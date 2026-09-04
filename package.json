@@ -1,0 +1,37 @@
+{
+  "name": "arbestra",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --filter @arbestra/api build && corepack pnpm --filter @arbestra/play-web build && corepack pnpm --filter @arbestra/world-web build",
+    "dev": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --parallel --filter @arbestra/api --filter @arbestra/play-web --filter @arbestra/world-web dev",
+    "db:migrate": "corepack pnpm --filter @arbestra/api db:migrate",
+    "db:migrate:test": "corepack pnpm --filter @arbestra/api db:migrate:test",
+    "db:seed": "corepack pnpm --filter @arbestra/api db:seed",
+    "db:setup": "corepack pnpm db:migrate && corepack pnpm db:seed",
+    "db:test:setup": "corepack pnpm db:migrate:test && corepack pnpm --filter @arbestra/api db:reset-e2e",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "lint": "eslint .",
+    "test": "corepack pnpm --filter @arbestra/contracts build && vitest run",
+    "test:watch": "corepack pnpm --filter @arbestra/contracts build && vitest",
+    "test:e2e": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --filter @arbestra/api build && playwright test",
+    "typecheck": "corepack pnpm -r typecheck",
+    "verify:db": "corepack pnpm db:test:setup && corepack pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.35.0",
+    "globals": "^16.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.42.0",
+    "vitest": "^3.2.4"
+  }
+}

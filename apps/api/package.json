@@ -1,0 +1,30 @@
+{
+  "name": "@arbestra/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch --import tsx src/server.ts",
+    "serve:e2e": "node dist/server-e2e.js",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "tsx src/database/migrate.ts",
+    "db:migrate:test": "tsx src/database/migrate-test.ts",
+    "db:seed": "tsx src/database/seed.ts",
+    "db:reset-e2e": "tsx src/database/reset-e2e.ts"
+  },
+  "dependencies": {
+    "@arbestra/contracts": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/type-provider-typebox": "^5.2.0",
+    "@sinclair/typebox": "^0.34.41",
+    "fastify": "^5.6.0",
+    "kysely": "^0.28.5",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5"
+  }
+}
