@@ -121,6 +121,14 @@ button { font: inherit; }
 .extension-choice strong { color: #d2dca6; }
 .construction-status { color: #dec477 !important; }
 .error { color: #ffb9a8 !important; }
+.construction-toolbar { position: fixed; z-index: 3; bottom: max(1rem, env(safe-area-inset-bottom)); left: 50%; display: flex; gap: .45rem; align-items: center; max-width: calc(100vw - 1rem); padding: .45rem; transform: translateX(-50%); background: rgb(20 29 23 / 90%); border: 1px solid rgb(205 170 100 / 55%); border-radius: .55rem; box-shadow: 0 .5rem 1.4rem rgb(0 0 0 / 32%); backdrop-filter: blur(6px); }
+.construction-toolbar span { color: #e9e4d4; font-size: .76rem; }
+.construction-summary { display: grid; gap: .2rem; min-width: 0; max-width: 25rem; }
+.construction-summary strong { font-size: .84rem; }
+.construction-toolbar button { min-height: 44px; padding: .4rem .65rem; color: #f8f4e9; font-weight: 700; background: linear-gradient(#4a5b38, #344329); border: 1px solid rgb(226 196 124 / 35%); border-radius: .4rem; touch-action: manipulation; cursor: pointer; }
+.construction-toolbar button:disabled { opacity: .5; cursor: default; }
+.construction-toolbar button:focus-visible { outline: 2px solid #d8b950; outline-offset: 2px; }
+.construction-toolbar kbd { margin-left: .45rem; opacity: .65; }
 
 .center-message { height: 100%; display: grid; place-items: center; padding: 2rem; text-align: center; }
 .center-message a { color: #d5f1ad; }
@@ -135,6 +143,9 @@ button { font: inherit; }
   .resource strong { font-size: .9rem; }
   .notification-stack { width: min(11.25rem, 44vw); right: .38rem; }
   .game-notification { padding-inline: .5rem; font-size: .64rem; }
+  .construction-toolbar { width: calc(100vw - 1rem); justify-content: center; flex-wrap: wrap; }
+  .construction-summary { flex-basis: 100%; }
+  .construction-toolbar kbd { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

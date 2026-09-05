@@ -38,12 +38,20 @@ export function getVillage(worldSlug: string): Promise<TimedVillageState> {
 export function buildBuilding(
   worldSlug: string,
   villageId: string,
-  cellId: string,
   buildingType: BuildingType,
+  anchor: { cellX: number; cellY: number },
+  cells: Array<{ cellX: number; cellY: number }>,
 ): Promise<TimedVillageState> {
   return requestState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/cells/${encodeURIComponent(cellId)}/buildings`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buildingType }) },
+    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
+  );
+}
+
+export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>): Promise<TimedVillageState> {
+  return requestState(
+    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cells }) },
   );
 }
 
@@ -51,11 +59,11 @@ export function upgradeBuilding(
   worldSlug: string,
   villageId: string,
   buildingId: string,
-  extensionCellId?: string,
+  extensionCell?: { extensionCellX: number; extensionCellY: number },
 ): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/upgrade`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(extensionCellId ? { extensionCellId } : {}) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(extensionCell ? extensionCell : {}) },
   );
 }
 

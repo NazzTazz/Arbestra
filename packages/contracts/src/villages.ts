@@ -43,8 +43,14 @@ export const GardenSchema = Type.Object({
   capacity: Type.Integer({ minimum: 0 }),
   productionPerHour: Type.Number({ minimum: 0 }),
   productionUpdatedAt: Type.String({ format: 'date-time' }),
-  extensionCellId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
-  pendingExtensionCellId: Type.Union([Type.String({ format: 'uuid' }), Type.Null()]),
+  activeCellCount: Type.Integer({ minimum: 0 }),
+  pendingCellCount: Type.Integer({ minimum: 0 }),
+  expansion: Type.Union([Type.Object({
+    id: Type.String({ format: 'uuid' }),
+    startedAt: Type.String({ format: 'date-time' }),
+    completesAt: Type.String({ format: 'date-time' }),
+    cells: Type.Array(Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) })),
+  }), Type.Null()]),
 });
 export type Garden = Static<typeof GardenSchema>;
 
@@ -69,7 +75,8 @@ export const BuildingFootprintSchema = Type.Object({
 });
 
 export const VillageCellSchema = Type.Object({
-  id: Type.String({ format: 'uuid' }),
+  // Coordinate key for UI selection only; it is not a persistent cell record id.
+  id: Type.String(),
   cellX: Type.Integer({ minimum: 0 }),
   cellY: Type.Integer({ minimum: 0 }),
   x: Type.Number(),
@@ -85,7 +92,7 @@ export const VillageStateSchema = Type.Object({
   world: Type.Object({
     id: Type.String({ format: 'uuid' }), slug: Type.String(), name: Type.String(),
     topology: Type.Literal('torus'), widthCells: Type.Integer(), heightCells: Type.Integer(),
-    chunkSize: Type.Integer(), seed: Type.String(),
+    chunkSize: Type.Integer(), seed: Type.String(), generationVersion: Type.Integer(),
   }),
   village: Type.Object({
     id: Type.String({ format: 'uuid' }), name: Type.String(), anchorCellX: Type.Integer(), anchorCellY: Type.Integer(),
@@ -95,12 +102,38 @@ export const VillageStateSchema = Type.Object({
     woodProductionUpdatedAt: Type.String({ format: 'date-time' }),
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),
+  region: Type.Object({
+    originCellX: Type.Integer({ minimum: 0 }), originCellY: Type.Integer({ minimum: 0 }),
+    width: Type.Integer({ minimum: 1 }), height: Type.Integer({ minimum: 1 }),
+    terrainCodes: Type.Array(Type.Integer({ minimum: 1 })),
+    elevations: Type.Array(Type.Integer()),
+    features: Type.Array(Type.Object({
+      id: Type.String({ format: 'uuid' }), type: Type.String(), cellX: Type.Integer({ minimum: 0 }),
+      cellY: Type.Integer({ minimum: 0 }), variantSeed: Type.Integer(),
+    })),
+  }),
   cells: Type.Array(VillageCellSchema),
 });
 export type VillageState = Static<typeof VillageStateSchema>;
 
-export const BuildRequestSchema = Type.Object({ buildingType: BuildingTypeSchema });
+const SpatialBuildRequestSchema = Type.Object({
+  buildingType: BuildingTypeSchema,
+  anchorCellX: Type.Integer(),
+  anchorCellY: Type.Integer(),
+  cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }), { minItems: 1, maxItems: 100 }),
+});
+const LegacyBuildRequestSchema = Type.Object({
+  buildingType: BuildingTypeSchema,
+  cellX: Type.Integer(),
+  cellY: Type.Integer(),
+});
+export const BuildRequestSchema = Type.Union([SpatialBuildRequestSchema, LegacyBuildRequestSchema]);
 export type BuildRequest = Static<typeof BuildRequestSchema>;
 
-export const UpgradeRequestSchema = Type.Object({ extensionCellId: Type.Optional(Type.String({ format: 'uuid' })) });
+export const UpgradeRequestSchema = Type.Object({});
 export type UpgradeRequest = Static<typeof UpgradeRequestSchema>;
+
+export const ExpansionRequestSchema = Type.Object({
+  cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }), { minItems: 1, maxItems: 100 }),
+});
+export type ExpansionRequest = Static<typeof ExpansionRequestSchema>;

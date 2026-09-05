@@ -1,5 +1,6 @@
 ﻿import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { Engine } from '@babylonjs/core/Engines/engine';
+import '@babylonjs/core/Culling/ray';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
@@ -15,10 +16,17 @@ import { Scene } from '@babylonjs/core/scene';
 import type { VillageCell, VillageState } from '@arbestra/contracts';
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
+import { cellKey, type AreaPreview, type Cell } from './construction-selection';
 
-const WORLD_CELLS = 64;
 const CHUNK_CELLS = 8;
 const TILE_SIZE = 2.5;
+
+function wrappedCellDelta(value: number, origin: number, size: number): number {
+  const direct = value - origin;
+  if (direct > size / 2) return direct - size;
+  if (direct < -size / 2) return direct + size;
+  return direct;
+}
 
 export class BabylonVillageScene {
   readonly #engine: Engine;
@@ -26,9 +34,14 @@ export class BabylonVillageScene {
   readonly #camera: ArcRotateCamera;
   readonly #canvas: HTMLCanvasElement;
   readonly #villageMeshes: Mesh[] = [];
+  readonly #terrainMeshes: Mesh[] = [];
+  readonly #featureMeshes: Mesh[] = [];
   readonly #selectableMeshes = new Map<string, Mesh>();
   readonly #onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
   readonly #onCameraMoved: () => void;
+  readonly #onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void;
+  readonly #previewMeshes: Mesh[] = [];
+  readonly #invalidAreaMaterial: StandardMaterial;
   readonly #resizeObserver: ResizeObserver;
   readonly #siteMaterial: StandardMaterial;
   readonly #candidateMaterial: StandardMaterial;
@@ -44,7 +57,6 @@ export class BabylonVillageScene {
   readonly #leafLightMaterial: StandardMaterial;
   readonly #leafDarkMaterial: StandardMaterial;
   readonly #trunkMaterial: StandardMaterial;
-  readonly #flowerMaterial: StandardMaterial;
   readonly #reservedGardenMaterial: StandardMaterial;
   readonly #constructionMaterial: StandardMaterial;
   readonly #scaffoldMaterial: StandardMaterial;
@@ -54,58 +66,114 @@ export class BabylonVillageScene {
   readonly #sawdustMaterial: StandardMaterial;
   readonly #selectionMarker: Mesh;
   readonly #deepGround: Mesh;
-  readonly #treePrototypes = new Map<number, { trunk: Mesh; lower: Mesh; upper: Mesh; shadow: Mesh }>();
   readonly #reducedQuality = navigator.webdriver;
+  #buildableGrid: Mesh | null = null;
   #selectedSiteId: string | null = null;
-  #availableSiteId: string | null = null;
   #highlightedSiteIds = new Set<string>();
-  #siteScreenPositions = new Map<string, { x: number; y: number }>();
-  #pointerDown: { x: number; y: number } | null = null;
+  #constructionMode = false;
+  #selectingArea = false;
+  #villageAnchor: Cell = { cellX: 0, cellY: 0 };
+  #pointerDown: { x: number; y: number; pointerId: number; mouseArea: boolean; first: Cell | null } | null = null;
+  #lastDragCell = '';
+  #lastPreviewSignature = '';
   #lastVisualSignature = '';
+  #lastTerrainSignature = '';
+  #lastFeatureSignature = '';
   #lastFrameAt = 0;
-  #lastSitePositionsSignature = '';
-  #lastAnchorPublishAt = 0;
+  #lastCameraRadius: number | null = null;
   #worldWidthUnits = 2048 * TILE_SIZE;
   #worldHeightUnits = 1024 * TILE_SIZE;
 
   readonly #handlePointerDown = (event: PointerEvent): void => {
-    this.#pointerDown = { x: event.clientX, y: event.clientY };
-    const bounds = this.#canvas.getBoundingClientRect();
-    const pointer = { x: (event.clientX - bounds.left) / bounds.width, y: (event.clientY - bounds.top) / bounds.height };
-    let nearest: { siteId: string; distance: number } | null = null;
-    for (const [siteId, position] of this.#siteScreenPositions) {
-      const distance = Math.hypot(pointer.x - position.x, pointer.y - position.y);
-      if (!nearest || distance < nearest.distance) nearest = { siteId, distance };
+    if (!event.isPrimary) { this.#pointerDown = null; return; }
+    if (event.button !== 0) return;
+    const mouseArea = this.#selectingArea && event.pointerType !== 'touch';
+    const first = this.#selectingArea ? this.#cellAtPointer(event) : null;
+    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, mouseArea, first };
+    if (mouseArea) {
+      // Consume only the construction drag. Right-drag, wheel and touch camera
+      // gestures keep their usual controls.
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      this.#canvas.setPointerCapture(event.pointerId);
+      this.#camera.inertialAlphaOffset = this.#camera.inertialBetaOffset = 0;
+      this.#camera.inertialPanningX = this.#camera.inertialPanningY = 0;
+      if (first) {
+        this.#lastDragCell = cellKey(first);
+        this.#onAreaGesture(first, first, false);
+      }
     }
-    if (nearest && nearest.distance < 0.1) this.selectSite(nearest.siteId, { x: event.clientX, y: event.clientY });
   };
 
   readonly #handlePointerMove = (event: PointerEvent): void => {
+    if (this.#pointerDown?.mouseArea && this.#pointerDown.pointerId === event.pointerId) {
+      event.stopImmediatePropagation();
+      const last = this.#cellAtPointer(event);
+      if (last && this.#pointerDown.first && cellKey(last) !== this.#lastDragCell) {
+        this.#lastDragCell = cellKey(last);
+        this.#onAreaGesture(this.#pointerDown.first, last, false);
+      }
+      return;
+    }
     if (!this.#pointerDown || Math.hypot(event.clientX - this.#pointerDown.x, event.clientY - this.#pointerDown.y) < 8) return;
     this.#pointerDown = null;
-    this.#onCameraMoved();
+    this.#clearSelection();
   };
 
-  readonly #handlePointerUp = (): void => { this.#pointerDown = null; };
-  readonly #handleWheel = (): void => this.#onCameraMoved();
+  readonly #handlePointerUp = (event: PointerEvent): void => {
+    if (!this.#pointerDown || this.#pointerDown.pointerId !== event.pointerId) return;
+    const gesture = this.#pointerDown;
+    if (gesture.mouseArea) {
+      this.#pointerDown = null;
+      event.stopImmediatePropagation();
+      if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
+      const last = this.#cellAtPointer(event);
+      if (gesture.first && last) this.#onAreaGesture(gesture.first, last, false);
+      return;
+    }
+    const moved = Math.hypot(
+      event.clientX - this.#pointerDown.x,
+      event.clientY - this.#pointerDown.y,
+    );
+    this.#pointerDown = null;
+    if (moved >= 8) return;
+
+    if (this.#selectingArea) {
+      const cell = this.#cellAtPointer(event);
+      if (cell) this.#onAreaGesture(cell, cell, true);
+      return;
+    }
+
+    const bounds = this.#canvas.getBoundingClientRect();
+    const picked = this.#scene.pick(
+      event.clientX - bounds.left,
+      event.clientY - bounds.top,
+      (mesh) => mesh.isPickable && typeof mesh.metadata?.siteId === 'string',
+    );
+    const siteId = picked.pickedMesh?.metadata?.siteId as string | undefined;
+    if (siteId) this.selectSite(siteId, { x: event.clientX, y: event.clientY });
+    else this.#clearSelection();
+  };
+  readonly #handlePointerCancel = (): void => {
+    this.#pointerDown = null;
+  };
+  readonly #handleWheel = (): void => this.#clearSelection();
 
   public constructor(
     canvas: HTMLCanvasElement,
     onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void,
     onCameraMoved: () => void,
+    onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void,
   ) {
     this.#canvas = canvas;
     this.#onSiteSelected = onSiteSelected;
     this.#onCameraMoved = onCameraMoved;
+    this.#onAreaGesture = onAreaGesture;
     this.#engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
     this.#engine.setHardwareScalingLevel(Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5));
     this.#scene = new Scene(this.#engine);
     this.#scene.skipPointerMovePicking = true;
     this.#scene.clearColor = Color4.FromHexString('#8ea0a0ff');
-    this.#scene.fogMode = Scene.FOGMODE_LINEAR;
-    this.#scene.fogStart = 45;
-    this.#scene.fogEnd = 95;
-    this.#scene.fogColor = Color3.FromHexString('#8ea0a0');
     this.#scene.imageProcessingConfiguration.exposure = 0.92;
     this.#scene.imageProcessingConfiguration.contrast = 1.18;
 
@@ -113,15 +181,15 @@ export class BabylonVillageScene {
       'strategic-camera',
       -Math.PI / 2 + 0.9,
       0.84,
-      window.innerWidth < 600 ? 25 : 23,
+      window.innerWidth < 600 ? 42 : 38,
       new Vector3(0, 0.45, 0),
       this.#scene,
     );
-    this.#camera.fov = 0.5;
-    this.#camera.lowerRadiusLimit = 16;
-    this.#camera.upperRadiusLimit = 52;
-    this.#camera.lowerBetaLimit = 0.68;
-    this.#camera.upperBetaLimit = 1.05;
+    this.#camera.fov = 0.55;
+    this.#camera.lowerRadiusLimit = 8;
+    this.#camera.upperRadiusLimit = 120;
+    this.#camera.lowerBetaLimit = 0.05;
+    this.#camera.upperBetaLimit = 0.95;
     this.#camera.panningSensibility = 105;
     this.#camera.panningAxis = new Vector3(1, 0, 1);
     this.#camera.wheelDeltaPercentage = 0.008;
@@ -132,16 +200,17 @@ export class BabylonVillageScene {
     const daylight = new HemisphericLight('daylight', new Vector3(-0.35, 1, -0.25), this.#scene);
     daylight.diffuse = new Color3(0.92, 0.94, 0.79);
     daylight.groundColor = new Color3(0.18, 0.22, 0.14);
-    daylight.intensity = 0.62;
+    daylight.intensity = 0.58;
     const sun = new DirectionalLight('sun', new Vector3(-0.62, -1, 0.42), this.#scene);
     sun.diffuse = new Color3(1, 0.82, 0.58);
     sun.position = new Vector3(24, 34, -24);
-    sun.intensity = 1.05;
+    sun.intensity = 0.8;
     sun.shadowFrustumSize = 46;
     sun.autoCalcShadowZBounds = true;
 
     this.#siteMaterial = this.#material('available-site', '#647442', 0.42);
     this.#candidateMaterial = this.#material('extension-candidate', '#9ac866', 0.82, '#1c3510');
+    this.#invalidAreaMaterial = this.#material('invalid-area', '#c1614f', 0.72, '#38140f');
     this.#timberMaterial = this.#material('timber', '#794521');
     this.#lightTimberMaterial = this.#material('light-timber', '#a8672f');
     this.#darkTimberMaterial = this.#material('dark-timber', '#402718');
@@ -154,7 +223,6 @@ export class BabylonVillageScene {
     this.#leafLightMaterial = this.#material('leaves-light', '#668442');
     this.#leafDarkMaterial = this.#material('leaves-dark', '#294e2d');
     this.#trunkMaterial = this.#material('trunk', '#523620');
-    this.#flowerMaterial = this.#material('field-flowers', '#ded8b2');
     this.#reservedGardenMaterial = this.#material('garden-reserved', '#bd8a43', 0.54);
     this.#constructionMaterial = this.#material('construction', '#c5a15d', 0.32, '#20170b');
     this.#constructionMaterial.wireframe = true;
@@ -167,7 +235,6 @@ export class BabylonVillageScene {
     this.#sawdustMaterial = this.#material('sawdust', '#806b3d');
 
     this.#deepGround = this.#createTerrain();
-    this.#createScenery();
     for (const material of this.#scene.materials) material.freeze();
 
     this.#selectionMarker = MeshBuilder.CreateBox('selection-marker', { width: 2.64, depth: 2.64, height: 0.035 }, this.#scene);
@@ -183,7 +250,7 @@ export class BabylonVillageScene {
     canvas.addEventListener('pointerdown', this.#handlePointerDown, { capture: true });
     canvas.addEventListener('pointermove', this.#handlePointerMove, { capture: true });
     canvas.addEventListener('pointerup', this.#handlePointerUp, { capture: true });
-    canvas.addEventListener('pointercancel', this.#handlePointerUp, { capture: true });
+    canvas.addEventListener('pointercancel', this.#handlePointerCancel, { capture: true });
     canvas.addEventListener('wheel', this.#handleWheel, { capture: true, passive: true });
 
     this.#resizeObserver = new ResizeObserver(() => this.#engine.resize());
@@ -192,24 +259,25 @@ export class BabylonVillageScene {
       const now = performance.now();
       if (now - this.#lastFrameAt < 1_000 / (this.#reducedQuality ? 5 : 45)) return;
       this.#wrapCamera();
+      this.#updateCameraProfile();
       this.#scene.render();
-      if (now - this.#lastAnchorPublishAt >= 100) {
-        this.#publishSitePositions();
-        this.#lastAnchorPublishAt = now;
-      }
       this.#lastFrameAt = performance.now();
     });
   }
 
-  public update(state: VillageState, highlightedSiteIds: string[] = []): void {
+  public update(state: VillageState, highlightedSiteIds: string[] = [], constructionMode = false): void {
+    this.#villageAnchor = { cellX: state.village.anchorCellX, cellY: state.village.anchorCellY };
     this.#worldWidthUnits = state.world.widthCells * TILE_SIZE;
     this.#worldHeightUnits = state.world.heightCells * TILE_SIZE;
     this.#deepGround.scaling.set(state.world.widthCells / 2048, 1, state.world.heightCells / 1024);
+    this.#updateTerrain(state);
+    this.#createWorldFeatures(state);
     this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
     this.#canvas.dataset.completedBuildingCount = String(state.cells.filter((site) => site.building?.status === 'completed').length);
     this.#canvas.dataset.underConstructionCount = String(state.cells.filter((site) => site.building?.status === 'under-construction').length);
     const visualSignature = JSON.stringify({
       highlightedSiteIds,
+      constructionMode,
       sites: state.cells.map((site) => [
         site.id,
         site.canBuild,
@@ -224,8 +292,9 @@ export class BabylonVillageScene {
     this.#lastVisualSignature = visualSignature;
     for (const mesh of this.#villageMeshes.splice(0)) mesh.dispose(false, false);
     this.#selectableMeshes.clear();
-    this.#availableSiteId = state.cells.find((site) => site.canBuild)?.id ?? null;
     this.#highlightedSiteIds = new Set(highlightedSiteIds);
+    this.#constructionMode = constructionMode;
+    this.#updateBuildableGrid(state.cells);
     for (const site of state.cells) {
       const mesh = site.footprint?.buildingType === 'garden' && site.footprint.role === 'extension'
         ? this.#createGardenExtension(site)
@@ -234,8 +303,10 @@ export class BabylonVillageScene {
           : site.building
             ? this.#createBuilding(site)
             : this.#createAvailableSite(site);
-      mesh.metadata = { siteId: site.id };
-      mesh.isPickable = true;
+      for (const selectable of [mesh, ...mesh.getChildMeshes()]) {
+        selectable.metadata = { ...selectable.metadata, siteId: site.id };
+        selectable.isPickable = Boolean(site.footprint || this.#constructionMode && site.canBuild);
+      }
       this.#villageMeshes.push(mesh);
       this.#selectableMeshes.set(site.id, mesh);
     }
@@ -249,6 +320,43 @@ export class BabylonVillageScene {
     this.#onSiteSelected(siteId, anchor);
   }
 
+  #cellAtPointer(event: PointerEvent): Cell | null {
+    const bounds = this.#canvas.getBoundingClientRect();
+    const ray = this.#scene.createPickingRay(event.clientX - bounds.left, event.clientY - bounds.top, Matrix.Identity(), this.#camera);
+    if (Math.abs(ray.direction.y) < 0.00001) return null;
+    const distance = (0.075 - ray.origin.y) / ray.direction.y;
+    if (distance < 0) return null;
+    const width = this.#worldWidthUnits / TILE_SIZE, height = this.#worldHeightUnits / TILE_SIZE;
+    const x = Math.round((ray.origin.x + ray.direction.x * distance) / TILE_SIZE) + this.#villageAnchor.cellX;
+    const y = Math.round((ray.origin.z + ray.direction.z * distance) / TILE_SIZE) + this.#villageAnchor.cellY;
+    return { cellX: ((x % width) + width) % width, cellY: ((y % height) + height) % height };
+  }
+
+  public updateAreaSelection(enabled: boolean, preview: AreaPreview | null, invalid: boolean): void {
+    this.#selectingArea = enabled;
+    const signature = JSON.stringify([preview?.cells, invalid]);
+    if (signature === this.#lastPreviewSignature) return;
+    this.#lastPreviewSignature = signature;
+    for (const mesh of this.#previewMeshes.splice(0)) mesh.dispose(false, false);
+    for (const cell of preview?.cells ?? []) {
+      const mesh = MeshBuilder.CreateBox(`area-preview-${cellKey(cell)}`, { width: TILE_SIZE - 0.06, depth: TILE_SIZE - 0.06, height: 0.025 }, this.#scene);
+      mesh.position.set(
+        wrappedCellDelta(cell.cellX, this.#villageAnchor.cellX, this.#worldWidthUnits / TILE_SIZE) * TILE_SIZE,
+        0.15,
+        wrappedCellDelta(cell.cellY, this.#villageAnchor.cellY, this.#worldHeightUnits / TILE_SIZE) * TILE_SIZE,
+      );
+      mesh.material = invalid ? this.#invalidAreaMaterial : this.#candidateMaterial;
+      mesh.isPickable = false;
+      this.#previewMeshes.push(mesh);
+    }
+  }
+
+  #clearSelection(): void {
+    this.#selectedSiteId = null;
+    this.#applySelection();
+    this.#onCameraMoved();
+  }
+
   #material(name: string, color: string, alpha = 1, emissive?: string): StandardMaterial {
     const material = new StandardMaterial(name, this.#scene);
     material.diffuseColor = Color3.FromHexString(color);
@@ -259,54 +367,6 @@ export class BabylonVillageScene {
   }
 
   #createTerrain(): Mesh {
-    const groundMaterial = this.#material('living-ground', '#ffffff');
-    groundMaterial.specularColor.set(0, 0, 0);
-    const worldStart = -(WORLD_CELLS * TILE_SIZE) / 2;
-    const groundColor = Color3.FromHexString('#536b37');
-
-    for (let chunkX = 0; chunkX < WORLD_CELLS; chunkX += CHUNK_CELLS) {
-      for (let chunkZ = 0; chunkZ < WORLD_CELLS; chunkZ += CHUNK_CELLS) {
-        const positions: number[] = [];
-        const indices: number[] = [];
-        const normals: number[] = [];
-        const colors: number[] = [];
-        for (let localX = 0; localX < CHUNK_CELLS; localX += 1) {
-          for (let localZ = 0; localZ < CHUNK_CELLS; localZ += 1) {
-            const cellX = chunkX + localX;
-            const cellZ = chunkZ + localZ;
-            const x = worldStart + cellX * TILE_SIZE;
-            const z = worldStart + cellZ * TILE_SIZE;
-            const outerRelief = 0;
-            const first = positions.length / 3;
-            positions.push(
-              x, outerRelief, z,
-              x + TILE_SIZE, outerRelief, z,
-              x + TILE_SIZE, outerRelief, z + TILE_SIZE,
-              x, outerRelief, z + TILE_SIZE,
-            );
-            indices.push(first, first + 1, first + 2, first, first + 2, first + 3);
-            for (const [vertexX, vertexZ] of [[cellX, cellZ], [cellX + 1, cellZ], [cellX + 1, cellZ + 1], [cellX, cellZ + 1]] as const) {
-              const fineNoise = this.#hash(vertexX + 7, vertexZ + 19) - 0.5;
-              const broadNoise = this.#hash(Math.floor(vertexX / 3) + 31, Math.floor(vertexZ / 3) + 73) - 0.5;
-              const shade = 1 + fineNoise * 0.028 + broadNoise * 0.018;
-              colors.push(groundColor.r * shade, groundColor.g * shade, groundColor.b * shade, 1);
-            }
-          }
-        }
-        VertexData.ComputeNormals(positions, indices, normals);
-        const data = new VertexData();
-        data.positions = positions;
-        data.indices = indices;
-        data.normals = normals;
-        data.colors = colors;
-        const chunk = new BabylonMesh(`terrain-chunk-${chunkX}-${chunkZ}`, this.#scene);
-        data.applyToMesh(chunk);
-        chunk.material = groundMaterial;
-        chunk.receiveShadows = true;
-        chunk.isPickable = false;
-      }
-    }
-
     const earth = MeshBuilder.CreateBox('deep-ground', {
       width: this.#worldWidthUnits * 3,
       depth: this.#worldHeightUnits * 3,
@@ -319,105 +379,191 @@ export class BabylonVillageScene {
     return earth;
   }
 
-  #createScenery(): void {
-    const sceneryMeshes: Mesh[] = [];
-    for (const [x, z, scale, variant] of [
-      [-7.2, -5.7, 0.9, 0], [-7.8, 4.8, 0.72, 1], [7.1, -5.5, 0.78, 2], [7.4, 5.9, 1.02, 0],
-      [-5.4, 7.4, 0.62, 2], [5.2, -7.3, 0.68, 1],
-    ] as const) this.#createTree(x, z, scale, variant);
+  #updateTerrain(state: VillageState): void {
+    const signature = `${state.world.generationVersion}:${state.region.originCellX}:${state.region.originCellY}`;
+    if (signature === this.#lastTerrainSignature) return;
+    this.#lastTerrainSignature = signature;
+    for (const mesh of this.#terrainMeshes.splice(0)) mesh.dispose(false, false);
 
-    for (let index = 0; index < (this.#reducedQuality ? 8 : 34); index += 1) {
-      const angle = this.#hash(index, 11) * Math.PI * 2;
-      const radius = 8.5 + this.#hash(index, 29) * 26;
-      const x = Math.cos(angle) * radius + (this.#hash(index, 47) - 0.5) * 4;
-      const z = Math.sin(angle) * radius + (this.#hash(index, 61) - 0.5) * 4;
-      const scale = 0.58 + this.#hash(index, 83) * 0.78;
-      this.#createTree(x, z, scale, index % 3);
-    }
+    const material = this.#material('generated-ground', '#ffffff');
+    material.specularColor.set(0, 0, 0);
+    const colorsByTerrain = new Map([
+      [1, Color3.FromHexString('#536b37')],
+      [2, Color3.FromHexString('#456f78')],
+      [3, Color3.FromHexString('#686a5f')],
+    ]);
 
-    for (let index = 0; index < (this.#reducedQuality ? 4 : 12); index += 1) {
-      const angle = this.#hash(index, 101) * Math.PI * 2;
-      const radius = 8.5 + this.#hash(index, 131) * 26;
-      this.#createRockCluster(Math.cos(angle) * radius, Math.sin(angle) * radius, 0.55 + this.#hash(index, 151) * 0.8, index, sceneryMeshes);
-    }
-
-    for (let index = 0; index < (this.#reducedQuality ? 3 : 12); index += 1) {
-      const angle = this.#hash(index, 173) * Math.PI * 2;
-      const radius = 8.5 + this.#hash(index, 191) * 25;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      for (let part = 0; part < 3; part += 1) {
-        const bush = MeshBuilder.CreateIcoSphere(`bush-${index}-${part}`, { radius: 0.2 + this.#hash(index, part + 211) * 0.1, subdivisions: 1 }, this.#scene);
-        bush.position.set(x + (part - 1) * 0.24, 0.18 + (part % 2) * 0.06, z + (part % 2) * 0.18);
-        bush.scaling.y = 0.72;
-        bush.rotation.y = angle + part;
-        bush.material = part === 1 ? this.#leafLightMaterial : this.#leafMaterial;
-        bush.isPickable = false;
-        sceneryMeshes.push(bush);
+    for (let chunkX = 0; chunkX < state.region.width; chunkX += CHUNK_CELLS) {
+      for (let chunkY = 0; chunkY < state.region.height; chunkY += CHUNK_CELLS) {
+        const positions: number[] = [];
+        const indices: number[] = [];
+        const normals: number[] = [];
+        const colors: number[] = [];
+        for (let localX = 0; localX < CHUNK_CELLS; localX += 1) {
+          for (let localY = 0; localY < CHUNK_CELLS; localY += 1) {
+            const regionX = chunkX + localX;
+            const regionY = chunkY + localY;
+            const index = regionY * state.region.width + regionX;
+            const worldCellX = (state.region.originCellX + regionX) % state.world.widthCells;
+            const worldCellY = (state.region.originCellY + regionY) % state.world.heightCells;
+            const centerX = wrappedCellDelta(worldCellX, state.village.anchorCellX, state.world.widthCells) * TILE_SIZE;
+            const centerZ = wrappedCellDelta(worldCellY, state.village.anchorCellY, state.world.heightCells) * TILE_SIZE;
+            const elevation = (state.region.elevations[index] ?? 0) * 0.025;
+            const first = positions.length / 3;
+            positions.push(
+              centerX - TILE_SIZE / 2, elevation, centerZ - TILE_SIZE / 2,
+              centerX + TILE_SIZE / 2, elevation, centerZ - TILE_SIZE / 2,
+              centerX + TILE_SIZE / 2, elevation, centerZ + TILE_SIZE / 2,
+              centerX - TILE_SIZE / 2, elevation, centerZ + TILE_SIZE / 2,
+            );
+            indices.push(first, first + 1, first + 2, first, first + 2, first + 3);
+            const base = colorsByTerrain.get(state.region.terrainCodes[index] ?? 1) ?? colorsByTerrain.get(1)!;
+            const shade = 0.975 + this.#hash(worldCellX, worldCellY) * 0.05;
+            for (let vertex = 0; vertex < 4; vertex += 1) colors.push(base.r * shade, base.g * shade, base.b * shade, 1);
+          }
+        }
+        VertexData.ComputeNormals(positions, indices, normals);
+        const data = new VertexData();
+        data.positions = positions;
+        data.indices = indices;
+        data.normals = normals;
+        data.colors = colors;
+        const mesh = new BabylonMesh(`generated-terrain-${chunkX}-${chunkY}`, this.#scene);
+        data.applyToMesh(mesh);
+        mesh.material = material;
+        mesh.receiveShadows = true;
+        mesh.isPickable = false;
+        this.#terrainMeshes.push(mesh);
       }
     }
-
-    for (let index = 0; index < (this.#reducedQuality ? 3 : 9); index += 1) {
-      const angle = this.#hash(index, 223) * Math.PI * 2;
-      const radius = 6.5 + this.#hash(index, 239) * 11;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      for (let bloom = 0; bloom < 3; bloom += 1) {
-        const flower = MeshBuilder.CreateIcoSphere(`flower-${index}-${bloom}`, { radius: 0.055, subdivisions: 1 }, this.#scene);
-        flower.position.set(x + (bloom - 1) * 0.14, 0.09, z + (bloom % 2) * 0.12);
-        flower.material = this.#flowerMaterial;
-        flower.isPickable = false;
-        sceneryMeshes.push(flower);
-      }
-    }
-    this.#mergeStaticScenery(sceneryMeshes);
+    material.freeze();
   }
 
-  #createTree(x: number, z: number, scale: number, variant: number): void {
-    let prototype = this.#treePrototypes.get(variant);
-    if (!prototype) {
-      const trunk = MeshBuilder.CreateCylinder(`tree-trunk-${variant}`, { height: 1.1, diameterTop: 0.22, diameterBottom: 0.38, tessellation: 6 }, this.#scene);
-      trunk.material = this.#trunkMaterial;
-      const lower = MeshBuilder.CreateCylinder(`tree-lower-${variant}`, { height: variant === 1 ? 1.35 : 1.55, diameterTop: 0.16, diameterBottom: variant === 2 ? 1.8 : 1.55, tessellation: 7 }, this.#scene);
-      lower.material = variant === 2 ? this.#leafDarkMaterial : this.#leafMaterial;
-      const upper = MeshBuilder.CreateCylinder(`tree-upper-${variant}`, { height: 1.25, diameterTop: 0.04, diameterBottom: 1.15, tessellation: 7 }, this.#scene);
-      upper.material = variant === 0 ? this.#leafLightMaterial : this.#leafMaterial;
-      const shadow = MeshBuilder.CreateDisc(`tree-shadow-${variant}`, { radius: 0.5, tessellation: 12 }, this.#scene);
-      shadow.material = this.#contactShadowMaterial;
-      prototype = { trunk, lower, upper, shadow };
-      this.#treePrototypes.set(variant, prototype);
+  #createWorldFeatures(state: VillageState): void {
+    const signature = `${state.world.generationVersion}:${state.region.originCellX}:${state.region.originCellY}`;
+    if (signature === this.#lastFeatureSignature) return;
+    this.#lastFeatureSignature = signature;
+    for (const mesh of this.#featureMeshes.splice(0)) mesh.dispose(false, false);
+    const scenery: Mesh[] = [];
+    for (const feature of state.region.features) {
+      const x = wrappedCellDelta(feature.cellX, state.village.anchorCellX, state.world.widthCells) * TILE_SIZE;
+      const z = wrappedCellDelta(feature.cellY, state.village.anchorCellY, state.world.heightCells) * TILE_SIZE;
+      const localX = wrappedCellDelta(feature.cellX, state.region.originCellX, state.world.widthCells);
+      const localY = wrappedCellDelta(feature.cellY, state.region.originCellY, state.world.heightCells);
+      const elevationIndex = localY * state.region.width + localX;
+      const elevation = (state.region.elevations[elevationIndex] ?? 0) * 0.025;
+      const seed = Math.abs(feature.variantSeed);
+      if (feature.type === 'woodland') {
+        const count = 2 + seed % 3;
+        for (let tree = 0; tree < count; tree += 1) {
+          const angle = this.#hash(seed, tree + 401) * Math.PI * 2;
+          const radius = 0.22 + this.#hash(seed, tree + 419) * 0.48;
+          this.#createTree(
+            x + Math.cos(angle) * radius,
+            z + Math.sin(angle) * radius,
+            0.48 + this.#hash(seed, tree + 431) * 0.22,
+            (seed + tree) % 3,
+            scenery,
+            elevation,
+          );
+        }
+      } else if (feature.type === 'stone_outcrop') {
+        this.#createRockCluster(x, z, 0.58 + this.#hash(seed, 443) * 0.35, seed, scenery, elevation);
+      }
     }
+    this.#featureMeshes.push(...this.#mergeStaticScenery(scenery));
+  }
 
+  #updateBuildableGrid(cells: VillageCell[]): void {
+    this.#buildableGrid?.dispose();
+    const segments = new Map<string, [Vector3, Vector3]>();
+    const edgeCounts = new Map<string, number>();
+    const add = (from: Vector3, to: Vector3): void => {
+      const a = `${from.x}:${from.z}`;
+      const b = `${to.x}:${to.z}`;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      segments.set(key, [from, to]);
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    };
+    const y = 0.105;
+    const half = TILE_SIZE / 2;
+    for (const cell of cells) {
+      const northWest = new Vector3(cell.x - half, y, cell.z - half);
+      const northEast = new Vector3(cell.x + half, y, cell.z - half);
+      const southEast = new Vector3(cell.x + half, y, cell.z + half);
+      const southWest = new Vector3(cell.x - half, y, cell.z + half);
+      add(northWest, northEast);
+      add(northEast, southEast);
+      add(southEast, southWest);
+      add(southWest, northWest);
+    }
+    const lines = [...segments].filter(([key]) => this.#constructionMode || edgeCounts.get(key) === 1).map(([, segment]) => segment);
+    const grid = lines.length > 0
+      ? MeshBuilder.CreateLineSystem(
+          'buildable-grid',
+          { lines },
+          this.#scene,
+        )
+      : null;
+    this.#buildableGrid = grid;
+    if (!grid) return;
+    grid.color = Color3.FromHexString('#738352');
+    grid.visibility = 0.26;
+    grid.isPickable = false;
+  }
+
+  #createTree(
+    x: number,
+    z: number,
+    scale: number,
+    variant: number,
+    scenery: Mesh[],
+    baseY = 0,
+  ): void {
     const serial = `${Math.round(x * 10)}-${Math.round(z * 10)}`;
-    const trunk = prototype.trunk.getTotalVertices() > 0 && prototype.trunk.position.equals(Vector3.Zero())
-      ? prototype.trunk
-      : prototype.trunk.createInstance(`tree-trunk-instance-${serial}`);
-    const lower = trunk === prototype.trunk ? prototype.lower : prototype.lower.createInstance(`tree-lower-instance-${serial}`);
-    const upper = trunk === prototype.trunk ? prototype.upper : prototype.upper.createInstance(`tree-upper-instance-${serial}`);
-    const shadow = trunk === prototype.trunk ? prototype.shadow : prototype.shadow.createInstance(`tree-shadow-instance-${serial}`);
+    const trunk = MeshBuilder.CreateCylinder(
+      `tree-trunk-${serial}`,
+      { height: 1.1, diameterTop: 0.22, diameterBottom: 0.38, tessellation: 6 },
+      this.#scene,
+    );
+    trunk.material = this.#trunkMaterial;
+    const lower = MeshBuilder.CreateCylinder(
+      `tree-lower-${serial}`,
+      {
+        height: variant === 1 ? 1.35 : 1.55,
+        diameterTop: 0.16,
+        diameterBottom: variant === 2 ? 1.8 : 1.55,
+        tessellation: 7,
+      },
+      this.#scene,
+    );
+    lower.material = variant === 2 ? this.#leafDarkMaterial : this.#leafMaterial;
+    const upper = MeshBuilder.CreateCylinder(
+      `tree-upper-${serial}`,
+      { height: 1.25, diameterTop: 0.04, diameterBottom: 1.15, tessellation: 7 },
+      this.#scene,
+    );
+    upper.material = variant === 0 ? this.#leafLightMaterial : this.#leafMaterial;
     const rotation = this.#hash(Math.round(x * 10), Math.round(z * 10)) * Math.PI;
-    trunk.position.set(x, 0.5 * scale, z);
-    lower.position.set(x, 1.48 * scale, z);
-    upper.position.set(x, 2.22 * scale, z);
-    shadow.position.set(x + 0.08 * scale, 0.025, z + 0.08 * scale);
+    trunk.position.set(x, baseY + 0.5 * scale, z);
+    lower.position.set(x, baseY + 1.48 * scale, z);
+    upper.position.set(x, baseY + 2.22 * scale, z);
     trunk.scaling.setAll(scale);
     lower.scaling.setAll(scale);
     upper.scaling.setAll(scale);
-    shadow.scaling.set(1.3 * scale, 0.92 * scale, 1);
     trunk.rotation.y = rotation;
     lower.rotation.y = rotation + 0.15;
     upper.rotation.y = rotation - 0.12;
-    shadow.rotation.x = Math.PI / 2;
     trunk.isPickable = false;
     lower.isPickable = false;
     upper.isPickable = false;
-    shadow.isPickable = false;
+    scenery.push(trunk, lower, upper);
   }
 
-  #createRockCluster(x: number, z: number, scale: number, index: number, sceneryMeshes: Mesh[]): void {
+  #createRockCluster(x: number, z: number, scale: number, index: number, sceneryMeshes: Mesh[], baseY = 0): void {
     for (let part = 0; part < (index % 3 === 0 ? 3 : 2); part += 1) {
       const rock = MeshBuilder.CreateIcoSphere(`rock-${index}-${part}`, { radius: scale * (0.42 - part * 0.07), subdivisions: 1 }, this.#scene);
-      rock.position.set(x + part * scale * 0.42, scale * (0.3 - part * 0.03), z + (part % 2) * scale * 0.28);
+      rock.position.set(x + part * scale * 0.42, baseY + scale * (0.3 - part * 0.03), z + (part % 2) * scale * 0.28);
       rock.scaling.set(1, 0.72, 0.86);
       rock.rotation.set(part * 0.24, this.#hash(index, part + 251) * Math.PI, part * -0.16);
       rock.material = this.#stoneMaterial;
@@ -426,7 +572,7 @@ export class BabylonVillageScene {
     }
   }
 
-  #mergeStaticScenery(meshes: Mesh[]): void {
+  #mergeStaticScenery(meshes: Mesh[]): Mesh[] {
     const byMaterial = new Map<StandardMaterial, Mesh[]>();
     for (const mesh of meshes) {
       if (mesh.parent) mesh.setParent(null);
@@ -436,12 +582,16 @@ export class BabylonVillageScene {
       group.push(mesh);
       byMaterial.set(material, group);
     }
+    const mergedMeshes: Mesh[] = [];
     for (const [material, group] of byMaterial) {
       const merged = BabylonMesh.MergeMeshes(group, true, true, undefined, false, false);
       if (!merged) continue;
       merged.name = `scenery-${material.name}`;
       merged.isPickable = false;
+      merged.freezeWorldMatrix();
+      mergedMeshes.push(merged);
     }
+    return mergedMeshes;
   }
 
   #hash(x: number, z: number): number {
@@ -463,10 +613,7 @@ export class BabylonVillageScene {
       marker.edgesColor.set(0.78, 0.95, 0.52, 0.9);
       marker.edgesWidth = 2;
     } else {
-      marker.visibility = 0.07;
-      marker.enableEdgesRendering();
-      marker.edgesColor.set(0.54, 0.63, 0.38, 0.48);
-      marker.edgesWidth = 1;
+      marker.visibility = 0.015;
     }
     return marker;
   }
@@ -743,41 +890,40 @@ export class BabylonVillageScene {
     if (x !== target.x || z !== target.z || target.y !== 0.45) this.#camera.setTarget(new Vector3(x, 0.45, z));
   }
 
-  #publishSitePositions(): void {
-    const width = this.#engine.getRenderWidth();
-    const height = this.#engine.getRenderHeight();
-    const positions: Record<string, { x: number; y: number }> = {};
-    this.#siteScreenPositions.clear();
-    for (const [siteId, mesh] of this.#selectableMeshes) {
-      const projected = Vector3.Project(
-        mesh.getAbsolutePosition(),
-        Matrix.IdentityReadOnly,
-        this.#scene.getTransformMatrix(),
-        this.#camera.viewport.toGlobal(width, height),
+  #updateCameraProfile(): void {
+    const minimum = this.#camera.lowerRadiusLimit ?? 8;
+    const maximum = this.#camera.upperRadiusLimit ?? 120;
+    const profileAt = (radius: number): { beta: number; fov: number } => {
+      const ratio = Math.max(0, Math.min(1, (radius - minimum) / (maximum - minimum)));
+      const eased = ratio * ratio * (3 - 2 * ratio);
+      return {
+        beta: 0.88 + (0.18 - 0.88) * eased,
+        fov: 0.5 + (0.9 - 0.5) * eased,
+      };
+    };
+    const current = profileAt(this.#camera.radius);
+
+    // Near the village, compressed perspective keeps buildings readable. Far
+    // away, zoom assists the angle towards a map view. Only the profile delta
+    // is applied, preserving any angle deliberately chosen by the player.
+    if (this.#lastCameraRadius !== null && this.#lastCameraRadius !== this.#camera.radius) {
+      const previous = profileAt(this.#lastCameraRadius);
+      const lowerBeta = this.#camera.lowerBetaLimit ?? 0.05;
+      const upperBeta = this.#camera.upperBetaLimit ?? 0.95;
+      this.#camera.beta = Math.max(
+        lowerBeta,
+        Math.min(upperBeta, this.#camera.beta + current.beta - previous.beta),
       );
-      const screenPosition = { x: projected.x / width, y: projected.y / height };
-      positions[siteId] = screenPosition;
-      this.#siteScreenPositions.set(siteId, screenPosition);
     }
-    const available = this.#availableSiteId ? positions[this.#availableSiteId] : undefined;
-    if (available) {
-      const x = String(available.x);
-      const y = String(available.y);
-      if (this.#canvas.dataset.availableSiteX !== x) this.#canvas.dataset.availableSiteX = x;
-      if (this.#canvas.dataset.availableSiteY !== y) this.#canvas.dataset.availableSiteY = y;
-    }
-    const signature = JSON.stringify(positions);
-    if (signature !== this.#lastSitePositionsSignature) {
-      this.#canvas.dataset.sitePositions = signature;
-      this.#lastSitePositionsSignature = signature;
-    }
+    this.#camera.fov = current.fov;
+    this.#lastCameraRadius = this.#camera.radius;
   }
 
   public dispose(): void {
     this.#canvas.removeEventListener('pointerdown', this.#handlePointerDown, { capture: true });
     this.#canvas.removeEventListener('pointermove', this.#handlePointerMove, { capture: true });
     this.#canvas.removeEventListener('pointerup', this.#handlePointerUp, { capture: true });
-    this.#canvas.removeEventListener('pointercancel', this.#handlePointerUp, { capture: true });
+    this.#canvas.removeEventListener('pointercancel', this.#handlePointerCancel, { capture: true });
     this.#canvas.removeEventListener('wheel', this.#handleWheel, { capture: true });
     this.#resizeObserver.disconnect();
     this.#scene.dispose();

@@ -2,9 +2,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import type { Building, BuildingTypeDefinition, Garden, VillageState } from '@arbestra/contracts';
 
-import { ApiError, buildBuilding, getVillage, harvestGarden, type TimedVillageState, upgradeBuilding } from './api/client';
+import { ApiError, buildBuilding, expandGarden, getVillage, harvestGarden, type TimedVillageState, upgradeBuilding } from './api/client';
 import { NotificationStack, type GameNotification } from './ui/NotificationStack';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
+import { cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 
 const VillageScene = lazy(() => import('./scene/VillageScene').then((module) => ({ default: module.VillageScene })));
 const worldSlug = new URLSearchParams(window.location.search).get('world') ?? 'aube';
@@ -27,11 +28,6 @@ function buildingLabel(building: Building, definitions: BuildingTypeDefinition[]
   return definitions.find((definition) => definition.code === building.type)?.displayName ?? building.type;
 }
 
-function wrappedDistance(a: number, b: number, size: number): number {
-  const direct = Math.abs(a - b);
-  return Math.min(direct, size - direct);
-}
-
 export function App() {
   const [state, setState] = useState<VillageState | null>(null);
   const stateRef = useRef<VillageState | null>(null);
@@ -43,7 +39,10 @@ export function App() {
   const [needsLogin, setNeedsLogin] = useState(false);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const [choosingGardenExtension, setChoosingGardenExtension] = useState(false);
+  const [construction, setConstruction] = useState<{ type: string | null; buildingId?: string } | null>(null);
+  const [selection, setSelection] = useState<CellRange | null>(null);
+  const touchOrigin = useRef<Cell | null>(null);
+  const actionInFlight = useRef(false);
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
   const notificationId = useRef(0);
   const notificationTimers = useRef<number[]>([]);
@@ -68,6 +67,9 @@ export function App() {
         if (building?.status === 'completed' && prior?.status === 'under-construction') {
           pushNotification(`${buildingLabel(building, snapshot.state.buildingTypes)} niveau ${building.level} terminé`);
         }
+        if (prior?.garden?.expansion && building?.garden && !building.garden.expansion) {
+          pushNotification('Extension du Jardin terminée');
+        }
       }
     }
     stateRef.current = snapshot.state;
@@ -87,14 +89,17 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const hasConstruction = state?.cells.some((site) => site.building?.status === 'under-construction') ?? false;
+  const hasConstruction = state?.cells.some((site) => site.building?.status === 'under-construction' || Boolean(site.building?.garden?.expansion)) ?? false;
   useEffect(() => {
     if (!hasConstruction) return;
     let refreshing = false;
     const timer = window.setInterval(() => {
-      if (refreshing) return;
+      if (refreshing || actionInFlight.current) return;
       refreshing = true;
-      void getVillage(worldSlug).then(applySnapshot).catch(() => undefined).finally(() => { refreshing = false; });
+      void getVillage(worldSlug).then((snapshot) => {
+        // A request started before a command must not replace its newer result.
+        if (!actionInFlight.current && (!stateRef.current || snapshot.state.serverTime >= stateRef.current.serverTime)) applySnapshot(snapshot);
+      }).catch(() => undefined).finally(() => { refreshing = false; });
     }, 250);
     return () => window.clearInterval(timer);
   }, [applySnapshot, hasConstruction]);
@@ -108,54 +113,110 @@ export function App() {
   }, [applySnapshot]);
 
   const selectedSite = useMemo(() => state?.cells.find((site) => site.id === selectedSiteId) ?? null, [selectedSiteId, state]);
-  const extensionCandidates = useMemo(() => {
-    if (!state || selectedSite?.building?.type !== 'garden') return [];
-    return state.cells.filter((site) => site.canBuild
-      && wrappedDistance(site.cellX, selectedSite.cellX, state.world.widthCells)
-        + wrappedDistance(site.cellY, selectedSite.cellY, state.world.heightCells) === 1);
-  }, [state, selectedSite]);
-  const highlightedSiteIds = choosingGardenExtension ? extensionCandidates.map((site) => site.id) : [];
+  const selectedBuilding = useMemo(() => selectedSite?.building
+    ?? (selectedSite?.footprint ? state?.cells.find((site) => site.building?.id === selectedSite.footprint?.buildingId)?.building ?? null : null), [selectedSite, state]);
+  const constructionDefinition = state?.buildingTypes.find((item) => item.code === construction?.type);
+  const spatial = constructionDefinition?.progressionMode === 'spatial';
+  const area = useMemo(() => state && selection
+    ? previewArea(state, selection, spatial, construction?.buildingId)
+    : null, [state, selection, spatial, construction?.buildingId]);
+  const highlightedSiteIds = useMemo(() => {
+    if (!state || !construction?.buildingId) return [];
+    const active = state.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active');
+    return state.cells.filter((cell) => cell.canBuild && active.some((other) => touchesCell(cell, other, state.world))).map(cellKey);
+  }, [state, construction?.buildingId]);
+  const constructionLevel = construction?.buildingId
+    ? state?.cells.find((cell) => cell.building?.id === construction.buildingId)?.building?.level ?? 1
+    : 1;
+  const costs = (constructionDefinition?.levels.find((level) => level.level === constructionLevel)?.costs ?? [])
+    .map((cost) => ({ ...cost, amount: cost.amount * (spatial ? area?.count ?? 0 : 1) }));
   const serverNow = now + serverOffsetMs;
   const displayedWood = state
     ? Math.floor(state.village.wood + state.village.woodProductionPerHour * Math.max(0, serverNow - Date.parse(state.serverTime)) / 3_600_000)
     : 0;
+  const affordable = costs.every((cost) => cost.amount <= (cost.resourceCode === 'wood'
+    ? displayedWood : state?.village.resources.find((resource) => resource.code === cost.resourceCode)?.amount ?? 0));
+  const selectionError = area?.error ?? (area && !affordable ? 'Ressources insuffisantes.' : null);
+
+  function clearPreview() {
+    touchOrigin.current = null;
+    setSelection(null);
+    setError(null);
+  }
+
+  function exitConstruction() {
+    setConstruction(null);
+    clearPreview();
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || actionInFlight.current) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || target?.closest('input, textarea, select')) return;
+      if (event.key.toLowerCase() !== 'b' && event.key !== 'Escape') return;
+      event.preventDefault();
+      setConstruction((current) => event.key === 'Escape' || current ? null : { type: null });
+      setMenuAnchor(null);
+      setSelection(null);
+      touchOrigin.current = null;
+      setError(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   async function runAction(action: () => Promise<TimedVillageState>, successMessage?: string) {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
     setPendingAction(true);
     setError(null);
     try {
       applySnapshot(await action());
-      setChoosingGardenExtension(false);
+      exitConstruction();
       if (successMessage) pushNotification(successMessage);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Action impossible.';
       setError(message);
       pushNotification(message, 'warning');
     } finally {
+      actionInFlight.current = false;
       setPendingAction(false);
     }
   }
 
   function handleSiteSelected(siteId: string, anchor: ScreenAnchor) {
-    if (choosingGardenExtension) {
-      const target = extensionCandidates.find((site) => site.id === siteId);
-      if (target && selectedSite?.building && state) {
-        void runAction(
-          () => upgradeBuilding(state.world.slug, state.village.id, selectedSite.building!.id, target.id),
-          'Extension du jardin lancée',
-        );
-        return;
-      }
-    }
+    if (construction) return;
+    if (!state?.cells.find((site) => site.id === siteId)?.footprint) return;
     setSelectedSiteId(siteId);
     setMenuAnchor(anchor);
-    setChoosingGardenExtension(false);
   }
 
   function closeContextMenu() {
     setSelectedSiteId(null);
     setMenuAnchor(null);
-    setChoosingGardenExtension(false);
+  }
+
+  function handleAreaGesture(first: Cell, last: Cell, tap: boolean) {
+    if (!construction?.type || actionInFlight.current) return;
+    setError(null);
+    if (tap && spatial) {
+      setSelection({ first: touchOrigin.current ?? first, last });
+      touchOrigin.current = touchOrigin.current ? null : first;
+    } else {
+      touchOrigin.current = null;
+      setSelection({ first: spatial ? first : last, last });
+    }
+  }
+
+  function confirmConstruction() {
+    if (!state || !construction?.type || !area || selectionError || !area.cells.length) return;
+    const command = construction;
+    const anchor = spatial ? selection!.first : area.cells[0]!;
+    void runAction(() => command.buildingId
+      ? expandGarden(state.world.slug, state.village.id, command.buildingId, area.cells)
+      : buildBuilding(state.world.slug, state.village.id, command.type!, anchor, area.cells),
+    command.buildingId ? 'Extension du Jardin lancée' : 'Construction lancée');
   }
 
   if (loading) return <main className="center-message">Chargement du monde…</main>;
@@ -165,7 +226,9 @@ export function App() {
   return (
     <main className="game-shell">
       <Suspense fallback={<div className="center-message">Préparation de la scène…</div>}>
-        <VillageScene state={state} highlightedSiteIds={highlightedSiteIds} onSiteSelected={handleSiteSelected} onCameraMoved={closeContextMenu} />
+        <VillageScene state={state} highlightedSiteIds={highlightedSiteIds} constructionMode={construction !== null}
+          selectingArea={Boolean(construction?.type) && !pendingAction} preview={area} previewInvalid={Boolean(selectionError)}
+          onAreaGesture={handleAreaGesture} onSiteSelected={handleSiteSelected} onCameraMoved={closeContextMenu} />
       </Suspense>
       <header className="top-bar">
         <div className="world-identity"><span className="world-name">{state.world.name}</span><strong>{state.village.name}</strong></div>
@@ -178,49 +241,56 @@ export function App() {
         </div>
         <NotificationStack notifications={notifications} />
       </header>
-      {selectedSite && menuAnchor ? (
+      {selectedBuilding && menuAnchor && !construction ? (
         <WorldContextMenu anchor={menuAnchor}>
-          {choosingGardenExtension ? (
-            <div className="extension-choice"><span>Extension du jardin</span><strong>Choisissez une case adjacente.</strong>
-              <button type="button" onClick={() => setChoosingGardenExtension(false)}>Annuler</button></div>
-          ) : null}
-          {selectedSite.building ? (
             <BuildingDetails
-              building={selectedSite.building}
-              definition={state.buildingTypes.find((definition) => definition.code === selectedSite.building?.type)!}
+              building={selectedBuilding}
+              definition={state.buildingTypes.find((definition) => definition.code === selectedBuilding.type)!}
               serverNow={serverNow}
               pendingAction={pendingAction}
               onUpgrade={() => {
-                if (selectedSite.building?.type === 'garden') setChoosingGardenExtension(true);
+                if (selectedBuilding.type === 'garden') {
+                  clearPreview();
+                  setConstruction({ type: selectedBuilding.type, buildingId: selectedBuilding.id });
+                  setMenuAnchor(null);
+                }
                 else void runAction(
-                  () => upgradeBuilding(state.world.slug, state.village.id, selectedSite.building!.id),
+                  () => upgradeBuilding(state.world.slug, state.village.id, selectedBuilding.id),
                   'Amélioration lancée',
                 );
               }}
               onHarvest={() => {
-                const ready = selectedSite.building?.garden ? gardenReady(selectedSite.building.garden, serverNow) : 0;
+                const ready = selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0;
                 void runAction(
-                  () => harvestGarden(state.world.slug, state.village.id, selectedSite.building!.id),
+                  () => harvestGarden(state.world.slug, state.village.id, selectedBuilding.id),
                   ready > 0 ? `+${formatResource(ready)} carottes récoltées` : 'Récolte effectuée',
                 );
               }}
             />
-          ) : null}
-          {selectedSite.canBuild && !choosingGardenExtension ? (
-            <div className="build-choice"><span>Emplacement libre</span>
-              {state.buildingTypes.filter((definition) => definition.buildable).map((definition) => {
-                const cost = definition.levels.find((level) => level.level === 1)?.costs.find((item) => item.resourceCode === 'wood')?.amount ?? 0;
-                return <button type="button" key={definition.code} disabled={pendingAction || displayedWood < cost}
-                  onClick={() => void runAction(
-                    () => buildBuilding(state.world.slug, state.village.id, selectedSite.id, definition.code),
-                    `${definition.displayName} en chantier`,
-                  )}>Construire {definition.displayName} — {cost} bois</button>;
-              })}
-            </div>
-          ) : null}
           {error ? <p className="error" role="alert">{error}</p> : null}
         </WorldContextMenu>
       ) : null}
+      <div className="construction-toolbar" aria-label="Construction">
+        {!construction ? <button type="button" disabled={pendingAction} aria-keyshortcuts="B" onClick={() => {
+          closeContextMenu(); clearPreview(); setConstruction({ type: null });
+        }}>Construire <kbd>B</kbd></button> : <>
+          {!construction.type ? state.buildingTypes.filter((definition) => definition.buildable).map((definition) => (
+            <button type="button" key={definition.code} onClick={() => { clearPreview(); setConstruction({ type: definition.code }); }}>
+              {definition.displayName}
+            </button>
+          )) : <>
+            <div className="construction-summary" aria-live="polite">
+              <strong>{construction.buildingId ? 'Étendre' : 'Construire'} : {constructionDefinition?.displayName}</strong>
+              <span>{spatial ? 'Glissez à la souris ; au tactile, touchez deux coins.' : 'Choisissez une case.'}</span>
+              {area ? <span>{area.count} case{area.count > 1 ? 's' : ''} · {costs.map((cost) => `${formatResource(cost.amount)} ${state.village.resources.find((resource) => resource.code === cost.resourceCode)?.displayName ?? cost.resourceCode}`).join(', ')}</span> : null}
+              {selectionError || error ? <span className="error">{selectionError ?? error}</span> : null}
+            </div>
+            <button type="button" disabled={pendingAction || !area?.cells.length || Boolean(selectionError)} onClick={confirmConstruction}>Confirmer</button>
+            {area ? <button type="button" disabled={pendingAction} onClick={clearPreview}>Recommencer</button> : null}
+          </>}
+          <button type="button" disabled={pendingAction} onClick={exitConstruction}>Annuler</button>
+        </>}
+      </div>
     </main>
   );
 }
@@ -238,15 +308,19 @@ function BuildingDetails({ building, definition, serverNow, pendingAction, onUpg
   const nextLevel = definition.levels.find((level) => level.level === building.level + 1);
   const upgradeCost = nextLevel?.costs.find((cost) => cost.resourceCode === 'wood')?.amount ?? null;
   const ownProduction = currentLevel?.production.find((production) => production.resourceCode === 'wood')?.ratePerHour ?? 0;
+  const extensionCost = currentLevel?.costs.find((cost) => cost.resourceCode === 'wood')?.amount ?? 0;
   return (
     <div className="building-details">
       <span>{definition.displayName}</span>
       <strong>Niveau {building.level}{building.targetLevel ? ` → ${building.targetLevel}` : ''}</strong>
       {building.type === 'sawmill' ? <p>Production : +{ownProduction}/h</p> : null}
       {garden ? <>
+        <p>{garden.activeCellCount} case{garden.activeCellCount > 1 ? 's' : ''} active{garden.activeCellCount > 1 ? 's' : ''}{garden.pendingCellCount ? ` · ${garden.pendingCellCount} en chantier` : ''}</p>
         <p>Prêtes : {formatResource(gardenReady(garden, serverNow))} / {garden.capacity} carottes</p>
         <p>Production : +{garden.productionPerHour}/h</p>
+        {garden.expansion ? <p className="construction-status">Extension — {Math.max(0, Math.ceil((Date.parse(garden.expansion.completesAt) - serverNow) / 1_000))} s</p> : null}
         <button type="button" disabled={pendingAction || building.status !== 'completed'} onClick={onHarvest}>Récolter</button>
+        <button type="button" disabled={pendingAction || building.status !== 'completed' || garden.expansion !== null} onClick={onUpgrade}>Étendre — {extensionCost} bois / case</button>
       </> : null}
       {building.status === 'under-construction' ? <ConstructionStatus building={building} serverNow={serverNow} /> : null}
       {upgradeCost !== null ? <button type="button" disabled={pendingAction || building.status !== 'completed'} onClick={onUpgrade}>

@@ -2,18 +2,17 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 
-import { BuildRequestSchema, UpgradeRequestSchema, VillageStateSchema } from '@arbestra/contracts';
+import { BuildRequestSchema, ExpansionRequestSchema, UpgradeRequestSchema, VillageStateSchema } from '@arbestra/contracts';
 
 import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import { authenticate } from '../auth/service.js';
-import { constructBuilding, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
+import { constructBuilding, constructBuildingArea, expandGarden, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
 
 const WorldParametersSchema = Type.Object({ worldSlug: Type.String({ minLength: 1, maxLength: 64 }) });
-const BuildParametersSchema = Type.Object({
+const VillageParametersSchema = Type.Object({
   worldSlug: Type.String({ minLength: 1, maxLength: 64 }),
   villageId: Type.String({ format: 'uuid' }),
-  cellId: Type.String({ format: 'uuid' }),
 });
 const BuildingParametersSchema = Type.Object({
   worldSlug: Type.String({ minLength: 1, maxLength: 64 }),
@@ -34,29 +33,39 @@ export async function registerVillageRoutes(
     return getVillageState(db, account.id, worldSlug);
   });
 
-  app.post('/api/worlds/:worldSlug/villages/:villageId/cells/:cellId/buildings', {
+  app.post('/api/worlds/:worldSlug/villages/:villageId/buildings', {
     schema: {
-      params: BuildParametersSchema,
+      params: VillageParametersSchema,
       body: BuildRequestSchema,
       response: { 201: VillageStateSchema },
     },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
-    const { worldSlug, villageId, cellId } = request.params as {
+    const { worldSlug, villageId } = request.params as {
       worldSlug: string;
       villageId: string;
-      cellId: string;
     };
-    const { buildingType } = request.body as { buildingType: string };
-    const state = await constructBuilding(
+    const body = request.body as { buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
+    const state = body.cells ? await constructBuildingArea(
       db,
       account.id,
       worldSlug,
       villageId,
-      cellId,
-      buildingType,
+      body.buildingType,
+      { cellX: body.anchorCellX!, cellY: body.anchorCellY! },
+      body.cells,
       config.constructionDurationOverrideMs,
-    );
+    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs);
+    return reply.status(201).send(state);
+  });
+
+  app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/expansions', {
+    schema: { params: BuildingParametersSchema, body: ExpansionRequestSchema, response: { 201: VillageStateSchema } },
+  }, async (request, reply) => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
+    const { cells } = request.body as { cells: Array<{ cellX: number; cellY: number }> };
+    const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs);
     return reply.status(201).send(state);
   });
 
@@ -69,14 +78,14 @@ export async function registerVillageRoutes(
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
-    const { extensionCellId } = request.body as { extensionCellId?: string };
     const state = await upgradeBuilding(
       db,
       account.id,
       worldSlug,
       villageId,
       buildingId,
-      extensionCellId,
+      undefined,
+      undefined,
       config.constructionDurationOverrideMs,
     );
     return reply.status(201).send(state);

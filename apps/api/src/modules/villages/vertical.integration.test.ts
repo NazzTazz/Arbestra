@@ -12,7 +12,7 @@ import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import type { Database } from '../../database/schema.js';
-import { DEVELOPMENT_IDS } from '../../database/seed.js';
+import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { COMPLETE_CONSTRUCTION_TASK, completeConstruction } from './complete-construction.js';
@@ -50,14 +50,16 @@ describe.sequential('deferred construction with PostgreSQL', () => {
   async function requestConstruction(cookie: string) {
     return app.inject({
       method: 'POST',
-      url: `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/cells/${DEVELOPMENT_IDS.dwellingCell}/buildings`,
-      headers: { cookie }, payload: { buildingType: 'dwelling' },
+      url: `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/buildings`,
+      headers: { cookie }, payload: { buildingType: 'dwelling', ...DEVELOPMENT_CELLS.dwelling },
     });
   }
 
   async function makeConstructionDue(): Promise<string> {
-    const building = await db.selectFrom('buildings').select('id')
-      .where('anchorCellId', '=', DEVELOPMENT_IDS.dwellingCell).executeTakeFirstOrThrow();
+    const building = await db.selectFrom('worldCellOccupancies').innerJoin('buildings', 'buildings.id', 'worldCellOccupancies.buildingId')
+      .select('buildings.id').where('worldCellOccupancies.cellX', '=', DEVELOPMENT_CELLS.dwelling.cellX)
+      .where('worldCellOccupancies.cellY', '=', DEVELOPMENT_CELLS.dwelling.cellY)
+      .where('worldCellOccupancies.role', '=', 'anchor').executeTakeFirstOrThrow();
     await db.updateTable('buildings').set({
       constructionStartedAt: sql`transaction_timestamp() - interval '2 seconds'`,
       constructionCompletesAt: sql`transaction_timestamp() - interval '1 second'`,
@@ -72,7 +74,7 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     const response = await requestConstruction(await authenticatedCookie());
     expect(response.statusCode).toBe(201);
     const state = response.json<VillageState>();
-    const building = state.cells.find((cell) => cell.id === DEVELOPMENT_IDS.dwellingCell)?.building;
+    const building = state.cells.find((cell) => cell.cellX === DEVELOPMENT_CELLS.dwelling.cellX && cell.cellY === DEVELOPMENT_CELLS.dwelling.cellY)?.building;
     expect(state.village.wood).toBe(1975);
     expect(building?.status).toBe('under-construction');
     expect(Date.parse(building!.constructionCompletesAt!) - Date.parse(building!.constructionStartedAt!)).toBe(10_000);
@@ -89,7 +91,8 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     const wood = await db.selectFrom('villageResources').select('amount')
       .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
     expect(Number(wood.amount)).toBe(1975);
-    expect(await db.selectFrom('buildings').select('id').where('anchorCellId', '=', DEVELOPMENT_IDS.dwellingCell).execute()).toHaveLength(1);
+    expect(await db.selectFrom('worldCellOccupancies').select('buildingId').where('cellX', '=', DEVELOPMENT_CELLS.dwelling.cellX)
+      .where('cellY', '=', DEVELOPMENT_CELLS.dwelling.cellY).where('role', '=', 'anchor').execute()).toHaveLength(1);
   });
 
   it('completes exactly once when presented twice', async () => {
@@ -153,7 +156,7 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     await requestConstruction(cookie);
     const id = await makeConstructionDue();
     const state = (await app.inject({ method: 'GET', url: '/api/worlds/aube/village', headers: { cookie } })).json<VillageState>();
-    expect(state.cells.find((cell) => cell.id === DEVELOPMENT_IDS.dwellingCell)?.building?.status).toBe('completed');
+    expect(state.cells.find((cell) => cell.cellX === DEVELOPMENT_CELLS.dwelling.cellX && cell.cellY === DEVELOPMENT_CELLS.dwelling.cellY)?.building?.status).toBe('completed');
     const restarted = createDatabase(databaseUrl);
     try { expect((await processNextScheduledTask(restarted, taskHandlers))?.outcome).toBe('completed'); }
     finally { await restarted.destroy(); }

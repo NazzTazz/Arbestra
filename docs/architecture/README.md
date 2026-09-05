@@ -13,6 +13,9 @@ HTTP JSON est le défaut. SSE/WebSocket, Redis et queues externes restent absent
 Spécifications :
 
 - [Monde et grille](./world-grid.md)
+- [Espace mondial et occupation](./world-space-and-occupancy.md)
+- [Génération d’un monde](./world-generation.md)
 - [Bâtiments et catalogue](./building-catalog.md)
+- [Construction spatiale et Jardin surfacique](./spatial-construction.md)
 - [Économie](./economy.md)
 - [Temps serveur](./server-time.md)

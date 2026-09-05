@@ -18,6 +18,9 @@ export interface WorldsTable {
   heightCells: number;
   chunkSize: number;
   seed: ColumnType<string, number | string, number | string>;
+  generationVersion: Generated<number>;
+  generationStatus: Generated<'pending' | 'generating' | 'ready' | 'failed'>;
+  generatedAt: Timestamp | null;
   createdAt: Generated<Timestamp>;
 }
 
@@ -38,19 +41,10 @@ export interface VillagesTable {
   createdAt: Generated<Timestamp>;
 }
 
-export interface VillageCellsTable {
-  id: Generated<string>;
-  worldId: string;
-  villageId: string;
-  cellX: number;
-  cellY: number;
-}
-
 export interface BuildingsTable {
   id: Generated<string>;
   worldId: string;
   villageId: string;
-  anchorCellId: string;
   buildingType: string;
   level: number;
   targetLevel: number | null;
@@ -116,12 +110,70 @@ export interface VillageResourceFlowsTable {
   productionUpdatedAt: Timestamp;
 }
 
-export interface BuildingCellsTable {
+export interface TerrainTypesTable {
+  code: number;
+  slug: string;
+  buildable: boolean;
+}
+
+export interface WorldChunksTable {
+  worldId: string;
+  chunkX: number;
+  chunkY: number;
+  generationVersion: number;
+  terrainCodes: number[];
+  elevations: number[];
+  createdAt: Generated<Timestamp>;
+}
+
+export interface WorldClearingsTable {
+  id: string;
+  worldId: string;
+  centerCellX: number;
+  centerCellY: number;
+  innerRadius: number;
+  transitionRadius: number;
+  status: 'protected' | 'claimed';
+  claimedVillageId: string | null;
+  createdAt: Generated<Timestamp>;
+}
+
+export interface WorldFeatureTypesTable {
+  code: string;
+  blocksConstruction: boolean;
+}
+
+export interface WorldFeaturesTable {
+  id: string;
+  worldId: string;
+  featureTypeCode: string;
+  state: 'available' | 'reserved' | 'depleted';
+  variantSeed: number;
+  createdAt: Generated<Timestamp>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface WorldCellOccupanciesTable {
+  worldId: string;
+  cellX: number;
+  cellY: number;
+  buildingId: string | null;
+  featureId: string | null;
+  pendingExpansionId: string | null;
+  role: 'anchor' | 'extension' | 'body';
+  createdAt: Generated<Timestamp>;
+}
+
+export interface BuildingExpansionsTable {
+  id: Generated<string>;
   worldId: string;
   villageId: string;
   buildingId: string;
-  cellId: string;
-  role: 'anchor' | 'extension';
+  status: 'under-construction' | 'completed';
+  startedAt: Timestamp;
+  completesAt: Timestamp;
+  completedAt: Timestamp | null;
+  createdAt: Generated<Timestamp>;
 }
 
 export interface BuildingResourceBuffersTable {
@@ -161,8 +213,14 @@ export interface Database {
   worlds: WorldsTable;
   worldMemberships: WorldMembershipsTable;
   villages: VillagesTable;
-  villageCells: VillageCellsTable;
   buildings: BuildingsTable;
+  terrainTypes: TerrainTypesTable;
+  worldChunks: WorldChunksTable;
+  worldClearings: WorldClearingsTable;
+  worldFeatureTypes: WorldFeatureTypesTable;
+  worldFeatures: WorldFeaturesTable;
+  worldCellOccupancies: WorldCellOccupanciesTable;
+  buildingExpansions: BuildingExpansionsTable;
   resourceTypes: ResourceTypesTable;
   buildingTypes: BuildingTypesTable;
   buildingTypeLevels: BuildingTypeLevelsTable;
@@ -170,7 +228,6 @@ export interface Database {
   buildingLevelProduction: BuildingLevelProductionTable;
   villageResources: VillageResourcesTable;
   villageResourceFlows: VillageResourceFlowsTable;
-  buildingCells: BuildingCellsTable;
   buildingResourceBuffers: BuildingResourceBuffersTable;
   scheduledTasks: ScheduledTasksTable;
   sessions: SessionsTable;

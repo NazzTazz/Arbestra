@@ -5,18 +5,12 @@ import { sql } from 'kysely';
 import { loadConfig } from '../config.js';
 import { hashPassword } from '../security/passwords.js';
 import { createDatabase } from './connection.js';
+import { generateWorld } from '../modules/worlds/generation.js';
 
 export const DEVELOPMENT_IDS = {
   account: '10000000-0000-4000-8000-000000000001',
   world: '20000000-0000-4000-8000-000000000001',
   village: '30000000-0000-4000-8000-000000000001',
-  townHallCell: '40000000-0000-4000-8000-000000000001',
-  dwellingCell: '40000000-0000-4000-8000-000000000002',
-  sawmillCell: '40000000-0000-4000-8000-000000000003',
-  gardenCell: '40000000-0000-4000-8000-000000000004',
-  gardenNorthCell: '40000000-0000-4000-8000-000000000005',
-  gardenSouthCell: '40000000-0000-4000-8000-000000000006',
-  meadowCell: '40000000-0000-4000-8000-000000000007',
   townHall: '50000000-0000-4000-8000-000000000001',
 } as const;
 
@@ -24,6 +18,14 @@ const WORLD_WIDTH = 2048;
 const WORLD_HEIGHT = 1024;
 const ANCHOR_X = WORLD_WIDTH / 2;
 const ANCHOR_Y = WORLD_HEIGHT / 2;
+
+export const DEVELOPMENT_CELLS = {
+  townHall: { cellX: ANCHOR_X - 1, cellY: ANCHOR_Y },
+  dwelling: { cellX: ANCHOR_X + 1, cellY: ANCHOR_Y },
+  sawmill: { cellX: ANCHOR_X - 1, cellY: ANCHOR_Y + 1 },
+  garden: { cellX: ANCHOR_X, cellY: ANCHOR_Y },
+  gardenNorth: { cellX: ANCHOR_X, cellY: ANCHOR_Y + 1 },
+} as const;
 
 export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl): Promise<void> {
   const db = createDatabase(databaseUrl);
@@ -60,26 +62,17 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
         baseRatePerHour: 60, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
       }).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
 
-      await transaction.insertInto('villageCells').values([
-        { id: DEVELOPMENT_IDS.townHallCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X - 1, cellY: ANCHOR_Y },
-        { id: DEVELOPMENT_IDS.dwellingCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X + 1, cellY: ANCHOR_Y },
-        { id: DEVELOPMENT_IDS.sawmillCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X - 1, cellY: ANCHOR_Y + 1 },
-        { id: DEVELOPMENT_IDS.gardenCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X, cellY: ANCHOR_Y },
-        { id: DEVELOPMENT_IDS.gardenNorthCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X, cellY: ANCHOR_Y + 1 },
-        { id: DEVELOPMENT_IDS.gardenSouthCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X, cellY: ANCHOR_Y - 1 },
-        { id: DEVELOPMENT_IDS.meadowCell, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, cellX: ANCHOR_X + 1, cellY: ANCHOR_Y - 1 },
-      ]).onConflict((conflict) => conflict.column('id').doNothing()).execute();
-
       await transaction.insertInto('buildings').values({
         id: DEVELOPMENT_IDS.townHall, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-        anchorCellId: DEVELOPMENT_IDS.townHallCell, buildingType: 'town-hall', level: 1, targetLevel: null,
+        buildingType: 'town-hall', level: 1, targetLevel: null,
         status: 'completed', constructionStartedAt: null, constructionCompletesAt: null,
         completedAt: sql`transaction_timestamp()`,
       }).onConflict((conflict) => conflict.column('id').doNothing()).execute();
-      await transaction.insertInto('buildingCells').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-        buildingId: DEVELOPMENT_IDS.townHall, cellId: DEVELOPMENT_IDS.townHallCell, role: 'anchor',
-      }).onConflict((conflict) => conflict.columns(['worldId', 'cellId']).doNothing()).execute();
+      await transaction.insertInto('worldCellOccupancies').values({
+        worldId: DEVELOPMENT_IDS.world,
+        ...DEVELOPMENT_CELLS.townHall, buildingId: DEVELOPMENT_IDS.townHall, featureId: null, role: 'anchor',
+      }).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
+      await generateWorld(transaction, DEVELOPMENT_IDS.world);
     });
   } finally {
     await db.destroy();

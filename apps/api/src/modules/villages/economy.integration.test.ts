@@ -7,14 +7,14 @@ import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import type { Database } from '../../database/schema.js';
-import { DEVELOPMENT_IDS } from '../../database/seed.js';
+import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
-import { COMPLETE_CONSTRUCTION_TASK, completeConstruction } from './complete-construction.js';
-import { constructBuilding, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
+import { COMPLETE_CONSTRUCTION_TASK, COMPLETE_EXPANSION_TASK, completeConstruction, completeExpansion } from './complete-construction.js';
+import { constructBuilding, expandGarden, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
 
 const databaseUrl = testDatabaseUrl();
-const handlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction };
+const handlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion };
 let db: Kysely<Database>;
 
 describe.sequential('economy with PostgreSQL', () => {
@@ -26,8 +26,8 @@ describe.sequential('economy with PostgreSQL', () => {
   beforeEach(() => resetE2eState(databaseUrl));
   afterAll(async () => { await db?.destroy(); });
 
-  async function build(type: 'sawmill' | 'garden' | 'dwelling', cellId: string): Promise<VillageState> {
-    return constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, cellId, type, 10_000);
+  async function build(type: 'sawmill' | 'garden' | 'dwelling', cell: { cellX: number; cellY: number }): Promise<VillageState> {
+    return constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, cell.cellX, cell.cellY, type, 10_000);
   }
 
   async function makeDue(buildingId: string): Promise<void> {
@@ -35,15 +35,27 @@ describe.sequential('economy with PostgreSQL', () => {
       constructionStartedAt: sql`transaction_timestamp() - interval '2 seconds'`,
       constructionCompletesAt: sql`transaction_timestamp() - interval '1 second'`,
     }).where('id', '=', buildingId).execute();
+    await db.updateTable('buildingExpansions').set({
+      startedAt: sql`transaction_timestamp() - interval '2 seconds'`,
+      completesAt: sql`transaction_timestamp() - interval '1 second'`,
+    }).where('buildingId', '=', buildingId).where('status', '=', 'under-construction').execute();
+    const task = await db.selectFrom('scheduledTasks').leftJoin('buildingExpansions', (join) => join
+      .onRef('buildingExpansions.id', '=', 'scheduledTasks.subjectId'))
+      .select('scheduledTasks.id').where((eb) => eb.or([
+        eb('scheduledTasks.subjectId', '=', buildingId),
+        eb('buildingExpansions.buildingId', '=', buildingId),
+      ])).where('scheduledTasks.completedAt', 'is', null).executeTakeFirstOrThrow();
     await db.updateTable('scheduledTasks').set({
       dueAt: sql`transaction_timestamp() - interval '1 second'`,
       availableAt: sql`transaction_timestamp() - interval '1 second'`,
-    }).where('subjectId', '=', buildingId).where('completedAt', 'is', null).execute();
+    }).where('id', '=', task.id).execute();
     expect((await processNextScheduledTask(db, handlers))?.outcome).toBe('completed');
   }
 
-  async function completeAt(cellId: string): Promise<string> {
-    const building = await db.selectFrom('buildings').select('id').where('anchorCellId', '=', cellId).executeTakeFirstOrThrow();
+  async function completeAt(cell: { cellX: number; cellY: number }): Promise<string> {
+    const building = await db.selectFrom('worldCellOccupancies').innerJoin('buildings', 'buildings.id', 'worldCellOccupancies.buildingId')
+      .select('buildings.id').where('worldCellOccupancies.cellX', '=', cell.cellX).where('worldCellOccupancies.cellY', '=', cell.cellY)
+      .where('worldCellOccupancies.role', '=', 'anchor').executeTakeFirstOrThrow();
     await makeDue(building.id);
     return building.id;
   }
@@ -57,13 +69,13 @@ describe.sequential('economy with PostgreSQL', () => {
   });
 
   it('uses catalog production for sawmill levels 1, 2 and 3', async () => {
-    await build('sawmill', DEVELOPMENT_IDS.sawmillCell);
-    const id = await completeAt(DEVELOPMENT_IDS.sawmillCell);
+    await build('sawmill', DEVELOPMENT_CELLS.sawmill);
+    const id = await completeAt(DEVELOPMENT_CELLS.sawmill);
     expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(120);
-    await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, 10_000);
+    await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, undefined, 10_000);
     await makeDue(id);
     expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(168);
-    await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, 10_000);
+    await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, undefined, 10_000);
     await makeDue(id);
     expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(254.4);
   });
@@ -84,7 +96,7 @@ describe.sequential('economy with PostgreSQL', () => {
 
   it('debits a concurrent duplicate construction exactly once', async () => {
     const results = await Promise.allSettled([
-      build('sawmill', DEVELOPMENT_IDS.sawmillCell), build('sawmill', DEVELOPMENT_IDS.sawmillCell),
+      build('sawmill', DEVELOPMENT_CELLS.sawmill), build('sawmill', DEVELOPMENT_CELLS.sawmill),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const wood = await db.selectFrom('villageResources').select('amount')
@@ -92,9 +104,31 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(Number(wood.amount)).toBe(1950);
   });
 
+  it('treats a generated feature occupation as authoritative', async () => {
+    const featureId = '60000000-0000-4000-8000-000000000001';
+    try {
+      await db.insertInto('worldFeatures').values({
+        id: featureId, worldId: DEVELOPMENT_IDS.world, featureTypeCode: 'woodland',
+        state: 'available', variantSeed: 1,
+      }).execute();
+      await db.insertInto('worldCellOccupancies').values({
+        worldId: DEVELOPMENT_IDS.world, ...DEVELOPMENT_CELLS.sawmill,
+        buildingId: null, featureId, role: 'body',
+      }).execute();
+
+      await expect(build('sawmill', DEVELOPMENT_CELLS.sawmill))
+        .rejects.toMatchObject({ code: 'CELL_OCCUPIED' });
+      const wood = await db.selectFrom('villageResources').select('amount')
+        .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
+      expect(Number(wood.amount)).toBe(2000);
+    } finally {
+      await db.deleteFrom('worldFeatures').where('id', '=', featureId).execute();
+    }
+  });
+
   it('caps buffered production and prevents double harvest', async () => {
-    await build('garden', DEVELOPMENT_IDS.gardenCell);
-    const id = await completeAt(DEVELOPMENT_IDS.gardenCell);
+    await build('garden', DEVELOPMENT_CELLS.garden);
+    const id = await completeAt(DEVELOPMENT_CELLS.garden);
     await db.updateTable('buildingResourceBuffers').set({
       storedAmount: 0, remainder: 0, productionUpdatedAt: sql`transaction_timestamp() - interval '20 hours'`,
     }).where('buildingId', '=', id).where('resourceCode', '=', 'carrot').execute();
@@ -112,29 +146,54 @@ describe.sequential('economy with PostgreSQL', () => {
   });
 
   it('persists one chosen garden extension and rejects occupied cells', async () => {
-    await build('dwelling', DEVELOPMENT_IDS.dwellingCell);
-    await completeAt(DEVELOPMENT_IDS.dwellingCell);
-    await build('garden', DEVELOPMENT_IDS.gardenCell);
-    const id = await completeAt(DEVELOPMENT_IDS.gardenCell);
-    await expect(upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, DEVELOPMENT_IDS.dwellingCell, 10_000))
-      .rejects.toMatchObject({ code: 'SITE_OCCUPIED' });
-    const pending = await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, DEVELOPMENT_IDS.gardenNorthCell, 10_000);
-    expect(pending.cells.find((cell) => cell.id === DEVELOPMENT_IDS.gardenNorthCell)?.footprint?.state).toBe('reserved');
+    await build('dwelling', DEVELOPMENT_CELLS.dwelling);
+    await completeAt(DEVELOPMENT_CELLS.dwelling);
+    await build('garden', DEVELOPMENT_CELLS.garden);
+    const id = await completeAt(DEVELOPMENT_CELLS.garden);
+    await expect(upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, DEVELOPMENT_CELLS.dwelling.cellX, DEVELOPMENT_CELLS.dwelling.cellY, 10_000))
+      .rejects.toMatchObject({ code: 'CELL_OCCUPIED' });
+    const pending = await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, DEVELOPMENT_CELLS.gardenNorth.cellX, DEVELOPMENT_CELLS.gardenNorth.cellY, 10_000);
+    expect(pending.cells.find((cell) => cell.cellX === DEVELOPMENT_CELLS.gardenNorth.cellX && cell.cellY === DEVELOPMENT_CELLS.gardenNorth.cellY)?.footprint?.state).toBe('reserved');
     await makeDue(id);
     const completed = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
-    expect(completed.cells.find((cell) => cell.id === DEVELOPMENT_IDS.gardenNorthCell)?.footprint?.state).toBe('active');
-    expect(completed.cells.find((cell) => cell.building?.id === id)?.building?.level).toBe(2);
+    expect(completed.cells.find((cell) => cell.cellX === DEVELOPMENT_CELLS.gardenNorth.cellX && cell.cellY === DEVELOPMENT_CELLS.gardenNorth.cellY)?.footprint?.state).toBe('active');
+    expect(completed.cells.find((cell) => cell.building?.id === id)?.building?.garden?.activeCellCount).toBe(2);
   });
 
   it('lets only one concurrent upgrade reserve a cell', async () => {
-    await build('garden', DEVELOPMENT_IDS.gardenCell);
-    await build('garden', DEVELOPMENT_IDS.sawmillCell);
-    const first = await completeAt(DEVELOPMENT_IDS.gardenCell);
-    const second = await completeAt(DEVELOPMENT_IDS.sawmillCell);
+    await build('garden', DEVELOPMENT_CELLS.garden);
+    await build('garden', DEVELOPMENT_CELLS.sawmill);
+    const first = await completeAt(DEVELOPMENT_CELLS.garden);
+    const second = await completeAt(DEVELOPMENT_CELLS.sawmill);
     const results = await Promise.allSettled([
-      upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, first, DEVELOPMENT_IDS.gardenNorthCell, 10_000),
-      upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, second, DEVELOPMENT_IDS.gardenNorthCell, 10_000),
+      upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, first, DEVELOPMENT_CELLS.gardenNorth.cellX, DEVELOPMENT_CELLS.gardenNorth.cellY, 10_000),
+      upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, second, DEVELOPMENT_CELLS.gardenNorth.cellX, DEVELOPMENT_CELLS.gardenNorth.cellY, 10_000),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+  });
+
+  it('harvests both production rates when an expansion is overdue and the worker has not run', async () => {
+    await build('garden', DEVELOPMENT_CELLS.garden);
+    const id = await completeAt(DEVELOPMENT_CELLS.garden);
+    await expandGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
+      id, [DEVELOPMENT_CELLS.gardenNorth], 10_000);
+    await db.transaction().execute(async (tx) => {
+      await tx.updateTable('buildingResourceBuffers').set({
+        storedAmount: 0, remainder: 0,
+        productionUpdatedAt: sql`transaction_timestamp() - interval '2 hours'`,
+      }).where('buildingId', '=', id).execute();
+      await tx.updateTable('buildingExpansions').set({
+        startedAt: sql`transaction_timestamp() - interval '90 minutes'`,
+        completesAt: sql`transaction_timestamp() - interval '1 hour'`,
+      }).where('buildingId', '=', id).execute();
+    });
+
+    // No snapshot or worker before the command: 1h at 60 + 1h at 120.
+    const harvested = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    expect(harvested.village.carrots).toBe(50 + 60 + 120);
+    expect(harvested.cells.find((cell) => cell.building?.id === id)?.building?.garden)
+      .toMatchObject({ activeCellCount: 2, pendingCellCount: 0, expansion: null, storedCarrots: 0, capacity: 1200 });
+    const again = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    expect(again.village.carrots).toBe(harvested.village.carrots);
   });
 });

@@ -9,6 +9,9 @@ import * as deferredActionsMigration from './migrations/002_deferred_actions.js'
 import * as economyMigration from './migrations/003_economy.js';
 import * as worldEconomyFoundationMigration from './migrations/004_world_economy_foundation.js';
 import * as foundationIndexesMigration from './migrations/005_foundation_indexes.js';
+import * as worldSpaceAndGenerationMigration from './migrations/006_world_space_and_generation.js';
+import * as clearingDepositsMigration from './migrations/007_clearing_deposits.js';
+import * as spatialGardensMigration from './migrations/008_spatial_gardens.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -18,6 +21,9 @@ const migrationProvider: MigrationProvider = {
       '003_economy': economyMigration,
       '004_world_economy_foundation': worldEconomyFoundationMigration,
       '005_foundation_indexes': foundationIndexesMigration,
+      '006_world_space_and_generation': worldSpaceAndGenerationMigration,
+      '007_clearing_deposits': clearingDepositsMigration,
+      '008_spatial_gardens': spatialGardensMigration,
     };
   },
 };

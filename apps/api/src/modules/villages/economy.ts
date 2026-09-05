@@ -156,12 +156,34 @@ async function bufferState(
       'buildingResourceBuffers.storedAmount', 'buildingResourceBuffers.remainder',
       'buildingResourceBuffers.productionUpdatedAt', 'buildingResourceBuffers.resourceCode',
       'buildingLevelProduction.ratePerHour', 'buildingLevelProduction.capacity',
-      'buildings.status', 'buildings.targetLevel',
+      'buildings.status', 'buildings.targetLevel', 'buildings.buildingType',
     ])
     .where('buildingResourceBuffers.worldId', '=', worldId)
     .where('buildingResourceBuffers.buildingId', '=', buildingId)
     .where('buildingResourceBuffers.resourceCode', '=', resourceCode)
     .executeTakeFirstOrThrow();
+}
+
+async function activeSurface(
+  transaction: Transaction<Database>, worldId: string, buildingId: string,
+): Promise<number> {
+  const row = await transaction.selectFrom('worldCellOccupancies')
+    .select(sql<number>`count(*)::integer`.as('count'))
+    .where('worldId', '=', worldId).where('buildingId', '=', buildingId)
+    .where('pendingExpansionId', 'is', null).executeTakeFirstOrThrow();
+  return row.count;
+}
+
+async function bufferedRates(
+  transaction: Transaction<Database>, worldId: string, buildingId: string,
+  buildingType: string, status: string, rate: string | number, capacity: string | number | null,
+) {
+  const active = status === 'completed';
+  if (!active) return { rate: 0, capacity: 0 };
+  const multiplier = buildingType === 'garden'
+    ? await activeSurface(transaction, worldId, buildingId)
+    : 1;
+  return { rate: Number(rate) * multiplier, capacity: Number(capacity ?? 0) * multiplier };
 }
 
 export async function projectBuildingBuffer(
@@ -172,9 +194,9 @@ export async function projectBuildingBuffer(
   through: Date,
 ): Promise<ProjectedBuffer> {
   const buffer = await bufferState(transaction, worldId, buildingId, resourceCode);
-  const active = buffer.status === 'completed' || buffer.targetLevel !== null;
-  const rate = active ? asNumber(buffer.ratePerHour) : 0;
-  const capacity = asNumber(buffer.capacity ?? 0);
+  const rates = await bufferedRates(transaction, worldId, buildingId, buffer.buildingType, buffer.status, buffer.ratePerHour, buffer.capacity);
+  const rate = rates.rate;
+  const capacity = rates.capacity;
   const delta = await productionDelta(transaction, buffer.remainder, rate, buffer.productionUpdatedAt, through);
   return {
     resourceCode: buffer.resourceCode,
@@ -196,9 +218,9 @@ export async function materializeBuildingBuffer(
     .where('worldId', '=', worldId).where('buildingId', '=', buildingId).where('resourceCode', '=', resourceCode)
     .forUpdate().executeTakeFirstOrThrow();
   const buffer = await bufferState(transaction, worldId, buildingId, resourceCode);
-  const active = buffer.status === 'completed' || buffer.targetLevel !== null;
-  const rate = active ? asNumber(buffer.ratePerHour) : 0;
-  const capacity = asNumber(buffer.capacity ?? 0);
+  const rates = await bufferedRates(transaction, worldId, buildingId, buffer.buildingType, buffer.status, buffer.ratePerHour, buffer.capacity);
+  const rate = rates.rate;
+  const capacity = rates.capacity;
   const effectiveThrough = through.getTime() > buffer.productionUpdatedAt.getTime() ? through : buffer.productionUpdatedAt;
   const delta = await productionDelta(transaction, buffer.remainder, rate, buffer.productionUpdatedAt, effectiveThrough);
   const uncapped = asNumber(buffer.storedAmount) + asNumber(delta.wholeUnits);

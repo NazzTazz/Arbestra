@@ -14,6 +14,6 @@ Valeurs initiales :
 - bois 2000, carottes 50 ;
 - bois naturel 60/h ;
 - Scierie : 60, 108, 194,4 bois/h aux niveaux 1–3 ;
-- Jardin : 60/600 puis 120/1200 carottes/h/capacité.
+- Jardin : 60 carottes/h et 600 de capacité par cellule active ; 50 bois par cellule construite.
 
 La récolte verrouille le buffer, le matérialise, transfère ses unités entières au stock et le vide dans une transaction. Deux récoltes concurrentes ne peuvent pas transférer les mêmes unités.
