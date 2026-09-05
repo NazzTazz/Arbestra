@@ -111,6 +111,7 @@ export async function materializeVillageResource(
   resourceCode: string,
   through: Date,
 ): Promise<number> {
+  // Callers that mutate village economy hold the village row before this flow.
   const flow = await transaction.selectFrom('villageResourceFlows')
     .select(['remainder', 'productionUpdatedAt'])
     .where('worldId', '=', worldId)
@@ -214,6 +215,7 @@ export async function materializeBuildingBuffer(
   resourceCode: string,
   through: Date,
 ): Promise<ProjectedBuffer> {
+  // Callers that mutate village economy hold the village row before this buffer.
   await transaction.selectFrom('buildingResourceBuffers').select('buildingId')
     .where('worldId', '=', worldId).where('buildingId', '=', buildingId).where('resourceCode', '=', resourceCode)
     .forUpdate().executeTakeFirstOrThrow();

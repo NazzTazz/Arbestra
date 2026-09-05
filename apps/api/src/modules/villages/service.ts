@@ -17,8 +17,6 @@ import { TERRAIN } from '../worlds/generation.js';
 import {
   COMPLETE_CONSTRUCTION_TASK,
   COMPLETE_EXPANSION_TASK,
-  settleDueConstructionsForVillage,
-  settleDueExpansionsForVillage,
 } from './complete-construction.js';
 import {
   materializeBuildingBuffer,
@@ -26,6 +24,7 @@ import {
   projectBuildingBuffer,
   projectVillageResource,
 } from './economy.js';
+import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
 
 const CELL_SIZE = 2.5;
@@ -87,14 +86,6 @@ async function ownedVillage(
     );
   return row;
 }
-async function now(tx: Transaction<Database>) {
-  return (
-    await tx
-      .selectNoFrom(sql<Date>`transaction_timestamp()`.as('now'))
-      .executeTakeFirstOrThrow()
-  ).now;
-}
-
 async function catalog(
   tx: Transaction<Database>,
 ): Promise<BuildingTypeDefinition[]> {
@@ -327,15 +318,16 @@ async function state(
   tx: Transaction<Database>,
   accountId: string,
   worldSlug: string,
+  existingEconomy?: VillageEconomy,
 ): Promise<VillageState> {
   const village = await ownedVillage(tx, accountId, worldSlug);
-  const at = await now(tx);
-  await settleDueConstructionsForVillage(
-    tx,
-    village.worldId,
-    village.villageId,
-  );
-  await settleDueExpansionsForVillage(tx, village.worldId, village.villageId);
+  const economy = existingEconomy ?? await beginVillageEconomy(tx, village.worldId, village.villageId);
+  if (economy.worldId !== village.worldId || economy.villageId !== village.villageId)
+    throw new Error('Village economy context does not match the requested village');
+  // This second pass uses the same bound and only matters for a zero-duration
+  // transition created by the command before its snapshot is assembled.
+  await reconcileVillageEconomy(tx, economy);
+  const at = economy.through;
   const [
     ground,
     resourcesRows,
@@ -624,7 +616,7 @@ async function debit(
   costs: Array<{ resourceCode: string; amount: string | number }>,
   at: Date,
 ) {
-  for (const cost of costs) {
+  for (const cost of [...costs].sort((left, right) => left.resourceCode.localeCompare(right.resourceCode))) {
     const amount = number(cost.amount);
     if (
       (await materializeVillageResource(
@@ -723,7 +715,7 @@ async function reserveSelection(
   tx: Transaction<Database>, worldId: string, buildingId: string,
   anchor: SpatialCell, cells: SpatialCell[], pendingExpansionId: string | null = null, initial = true,
 ) {
-  for (const cell of cells) {
+  for (const cell of [...cells].sort((left, right) => left.cellX - right.cellX || left.cellY - right.cellY)) {
     const row = await tx.insertInto('worldCellOccupancies').values({
       worldId, cellX: cell.cellX, cellY: cell.cellY, buildingId, featureId: null,
       pendingExpansionId,
@@ -757,12 +749,8 @@ export async function constructBuilding(
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const x = normalizeCell(cellX, village.widthCells);
     const y = normalizeCell(cellY, village.heightCells);
-    const at = await now(tx);
-    await settleDueConstructionsForVillage(
-      tx,
-      village.worldId,
-      village.villageId,
-    );
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const at = economy.through;
     const item = await definition(tx, buildingType, 1);
     if (!item.buildable)
       throw new HttpError(
@@ -838,7 +826,7 @@ export async function constructBuilding(
         completedAt: null,
       })
       .execute();
-    return state(tx, accountId, worldSlug);
+    return state(tx, accountId, worldSlug, economy);
   });
 }
 /** Construct a spatial building in one atomic selection. Non-spatial buildings
@@ -850,9 +838,8 @@ export async function constructBuildingArea(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const at = await now(tx);
-    await settleDueConstructionsForVillage(tx, village.worldId, village.villageId);
-    await settleDueExpansionsForVillage(tx, village.worldId, village.villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const at = economy.through;
     const item = await definition(tx, buildingType, 1);
     if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
     const selection = normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells);
@@ -881,7 +868,7 @@ export async function constructBuildingArea(
       worldId: village.worldId, taskType: COMPLETE_CONSTRUCTION_TASK, subjectId: building.id,
       payload: {}, dueAt: completesAt, availableAt: completesAt, lastError: null, completedAt: null,
     }).execute();
-    return state(tx, accountId, worldSlug);
+    return state(tx, accountId, worldSlug, economy);
   });
 }
 
@@ -892,9 +879,8 @@ export async function expandGarden(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const at = await now(tx);
-    await settleDueConstructionsForVillage(tx, village.worldId, village.villageId);
-    await settleDueExpansionsForVillage(tx, village.worldId, village.villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const at = economy.through;
     const building = await tx.selectFrom('buildings').selectAll().where('id', '=', buildingId)
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).forUpdate().executeTakeFirst();
     if (!building || building.buildingType !== 'garden') throw new HttpError(404, 'GARDEN_NOT_FOUND', 'Jardin introuvable.');
@@ -925,7 +911,7 @@ export async function expandGarden(
       worldId: village.worldId, taskType: COMPLETE_EXPANSION_TASK, subjectId: expansion.id,
       payload: {}, dueAt: completesAt, availableAt: completesAt, lastError: null, completedAt: null,
     }).execute();
-    return state(tx, accountId, worldSlug);
+    return state(tx, accountId, worldSlug, economy);
   });
 }
 
@@ -948,12 +934,8 @@ export async function upgradeBuilding(
     const village = await ownedVillage(tx, accountId, worldSlug);
     if (village.villageId !== villageId)
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const at = await now(tx);
-    await settleDueConstructionsForVillage(
-      tx,
-      village.worldId,
-      village.villageId,
-    );
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const at = economy.through;
     const building = await tx
       .selectFrom('buildings')
       .innerJoin('worldCellOccupancies', (join) =>
@@ -972,7 +954,7 @@ export async function upgradeBuilding(
       .where('buildings.id', '=', buildingId)
       .where('buildings.worldId', '=', village.worldId)
       .where('buildings.villageId', '=', village.villageId)
-      .forUpdate()
+      .forUpdate('buildings')
       .executeTakeFirst();
     if (!building)
       throw new HttpError(404, 'BUILDING_NOT_FOUND', 'Bâtiment introuvable.');
@@ -1053,7 +1035,7 @@ export async function upgradeBuilding(
         completedAt: null,
       })
       .execute();
-    return state(tx, accountId, worldSlug);
+    return state(tx, accountId, worldSlug, economy);
   });
 }
 export async function harvestGarden(
@@ -1067,14 +1049,8 @@ export async function harvestGarden(
     const village = await ownedVillage(tx, accountId, worldSlug);
     if (village.villageId !== villageId)
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const at = await now(tx);
-    await settleDueConstructionsForVillage(
-      tx,
-      village.worldId,
-      village.villageId,
-    );
-    // Settle rate/capacity changes before moving the buffer's clock to now.
-    await settleDueExpansionsForVillage(tx, village.worldId, village.villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const at = economy.through;
     const building = await tx
       .selectFrom('buildings')
       .innerJoin(
@@ -1091,7 +1067,7 @@ export async function harvestGarden(
       .where('buildings.id', '=', buildingId)
       .where('buildings.worldId', '=', village.worldId)
       .where('buildings.villageId', '=', village.villageId)
-      .forUpdate()
+      .forUpdate('buildings')
       .executeTakeFirst();
     if (!building || building.productionMode !== 'buffered')
       throw new HttpError(
@@ -1110,6 +1086,7 @@ export async function harvestGarden(
       .select('resourceCode')
       .where('worldId', '=', village.worldId)
       .where('buildingId', '=', building.id)
+      .orderBy('resourceCode')
       .execute();
     for (const buffer of buffers) {
       const amount = await materializeBuildingBuffer(
@@ -1134,6 +1111,6 @@ export async function harvestGarden(
         .where('resourceCode', '=', buffer.resourceCode)
         .execute();
     }
-    return state(tx, accountId, worldSlug);
+    return state(tx, accountId, worldSlug, economy);
   });
 }
