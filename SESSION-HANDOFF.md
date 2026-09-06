@@ -1,3 +1,29 @@
+# Coffre et journal de l'Oracle — 7 septembre 2026
+
+Revue et corrections demandées par Tristan : [verdict et levée des réserves](docs/REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md). Les trois preuves sont renforcées ; deux mutations temporaires ont démontré la sensibilité des tests. Validation finale : **83 tests**, **4 parcours Playwright desktop/mobile**, lint, typecheck et build verts. Le parcours ancien accomplissement/clavier est validé. Les réserves techniques sont levées ; l'indice reste à arbitrer. Commit/push autorisés par Tristan pour ce lot et ses documents de référence ; `hud.css` reste hors livraison.
+
+Sol a implémenté la [spec coffre/journal](docs/SPEC-COFFRE-JOURNAL-ORACLE.md) sur la base `master`, `1da6df0` : accomplissement PostgreSQL `town-hall-supplies`, crédit atomique et idempotent des 2 000 carottes, migration conservatrice 014, célébration Oracle et grimoire persistant dans le HUD. Voir le [handoff et les preuves](docs/HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md).
+
+Statut : **implémentée / à valider pour l'indice**. Les résultats finaux de correction figurent ci-dessus et dans la revue. Sol avait également contrôlé dans le Chrome de Tristan : journal vide, coffre, 2 050 carottes, entrée datée et F5. Migration appliquée uniquement à la base test ; base dev intacte.
+
+Seule limite de tranche : le délai et la règle de l'indice de l'Oracle restent ouverts ; la proposition actuelle est 90 secondes de présence active sans action métier réussie, une fois par session. Première récolte recommandée ensuite. Ce handoff accompagne la livraison Git demandée ; vérifier son commit et le distant avec Git à la reprise. Préserver `apps/world-web/src/hud.css`, brouillon non suivi préexistant.
+
+## Consolidation produit — état au 6 septembre 2026
+
+Travail courant : **consolidation documentaire terminée**, sans implémentation. Lire la [direction produit](docs/DIRECTION-PRODUIT.md) : parcours standard inscription → monde → spawn → quêtes ; TRY dans un village abandonné partiellement construit, puis inscription pour le garder ou commencer un village neuf ; coffre/Jardin, quêtes parallèles bois-pierre, population et satisfaction, Oracle, karma. Elle distingue décisions actées, pistes et arbitrages ouverts ; elle ne rend pas ces systèmes livrés. Le [lore TRY](docs-lore/TRY-SAMSARA.md), préexistant et non suivi à cette reprise, porte désormais cette évolution au-dessus de son texte initial conservé comme historique. Les modalités de conservation du village restent ouvertes.
+
+Base relue : `master`, `1da6df0` (population, pierre, interactions, Habitation niveau 2). Réserves applicatives : contrôle visuel des dernières corrections de revue, Playwright historique à adapter ; voir la [revue de clôture](docs/REVIEW-ASTRA-2026-09-06-CLOTURE.md). Aucun test applicatif relancé pour cette consolidation.
+
+Précision TRY actée : garder le village conserve toute la progression, constructions et ressources incluses. L'essai sans compte est plafonné par des niveaux de bâtiments nécessitant l'inscription/incarnation pour poursuivre (Scierie 6 comme exemple, seuils à calibrer), pas par le temps passé. Les modalités techniques de conservation et d'attribution restent à cadrer.
+
+À cette date, la prochaine tranche prévue pour **Sol** était le [coffre et journal de l'Oracle](docs/SPEC-COFFRE-JOURNAL-ORACLE.md). Elle est désormais implémentée ; l'état courant et ses preuves figurent en tête de ce fichier. Le déclenchement de l'indice reste proposé à 90 secondes et non acté. Première récolte et architecture TRY sont des tranches suivantes à ordonner. Ne pas engager population/humeur/combat au seul motif qu'ils figurent dans la direction produit. Les réveils lisibles restent un cadrage distinct.
+
+Git au 6 septembre : modifications documentaires seulement ; aucun commit/push pour cette tâche. L'état Git courant est décrit en tête de ce fichier. `apps/world-web/src/hud.css` reste intact. `docs-lore/` était non suivi avant les éditions ; seul le préambule d'évolution a été ajouté à son document TRY. Vérification documentaire : liens locaux des documents édités et diff contrôlés ; les comptes de tests ci-dessous sont historiques.
+
+## Notes antérieures — historique, pas état courant
+
+Les sections suivantes conservent les preuves et le contexte de leurs reprises. Leurs mentions « aucun commit/push », délégations et propositions sont datées ; elles ne remplacent ni le point de reprise ci-dessus ni les décisions produit consolidées.
+
 # Revue de publication — 6 septembre 2026
 
 À la demande de Tristan : revue, clôture technique et publication du lot population/pierre/interactions React/Habitation niveau 2. Voir la [revue Astra et ses réserves](docs/REVIEW-ASTRA-2026-09-06-CLOTURE.md). Le parcours complet a été validé humainement par Tristan avec Sol ; la suite Playwright historique reste à adapter. La revue corrige le rafraîchissement du coffre concurrent, la conservation de l'effectif pierre et les intentions d'extraction par cible. Ces dernières corrections restent à recontrôler visuellement par Tristan. Les anciens statuts « aucun commit/push » ci-dessous décrivent les reprises précédentes.

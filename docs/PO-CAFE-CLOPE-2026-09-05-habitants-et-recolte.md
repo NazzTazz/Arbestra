@@ -2,6 +2,8 @@
 
 Version product owner. Compagnon de la [spec pour Terra](./SPEC-TERRA-2026-09-05-habitants-et-recolte.md).
 
+> Ce document décrit la tranche initiale. La [direction produit consolidée](./DIRECTION-PRODUIT.md) porte les évolutions futures : repas automatiques liés à l'humeur, croissance par petits groupes et limite de couchages. Elles ne sont pas encore livrées ; la durée de récolte d'une minute reste un réglage de POC.
+
 ## Ce qu'on construit
 
 Le village accueille quinze habitants. Ils arrivent en forme, avec dix points d'énergie chacun. L'Hôtel de ville offre trente places pour dormir : on a donc de la marge. Une maison terminée ajoute cinq places, mais personne ne surgit spontanément du plâtre frais. L'arrivée de nouveaux habitants attendra une autre tranche.

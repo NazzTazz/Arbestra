@@ -114,6 +114,12 @@ export const VillageCellSchema = Type.Object({
 });
 export type VillageCell = Static<typeof VillageCellSchema>;
 
+export const VillageAccomplishmentSchema = Type.Object({
+  code: Type.String({ pattern: '^[a-z][a-z0-9-]*$' }),
+  completedAt: Type.String({ format: 'date-time' }),
+});
+export type VillageAccomplishment = Static<typeof VillageAccomplishmentSchema>;
+
 export const VillageStateSchema = Type.Object({
   serverTime: Type.String({ format: 'date-time' }),
   world: Type.Object({
@@ -132,6 +138,7 @@ export const VillageStateSchema = Type.Object({
       available: Type.Integer({ minimum: 0 }), working: Type.Integer({ minimum: 0 }), resting: Type.Integer({ minimum: 0 }),
       energyCounts: Type.Array(Type.Integer({ minimum: 0 })),
     }),
+    accomplishments: Type.Array(VillageAccomplishmentSchema),
     extractions: Type.Array(ExtractionSchema),
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),

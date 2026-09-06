@@ -281,6 +281,13 @@ export interface PopulationCommandReceiptsTable {
   createdAt: Generated<Timestamp>;
 }
 
+export interface VillageAccomplishmentsTable {
+  worldId: string;
+  villageId: string;
+  code: string;
+  completedAt: Timestamp;
+}
+
 export interface SessionsTable {
   id: Generated<string>;
   tokenHash: string;
@@ -316,6 +323,7 @@ export interface Database {
   buildingHiddenSupplies: BuildingHiddenSuppliesTable;
   gardenHarvests: GardenHarvestsTable;
   populationCommandReceipts: PopulationCommandReceiptsTable;
+  villageAccomplishments: VillageAccomplishmentsTable;
   stoneDeposits: StoneDepositsTable;
   depositExtractions: DepositExtractionsTable;
   sessions: SessionsTable;

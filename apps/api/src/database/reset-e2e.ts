@@ -31,6 +31,7 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await transaction.deleteFrom('sessions').execute();
       await transaction.deleteFrom('scheduledTasks').execute();
       await transaction.deleteFrom('populationCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('villageAccomplishments').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('populationCohorts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('gardenHarvests').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('depositExtractions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();

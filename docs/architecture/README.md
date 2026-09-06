@@ -10,6 +10,10 @@ Arbestra est un monolithe modulaire TypeScript :
 
 HTTP JSON est le défaut. SSE/WebSocket, Redis et queues externes restent absents jusqu’à un besoin démontré.
 
+## Direction produit, distincte de l'architecture livrée
+
+La [direction produit consolidée](../DIRECTION-PRODUIT.md) fixe le parcours initial et les intentions population/Oracle/karma, avec leurs points ouverts. Le [lore TRY](../../docs-lore/TRY-SAMSARA.md) pose l'expérience sans inscription et l'isolation du monde persistant. Ces documents ne prescrivent pas une implémentation générale ; une spec bornée reste nécessaire pour chaque tranche.
+
 Conventions et tranches implémentées :
 
 - [Monde et grille](./world-grid.md)
@@ -21,6 +25,8 @@ Conventions et tranches implémentées :
 - [Temps serveur](./server-time.md)
 
 ## Population et cadrages associés
+
+Le premier accomplissement persistant et le grimoire de l'Oracle sont implémentés par la migration 014 ; voir la section correspondante dans [Économie](./economy.md) et le [handoff](../HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). L'indice en cas de blocage reste à arbitrer.
 
 - [Habitants par cohortes et récolte différée](../SPEC-TERRA-2026-09-05-habitants-et-recolte.md) — implémentés avec repas, repos et intégration React ; voir la reprise courante pour les preuves et réserves.
 - [Version product owner](../PO-CAFE-CLOPE-2026-09-05-habitants-et-recolte.md) — même périmètre, lecture joueur.

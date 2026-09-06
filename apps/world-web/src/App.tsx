@@ -7,6 +7,7 @@ import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPan
 import { Hud } from './ui/Hud';
 import { ExtractionIntents } from './ui/extraction-intents';
 import { type GameNotification } from './ui/NotificationStack';
+import { OracleJournal } from './ui/OracleJournal';
 import { BuildingPanel, DepositPanel, PopulationPanel } from './ui/PlayerPanels';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 
@@ -33,6 +34,7 @@ export function App() {
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
   const [showPopulation, setShowPopulation] = useState(false);
+  const [showJournal, setShowJournal] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ScreenAnchor | null>(null);
   const [construction, setConstruction] = useState<ConstructionChoice | null>(null);
   const [selection, setSelection] = useState<CellRange | null>(null);
@@ -60,6 +62,9 @@ export function App() {
     const previous = stateRef.current;
     if (previous && snapshot.state.serverTime < previous.serverTime) return;
     if (previous) {
+      const priorAccomplishments = new Set(previous.village.accomplishments.map((item) => item.code));
+      if (snapshot.state.village.accomplishments.some((item) => item.code === 'town-hall-supplies' && !priorAccomplishments.has(item.code)))
+        pushNotification("Oracle — Un coffre, 2 000 carottes, et personne n'avait regardé. Admirable.");
       const prior = new Map(previous.cells.flatMap((cell) => cell.building ? [[cell.building.id, cell.building] as const] : []));
       for (const cell of snapshot.state.cells) {
         if (cell.building?.status === 'completed' && prior.get(cell.building.id)?.status === 'under-construction') pushNotification('Construction terminée');
@@ -123,7 +128,7 @@ export function App() {
   const existingGardenCells = construction?.buildingId ? state?.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active').length ?? 0 : 0;
   const gardenWorkerNeed = spatial && area ? existingGardenCells + area.count : null;
 
-  function closePanels() { depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setMenuAnchor(null); }
+  function closePanels() { depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setMenuAnchor(null); }
   function clearPreview() { touchOrigin.current = null; setSelection(null); setError(null); }
   function exitConstruction() { setConstruction(null); clearPreview(); }
   async function runAction(action: () => Promise<TimedVillageState>, success?: string, exit = false): Promise<boolean> {
@@ -149,7 +154,7 @@ export function App() {
     try {
       const result = await discoverOrRefreshSupplies(worldSlug, currentState.village.id, buildingId);
       applySnapshot(result.snapshot);
-      pushNotification(result.alreadyDiscovered ? 'Les réserves avaient déjà été fouillées' : '2 000 carottes découvertes');
+      if (result.alreadyDiscovered) pushNotification('Les réserves avaient déjà été fouillées');
     }
     catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Fouille impossible.';
@@ -182,8 +187,9 @@ export function App() {
   if (!state) return <main className="center-message" role="alert">{error ?? 'Village indisponible.'}</main>;
   return <main className="game-shell">
     <Suspense fallback={<div className="center-message">L'oracle se rhabille…</div>}><VillageScene state={state} highlightedSiteIds={highlightedSiteIds} constructionMode={construction !== null} selectingArea={Boolean(construction?.type) && !pendingAction} preview={area} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture} onSiteSelected={(id, anchor) => { if (!construction) { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); } }} onFeatureSelected={(id, anchor) => { if (!construction) { closePanels(); setWorkerCount(extractionIntents.current.get(id)?.workerCount ?? 1); setSelectedFeatureId(id); setMenuAnchor(anchor); } }} onCameraMoved={closePanels} /></Suspense>
-    <Hud state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => { closePanels(); setShowPopulation(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => { closePanels(); setShowPopulation(true); setMenuAnchor(populationAnchor()); }} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
     {menuAnchor && showPopulation ? <WorldContextMenu anchor={menuAnchor}><PopulationPanel population={state.village.population} pending={pendingAction} count={populationCount} onCount={(count) => setPopulationCount(Math.max(1, Math.min(state.village.population.available || 1, count || 1)))} onFeed={() => runPopulation('feed')} onRest={() => runPopulation('rest')} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
+    {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
     {menuAnchor && selectedBuilding ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => selectedBuilding.type === 'garden' ? (clearPreview(), setConstruction({ type: 'garden', buildingId: selectedBuilding.id }), setMenuAnchor(null)) : void runAction(() => upgradeBuilding(worldSlug, state.village.id, selectedBuilding.id), 'Amélioration lancée')} onHarvest={() => { const id = harvestIntents.current.get(selectedBuilding.id) ?? crypto.randomUUID(); harvestIntents.current.set(selectedBuilding.id, id); void runAction(() => harvestGarden(worldSlug, state.village.id, selectedBuilding.id, id), 'Récolte lancée : retour dans 1 minute').then((ok) => { if (ok) harvestIntents.current.delete(selectedBuilding.id); }); }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && selectedFeatureId ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} workerCount={workerCount} onWorkerCount={(count) => { if (!extractionIntents.current.get(selectedFeatureId)) setWorkerCount(count); }} onStart={startExtraction} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     <ConstructionPanel construction={construction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} population={state.village.population} gardenWorkerNeed={gardenWorkerNeed} onOpen={() => { closePanels(); clearPreview(); setConstruction({ type: null }); }} onChoose={(type) => { clearPreview(); setConstruction({ type }); }} onConfirm={confirmConstruction} onRestart={clearPreview} onCancel={exitConstruction} />

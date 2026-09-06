@@ -2,6 +2,8 @@
 
 Date : 5 septembre 2026. Auteur : Astra/Codex. Base relue : commit `4dfd494`, avec migration 009. Aucun code applicatif modifié pour cette rédaction.
 
+> Portée historique : cette spec décrit la tranche initiale. La [direction produit du 6 septembre](./DIRECTION-PRODUIT.md) définit une évolution future (satisfaction, repas automatiques, croissance par groupes et couchages comme plafond). Ces mécanismes ne sont pas livrés ; la minute de récolte ci-dessous est une durée de POC, pas une cible de rythme définitive. Ne pas appliquer silencieusement ces évolutions à cette tranche.
+
 ## 0. Statut et contrat d'exécution
 
 Cette spec couvre le socle de population, son énergie, les logements, la réserve cachée de l'Hôtel de ville, puis une récolte de Jardin d'une minute avec personnages visibles. Elle ne couvre pas l'exploitation des gisements.

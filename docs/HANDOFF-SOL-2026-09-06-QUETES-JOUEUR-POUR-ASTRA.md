@@ -2,7 +2,7 @@
 
 Date : 6 septembre 2026. Destinataire : Astra, pour cadrage architectural. Base Git observée : `master`, HEAD `4dfd494`, worktree non commité préexistant.
 
-**Statut : proposition en cadrage.** Tristan propose d'implémenter des « quêtes joueur » et d'en faire du coffre de l'Hôtel de ville la première quête. La quête, plutôt que l'action de coffre isolée, créditerait les carottes. Cette conversation n'autorise aucune implémentation, migration, commit ou push.
+**Statut : proposition technique historique, à cadrer.** Les décisions produit ultérieures sont consolidées dans la [direction produit](./DIRECTION-PRODUIT.md). Le coffre est désormais acté comme première quête implicite, découverte librement avec indice Oracle en cas de blocage. Les recommandations de persistance ci-dessous ne sont pas une implémentation approuvée ou livrée. La consolidation courante est documentaire uniquement.
 
 ## Intention joueur
 
@@ -22,18 +22,15 @@ Première tranche minimale proposée :
 - deux états suffisants pour ce cas : `available` et `completed` ;
 - l'action contextuelle de l'Hôtel de ville accomplit cette quête ;
 - la complétion et le crédit de 2 000 carottes ont lieu dans la même transaction économique du village ;
-- le joueur voit la quête à faire, sa récompense, puis son état terminé ;
+- le joueur découvre librement le coffre, puis voit l'accomplissement et sa récompense ; l'Oracle aide seulement en cas de blocage ;
 - retry et concurrence retournent le même résultat métier sans second crédit.
 
-Représentation UI indicative :
+Représentation UI indicative, corrigée après l'arbitrage de découverte implicite :
 
 ```text
-À faire
-Fouiller les réserves de l'Hôtel de ville
-Récompense : 2 000 carottes
-
 Terminée
 Les anciennes réserves
+2 000 carottes découvertes
 ```
 
 ## Existant à confronter
@@ -71,7 +68,7 @@ Une seconde quête réelle doit fournir le besoin qui justifiera l'abstraction s
 ## Décisions à fermer par Tristan avec recommandation d'Astra
 
 1. **Nature durable des quêtes.** Recommandation Sol : onboarding scénarisé et jalons, pas tâches répétitives.
-2. **Visibilité après complétion.** Proposition : conserver la quête terminée dans un petit journal plutôt que la faire disparaître immédiatement.
+2. **Visibilité après complétion — désormais actée.** Tristan valide un journal persistant, éventuellement présenté en trophées. Voir la [spec courante pour Sol](./SPEC-COFFRE-JOURNAL-ORACLE.md), qui remplace cette proposition pour la première tranche.
 3. **Déclenchement des futures quêtes.** Ne rien généraliser avant la seconde quête concrète ; décider alors si elles deviennent disponibles explicitement ou par prérequis.
 4. **Modèle du coffre.** Choisir si `building_hidden_supplies` disparaît après migration ou devient une donnée narrative subordonnée à la quête. Une seule autorité doit créditer les carottes.
 

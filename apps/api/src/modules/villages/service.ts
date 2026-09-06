@@ -338,6 +338,7 @@ async function state(
     occupancyRows,
     protectedRows,
     hiddenSupplyRows,
+    accomplishmentRows,
   ] = await Promise.all([
     snapshot(tx, village),
     tx
@@ -389,6 +390,9 @@ async function state(
     clearings(tx, village.worldId),
     tx.selectFrom('buildingHiddenSupplies').select(['buildingId', 'claimedAt'])
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
+    tx.selectFrom('villageAccomplishments').select(['code', 'completedAt'])
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
+      .orderBy('completedAt').orderBy('code').execute(),
   ]);
   const resources = await Promise.all(
     resourcesRows.map(async (row) => {
@@ -511,6 +515,7 @@ async function state(
       woodProductionPerHour: wood.productionPerHour,
       woodProductionUpdatedAt: wood.productionUpdatedAt,
       population,
+      accomplishments: accomplishmentRows.map((item) => ({ code: item.code, completedAt: item.completedAt.toISOString() })),
       extractions: await Promise.all(extractionRows.map((row) => readExtraction(tx, village.worldId, village.villageId, row.id))),
     },
     buildingTypes: definitions,
@@ -1141,24 +1146,40 @@ export async function getStoneDepositDetails(
   });
 }
 
+export async function discoverBuildingSuppliesInTransaction(
+  tx: Transaction<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string,
+): Promise<VillageState> {
+  const village = await ownedVillage(tx, accountId, worldSlug);
+  if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+  const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+  const supply = await tx.selectFrom('buildingHiddenSupplies').selectAll().where('worldId', '=', village.worldId)
+    .where('villageId', '=', village.villageId).where('buildingId', '=', buildingId).forUpdate().executeTakeFirst();
+  if (!supply) throw new HttpError(404, 'SUPPLIES_NOT_FOUND', 'Réserves introuvables.');
+  const accomplishment = await tx.selectFrom('villageAccomplishments').select('completedAt')
+    .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
+    .where('code', '=', 'town-hall-supplies').executeTakeFirst();
+  if (accomplishment) {
+    if (!supply.claimedAt) throw new Error('Town-hall supplies accomplishment has no matching claim');
+    return state(tx, accountId, worldSlug, economy);
+  }
+  if (supply.claimedAt) throw new Error('Claimed town-hall supplies have no matching accomplishment');
+  await tx.insertInto('villageAccomplishments').values({
+    worldId: village.worldId, villageId: village.villageId,
+    code: 'town-hall-supplies', completedAt: economy.through,
+  }).execute();
+  await tx.updateTable('buildingHiddenSupplies').set({ claimedAt: economy.through }).where('worldId', '=', village.worldId)
+    .where('villageId', '=', village.villageId).where('buildingId', '=', buildingId).execute();
+  await tx.updateTable('villageResources').set({ amount: sql`amount + ${supply.amount}::bigint` })
+    .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
+    .where('resourceCode', '=', supply.resourceCode).execute();
+  return state(tx, accountId, worldSlug, economy);
+}
+
 export async function discoverBuildingSupplies(
   db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string,
 ): Promise<VillageState> {
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
-    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    const supply = await tx.selectFrom('buildingHiddenSupplies').selectAll().where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId).where('buildingId', '=', buildingId).forUpdate().executeTakeFirst();
-    if (!supply) throw new HttpError(404, 'SUPPLIES_NOT_FOUND', 'Réserves introuvables.');
-    if (supply.claimedAt) throw new HttpError(409, 'SUPPLIES_ALREADY_DISCOVERED', 'Les réserves ont déjà été fouillées.');
-    await tx.updateTable('buildingHiddenSupplies').set({ claimedAt: economy.through }).where('worldId', '=', village.worldId)
-      .where('buildingId', '=', buildingId).execute();
-    await tx.updateTable('villageResources').set({ amount: sql`amount + ${supply.amount}::bigint` })
-      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
-      .where('resourceCode', '=', supply.resourceCode).execute();
-    return state(tx, accountId, worldSlug, economy);
-  });
+  return db.transaction().execute((tx) =>
+    discoverBuildingSuppliesInTransaction(tx, accountId, worldSlug, villageId, buildingId));
 }
 
 async function populationCommand(

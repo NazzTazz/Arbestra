@@ -17,6 +17,7 @@ import * as populationAndGardenHarvestsMigration from './migrations/010_populati
 import * as populationCommandReceiptsMigration from './migrations/011_population_command_receipts.js';
 import * as stoneDepositExtractionsMigration from './migrations/012_stone_deposit_extractions.js';
 import * as dwellingLevelTwoMigration from './migrations/013_dwelling_level_two.js';
+import * as villageAccomplishmentsMigration from './migrations/014_village_accomplishments.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -34,6 +35,7 @@ const migrationProvider: MigrationProvider = {
       '011_population_command_receipts': populationCommandReceiptsMigration,
       '012_stone_deposit_extractions': stoneDepositExtractionsMigration,
       '013_dwelling_level_two': dwellingLevelTwoMigration,
+      '014_village_accomplishments': villageAccomplishmentsMigration,
     };
   },
 };

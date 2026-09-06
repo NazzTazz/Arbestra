@@ -41,3 +41,5 @@ corepack pnpm build
 Commencer par [AGENTS.md](./AGENTS.md) et l'état courant de [SESSION-HANDOFF.md](./SESSION-HANDOFF.md). Le [workflow de tranche](./docs/AGENT-WORKFLOW.md) précise les statuts, la validation et le format de passation.
 
 Les conventions durables sont dans [docs/architecture](./docs/architecture/README.md). Les specs prospectives y sont signalées séparément du code livré.
+
+La [direction produit](./docs/DIRECTION-PRODUIT.md) rassemble les décisions actuelles et les questions ouvertes sur la découverte, la population et la protection des joueurs. Le [lore TRY — Samsara](./docs-lore/TRY-SAMSARA.md) décrit l'expérience d'essai ; ces intentions ne sont pas une liste de fonctionnalités livrées.

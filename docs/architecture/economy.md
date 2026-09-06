@@ -22,6 +22,10 @@ Valeurs initiales :
 
 La récolte du Jardin verrouille le buffer, le matérialise et réserve ses unités entières pour un trajet d'une minute. Le stock village est crédité à l'échéance, dans la même transition qui termine la récolte et libère les cohortes affectées. La production survenue pendant le trajet reste dans le buffer. Deux récoltes concurrentes ne peuvent ni réserver ni transférer les mêmes unités.
 
+## Accomplissement du coffre (014)
+
+`village_accomplishments` conserve le journal autoritatif du village, unique par `(world_id, village_id, code)`. Pour `town-hall-supplies`, l'insertion de l'accomplissement, la réclamation de `building_hidden_supplies` et le crédit de 2 000 carottes partagent la transaction et la borne économique du village. Le verrou village sérialise concurrence et retry ; un accomplissement existant retourne l'état courant sans second crédit. La migration reprend les coffres déjà réclamés à leur date sans toucher aux stocks. Les notifications et le texte de l'Oracle restent une présentation sans autorité économique.
+
 
 ## Exploitation de pierre (012)
 

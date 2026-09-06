@@ -52,9 +52,14 @@ button { font: inherit; }
 .resource small { align-self: start; color: #a8d675; letter-spacing: .02em; text-transform: none; white-space: nowrap; }
 .resource:not(.resource--wood) { grid-template-rows: 1fr; }
 .resource:not(.resource--wood) strong { align-self: center; }
-.population-button { display: grid; grid-template-columns: auto auto; gap: 0 .35rem; align-items: center; min-height: 34px; padding: .15rem .5rem; color: #f4eedf; background: rgb(255 255 255 / 6%); border: 1px solid rgb(255 255 255 / 10%); border-radius: .38rem; cursor: pointer; }
+.population-button, .journal-button { display: grid; grid-template-columns: auto auto; gap: 0 .35rem; align-items: center; min-height: 34px; padding: .15rem .5rem; color: #f4eedf; background: rgb(255 255 255 / 6%); border: 1px solid rgb(255 255 255 / 10%); border-radius: .38rem; cursor: pointer; }
 .population-button strong { font-size: .9rem; }
-.population-button small { grid-column: 2; color: #bcd19f; font-size: .65rem; }
+.population-button small, .journal-button small { grid-column: 2; color: #bcd19f; font-size: .65rem; }
+.journal-button strong { font-size: .78rem; }
+.oracle-journal ol { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }
+.oracle-journal li { display: grid; gap: .2rem; padding: .65rem; background: rgb(255 255 255 / 5%); border-left: 2px solid #d8b950; border-radius: .25rem; }
+.oracle-journal li p { color: #e5dfcf; }
+.oracle-journal time { color: #aeb9a4; font-size: .68rem; }
 
 .notification-stack { position: absolute; z-index: 1; top: 0; right: max(.5rem, env(safe-area-inset-right)); width: min(18rem, calc(100vw - 1rem)); height: 40px; pointer-events: none; }
 .game-notification {
@@ -151,6 +156,8 @@ button { font: inherit; }
   .resource strong { font-size: .9rem; }
   .population-button small { display: none; }
   .population-button { grid-template-columns: auto auto; padding-inline: .35rem; }
+  .journal-button { padding-inline: .35rem; }
+  .journal-button strong { display: none; }
   .notification-stack { width: min(11.25rem, 44vw); right: .38rem; }
   .game-notification { padding-inline: .5rem; font-size: .64rem; }
   .construction-toolbar { width: calc(100vw - 1rem); justify-content: center; flex-wrap: wrap; }
