@@ -1,5 +1,7 @@
 # Handoff Sol — coffre et journal de l'Oracle
 
+État ultérieur : l'indice a été validé par Tristan, implémenté et testé ; la tranche est clôturée. Voir le [handoff final](./HANDOFF-2026-09-07-INDICE-ORACLE.md). Les statuts ci-dessous décrivent la livraison initiale du socle.
+
 Date / agent : 7 septembre 2026, Sol
 
 Spec : [coffre et journal de l'Oracle](./SPEC-COFFRE-JOURNAL-ORACLE.md), **implémentée / à valider pour l'indice**

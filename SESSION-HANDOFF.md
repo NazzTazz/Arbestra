@@ -1,4 +1,8 @@
-# Coffre et journal de l'Oracle — 7 septembre 2026
+# Coffre, journal et indice de l'Oracle — clôture du 7 septembre 2026
+
+Tristan a validé l'indice : 90 secondes visibles sans action réussie ni découverte du coffre, une seule fois par session, sans panneau automatique. Implémentation et validations terminées : [handoff de clôture](docs/HANDOFF-2026-09-07-INDICE-ORACLE.md), [spec](docs/SPEC-COFFRE-JOURNAL-ORACLE.md). **Tranche clôturée.** 9 tests ciblés verts dont 5 nouveaux, 4 parcours navigateur de l'indice desktop/mobile verts, lint/typecheck et build client verts. Base dev inchangée. Ce handoff accompagne la publication autorisée de l'indice ; le socle précédent est poussé dans `38b801a`. Seul `hud.css`, brouillon préexistant, reste hors livraison. Première récolte recommandée ensuite.
+
+## Livraison du socle — avant l'arbitrage de l'indice
 
 Revue et corrections demandées par Tristan : [verdict et levée des réserves](docs/REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md). Les trois preuves sont renforcées ; deux mutations temporaires ont démontré la sensibilité des tests. Validation finale : **83 tests**, **4 parcours Playwright desktop/mobile**, lint, typecheck et build verts. Le parcours ancien accomplissement/clavier est validé. Les réserves techniques sont levées ; l'indice reste à arbitrer. Commit/push autorisés par Tristan pour ce lot et ses documents de référence ; `hud.css` reste hors livraison.
 

@@ -1,5 +1,7 @@
 # Revue — coffre et journal de l'Oracle
 
+Suite à cette revue : l'arbitrage de l'indice est validé et la tranche clôturée, voir le [handoff final](./HANDOFF-2026-09-07-INDICE-ORACLE.md). Les réserves produit ci-dessous décrivent l'état au moment de la revue.
+
 7 septembre 2026. Revue demandée par Tristan, sur le diff non commité de `master`, base `1da6df0`. Référence : [spec](SPEC-COFFRE-JOURNAL-ORACLE.md). Statut : **implémentée / à valider**, réserves de preuve ci-dessous et indice toujours à arbitrer.
 
 ## Levée des réserves — après demande « fix, test, commit push »

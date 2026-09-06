@@ -26,7 +26,7 @@ Conventions et tranches implémentées :
 
 ## Population et cadrages associés
 
-Le premier accomplissement persistant et le grimoire de l'Oracle sont implémentés par la migration 014 ; voir la section correspondante dans [Économie](./economy.md) et le [handoff](../HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). L'indice en cas de blocage reste à arbitrer.
+Le premier accomplissement persistant et le grimoire de l'Oracle sont implémentés par la migration 014 ; voir la section correspondante dans [Économie](./economy.md) et le [handoff](../HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). L'indice validé attend 90 secondes visibles sans action réussie ni découverte du coffre ; son suivi reste une présentation de session côté React, sans autorité économique. Voir la [spec](../SPEC-COFFRE-JOURNAL-ORACLE.md).
 
 - [Habitants par cohortes et récolte différée](../SPEC-TERRA-2026-09-05-habitants-et-recolte.md) — implémentés avec repas, repos et intégration React ; voir la reprise courante pour les preuves et réserves.
 - [Version product owner](../PO-CAFE-CLOPE-2026-09-05-habitants-et-recolte.md) — même périmètre, lecture joueur.

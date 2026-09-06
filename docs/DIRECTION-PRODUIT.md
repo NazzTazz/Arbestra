@@ -61,7 +61,7 @@ Seuils, délais, récupération, critères de satisfaction, fréquence et taille
 
 ## Oracle
 
-**Accomplissements persistants actés** : le joueur peut retrouver ses quêtes accomplies dans un journal, éventuellement présenté sous forme de trophées. PostgreSQL conserve la vérité métier ; l'Oracle en est la voix. Ce choix ne demande pas un moteur générique de trophées. Première tranche implémentée par Sol : [coffre et journal de l'Oracle](./SPEC-COFFRE-JOURNAL-ORACLE.md). Le déclenchement de l'indice reste à arbitrer ; voir le handoff courant pour les validations.
+**Accomplissements persistants actés** : le joueur peut retrouver ses quêtes accomplies dans un journal, éventuellement présenté sous forme de trophées. PostgreSQL conserve la vérité métier ; l'Oracle en est la voix. Ce choix ne demande pas un moteur générique de trophées. Première tranche implémentée par Sol : [coffre et journal de l'Oracle](./SPEC-COFFRE-JOURNAL-ORACLE.md). Le déclenchement est validé : 90 secondes visibles sans action réussie ni découverte du coffre, une fois par session ; voir la spec et le handoff courant pour les validations.
 
 L'Oracle est la sortie privilégiée des astuces et du tutoriel, avec humour et contexte. Il explique les règles par leurs conséquences observables sans exiger des personnages persistants individuels.
 

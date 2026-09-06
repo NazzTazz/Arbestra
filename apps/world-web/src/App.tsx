@@ -8,6 +8,7 @@ import { Hud } from './ui/Hud';
 import { ExtractionIntents } from './ui/extraction-intents';
 import { type GameNotification } from './ui/NotificationStack';
 import { OracleJournal } from './ui/OracleJournal';
+import { useOracleHint } from './ui/useOracleHint';
 import { BuildingPanel, DepositPanel, PopulationPanel } from './ui/PlayerPanels';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 
@@ -57,6 +58,8 @@ export function App() {
     notificationTimers.current.push(window.setTimeout(() => setNotifications((current) => current.filter((item) => item.id !== id)), 3_800));
   }, []);
   useEffect(() => () => notificationTimers.current.forEach(window.clearTimeout), []);
+  const markOracleProgress = useOracleHint(state ? `${state.world.id}:${state.village.id}` : null,
+    state?.cells.some((cell) => cell.building?.hiddenSuppliesAvailable) ?? false, pendingAction, pushNotification);
 
   const applySnapshot = useCallback((snapshot: TimedVillageState) => {
     const previous = stateRef.current;
@@ -134,7 +137,7 @@ export function App() {
   async function runAction(action: () => Promise<TimedVillageState>, success?: string, exit = false): Promise<boolean> {
     if (actionInFlight.current) return false;
     actionInFlight.current = true; setPendingAction(true); setError(null);
-    try { applySnapshot(await action()); if (exit) exitConstruction(); if (success) pushNotification(success); return true; }
+    try { applySnapshot(await action()); markOracleProgress(); if (exit) exitConstruction(); if (success) pushNotification(success); return true; }
     catch (reason) { const message = reason instanceof Error ? reason.message : 'Action impossible.'; setError(message); pushNotification(message, 'warning'); return false; }
     finally { actionInFlight.current = false; setPendingAction(false); }
   }
@@ -154,6 +157,7 @@ export function App() {
     try {
       const result = await discoverOrRefreshSupplies(worldSlug, currentState.village.id, buildingId);
       applySnapshot(result.snapshot);
+      markOracleProgress();
       if (result.alreadyDiscovered) pushNotification('Les réserves avaient déjà été fouillées');
     }
     catch (reason) {
@@ -171,6 +175,7 @@ export function App() {
     try {
       const result = await startStoneExtraction(worldSlug, state.village.id, featureId, intent.workerCount, intent.id);
       applySnapshot({ state: result.villageState, serverOffsetMs: result.serverOffsetMs });
+      markOracleProgress();
       if (request === depositRequest.current) setDepositDetails((current) => current?.deposit.featureId === featureId ? { ...current, deposit: result.deposit } : current);
       extractionIntents.current.complete(featureId);
       pushNotification(`Extraction lancée : ${result.extraction.reservedAmount} pierre`);

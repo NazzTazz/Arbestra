@@ -2,11 +2,11 @@
 
 Date : 6 septembre 2026 ; mise à jour d'implémentation le 7 septembre. Base relue : `master`, `1da6df0`, avec consolidation documentaire non commitée. Implémenteur : **Sol**.
 
-**Statut : implémentée / à valider pour l'indice.** Coffre, crédit unique, accomplissement PostgreSQL, journal, célébration et parcours navigateur sont réalisés ; voir le [handoff et les preuves](./HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). La règle de déclenchement de l'indice reste ouverte. Aucune migration de développement ni publication. Référence produit : [direction consolidée](./DIRECTION-PRODUIT.md).
+**Statut : clôturée.** Coffre, crédit unique, accomplissement PostgreSQL, journal et célébration sont validés et publiés dans `38b801a` ; voir le [handoff du socle](./HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). L'indice validé est implémenté et testé : [preuves de clôture](./HANDOFF-2026-09-07-INDICE-ORACLE.md). Aucune migration de développement. Référence produit : [direction consolidée](./DIRECTION-PRODUIT.md).
 
 ## Résultat demandé
 
-Validation technique après revue : [réserves levées et preuves finales](./REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md), 83 tests et 4 parcours Playwright verts. Tristan a ensuite autorisé commit/push ; la restriction historique de publication de cette spec est remplacée par cette demande. L'indice reste non arbitré et la base de développement non migrée.
+Validation technique du socle après revue : [réserves levées](./REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md), 83 tests et 4 parcours Playwright verts. Tristan a ensuite autorisé commit/push ; la restriction historique de publication de cette spec est remplacée par cette demande. La base de développement reste non migrée.
 
 Le joueur découvre librement le coffre de l'Hôtel de ville. L'ouverture accomplit la première quête implicite et verse les 2 000 carottes une seule fois. L'Oracle célèbre l'accomplissement ; une trace durable reste consultable dans un journal. Tristan valide le stockage de l'accomplissement dans PostgreSQL : « le maître c'est l'Oracle, et son grimoire c'est Postgres ».
 
@@ -45,13 +45,13 @@ Après ouverture, afficher un retour visible d'accomplissement, la récompense r
 
 La célébration n'est pas un écran bloquant. Vérifier navigation clavier, affichage tactile et absence d'interception involontaire des clics de la scène. Aucun asset généré n'est requis.
 
-## Indice de l'Oracle — décision restante
+## Indice de l'Oracle — arbitrage validé le 7 septembre
 
-Acté : l'Oracle aide seulement si le joueur peine à progresser. Délai et définition du blocage non fixés.
+Tristan valide le déclencheur proposé : après 90 secondes dans l'onglet visible, si le coffre reste fermé et qu'aucune action de gameplay n'a réussi, afficher un indice discret une seule fois par session. Le temps caché ne compte pas. Explorer la carte et ouvrir les panneaux ne coupent pas le délai. Une commande refusée n'annule pas l'aide ; une commande en cours diffère son affichage jusqu'au résultat.
 
-**Proposition à arbitrer** : après 90 secondes de présence active sur le village, si le coffre reste disponible et qu'aucune action métier n'a réussi, afficher un seul indice discret par session. Suspendre le délai quand l'onglet est caché ; annuler si le coffre est découvert. Cette règle est une proposition, pas une décision de Tristan. Texte indicatif : « L'ancien chef rangeait rarement ses affaires. Les réserves de l'Hôtel de ville mériteraient peut-être un coup d'œil. »
+Texte validé : « L’ancien chef avait caché des provisions dans l’Hôtel de ville. Une mesure remarquablement efficace, puisque personne ne les a retrouvées. » L'indice n'ouvre aucun panneau. Les 90 secondes restent un réglage de POC à ajuster en jouant.
 
-Les travaux coffre/persistance/journal sont indépendants de ce réglage. Ne pas inventer un système général de détection de blocage pour le résoudre ; ne pas déclarer la tranche complète si l'indice attendu reste non arbitré ou non vérifié.
+Implémentation bornée : session d'onglet via `sessionStorage`, isolée par monde et village ; temps et annulation conservés après F5. Si le stockage est indisponible, repli en mémoire pour la page courante. Aucune autorité économique ni état de quête ne dépend de ce cache.
 
 ## Vérification et acceptation
 

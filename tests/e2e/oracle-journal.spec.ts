@@ -4,6 +4,7 @@ import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
+import { ORACLE_HINT } from '../../apps/world-web/src/ui/oracle-hint';
 
 test.setTimeout(90_000);
 test.beforeEach(() => resetE2eState());
@@ -101,4 +102,37 @@ test('un accomplissement ancien reste silencieux et le grimoire se commande au c
   await expect(page.getByText('Les anciennes réserves')).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { oracleAnnouncements: string[] }).oracleAnnouncements))
     .not.toEqual(expect.arrayContaining([expect.stringContaining('Oracle — Un coffre')]));
+});
+
+test('l’indice attend la découverte libre et ne revient pas après F5', async ({ page }) => {
+  const origin = new Date('2026-09-07T00:00:00Z');
+  await page.clock.install({ time: origin });
+  await enterWorld(page);
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000));
+  await page.getByRole('button', { name: "Ouvrir le grimoire de l'Oracle" }).click();
+  await page.clock.fastForward(80_000);
+  await expect(page.getByText(ORACLE_HINT)).toBeHidden();
+  await page.clock.fastForward(10_000);
+  await expect(page.getByText(ORACLE_HINT)).toBeVisible();
+  await expect(page.getByText('Le grimoire ne porte encore aucune trace.')).toBeVisible();
+  await page.clock.resume();
+  await page.reload();
+  await expect(page.getByTestId('village-canvas')).toBeVisible();
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000));
+  await page.clock.fastForward(91_000);
+  await expect(page.getByText(ORACLE_HINT)).toBeHidden();
+});
+
+test('une action réussie annule l’indice même après rechargement', async ({ page }) => {
+  const origin = new Date('2026-09-07T00:00:00Z');
+  await page.clock.install({ time: origin });
+  await enterWorld(page);
+  await page.getByRole('button', { name: 'Gérer les habitants' }).click();
+  await page.getByRole('button', { name: 'Envoyer au repos' }).click();
+  await expect(page.getByText('1 habitant(s) au repos', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('village-canvas')).toBeVisible();
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000));
+  await page.clock.fastForward(91_000);
+  await expect(page.getByText(ORACLE_HINT)).toBeHidden();
 });
