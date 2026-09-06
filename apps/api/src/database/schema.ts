@@ -200,6 +200,87 @@ export interface ScheduledTasksTable {
   createdAt: Generated<Timestamp>;
 }
 
+export interface VillagePopulationsTable {
+  worldId: string;
+  villageId: string;
+  initializedAt: Generated<Timestamp>;
+}
+
+export interface PopulationCohortsTable {
+  id: Generated<string>;
+  worldId: string;
+  villageId: string;
+  originVillageId: string;
+  memberCount: number;
+  activity: 'idle' | 'working' | 'resting';
+  energy: number;
+  energyProgress: number;
+  energyUpdatedAt: Timestamp;
+  restingSince: Timestamp | null;
+  foodUsedSinceRest: number;
+  harvestId: string | null;
+  extractionId: string | null;
+  createdAt: Generated<Timestamp>;
+}
+
+export interface StoneDepositsTable {
+  worldId: string;
+  featureId: string;
+  cellX: number;
+  cellY: number;
+  initialAmount: ColumnType<string, number | string, number | string>;
+  remainingAmount: ColumnType<string, number | string, number | string>;
+  reservedAmount: ColumnType<string, number | string, number | string>;
+  revision: ColumnType<string, number | string, number | string>;
+  updatedAt: Timestamp;
+}
+
+export interface DepositExtractionsTable {
+  id: Generated<string>;
+  worldId: string;
+  villageId: string;
+  featureId: string;
+  commandId: string;
+  status: 'in-progress' | 'completed';
+  startedAt: Timestamp;
+  completesAt: Timestamp;
+  completedAt: Timestamp | null;
+  workerCount: number;
+  reservedAmount: ColumnType<string, number | string, number | string>;
+}
+
+export interface BuildingHiddenSuppliesTable {
+  worldId: string;
+  villageId: string;
+  buildingId: string;
+  resourceCode: string;
+  amount: ColumnType<string, number | string, number | string>;
+  claimedAt: Timestamp | null;
+}
+
+export interface GardenHarvestsTable {
+  id: Generated<string>;
+  worldId: string;
+  villageId: string;
+  buildingId: string;
+  commandId: string;
+  status: 'in-progress' | 'completed';
+  startedAt: Timestamp;
+  completesAt: Timestamp;
+  completedAt: Timestamp | null;
+  workerCount: number;
+  reservedCarrots: ColumnType<string, number | string, number | string>;
+}
+
+export interface PopulationCommandReceiptsTable {
+  worldId: string;
+  villageId: string;
+  commandId: string;
+  commandType: 'feed' | 'rest';
+  memberCount: number;
+  createdAt: Generated<Timestamp>;
+}
+
 export interface SessionsTable {
   id: Generated<string>;
   tokenHash: string;
@@ -230,5 +311,12 @@ export interface Database {
   villageResourceFlows: VillageResourceFlowsTable;
   buildingResourceBuffers: BuildingResourceBuffersTable;
   scheduledTasks: ScheduledTasksTable;
+  villagePopulations: VillagePopulationsTable;
+  populationCohorts: PopulationCohortsTable;
+  buildingHiddenSupplies: BuildingHiddenSuppliesTable;
+  gardenHarvests: GardenHarvestsTable;
+  populationCommandReceipts: PopulationCommandReceiptsTable;
+  stoneDeposits: StoneDepositsTable;
+  depositExtractions: DepositExtractionsTable;
   sessions: SessionsTable;
 }

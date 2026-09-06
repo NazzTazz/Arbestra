@@ -13,4 +13,6 @@ Les limites d’instance sont validées transactionnellement. La Scierie est lim
 
 Pour un bâtiment `spatial`, le niveau et la superficie sont indépendants. Les coûts, productions et capacités catalogués au niveau courant sont interprétés par cellule active selon [Construction spatiale](./spatial-construction.md).
 
+L'Habitation suit une progression verticale sans extension d'emprise. Son niveau 1 coûte 25 bois, dure 60 secondes et offre 5 couchages une fois terminé. Son niveau 2 coûte 300 bois, dure 120 secondes et offre 25 couchages une fois terminé. Pendant l'amélioration, l'Habitation est en chantier et ne contribue temporairement pas à la capacité. Le niveau 2 utilise une teinte de bois plus sombre dans Babylon.
+
 Le client lit libellés, niveaux, coûts et productions depuis le catalogue renvoyé par l’API ; il peut prévisualiser un total, mais le serveur le recalcule toujours.

@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type {
   BuildingType,
   BuildingTypeDefinition,
   VillageState,
+  ExtractionResponse,
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -26,6 +28,10 @@ import {
 } from './economy.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
+import { advanceEnergy, beginRest, displayedEnergy, feedEnergy, type EnergyState } from '../population/energy.js';
+import { startGardenHarvest } from '../population/garden-harvest.js';
+import { materializeCohorts, withoutAssignment } from '../population/work.js';
+import { startStoneExtraction, stoneDepositDetails, readExtraction, readStoneDeposit, safeAmount } from '../deposits/stone-extractions.js';
 
 const CELL_SIZE = 2.5;
 const SNAPSHOT_SIZE = 64;
@@ -248,46 +254,42 @@ async function featuresInSnapshot(
   ground: Snapshot,
 ) {
   let query = tx
-    .selectFrom('worldCellOccupancies')
-    .innerJoin('worldFeatures', (join) =>
-      join
-        .onRef('worldFeatures.id', '=', 'worldCellOccupancies.featureId')
-        .onRef('worldFeatures.worldId', '=', 'worldCellOccupancies.worldId'),
-    )
+    .selectFrom('worldFeatures')
+    .leftJoin('worldCellOccupancies', (join) => join
+      .onRef('worldCellOccupancies.featureId', '=', 'worldFeatures.id')
+      .onRef('worldCellOccupancies.worldId', '=', 'worldFeatures.worldId'))
+    .leftJoin('stoneDeposits', (join) => join
+      .onRef('stoneDeposits.featureId', '=', 'worldFeatures.id')
+      .onRef('stoneDeposits.worldId', '=', 'worldFeatures.worldId'))
     .select([
       'worldFeatures.id',
       'worldFeatures.featureTypeCode',
       'worldFeatures.variantSeed',
-      'worldCellOccupancies.cellX',
-      'worldCellOccupancies.cellY',
+      'worldFeatures.state as featureState',
+      sql<number>`coalesce(stone_deposits.cell_x, world_cell_occupancies.cell_x)`.as('cellX'),
+      sql<number>`coalesce(stone_deposits.cell_y, world_cell_occupancies.cell_y)`.as('cellY'),
+      'stoneDeposits.initialAmount', 'stoneDeposits.remainingAmount', 'stoneDeposits.reservedAmount',
+      'stoneDeposits.revision', 'stoneDeposits.updatedAt',
     ])
-    .where('worldCellOccupancies.worldId', '=', village.worldId);
+    .where('worldFeatures.worldId', '=', village.worldId);
 
   const endX = ground.originCellX + SNAPSHOT_SIZE;
   query =
     endX <= village.widthCells
       ? query
-          .where('worldCellOccupancies.cellX', '>=', ground.originCellX)
-          .where('worldCellOccupancies.cellX', '<', endX)
-      : query.where((eb) =>
-          eb.or([
-            eb('worldCellOccupancies.cellX', '>=', ground.originCellX),
-            eb('worldCellOccupancies.cellX', '<', endX - village.widthCells),
-          ]),
-        );
+          .where(sql<boolean>`coalesce(stone_deposits.cell_x, world_cell_occupancies.cell_x) >= ${ground.originCellX}`)
+          .where(sql<boolean>`coalesce(stone_deposits.cell_x, world_cell_occupancies.cell_x) < ${endX}`)
+      : query.where(sql<boolean>`(coalesce(stone_deposits.cell_x, world_cell_occupancies.cell_x) >= ${ground.originCellX}
+        or coalesce(stone_deposits.cell_x, world_cell_occupancies.cell_x) < ${endX - village.widthCells})`);
 
   const endY = ground.originCellY + SNAPSHOT_SIZE;
   query =
     endY <= village.heightCells
       ? query
-          .where('worldCellOccupancies.cellY', '>=', ground.originCellY)
-          .where('worldCellOccupancies.cellY', '<', endY)
-      : query.where((eb) =>
-          eb.or([
-            eb('worldCellOccupancies.cellY', '>=', ground.originCellY),
-            eb('worldCellOccupancies.cellY', '<', endY - village.heightCells),
-          ]),
-        );
+          .where(sql<boolean>`coalesce(stone_deposits.cell_y, world_cell_occupancies.cell_y) >= ${ground.originCellY}`)
+          .where(sql<boolean>`coalesce(stone_deposits.cell_y, world_cell_occupancies.cell_y) < ${endY}`)
+      : query.where(sql<boolean>`(coalesce(stone_deposits.cell_y, world_cell_occupancies.cell_y) >= ${ground.originCellY}
+        or coalesce(stone_deposits.cell_y, world_cell_occupancies.cell_y) < ${endY - village.heightCells})`);
 
   return query.execute();
 }
@@ -335,6 +337,7 @@ async function state(
     bufferRows,
     occupancyRows,
     protectedRows,
+    hiddenSupplyRows,
   ] = await Promise.all([
     snapshot(tx, village),
     tx
@@ -384,6 +387,8 @@ async function state(
       .where('buildings.villageId', '=', village.villageId)
       .execute(),
     clearings(tx, village.worldId),
+    tx.selectFrom('buildingHiddenSupplies').select(['buildingId', 'claimedAt'])
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
   ]);
   const resources = await Promise.all(
     resourcesRows.map(async (row) => {
@@ -394,6 +399,7 @@ async function state(
         row.resourceCode,
         at,
       );
+      if (row.resourceCode === 'stone') safeAmount(projected.amount);
       return {
         code: row.resourceCode,
         displayName: row.displayName,
@@ -419,6 +425,38 @@ async function state(
         at,
       ),
     );
+  const [cohorts, housingRows, harvestRows, extractionRows] = await Promise.all([
+    tx.selectFrom('populationCohorts').selectAll()
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
+    tx.selectFrom('buildings').select(['buildingType', 'level']).where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('status', '=', 'completed').execute(),
+    tx.selectFrom('gardenHarvests').selectAll().where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
+    tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
+  ]);
+  const projectedCohorts = cohorts.map((cohort) => ({
+    ...cohort,
+    energy: advanceEnergy({
+      energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
+      restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest,
+      updatedAt: cohort.energyUpdatedAt,
+    } satisfies EnergyState, at),
+  }));
+  const population = {
+    total: projectedCohorts.reduce((total, cohort) => total + cohort.memberCount, 0),
+    housingCapacity: housingRows.reduce((total, row) => total + (row.buildingType === 'town-hall' ? 30 : row.buildingType === 'dwelling' ? (row.level >= 2 ? 25 : 5) : 0), 0),
+    available: projectedCohorts.filter((cohort) => cohort.energy.activity === 'idle' && withoutAssignment(cohort))
+      .reduce((total, cohort) => total + cohort.memberCount, 0),
+    working: projectedCohorts.filter((cohort) => cohort.energy.activity === 'working')
+      .reduce((total, cohort) => total + cohort.memberCount, 0),
+    resting: projectedCohorts.filter((cohort) => cohort.energy.activity === 'resting')
+      .reduce((total, cohort) => total + cohort.memberCount, 0),
+    energyCounts: Array.from({ length: 11 }, (_, energy) => projectedCohorts
+      .filter((cohort) => displayedEnergy(cohort.energy) === energy)
+      .reduce((total, cohort) => total + cohort.memberCount, 0)),
+  };
+  const harvestByBuilding = new Map(harvestRows.map((harvest) => [harvest.buildingId, harvest]));
   const byBuilding = new Map<string, typeof occupancyRows>();
   for (const row of occupancyRows) {
     const rows = byBuilding.get(row.buildingId) ?? [];
@@ -430,6 +468,7 @@ async function state(
     .select(['id', 'startedAt', 'completesAt']).where('worldId', '=', village.worldId)
     .where('id', 'in', expansionIds).execute();
   const expansionById = new Map(expansions.map((item) => [item.id, item]));
+  const hiddenSupplies = new Map(hiddenSupplyRows.map((item) => [item.buildingId, item.claimedAt === null]));
   const available = candidates(
     occupancyRows
       .filter((row) => row.status === 'completed' && row.pendingExpansionId === null)
@@ -442,7 +481,7 @@ async function state(
   const visible = new Set([...available, ...occupied.keys()]);
   const features = await featuresInSnapshot(tx, village, ground);
   const featureCells = new Set(
-    features.map((feature) => worldCellKey(feature.cellX, feature.cellY)),
+    features.filter((feature) => feature.featureState !== 'depleted').map((feature) => worldCellKey(feature.cellX, feature.cellY)),
   );
   const wood = resources.find((item) => item.code === 'wood'),
     carrot = resources.find((item) => item.code === 'carrot');
@@ -471,6 +510,8 @@ async function state(
       carrots: carrot.amount,
       woodProductionPerHour: wood.productionPerHour,
       woodProductionUpdatedAt: wood.productionUpdatedAt,
+      population,
+      extractions: await Promise.all(extractionRows.map((row) => readExtraction(tx, village.worldId, village.villageId, row.id))),
     },
     buildingTypes: definitions,
     region: {
@@ -486,6 +527,13 @@ async function state(
         cellX: feature.cellX,
         cellY: feature.cellY,
         variantSeed: feature.variantSeed,
+        deposit: feature.featureTypeCode === 'stone_outcrop' ? {
+          featureId: feature.id, resourceCode: 'stone' as const, cellX: feature.cellX, cellY: feature.cellY,
+          initialAmount: safeAmount(feature.initialAmount!), remainingAmount: safeAmount(feature.remainingAmount!),
+          reservedAmount: safeAmount(feature.reservedAmount!), availableAmount: safeAmount(feature.remainingAmount!) - safeAmount(feature.reservedAmount!),
+          state: feature.featureState === 'depleted' ? 'depleted' as const : 'available' as const,
+          revision: safeAmount(feature.revision!), updatedAt: feature.updatedAt!.toISOString(),
+        } : null,
       })),
     },
     cells: [...visible]
@@ -522,6 +570,7 @@ async function state(
                   constructionCompletesAt:
                     row.constructionCompletesAt?.toISOString() ?? null,
                   completedAt: row.completedAt?.toISOString() ?? null,
+                  hiddenSuppliesAvailable: hiddenSupplies.get(row.buildingId) ?? false,
                   garden: buffer
                     ? {
                         storedCarrots: buffer.amount,
@@ -537,6 +586,14 @@ async function state(
                           completesAt: expansion.completesAt.toISOString(),
                           cells: pendingCells.map((item) => ({ cellX: item.cellX, cellY: item.cellY })),
                         } : null,
+                        harvest: harvestByBuilding.get(row.buildingId) ? (() => {
+                          const harvest = harvestByBuilding.get(row.buildingId)!;
+                          return {
+                            id: harvest.id, startedAt: harvest.startedAt.toISOString(),
+                            completesAt: harvest.completesAt.toISOString(), workerCount: harvest.workerCount,
+                            reservedCarrots: number(harvest.reservedCarrots),
+                          };
+                        })() : null,
                       }
                     : null,
                 }
@@ -1044,6 +1101,7 @@ export async function harvestGarden(
   worldSlug: string,
   villageId: string,
   buildingId: string,
+  commandId: string = randomUUID(),
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug);
@@ -1051,66 +1109,128 @@ export async function harvestGarden(
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     const at = economy.through;
-    const building = await tx
-      .selectFrom('buildings')
-      .innerJoin(
-        'buildingTypes',
-        'buildingTypes.code',
-        'buildings.buildingType',
-      )
-      .select([
-        'buildings.id',
-        'buildings.status',
-        'buildings.targetLevel',
-        'buildingTypes.productionMode',
-      ])
-      .where('buildings.id', '=', buildingId)
-      .where('buildings.worldId', '=', village.worldId)
-      .where('buildings.villageId', '=', village.villageId)
-      .forUpdate('buildings')
-      .executeTakeFirst();
-    if (!building || building.productionMode !== 'buffered')
-      throw new HttpError(
-        404,
-        'BUFFERED_BUILDING_NOT_FOUND',
-        'Bâtiment récoltable introuvable.',
-      );
-    if (building.status !== 'completed' && building.targetLevel === null)
-      throw new HttpError(
-        409,
-        'BUILDING_NOT_READY',
-        'Le bâtiment est encore en chantier.',
-      );
-    const buffers = await tx
-      .selectFrom('buildingResourceBuffers')
-      .select('resourceCode')
-      .where('worldId', '=', village.worldId)
-      .where('buildingId', '=', building.id)
-      .orderBy('resourceCode')
-      .execute();
-    for (const buffer of buffers) {
-      const amount = await materializeBuildingBuffer(
-        tx,
-        village.worldId,
-        building.id,
-        buffer.resourceCode,
-        at,
-      );
-      await tx
-        .updateTable('villageResources')
-        .set({ amount: sql`amount + ${amount.amount}::bigint` })
-        .where('worldId', '=', village.worldId)
-        .where('villageId', '=', village.villageId)
-        .where('resourceCode', '=', buffer.resourceCode)
-        .execute();
-      await tx
-        .updateTable('buildingResourceBuffers')
-        .set({ storedAmount: 0, productionUpdatedAt: at })
-        .where('worldId', '=', village.worldId)
-        .where('buildingId', '=', building.id)
-        .where('resourceCode', '=', buffer.resourceCode)
-        .execute();
+    await startGardenHarvest(tx, village.worldId, village.villageId, buildingId, commandId, at);
+    return state(tx, accountId, worldSlug, economy);
+  });
+}
+
+/** Starts a server-authoritative stone extraction. The feature UUID, not a viewport cell, is the target. */
+export async function startVillageStoneExtraction(
+  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
+  featureId: string, commandId: string, workerCount: number,
+): Promise<ExtractionResponse> {
+  return db.transaction().execute(async (tx) => {
+    const village = await ownedVillage(tx, accountId, worldSlug);
+    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
+    const id = await startStoneExtraction(tx, village, economy, featureId, commandId, workerCount);
+    return { villageState: await state(tx, accountId, worldSlug, economy),
+      extraction: await readExtraction(tx, village.worldId, village.villageId, id),
+      deposit: await readStoneDeposit(tx, village.worldId, featureId) };
+  });
+}
+
+export async function getStoneDepositDetails(
+  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, featureId: string,
+) {
+  return db.transaction().execute(async (tx) => {
+    const village = await ownedVillage(tx, accountId, worldSlug);
+    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
+    return stoneDepositDetails(tx, village, economy, featureId);
+  });
+}
+
+export async function discoverBuildingSupplies(
+  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string,
+): Promise<VillageState> {
+  return db.transaction().execute(async (tx) => {
+    const village = await ownedVillage(tx, accountId, worldSlug);
+    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const supply = await tx.selectFrom('buildingHiddenSupplies').selectAll().where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('buildingId', '=', buildingId).forUpdate().executeTakeFirst();
+    if (!supply) throw new HttpError(404, 'SUPPLIES_NOT_FOUND', 'Réserves introuvables.');
+    if (supply.claimedAt) throw new HttpError(409, 'SUPPLIES_ALREADY_DISCOVERED', 'Les réserves ont déjà été fouillées.');
+    await tx.updateTable('buildingHiddenSupplies').set({ claimedAt: economy.through }).where('worldId', '=', village.worldId)
+      .where('buildingId', '=', buildingId).execute();
+    await tx.updateTable('villageResources').set({ amount: sql`amount + ${supply.amount}::bigint` })
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
+      .where('resourceCode', '=', supply.resourceCode).execute();
+    return state(tx, accountId, worldSlug, economy);
+  });
+}
+
+async function populationCommand(
+  tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
+  commandId: string, count: number, type: 'feed' | 'rest',
+) {
+  if (!Number.isInteger(count) || count < 1) throw new HttpError(400, 'POPULATION_COUNT_INVALID', 'Effectif invalide.');
+  const repeated = await tx.selectFrom('populationCommandReceipts').selectAll()
+    .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
+    .where('commandId', '=', commandId).executeTakeFirst();
+  if (repeated) {
+    if (repeated.commandType !== type || repeated.memberCount !== count)
+      throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée différemment.');
+    return;
+  }
+  const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
+  let remaining = count;
+  const eligible = cohorts.filter((cohort) => cohort.activity === 'idle' && withoutAssignment(cohort))
+    .filter((cohort) => type === 'feed'
+      ? feedEnergy({ energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
+        restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt }) !== null
+      : beginRest({ energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
+        restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt }) !== null);
+  if (eligible.reduce((total, cohort) => total + cohort.memberCount, 0) < remaining)
+    throw new HttpError(409, type === 'feed' ? 'POPULATION_FOOD_UNAVAILABLE' : 'POPULATION_REST_UNAVAILABLE', 'Habitants éligibles insuffisants.');
+  if (type === 'feed') {
+    const carrots = await tx.selectFrom('villageResources').select('amount').where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('resourceCode', '=', 'carrot').forUpdate().executeTakeFirstOrThrow();
+    if (number(carrots.amount) < count) throw new HttpError(409, 'CARROTS_INSUFFICIENT', 'Carottes insuffisantes.');
+    await tx.updateTable('villageResources').set({ amount: sql`amount - ${count}::bigint` }).where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('resourceCode', '=', 'carrot').execute();
+  }
+  for (const cohort of eligible) {
+    if (remaining === 0) break;
+    const memberCount = Math.min(remaining, cohort.memberCount);
+    const initial = { energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
+      restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt };
+    const next = type === 'feed' ? feedEnergy(initial)! : beginRest(initial)!;
+    const values = { activity: next.activity, energy: next.energy, energyProgress: next.progress,
+      restingSince: next.restingSince, foodUsedSinceRest: next.foodUsedSinceRest, energyUpdatedAt: next.updatedAt };
+    if (memberCount === cohort.memberCount) await tx.updateTable('populationCohorts').set(values).where('id', '=', cohort.id).execute();
+    else {
+      await tx.updateTable('populationCohorts').set({ memberCount: cohort.memberCount - memberCount }).where('id', '=', cohort.id).execute();
+      await tx.insertInto('populationCohorts').values({ worldId: village.worldId, villageId: village.villageId,
+        originVillageId: cohort.originVillageId, memberCount, ...values, harvestId: null, extractionId: null }).execute();
     }
+    remaining -= memberCount;
+  }
+  await tx.insertInto('populationCommandReceipts').values({ worldId: village.worldId, villageId: village.villageId,
+    commandId, commandType: type, memberCount: count }).execute();
+}
+
+export async function feedPopulation(
+  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, commandId: string, count: number,
+): Promise<VillageState> {
+  return db.transaction().execute(async (tx) => {
+    const village = await ownedVillage(tx, accountId, worldSlug);
+    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    await populationCommand(tx, village, economy, commandId, count, 'feed');
+    return state(tx, accountId, worldSlug, economy);
+  });
+}
+
+export async function restPopulation(
+  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, commandId: string, count: number,
+): Promise<VillageState> {
+  return db.transaction().execute(async (tx) => {
+    const village = await ownedVillage(tx, accountId, worldSlug);
+    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    await populationCommand(tx, village, economy, commandId, count, 'rest');
     return state(tx, accountId, worldSlug, economy);
   });
 }

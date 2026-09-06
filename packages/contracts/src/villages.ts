@@ -51,8 +51,34 @@ export const GardenSchema = Type.Object({
     completesAt: Type.String({ format: 'date-time' }),
     cells: Type.Array(Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) })),
   }), Type.Null()]),
+  harvest: Type.Union([Type.Object({
+    id: Type.String({ format: 'uuid' }), startedAt: Type.String({ format: 'date-time' }),
+    completesAt: Type.String({ format: 'date-time' }), workerCount: Type.Integer({ minimum: 1 }),
+    reservedCarrots: Type.Integer({ minimum: 0 }),
+  }), Type.Null()]),
 });
 export type Garden = Static<typeof GardenSchema>;
+
+export const StoneDepositSchema = Type.Object({
+  featureId: Type.String({ format: 'uuid' }),
+  resourceCode: Type.Literal('stone'),
+  cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }),
+  initialAmount: Type.Integer({ minimum: 1 }), remainingAmount: Type.Integer({ minimum: 0 }),
+  reservedAmount: Type.Integer({ minimum: 0 }), availableAmount: Type.Integer({ minimum: 0 }),
+  state: Type.Union([Type.Literal('available'), Type.Literal('depleted')]),
+  revision: Type.Integer({ minimum: 1 }), updatedAt: Type.String({ format: 'date-time' }),
+});
+export type StoneDeposit = Static<typeof StoneDepositSchema>;
+
+export const ExtractionSchema = Type.Object({
+  cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }),
+  id: Type.String({ format: 'uuid' }), featureId: Type.String({ format: 'uuid' }),
+  workerCount: Type.Integer({ minimum: 1 }), reservedAmount: Type.Integer({ minimum: 1 }),
+  status: Type.Union([Type.Literal('in-progress'), Type.Literal('completed')]),
+  startedAt: Type.String({ format: 'date-time' }), completesAt: Type.String({ format: 'date-time' }),
+  completedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+});
+export type Extraction = Static<typeof ExtractionSchema>;
 
 export const BuildingSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
@@ -63,6 +89,7 @@ export const BuildingSchema = Type.Object({
   constructionStartedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
   constructionCompletesAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
   completedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  hiddenSuppliesAvailable: Type.Boolean(),
   garden: Type.Union([GardenSchema, Type.Null()]),
 });
 export type Building = Static<typeof BuildingSchema>;
@@ -100,6 +127,12 @@ export const VillageStateSchema = Type.Object({
     wood: Type.Integer({ minimum: 0 }), carrots: Type.Integer({ minimum: 0 }),
     woodProductionPerHour: Type.Number({ minimum: 0 }),
     woodProductionUpdatedAt: Type.String({ format: 'date-time' }),
+    population: Type.Object({
+      total: Type.Integer({ minimum: 0 }), housingCapacity: Type.Integer({ minimum: 0 }),
+      available: Type.Integer({ minimum: 0 }), working: Type.Integer({ minimum: 0 }), resting: Type.Integer({ minimum: 0 }),
+      energyCounts: Type.Array(Type.Integer({ minimum: 0 })),
+    }),
+    extractions: Type.Array(ExtractionSchema),
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),
   region: Type.Object({
@@ -110,6 +143,7 @@ export const VillageStateSchema = Type.Object({
     features: Type.Array(Type.Object({
       id: Type.String({ format: 'uuid' }), type: Type.String(), cellX: Type.Integer({ minimum: 0 }),
       cellY: Type.Integer({ minimum: 0 }), variantSeed: Type.Integer(),
+      deposit: Type.Union([StoneDepositSchema, Type.Null()]),
     })),
   }),
   cells: Type.Array(VillageCellSchema),
@@ -137,3 +171,31 @@ export const ExpansionRequestSchema = Type.Object({
   cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }), { minItems: 1, maxItems: 100 }),
 });
 export type ExpansionRequest = Static<typeof ExpansionRequestSchema>;
+
+export const HarvestRequestSchema = Type.Object({ commandId: Type.String({ format: 'uuid' }) });
+export type HarvestRequest = Static<typeof HarvestRequestSchema>;
+
+export const PopulationCommandRequestSchema = Type.Object({
+  commandId: Type.String({ format: 'uuid' }), count: Type.Integer({ minimum: 1 }),
+});
+export type PopulationCommandRequest = Static<typeof PopulationCommandRequestSchema>;
+
+export const ExtractionRequestSchema = Type.Object({
+  commandId: Type.String({ format: 'uuid' }), workerCount: Type.Integer({ minimum: 1, maximum: 10 }),
+}, { additionalProperties: false });
+export type ExtractionRequest = Static<typeof ExtractionRequestSchema>;
+
+export const DepositDetailsSchema = Type.Object({
+  serverTime: Type.String({ format: 'date-time' }), deposit: StoneDepositSchema,
+  eligibility: Type.Object({
+    inRange: Type.Boolean(), onBoundary: Type.Boolean(), protected: Type.Boolean(), lotAmount: Type.Integer({ minimum: 0, maximum: 100 }),
+    workerOptions: Type.Array(Type.Object({
+      workerCount: Type.Integer({ minimum: 1, maximum: 10 }), durationMs: Type.Integer({ minimum: 1 }),
+      availableWorkers: Type.Integer({ minimum: 0 }), canStart: Type.Boolean(), reasonCode: Type.Union([Type.String(), Type.Null()]),
+    })),
+  }),
+});
+export type DepositDetails = Static<typeof DepositDetailsSchema>;
+
+export const ExtractionResponseSchema = Type.Object({ villageState: VillageStateSchema, extraction: ExtractionSchema, deposit: StoneDepositSchema });
+export type ExtractionResponse = Static<typeof ExtractionResponseSchema>;

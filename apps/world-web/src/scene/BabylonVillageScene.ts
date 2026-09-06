@@ -16,6 +16,7 @@ import { Scene } from '@babylonjs/core/scene';
 import type { VillageCell, VillageState } from '@arbestra/contracts';
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
+import { changedStoneFeatures, extractionTravel, stoneVisualSignature, terrainSignature } from './deposit-visuals';
 import { cellKey, type AreaPreview, type Cell } from './construction-selection';
 
 const CHUNK_CELLS = 8;
@@ -36,6 +37,11 @@ export class BabylonVillageScene {
   readonly #villageMeshes: Mesh[] = [];
   readonly #terrainMeshes: Mesh[] = [];
   readonly #featureMeshes: Mesh[] = [];
+  readonly #stoneGroups = new Map<string, { signature: string; meshes: Mesh[] }>();
+  readonly #extractionPeople = new Map<string, { meshes: Mesh[]; target: Vector3; startedAt: number; completesAt: number }>();
+  #selectedFeatureId: string | null = null;
+  readonly #onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void;
+  readonly #harvestPeople: Array<{ mesh: Mesh; target: Vector3; index: number }> = [];
   readonly #selectableMeshes = new Map<string, Mesh>();
   readonly #onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
   readonly #onCameraMoved: () => void;
@@ -79,6 +85,10 @@ export class BabylonVillageScene {
   #lastVisualSignature = '';
   #lastTerrainSignature = '';
   #lastFeatureSignature = '';
+  #lastHarvestSignature = '';
+  #harvestStartedAt = 0;
+  #harvestCompletesAt = 0;
+  #serverOffsetMs = 0;
   #lastFrameAt = 0;
   #lastCameraRadius: number | null = null;
   #worldWidthUnits = 2048 * TILE_SIZE;
@@ -148,8 +158,17 @@ export class BabylonVillageScene {
     const picked = this.#scene.pick(
       event.clientX - bounds.left,
       event.clientY - bounds.top,
-      (mesh) => mesh.isPickable && typeof mesh.metadata?.siteId === 'string',
+      (mesh) => mesh.isPickable && (typeof mesh.metadata?.siteId === 'string' || typeof mesh.metadata?.featureId === 'string'),
     );
+    const featureId = picked.pickedMesh?.metadata?.featureId as string | undefined;
+    if (featureId) {
+      this.#selectedSiteId = null;
+      this.#applySelection();
+      this.#selectedFeatureId = featureId;
+      this.#applyFeatureSelection();
+      this.#onFeatureSelected(featureId, { x: event.clientX, y: event.clientY });
+      return;
+    }
     const siteId = picked.pickedMesh?.metadata?.siteId as string | undefined;
     if (siteId) this.selectSite(siteId, { x: event.clientX, y: event.clientY });
     else this.#clearSelection();
@@ -164,8 +183,10 @@ export class BabylonVillageScene {
     onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void,
     onCameraMoved: () => void,
     onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void,
+    onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void = () => {},
   ) {
     this.#canvas = canvas;
+    this.#onFeatureSelected = onFeatureSelected;
     this.#onSiteSelected = onSiteSelected;
     this.#onCameraMoved = onCameraMoved;
     this.#onAreaGesture = onAreaGesture;
@@ -260,6 +281,8 @@ export class BabylonVillageScene {
       if (now - this.#lastFrameAt < 1_000 / (this.#reducedQuality ? 5 : 45)) return;
       this.#wrapCamera();
       this.#updateCameraProfile();
+      this.#animateHarvestPeople();
+      this.#animateExtractionPeople();
       this.#scene.render();
       this.#lastFrameAt = performance.now();
     });
@@ -272,6 +295,9 @@ export class BabylonVillageScene {
     this.#deepGround.scaling.set(state.world.widthCells / 2048, 1, state.world.heightCells / 1024);
     this.#updateTerrain(state);
     this.#createWorldFeatures(state);
+    this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
+    this.#updateHarvestPeople(state);
+    this.#updateExtractionPeople(state);
     this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
     this.#canvas.dataset.completedBuildingCount = String(state.cells.filter((site) => site.building?.status === 'completed').length);
     this.#canvas.dataset.underConstructionCount = String(state.cells.filter((site) => site.building?.status === 'under-construction').length);
@@ -315,6 +341,8 @@ export class BabylonVillageScene {
 
   public selectSite(siteId: string, anchor: ScreenAnchor): void {
     if (!this.#selectableMeshes.has(siteId)) return;
+    this.#selectedFeatureId = null;
+    this.#applyFeatureSelection();
     this.#selectedSiteId = siteId;
     this.#applySelection();
     this.#onSiteSelected(siteId, anchor);
@@ -352,6 +380,8 @@ export class BabylonVillageScene {
   }
 
   #clearSelection(): void {
+    this.#selectedFeatureId = null;
+    this.#applyFeatureSelection();
     this.#selectedSiteId = null;
     this.#applySelection();
     this.#onCameraMoved();
@@ -380,7 +410,7 @@ export class BabylonVillageScene {
   }
 
   #updateTerrain(state: VillageState): void {
-    const signature = `${state.world.generationVersion}:${state.region.originCellX}:${state.region.originCellY}`;
+    const signature = terrainSignature(state);
     if (signature === this.#lastTerrainSignature) return;
     this.#lastTerrainSignature = signature;
     for (const mesh of this.#terrainMeshes.splice(0)) mesh.dispose(false, false);
@@ -440,7 +470,8 @@ export class BabylonVillageScene {
   }
 
   #createWorldFeatures(state: VillageState): void {
-    const signature = `${state.world.generationVersion}:${state.region.originCellX}:${state.region.originCellY}`;
+    this.#updateStoneFeatures(state);
+    const signature = terrainSignature(state);
     if (signature === this.#lastFeatureSignature) return;
     this.#lastFeatureSignature = signature;
     for (const mesh of this.#featureMeshes.splice(0)) mesh.dispose(false, false);
@@ -467,11 +498,116 @@ export class BabylonVillageScene {
             elevation,
           );
         }
-      } else if (feature.type === 'stone_outcrop') {
-        this.#createRockCluster(x, z, 0.58 + this.#hash(seed, 443) * 0.35, seed, scenery, elevation);
       }
     }
     this.#featureMeshes.push(...this.#mergeStaticScenery(scenery));
+  }
+
+  #updateStoneFeatures(state: VillageState): void {
+    const origin = terrainSignature(state);
+    const previous = new Map([...this.#stoneGroups].map(([id, group]) => [id, group.signature]));
+    const diff = changedStoneFeatures(previous, state.region.features, origin);
+    for (const id of [...diff.removed, ...diff.changed.map((feature) => feature.id)]) {
+      for (const mesh of this.#stoneGroups.get(id)?.meshes ?? []) mesh.dispose(false, false);
+      this.#stoneGroups.delete(id);
+    }
+    for (const feature of diff.changed) {
+      const meshes: Mesh[] = [];
+      if (feature.deposit && feature.deposit.state !== 'depleted') {
+        const x = wrappedCellDelta(feature.cellX, state.village.anchorCellX, state.world.widthCells) * TILE_SIZE;
+        const z = wrappedCellDelta(feature.cellY, state.village.anchorCellY, state.world.heightCells) * TILE_SIZE;
+        const localX = wrappedCellDelta(feature.cellX, state.region.originCellX, state.world.widthCells);
+        const localY = wrappedCellDelta(feature.cellY, state.region.originCellY, state.world.heightCells);
+        const elevation = (state.region.elevations[localY * state.region.width + localX] ?? 0) * 0.025;
+        const seed = Math.abs(feature.variantSeed);
+        const scale = (0.58 + this.#hash(seed, 443) * 0.35)
+          * (0.55 + 0.45 * feature.deposit.remainingAmount / feature.deposit.initialAmount);
+        this.#createRockCluster(x, z, scale, seed, meshes, elevation);
+        for (const mesh of meshes) {
+          mesh.metadata = { featureId: feature.id };
+          mesh.isPickable = true;
+        }
+      }
+      this.#stoneGroups.set(feature.id, { signature: stoneVisualSignature(feature, origin), meshes });
+    }
+    this.#applyFeatureSelection();
+  }
+
+  #applyFeatureSelection(): void {
+    for (const [id, group] of this.#stoneGroups) for (const mesh of group.meshes) {
+      if (id === this.#selectedFeatureId) {
+        mesh.enableEdgesRendering();
+        mesh.edgesColor.set(0.95, 0.85, 0.3, 1);
+        mesh.edgesWidth = 3;
+      } else mesh.disableEdgesRendering();
+    }
+  }
+
+  #updateExtractionPeople(state: VillageState): void {
+    const active = new Set(state.village.extractions.map((work) => work.id));
+    for (const [id, group] of this.#extractionPeople) if (!active.has(id)) {
+      for (const mesh of group.meshes) mesh.dispose(false, false);
+      this.#extractionPeople.delete(id);
+    }
+    for (const work of state.village.extractions) {
+      const existing = this.#extractionPeople.get(work.id);
+      if (existing) continue;
+      const meshes = Array.from({ length: work.workerCount }, (_, index) => {
+        const mesh = MeshBuilder.CreateBox(`extraction-person-${work.id}-${index}`, { width: 0.22, height: 0.42, depth: 0.22 }, this.#scene);
+        mesh.material = this.#darkTimberMaterial;
+        mesh.isPickable = false;
+        return mesh;
+      });
+      this.#extractionPeople.set(work.id, { meshes, startedAt: Date.parse(work.startedAt), completesAt: Date.parse(work.completesAt),
+        target: new Vector3(wrappedCellDelta(work.cellX, state.village.anchorCellX, state.world.widthCells) * TILE_SIZE, 0.33,
+          wrappedCellDelta(work.cellY, state.village.anchorCellY, state.world.heightCells) * TILE_SIZE) });
+    }
+  }
+
+  #animateExtractionPeople(): void {
+    const now = Date.now() - this.#serverOffsetMs;
+    for (const group of this.#extractionPeople.values()) {
+      const fraction = extractionTravel(now, group.startedAt, group.completesAt);
+      for (const [index, mesh] of group.meshes.entries()) {
+        const target = group.target.add(new Vector3(Math.cos(index * 2.4) * 0.65, 0, Math.sin(index * 2.4) * 0.65));
+        mesh.position.copyFrom(Vector3.Lerp(new Vector3(0, 0.33, 0), target, fraction));
+      }
+    }
+  }
+
+  #updateHarvestPeople(state: VillageState): void {
+    const gardens = state.cells.flatMap((cell) => cell.building?.garden?.harvest
+      ? [{ buildingId: cell.building.id, harvest: cell.building.garden.harvest }] : []);
+    const signature = JSON.stringify(gardens.map(({ buildingId, harvest }) => [buildingId, harvest.id, harvest.startedAt, harvest.completesAt]));
+    if (signature === this.#lastHarvestSignature) return;
+    this.#lastHarvestSignature = signature;
+    for (const person of this.#harvestPeople.splice(0)) person.mesh.dispose(false, false);
+    const garden = gardens[0];
+    if (!garden) return;
+    this.#harvestStartedAt = Date.parse(garden.harvest.startedAt);
+    this.#harvestCompletesAt = Date.parse(garden.harvest.completesAt);
+    const cells = state.cells.filter((cell) => cell.footprint?.buildingId === garden.buildingId && cell.footprint.state === 'active')
+      .slice(0, garden.harvest.workerCount);
+    for (const [index, cell] of cells.entries()) {
+      const mesh = MeshBuilder.CreateBox(`harvest-person-${garden.harvest.id}-${index}`, { width: 0.22, height: 0.42, depth: 0.22 }, this.#scene);
+      mesh.material = this.#darkTimberMaterial;
+      mesh.isPickable = false;
+      mesh.position.set(cell.x, 0.33, cell.z);
+      this.#harvestPeople.push({ mesh, target: new Vector3(cell.x, 0.33, cell.z), index });
+    }
+  }
+
+  #animateHarvestPeople(): void {
+    if (this.#harvestPeople.length === 0 || this.#harvestCompletesAt <= this.#harvestStartedAt) return;
+    const serverNow = Date.now() - this.#serverOffsetMs;
+    const fraction = Math.max(0, Math.min(1, (serverNow - this.#harvestStartedAt) / (this.#harvestCompletesAt - this.#harvestStartedAt)));
+    const roundTrip = fraction <= 0.5 ? fraction * 2 : (1 - fraction) * 2;
+    const origin = new Vector3(0, 0.33, 0);
+    for (const person of this.#harvestPeople) {
+      const wobble = Math.sin((fraction * 80) + person.index) * 0.04;
+      person.mesh.position.copyFrom(Vector3.Lerp(origin, person.target, roundTrip));
+      person.mesh.position.y += wobble;
+    }
   }
 
   #updateBuildableGrid(cells: VillageCell[]): void {
@@ -789,9 +925,10 @@ export class BabylonVillageScene {
   }
 
   #createDwelling(site: VillageCell): Mesh {
+    const level = site.building?.level ?? 1;
     const body = MeshBuilder.CreateBox(`dwelling-${site.id}`, { width: 1.7, depth: 1.55, height: 1.12 }, this.#scene);
     body.position.set(site.x, 0.66, site.z);
-    body.material = this.#lightTimberMaterial;
+    body.material = level >= 2 ? this.#timberMaterial : this.#lightTimberMaterial;
     const roof = MeshBuilder.CreateCylinder(`dwelling-roof-${site.id}`, { height: 0.72, diameterTop: 0, diameterBottom: 2.25, tessellation: 4 }, this.#scene);
     roof.parent = body;
     roof.position.y = 0.85;
@@ -926,6 +1063,7 @@ export class BabylonVillageScene {
     this.#canvas.removeEventListener('pointercancel', this.#handlePointerCancel, { capture: true });
     this.#canvas.removeEventListener('wheel', this.#handleWheel, { capture: true });
     this.#resizeObserver.disconnect();
+    for (const person of this.#harvestPeople.splice(0)) person.mesh.dispose(false, false);
     this.#scene.dispose();
     this.#engine.dispose();
     this.#canvas.width = 0;

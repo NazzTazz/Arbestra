@@ -1,4 +1,51 @@
-# Reprise inter-agent — fondations monde
+# Revue de publication — 6 septembre 2026
+
+À la demande de Tristan : revue, clôture technique et publication du lot population/pierre/interactions React/Habitation niveau 2. Voir la [revue Astra et ses réserves](docs/REVIEW-ASTRA-2026-09-06-CLOTURE.md). Le parcours complet a été validé humainement par Tristan avec Sol ; la suite Playwright historique reste à adapter. La revue corrige le rafraîchissement du coffre concurrent, la conservation de l'effectif pierre et les intentions d'extraction par cible. Ces dernières corrections restent à recontrôler visuellement par Tristan. Les anciens statuts « aucun commit/push » ci-dessous décrivent les reprises précédentes.
+
+# Design du réveil des cohortes pour Astra — 6 septembre 2026
+
+Tristan demande que le joueur puisse savoir quand les cohortes se réveillent. Voir la [note de design de Sol pour Astra](docs/DESIGN-SOL-2026-09-06-REVEIL-COHORTES-POUR-ASTRA.md) : vagues de réveil autoritatives exposées sans IDs techniques, prochain effectif et heure du dernier réveil, distinction explicite entre sommeil et manque de couchages. Statut : **proposition en cadrage** ; documentation uniquement, aucun commit/push.
+
+# Proposition de quêtes joueur pour Astra — 6 septembre 2026
+
+> Correctif UI courant : le HUD ne recevait aucun clic car `.top-bar` déclarait `pointer-events: none`. La barre reçoit désormais les événements et la pile de notifications demeure transparente. Validation navigateur laissée explicitement à Tristan ; aucun commit/push.
+
+> Correctif énergie courant : le serveur projetait correctement le réveil automatique, mais le front ne pollait pas lorsque le repos était la seule transition. `App.tsx` rafraîchit désormais toutes les dix secondes tant que des habitants sont au repos. Validation navigateur laissée à Tristan ; aucun commit/push.
+
+Tristan propose de faire du coffre de l'Hôtel de ville la première quête joueur, la complétion de la quête devenant l'autorité qui crédite les 2 000 carottes. Sol recommande un onboarding scénarisé minimal, sans moteur générique prématuré. Voir le [handoff de cadrage pour Astra](docs/HANDOFF-SOL-2026-09-06-QUETES-JOUEUR-POUR-ASTRA.md). Statut : **proposition en cadrage** ; aucun code, test, accès base, commit ou push pour cette discussion.
+
+# Habitation niveau 2 — 6 septembre 2026
+
+Sol a ajouté l'amélioration de l'Habitation : 300 bois, 120 secondes, 25 couchages après achèvement et corps Babylon plus sombre. Voir le [handoff et les preuves](docs/HANDOFF-SOL-2026-09-06-HABITATION-NIVEAU-2.md). Migration additive 013 appliquée avec succès à la base de développement, sans reset ni seed. 78 tests verts, lint/build/typechecks verts. Validation navigateur explicitement laissée à Tristan. Aucun commit/push.
+
+# Interactions joueur prises en charge par Sol — 6 septembre 2026
+
+À la demande de Tristan, Sol a repris le front React et branché HUD/population, coffre, récolte différée et menu pierre, avec découpage borné d'`App.tsx`. Voir le [handoff et les preuves](docs/HANDOFF-SOL-2026-09-06-INTERACTIONS-JOUEUR.md). Statut : **implémentée / à valider sur les parcours métier complets**, sans commit/push. Suite actuelle : 77 tests verts, lint/build/typechecks verts ; vérification Chrome partielle avec une correction issue du parcours. La base dev contient 800 habitants ajoutés manuellement par Tristan : ne pas traiter cette fixture comme un défaut applicatif ni la modifier.
+
+# Audit et relais à Sol — 6 septembre 2026
+
+Tristan confie exceptionnellement le clavier à Sol et demande de lui transmettre l'[audit Astra : priorités métier et frontières React](docs/AUDIT-ASTRA-2026-09-06-PRIORITES-POUR-SOL.md). Audit statique : constats, limites et tranches proposées, sans validation automatique des choix gameplay. La recommandation est une extraction limitée HUD/panneau construire, puis l'intégration habitants–récoltes et pierre. Ce relais explicite prime sur l'ancienne répartition « React à Tristan » ; suivre les instructions courantes de Tristan pour le périmètre de Sol. Enregistrement documentaire uniquement, aucun test applicatif ni commit/push.
+
+# Finition gisements pierre — 5 septembre 2026
+
+La finition Astra est implémentée après la revue Terra. Voir le [handoff et ses preuves](docs/HANDOFF-ASTRA-2026-09-05-gisements.md) et le [contrat React](docs/API-EXPLOITATION-GISEMENTS.md). Cette note prime sur les statuts historiques ci-dessous. Aucun commit/push. La migration 012 a été appliquée à la base de développement à la demande explicite de Tristan, sans reset ni seed. React et validation visuelle restent à Tristan.
+
+# Reprise inter-agent — état courant
+
+## Point de reprise — 5 septembre 2026
+
+Lire [AGENTS.md](./AGENTS.md) et le [workflow](./docs/AGENT-WORKFLOW.md). Cette section remplace les statuts et consignes opérationnelles historiques plus bas ; vérifier toujours le worktree réel.
+
+- Dernière tranche applicative clôturée : ordre économique par village, commit `4dfd494`, poussé sur `origin/master`. [Handoff et preuves](./docs/HANDOFF-ASTRA-2026-09-05-economic-order.md) : 39 tests verts à cette clôture, lint/typecheck verts, défaut historique reproduit rétrospectivement. Ce compte n'est pas une validation des futurs changements.
+- Migration `009_economic_task_notifications` appliquée ensuite à la base de développement, à la demande explicite de Tristan ; le migrateur a signalé `Success` puis aucune migration restante à la seconde exécution. Le handoff daté décrit l'état antérieur, limité à la base test.
+- Tranche habitants et récolte différée : implémentation hors UI React terminée dans le worktree, à valider/committer. [Handoff](./docs/HANDOFF-TERRA-2026-09-05-population-et-recolte.md), [spec](./docs/SPEC-TERRA-2026-09-05-habitants-et-recolte.md), [mock-up/API pour le product owner](./docs/UI-MOCKUP-2026-09-05-habitants-et-recolte.md). Migrations 010/011 testées uniquement sur `arbestra_test`; ne pas présumer leur application au développement.
+- Gisements : [brief de Sol](./docs/architecture/Sol-Brief-exploit.md) conservé comme cadrage futur. Ce n'est pas une instruction de démarrer son implémentation.
+- Travail documentaire courant : consignes agent/workflow et clarification des références. Les nouveaux documents de spec/PO et le brief existaient déjà dans le worktree avant cette mise à jour ; ne pas les attribuer à une implémentation.
+- La présente mise à jour documentaire n'est pas un commit/push. Vérifier `git status` avant toute reprise ; ne pas déduire une autorisation de publication de celle donnée pour la tranche économique clôturée.
+
+## Archives — fondations monde et Jardins
+
+Les sections suivantes sont conservées pour leur historique. Leurs statuts « non commité », chiffres de tests, références Git et restrictions de session décrivent leurs dates d'origine, pas l'état courant. La délégation ancienne des tests navigateur à Tristan n'est pas une dispense permanente de validation des nouvelles tranches.
 
 ## Dernière reprise — corrections jardins, 2026-09-05
 
@@ -25,7 +72,7 @@ Date : 2026-09-04. État : **implémentation validée hors navigateur, non commi
 - Génération v2 : noyau central de clairière `5 × 5` libre et quatre gisements déterministes hors noyau. La migration `007_clearing_deposits` enrichit les mondes v1 sans régénérer leur terrain.
 - `docs/architecture/spatial-construction.md` est implémentée dans le worktree ; voir la dernière reprise en tête et les réserves de validation manuelle.
 
-## Consigne de session prioritaire
+## Ancienne consigne de session (archive)
 
 L'interdiction de tests a été explicitement levée. Les tests navigateur restent volontairement à la charge de Tristan, car ils sont coûteux et il pilote manuellement l'UX.
 

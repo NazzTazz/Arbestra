@@ -143,6 +143,13 @@ describe.sequential('economy with PostgreSQL', () => {
     return { resources, flows, buffers, buildings, expansions, occupations };
   }
 
+  async function finishHarvest(buildingId: string): Promise<VillageState> {
+    await db.updateTable('gardenHarvests').set({ completesAt: new Date(Date.now() - 1) })
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('buildingId', '=', buildingId)
+      .where('status', '=', 'in-progress').execute();
+    return getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+  }
+
   it('starts with whole resources and natural wood production', async () => {
     const state = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
     expect(state.village.wood).toBe(2000);
@@ -161,6 +168,27 @@ describe.sequential('economy with PostgreSQL', () => {
     await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, undefined, 10_000);
     await makeDue(id);
     expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(254.4);
+  });
+
+  it('upgrades a dwelling for 300 wood and increases housing only at completion', async () => {
+    await db.updateTable('villageResourceFlows').set({ baseRatePerHour: 0, remainder: 0,
+      productionUpdatedAt: sql`statement_timestamp()` }).where('worldId', '=', DEVELOPMENT_IDS.world)
+      .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').execute();
+    await build('dwelling', DEVELOPMENT_CELLS.dwelling);
+    const id = await completeAt(DEVELOPMENT_CELLS.dwelling);
+    const before = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+    expect(before.village.population.housingCapacity).toBe(35);
+    const pending = await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
+      undefined, undefined, 10_000);
+    expect(pending.village.population.housingCapacity).toBe(30);
+    expect(pending.cells.find((cell) => cell.building?.id === id)?.building)
+      .toMatchObject({ level: 1, targetLevel: 2, status: 'under-construction' });
+    expect(before.village.wood - pending.village.wood).toBe(300);
+    await makeDue(id);
+    const completed = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+    expect(completed.village.population.housingCapacity).toBe(55);
+    expect(completed.cells.find((cell) => cell.building?.id === id)?.building)
+      .toMatchObject({ level: 2, targetLevel: null, status: 'completed' });
   });
 
   it('settles due transitions chronologically when the scheduler discovers T2 before T1', async () => {
@@ -476,15 +504,14 @@ describe.sequential('economy with PostgreSQL', () => {
         return harvestGarden(inside(tx), DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
       });
       const first = await bounded(firstHarvest);
-      const second = await bounded(waitingHarvest);
-      expect(Date.parse(second.serverTime)).toBeGreaterThanOrEqual(Date.parse(first.serverTime));
-      const production = 0.25 + 60 * (Date.parse(second.serverTime) - t0.getTime()) / 3_600_000;
-      expect(second.village.carrots).toBe(50 + Math.floor(production));
+      await expect(bounded(waitingHarvest)).rejects.toMatchObject({ code: 'GARDEN_HARVEST_IN_PROGRESS' });
+      const production = 0.25 + 60 * (Date.parse(first.serverTime) - t0.getTime()) / 3_600_000;
+      expect(first.village.carrots).toBe(50);
       const buffer = await db.selectFrom('buildingResourceBuffers').selectAll().where('buildingId', '=', id).executeTakeFirstOrThrow();
-      expect(buffer.productionUpdatedAt.toISOString()).toBe(second.serverTime);
+      expect(buffer.productionUpdatedAt.toISOString()).toBe(first.serverTime);
       expect(Number(buffer.storedAmount)).toBe(0);
       expect(Number(buffer.remainder)).toBeCloseTo(production % 1, 10);
-      expect(second.cells.find((cell) => cell.building?.id === id)?.building?.garden?.storedCarrots).toBe(0);
+      expect(first.cells.find((cell) => cell.building?.id === id)?.building?.garden?.storedCarrots).toBe(0);
     } finally {
       locked.resolve();
       await Promise.allSettled([waitingHarvest, ...(firstHarvest ? [firstHarvest] : [])]);
@@ -559,13 +586,21 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(capped.cells.find((cell) => cell.building?.id === id)?.building?.garden?.storedCarrots).toBe(600);
     await db.updateTable('buildingResourceBuffers').set({ storedAmount: 347, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()` })
       .where('buildingId', '=', id).where('resourceCode', '=', 'carrot').execute();
-    await Promise.all([
-      harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id),
-      harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id),
-    ]);
+    const commandId = '33333333-3333-4333-8333-333333333333';
+    const started = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, commandId);
+    expect(started.village.carrots).toBe(50);
+    const retried = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, commandId);
+    expect(retried.cells.find((cell) => cell.building?.id === id)?.building?.garden?.harvest?.id)
+      .toBe(started.cells.find((cell) => cell.building?.id === id)?.building?.garden?.harvest?.id);
+    await expect(harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id))
+      .rejects.toMatchObject({ code: 'GARDEN_HARVEST_IN_PROGRESS' });
+    await finishHarvest(id);
     const carrots = await db.selectFrom('villageResources').select('amount')
       .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'carrot').executeTakeFirstOrThrow();
     expect(Number(carrots.amount)).toBe(397);
+    const inhabitants = await db.selectFrom('populationCohorts').select(sql<number>`sum(member_count)::integer`.as('count'))
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).executeTakeFirstOrThrow();
+    expect(inhabitants.count).toBe(15);
   });
 
   it('persists one chosen garden extension and rejects occupied cells', async () => {
@@ -612,12 +647,14 @@ describe.sequential('economy with PostgreSQL', () => {
     });
 
     // No snapshot or worker before the command: 1h at 60 + 1h at 120.
-    const harvested = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    const started = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    expect(started.village.carrots).toBe(50);
+    const harvested = await finishHarvest(id);
     expect(harvested.village.carrots).toBe(50 + 60 + 120);
     expect(harvested.cells.find((cell) => cell.building?.id === id)?.building?.garden)
       .toMatchObject({ activeCellCount: 2, pendingCellCount: 0, expansion: null, storedCarrots: 0, capacity: 1200 });
-    const again = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
-    expect(again.village.carrots).toBe(harvested.village.carrots);
+    await expect(harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id))
+      .rejects.toMatchObject({ code: 'GARDEN_EMPTY' });
   });
 
   it('does not recover production capped before an overdue expansion', async () => {
@@ -633,7 +670,8 @@ describe.sequential('economy with PostgreSQL', () => {
     await db.updateTable('buildingExpansions').set({ startedAt: t0, completesAt: t1 })
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('buildingId', '=', id)
       .where('status', '=', 'under-construction').execute();
-    const harvested = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    const harvested = await finishHarvest(id);
     expect(harvested.village.carrots).toBe(50 + 600 + 120);
   });
 

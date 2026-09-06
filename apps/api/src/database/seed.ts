@@ -56,6 +56,7 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
       await transaction.insertInto('villageResources').values([
         { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'wood', amount: 2000 },
         { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'carrot', amount: 50 },
+        { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'stone', amount: 0 },
       ]).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
       await transaction.insertInto('villageResourceFlows').values({
         worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'wood',
@@ -72,6 +73,21 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
         worldId: DEVELOPMENT_IDS.world,
         ...DEVELOPMENT_CELLS.townHall, buildingId: DEVELOPMENT_IDS.townHall, featureId: null, role: 'anchor',
       }).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
+      await transaction.insertInto('villagePopulations').values({
+        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
+      }).onConflict((conflict) => conflict.columns(['worldId', 'villageId']).doNothing()).execute();
+      const existingPopulation = await transaction.selectFrom('populationCohorts').select('id')
+        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).executeTakeFirst();
+      if (!existingPopulation) await transaction.insertInto('populationCohorts').values({
+        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
+        originVillageId: DEVELOPMENT_IDS.village, memberCount: 15, activity: 'idle', energy: 10,
+        energyProgress: 0, energyUpdatedAt: sql`transaction_timestamp()`, restingSince: null,
+        foodUsedSinceRest: 0, harvestId: null, extractionId: null,
+      }).execute();
+      await transaction.insertInto('buildingHiddenSupplies').values({
+        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, buildingId: DEVELOPMENT_IDS.townHall,
+        resourceCode: 'carrot', amount: 2000, claimedAt: null,
+      }).onConflict((conflict) => conflict.columns(['worldId', 'buildingId']).doNothing()).execute();
       await generateWorld(transaction, DEVELOPMENT_IDS.world);
     });
   } finally {

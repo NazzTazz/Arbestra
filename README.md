@@ -36,4 +36,8 @@ corepack pnpm typecheck
 corepack pnpm build
 ```
 
-Les décisions autoritaires sont dans [docs/architecture](./docs/architecture/README.md).
+## Travail avec les agents
+
+Commencer par [AGENTS.md](./AGENTS.md) et l'état courant de [SESSION-HANDOFF.md](./SESSION-HANDOFF.md). Le [workflow de tranche](./docs/AGENT-WORKFLOW.md) précise les statuts, la validation et le format de passation.
+
+Les conventions durables sont dans [docs/architecture](./docs/architecture/README.md). Les specs prospectives y sont signalées séparément du code livré.

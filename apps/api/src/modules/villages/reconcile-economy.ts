@@ -2,6 +2,8 @@ import { sql, type Transaction } from 'kysely';
 
 import type { Database } from '../../database/schema.js';
 import { materializeBuildingBuffer, materializeVillageResource } from './economy.js';
+import { completeGardenHarvestAt } from '../population/garden-harvest.js';
+import { completeStoneExtractionAt } from '../deposits/stone-extractions.js';
 
 export interface VillageEconomy {
   worldId: string;
@@ -11,11 +13,13 @@ export interface VillageEconomy {
 
 type DueTransition =
   | { id: string; through: Date; type: 'construction' }
-  | { id: string; through: Date; type: 'expansion' };
+  | { id: string; through: Date; type: 'expansion' }
+  | { id: string; through: Date; type: 'harvest' }
+  | { id: string; through: Date; type: 'extraction' };
 
 /** The village row serializes all economic mutations for that village. */
 export async function beginVillageEconomy(
-  transaction: Transaction<Database>, worldId: string, villageId: string,
+  transaction: Transaction<Database>, worldId: string, villageId: string, depositFeatureId?: string,
 ): Promise<VillageEconomy> {
   await transaction.selectFrom('villages').select('id')
     .where('worldId', '=', worldId).where('id', '=', villageId)
@@ -24,6 +28,15 @@ export async function beginVillageEconomy(
   const through = (await transaction.selectNoFrom(sql<Date>`statement_timestamp()`.as('through'))
     .executeTakeFirstOrThrow()).through;
   const economy = { worldId, villageId, through };
+  const dueDeposits = await transaction.selectFrom('depositExtractions').select('featureId')
+    .where('worldId', '=', worldId).where('villageId', '=', villageId).where('status', '=', 'in-progress')
+    .where('completesAt', '<=', through).execute();
+  const depositIds = [...new Set([...dueDeposits.map((row) => row.featureId), ...(depositFeatureId ? [depositFeatureId.toLowerCase()] : [])])]
+    .sort(); // Canonical UUID strings have the same order as PostgreSQL UUID bytes.
+  // Several villages may complete work on the same deposits. Acquiring the
+  // shared rows in one global order prevents village X/Y lock inversions.
+  for (const featureId of depositIds) await transaction.selectFrom('stoneDeposits').select('featureId')
+    .where('worldId', '=', worldId).where('featureId', '=', featureId).forUpdate().executeTakeFirst();
   await reconcileVillageEconomy(transaction, economy);
   return economy;
 }
@@ -32,25 +45,37 @@ export async function beginVillageEconomy(
 export async function reconcileVillageEconomy(
   transaction: Transaction<Database>, economy: VillageEconomy,
 ): Promise<void> {
-  const [constructions, expansions] = await Promise.all([
+  const [constructions, expansions, harvests, extractions] = await Promise.all([
     transaction.selectFrom('buildings').select(['id', 'constructionCompletesAt'])
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('status', '=', 'under-construction').where('constructionCompletesAt', '<=', economy.through).execute(),
     transaction.selectFrom('buildingExpansions').select(['id', 'completesAt'])
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('status', '=', 'under-construction').where('completesAt', '<=', economy.through).execute(),
+    transaction.selectFrom('gardenHarvests').select(['id', 'completesAt'])
+      .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
+      .where('status', '=', 'in-progress').where('completesAt', '<=', economy.through).execute(),
+    transaction.selectFrom('depositExtractions').select(['id', 'completesAt'])
+      .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
+      .where('status', '=', 'in-progress').where('completesAt', '<=', economy.through).execute(),
   ]);
   const due: DueTransition[] = [
     ...constructions.flatMap((building) => building.constructionCompletesAt
       ? [{ id: building.id, through: building.constructionCompletesAt, type: 'construction' as const }] : []),
     ...expansions.map((expansion) => ({ id: expansion.id, through: expansion.completesAt, type: 'expansion' as const })),
+    ...harvests.map((harvest) => ({ id: harvest.id, through: harvest.completesAt, type: 'harvest' as const })),
+    ...extractions.map((extraction) => ({ id: extraction.id, through: extraction.completesAt, type: 'extraction' as const })),
   ].sort((left, right) => left.through.getTime() - right.through.getTime()
     || left.id.localeCompare(right.id) || left.type.localeCompare(right.type));
   for (const transition of due) {
     if (transition.type === 'construction')
       await completeConstructionAt(transaction, economy, transition.id, transition.through);
-    else
+    else if (transition.type === 'expansion')
       await completeExpansionAt(transaction, economy, transition.id, transition.through);
+    else if (transition.type === 'harvest')
+      await completeGardenHarvestAt(transaction, economy.worldId, economy.villageId, transition.id, transition.through);
+    else
+      await completeStoneExtractionAt(transaction, economy.worldId, economy.villageId, transition.id, transition.through);
   }
 }
 

@@ -13,6 +13,10 @@ import * as worldSpaceAndGenerationMigration from './migrations/006_world_space_
 import * as clearingDepositsMigration from './migrations/007_clearing_deposits.js';
 import * as spatialGardensMigration from './migrations/008_spatial_gardens.js';
 import * as economicTaskNotificationsMigration from './migrations/009_economic_task_notifications.js';
+import * as populationAndGardenHarvestsMigration from './migrations/010_population_and_garden_harvests.js';
+import * as populationCommandReceiptsMigration from './migrations/011_population_command_receipts.js';
+import * as stoneDepositExtractionsMigration from './migrations/012_stone_deposit_extractions.js';
+import * as dwellingLevelTwoMigration from './migrations/013_dwelling_level_two.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -26,6 +30,10 @@ const migrationProvider: MigrationProvider = {
       '007_clearing_deposits': clearingDepositsMigration,
       '008_spatial_gardens': spatialGardensMigration,
       '009_economic_task_notifications': economicTaskNotificationsMigration,
+      '010_population_and_garden_harvests': populationAndGardenHarvestsMigration,
+      '011_population_command_receipts': populationCommandReceiptsMigration,
+      '012_stone_deposit_extractions': stoneDepositExtractionsMigration,
+      '013_dwelling_level_two': dwellingLevelTwoMigration,
     };
   },
 };

@@ -29,7 +29,7 @@ button { font: inherit; }
   border-bottom: 1px solid rgb(213 182 111 / 32%);
   box-shadow: 0 .35rem 1.3rem rgb(0 0 0 / 26%);
   backdrop-filter: blur(8px);
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .world-identity { display: grid; min-width: 8.7rem; padding-right: 1rem; border-right: 1px solid rgb(235 220 180 / 12%); line-height: 1; }
@@ -52,8 +52,11 @@ button { font: inherit; }
 .resource small { align-self: start; color: #a8d675; letter-spacing: .02em; text-transform: none; white-space: nowrap; }
 .resource:not(.resource--wood) { grid-template-rows: 1fr; }
 .resource:not(.resource--wood) strong { align-self: center; }
+.population-button { display: grid; grid-template-columns: auto auto; gap: 0 .35rem; align-items: center; min-height: 34px; padding: .15rem .5rem; color: #f4eedf; background: rgb(255 255 255 / 6%); border: 1px solid rgb(255 255 255 / 10%); border-radius: .38rem; cursor: pointer; }
+.population-button strong { font-size: .9rem; }
+.population-button small { grid-column: 2; color: #bcd19f; font-size: .65rem; }
 
-.notification-stack { position: absolute; z-index: 1; top: 0; right: max(.5rem, env(safe-area-inset-right)); width: min(18rem, calc(100vw - 1rem)); height: 40px; }
+.notification-stack { position: absolute; z-index: 1; top: 0; right: max(.5rem, env(safe-area-inset-right)); width: min(18rem, calc(100vw - 1rem)); height: 40px; pointer-events: none; }
 .game-notification {
   position: absolute;
   top: 3px;
@@ -117,10 +120,15 @@ button { font: inherit; }
 .world-context-menu button:hover:not(:disabled) { background: linear-gradient(#52683e, #405231); }
 .world-context-menu button:focus-visible { outline: 2px solid #d8b950; outline-offset: 2px; }
 .world-context-menu button:disabled { opacity: .52; cursor: wait; }
+.world-context-menu label { display: flex; align-items: center; justify-content: space-between; gap: .7rem; color: #d8dfd0; font-size: .82rem; }
+.world-context-menu input, .world-context-menu select { width: 7rem; min-height: 36px; padding: .3rem .45rem; color: #f8f4e9; background: #202d25; border: 1px solid rgb(226 196 124 / 35%); border-radius: .35rem; }
+.energy-list { display: flex !important; flex-wrap: wrap; gap: .25rem !important; }
+.energy-list span { padding: .18rem .35rem; color: #dce9c9; font-size: .7rem; background: rgb(255 255 255 / 6%); border-radius: .25rem; }
 .build-choice { padding-top: .1rem; border-top: 1px solid rgb(198 209 177 / 15%); }
 .extension-choice strong { color: #d2dca6; }
 .construction-status { color: #dec477 !important; }
 .error { color: #ffb9a8 !important; }
+.warning { color: #f3cc78 !important; }
 .construction-toolbar { position: fixed; z-index: 3; bottom: max(1rem, env(safe-area-inset-bottom)); left: 50%; display: flex; gap: .45rem; align-items: center; max-width: calc(100vw - 1rem); padding: .45rem; transform: translateX(-50%); background: rgb(20 29 23 / 90%); border: 1px solid rgb(205 170 100 / 55%); border-radius: .55rem; box-shadow: 0 .5rem 1.4rem rgb(0 0 0 / 32%); backdrop-filter: blur(6px); }
 .construction-toolbar span { color: #e9e4d4; font-size: .76rem; }
 .construction-summary { display: grid; gap: .2rem; min-width: 0; max-width: 25rem; }
@@ -141,6 +149,8 @@ button { font: inherit; }
   .world-identity { padding-right: .55rem; }
   .resource { grid-template-columns: 1.35rem auto; min-width: 5rem; column-gap: .25rem; }
   .resource strong { font-size: .9rem; }
+  .population-button small { display: none; }
+  .population-button { grid-template-columns: auto auto; padding-inline: .35rem; }
   .notification-stack { width: min(11.25rem, 44vw); right: .38rem; }
   .game-notification { padding-inline: .5rem; font-size: .64rem; }
   .construction-toolbar { width: calc(100vw - 1rem); justify-content: center; flex-wrap: wrap; }

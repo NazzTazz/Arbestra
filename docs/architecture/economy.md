@@ -20,4 +20,13 @@ Valeurs initiales :
 - Scierie : 60, 108, 194,4 bois/h aux niveaux 1–3 ;
 - Jardin : 60 carottes/h et 600 de capacité par cellule active ; 50 bois par cellule construite.
 
-La récolte verrouille le buffer, le matérialise, transfère ses unités entières au stock et le vide dans une transaction. Deux récoltes concurrentes ne peuvent pas transférer les mêmes unités.
+La récolte du Jardin verrouille le buffer, le matérialise et réserve ses unités entières pour un trajet d'une minute. Le stock village est crédité à l'échéance, dans la même transition qui termine la récolte et libère les cohortes affectées. La production survenue pendant le trajet reste dans le buffer. Deux récoltes concurrentes ne peuvent ni réserver ni transférer les mêmes unités.
+
+
+## Exploitation de pierre (012)
+
+`stone_deposits` conserve I initial, R restant et S engagé. Disponible = R−S ; réservation Q=min(100,R−S), puis à échéance R−=Q, S−=Q et stock village stone+=Q dans la même transaction. La réservation garantit le lot malgré les travaux adverses. Pas de flux automatique stone. Les quantités sont des entiers sûrs dans les contrats.
+
+Verrous : tâche déjà acquise (worker seulement) → un village → tous les gisements dus et la cible éventuelle, triés par UUID canonique → métier local. Cet ensemble est préparé avant réconciliation ; ne jamais attendre un second village ni une notification existante après un gisement. `beginVillageEconomy` garde H lu après le verrou village, même après attente d’un gisement. Construction, extension, Jardin et pierre restent mêlés par échéance, ID, type. Les opérations atomiques d’extraction supposent cet ensemble préverrouillé.
+
+`population/work.ts` partage énergie, sélection, split et libération. Aucun membre doublement affecté ; un reste positif sous un point ne déclenche pas de repos à la libération. Les quantités publiques sont l’état mondial matérialisé identifié par révision ; une lecture ne réconcilie que son village.

@@ -15,13 +15,16 @@ interface VillageSceneProps {
   previewInvalid: boolean;
   onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void;
   onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
+  onFeatureSelected?: (featureId: string, anchor: ScreenAnchor) => void;
   onCameraMoved: () => void;
 }
 
-export function VillageScene({ state, highlightedSiteIds, constructionMode = false, selectingArea, preview, previewInvalid, onAreaGesture, onSiteSelected, onCameraMoved }: VillageSceneProps) {
+export function VillageScene({ state, highlightedSiteIds, constructionMode = false, selectingArea, preview, previewInvalid, onAreaGesture, onSiteSelected, onCameraMoved, onFeatureSelected }: VillageSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BabylonVillageScene | null>(null);
   const selectionHandlerRef = useRef(onSiteSelected);
+  const featureHandlerRef = useRef(onFeatureSelected);
+  featureHandlerRef.current = onFeatureSelected;
   const cameraHandlerRef = useRef(onCameraMoved);
   const areaHandlerRef = useRef(onAreaGesture);
   selectionHandlerRef.current = onSiteSelected;
@@ -36,6 +39,7 @@ export function VillageScene({ state, highlightedSiteIds, constructionMode = fal
       (siteId, anchor) => selectionHandlerRef.current(siteId, anchor),
       () => cameraHandlerRef.current(),
       (first, last, tap) => areaHandlerRef.current(first, last, tap),
+      (featureId, anchor) => featureHandlerRef.current?.(featureId, anchor),
     );
     sceneRef.current = scene;
     return () => {

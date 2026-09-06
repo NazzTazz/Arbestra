@@ -27,3 +27,6 @@ export const WORLD_GENERATION_V2 = {
     ],
   },
 } as const;
+
+/** These values affect only worlds generated after this code is deployed. */
+export const STONE_DEPOSIT_INITIAL_AMOUNT = { min: 750, max: 1250 } as const;

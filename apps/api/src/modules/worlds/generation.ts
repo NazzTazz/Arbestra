@@ -9,7 +9,7 @@ import {
   worldCellKey,
 } from './coordinates.js';
 import { planClearingFeatures } from './clearing-features.js';
-import { WORLD_GENERATION_V2 } from './generation-config.js';
+import { STONE_DEPOSIT_INITIAL_AMOUNT, WORLD_GENERATION_V2 } from './generation-config.js';
 
 export const TERRAIN = {
   grassland: 1,
@@ -22,6 +22,11 @@ const {
   terrain: TERRAIN_CONFIG,
   features: FEATURE_CONFIG,
 } = WORLD_GENERATION_V2;
+
+function stoneDepositAmount(variantSeed: number): number {
+  const span = STONE_DEPOSIT_INITIAL_AMOUNT.max - STONE_DEPOSIT_INITIAL_AMOUNT.min + 1;
+  return STONE_DEPOSIT_INITIAL_AMOUNT.min + (Math.abs(variantSeed) % span);
+}
 
 interface ClearingPlan {
   centerCellX: number;
@@ -404,6 +409,12 @@ export async function generateWorld(
         conflict.columns(['worldId', 'cellX', 'cellY']).doNothing(),
       )
       .execute();
+    const stones = batch.filter((feature) => feature.featureTypeCode === 'stone_outcrop');
+    if (stones.length) await transaction.insertInto('stoneDeposits').values(stones.map((feature) => ({
+      worldId, featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY,
+      initialAmount: stoneDepositAmount(feature.variantSeed), remainingAmount: stoneDepositAmount(feature.variantSeed),
+      reservedAmount: 0, revision: 1, updatedAt: sql`transaction_timestamp()`,
+    }))).execute();
   }
   await transaction
     .updateTable('worlds')

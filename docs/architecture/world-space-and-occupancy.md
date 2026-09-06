@@ -92,3 +92,8 @@ La migration conserve strictement les bâtiments et extensions existants.
 ## Hors scope
 
 Extraction, terrassement, rendements des gisements, territoire politique, quêtes, spawn, streaming et rendu 3D du tore.
+
+
+## Pierre épuisée (012)
+
+La position persiste dans `stone_deposits` après suppression de l’occupation. Le snapshot conserve la feature depleted comme trace, qui ne bloque pas `canBuild`. La cellule libérée reste soumise au terrain et aux autres règles de construction. Les commandes recherchent le UUID dans le monde, jamais dans la fenêtre 64×64. Les rochers sont invalidés individuellement par ID/révision, indépendamment du terrain.

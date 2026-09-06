@@ -1,5 +1,7 @@
 # ARBESTRA — Context for Astra
 
+> Note de reprise, 2026-09-05 : document historique d'intention, non exhaustif des décisions ultérieures. Pour l'état courant et les règles de travail, lire [SESSION-HANDOFF.md](../SESSION-HANDOFF.md) et [AGENTS.md](../AGENTS.md). Les décisions explicites ultérieures de Tristan et la spec de la tranche active priment sur les intentions anciennes ci-dessous.
+
 > **Purpose of this document**  
 > This is not a specification and not a README. It is a context-transfer note for an AI/model reviewing the Arbestra repository. It summarizes the project's genealogy, the technical and product directions already discussed, the deliberately absurd worldbuilding ideas that may have architectural consequences, and the areas where a critical external review is wanted.
 >
@@ -652,4 +654,3 @@ That is the lens this audit should use.
 # 16. One-sentence project brief
 
 **Arbestra is a clean-room, server-authoritative, persistent web strategy game using React + Babylon.js + Fastify + PostgreSQL and a deterministic Rust combat engine, trying to stay brutally simple in infrastructure while leaving just enough room for a world that may eventually reveal itself to be a literal donut with bad routes, cartographers, and eclipses inside its own hole.**
-
