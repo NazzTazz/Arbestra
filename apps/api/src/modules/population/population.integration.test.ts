@@ -121,6 +121,18 @@ describe.sequential('population with PostgreSQL', () => {
     expect(state.village.population).toMatchObject({ total: 15, available: 11, resting: 4 });
   });
 
+  it('makes short-rest and legacy full-energy cohorts available in the village snapshot', async () => {
+    for (const energy of [9, 10]) {
+      await db.updateTable('populationCohorts').set({ activity: 'resting', energy, energyProgress: 0,
+        foodUsedSinceRest: 2, restingSince: sql`statement_timestamp() - interval '31 minutes'`,
+        energyUpdatedAt: sql`statement_timestamp() - interval '31 minutes'` })
+        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).execute();
+      const state = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+      expect(state.village.population).toMatchObject({ total: 15, available: 15, resting: 0 });
+      expect(state.village.population.energyCounts[10]).toBe(15);
+    }
+  });
+
   it('serializes two discoveries on the village and returns one persistent credit to both callers', async () => {
     const before = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
     expect(before.cells.find((cell) => cell.building?.id === DEVELOPMENT_IDS.townHall)?.building?.hiddenSuppliesAvailable).toBe(true);

@@ -24,27 +24,17 @@ function clampEnergy(value: number) { return Math.max(0, Math.min(10, value)); }
 /** Advances energy lazily. `progress` carries sub-point work across actions. */
 export function advanceEnergy(state: EnergyState, through: Date): EnergyState {
   let remaining = Math.max(0, through.getTime() - state.updatedAt.getTime());
-  if (remaining === 0) return state;
   let cursor = state.updatedAt.getTime();
   let exact = state.energy * UNITS + state.progress;
   let activity = state.activity;
   let restingSince = state.restingSince;
   let foodUsedSinceRest = state.foodUsedSinceRest;
+  if (activity === 'resting' && exact === 10 * UNITS) {
+    if (restingSince && cursor - restingSince.getTime() >= REST_RESET_MS) foodUsedSinceRest = 0;
+    activity = 'idle';
+    restingSince = null;
+  }
   while (remaining > 0) {
-    if (activity === 'resting' && exact === 10 * UNITS && restingSince) {
-      const untilReset = Math.max(0, REST_RESET_MS - (cursor - restingSince.getTime()));
-      if (untilReset > remaining) {
-        cursor += remaining;
-        remaining = 0;
-        break;
-      }
-      cursor += untilReset;
-      remaining -= untilReset;
-      activity = 'idle';
-      restingSince = null;
-      foodUsedSinceRest = 0;
-      continue;
-    }
     const rate = RATE_PER_MILLISECOND[activity];
     const boundary = rate < 0 ? 0 : 10 * UNITS;
     const distance = Math.abs(boundary - exact);
@@ -63,13 +53,10 @@ export function advanceEnergy(state: EnergyState, through: Date): EnergyState {
       restingSince = new Date(cursor);
       continue;
     }
-    // Full voluntary rests wait here until their five-hour qualifying period.
-    // An automatic rest reaches full after precisely five hours from empty.
-    if (restingSince && cursor - restingSince.getTime() >= REST_RESET_MS) {
-      activity = 'idle';
-      restingSince = null;
-      foodUsedSinceRest = 0;
-    }
+    // Waking at full energy and qualifying for more food are separate rules.
+    if (restingSince && cursor - restingSince.getTime() >= REST_RESET_MS) foodUsedSinceRest = 0;
+    activity = 'idle';
+    restingSince = null;
   }
   return {
     energy: clampEnergy(Math.floor(exact / UNITS)),
@@ -102,6 +89,6 @@ export function feedEnergy(state: EnergyState): EnergyState | null {
 }
 
 export function beginRest(state: EnergyState): EnergyState | null {
-  if (state.activity !== 'idle') return null;
+  if (state.activity !== 'idle' || state.energy * UNITS + state.progress >= 10 * UNITS) return null;
   return { ...state, activity: 'resting', restingSince: state.updatedAt };
 }

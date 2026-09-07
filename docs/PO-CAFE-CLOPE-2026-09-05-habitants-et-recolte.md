@@ -49,7 +49,7 @@ Ces points sont des recommandations, pas des règles décidées à ta place :
 1. **Tout le Jardin ou rien pour commencer.** Dix parcelles demandent dix personnes ; s'il n'y en a que neuf de disponibles, on explique pourquoi le départ est impossible. On réserve les carottes au départ. Pas d'annulation ni de récolte partielle pour cette version.
 2. **On part avec assez d'énergie pour tenir la minute.** On évite qu'un récolteur s'endorme à mi-parcours et transforme la petite tranche en gestion de relève.
 3. **On garde les bouts de fatigue.** Une minute de travail ne coûte pas un point entier, mais soixante récoltes ne sont pas gratuites. Le serveur conserve cette progression même si la jauge reste graduée de zéro à dix. Cela peut créer davantage de groupes que onze : on ne triche pas en fusionnant des gens qui n'ont pas la même fatigue.
-4. **Repas et repos par commandes collectives simples.** Proposition : choisir combien de personnes disponibles mangent une carotte chacune ou partent se reposer. Le repos volontaire dure au moins cinq heures pour pouvoir restaurer le quota alimentaire. Pas de réveil anticipé ni de repas automatiques pour cette première version.
+4. **Repas et repos par commandes collectives simples.** Choisir combien de personnes disponibles mangent une carotte chacune ou partent se reposer. Arbitrage du 7 septembre : ils se réveillent dès qu'ils atteignent dix d'énergie ; ceux qui sont exactement pleins restent disponibles. Une sieste courte ne restaure pas le quota alimentaire : il faut cinq heures continues pour cela. Pas de repas automatiques pour cette première version.
 
 ## Ce qui attend dehors
 

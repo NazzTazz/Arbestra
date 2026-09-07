@@ -1,4 +1,12 @@
-# Coffre, journal et indice de l'Oracle — clôture du 7 septembre 2026
+# Repos jusqu'à énergie 10 — 7 septembre 2026
+
+Arbitrage de Tristan implémenté et validé : réveil dès énergie exacte 10, aucune immobilisation de cinq heures à pleine énergie ; une sieste courte ne restaure pas le quota alimentaire. Anciennes cohortes pleines endormies prises en charge à la lecture, sans migration ni nouveau reset. [Handoff et preuves](docs/HANDOFF-2026-09-07-REPOS-A-10.md) : 90 tests, 4 parcours navigateur desktop/mobile, lint/typecheck/build API verts. Correctif prêt et publié dans le workflow autorisé ; voir Git pour le hash de ce handoff. `hud.css` reste hors livraison.
+
+## Coffre, journal et indice — clôture et opérations dev précédentes
+
+Test manuel demandé ensuite par Tristan : village dev Clairière de `player@arbestra.local` réinitialisé dans une transaction ciblée (Hôtel de ville niveau 1, 15 habitants reposés, 2 000 bois, 50 carottes, 0 pierre, coffre disponible et grimoire vide). Compte, sessions et monde conservés ; tâches et progression du village supprimées. Nouvel onglet Chrome ouvert pour une session d'indice vierge. Script ponctuel retiré après succès.
+
+Développement migré ensuite à la demande explicite de Tristan : `corepack pnpm db:migrate` a appliqué `014_village_accomplishments` avec succès sur la base locale `arbestra` (`127.0.0.1:5432`). Aucun reset ni seed. Les mentions « base dev inchangée » ci-dessous décrivent les validations précédentes.
 
 Tristan a validé l'indice : 90 secondes visibles sans action réussie ni découverte du coffre, une seule fois par session, sans panneau automatique. Implémentation et validations terminées : [handoff de clôture](docs/HANDOFF-2026-09-07-INDICE-ORACLE.md), [spec](docs/SPEC-COFFRE-JOURNAL-ORACLE.md). **Tranche clôturée.** 9 tests ciblés verts dont 5 nouveaux, 4 parcours navigateur de l'indice desktop/mobile verts, lint/typecheck et build client verts. Base dev inchangée. Ce handoff accompagne la publication autorisée de l'indice ; le socle précédent est poussé dans `38b801a`. Seul `hud.css`, brouillon préexistant, reste hors livraison. Première récolte recommandée ensuite.
 

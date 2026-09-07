@@ -13,7 +13,7 @@ Un défaut distinct de rafraîchissement a été corrigé dans le worktree : tan
 ## Existant prouvé
 
 - Le serveur conserve pour chaque cohorte `memberCount`, l'activité, l'énergie exacte, `energyUpdatedAt` et `restingSince`.
-- Un repos continu se termine cinq heures après `restingSince`. Le calcul serveur projette déjà automatiquement le retour à `idle`.
+- Arbitrage ultérieur du 7 septembre : un repos se termine dès que l'énergie exacte atteint 10 ; les cinq heures continues servent uniquement à restaurer le quota alimentaire. Les futures vagues de réveil doivent utiliser la fatigue restante, pas une échéance fixe `restingSince + 5 h`.
 - Le contrat public ne livre que les totaux `available`, `working`, `resting` et `energyCounts`. Il ne permet donc pas au client de calculer honnêtement les échéances de réveil.
 - `serverTime` et l'offset serveur sont déjà utilisés dans le front pour les autres comptes à rebours.
 - Les cohortes sont des groupes techniques, pas des personnes ni des identités à exposer au joueur.
@@ -32,7 +32,7 @@ Le panneau Habitants devrait contenir une section **Au dortoir** :
 
 Pour une population très fragmentée, ne pas afficher vingt lignes presque identiques. Regrouper visuellement les réveils proches dans une fenêtre d'une minute est acceptable, à condition que le serveur fournisse les échéances exactes et que ce regroupement reste uniquement de présentation.
 
-La jauge d'énergie peut rester complémentaire, mais ne doit pas servir d'horloge : `Énergie 7` ne permet pas de déduire la fin d'un repos volontaire, qui reste qualifié par cinq heures continues.
+La jauge arrondie peut rester complémentaire, mais ne donne pas l'échéance exacte : les fractions énergétiques déterminent le temps restant jusqu'à 10. Depuis l'arbitrage du 7 septembre, il n'existe plus de minimum de cinq heures de repos volontaire.
 
 ## Contrat minimal proposé
 
@@ -81,7 +81,7 @@ Les libellés doivent distinguer `au travail`, `disponibles` et `au repos`. Évi
 
 - Ton final : « dortoir », « repos », ou une formulation plus diégétique liée au village.
 - Afficher ou non toutes les vagues au-delà des trois premières.
-- Ajouter plus tard un réveil anticipé. Ce serait une nouvelle règle gameplay avec conséquences sur le quota alimentaire ; ce n'est pas nécessaire pour résoudre le problème d'information.
+- Un réveil manuel avant énergie 10 reste hors scope ; le réveil automatique dès 10 est désormais acté le 7 septembre, sans remise à zéro du quota alimentaire si le repos a duré moins de cinq heures.
 - Donner ultérieurement un effet réel au manque de couchages. Ne pas le coupler à cette tranche d'affichage sans arbitrage gameplay explicite.
 
 ## Tranche d'implémentation suggérée

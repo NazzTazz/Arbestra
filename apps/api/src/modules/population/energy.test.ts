@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceEnergy, type EnergyState } from './energy.js';
+import { advanceEnergy, beginRest, type EnergyState } from './energy.js';
 
 const at = new Date('2026-09-05T00:00:00.000Z');
 const idle = (): EnergyState => ({ energy: 10, progress: 0, activity: 'idle', restingSince: null, foodUsedSinceRest: 2, updatedAt: at });
@@ -27,9 +27,18 @@ describe('population energy', () => {
     const afterTwoCycles = advanceEnergy(idle(), new Date(at.getTime() + 54 * 3_600_000));
     expect(afterTwoCycles).toMatchObject({ energy: 10, progress: 0, activity: 'idle' });
   });
-  it('keeps a voluntary full-energy rest until its five qualifying hours pass', () => {
+  it('leaves a full-energy resident available and wakes a legacy full-energy rest immediately', () => {
+    expect(beginRest(idle())).toBeNull();
     const resting: EnergyState = { ...idle(), activity: 'resting', restingSince: at, foodUsedSinceRest: 2 };
-    expect(advanceEnergy(resting, new Date(at.getTime() + 4 * 3_600_000)).activity).toBe('resting');
-    expect(advanceEnergy(resting, new Date(at.getTime() + 5 * 3_600_000))).toMatchObject({ activity: 'idle', foodUsedSinceRest: 0 });
+    expect(advanceEnergy(resting, at)).toMatchObject({ activity: 'idle', restingSince: null, foodUsedSinceRest: 2 });
+  });
+  it('wakes at full energy after a short rest without resetting food quota', () => {
+    const resting = beginRest({ ...idle(), energy: 9 })!;
+    expect(advanceEnergy(resting, new Date(at.getTime() + 1_800_000 - 1)).activity).toBe('resting');
+    const awake = advanceEnergy(resting, new Date(at.getTime() + 1_800_000));
+    expect(awake).toMatchObject({ energy: 10, progress: 0, activity: 'idle', restingSince: null, foodUsedSinceRest: 2 });
+    const later = new Date(at.getTime() + 5 * 3_600_000);
+    expect(advanceEnergy(resting, later)).toEqual(advanceEnergy(awake, later));
+    expect(advanceEnergy(resting, later).foodUsedSinceRest).toBe(2);
   });
 });
