@@ -12,6 +12,8 @@ HTTP JSON est le défaut. SSE/WebSocket, Redis et queues externes restent absent
 
 ## Direction produit, distincte de l'architecture livrée
 
+La tranche [Jardins par parcelle, fusion et agrandissement tolérant](../SPEC-JARDINS-PARCELLES-FUSION.md) est présente dans le worktree avec la migration 015, mais reste **à corriger / à valider** : la [recette du 7 septembre](../REVIEW-2026-09-07-JARDINS.md) reproduit des défauts de migration, de balayage et de collision. PostgreSQL porte le stock et le curseur de chaque parcelle ; le snapshot expose les composantes cardinales fusionnées.
+
 La [direction produit consolidée](../DIRECTION-PRODUIT.md) fixe le parcours initial et les intentions population/Oracle/karma, avec leurs points ouverts. Le [lore TRY](../../docs-lore/TRY-SAMSARA.md) pose l'expérience sans inscription et l'isolation du monde persistant. Ces documents ne prescrivent pas une implémentation générale ; une spec bornée reste nécessaire pour chaque tranche.
 
 Conventions et tranches implémentées :

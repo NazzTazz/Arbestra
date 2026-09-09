@@ -1,6 +1,6 @@
 # Construction spatiale et Jardin surfacique
 
-Statut : **implémentation dans le worktree ; validation UX desktop/tactile manuelle en attente**.
+Statut : **implémenté dans le worktree ; parcours clavier desktop/mobile automatisés validés**.
 
 ## Principe
 
@@ -23,7 +23,7 @@ Jardin niveau 1 :
 - capacité : `600 carottes × cellules actives` ;
 - la durée configurée s’applique au chantier complet et n’est pas multipliée par la surface dans cette tranche.
 
-Avant toute variation de superficie active, le buffer est matérialisé au timestamp PostgreSQL de l’échéance avec son ancien taux et son ancienne capacité. Le nouveau taux commence à cette échéance. Une capacité atteinte suspend toujours la production jusqu’à une récolte ou une augmentation de surface.
+Chaque parcelle active possède son stock, son reliquat et son curseur dans `garden_plots`. Une nouvelle parcelle commence à produire à l'échéance exacte de son chantier ; les parcelles existantes gardent leurs propres curseurs. Une capacité atteinte suspend la production de cette parcelle jusqu’à sa récolte.
 
 Les stocks et productions matérialisées restent entiers avec reliquat exact selon [Économie](./economy.md).
 
@@ -59,7 +59,7 @@ Version initiale :
 
 Construction initiale : toutes les cellules doivent être constructibles avant la commande. Elles ne peuvent pas utiliser leur propre chantier pour étendre le rayon de construction.
 
-Extension : toutes les cellules sont nouvelles, forment un rectangle et au moins l’une partage un côté avec une cellule **active** du Jardin. Une diagonale seule ne suffit pas.
+Extension : le geste décrit un rectangle complet. Une cellule active d'un Jardin logique du même village est tolérée et gratuite ; seules les cellules libres sont réservées et facturées. Une cellule en chantier ou occupée par un autre objet rejette toute la commande. Le rectangle doit recouvrir ou toucher par un côté le Jardin actif ; une diagonale seule ne suffit pas. Un rectangle sans cellule nouvelle est un no-op sans débit ni tâche.
 
 ## Cycle de vie
 
@@ -81,20 +81,20 @@ Dans une transaction :
 Dans une transaction :
 
 1. verrouiller le Jardin et vérifier l’absence d’expansion courante ;
-2. matérialiser son buffer au temps PostgreSQL courant ;
-3. valider et réserver toutes les nouvelles cellules ;
+2. classer le rectangle complet entre parcelles existantes tolérées, nouvelles cellules et obstacles ;
+3. valider et réserver uniquement les nouvelles cellules ;
 4. débiter `50 × nouvelles cellules` une seule fois ;
 5. créer `building_expansions` et une tâche `building-expansion.complete`.
 
-À l’échéance logique, le handler matérialise d’abord le buffer jusqu’à `completes_at` avec l’ancienne superficie, active toutes les occupations de l’expansion, puis termine l’expansion. Une réconciliation à la lecture applique la même règle si le worker est en retard.
+À l’échéance logique, le handler active les occupations de l’expansion, crée leur état `garden_plots` avec `production_updated_at = completes_at`, puis termine l’expansion. Une réconciliation à la lecture applique la même règle si le worker est en retard.
 
 Le handler est transactionnel et idempotent. La clé primaire des occupations arbitre les collisions concurrentes ; un échec ne laisse ni débit, ni chantier, ni cellule réservée.
 
 ## Récolte
 
-Toute cellule de l’emprise renvoie au même `building_id`. Cliquer l’ancre, une extension active ou une extension en chantier ouvre donc le même Jardin.
+Les Jardins actifs du même village qui se touchent par un côté forment une composante logique unique, y compris à travers une couture du tore. Le snapshot choisit le plus petit UUID comme identifiant canonique et réécrit les footprints publics vers lui sans supprimer les bâtiments physiques historiques. Un contact diagonal ne fusionne pas ; une liaison en chantier fusionne seulement à son achèvement.
 
-La récolte reste possible pendant une extension et ne concerne que la production accumulée par les cellules actives. Le verrou du buffer continue d’interdire toute double récolte.
+Chaque parcelle contenant au moins une carotte se récolte séparément avec un habitant. Plusieurs trajets peuvent coexister sur des parcelles distinctes ; une parcelle en trajet continue de produire mais refuse un second départ. Le clic maintenu/glissé parcourt toutes les cases du segment dans l'ordre, déduplique celles déjà visitées et envoie les commandes dans une file séquentielle. Le manque d'habitants arrête les départs suivants du geste. Un bouton par parcelle fournit le chemin clavier.
 
 ## Contrats HTTP
 
@@ -119,10 +119,17 @@ Une extension utilise :
 
 avec `{ "cells": [...] }`. L’ancien upgrade spatial par cellule unique est retiré ; l’upgrade vertical reste inchangé.
 
-Le snapshot Jardin remplace `extensionCell` et `pendingExtensionCell` par :
+Une récolte utilise le même endpoint historique avec une cible explicite :
+
+`POST /api/worlds/:slug/villages/:villageId/buildings/:buildingId/harvest`
+
+avec `{ "commandId": "…", "cellX": 1024, "cellY": 512 }`. Le reçu est idempotent pour cette coordonnée ; réutiliser son identifiant sur une autre parcelle produit `COMMAND_ID_CONFLICT`.
+
+Le snapshot Jardin expose :
 
 - `activeCellCount`, `pendingCellCount` ;
 - une éventuelle expansion avec `id`, `startedAt`, `completesAt` et ses cellules ;
+- `plots`, avec coordonnées, stock projeté, capacité, taux, saturation et trajet éventuel ;
 - chaque `VillageCell.footprint.state` reste `active | reserved`.
 
 Le client peut retrouver l’ancre dans `state.cells` grâce au `buildingId` d’une extension ; il ne duplique pas l’objet bâtiment sur chaque cellule.
@@ -141,7 +148,7 @@ Mode **Construire** :
 - grille détaillée des cellules valides ;
 - choix du type, puis sélection de surface ;
 - Jardin : drag rectangulaire desktop, premier/deuxième coin au tactile ;
-- aperçu du nombre de cellules, du coût total et des invalidités ;
+- aperçu distinct des parcelles existantes, nouvelles et obstacles, avec coût sur les seules nouvelles cellules ;
 - confirmation explicite avant toute commande serveur.
 
 Le bouton **Étendre** d’un Jardin réutilise ce sélecteur, limité aux extensions valides. Annuler une prévisualisation ne produit aucune écriture. Une commande confirmée n’est pas annulable dans cette tranche.
@@ -149,6 +156,7 @@ Le bouton **Étendre** d’un Jardin réutilise ce sélecteur, limité aux exten
 ## Migration des Jardins existants
 
 - Jardin terminé : conserver toutes ses occupations comme actives, fixer `level = 1`, recalculer taux et capacité depuis leur nombre.
+- Migration 015 : répartir l'ancien stock entier par quotient/reste entre les parcelles actives, conserver le reliquat exact et laisser les trajets globaux déjà partis terminer une seule fois.
 - Construction initiale en cours : conserver le bâtiment et toute son emprise sous `buildings.status`.
 - Ancien passage niveau 1 → 2 en cours : convertir ses timestamps et sa cellule réservée en `building_expansions`, remettre le Jardin existant à `completed`, niveau 1.
 - Supprimer les lignes catalogue Jardin niveau 2 ; les valeurs Jardin niveau 1 deviennent les valeurs par cellule.
@@ -166,7 +174,7 @@ Aucune carotte accumulée ni aucun coût déjà payé ne doit être perdu ou rej
 - clic sur toute cellule = même Jardin ;
 - migration fidèle des Jardins à une et deux cellules.
 
-La validation navigateur desktop/tactile est manuelle par le product owner.
+Le parcours explicite de récolte au clavier est couvert sur Chromium desktop et profil mobile. La [recette du 7 septembre](../REVIEW-2026-09-07-JARDINS.md) reproduit toutefois des cellules sautées par le calcul de balayage et un chantier initial toléré à tort par le serveur. Le glissé souris/tactile et les parcours d'extension/fusion restent à vérifier dans le navigateur après correction.
 
 ## Hors scope
 

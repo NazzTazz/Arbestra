@@ -5,7 +5,8 @@ Les stocks joueurs sont des `bigint` entiers : aucune fraction de planche ou de 
 Les taux sont des `numeric` exacts. Chaque flux conserve un reliquat fractionnaire `[0,1[` et un curseur temporel :
 
 - `village_resource_flows` pour la production directe vers un stock ;
-- `building_resource_buffers` pour une production interne plafonnée.
+- `building_resource_buffers` pour les productions internes historiques et non spatiales ;
+- `garden_plots` pour le stock, le reliquat et le curseur de chaque parcelle de Jardin active.
 
 Une lecture sans transition due projette `stock entier + floor(reliquat + taux × temps)` sans écrire. Une commande qui dépense, récolte ou change un taux matérialise d’abord jusqu’à sa borne PostgreSQL, puis conserve le nouveau reliquat.
 
@@ -20,7 +21,9 @@ Valeurs initiales :
 - Scierie : 60, 108, 194,4 bois/h aux niveaux 1–3 ;
 - Jardin : 60 carottes/h et 600 de capacité par cellule active ; 50 bois par cellule construite.
 
-La récolte du Jardin verrouille le buffer, le matérialise et réserve ses unités entières pour un trajet d'une minute. Le stock village est crédité à l'échéance, dans la même transition qui termine la récolte et libère les cohortes affectées. La production survenue pendant le trajet reste dans le buffer. Deux récoltes concurrentes ne peuvent ni réserver ni transférer les mêmes unités.
+La récolte du Jardin cible une coordonnée canonique, verrouille cette parcelle, la matérialise et réserve ses unités entières pour un trajet d'une minute avec un habitant. Le stock village est crédité à l'échéance, dans la même transition qui termine la récolte et libère la cohorte affectée. La parcelle repart immédiatement de zéro avec son reliquat conservé et continue donc de produire pendant le trajet ; ses voisines ne changent pas. L'unicité partielle des trajets actifs par `(world_id, cell_x, cell_y)` et le verrou village empêchent une double réservation. Les trajets antérieurs à la migration 015 gardent leur crédit, leur échéance et leur reçu global.
+
+La migration 015 répartit l'ancien buffer entier par quotient/reste dans l'ordre canonique des coordonnées et place le reliquat fractionnaire sur la dernière parcelle. Elle conserve le stock brut mais ne matérialise pas d'abord la production due : une perte près de la saturation est reproduite dans la [recette](../REVIEW-2026-09-07-JARDINS.md). L'ancien buffer n'alimente plus les nouvelles récoltes, mais continue d'être matérialisé à la réconciliation ; ce n'est donc pas encore une archive passive. Ces points restent à corriger avant validation de la bascule.
 
 ## Accomplissement du coffre (014)
 
