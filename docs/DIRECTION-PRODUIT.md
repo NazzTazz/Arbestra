@@ -59,6 +59,10 @@ Les quêtes suivent le spawn dans le parcours standard et accompagnent la décou
 
 Seuils, délais, récupération, critères de satisfaction, fréquence et taille des arrivées ; articulation avec le quota alimentaire actuel ; refus au départ ou interruption d'une tâche ; effet de l'absence du joueur ; choix du village d'accueil et conservation des effectifs lors des migrations. L'accès au Jardin en cas de mécontentement est une recommandation pour éviter une impasse, pas encore un arbitrage.
 
+## Évolution des Jardins — arbitrages du 7 septembre
+
+Récolte par parcelle par clic maintenu et glissement, un habitant par parcelle, récoltable dès une carotte ; symbole sur les parcelles pleines. Le passage définit l'ordre des départs, sans doublon ; faute d'habitants, les parcelles suivantes restent intactes. Fusion automatique des Jardins du même village contigus par un côté après achèvement de la liaison. Agrandissement rectangulaire tolérant les parcelles de Jardin existantes du même village, sans les refacturer ; seuls les ajouts sont construits. Voir la [spec prête à implémenter](./SPEC-JARDINS-PARCELLES-FUSION.md). Direction graphique : Age of Empires IV ; référence UX de ces interactions : Elvenar. Aucun de ces changements n'est encore livré par ce cadrage.
+
 ## Oracle
 
 **Accomplissements persistants actés** : le joueur peut retrouver ses quêtes accomplies dans un journal, éventuellement présenté sous forme de trophées. PostgreSQL conserve la vérité métier ; l'Oracle en est la voix. Ce choix ne demande pas un moteur générique de trophées. Première tranche implémentée par Sol : [coffre et journal de l'Oracle](./SPEC-COFFRE-JOURNAL-ORACLE.md). Le déclenchement est validé : 90 secondes visibles sans action réussie ni découverte du coffre, une fois par session ; voir la spec et le handoff courant pour les validations.
