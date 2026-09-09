@@ -21,9 +21,8 @@ import {
   COMPLETE_EXPANSION_TASK,
 } from './complete-construction.js';
 import {
-  materializeBuildingBuffer,
   materializeVillageResource,
-  projectBuildingBuffer,
+  projectGardenPlot,
   projectVillageResource,
 } from './economy.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
@@ -334,7 +333,6 @@ async function state(
     ground,
     resourcesRows,
     definitions,
-    bufferRows,
     occupancyRows,
     protectedRows,
     hiddenSupplyRows,
@@ -357,12 +355,6 @@ async function state(
       .where('villageResources.villageId', '=', village.villageId)
       .execute(),
     catalog(tx),
-    tx
-      .selectFrom('buildingResourceBuffers')
-      .select(['buildingId', 'resourceCode'])
-      .where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId)
-      .execute(),
     tx
       .selectFrom('worldCellOccupancies')
       .innerJoin('buildings', (join) =>
@@ -414,22 +406,7 @@ async function state(
       };
     }),
   );
-  const buffers = new Map<
-    string,
-    Awaited<ReturnType<typeof projectBuildingBuffer>>
-  >();
-  for (const row of bufferRows)
-    buffers.set(
-      `${row.buildingId}:${row.resourceCode}`,
-      await projectBuildingBuffer(
-        tx,
-        village.worldId,
-        row.buildingId,
-        row.resourceCode,
-        at,
-      ),
-    );
-  const [cohorts, housingRows, harvestRows, extractionRows] = await Promise.all([
+  const [cohorts, housingRows, harvestRows, extractionRows, gardenPlotRows] = await Promise.all([
     tx.selectFrom('populationCohorts').selectAll()
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
     tx.selectFrom('buildings').select(['buildingType', 'level']).where('worldId', '=', village.worldId)
@@ -438,6 +415,8 @@ async function state(
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
     tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
+    tx.selectFrom('gardenPlots').select(['buildingId', 'cellX', 'cellY'])
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
   ]);
   const projectedCohorts = cohorts.map((cohort) => ({
     ...cohort,
@@ -460,12 +439,42 @@ async function state(
       .filter((cohort) => displayedEnergy(cohort.energy) === energy)
       .reduce((total, cohort) => total + cohort.memberCount, 0)),
   };
-  const harvestByBuilding = new Map(harvestRows.map((harvest) => [harvest.buildingId, harvest]));
+  const projectedPlots = await Promise.all(gardenPlotRows.map((plot) =>
+    projectGardenPlot(tx, village.worldId, plot.cellX, plot.cellY, at)));
+  const harvestByPlot = new Map(harvestRows.filter((item) => item.plotCellX !== null)
+    .map((item) => [worldCellKey(item.plotCellX!, item.plotCellY!), item]));
+  const legacyHarvestByBuilding = new Map(harvestRows.filter((item) => item.plotCellX === null)
+    .map((item) => [item.buildingId, item]));
+  const activeGardenRows = occupancyRows.filter((item) => item.buildingType === 'garden'
+    && item.status === 'completed' && item.pendingExpansionId === null);
+  const gardenAt = new Map(activeGardenRows.map((item) => [worldCellKey(item.cellX, item.cellY), item]));
+  const canonicalByBuilding = new Map<string, string>();
+  const componentBuildings = new Map<string, Set<string>>();
+  const visitedGarden = new Set<string>();
+  for (const seed of activeGardenRows) {
+    const seedKey = worldCellKey(seed.cellX, seed.cellY);
+    if (visitedGarden.has(seedKey)) continue;
+    const queue = [seed], ids = new Set<string>();
+    visitedGarden.add(seedKey);
+    while (queue.length) {
+      const current = queue.shift()!; ids.add(current.buildingId);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const neighbour = gardenAt.get(worldCellKey(normalizeCell(current.cellX + dx, village.widthCells), normalizeCell(current.cellY + dy, village.heightCells)));
+        if (neighbour && !visitedGarden.has(worldCellKey(neighbour.cellX, neighbour.cellY))) {
+          visitedGarden.add(worldCellKey(neighbour.cellX, neighbour.cellY)); queue.push(neighbour);
+        }
+      }
+    }
+    const canonical = [...ids].sort()[0]!;
+    componentBuildings.set(canonical, ids);
+    for (const id of ids) canonicalByBuilding.set(id, canonical);
+  }
   const byBuilding = new Map<string, typeof occupancyRows>();
   for (const row of occupancyRows) {
-    const rows = byBuilding.get(row.buildingId) ?? [];
+    const logicalId = canonicalByBuilding.get(row.buildingId) ?? row.buildingId;
+    const rows = byBuilding.get(logicalId) ?? [];
     rows.push(row);
-    byBuilding.set(row.buildingId, rows);
+    byBuilding.set(logicalId, rows);
   }
   const expansionIds = [...new Set(occupancyRows.flatMap((row) => row.pendingExpansionId ? [row.pendingExpansionId] : []))];
   const expansions = expansionIds.length === 0 ? [] : await tx.selectFrom('buildingExpansions')
@@ -545,13 +554,15 @@ async function state(
       .map((key) => {
         const [cellX, cellY] = parseCellKey(key);
         const row = occupied.get(key),
-          footprint = row ? (byBuilding.get(row.buildingId) ?? []) : [],
+          logicalBuildingId = row ? canonicalByBuilding.get(row.buildingId) ?? row.buildingId : '',
+          footprint = row ? (byBuilding.get(logicalBuildingId) ?? []) : [],
           activeCells = footprint.filter((item) => item.pendingExpansionId === null),
           pendingCells = footprint.filter((item) => item.pendingExpansionId !== null),
           expansion = pendingCells[0]?.pendingExpansionId
             ? expansionById.get(pendingCells[0].pendingExpansionId)
             : undefined,
-          buffer = row ? buffers.get(`${row.buildingId}:carrot`) : undefined;
+          plots = row?.buildingType === 'garden' ? projectedPlots.filter((plot) =>
+            (componentBuildings.get(logicalBuildingId) ?? new Set([row.buildingId])).has(plot.buildingId)) : [];
         return {
           id: key,
           cellX,
@@ -563,9 +574,9 @@ async function state(
             wrappedDelta(cellY, village.anchorCellY, village.heightCells) *
             CELL_SIZE,
           building:
-            row?.role === 'anchor'
+            row?.role === 'anchor' && (!canonicalByBuilding.has(row.buildingId) || row.buildingId === logicalBuildingId)
               ? {
-                  id: row.buildingId,
+                  id: logicalBuildingId,
                   type: row.buildingType as BuildingType,
                   level: row.level,
                   targetLevel: row.targetLevel,
@@ -576,23 +587,32 @@ async function state(
                     row.constructionCompletesAt?.toISOString() ?? null,
                   completedAt: row.completedAt?.toISOString() ?? null,
                   hiddenSuppliesAvailable: hiddenSupplies.get(row.buildingId) ?? false,
-                  garden: buffer
+                  garden: row.buildingType === 'garden' && plots.length
                     ? {
-                        storedCarrots: buffer.amount,
-                        capacity: buffer.capacity,
-                        productionPerHour: buffer.productionPerHour,
-                        productionUpdatedAt:
-                          buffer.productionUpdatedAt.toISOString(),
+                        storedCarrots: plots.reduce((sum, plot) => sum + plot.amount, 0),
+                        capacity: plots.reduce((sum, plot) => sum + plot.capacity, 0),
+                        productionPerHour: plots.reduce((sum, plot) => sum + plot.productionPerHour, 0),
+                        productionUpdatedAt: at.toISOString(),
                         activeCellCount: row.status === 'completed' ? activeCells.length : 0,
                         pendingCellCount: row.status === 'completed' ? pendingCells.length : footprint.length,
+                        plots: plots.map((plot) => {
+                          const harvest = harvestByPlot.get(worldCellKey(plot.cellX, plot.cellY));
+                          return { cellX: plot.cellX, cellY: plot.cellY, storedCarrots: plot.amount,
+                            capacity: plot.capacity, productionPerHour: plot.productionPerHour,
+                            productionUpdatedAt: plot.productionUpdatedAt.toISOString(), full: plot.amount >= plot.capacity,
+                            harvest: harvest ? { id: harvest.id, startedAt: harvest.startedAt.toISOString(),
+                              completesAt: harvest.completesAt.toISOString(), reservedCarrots: number(harvest.reservedCarrots) } : null };
+                        }),
                         expansion: expansion ? {
                           id: expansion.id,
                           startedAt: expansion.startedAt.toISOString(),
                           completesAt: expansion.completesAt.toISOString(),
                           cells: pendingCells.map((item) => ({ cellX: item.cellX, cellY: item.cellY })),
                         } : null,
-                        harvest: harvestByBuilding.get(row.buildingId) ? (() => {
-                          const harvest = harvestByBuilding.get(row.buildingId)!;
+                        harvest: [...(componentBuildings.get(logicalBuildingId) ?? new Set([row.buildingId]))]
+                          .map((id) => legacyHarvestByBuilding.get(id)).find(Boolean) ? (() => {
+                          const harvest = [...(componentBuildings.get(logicalBuildingId) ?? new Set([row.buildingId]))]
+                            .map((id) => legacyHarvestByBuilding.get(id)).find(Boolean)!;
                           return {
                             id: harvest.id, startedAt: harvest.startedAt.toISOString(),
                             completesAt: harvest.completesAt.toISOString(), workerCount: harvest.workerCount,
@@ -605,7 +625,7 @@ async function state(
               : null,
           footprint: row
             ? {
-                buildingId: row.buildingId,
+                buildingId: logicalBuildingId,
                 buildingType: row.buildingType as BuildingType,
                 role: row.role as 'anchor' | 'extension',
                 state:
@@ -947,28 +967,56 @@ export async function expandGarden(
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).forUpdate().executeTakeFirst();
     if (!building || building.buildingType !== 'garden') throw new HttpError(404, 'GARDEN_NOT_FOUND', 'Jardin introuvable.');
     if (building.status !== 'completed') throw new HttpError(409, 'BUILDING_BUSY', 'Le jardin est encore en chantier.');
+    const allActiveGardens = await tx.selectFrom('worldCellOccupancies')
+      .innerJoin('buildings', (join) => join.onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId')
+        .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'))
+      .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY', 'buildings.id as buildingId'])
+      .where('worldCellOccupancies.worldId', '=', village.worldId).where('buildings.villageId', '=', village.villageId)
+      .where('buildings.buildingType', '=', 'garden').where('buildings.status', '=', 'completed')
+      .where('worldCellOccupancies.pendingExpansionId', 'is', null).execute();
+    const activeAt = new Map(allActiveGardens.map((cell) => [worldCellKey(cell.cellX, cell.cellY), cell]));
+    const activeCells = allActiveGardens.filter((cell) => cell.buildingId === building.id), queue = [...allActiveGardens.filter((cell) => cell.buildingId === building.id)];
+    const activeKeys = new Set(activeCells.map((cell) => worldCellKey(cell.cellX, cell.cellY)));
+    while (queue.length) {
+      const current = queue.shift()!;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const next = activeAt.get(worldCellKey(normalizeCell(current.cellX + dx, village.widthCells), normalizeCell(current.cellY + dy, village.heightCells)));
+        if (next && !activeKeys.has(worldCellKey(next.cellX, next.cellY))) {
+          activeKeys.add(worldCellKey(next.cellX, next.cellY)); activeCells.push(next); queue.push(next);
+        }
+      }
+    }
+    const componentIds = [...new Set(activeCells.map((cell) => cell.buildingId))];
     const pending = await tx.selectFrom('buildingExpansions').select('id').where('worldId', '=', village.worldId)
-      .where('buildingId', '=', building.id).where('status', '=', 'under-construction').executeTakeFirst();
+      .where('buildingId', 'in', componentIds).where('status', '=', 'under-construction').executeTakeFirst();
     if (pending) throw new HttpError(409, 'BUILDING_BUSY', 'Le jardin possède déjà une extension en chantier.');
-    const activeCells = await tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY'])
-      .where('worldId', '=', village.worldId).where('buildingId', '=', building.id)
-      .where('pendingExpansionId', 'is', null).execute();
     const selection = normalizeSpatialSelection(rawCells[0]!, rawCells, village.widthCells, village.heightCells);
+    const occupiedRows = await tx.selectFrom('worldCellOccupancies')
+      .leftJoin('buildings', (join) => join.onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId')
+        .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'))
+      .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY', 'worldCellOccupancies.pendingExpansionId',
+        'buildings.buildingType', 'buildings.villageId'])
+      .where('worldCellOccupancies.worldId', '=', village.worldId).execute();
+    const occupiedAt = new Map(occupiedRows.map((item) => [worldCellKey(item.cellX, item.cellY), item]));
+    const newCells: SpatialCell[] = [];
     for (const cell of selection.cells) {
-      await assertBuildable(tx, village, cell.cellX, cell.cellY);
+      const occupied = occupiedAt.get(worldCellKey(cell.cellX, cell.cellY));
+      if (!occupied) { await assertBuildable(tx, village, cell.cellX, cell.cellY); newCells.push(cell); continue; }
+      if (occupied.pendingExpansionId !== null || occupied.buildingType !== 'garden' || occupied.villageId !== village.villageId)
+        throw new HttpError(409, 'CELL_OCCUPIED', 'Une case de la sélection est occupée ou encore en chantier.');
     }
     if (!selection.cells.some((cell) => activeCells.some((active) =>
-      toroidalManhattan(active.cellX, active.cellY, cell.cellX, cell.cellY, village.widthCells, village.heightCells) === 1,
+      toroidalManhattan(active.cellX, active.cellY, cell.cellX, cell.cellY, village.widthCells, village.heightCells) <= 1,
     ))) throw new HttpError(409, 'INVALID_BUILDING_EXTENSION', 'L’extension doit toucher le jardin actif.');
+    if (newCells.length === 0) return state(tx, accountId, worldSlug, economy);
     const item = await definition(tx, 'garden', 1);
-    await materializeBuildingBuffer(tx, village.worldId, building.id, 'carrot', at);
-    await debit(tx, village.worldId, village.villageId, scaledCosts(item.costs, selection.cells.length), at);
+    await debit(tx, village.worldId, village.villageId, scaledCosts(item.costs, newCells.length), at);
     const completesAt = new Date(at.getTime() + (durationOverride ?? item.constructionDurationSeconds * 1_000));
     const expansion = await tx.insertInto('buildingExpansions').values({
       worldId: village.worldId, villageId: village.villageId, buildingId: building.id,
       status: 'under-construction', startedAt: at, completesAt, completedAt: null,
     }).returning('id').executeTakeFirstOrThrow();
-    await reserveSelection(tx, village.worldId, building.id, selection.anchor, selection.cells, expansion.id, false);
+    await reserveSelection(tx, village.worldId, building.id, selection.anchor, newCells, expansion.id, false);
     await tx.insertInto('scheduledTasks').values({
       worldId: village.worldId, taskType: COMPLETE_EXPANSION_TASK, subjectId: expansion.id,
       payload: {}, dueAt: completesAt, availableAt: completesAt, lastError: null, completedAt: null,
@@ -1106,6 +1154,8 @@ export async function harvestGarden(
   worldSlug: string,
   villageId: string,
   buildingId: string,
+  cellXOrCommandId?: number | string,
+  cellY?: number,
   commandId: string = randomUUID(),
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
@@ -1114,7 +1164,41 @@ export async function harvestGarden(
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     const at = economy.through;
-    await startGardenHarvest(tx, village.worldId, village.villageId, buildingId, commandId, at);
+    const plots = await tx.selectFrom('gardenPlots').select(['buildingId', 'cellX', 'cellY'])
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute();
+    const legacyCommandId = typeof cellXOrCommandId === 'string' ? cellXOrCommandId : commandId;
+    const oldReceipt = await tx.selectFrom('gardenHarvests').select(['plotCellX', 'plotCellY'])
+      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
+      .where('commandId', '=', legacyCommandId).executeTakeFirst();
+    const fallback = plots.find((plot) => plot.buildingId === buildingId);
+    const x = normalizeCell(typeof cellXOrCommandId === 'number' ? cellXOrCommandId : fallback?.cellX ?? -1, village.widthCells);
+    const y = normalizeCell(typeof cellY === 'number' ? cellY : fallback?.cellY ?? -1, village.heightCells);
+    if (oldReceipt) {
+      if (oldReceipt.plotCellX === null) return state(tx, accountId, worldSlug, economy);
+      if (oldReceipt.plotCellX !== x || oldReceipt.plotCellY !== y)
+        throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée pour une autre parcelle.');
+      return state(tx, accountId, worldSlug, economy);
+    }
+    const byCell = new Map(plots.map((plot) => [worldCellKey(plot.cellX, plot.cellY), plot]));
+    const queue = plots.filter((plot) => plot.buildingId === buildingId);
+    const visited = new Set(queue.map((plot) => worldCellKey(plot.cellX, plot.cellY)));
+    while (queue.length) {
+      const current = queue.shift()!;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const next = byCell.get(worldCellKey(normalizeCell(current.cellX + dx, village.widthCells), normalizeCell(current.cellY + dy, village.heightCells)));
+        if (next && !visited.has(worldCellKey(next.cellX, next.cellY))) {
+          visited.add(worldCellKey(next.cellX, next.cellY)); queue.push(next);
+        }
+      }
+    }
+    const target = byCell.get(worldCellKey(x, y));
+    if (!target || !visited.has(worldCellKey(x, y)))
+      throw new HttpError(404, 'GARDEN_PLOT_NOT_READY', 'Cette parcelle n’appartient pas à ce Jardin.');
+    const componentIds = [...new Set(plots.filter((plot) => visited.has(worldCellKey(plot.cellX, plot.cellY))).map((plot) => plot.buildingId))];
+    const legacyHarvest = await tx.selectFrom('gardenHarvests').select('id').where('worldId', '=', village.worldId)
+      .where('buildingId', 'in', componentIds).where('plotCellX', 'is', null).where('status', '=', 'in-progress').executeTakeFirst();
+    if (legacyHarvest) throw new HttpError(409, 'GARDEN_HARVEST_IN_PROGRESS', 'Une récolte existante est encore en cours sur ce Jardin.');
+    await startGardenHarvest(tx, village.worldId, village.villageId, target.buildingId, x, y, legacyCommandId, at);
     return state(tx, accountId, worldSlug, economy);
   });
 }

@@ -16,6 +16,12 @@ export interface ProjectedBuffer {
   productionUpdatedAt: Date;
 }
 
+export interface ProjectedGardenPlot extends ProjectedBuffer {
+  cellX: number;
+  cellY: number;
+  buildingId: string;
+}
+
 interface ProductionDelta {
   wholeUnits: string;
   remainder: string;
@@ -234,4 +240,55 @@ export async function materializeBuildingBuffer(
     productionUpdatedAt: effectiveThrough,
   }).where('worldId', '=', worldId).where('buildingId', '=', buildingId).where('resourceCode', '=', resourceCode).execute();
   return { resourceCode, amount: capped, capacity, productionPerHour: rate, productionUpdatedAt: effectiveThrough };
+}
+
+async function gardenPlotState(
+  transaction: Transaction<Database>, worldId: string, cellX: number, cellY: number,
+) {
+  return transaction.selectFrom('gardenPlots')
+    .innerJoin('buildings', (join) => join
+      .onRef('buildings.worldId', '=', 'gardenPlots.worldId')
+      .onRef('buildings.id', '=', 'gardenPlots.buildingId'))
+    .innerJoin('buildingLevelProduction', (join) => join
+      .onRef('buildingLevelProduction.buildingTypeCode', '=', 'buildings.buildingType')
+      .onRef('buildingLevelProduction.level', '=', 'buildings.level')
+      .on('buildingLevelProduction.resourceCode', '=', 'carrot'))
+    .select(['gardenPlots.buildingId', 'gardenPlots.cellX', 'gardenPlots.cellY', 'gardenPlots.storedAmount',
+      'gardenPlots.remainder', 'gardenPlots.productionUpdatedAt', 'buildingLevelProduction.ratePerHour',
+      'buildingLevelProduction.capacity'])
+    .where('gardenPlots.worldId', '=', worldId).where('gardenPlots.cellX', '=', cellX)
+    .where('gardenPlots.cellY', '=', cellY).executeTakeFirstOrThrow();
+}
+
+function projectedPlot(row: Awaited<ReturnType<typeof gardenPlotState>>, delta: ProductionDelta, through: Date): ProjectedGardenPlot {
+  const capacity = Number(row.capacity ?? 0);
+  return { resourceCode: 'carrot', buildingId: row.buildingId, cellX: row.cellX, cellY: row.cellY,
+    amount: Math.min(capacity, asNumber(row.storedAmount) + asNumber(delta.wholeUnits)), capacity,
+    productionPerHour: Number(row.ratePerHour), productionUpdatedAt: through };
+}
+
+export async function projectGardenPlot(
+  transaction: Transaction<Database>, worldId: string, cellX: number, cellY: number, through: Date,
+): Promise<ProjectedGardenPlot> {
+  const row = await gardenPlotState(transaction, worldId, cellX, cellY);
+  const effectiveThrough = through > row.productionUpdatedAt ? through : row.productionUpdatedAt;
+  const delta = await productionDelta(transaction, String(row.remainder), Number(row.ratePerHour), row.productionUpdatedAt, effectiveThrough);
+  return projectedPlot(row, delta, effectiveThrough);
+}
+
+export async function materializeGardenPlot(
+  transaction: Transaction<Database>, worldId: string, cellX: number, cellY: number, through: Date,
+): Promise<ProjectedGardenPlot> {
+  await transaction.selectFrom('gardenPlots').select('cellX').where('worldId', '=', worldId)
+    .where('cellX', '=', cellX).where('cellY', '=', cellY).forUpdate().executeTakeFirstOrThrow();
+  const row = await gardenPlotState(transaction, worldId, cellX, cellY);
+  const effectiveThrough = through > row.productionUpdatedAt ? through : row.productionUpdatedAt;
+  const delta = await productionDelta(transaction, String(row.remainder), Number(row.ratePerHour), row.productionUpdatedAt, effectiveThrough);
+  const capacity = Number(row.capacity ?? 0);
+  const amount = Math.min(capacity, asNumber(row.storedAmount) + asNumber(delta.wholeUnits));
+  await transaction.updateTable('gardenPlots').set({ storedAmount: amount,
+    remainder: amount >= capacity ? '0' : delta.remainder, productionUpdatedAt: effectiveThrough })
+    .where('worldId', '=', worldId).where('cellX', '=', cellX).where('cellY', '=', cellY).executeTakeFirstOrThrow();
+  return { resourceCode: 'carrot', buildingId: row.buildingId, cellX, cellY, amount, capacity,
+    productionPerHour: Number(row.ratePerHour), productionUpdatedAt: effectiveThrough };
 }

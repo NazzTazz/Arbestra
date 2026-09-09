@@ -295,10 +295,10 @@ describe.sequential('stone regression proofs', () => {
   it('M: extraction and garden share workers, block meals/rest while working, and details project energy to H', async () => {
     const built = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', villageId, 1024, 512, 'garden', 0);
     const gardenId = built.cells.find(cell => cell.building?.type === 'garden')!.building!.id;
-    await db.updateTable('buildingResourceBuffers').set({ storedAmount:100, productionUpdatedAt:t0 }).where('buildingId','=',gardenId).execute();
+    await db.updateTable('gardenPlots').set({ storedAmount:100, productionUpdatedAt:t0 }).where('buildingId','=',gardenId).execute();
     await db.updateTable('populationCohorts').set({energyUpdatedAt:t0}).where('worldId','=',worldId).execute();
     const id=await stone();
-    await db.transaction().execute(async tx => { await lockVillage(tx); await startGardenHarvest(tx,worldId,villageId,gardenId,randomUUID(),t0); });
+    await db.transaction().execute(async tx => { await lockVillage(tx); await startGardenHarvest(tx,worldId,villageId,gardenId,1024,512,randomUUID(),t0); });
     await start(id,10);
     await expect(start(id,5)).rejects.toMatchObject({code:'WORKERS_UNAVAILABLE'});
     await start(id,4);
@@ -308,7 +308,7 @@ describe.sequential('stone regression proofs', () => {
     await db.updateTable('gardenHarvests').set({completesAt:future}).where('worldId','=',worldId).execute();
     const otherGarden=await constructBuilding(db,DEVELOPMENT_IDS.account,'aube',villageId,1025,513,'garden',0);
     const otherGardenId=otherGarden.cells.find(cell=>cell.building?.type==='garden'&&cell.building.id!==gardenId)!.building!.id;
-    await db.updateTable('buildingResourceBuffers').set({storedAmount:100}).where('buildingId','=',otherGardenId).execute();
+    await db.updateTable('gardenPlots').set({storedAmount:100}).where('buildingId','=',otherGardenId).execute();
     await expect(harvestGarden(db,DEVELOPMENT_IDS.account,'aube',villageId,otherGardenId)).rejects.toMatchObject({code:'HARVESTERS_UNAVAILABLE'});
     await expect(feedPopulation(db,DEVELOPMENT_IDS.account,'aube',villageId,randomUUID(),1)).rejects.toMatchObject({code:'POPULATION_FOOD_UNAVAILABLE'});
     await expect(restPopulation(db,DEVELOPMENT_IDS.account,'aube',villageId,randomUUID(),1)).rejects.toMatchObject({code:'POPULATION_REST_UNAVAILABLE'});
@@ -332,9 +332,9 @@ describe.sequential('stone regression proofs', () => {
     await db.updateTable('buildings').set({constructionStartedAt:t0,constructionCompletesAt:new Date(t0.getTime()+30000)}).where('id','=',sawId).execute();
     await db.updateTable('populationCohorts').set({energyUpdatedAt:t0}).where('worldId','=',worldId).execute();
     await db.updateTable('villageResourceFlows').set({productionUpdatedAt:t0}).where('worldId','=',worldId).execute();
-    await db.updateTable('buildingResourceBuffers').set({storedAmount:100,productionUpdatedAt:t0,remainder:0.25}).where('buildingId','=',gardenId).execute();
+    await db.updateTable('gardenPlots').set({storedAmount:100,productionUpdatedAt:t0,remainder:0.25}).where('buildingId','=',gardenId).execute();
     const id=await stone();
-    await db.transaction().execute(async tx=>{await lockVillage(tx);await startGardenHarvest(tx,worldId,villageId,gardenId,randomUUID(),t0);});
+    await db.transaction().execute(async tx=>{await lockVillage(tx);await startGardenHarvest(tx,worldId,villageId,gardenId,1024,512,randomUUID(),t0);});
     await start(id,10); // Same D as the garden.
     await start(id,1,villageId,new Date(t0.getTime()+1)); // H+1 stays active.
     const end=new Date(t0.getTime()+600000);

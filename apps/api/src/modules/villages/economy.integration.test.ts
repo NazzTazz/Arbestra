@@ -1,4 +1,5 @@
 ﻿import { sql, type Kysely } from 'kysely';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Transaction } from 'kysely';
 
@@ -7,6 +8,7 @@ import type { VillageState } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
+import { up as migrateGardenPlots } from '../../database/migrations/015_garden_plots.js';
 import type { Database } from '../../database/schema.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
@@ -14,7 +16,7 @@ import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { COMPLETE_CONSTRUCTION_TASK, COMPLETE_EXPANSION_TASK, completeConstruction, completeExpansion } from './complete-construction.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { materializeVillageResource } from './economy.js';
-import { constructBuilding, expandGarden, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
+import { constructBuilding, constructBuildingArea, expandGarden, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
 
 const databaseUrl = testDatabaseUrl();
 const handlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion };
@@ -477,7 +479,7 @@ describe.sequential('economy with PostgreSQL', () => {
     await build('garden', DEVELOPMENT_CELLS.garden);
     const id = await completeAt(DEVELOPMENT_CELLS.garden);
     const t0 = new Date(Date.now() - 3_600_000);
-    await db.updateTable('buildingResourceBuffers').set({ storedAmount: 0, remainder: 0.25, productionUpdatedAt: t0 })
+    await db.updateTable('gardenPlots').set({ storedAmount: 0, remainder: 0.25, productionUpdatedAt: t0 })
       .where('buildingId', '=', id).execute();
     const opened = gate();
     const locked = gate();
@@ -507,7 +509,7 @@ describe.sequential('economy with PostgreSQL', () => {
       await expect(bounded(waitingHarvest)).rejects.toMatchObject({ code: 'GARDEN_HARVEST_IN_PROGRESS' });
       const production = 0.25 + 60 * (Date.parse(first.serverTime) - t0.getTime()) / 3_600_000;
       expect(first.village.carrots).toBe(50);
-      const buffer = await db.selectFrom('buildingResourceBuffers').selectAll().where('buildingId', '=', id).executeTakeFirstOrThrow();
+      const buffer = await db.selectFrom('gardenPlots').selectAll().where('buildingId', '=', id).executeTakeFirstOrThrow();
       expect(buffer.productionUpdatedAt.toISOString()).toBe(first.serverTime);
       expect(Number(buffer.storedAmount)).toBe(0);
       expect(Number(buffer.remainder)).toBeCloseTo(production % 1, 10);
@@ -579,19 +581,19 @@ describe.sequential('economy with PostgreSQL', () => {
   it('caps buffered production and prevents double harvest', async () => {
     await build('garden', DEVELOPMENT_CELLS.garden);
     const id = await completeAt(DEVELOPMENT_CELLS.garden);
-    await db.updateTable('buildingResourceBuffers').set({
+    await db.updateTable('gardenPlots').set({
       storedAmount: 0, remainder: 0, productionUpdatedAt: sql`transaction_timestamp() - interval '20 hours'`,
-    }).where('buildingId', '=', id).where('resourceCode', '=', 'carrot').execute();
+    }).where('buildingId', '=', id).execute();
     const capped = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
     expect(capped.cells.find((cell) => cell.building?.id === id)?.building?.garden?.storedCarrots).toBe(600);
-    await db.updateTable('buildingResourceBuffers').set({ storedAmount: 347, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()` })
-      .where('buildingId', '=', id).where('resourceCode', '=', 'carrot').execute();
+    await db.updateTable('gardenPlots').set({ storedAmount: 347, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()` })
+      .where('buildingId', '=', id).execute();
     const commandId = '33333333-3333-4333-8333-333333333333';
     const started = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, commandId);
     expect(started.village.carrots).toBe(50);
     const retried = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, commandId);
-    expect(retried.cells.find((cell) => cell.building?.id === id)?.building?.garden?.harvest?.id)
-      .toBe(started.cells.find((cell) => cell.building?.id === id)?.building?.garden?.harvest?.id);
+    expect(retried.cells.find((cell) => cell.building?.id === id)?.building?.garden?.plots[0]?.harvest?.id)
+      .toBe(started.cells.find((cell) => cell.building?.id === id)?.building?.garden?.plots[0]?.harvest?.id);
     await expect(harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id))
       .rejects.toMatchObject({ code: 'GARDEN_HARVEST_IN_PROGRESS' });
     await finishHarvest(id);
@@ -618,6 +620,102 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(completed.cells.find((cell) => cell.building?.id === id)?.building?.garden?.activeCellCount).toBe(2);
   });
 
+  it('harvests one plot without changing its neighbour and assigns one inhabitant', async () => {
+    await build('garden', DEVELOPMENT_CELLS.garden);
+    const id = await completeAt(DEVELOPMENT_CELLS.garden);
+    await expandGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, [DEVELOPMENT_CELLS.gardenNorth], 0);
+    await db.updateTable('gardenPlots').set({ storedAmount: 11, remainder: 0, productionUpdatedAt: sql`statement_timestamp()` })
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('cellX', '=', DEVELOPMENT_CELLS.garden.cellX)
+      .where('cellY', '=', DEVELOPMENT_CELLS.garden.cellY).execute();
+    await db.updateTable('gardenPlots').set({ storedAmount: 29, remainder: 0, productionUpdatedAt: sql`statement_timestamp()` })
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('cellX', '=', DEVELOPMENT_CELLS.gardenNorth.cellX)
+      .where('cellY', '=', DEVELOPMENT_CELLS.gardenNorth.cellY).execute();
+    const started = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
+      DEVELOPMENT_CELLS.garden.cellX, DEVELOPMENT_CELLS.garden.cellY);
+    const garden = started.cells.find((cell) => cell.building?.id === id)?.building?.garden;
+    expect(garden?.plots.find((plot) => plot.cellY === DEVELOPMENT_CELLS.garden.cellY)).toMatchObject({ storedCarrots: 0, harvest: { reservedCarrots: 11 } });
+    expect(garden?.plots.find((plot) => plot.cellY === DEVELOPMENT_CELLS.gardenNorth.cellY)).toMatchObject({ storedCarrots: 29, harvest: null });
+    const assigned = await db.selectFrom('populationCohorts').select(sql<number>`sum(member_count)::integer`.as('count'))
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('harvestId', 'is not', null).executeTakeFirstOrThrow();
+    expect(assigned.count).toBe(1);
+  });
+
+  it('charges only five new cells for a 3 by 2 rectangle overlapping one active plot', async () => {
+    const anchor = { cellX: 1024, cellY: 514 };
+    const built = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
+      'garden', anchor, [anchor], 0);
+    const id = built.cells.find((cell) => cell.cellX === anchor.cellX && cell.cellY === anchor.cellY)?.building?.id;
+    expect(id).toBeDefined();
+    const rectangle = [0, 1].flatMap((dy) => [0, 1, 2].map((dx) => ({ cellX: anchor.cellX + dx, cellY: anchor.cellY - dy })));
+    const pending = await expandGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id!, rectangle, 10_000);
+    expect(pending.village.wood).toBe(1700);
+    expect(pending.cells.find((cell) => cell.building?.id === id)?.building?.garden?.pendingCellCount).toBe(5);
+    await makeDue(id!);
+    const beforeNoop = await db.selectFrom('villageResources').select('amount').where('villageId', '=', DEVELOPMENT_IDS.village)
+      .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
+    const completed = await expandGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id!, rectangle, 10_000);
+    expect(completed.cells.find((cell) => cell.building?.id === id)?.building?.garden?.activeCellCount).toBe(6);
+    expect(Number(beforeNoop.amount)).toBe(1700);
+    expect(completed.village.wood).toBe(1700);
+  });
+
+  it('keeps diagonal Gardens separate then fuses the chain when a cardinal bridge completes', async () => {
+    await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1024, 512, 'garden', 0);
+    const diagonal = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1025, 513, 'garden', 0);
+    expect(diagonal.cells.filter((cell) => cell.building?.type === 'garden')).toHaveLength(2);
+    const bridged = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1024, 513, 'garden', 0);
+    const logical = bridged.cells.filter((cell) => cell.building?.type === 'garden');
+    expect(logical).toHaveLength(1);
+    expect(logical[0]?.building?.garden?.plots).toHaveLength(3);
+    expect(new Set(bridged.cells.filter((cell) => cell.footprint?.buildingType === 'garden')
+      .map((cell) => cell.footprint?.buildingId)).size).toBe(1);
+  });
+
+  it('backfills plot stocks deterministically without duplicating an active legacy harvest', async () => {
+    const rollback = new Error('rollback isolated garden plot migration');
+    await expect(db.transaction().execute(async (tx) => {
+      await sql`create schema garden_plot_migration_proof`.execute(tx);
+      await sql`set local search_path to garden_plot_migration_proof, public`.execute(tx);
+      await sql`create table buildings (
+        world_id uuid not null, village_id uuid not null, id uuid not null, building_type text not null, status text not null,
+        primary key (world_id, village_id, id)
+      )`.execute(tx);
+      await sql`create table world_cell_occupancies (
+        world_id uuid not null, building_id uuid, cell_x integer not null, cell_y integer not null, pending_expansion_id uuid
+      )`.execute(tx);
+      await sql`create table building_resource_buffers (
+        world_id uuid not null, building_id uuid not null, resource_code text not null,
+        stored_amount bigint not null, remainder numeric not null, production_updated_at timestamptz not null
+      )`.execute(tx);
+      await sql`create table garden_harvests (
+        id uuid primary key, world_id uuid not null, building_id uuid not null, status text not null
+      )`.execute(tx);
+      await sql`create unique index garden_harvests_one_active_building
+        on garden_harvests(world_id, building_id) where status = 'in-progress'`.execute(tx);
+      const buildingId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      await sql`insert into buildings values (${DEVELOPMENT_IDS.world}::uuid, ${DEVELOPMENT_IDS.village}::uuid,
+        ${buildingId}::uuid, 'garden', 'completed')`.execute(tx);
+      await sql`insert into world_cell_occupancies values
+        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 8, 9, null),
+        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 9, 9, null),
+        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 10, 9, null),
+        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 11, 9, ${randomUUID()}::uuid)`.execute(tx);
+      await sql`insert into building_resource_buffers values
+        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 'carrot', 10, 0.25, '2026-09-07T00:00:00Z')`.execute(tx);
+      await sql`insert into garden_harvests values
+        ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 'in-progress')`.execute(tx);
+      await migrateGardenPlots(tx as unknown as Kysely<unknown>);
+      const plots = await sql<{ stored: string; remainder: string }>`select stored_amount as stored, remainder
+        from garden_plots order by cell_x, cell_y`.execute(tx);
+      expect(plots.rows.map((row) => Number(row.stored))).toEqual([4, 3, 3]);
+      expect(plots.rows.reduce((sum, row) => sum + Number(row.stored), 0)).toBe(10);
+      expect(plots.rows.map((row) => Number(row.remainder))).toEqual([0, 0, 0.25]);
+      const legacy = await sql<{ x: number | null; y: number | null }>`select plot_cell_x as x, plot_cell_y as y from garden_harvests`.execute(tx);
+      expect(legacy.rows).toEqual([{ x: null, y: null }]);
+      throw rollback;
+    })).rejects.toBe(rollback);
+  });
+
   it('lets only one concurrent upgrade reserve a cell', async () => {
     await build('garden', DEVELOPMENT_CELLS.garden);
     await build('garden', DEVELOPMENT_CELLS.sawmill);
@@ -636,7 +734,7 @@ describe.sequential('economy with PostgreSQL', () => {
     await expandGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
       id, [DEVELOPMENT_CELLS.gardenNorth], 10_000);
     await db.transaction().execute(async (tx) => {
-      await tx.updateTable('buildingResourceBuffers').set({
+      await tx.updateTable('gardenPlots').set({
         storedAmount: 0, remainder: 0,
         productionUpdatedAt: sql`transaction_timestamp() - interval '2 hours'`,
       }).where('buildingId', '=', id).execute();
@@ -647,7 +745,10 @@ describe.sequential('economy with PostgreSQL', () => {
     });
 
     // No snapshot or worker before the command: 1h at 60 + 1h at 120.
-    const started = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    const started = await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
+      DEVELOPMENT_CELLS.garden.cellX, DEVELOPMENT_CELLS.garden.cellY);
+    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
+      DEVELOPMENT_CELLS.gardenNorth.cellX, DEVELOPMENT_CELLS.gardenNorth.cellY);
     expect(started.village.carrots).toBe(50);
     const harvested = await finishHarvest(id);
     expect(harvested.village.carrots).toBe(50 + 60 + 120);
@@ -664,15 +765,18 @@ describe.sequential('economy with PostgreSQL', () => {
       id, [DEVELOPMENT_CELLS.gardenNorth], 10_000);
     const t0 = new Date(Date.now() - 2 * 60 * 60 * 1_000);
     const t1 = new Date(t0.getTime() + 60 * 60 * 1_000);
-    await db.updateTable('buildingResourceBuffers').set({
+    await db.updateTable('gardenPlots').set({
       storedAmount: 600, remainder: 0, productionUpdatedAt: t0,
-    }).where('buildingId', '=', id).where('resourceCode', '=', 'carrot').execute();
+    }).where('buildingId', '=', id).execute();
     await db.updateTable('buildingExpansions').set({ startedAt: t0, completesAt: t1 })
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('buildingId', '=', id)
       .where('status', '=', 'under-construction').execute();
-    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id);
+    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
+      DEVELOPMENT_CELLS.garden.cellX, DEVELOPMENT_CELLS.garden.cellY);
+    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
+      DEVELOPMENT_CELLS.gardenNorth.cellX, DEVELOPMENT_CELLS.gardenNorth.cellY);
     const harvested = await finishHarvest(id);
-    expect(harvested.village.carrots).toBe(50 + 600 + 120);
+    expect(harvested.village.carrots).toBe(50 + 600 + 60);
   });
 
   it('rolls back a due expansion without activating its reserved cells when its handler fails', async () => {

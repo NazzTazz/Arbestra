@@ -82,7 +82,7 @@ export async function reconcileVillageEconomy(
 async function completeConstructionAt(
   transaction: Transaction<Database>, economy: VillageEconomy, buildingId: string, through: Date,
 ): Promise<void> {
-  const building = await transaction.selectFrom('buildings').select(['id', 'status', 'constructionCompletesAt'])
+  const building = await transaction.selectFrom('buildings').select(['id', 'status', 'buildingType', 'constructionCompletesAt'])
     .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
     .where('id', '=', buildingId).forUpdate().executeTakeFirst();
   if (!building || building.status !== 'under-construction' || !building.constructionCompletesAt
@@ -98,6 +98,15 @@ async function completeConstructionAt(
   await transaction.updateTable('buildings').set({
     level: sql`coalesce(target_level, level)`, targetLevel: null, status: 'completed', completedAt: sql.ref('constructionCompletesAt'),
   }).where('id', '=', building.id).where('status', '=', 'under-construction').executeTakeFirstOrThrow();
+  if (building.buildingType === 'garden') {
+    const cells = await transaction.selectFrom('worldCellOccupancies').select(['cellX', 'cellY'])
+      .where('worldId', '=', economy.worldId).where('buildingId', '=', building.id)
+      .where('pendingExpansionId', 'is', null).orderBy('cellX').orderBy('cellY').execute();
+    if (cells.length) await transaction.insertInto('gardenPlots').values(cells.map((cell) => ({
+      worldId: economy.worldId, villageId: economy.villageId, buildingId: building.id,
+      cellX: cell.cellX, cellY: cell.cellY, storedAmount: 0, remainder: 0, productionUpdatedAt: through,
+    }))).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
+  }
 }
 
 async function completeExpansionAt(
@@ -117,4 +126,11 @@ async function completeExpansionAt(
   await transaction.updateTable('buildingExpansions').set({ status: 'completed', completedAt: through })
     .where('worldId', '=', economy.worldId).where('id', '=', expansion.id)
     .where('status', '=', 'under-construction').execute();
+  const cells = await transaction.selectFrom('worldCellOccupancies').select(['cellX', 'cellY'])
+    .where('worldId', '=', economy.worldId).where('buildingId', '=', expansion.buildingId)
+    .where('pendingExpansionId', 'is', null).execute();
+  if (cells.length) await transaction.insertInto('gardenPlots').values(cells.map((cell) => ({
+    worldId: economy.worldId, villageId: economy.villageId, buildingId: expansion.buildingId,
+    cellX: cell.cellX, cellY: cell.cellY, storedAmount: 0, remainder: 0, productionUpdatedAt: through,
+  }))).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
 }

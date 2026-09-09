@@ -97,8 +97,8 @@ export async function registerVillageRoutes(
   }, async (request) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
-    const { commandId } = request.body as { commandId: string };
-    return harvestGarden(db, account.id, worldSlug, villageId, buildingId, commandId);
+    const { commandId, cellX, cellY } = request.body as { commandId: string; cellX: number; cellY: number };
+    return harvestGarden(db, account.id, worldSlug, villageId, buildingId, cellX, cellY, commandId);
   });
 
   app.get('/api/worlds/:worldSlug/villages/:villageId/features/:featureId', {

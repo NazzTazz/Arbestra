@@ -45,6 +45,19 @@ export const GardenSchema = Type.Object({
   productionUpdatedAt: Type.String({ format: 'date-time' }),
   activeCellCount: Type.Integer({ minimum: 0 }),
   pendingCellCount: Type.Integer({ minimum: 0 }),
+  plots: Type.Array(Type.Object({
+    cellX: Type.Integer({ minimum: 0 }),
+    cellY: Type.Integer({ minimum: 0 }),
+    storedCarrots: Type.Integer({ minimum: 0 }),
+    capacity: Type.Integer({ minimum: 0 }),
+    productionPerHour: Type.Number({ minimum: 0 }),
+    productionUpdatedAt: Type.String({ format: 'date-time' }),
+    full: Type.Boolean(),
+    harvest: Type.Union([Type.Object({
+      id: Type.String({ format: 'uuid' }), startedAt: Type.String({ format: 'date-time' }),
+      completesAt: Type.String({ format: 'date-time' }), reservedCarrots: Type.Integer({ minimum: 0 }),
+    }), Type.Null()]),
+  })),
   expansion: Type.Union([Type.Object({
     id: Type.String({ format: 'uuid' }),
     startedAt: Type.String({ format: 'date-time' }),
@@ -179,7 +192,11 @@ export const ExpansionRequestSchema = Type.Object({
 });
 export type ExpansionRequest = Static<typeof ExpansionRequestSchema>;
 
-export const HarvestRequestSchema = Type.Object({ commandId: Type.String({ format: 'uuid' }) });
+export const HarvestRequestSchema = Type.Object({
+  commandId: Type.String({ format: 'uuid' }),
+  cellX: Type.Integer(),
+  cellY: Type.Integer(),
+}, { additionalProperties: false });
 export type HarvestRequest = Static<typeof HarvestRequestSchema>;
 
 export const PopulationCommandRequestSchema = Type.Object({

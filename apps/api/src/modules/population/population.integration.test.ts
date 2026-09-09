@@ -73,21 +73,19 @@ describe.sequential('population with PostgreSQL', () => {
         payload: { buildingType: 'garden', ...DEVELOPMENT_CELLS.garden } });
       expect(built.statusCode, built.body).toBe(201);
       const buildingId = built.json().cells.find((cell: { building?: { type: string } }) => cell.building?.type === 'garden').building.id;
-      await db.updateTable('buildingResourceBuffers').set({ storedAmount: 100 }).where('buildingId', '=', buildingId).execute();
+      await db.updateTable('gardenPlots').set({ storedAmount: 100 }).where('buildingId', '=', buildingId).execute();
       const harvested = await app.inject({ method: 'POST', url: `${base}/${buildingId}/harvest`, cookies,
-        payload: { commandId: feedId } });
+        payload: { commandId: feedId, ...DEVELOPMENT_CELLS.garden } });
       expect(harvested.statusCode, harvested.body).toBe(200);
       expect(harvested.json().village.carrots).toBe(50);
-      expect(harvested.json().cells.find((cell: { building?: { id: string } }) => cell.building?.id === buildingId).building.garden.harvest)
-        .toMatchObject({ workerCount: 1, reservedCarrots: 100 });
+      expect(harvested.json().cells.find((cell: { building?: { id: string } }) => cell.building?.id === buildingId).building.garden.plots[0].harvest)
+        .toMatchObject({ reservedCarrots: 100 });
       const nextCell = harvested.json().cells.find((cell: { canBuild: boolean }) => cell.canBuild);
       const secondGarden = await app.inject({ method: 'POST', url: base, cookies,
         payload: { buildingType: 'garden', cellX: nextCell.cellX, cellY: nextCell.cellY } });
       expect(secondGarden.statusCode, secondGarden.body).toBe(201);
-      const secondId = secondGarden.json().cells.find((cell: { building?: { type: string; id: string } }) =>
-        cell.building?.type === 'garden' && cell.building.id !== buildingId).building.id;
-      const conflicted = await app.inject({ method: 'POST', url: `${base}/${secondId}/harvest`, cookies,
-        payload: { commandId: feedId } });
+      const conflicted = await app.inject({ method: 'POST', url: `${base}/${buildingId}/harvest`, cookies,
+        payload: { commandId: feedId, cellX: nextCell.cellX, cellY: nextCell.cellY } });
       expect(conflicted.statusCode).toBe(409);
       expect(conflicted.json().code).toBe('COMMAND_ID_CONFLICT');
     } finally { await app.close(); }
