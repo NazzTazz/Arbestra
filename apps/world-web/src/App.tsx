@@ -49,6 +49,11 @@ export function App() {
   const [workerCount, setWorkerCount] = useState(1);
   const depositRequest = useRef(0);
   const harvestIntents = useRef(new Map<string, string>());
+  const harvestQueued = useRef(new Set<string>());
+  const harvestQueue = useRef<Promise<void>>(Promise.resolve());
+  const harvestGestureId = useRef(0);
+  const stoppedHarvestGestures = useRef(new Set<number>());
+  const notifiedHarvestGestures = useRef(new Set<number>());
   const populationIntent = useRef<{ action: 'feed' | 'rest'; count: number; id: string } | null>(null);
   const extractionIntents = useRef(new ExtractionIntents());
 
@@ -90,14 +95,16 @@ export function App() {
   }).finally(() => setLoading(false)); }, [applySnapshot]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1_000); return () => window.clearInterval(timer); }, []);
 
-  const hasFastTransition = state?.cells.some((cell) => cell.building?.status === 'under-construction' || cell.building?.garden?.expansion || cell.building?.garden?.harvest) ?? false;
+  const hasFastTransition = state?.cells.some((cell) => cell.building?.status === 'under-construction' || cell.building?.garden?.expansion
+    || cell.building?.garden?.harvest || cell.building?.garden?.plots.some((plot) => plot.harvest)) ?? false;
+  const hasGarden = state?.cells.some((cell) => Boolean(cell.building?.garden)) ?? false;
   const hasExtraction = (state?.village.extractions.length ?? 0) > 0;
   const hasRestingPopulation = (state?.village.population.resting ?? 0) > 0;
   useEffect(() => {
-    if (!hasFastTransition && !hasExtraction && !hasRestingPopulation && !selectedFeatureId) return;
+    if (!hasFastTransition && !hasExtraction && !hasRestingPopulation && !selectedFeatureId && !hasGarden) return;
     const timer = window.setInterval(() => void refresh(), hasFastTransition ? 500 : hasExtraction || selectedFeatureId ? 2_000 : 10_000);
     return () => window.clearInterval(timer);
-  }, [hasFastTransition, hasExtraction, hasRestingPopulation, selectedFeatureId, refresh]);
+  }, [hasFastTransition, hasExtraction, hasRestingPopulation, selectedFeatureId, hasGarden, refresh]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const loadDeposit = useCallback(async (featureId: string) => {
@@ -114,6 +121,7 @@ export function App() {
 
   const selectedSite = useMemo(() => state?.cells.find((cell) => cell.id === selectedSiteId) ?? null, [selectedSiteId, state]);
   const selectedBuilding = useMemo(() => selectedSite?.building ?? (selectedSite?.footprint ? state?.cells.find((cell) => cell.building?.id === selectedSite.footprint?.buildingId)?.building ?? null : null), [selectedSite, state]);
+  const firstGardenSite = useMemo(() => state?.cells.find((cell) => cell.building?.garden) ?? null, [state]);
   const definition = state?.buildingTypes.find((item) => item.code === construction?.type);
   const spatial = definition?.progressionMode === 'spatial';
   const area = useMemo(() => state && selection ? previewArea(state, selection, spatial, construction?.buildingId) : null, [state, selection, spatial, construction?.buildingId]);
@@ -149,6 +157,36 @@ export function App() {
 
   function handleAreaGesture(first: Cell, last: Cell, tap: boolean) { if (!construction?.type || actionInFlight.current) return; setError(null); if (tap && spatial) { setSelection({ first: touchOrigin.current ?? first, last }); touchOrigin.current = touchOrigin.current ? null : first; } else { touchOrigin.current = null; setSelection({ first: spatial ? first : last, last }); } }
   function confirmConstruction() { if (!state || !construction?.type || !area || selectionError || !area.cells.length) return; const command = construction; const anchor = spatial ? selection!.first : area.cells[0]!; void runAction(() => command.buildingId ? expandGarden(state.world.slug, state.village.id, command.buildingId, area.cells) : buildBuilding(state.world.slug, state.village.id, command.type!, anchor, area.cells), command.buildingId ? 'Extension du Jardin lancée' : 'Construction lancée', true); }
+  function queuePlotHarvest(cell: Cell, newGesture = false) {
+    const current = stateRef.current;
+    if (!current) return;
+    if (newGesture) harvestGestureId.current += 1;
+    const gestureId = harvestGestureId.current;
+    const site = current.cells.find((item) => item.cellX === cell.cellX && item.cellY === cell.cellY);
+    const building = site?.footprint ? current.cells.find((item) => item.building?.id === site.footprint?.buildingId)?.building : site?.building;
+    const plot = building?.garden?.plots.find((item) => item.cellX === cell.cellX && item.cellY === cell.cellY);
+    if (!building?.garden || !plot || plot.harvest || plot.storedCarrots < 1) return;
+    const key = `${building.id}:${cell.cellX}:${cell.cellY}`;
+    if (harvestQueued.current.has(key)) return;
+    const commandId = harvestIntents.current.get(key) ?? crypto.randomUUID();
+    harvestIntents.current.set(key, commandId); harvestQueued.current.add(key);
+    harvestQueue.current = harvestQueue.current.then(async () => {
+      if (stoppedHarvestGestures.current.has(gestureId)) {
+        harvestIntents.current.delete(key); harvestQueued.current.delete(key); return;
+      }
+      try {
+        const snapshot = await harvestGarden(worldSlug, current.village.id, building.id, cell.cellX, cell.cellY, commandId);
+        applySnapshot(snapshot); markOracleProgress(); harvestIntents.current.delete(key);
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.code === 'HARVESTERS_UNAVAILABLE') stoppedHarvestGestures.current.add(gestureId);
+        if (!notifiedHarvestGestures.current.has(gestureId)) {
+          notifiedHarvestGestures.current.add(gestureId);
+          pushNotification(reason instanceof Error ? reason.message : 'Récolte impossible.', 'warning');
+        }
+        if (reason instanceof ApiError && reason.status >= 400 && reason.status < 500) harvestIntents.current.delete(key);
+      } finally { harvestQueued.current.delete(key); }
+    });
+  }
   function runPopulation(action: 'feed' | 'rest') { if (!state) return; const intent = populationIntent.current?.action === action && populationIntent.current.count === populationCount ? populationIntent.current : { action, count: populationCount, id: crypto.randomUUID() }; populationIntent.current = intent; void runAction(() => action === 'feed' ? feedPopulation(worldSlug, state.village.id, intent.count, intent.id) : restPopulation(worldSlug, state.village.id, intent.count, intent.id), action === 'feed' ? `${intent.count} habitant(s) ont mangé` : `${intent.count} habitant(s) au repos`).then((ok) => { if (ok) populationIntent.current = null; }); }
   async function discoverSupplies(buildingId: string) {
     const currentState = stateRef.current;
@@ -191,11 +229,14 @@ export function App() {
   if (needsLogin) return <main className="center-message"><a href={LOBBY_URL}>Se connecter pour entrer dans ce monde</a></main>;
   if (!state) return <main className="center-message" role="alert">{error ?? 'Village indisponible.'}</main>;
   return <main className="game-shell">
-    <Suspense fallback={<div className="center-message">L'oracle se rhabille…</div>}><VillageScene state={state} highlightedSiteIds={highlightedSiteIds} constructionMode={construction !== null} selectingArea={Boolean(construction?.type) && !pendingAction} preview={area} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture} onSiteSelected={(id, anchor) => { if (!construction) { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); } }} onFeatureSelected={(id, anchor) => { if (!construction) { closePanels(); setWorkerCount(extractionIntents.current.get(id)?.workerCount ?? 1); setSelectedFeatureId(id); setMenuAnchor(anchor); } }} onCameraMoved={closePanels} /></Suspense>
+    <Suspense fallback={<div className="center-message">L'oracle se rhabille…</div>}><VillageScene state={state} highlightedSiteIds={highlightedSiteIds} constructionMode={construction !== null} selectingArea={Boolean(construction?.type) && !pendingAction} preview={area} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture} onGardenHarvest={queuePlotHarvest} onSiteSelected={(id, anchor) => { if (!construction) { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); } }} onFeatureSelected={(id, anchor) => { if (!construction) { closePanels(); setWorkerCount(extractionIntents.current.get(id)?.workerCount ?? 1); setSelectedFeatureId(id); setMenuAnchor(anchor); } }} onCameraMoved={closePanels} /></Suspense>
     <Hud state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => { closePanels(); setShowPopulation(true); setMenuAnchor(populationAnchor()); }} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    {firstGardenSite ? <button type="button" className="garden-access" onClick={() => {
+      closePanels(); setSelectedSiteId(firstGardenSite.id); setMenuAnchor(populationAnchor());
+    }}>Gérer les Jardins</button> : null}
     {menuAnchor && showPopulation ? <WorldContextMenu anchor={menuAnchor}><PopulationPanel population={state.village.population} pending={pendingAction} count={populationCount} onCount={(count) => setPopulationCount(Math.max(1, Math.min(state.village.population.available || 1, count || 1)))} onFeed={() => runPopulation('feed')} onRest={() => runPopulation('rest')} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
-    {menuAnchor && selectedBuilding ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => selectedBuilding.type === 'garden' ? (clearPreview(), setConstruction({ type: 'garden', buildingId: selectedBuilding.id }), setMenuAnchor(null)) : void runAction(() => upgradeBuilding(worldSlug, state.village.id, selectedBuilding.id), 'Amélioration lancée')} onHarvest={() => { const id = harvestIntents.current.get(selectedBuilding.id) ?? crypto.randomUUID(); harvestIntents.current.set(selectedBuilding.id, id); void runAction(() => harvestGarden(worldSlug, state.village.id, selectedBuilding.id, id), 'Récolte lancée : retour dans 1 minute').then((ok) => { if (ok) harvestIntents.current.delete(selectedBuilding.id); }); }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
+    {menuAnchor && selectedBuilding ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => selectedBuilding.type === 'garden' ? (clearPreview(), setConstruction({ type: 'garden', buildingId: selectedBuilding.id }), setMenuAnchor(null)) : void runAction(() => upgradeBuilding(worldSlug, state.village.id, selectedBuilding.id), 'Amélioration lancée')} onHarvest={(plot) => queuePlotHarvest(plot, true)} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && selectedFeatureId ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} workerCount={workerCount} onWorkerCount={(count) => { if (!extractionIntents.current.get(selectedFeatureId)) setWorkerCount(count); }} onStart={startExtraction} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     <ConstructionPanel construction={construction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} population={state.village.population} gardenWorkerNeed={gardenWorkerNeed} onOpen={() => { closePanels(); clearPreview(); setConstruction({ type: null }); }} onChoose={(type) => { clearPreview(); setConstruction({ type }); }} onConfirm={confirmConstruction} onRestart={clearPreview} onCancel={exitConstruction} />
   </main>;

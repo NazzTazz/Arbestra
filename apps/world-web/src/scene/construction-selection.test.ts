@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VillageState } from '@arbestra/contracts';
-import { cellKey, previewArea, rectangleCells, type Cell } from './construction-selection';
+import { cellKey, cellsAlongSegment, previewArea, rectangleCells, type Cell } from './construction-selection';
 
 const world: VillageState['world'] = {
   id: 'world', slug: 'test', name: 'Test', topology: 'torus', widthCells: 2048, heightCells: 1024,
@@ -21,17 +21,24 @@ describe('construction selection', () => {
       .toEqual({ cells: [at(4, 5)], count: 1, error: null });
   });
 
+  it('fills sparse pointer segments in traversal order across a torus seam', () => {
+    expect(cellsAlongSegment(at(2047, 4), at(2, 4), world)).toEqual([at(0, 4), at(1, 4), at(2, 4)]);
+    expect(cellsAlongSegment(at(4, 4), at(7, 6), world)).toEqual([at(5, 5), at(6, 5), at(7, 6)]);
+  });
+
   it('allows adjacency to an active extension, rejects reserved adjacency and occupied rectangles', () => {
     const state = { world, cells: [
-      { ...at(0, 0), canBuild: false, footprint: { buildingId: 'garden', state: 'active' } },
-      { ...at(1, 0), canBuild: false, footprint: { buildingId: 'garden', state: 'active' } },
-      { ...at(2, 0), canBuild: false, footprint: { buildingId: 'garden', state: 'reserved' } },
+      { ...at(0, 0), canBuild: false, footprint: { buildingId: 'garden', buildingType: 'garden', state: 'active' } },
+      { ...at(1, 0), canBuild: false, footprint: { buildingId: 'garden', buildingType: 'garden', state: 'active' } },
+      { ...at(2, 0), canBuild: false, footprint: { buildingId: 'garden', buildingType: 'garden', state: 'reserved' } },
       { ...at(1, 1), canBuild: true }, { ...at(2, 1), canBuild: true },
     ] } as VillageState;
     expect(previewArea(state, { first: at(1, 1), last: at(2, 1) }, true, 'garden').error).toBeNull();
     expect(previewArea(state, { first: at(2, 1), last: at(2, 1) }, true, 'garden').error).not.toBeNull();
-    const invalid = previewArea(state, { first: at(1, 1), last: at(1, 0) }, true, 'garden');
-    expect(invalid.cells).toHaveLength(2);
+    const tolerant = previewArea(state, { first: at(1, 1), last: at(1, 0) }, true, 'garden');
+    expect(tolerant).toMatchObject({ count: 1, error: null, existingCells: [at(1, 0)], newCells: [at(1, 1)] });
+    const invalid = previewArea(state, { first: at(1, 0), last: at(2, 0) }, true, 'garden');
     expect(invalid.error).not.toBeNull();
+    expect(invalid.obstacleCells).toEqual([at(2, 0)]);
   });
 });

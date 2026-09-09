@@ -168,3 +168,17 @@ button { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }
+.garden-access {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 5;
+}
+
+.garden-plot-actions {
+  display: grid;
+  gap: .35rem;
+  margin: .5rem 0;
+  max-height: 12rem;
+  overflow: auto;
+}

@@ -67,10 +67,10 @@ export function upgradeBuilding(
   );
 }
 
-export function harvestGarden(worldSlug: string, villageId: string, buildingId: string, commandId: string = crypto.randomUUID()): Promise<TimedVillageState> {
+export function harvestGarden(worldSlug: string, villageId: string, buildingId: string, cellX: number, cellY: number, commandId: string = crypto.randomUUID()): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/harvest`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, cellX, cellY }) },
   );
 }
 

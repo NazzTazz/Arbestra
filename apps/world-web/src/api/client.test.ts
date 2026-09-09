@@ -21,10 +21,10 @@ it('sends the harvest command as JSON and preserves its id for a retry', async (
     { headers: { 'content-type': 'application/json' } }));
   vi.stubGlobal('fetch', fetchMock);
   const commandId = crypto.randomUUID();
-  await harvestGarden('aube', 'village', 'garden', commandId);
+  await harvestGarden('aube', 'village', 'garden', 12, 34, commandId);
   expect(fetchMock).toHaveBeenCalledWith('/api/worlds/aube/villages/village/buildings/garden/harvest',
     expect.objectContaining({ method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandId }) }));
+      body: JSON.stringify({ commandId, cellX: 12, cellY: 34 }) }));
 });
 
 it('E: sends one explicit extraction intention across retries and returns its off-screen target', async () => {

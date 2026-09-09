@@ -17,7 +17,7 @@ import type { VillageCell, VillageState } from '@arbestra/contracts';
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import { changedStoneFeatures, extractionTravel, stoneVisualSignature, terrainSignature } from './deposit-visuals';
-import { cellKey, type AreaPreview, type Cell } from './construction-selection';
+import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 
 const CHUNK_CELLS = 8;
 const TILE_SIZE = 2.5;
@@ -41,11 +41,12 @@ export class BabylonVillageScene {
   readonly #extractionPeople = new Map<string, { meshes: Mesh[]; target: Vector3; startedAt: number; completesAt: number }>();
   #selectedFeatureId: string | null = null;
   readonly #onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void;
-  readonly #harvestPeople: Array<{ mesh: Mesh; target: Vector3; index: number }> = [];
+  readonly #harvestPeople: Array<{ mesh: Mesh; target: Vector3; index: number; startedAt: number; completesAt: number }> = [];
   readonly #selectableMeshes = new Map<string, Mesh>();
   readonly #onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
   readonly #onCameraMoved: () => void;
   readonly #onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void;
+  readonly #onGardenHarvest: (cell: Cell, newGesture: boolean) => void;
   readonly #previewMeshes: Mesh[] = [];
   readonly #invalidAreaMaterial: StandardMaterial;
   readonly #resizeObserver: ResizeObserver;
@@ -78,16 +79,17 @@ export class BabylonVillageScene {
   #highlightedSiteIds = new Set<string>();
   #constructionMode = false;
   #selectingArea = false;
+  #harvestableSites = new Set<string>();
+  #fullGardenSites = new Set<string>();
+  #harvestVisited = new Set<string>();
   #villageAnchor: Cell = { cellX: 0, cellY: 0 };
-  #pointerDown: { x: number; y: number; pointerId: number; mouseArea: boolean; first: Cell | null } | null = null;
+  #pointerDown: { x: number; y: number; pointerId: number; mouseArea: boolean; harvest: boolean; first: Cell | null; last: Cell | null } | null = null;
   #lastDragCell = '';
   #lastPreviewSignature = '';
   #lastVisualSignature = '';
   #lastTerrainSignature = '';
   #lastFeatureSignature = '';
   #lastHarvestSignature = '';
-  #harvestStartedAt = 0;
-  #harvestCompletesAt = 0;
   #serverOffsetMs = 0;
   #lastFrameAt = 0;
   #lastCameraRadius: number | null = null;
@@ -98,9 +100,10 @@ export class BabylonVillageScene {
     if (!event.isPrimary) { this.#pointerDown = null; return; }
     if (event.button !== 0) return;
     const mouseArea = this.#selectingArea && event.pointerType !== 'touch';
-    const first = this.#selectingArea ? this.#cellAtPointer(event) : null;
-    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, mouseArea, first };
-    if (mouseArea) {
+    const first = this.#cellAtPointer(event);
+    const harvest = !this.#selectingArea && first !== null && this.#harvestableSites.has(cellKey(first));
+    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, mouseArea, harvest, first, last: first };
+    if (mouseArea || harvest) {
       // Consume only the construction drag. Right-drag, wheel and touch camera
       // gestures keep their usual controls.
       event.stopImmediatePropagation();
@@ -110,12 +113,24 @@ export class BabylonVillageScene {
       this.#camera.inertialPanningX = this.#camera.inertialPanningY = 0;
       if (first) {
         this.#lastDragCell = cellKey(first);
-        this.#onAreaGesture(first, first, false);
+        if (harvest) { this.#harvestVisited = new Set([cellKey(first)]); this.#onGardenHarvest(first, true); }
+        else this.#onAreaGesture(first, first, false);
       }
     }
   };
 
   readonly #handlePointerMove = (event: PointerEvent): void => {
+    if (this.#pointerDown?.harvest && this.#pointerDown.pointerId === event.pointerId) {
+      event.stopImmediatePropagation(); event.preventDefault();
+      const last = this.#cellAtPointer(event), previous = this.#pointerDown.last;
+      if (last && previous && cellKey(last) !== cellKey(previous)) {
+        for (const cell of cellsAlongSegment(previous, last, { widthCells: this.#worldWidthUnits / TILE_SIZE, heightCells: this.#worldHeightUnits / TILE_SIZE })) {
+          if (!this.#harvestVisited.has(cellKey(cell))) { this.#harvestVisited.add(cellKey(cell)); this.#onGardenHarvest(cell, false); }
+        }
+        this.#pointerDown.last = last;
+      }
+      return;
+    }
     if (this.#pointerDown?.mouseArea && this.#pointerDown.pointerId === event.pointerId) {
       event.stopImmediatePropagation();
       const last = this.#cellAtPointer(event);
@@ -133,6 +148,11 @@ export class BabylonVillageScene {
   readonly #handlePointerUp = (event: PointerEvent): void => {
     if (!this.#pointerDown || this.#pointerDown.pointerId !== event.pointerId) return;
     const gesture = this.#pointerDown;
+    if (gesture.harvest) {
+      this.#pointerDown = null; event.stopImmediatePropagation(); event.preventDefault();
+      if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (gesture.mouseArea) {
       this.#pointerDown = null;
       event.stopImmediatePropagation();
@@ -184,12 +204,14 @@ export class BabylonVillageScene {
     onCameraMoved: () => void,
     onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void,
     onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void = () => {},
+    onGardenHarvest: (cell: Cell, newGesture: boolean) => void = () => {},
   ) {
     this.#canvas = canvas;
     this.#onFeatureSelected = onFeatureSelected;
     this.#onSiteSelected = onSiteSelected;
     this.#onCameraMoved = onCameraMoved;
     this.#onAreaGesture = onAreaGesture;
+    this.#onGardenHarvest = onGardenHarvest;
     this.#engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
     this.#engine.setHardwareScalingLevel(Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5));
     this.#scene = new Scene(this.#engine);
@@ -296,6 +318,9 @@ export class BabylonVillageScene {
     this.#updateTerrain(state);
     this.#createWorldFeatures(state);
     this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
+    const plots = state.cells.flatMap((cell) => cell.building?.garden?.plots ?? []);
+    this.#harvestableSites = new Set(plots.filter((plot) => plot.storedCarrots >= 1 && !plot.harvest).map(cellKey));
+    this.#fullGardenSites = new Set(plots.filter((plot) => plot.full && !plot.harvest).map(cellKey));
     this.#updateHarvestPeople(state);
     this.#updateExtractionPeople(state);
     this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
@@ -312,6 +337,7 @@ export class BabylonVillageScene {
         site.building?.level,
         site.building?.targetLevel,
         site.footprint?.state,
+        this.#fullGardenSites.has(site.id),
       ]),
     });
     if (visualSignature === this.#lastVisualSignature) return;
@@ -322,10 +348,10 @@ export class BabylonVillageScene {
     this.#constructionMode = constructionMode;
     this.#updateBuildableGrid(state.cells);
     for (const site of state.cells) {
-      const mesh = site.footprint?.buildingType === 'garden' && site.footprint.role === 'extension'
-        ? this.#createGardenExtension(site)
-        : site.building?.status === 'under-construction'
-          ? this.#createConstructionSite(site)
+      const mesh = site.building?.status === 'under-construction'
+        ? this.#createConstructionSite(site)
+        : site.footprint?.buildingType === 'garden'
+          ? this.#createGardenExtension(site)
           : site.building
             ? this.#createBuilding(site)
             : this.#createAvailableSite(site);
@@ -362,10 +388,12 @@ export class BabylonVillageScene {
 
   public updateAreaSelection(enabled: boolean, preview: AreaPreview | null, invalid: boolean): void {
     this.#selectingArea = enabled;
-    const signature = JSON.stringify([preview?.cells, invalid]);
+    const signature = JSON.stringify([preview, invalid]);
     if (signature === this.#lastPreviewSignature) return;
     this.#lastPreviewSignature = signature;
     for (const mesh of this.#previewMeshes.splice(0)) mesh.dispose(false, false);
+    const existing = new Set((preview?.existingCells ?? []).map(cellKey));
+    const obstacles = new Set((preview?.obstacleCells ?? []).map(cellKey));
     for (const cell of preview?.cells ?? []) {
       const mesh = MeshBuilder.CreateBox(`area-preview-${cellKey(cell)}`, { width: TILE_SIZE - 0.06, depth: TILE_SIZE - 0.06, height: 0.025 }, this.#scene);
       mesh.position.set(
@@ -373,7 +401,9 @@ export class BabylonVillageScene {
         0.15,
         wrappedCellDelta(cell.cellY, this.#villageAnchor.cellY, this.#worldHeightUnits / TILE_SIZE) * TILE_SIZE,
       );
-      mesh.material = invalid ? this.#invalidAreaMaterial : this.#candidateMaterial;
+      mesh.material = obstacles.has(cellKey(cell)) ? this.#invalidAreaMaterial
+        : existing.has(cellKey(cell)) ? this.#selectionMaterial
+          : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
       mesh.isPickable = false;
       this.#previewMeshes.push(mesh);
     }
@@ -576,34 +606,31 @@ export class BabylonVillageScene {
   }
 
   #updateHarvestPeople(state: VillageState): void {
-    const gardens = state.cells.flatMap((cell) => cell.building?.garden?.harvest
-      ? [{ buildingId: cell.building.id, harvest: cell.building.garden.harvest }] : []);
-    const signature = JSON.stringify(gardens.map(({ buildingId, harvest }) => [buildingId, harvest.id, harvest.startedAt, harvest.completesAt]));
+    const gardens = state.cells.flatMap((cell) => cell.building?.garden?.plots.flatMap((plot) => plot.harvest
+      ? [{ plot, harvest: plot.harvest }] : []) ?? []);
+    const signature = JSON.stringify(gardens.map(({ plot, harvest }) => [plot.cellX, plot.cellY, harvest.id, harvest.startedAt, harvest.completesAt]));
     if (signature === this.#lastHarvestSignature) return;
     this.#lastHarvestSignature = signature;
     for (const person of this.#harvestPeople.splice(0)) person.mesh.dispose(false, false);
-    const garden = gardens[0];
-    if (!garden) return;
-    this.#harvestStartedAt = Date.parse(garden.harvest.startedAt);
-    this.#harvestCompletesAt = Date.parse(garden.harvest.completesAt);
-    const cells = state.cells.filter((cell) => cell.footprint?.buildingId === garden.buildingId && cell.footprint.state === 'active')
-      .slice(0, garden.harvest.workerCount);
-    for (const [index, cell] of cells.entries()) {
-      const mesh = MeshBuilder.CreateBox(`harvest-person-${garden.harvest.id}-${index}`, { width: 0.22, height: 0.42, depth: 0.22 }, this.#scene);
+    for (const [index, garden] of gardens.entries()) {
+      const cell = state.cells.find((item) => item.cellX === garden.plot.cellX && item.cellY === garden.plot.cellY);
+      if (!cell) continue;
+      const mesh = MeshBuilder.CreateBox(`harvest-person-${garden.harvest.id}`, { width: 0.22, height: 0.42, depth: 0.22 }, this.#scene);
       mesh.material = this.#darkTimberMaterial;
       mesh.isPickable = false;
       mesh.position.set(cell.x, 0.33, cell.z);
-      this.#harvestPeople.push({ mesh, target: new Vector3(cell.x, 0.33, cell.z), index });
+      this.#harvestPeople.push({ mesh, target: new Vector3(cell.x, 0.33, cell.z), index,
+        startedAt: Date.parse(garden.harvest.startedAt), completesAt: Date.parse(garden.harvest.completesAt) });
     }
   }
 
   #animateHarvestPeople(): void {
-    if (this.#harvestPeople.length === 0 || this.#harvestCompletesAt <= this.#harvestStartedAt) return;
+    if (this.#harvestPeople.length === 0) return;
     const serverNow = Date.now() - this.#serverOffsetMs;
-    const fraction = Math.max(0, Math.min(1, (serverNow - this.#harvestStartedAt) / (this.#harvestCompletesAt - this.#harvestStartedAt)));
-    const roundTrip = fraction <= 0.5 ? fraction * 2 : (1 - fraction) * 2;
     const origin = new Vector3(0, 0.33, 0);
     for (const person of this.#harvestPeople) {
+      const fraction = Math.max(0, Math.min(1, (serverNow - person.startedAt) / (person.completesAt - person.startedAt)));
+      const roundTrip = fraction <= 0.5 ? fraction * 2 : (1 - fraction) * 2;
       const wobble = Math.sin((fraction * 80) + person.index) * 0.04;
       person.mesh.position.copyFrom(Vector3.Lerp(origin, person.target, roundTrip));
       person.mesh.position.y += wobble;
@@ -958,6 +985,12 @@ export class BabylonVillageScene {
         sprout.parent = plot;
         sprout.position.set(x, 0.18, z);
         sprout.material = this.#leafMaterial;
+      }
+      if (this.#fullGardenSites.has(site.id)) {
+        const marker = MeshBuilder.CreateCylinder(`garden-full-${site.id}`, { height: 0.12, diameter: 0.62, tessellation: 16 }, this.#scene);
+        marker.parent = plot; marker.position.set(0, 1.05, 0); marker.material = this.#windowMaterial; marker.isPickable = false;
+        const stem = MeshBuilder.CreateCylinder(`garden-full-stem-${site.id}`, { height: 0.34, diameter: 0.08, tessellation: 8 }, this.#scene);
+        stem.parent = plot; stem.position.set(0, 0.83, 0); stem.material = this.#leafDarkMaterial; stem.isPickable = false;
       }
     }
     return this.#registerStructure(plot);

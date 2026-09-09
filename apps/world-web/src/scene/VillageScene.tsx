@@ -14,12 +14,13 @@ interface VillageSceneProps {
   preview: AreaPreview | null;
   previewInvalid: boolean;
   onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void;
+  onGardenHarvest: (cell: Cell, newGesture?: boolean) => void;
   onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
   onFeatureSelected?: (featureId: string, anchor: ScreenAnchor) => void;
   onCameraMoved: () => void;
 }
 
-export function VillageScene({ state, highlightedSiteIds, constructionMode = false, selectingArea, preview, previewInvalid, onAreaGesture, onSiteSelected, onCameraMoved, onFeatureSelected }: VillageSceneProps) {
+export function VillageScene({ state, highlightedSiteIds, constructionMode = false, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onSiteSelected, onCameraMoved, onFeatureSelected }: VillageSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BabylonVillageScene | null>(null);
   const selectionHandlerRef = useRef(onSiteSelected);
@@ -27,9 +28,11 @@ export function VillageScene({ state, highlightedSiteIds, constructionMode = fal
   featureHandlerRef.current = onFeatureSelected;
   const cameraHandlerRef = useRef(onCameraMoved);
   const areaHandlerRef = useRef(onAreaGesture);
+  const harvestHandlerRef = useRef(onGardenHarvest);
   selectionHandlerRef.current = onSiteSelected;
   cameraHandlerRef.current = onCameraMoved;
   areaHandlerRef.current = onAreaGesture;
+  harvestHandlerRef.current = onGardenHarvest;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -40,6 +43,7 @@ export function VillageScene({ state, highlightedSiteIds, constructionMode = fal
       () => cameraHandlerRef.current(),
       (first, last, tap) => areaHandlerRef.current(first, last, tap),
       (featureId, anchor) => featureHandlerRef.current?.(featureId, anchor),
+      (cell, newGesture) => harvestHandlerRef.current(cell, newGesture),
     );
     sceneRef.current = scene;
     return () => {
