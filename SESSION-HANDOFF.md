@@ -1,4 +1,24 @@
-# Repos jusqu'à énergie 10 — 7 septembre 2026
+# Historisation granulaire — 9 septembre 2026
+
+À la demande de Tristan, les changements Jardins existants sont répartis en commits de cadrage, migration, API, client, parcours E2E et revue, sans squash ni modification du code applicatif. La branche locale `master` est renommée `main` pour rejoindre la branche par défaut GitHub ; l'historique antérieur reste intact. La publication est autorisée ; vérifier le résultat effectif avec Git. `origin/master` reste une référence historique, sans suppression demandée.
+
+Vérifications de cette opération : compilation des contrats et `corepack pnpm typecheck` terminées avec succès ; tests ciblés client/sélection : huit succès et un échec sur la régression connue de balayage diagonal. Les tests PostgreSQL et E2E ne sont pas relancés pendant cette historisation ; leurs preuves du 7 septembre restent datées. Aucun correctif de recette, aucune migration ni opération sur les données n'est effectué ici. La tranche reste **à corriger / à valider**, même une fois publiée.
+
+Le brouillon `apps/world-web/src/hud.css` et le journal brut `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` restent locaux et hors commits. Cette séparation organise l'état local disponible aujourd'hui ; elle ne reconstitue pas des dates ou étapes d'exécution historiques inexistantes dans Git.
+
+# Recette Jardins — 7 septembre 2026
+
+Opération dev effectuée ensuite à la demande explicite de Tristan pour constater les comportements : `corepack pnpm db:migrate` a appliqué `015_garden_plots` avec succès sur `127.0.0.1:5432/arbestra`. Seconde exécution réussie sans migration restante. Aucun reset ni seed. Les défauts de recette restent non corrigés ; les mentions « uniquement en test » ci-dessous décrivent l'état avant cette opération.
+
+**Verdict : à corriger / à valider.** Recette demandée par Tristan après la livraison de Sol. Base relue : `master`, `b148f37`, worktree non commité. Voir la [revue avec reproductions et corrections attendues](docs/REVIEW-2026-09-07-JARDINS.md) et la [spec validée](docs/SPEC-JARDINS-PARCELLES-FUSION.md).
+
+Trois défauts reproduits : perte de 0,25 carotte de production due lors d'une reprise proche de la saturation ; deux cellules traversées omises par le balayage diagonal ; chantier initial accepté comme existant toléré par le serveur. Régressions ajoutées dans `garden-review.integration.test.ts` et `garden-review.test.ts`, volontairement rouges : trois échecs précis constatés. La lecture révèle aussi des trous dans la reprise des intentions après réponse perdue/fusion et l'accès aux détails des Jardins autres que le premier.
+
+Preuves de cette recette : suite livrée **95/95 verte**, puis régressions ciblées **3/3 rouges** ; **2 parcours Playwright verts** desktop/profil mobile, builds contrats/API réussis, six captures inspectées. Le parcours valide la récolte clavier d'une parcelle et un seul habitant affecté ; il ne prouve pas le glissé tactile, la caméra, l'extension ou la fusion visibles. `agent-browser` ne démarre pas Chrome ; repli Playwright. Ne pas confondre ces vérifications avec la validation complète de la tranche. Les anciens résultats lint/typecheck/build globaux restent ceux de Sol, pas une nouvelle campagne de recette.
+
+La recette n'a corrigé aucun code applicatif. Les trois régressions, les captures ajoutées au test E2E et cette revue préparent la correction. Migration 015 présente uniquement en test ; aucune migration dev ni modification du joueur effectuée. Aucun commit/push. `hud.css` préexistant reste intact. Le précédent statut « implémentation terminée » est retiré ; l'explication antérieure attribuant l'échec de saturation à des fixtures parallèles n'est pas une preuve retenue.
+
+## Repos jusqu'à énergie 10 — livraison précédente
 
 Arbitrage de Tristan implémenté et validé : réveil dès énergie exacte 10, aucune immobilisation de cinq heures à pleine énergie ; une sieste courte ne restaure pas le quota alimentaire. Anciennes cohortes pleines endormies prises en charge à la lecture, sans migration ni nouveau reset. [Handoff et preuves](docs/HANDOFF-2026-09-07-REPOS-A-10.md) : 90 tests, 4 parcours navigateur desktop/mobile, lint/typecheck/build API verts. Correctif prêt et publié dans le workflow autorisé ; voir Git pour le hash de ce handoff. `hud.css` reste hors livraison.
 
