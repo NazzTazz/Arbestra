@@ -270,6 +270,19 @@ export interface GardenHarvestsTable {
   completedAt: Timestamp | null;
   workerCount: number;
   reservedCarrots: ColumnType<string, number | string, number | string>;
+  plotCellX: ColumnType<number | null, number | null | undefined, number | null>;
+  plotCellY: ColumnType<number | null, number | null | undefined, number | null>;
+}
+
+export interface GardenPlotsTable {
+  worldId: string;
+  villageId: string;
+  buildingId: string;
+  cellX: number;
+  cellY: number;
+  storedAmount: ColumnType<string, number | string, number | string>;
+  remainder: ColumnType<string, number | string, number | string>;
+  productionUpdatedAt: Timestamp;
 }
 
 export interface PopulationCommandReceiptsTable {
@@ -322,6 +335,7 @@ export interface Database {
   populationCohorts: PopulationCohortsTable;
   buildingHiddenSupplies: BuildingHiddenSuppliesTable;
   gardenHarvests: GardenHarvestsTable;
+  gardenPlots: GardenPlotsTable;
   populationCommandReceipts: PopulationCommandReceiptsTable;
   villageAccomplishments: VillageAccomplishmentsTable;
   stoneDeposits: StoneDepositsTable;
