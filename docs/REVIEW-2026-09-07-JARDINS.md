@@ -1,5 +1,7 @@
 # Recette Jardins — 7 septembre 2026
 
+**Suivi au 30 septembre 2026 : R1/R2/R3 et les écarts UI ci-dessous corrigés dans le worktree.** Les trois régressions ont d'abord été réexécutées rouges, puis corrigées. Huit preuves de revue serveur sont vertes, dont attente PostgreSQL forcée, rollback observé et conservation de deux trajets/deux extensions à travers la fusion. La recette complète Playwright a terminé avec 24 tests verts sur Chromium desktop/Pixel 7 ; quatre reprises ciblées valident ensuite la vraie migration 015 avant session navigateur et la réponse perdue après fusion. Voir la [reprise courante](../SESSION-HANDOFF.md) pour la clôture et les limites. Le verdict et les chiffres du reste de ce document décrivent uniquement la recette historique du 7 septembre.
+
 Base : `master`, `b148f37`, livraison non commitée de Sol. Verdict : **à corriger / à valider**. Aucun changement de gameplay demandé ; les défauts portent sur la spec validée.
 
 ## Régressions reproduites

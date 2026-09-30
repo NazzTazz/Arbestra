@@ -23,7 +23,7 @@ describe('construction selection', () => {
 
   it('fills sparse pointer segments in traversal order across a torus seam', () => {
     expect(cellsAlongSegment(at(2047, 4), at(2, 4), world)).toEqual([at(0, 4), at(1, 4), at(2, 4)]);
-    expect(cellsAlongSegment(at(4, 4), at(7, 6), world)).toEqual([at(5, 5), at(6, 5), at(7, 6)]);
+    expect(cellsAlongSegment(at(4, 4), at(7, 6), world)).toEqual([at(5, 4), at(5, 5), at(6, 5), at(6, 6), at(7, 6)]);
   });
 
   it('allows adjacency to an active extension, rejects reserved adjacency and occupied rectangles', () => {

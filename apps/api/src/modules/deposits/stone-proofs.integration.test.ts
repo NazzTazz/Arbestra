@@ -134,6 +134,17 @@ describe.sequential('stone regression proofs', () => {
     expect(all.cohorts.reduce((n, cohort) => n + cohort.memberCount, 0)).toBe(15);
   });
 
+  it('records the stone route and adds both journeys to the work deadline', async () => {
+    const id = await stone();
+    const result = await startVillageStoneExtraction(db, DEVELOPMENT_IDS.account, 'aube', villageId, id, randomUUID(), 1);
+    const work = result.extraction;
+    expect(work.path.length).toBeGreaterThan(1);
+    expect(work.transportMs).toBe((work.path.length - 1) * 1_000);
+    expect(Date.parse(work.completesAt) - Date.parse(work.startedAt)).toBe(600_000 + work.transportMs * 2);
+    const detail = await getStoneDepositDetails(db, DEVELOPMENT_IDS.account, 'aube', villageId, id);
+    expect(detail.eligibility.workerOptions[0]?.durationMs).toBe(600_000 + work.transportMs * 2);
+  });
+
   it('B/J: depleted tombstones free their cell and expose consistent eligibility', async () => {
     const id = await stone(50);
     await expect(constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', villageId, 1024, 514, 'dwelling', 0)).rejects.toBeDefined();

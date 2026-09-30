@@ -1,0 +1,42 @@
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.hud__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0.75rem 1rem;
+
+  background: var(--color-panel);
+  color: var(--color-text);
+
+  pointer-events: auto;
+}
+
+.hud__village {
+  font-weight: 700;
+}
+
+.hud__resources {
+  display: flex;
+  gap: 1rem;
+}
+
+.hud__resource {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.hud__resource-label {
+  opacity: 0.7;
+}
+
+.hud__resource-value {
+  font-variant-numeric: tabular-nums;
+}

@@ -10,7 +10,7 @@ export function PopulationPanel({ population, pending, count, onCount, onFeed, o
     <button type="button" disabled={pending || population.available < 1} onClick={onFeed}>Faire manger</button><button type="button" disabled={pending || population.available < 1} onClick={onRest}>Envoyer au repos</button></div>;
 }
 
-export function BuildingPanel({ building, definition, serverNow, pending, readyCarrots, availableWorkers, onUpgrade, onHarvest, onDiscover }: { building: Building; definition: BuildingTypeDefinition; serverNow: number; pending: boolean; readyCarrots: number; availableWorkers: number; onUpgrade: () => void; onHarvest: (plot: { cellX: number; cellY: number }) => void; onDiscover: () => void }) {
+export function BuildingPanel({ building, definition, serverNow, pending, pendingHarvestKeys = new Set<string>(), readyCarrots, availableWorkers, onUpgrade, onHarvest, onDiscover }: { building: Building; definition: BuildingTypeDefinition; serverNow: number; pending: boolean; pendingHarvestKeys?: Set<string>; readyCarrots: number; availableWorkers: number; onUpgrade: () => void; onHarvest: (plot: { cellX: number; cellY: number }) => void; onDiscover: () => void }) {
   const garden = building.garden;
   const current = definition.levels.find((level) => level.level === building.level);
   const next = definition.levels.find((level) => level.level === building.level + 1);
@@ -22,11 +22,11 @@ export function BuildingPanel({ building, definition, serverNow, pending, readyC
     {building.type === 'sawmill' ? <p>Production : +{production}/h</p> : null}
     {garden ? <><p>{garden.activeCellCount} parcelle{garden.activeCellCount > 1 ? 's' : ''} active{garden.activeCellCount > 1 ? 's' : ''}{garden.pendingCellCount ? ` · ${garden.pendingCellCount} en chantier` : ''}</p>
       {garden.harvest ? <><p className="construction-status">Récolte en cours · retour dans {secondsUntil(garden.harvest.completesAt, serverNow)} s</p><p>{garden.harvest.workerCount} récolteurs · {format(garden.harvest.reservedCarrots)} carottes en transit</p></> : <p>Prêtes : {format(readyCarrots)} / {garden.capacity} carottes</p>}
-      <p>Production : +{garden.productionPerHour}/h</p>{garden.expansion ? <p className="construction-status">Extension — {secondsUntil(garden.expansion.completesAt, serverNow)} s</p> : null}
+      <p>Production : +{garden.productionPerHour}/h</p>{(garden.expansions ?? (garden.expansion ? [garden.expansion] : [])).map((expansion) => <p key={expansion.id} className="construction-status">Extension · {expansion.cells.length} parcelle(s) — {secondsUntil(expansion.completesAt, serverNow)} s</p>)}
       {availableWorkers < 1 ? <p className="error">Aucun habitant disponible et reposé.</p> : null}
       <div className="garden-plot-actions" aria-label="Parcelles du Jardin">{garden.plots.map((plot) => <button key={`${plot.cellX}:${plot.cellY}`} type="button"
-        disabled={pending || building.status !== 'completed' || Boolean(plot.harvest) || plot.storedCarrots < 1 || availableWorkers < 1}
-        onClick={() => onHarvest(plot)}>Parcelle {plot.cellX}, {plot.cellY} · {plot.harvest ? 'en cours' : `${format(plot.storedCarrots)} carottes`}</button>)}</div>
+        disabled={pending || pendingHarvestKeys.has(`${plot.cellX}:${plot.cellY}`) || building.status !== 'completed' || Boolean(plot.harvest || garden.harvest) || plot.storedCarrots < 1 || availableWorkers < 1}
+        onClick={() => onHarvest(plot)}>Parcelle {plot.cellX}, {plot.cellY} · {pendingHarvestKeys.has(`${plot.cellX}:${plot.cellY}`) ? 'en attente' : plot.harvest ? 'en cours' : `${format(plot.storedCarrots)} carottes`}</button>)}</div>
       <button type="button" disabled={pending || building.status !== 'completed' || garden.expansion !== null} onClick={onUpgrade}>Étendre — {extensionCost} bois / case</button></> : null}
     {building.status === 'under-construction' ? <p className="construction-status">Chantier — {secondsUntil(building.constructionCompletesAt!, serverNow)} s</p> : null}
     {upgradeCost !== undefined ? <button type="button" disabled={pending || building.status !== 'completed'} onClick={onUpgrade}>Améliorer — {upgradeCost} bois</button> : null}</div>;

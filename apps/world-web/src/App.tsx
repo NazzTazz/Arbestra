@@ -6,6 +6,7 @@ import { cellKey, previewArea, touchesCell, type Cell, type CellRange } from './
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
 import { ExtractionIntents } from './ui/extraction-intents';
+import { GardenHarvestQueue, type HarvestIntent } from './ui/garden-harvest-queue';
 import { type GameNotification } from './ui/NotificationStack';
 import { OracleJournal } from './ui/OracleJournal';
 import { useOracleHint } from './ui/useOracleHint';
@@ -18,8 +19,8 @@ const LOBBY_URL = import.meta.env.VITE_LOBBY_URL ?? 'http://localhost:5173';
 const populationAnchor = (): ScreenAnchor => ({ x: Math.max(8, window.innerWidth - 300), y: 40 });
 
 function gardenReady(garden: Garden, serverNow: number): number {
-  const elapsedHours = Math.max(0, serverNow - Date.parse(garden.productionUpdatedAt)) / 3_600_000;
-  return Math.floor(Math.min(garden.capacity, garden.storedCarrots + garden.productionPerHour * elapsedHours));
+  return garden.plots.reduce((sum, plot) => sum + Math.floor(Math.min(plot.capacity, plot.storedCarrots
+    + plot.productionPerHour * Math.max(0, serverNow - Date.parse(plot.productionUpdatedAt)) / 3_600_000)), 0);
 }
 
 export function App() {
@@ -48,12 +49,10 @@ export function App() {
   const [depositLoading, setDepositLoading] = useState(false);
   const [workerCount, setWorkerCount] = useState(1);
   const depositRequest = useRef(0);
-  const harvestIntents = useRef(new Map<string, string>());
-  const harvestQueued = useRef(new Set<string>());
-  const harvestQueue = useRef<Promise<void>>(Promise.resolve());
-  const harvestGestureId = useRef(0);
-  const stoppedHarvestGestures = useRef(new Set<number>());
-  const notifiedHarvestGestures = useRef(new Set<number>());
+  const [pendingHarvests, setPendingHarvests] = useState<HarvestIntent[]>([]);
+  const [showGardens, setShowGardens] = useState(false);
+  const [showTravelPaths, setShowTravelPaths] = useState(false);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const populationIntent = useRef<{ action: 'feed' | 'rest'; count: number; id: string } | null>(null);
   const extractionIntents = useRef(new ExtractionIntents());
 
@@ -65,6 +64,8 @@ export function App() {
   useEffect(() => () => notificationTimers.current.forEach(window.clearTimeout), []);
   const markOracleProgress = useOracleHint(state ? `${state.world.id}:${state.village.id}` : null,
     state?.cells.some((cell) => cell.building?.hiddenSuppliesAvailable) ?? false, pendingAction, pushNotification);
+  const markOracleProgressRef = useRef(markOracleProgress);
+  markOracleProgressRef.current = markOracleProgress;
 
   const applySnapshot = useCallback((snapshot: TimedVillageState) => {
     const previous = stateRef.current;
@@ -76,13 +77,37 @@ export function App() {
       const prior = new Map(previous.cells.flatMap((cell) => cell.building ? [[cell.building.id, cell.building] as const] : []));
       for (const cell of snapshot.state.cells) {
         if (cell.building?.status === 'completed' && prior.get(cell.building.id)?.status === 'under-construction') pushNotification('Construction terminée');
-        if (prior.get(cell.building?.id ?? '')?.garden?.harvest && cell.building?.garden && !cell.building.garden.harvest) pushNotification('Récolte livrée');
       }
+      const activeHarvestIds = new Set(snapshot.state.cells.flatMap((cell) => [
+        ...(cell.building?.garden?.harvest ? [cell.building.garden.harvest.id] : []),
+        ...(cell.building?.garden?.plots.flatMap((plot) => plot.harvest ? [plot.harvest.id] : []) ?? []),
+      ]));
+      if (previous.cells.some((cell) => cell.building?.garden && (
+        cell.building.garden.harvest && !activeHarvestIds.has(cell.building.garden.harvest.id)
+        || cell.building.garden.plots.some((plot) => plot.harvest && !activeHarvestIds.has(plot.harvest.id)))))
+        pushNotification('Récolte livrée');
     }
     stateRef.current = snapshot.state;
     setState(snapshot.state);
     setServerOffsetMs(snapshot.serverOffsetMs);
   }, [pushNotification]);
+
+  const harvestQueue = useMemo(() => new GardenHarvestQueue({
+    send: (intent) => harvestGarden(intent.worldSlug, intent.villageId, intent.buildingId, intent.cellX, intent.cellY, intent.commandId),
+    accepted: (snapshot) => { applySnapshot(snapshot); markOracleProgressRef.current(); },
+    warning: (message) => pushNotification(message, 'warning'),
+    changed: setPendingHarvests,
+  }), [applySnapshot, pushNotification]);
+  const pendingHarvestCells = useMemo(() => pendingHarvests.map(({ cellX, cellY }) => ({ cellX, cellY })), [pendingHarvests]);
+  const pendingHarvestKeys = useMemo(() => new Set(pendingHarvestCells.map(cellKey)), [pendingHarvestCells]);
+  const uncertainHarvests = pendingHarvests.some((intent) => intent.status === 'uncertain');
+  useEffect(() => {
+    if (!uncertainHarvests) return;
+    const retry = () => harvestQueue.retry();
+    const timer = window.setInterval(retry, 2_000);
+    window.addEventListener('online', retry); window.addEventListener('focus', retry);
+    return () => { window.clearInterval(timer); window.removeEventListener('online', retry); window.removeEventListener('focus', retry); };
+  }, [uncertainHarvests, harvestQueue]);
 
   const refresh = useCallback(async () => {
     if (actionInFlight.current) return;
@@ -117,11 +142,15 @@ export function App() {
     } catch (reason) { if (request === depositRequest.current) setError(reason instanceof Error ? reason.message : 'Inspection impossible.'); }
     finally { if (request === depositRequest.current) setDepositLoading(false); }
   }, []);
-  useEffect(() => { if (selectedFeatureId) void loadDeposit(selectedFeatureId); }, [selectedFeatureId, state?.serverTime, loadDeposit]);
+  useEffect(() => { if (selectedFeatureId) void loadDeposit(selectedFeatureId); }, [selectedFeatureId, loadDeposit]);
 
   const selectedSite = useMemo(() => state?.cells.find((cell) => cell.id === selectedSiteId) ?? null, [selectedSiteId, state]);
   const selectedBuilding = useMemo(() => selectedSite?.building ?? (selectedSite?.footprint ? state?.cells.find((cell) => cell.building?.id === selectedSite.footprint?.buildingId)?.building ?? null : null), [selectedSite, state]);
-  const firstGardenSite = useMemo(() => state?.cells.find((cell) => cell.building?.garden) ?? null, [state]);
+  const gardenSites = useMemo(() => state?.cells.filter((cell) => cell.building?.garden)
+    .sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY) ?? [], [state]);
+  useEffect(() => {
+    if (showGardens && gardenSites.length === 1) { setSelectedSiteId(gardenSites[0]!.id); setShowGardens(false); }
+  }, [showGardens, gardenSites]);
   const definition = state?.buildingTypes.find((item) => item.code === construction?.type);
   const spatial = definition?.progressionMode === 'spatial';
   const area = useMemo(() => state && selection ? previewArea(state, selection, spatial, construction?.buildingId) : null, [state, selection, spatial, construction?.buildingId]);
@@ -139,7 +168,7 @@ export function App() {
   const existingGardenCells = construction?.buildingId ? state?.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active').length ?? 0 : 0;
   const gardenWorkerNeed = spatial && area ? existingGardenCells + area.count : null;
 
-  function closePanels() { depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setMenuAnchor(null); }
+  function closePanels() { depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setShowGardens(false); setMenuAnchor(null); }
   function clearPreview() { touchOrigin.current = null; setSelection(null); setError(null); }
   function exitConstruction() { setConstruction(null); clearPreview(); }
   async function runAction(action: () => Promise<TimedVillageState>, success?: string, exit = false): Promise<boolean> {
@@ -160,32 +189,14 @@ export function App() {
   function queuePlotHarvest(cell: Cell, newGesture = false) {
     const current = stateRef.current;
     if (!current) return;
-    if (newGesture) harvestGestureId.current += 1;
-    const gestureId = harvestGestureId.current;
     const site = current.cells.find((item) => item.cellX === cell.cellX && item.cellY === cell.cellY);
     const building = site?.footprint ? current.cells.find((item) => item.building?.id === site.footprint?.buildingId)?.building : site?.building;
     const plot = building?.garden?.plots.find((item) => item.cellX === cell.cellX && item.cellY === cell.cellY);
-    if (!building?.garden || !plot || plot.harvest || plot.storedCarrots < 1) return;
-    const key = `${building.id}:${cell.cellX}:${cell.cellY}`;
-    if (harvestQueued.current.has(key)) return;
-    const commandId = harvestIntents.current.get(key) ?? crypto.randomUUID();
-    harvestIntents.current.set(key, commandId); harvestQueued.current.add(key);
-    harvestQueue.current = harvestQueue.current.then(async () => {
-      if (stoppedHarvestGestures.current.has(gestureId)) {
-        harvestIntents.current.delete(key); harvestQueued.current.delete(key); return;
-      }
-      try {
-        const snapshot = await harvestGarden(worldSlug, current.village.id, building.id, cell.cellX, cell.cellY, commandId);
-        applySnapshot(snapshot); markOracleProgress(); harvestIntents.current.delete(key);
-      } catch (reason) {
-        if (reason instanceof ApiError && reason.code === 'HARVESTERS_UNAVAILABLE') stoppedHarvestGestures.current.add(gestureId);
-        if (!notifiedHarvestGestures.current.has(gestureId)) {
-          notifiedHarvestGestures.current.add(gestureId);
-          pushNotification(reason instanceof Error ? reason.message : 'Récolte impossible.', 'warning');
-        }
-        if (reason instanceof ApiError && reason.status >= 400 && reason.status < 500) harvestIntents.current.delete(key);
-      } finally { harvestQueued.current.delete(key); }
-    });
+    const target = { ...cell, worldSlug, villageId: current.village.id, buildingId: building?.id ?? '' };
+    // Resolve the old receipt even if a refresh already shows its departure
+    // or a different canonical Garden after fusion.
+    if (!harvestQueue.has(target) && (!building?.garden || building.garden.harvest || !plot || plot.harvest || plot.storedCarrots < 1)) return;
+    harvestQueue.enqueue(target, newGesture);
   }
   function runPopulation(action: 'feed' | 'rest') { if (!state) return; const intent = populationIntent.current?.action === action && populationIntent.current.count === populationCount ? populationIntent.current : { action, count: populationCount, id: crypto.randomUUID() }; populationIntent.current = intent; void runAction(() => action === 'feed' ? feedPopulation(worldSlug, state.village.id, intent.count, intent.id) : restPopulation(worldSlug, state.village.id, intent.count, intent.id), action === 'feed' ? `${intent.count} habitant(s) ont mangé` : `${intent.count} habitant(s) au repos`).then((ok) => { if (ok) populationIntent.current = null; }); }
   async function discoverSupplies(buildingId: string) {
@@ -215,6 +226,7 @@ export function App() {
       applySnapshot({ state: result.villageState, serverOffsetMs: result.serverOffsetMs });
       markOracleProgress();
       if (request === depositRequest.current) setDepositDetails((current) => current?.deposit.featureId === featureId ? { ...current, deposit: result.deposit } : current);
+      void loadDeposit(featureId);
       extractionIntents.current.complete(featureId);
       pushNotification(`Extraction lancée : ${result.extraction.reservedAmount} pierre`);
     } catch (reason) {
@@ -229,14 +241,18 @@ export function App() {
   if (needsLogin) return <main className="center-message"><a href={LOBBY_URL}>Se connecter pour entrer dans ce monde</a></main>;
   if (!state) return <main className="center-message" role="alert">{error ?? 'Village indisponible.'}</main>;
   return <main className="game-shell">
-    <Suspense fallback={<div className="center-message">L'oracle se rhabille…</div>}><VillageScene state={state} highlightedSiteIds={highlightedSiteIds} constructionMode={construction !== null} selectingArea={Boolean(construction?.type) && !pendingAction} preview={area} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture} onGardenHarvest={queuePlotHarvest} onSiteSelected={(id, anchor) => { if (!construction) { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); } }} onFeatureSelected={(id, anchor) => { if (!construction) { closePanels(); setWorkerCount(extractionIntents.current.get(id)?.workerCount ?? 1); setSelectedFeatureId(id); setMenuAnchor(anchor); } }} onCameraMoved={closePanels} /></Suspense>
+    <Suspense fallback={<div className="center-message">L'oracle se rhabille…</div>}><VillageScene state={state} pendingHarvestCells={pendingHarvestCells} highlightedSiteIds={highlightedSiteIds} constructionMode={construction !== null} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId} selectingArea={Boolean(construction?.type) && !pendingAction} preview={area} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture} onGardenHarvest={queuePlotHarvest} onSiteSelected={(id, anchor) => { if (!construction) { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); } }} onFeatureSelected={(id, anchor) => { if (!construction) { closePanels(); setWorkerCount(extractionIntents.current.get(id)?.workerCount ?? 1); setSelectedFeatureId(id); setMenuAnchor(anchor); } }} onCameraMoved={closePanels} /></Suspense>
     <Hud state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => { closePanels(); setShowPopulation(true); setMenuAnchor(populationAnchor()); }} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
-    {firstGardenSite ? <button type="button" className="garden-access" onClick={() => {
-      closePanels(); setSelectedSiteId(firstGardenSite.id); setMenuAnchor(populationAnchor());
+    <div className="travel-debug"><button type="button" aria-pressed={showTravelPaths} onClick={() => setShowTravelPaths((value) => !value)}>Chemins · debug</button>{showTravelPaths ? <div className="travel-debug-details"><label>Itinéraire <select value={selectedRouteId ?? ''} onChange={(event) => setSelectedRouteId(event.target.value || null)}><option value="">Tous ({state.travelRoutes.length})</option>{state.travelRoutes.map((route) => <option key={route.id} value={route.id}>{route.kind} · {route.destination.cellX}, {route.destination.cellY} · {route.cells.length - 1} s / trajet</option>)}</select></label><small>Transport aller et retour : 1 s par case. Travail sur place : durée propre à la tâche.</small></div> : null}</div>
+    {gardenSites.length ? <button type="button" className="garden-access" onClick={() => {
+      closePanels(); if (gardenSites.length === 1) setSelectedSiteId(gardenSites[0]!.id); else setShowGardens(true);
+      setMenuAnchor(populationAnchor());
     }}>Gérer les Jardins</button> : null}
+    {pendingHarvests.length ? <div className="harvest-pending" role="status">{pendingHarvests.length} récolte(s) {uncertainHarvests ? 'à confirmer' : 'en attente'}{uncertainHarvests ? <button type="button" onClick={() => harvestQueue.retry()}>Réessayer</button> : null}</div> : null}
+    {menuAnchor && showGardens ? <WorldContextMenu anchor={menuAnchor}><div><strong>Choisir un Jardin</strong>{gardenSites.map((site, index) => <button type="button" key={site.id} onClick={() => { setShowGardens(false); setSelectedSiteId(site.id); }}>Jardin {index + 1} · {site.cellX}, {site.cellY} · {site.building!.garden!.activeCellCount} parcelle(s)</button>)}</div></WorldContextMenu> : null}
     {menuAnchor && showPopulation ? <WorldContextMenu anchor={menuAnchor}><PopulationPanel population={state.village.population} pending={pendingAction} count={populationCount} onCount={(count) => setPopulationCount(Math.max(1, Math.min(state.village.population.available || 1, count || 1)))} onFeed={() => runPopulation('feed')} onRest={() => runPopulation('rest')} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
-    {menuAnchor && selectedBuilding ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => selectedBuilding.type === 'garden' ? (clearPreview(), setConstruction({ type: 'garden', buildingId: selectedBuilding.id }), setMenuAnchor(null)) : void runAction(() => upgradeBuilding(worldSlug, state.village.id, selectedBuilding.id), 'Amélioration lancée')} onHarvest={(plot) => queuePlotHarvest(plot, true)} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
+    {menuAnchor && selectedBuilding ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => selectedBuilding.type === 'garden' ? (clearPreview(), setConstruction({ type: 'garden', buildingId: selectedBuilding.id }), setMenuAnchor(null)) : void runAction(() => upgradeBuilding(worldSlug, state.village.id, selectedBuilding.id), 'Amélioration lancée')} onHarvest={(plot) => queuePlotHarvest(plot, true)} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && selectedFeatureId ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} workerCount={workerCount} onWorkerCount={(count) => { if (!extractionIntents.current.get(selectedFeatureId)) setWorkerCount(count); }} onStart={startExtraction} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     <ConstructionPanel construction={construction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} population={state.village.population} gardenWorkerNeed={gardenWorkerNeed} onOpen={() => { closePanels(); clearPreview(); setConstruction({ type: null }); }} onChoose={(type) => { clearPreview(); setConstruction({ type }); }} onConfirm={confirmConstruction} onRestart={clearPreview} onCancel={exitConstruction} />
   </main>;

@@ -11,7 +11,7 @@ export function ConstructionPanel({ construction, definitions, area, costs, erro
       {!construction.type ? definitions.filter((item) => item.buildable).map((item) => <button type="button" key={item.code} onClick={() => onChoose(item.code)}>{item.displayName}</button>) : <>
         <div className="construction-summary" aria-live="polite"><strong>{construction.buildingId ? 'Étendre' : 'Construire'} : {definition?.displayName}</strong><span>{spatial ? 'Glissez à la souris ; au tactile, touchez deux coins.' : 'Choisissez une case.'}</span>
           {area ? <span>{area.count} case{area.count > 1 ? 's' : ''} · {costs.map((cost) => `${cost.amount.toLocaleString('fr-FR')} ${cost.resourceCode}`).join(', ')}</span> : null}
-          {spatial && gardenWorkerNeed !== null && gardenWorkerNeed > population.total ? <span className="warning">Ce Jardin demandera {gardenWorkerNeed} habitants pour une récolte ; vous en avez {population.total}.</span> : null}{error ? <span className="error">{error}</span> : null}</div>
+          {spatial && gardenWorkerNeed !== null && gardenWorkerNeed > population.total ? <span className="warning">Récolter ses {gardenWorkerNeed} parcelles à la fois mobiliserait {gardenWorkerNeed} habitants ; vous en avez {population.total}.</span> : null}{error ? <span className="error">{error}</span> : null}</div>
         <button type="button" disabled={pending || !area?.cells.length || Boolean(error)} onClick={onConfirm}>Confirmer</button>{area ? <button type="button" disabled={pending} onClick={onRestart}>Recommencer</button> : null}
       </>}<button type="button" disabled={pending} onClick={onCancel}>Annuler</button>
     </>}

@@ -8,8 +8,11 @@ import type { AreaPreview, Cell } from './construction-selection';
 
 interface VillageSceneProps {
   state: VillageState;
+  pendingHarvestCells: Cell[];
   highlightedSiteIds: string[];
   constructionMode?: boolean;
+  showTravelPaths?: boolean;
+  selectedRouteId?: string | null;
   selectingArea: boolean;
   preview: AreaPreview | null;
   previewInvalid: boolean;
@@ -20,7 +23,7 @@ interface VillageSceneProps {
   onCameraMoved: () => void;
 }
 
-export function VillageScene({ state, highlightedSiteIds, constructionMode = false, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onSiteSelected, onCameraMoved, onFeatureSelected }: VillageSceneProps) {
+export function VillageScene({ state, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onSiteSelected, onCameraMoved, onFeatureSelected }: VillageSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BabylonVillageScene | null>(null);
   const selectionHandlerRef = useRef(onSiteSelected);
@@ -53,8 +56,10 @@ export function VillageScene({ state, highlightedSiteIds, constructionMode = fal
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.update(state, highlightedSiteIds, constructionMode);
-  }, [state, highlightedSiteIds, constructionMode]);
+    sceneRef.current?.update(state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId);
+  }, [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId]);
+
+  useEffect(() => { sceneRef.current?.updateHarvestPending(pendingHarvestCells); }, [state, pendingHarvestCells]);
 
   useEffect(() => {
     sceneRef.current?.updateAreaSelection(selectingArea, preview, previewInvalid);

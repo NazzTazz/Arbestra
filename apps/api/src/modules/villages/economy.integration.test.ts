@@ -9,6 +9,7 @@ import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { up as migrateGardenPlots } from '../../database/migrations/015_garden_plots.js';
+import { createLegacyGardenSchema } from '../../database/garden-migration.fixture.js';
 import type { Database } from '../../database/schema.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
@@ -142,7 +143,9 @@ describe.sequential('economy with PostgreSQL', () => {
     const expansions = await source.selectFrom('buildingExpansions').selectAll().where('villageId', '=', DEVELOPMENT_IDS.village).orderBy('id').execute();
     const occupations = await source.selectFrom('worldCellOccupancies').selectAll().where('buildingId', 'in', buildings.map((building) => building.id))
       .orderBy('cellX').orderBy('cellY').execute();
-    return { resources, flows, buffers, buildings, expansions, occupations };
+    const plots = await source.selectFrom('gardenPlots').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world)
+      .where('villageId', '=', DEVELOPMENT_IDS.village).orderBy('cellX').orderBy('cellY').execute();
+    return { resources, flows, buffers, buildings, expansions, occupations, plots };
   }
 
   async function finishHarvest(buildingId: string): Promise<VillageState> {
@@ -674,26 +677,9 @@ describe.sequential('economy with PostgreSQL', () => {
   it('backfills plot stocks deterministically without duplicating an active legacy harvest', async () => {
     const rollback = new Error('rollback isolated garden plot migration');
     await expect(db.transaction().execute(async (tx) => {
-      await sql`create schema garden_plot_migration_proof`.execute(tx);
-      await sql`set local search_path to garden_plot_migration_proof, public`.execute(tx);
-      await sql`create table buildings (
-        world_id uuid not null, village_id uuid not null, id uuid not null, building_type text not null, status text not null,
-        primary key (world_id, village_id, id)
-      )`.execute(tx);
-      await sql`create table world_cell_occupancies (
-        world_id uuid not null, building_id uuid, cell_x integer not null, cell_y integer not null, pending_expansion_id uuid
-      )`.execute(tx);
-      await sql`create table building_resource_buffers (
-        world_id uuid not null, building_id uuid not null, resource_code text not null,
-        stored_amount bigint not null, remainder numeric not null, production_updated_at timestamptz not null
-      )`.execute(tx);
-      await sql`create table garden_harvests (
-        id uuid primary key, world_id uuid not null, building_id uuid not null, status text not null
-      )`.execute(tx);
-      await sql`create unique index garden_harvests_one_active_building
-        on garden_harvests(world_id, building_id) where status = 'in-progress'`.execute(tx);
+      await createLegacyGardenSchema(tx);
       const buildingId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-      await sql`insert into buildings values (${DEVELOPMENT_IDS.world}::uuid, ${DEVELOPMENT_IDS.village}::uuid,
+      await sql`insert into buildings (world_id, village_id, id, building_type, status) values (${DEVELOPMENT_IDS.world}::uuid, ${DEVELOPMENT_IDS.village}::uuid,
         ${buildingId}::uuid, 'garden', 'completed')`.execute(tx);
       await sql`insert into world_cell_occupancies values
         (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 8, 9, null),
@@ -701,8 +687,8 @@ describe.sequential('economy with PostgreSQL', () => {
         (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 10, 9, null),
         (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 11, 9, ${randomUUID()}::uuid)`.execute(tx);
       await sql`insert into building_resource_buffers values
-        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 'carrot', 10, 0.25, '2026-09-07T00:00:00Z')`.execute(tx);
-      await sql`insert into garden_harvests values
+        (${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 'carrot', 10, 0.25, statement_timestamp() + interval '1 hour')`.execute(tx);
+      await sql`insert into garden_harvests (id, world_id, building_id, status) values
         ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ${DEVELOPMENT_IDS.world}::uuid, ${buildingId}::uuid, 'in-progress')`.execute(tx);
       await migrateGardenPlots(tx as unknown as Kysely<unknown>);
       const plots = await sql<{ stored: string; remainder: string }>`select stored_amount as stored, remainder
@@ -804,7 +790,9 @@ describe.sequential('economy with PostgreSQL', () => {
         const applied = await economicRows(transaction);
         expect(applied.expansions.find((row) => row.id === expansion.id)?.status).toBe('completed');
         expect(applied.occupations.filter((row) => row.pendingExpansionId === expansion.id)).toHaveLength(0);
-        expect(Number(applied.buffers.find((row) => row.buildingId === id)?.storedAmount)).toBe(70);
+        expect(Number(applied.buffers.find((row) => row.buildingId === id)?.storedAmount)).toBe(10);
+        const added = applied.plots.find((row) => row.cellX === DEVELOPMENT_CELLS.gardenNorth.cellX && row.cellY === DEVELOPMENT_CELLS.gardenNorth.cellY);
+        expect(added).toMatchObject({ storedAmount: '0', remainder: '0', productionUpdatedAt: dueAt });
         throw new Error('crash after expansion reconciliation');
       },
     };

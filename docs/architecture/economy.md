@@ -1,5 +1,11 @@
 # Économie
 
+## Déplacements liés aux travaux (016)
+
+Pour les nouvelles récoltes de parcelles et extractions de pierre, le trajet aller-retour s'ajoute au travail sur place : une seconde par case parcourue dans chaque sens, puis 60 secondes au Jardin ou `600 secondes / travailleurs` à la pierre. L'itinéraire et `transport_ms` sont figés sur la mission au départ ; une construction ultérieure ne décale pas sa fin. Le crédit et la libération des travailleurs restent atomiques à l'échéance totale. Les missions antérieures à 016 conservent leur échéance et ont un trajet vide avec un transport nul. Les temps montrés pour choisir l'effectif d'extraction incluent le transport.
+
+Les routes partent de l'ancrage du village, passent par des cases cardinalement adjacentes et peuvent faire des détours pour contourner les occupations ou rejoindre un tracé partagé. Le terrain et les occupations sont lus côté serveur ; pour un gisement hors du viewport jusqu'à 128 cases, le calcul lit un corridor de chunks et d'occupations du monde. Au-delà, un trajet torique cardinal direct préserve la portée mondiale des commandes : son contournement du terrain reste à traiter dans une tranche de navigation à grande distance. La surcouche de carte est une aide de débogage, sans autorité économique.
+
 Les stocks joueurs sont des `bigint` entiers : aucune fraction de planche ou de carotte n’est visible ni dépensable. Les coûts sont entiers ; le coût théorique 112,5 de la Scierie niveau 3 est arrondi explicitement à 113.
 
 Les taux sont des `numeric` exacts. Chaque flux conserve un reliquat fractionnaire `[0,1[` et un curseur temporel :
@@ -21,9 +27,11 @@ Valeurs initiales :
 - Scierie : 60, 108, 194,4 bois/h aux niveaux 1–3 ;
 - Jardin : 60 carottes/h et 600 de capacité par cellule active ; 50 bois par cellule construite.
 
-La récolte du Jardin cible une coordonnée canonique, verrouille cette parcelle, la matérialise et réserve ses unités entières pour un trajet d'une minute avec un habitant. Le stock village est crédité à l'échéance, dans la même transition qui termine la récolte et libère la cohorte affectée. La parcelle repart immédiatement de zéro avec son reliquat conservé et continue donc de produire pendant le trajet ; ses voisines ne changent pas. L'unicité partielle des trajets actifs par `(world_id, cell_x, cell_y)` et le verrou village empêchent une double réservation. Les trajets antérieurs à la migration 015 gardent leur crédit, leur échéance et leur reçu global.
+La récolte du Jardin cible une coordonnée canonique, verrouille cette parcelle, la matérialise et réserve ses unités entières pour un travail sur place d'une minute avec un habitant, auquel s'ajoute le transport défini ci-dessus. Le stock village est crédité à l'échéance, dans la même transition qui termine la récolte et libère la cohorte affectée. La parcelle repart immédiatement de zéro avec son reliquat conservé et continue donc de produire pendant le travail et le trajet ; ses voisines ne changent pas. L'unicité partielle des trajets actifs par `(world_id, cell_x, cell_y)` et le verrou village empêchent une double réservation. Les trajets antérieurs à la migration 015 gardent leur crédit, leur échéance et leur reçu global.
 
-La migration 015 répartit l'ancien buffer entier par quotient/reste dans l'ordre canonique des coordonnées et place le reliquat fractionnaire sur la dernière parcelle. Elle conserve le stock brut mais ne matérialise pas d'abord la production due : une perte près de la saturation est reproduite dans la [recette](../REVIEW-2026-09-07-JARDINS.md). L'ancien buffer n'alimente plus les nouvelles récoltes, mais continue d'être matérialisé à la réconciliation ; ce n'est donc pas encore une archive passive. Ces points restent à corriger avant validation de la bascule.
+La migration 015 verrouille les villages dans l'ordre monde/UUID, puis lit sa borne commune avec `statement_timestamp()`. Elle matérialise l'ancien producteur à chaque construction/extension échue dans l'ordre échéance/ID/type, en appliquant le plafond avant chaque agrandissement, puis à la borne finale. Elle répartit ensuite le stock entier par quotient/reste dans l'ordre canonique des coordonnées et place le reliquat exact sur la dernière parcelle. Stocks villages, trajets globaux et notifications existantes restent inchangés. Après la bascule, les anciens buffers Jardin sont des archives passives : seule `garden_plots` produit les nouvelles carottes. La [recette historique](../REVIEW-2026-09-07-JARDINS.md) décrit le défaut corrigé le 30 septembre.
+
+Cette correction de 015 concerne ses prochaines exécutions. Une base ayant déjà appliqué l'ancienne version conserve ses parcelles ; ne pas rejouer la répartition sur leurs stocks et ne pas créditer une perte historique impossible à attribuer exactement.
 
 ## Accomplissement du coffre (014)
 

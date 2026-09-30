@@ -91,7 +91,7 @@ async function completeConstructionAt(
     .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId).orderBy('resourceCode').execute();
   for (const resource of directResources)
     await materializeVillageResource(transaction, economy.worldId, economy.villageId, resource.resourceCode, through);
-  const buffers = await transaction.selectFrom('buildingResourceBuffers').select('resourceCode')
+  const buffers = building.buildingType === 'garden' ? [] : await transaction.selectFrom('buildingResourceBuffers').select('resourceCode')
     .where('worldId', '=', economy.worldId).where('buildingId', '=', building.id).orderBy('resourceCode').execute();
   for (const buffer of buffers)
     await materializeBuildingBuffer(transaction, economy.worldId, building.id, buffer.resourceCode, through);
@@ -117,10 +117,8 @@ async function completeExpansionAt(
     .where('id', '=', expansionId).forUpdate().executeTakeFirst();
   if (!expansion || expansion.status !== 'under-construction'
     || expansion.completesAt.getTime() !== through.getTime() || expansion.completesAt > economy.through) return;
-  const buffers = await transaction.selectFrom('buildingResourceBuffers').select('resourceCode')
-    .where('worldId', '=', economy.worldId).where('buildingId', '=', expansion.buildingId).orderBy('resourceCode').execute();
-  for (const buffer of buffers)
-    await materializeBuildingBuffer(transaction, economy.worldId, expansion.buildingId, buffer.resourceCode, through);
+  // Garden buffers are historical after 015; existing plots keep their own
+  // cursor and only the new plots start producing at this deadline.
   await transaction.updateTable('worldCellOccupancies').set({ pendingExpansionId: null })
     .where('worldId', '=', economy.worldId).where('pendingExpansionId', '=', expansion.id).execute();
   await transaction.updateTable('buildingExpansions').set({ status: 'completed', completedAt: through })

@@ -61,7 +61,7 @@ Seuils, délais, récupération, critères de satisfaction, fréquence et taille
 
 ## Évolution des Jardins — arbitrages du 7 septembre
 
-Récolte par parcelle par clic maintenu et glissement, un habitant par parcelle, récoltable dès une carotte ; symbole sur les parcelles pleines. Le passage définit l'ordre des départs, sans doublon ; faute d'habitants, les parcelles suivantes restent intactes. Fusion automatique des Jardins du même village contigus par un côté après achèvement de la liaison. Agrandissement rectangulaire tolérant les parcelles de Jardin existantes du même village, sans les refacturer ; seuls les ajouts sont construits. Voir la [spec prête à implémenter](./SPEC-JARDINS-PARCELLES-FUSION.md). Direction graphique : Age of Empires IV ; référence UX de ces interactions : Elvenar. Aucun de ces changements n'est encore livré par ce cadrage.
+Récolte par parcelle par clic maintenu et glissement, un habitant par parcelle, récoltable dès une carotte ; symbole sur les parcelles pleines. Le passage définit l'ordre des départs, sans doublon ; faute d'habitants, les parcelles suivantes restent intactes. Fusion automatique des Jardins du même village contigus par un côté après achèvement de la liaison. Agrandissement rectangulaire tolérant les parcelles de Jardin existantes du même village, sans les refacturer ; seuls les ajouts sont construits. Voir la [spec implémentée dans le worktree](./SPEC-JARDINS-PARCELLES-FUSION.md) et la [reprise courante](../SESSION-HANDOFF.md) pour les preuves. Direction graphique : Age of Empires IV ; référence UX de ces interactions : Elvenar. Ce cadrage historique ne vaut pas preuve de livraison.
 
 ## Oracle
 

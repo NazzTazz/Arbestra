@@ -1,5 +1,6 @@
 import { sql, type Transaction } from 'kysely';
 import type { DepositDetails, Extraction, StoneDeposit } from '@arbestra/contracts';
+import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -75,7 +76,8 @@ export async function readExtraction(tx: Transaction<Database>, worldId: string,
   return { id: row.id, featureId: row.featureId, cellX: deposit.cellX, cellY: deposit.cellY,
     workerCount: row.workerCount, reservedAmount: safeAmount(row.reservedAmount),
     status: row.status, startedAt: row.startedAt.toISOString(), completesAt: row.completesAt.toISOString(),
-    completedAt: row.completedAt?.toISOString() ?? null };
+    completedAt: row.completedAt?.toISOString() ?? null,
+    transportMs: row.transportMs, path: row.pathCells ?? [] };
 }
 
 async function access(tx: Transaction<Database>, village: ExtractionVillage, deposit: StoneDeposit) {
@@ -93,15 +95,15 @@ function refusal(deposit: StoneDeposit, eligibility: Awaited<ReturnType<typeof a
 }
 
 /** Caller holds village and target locks, after reconciling that village to H. */
-export async function stoneDepositDetails(tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy, featureId: string): Promise<DepositDetails> {
+export async function stoneDepositDetails(tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy, featureId: string, transportMs = 0, pathReachable = true): Promise<DepositDetails> {
   const deposit = await readStoneDeposit(tx, village.worldId, featureId);
   const eligibility = await access(tx, village, deposit);
   const reason = refusal(deposit, eligibility);
   const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
   const workerOptions = Array.from({ length: STONE_EXTRACTION_MAX_WORKERS }, (_, i) => {
-    const workerCount = i + 1, durationMs = stoneExtractionDuration(workerCount);
+    const workerCount = i + 1, durationMs = stoneExtractionDuration(workerCount) + transportMs * 2;
     const availableWorkers = eligibleWorkers(cohorts, durationMs).reduce((sum, row) => sum + row.memberCount, 0);
-    const reasonCode = reason ?? (availableWorkers < workerCount ? 'WORKERS_UNAVAILABLE' : null);
+    const reasonCode = reason ?? (!pathReachable ? 'DESTINATION_UNREACHABLE' : availableWorkers < workerCount ? 'WORKERS_UNAVAILABLE' : null);
     return { workerCount, durationMs, availableWorkers, canStart: reasonCode === null, reasonCode };
   });
   return { serverTime: economy.through.toISOString(), deposit,
@@ -111,6 +113,7 @@ export async function stoneDepositDetails(tx: Transaction<Database>, village: Ex
 export async function startStoneExtraction(
   tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy,
   featureId: string, commandId: string, workerCount: number,
+  path: TravelCell[] = [], transportMs = 0,
 ): Promise<string> {
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > STONE_EXTRACTION_MAX_WORKERS)
     throw new HttpError(400, 'EXTRACTION_WORKER_COUNT_INVALID', 'Effectif d’extraction invalide.');
@@ -125,7 +128,7 @@ export async function startStoneExtraction(
   const reason = refusal(deposit, await access(tx, village, deposit));
   if (reason) throw new HttpError(409, reason, 'Ce gisement ne peut pas être exploité actuellement.');
   const available = deposit.availableAmount;
-  const durationMs = stoneExtractionDuration(workerCount);
+  const durationMs = stoneExtractionDuration(workerCount) + transportMs * 2;
   const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
   const candidates = eligibleWorkers(cohorts, durationMs);
   if (candidates.reduce((total, cohort) => total + cohort.memberCount, 0) < workerCount)
@@ -134,7 +137,8 @@ export async function startStoneExtraction(
   const extraction = await tx.insertInto('depositExtractions').values({ worldId: village.worldId, villageId: village.villageId,
     featureId, commandId, status: 'in-progress', startedAt: economy.through,
     completesAt: new Date(economy.through.getTime() + durationMs), completedAt: null,
-    workerCount, reservedAmount: amount }).returning('id').executeTakeFirstOrThrow();
+    workerCount, reservedAmount: amount,
+    transportMs, pathCells: sql`${JSON.stringify(path)}::jsonb` }).returning('id').executeTakeFirstOrThrow();
   await assignWorkers(tx, candidates, workerCount, { harvestId: null, extractionId: extraction.id });
   const reserved = await tx.updateTable('stoneDeposits').set({ reservedAmount: sql`reserved_amount + ${amount}::bigint`,
     revision: sql`revision + 1`, updatedAt: sql`statement_timestamp()` }).where('worldId', '=', village.worldId)

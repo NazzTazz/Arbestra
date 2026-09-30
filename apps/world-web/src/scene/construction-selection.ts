@@ -15,13 +15,22 @@ export function touchesCell(a: Cell, b: Cell, world: VillageState['world']): boo
 
 export function cellsAlongSegment(from: Cell, to: Cell, world: Pick<VillageState['world'], 'widthCells' | 'heightCells'>): Cell[] {
   const dx = delta(to.cellX, from.cellX, world.widthCells), dy = delta(to.cellY, from.cellY, world.heightCells);
-  const steps = Math.max(Math.abs(dx), Math.abs(dy));
-  if (steps === 0) return [];
+  const width = Math.abs(dx), height = Math.abs(dy);
+  const stepX = Math.sign(dx), stepY = Math.sign(dy);
+  let x = Math.round(from.cellX), y = Math.round(from.cellY);
+  const endX = Math.round(from.cellX + dx), endY = Math.round(from.cellY + dy);
+  let distanceX = stepX * (x + stepX * 0.5 - from.cellX);
+  let distanceY = stepY * (y + stepY * 0.5 - from.cellY);
   const cells: Cell[] = [];
-  for (let index = 1; index <= steps; index += 1) cells.push({
-    cellX: normalize(Math.round(from.cellX + dx * index / steps), world.widthCells),
-    cellY: normalize(Math.round(from.cellY + dy * index / steps), world.heightCells),
-  });
+  while (x !== endX || y !== endY) {
+    // Compare the next grid intersections using their actual starting point. A
+    // corner contact alone does not traverse either of the two side cells.
+    const nextX = distanceX * height, nextY = distanceY * width;
+    if (x !== endX && (y === endY || nextX < nextY - 1e-12)) { x += stepX; distanceX++; }
+    else if (y !== endY && (x === endX || nextY < nextX - 1e-12)) { y += stepY; distanceY++; }
+    else { x += stepX; y += stepY; distanceX++; distanceY++; }
+    cells.push({ cellX: normalize(x, world.widthCells), cellY: normalize(y, world.heightCells) });
+  }
   return cells;
 }
 

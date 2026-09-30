@@ -1,4 +1,5 @@
 import { sql, type Transaction } from 'kysely';
+import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -12,6 +13,7 @@ const HARVEST_MS = 60_000;
 export async function startGardenHarvest(
   tx: Transaction<Database>, worldId: string, villageId: string, buildingId: string,
   cellX: number, cellY: number, commandId: string, through: Date,
+  path: TravelCell[] = [], transportMs = 0,
 ) {
   const repeated = await tx.selectFrom('gardenHarvests').select(['id', 'plotCellX', 'plotCellY'])
     .where('worldId', '=', worldId).where('villageId', '=', villageId)
@@ -37,15 +39,17 @@ export async function startGardenHarvest(
     .where('buildingId', '=', buildingId).where('plotCellX', 'is', null).where('status', '=', 'in-progress').executeTakeFirst();
   if (legacyHarvest) throw new HttpError(409, 'GARDEN_HARVEST_IN_PROGRESS', 'Une récolte existante est encore en cours sur ce Jardin.');
   const cohorts = await materializeCohorts(tx, worldId, villageId, through);
-  const selected = eligibleWorkers(cohorts, HARVEST_MS);
+  const durationMs = HARVEST_MS + transportMs * 2;
+  const selected = eligibleWorkers(cohorts, durationMs);
   if (selected.reduce((count, cohort) => count + cohort.memberCount, 0) < 1)
     throw new HttpError(409, 'HARVESTERS_UNAVAILABLE', 'Aucun habitant disponible et reposé.');
   const buffer = await materializeGardenPlot(tx, worldId, cellX, cellY, through);
   if (buffer.amount === 0) throw new HttpError(409, 'GARDEN_EMPTY', 'Cette parcelle ne contient aucune carotte à récolter.');
-  const completesAt = new Date(through.getTime() + HARVEST_MS);
+  const completesAt = new Date(through.getTime() + durationMs);
   const harvest = await tx.insertInto('gardenHarvests').values({ worldId, villageId, buildingId, commandId,
     plotCellX: cellX, plotCellY: cellY, status: 'in-progress', startedAt: through, completesAt,
-    completedAt: null, workerCount: 1, reservedCarrots: buffer.amount }).returning('id').executeTakeFirstOrThrow();
+    completedAt: null, workerCount: 1, reservedCarrots: buffer.amount,
+    transportMs, pathCells: sql`${JSON.stringify(path)}::jsonb` }).returning('id').executeTakeFirstOrThrow();
   await assignWorkers(tx, selected, 1, { harvestId: harvest.id, extractionId: null });
   await tx.updateTable('gardenPlots').set({ storedAmount: 0, productionUpdatedAt: through })
     .where('worldId', '=', worldId).where('cellX', '=', cellX).where('cellY', '=', cellY).execute();

@@ -5,7 +5,9 @@ import type {
   BuildingTypeDefinition,
   VillageState,
   ExtractionResponse,
+  TravelCell,
 } from '@arbestra/contracts';
+import { buildTravelNetwork } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import {
@@ -214,6 +216,66 @@ async function snapshot(
         : undefined;
     },
   };
+}
+
+/** Route beyond the visual snapshot, using real world chunks and occupancy in a bounded corridor. */
+async function stoneTravelPath(tx: Transaction<Database>, village: OwnedVillage, featureId: string,
+  visiblePath?: TravelCell[]): Promise<TravelCell[] | undefined> {
+  if (visiblePath) return visiblePath;
+  const deposit = await tx.selectFrom('stoneDeposits').select(['cellX', 'cellY', 'remainingAmount'])
+    .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
+  if (!deposit || Number(deposit.remainingAmount) <= 0) return undefined;
+  const dx = wrappedDelta(deposit.cellX, village.anchorCellX, village.widthCells);
+  const dy = wrappedDelta(deposit.cellY, village.anchorCellY, village.heightCells);
+  // World-reach commands can target arbitrarily remote cells. Keep this case bounded
+  // until long-distance navigation has a chunk-level planner.
+  if (Math.abs(dx) + Math.abs(dy) > 128) {
+    const path: TravelCell[] = [{ cellX: village.anchorCellX, cellY: village.anchorCellY }];
+    for (let i = 1; i <= Math.abs(dx); i++) path.push({
+      cellX: normalizeCell(village.anchorCellX + Math.sign(dx) * i, village.widthCells),
+      cellY: village.anchorCellY,
+    });
+    for (let i = 1; i <= Math.abs(dy); i++) path.push({
+      cellX: deposit.cellX,
+      cellY: normalizeCell(village.anchorCellY + Math.sign(dy) * i, village.heightCells),
+    });
+    return path;
+  }
+  const width = Math.min(village.widthCells, Math.abs(dx) + 17);
+  const height = Math.min(village.heightCells, Math.abs(dy) + 17);
+  const originCellX = normalizeCell(village.anchorCellX + Math.min(0, dx) - 8, village.widthCells);
+  const originCellY = normalizeCell(village.anchorCellY + Math.min(0, dy) - 8, village.heightCells);
+  const xs = Array.from({ length: width }, (_, i) => normalizeCell(originCellX + i, village.widthCells));
+  const ys = Array.from({ length: height }, (_, i) => normalizeCell(originCellY + i, village.heightCells));
+  const wanted = new Map<string, { chunkX: number; chunkY: number }>();
+  for (const y of ys) for (const x of xs) {
+    const chunkX = Math.floor(x / village.chunkSize), chunkY = Math.floor(y / village.chunkSize);
+    wanted.set(`${chunkX}:${chunkY}`, { chunkX, chunkY });
+  }
+  const [chunks, occupied] = await Promise.all([
+    tx.selectFrom('worldChunks').select(['chunkX', 'chunkY', 'terrainCodes'])
+      .where('worldId', '=', village.worldId)
+      .where((eb) => eb.or([...wanted.values()].map(({ chunkX, chunkY }) => eb.and([
+        eb('chunkX', '=', chunkX), eb('chunkY', '=', chunkY),
+      ])))).execute(),
+    tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY'])
+      .where('worldId', '=', village.worldId).where('cellX', 'in', xs).where('cellY', 'in', ys).execute(),
+  ]);
+  const byChunk = new Map(chunks.map((chunk) => [`${chunk.chunkX}:${chunk.chunkY}`, chunk]));
+  const terrainCodes = ys.flatMap((y) => xs.map((x) => {
+    const chunk = byChunk.get(`${Math.floor(x / village.chunkSize)}:${Math.floor(y / village.chunkSize)}`);
+    if (!chunk) throw new HttpError(409, 'WORLD_NOT_READY', 'Le terrain de ce monde est en préparation.');
+    return chunk.terrainCodes[(y % village.chunkSize) * village.chunkSize + (x % village.chunkSize)]!;
+  }));
+  const routeState = {
+    world: { widthCells: village.widthCells, heightCells: village.heightCells },
+    village: { anchorCellX: village.anchorCellX, anchorCellY: village.anchorCellY },
+    region: { originCellX, originCellY, width, height, terrainCodes,
+      features: [{ id: featureId, cellX: deposit.cellX, cellY: deposit.cellY,
+        type: 'stone_outcrop', deposit: { state: 'available' } }] },
+    cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
+  } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
+  return buildTravelNetwork(routeState).find((route) => route.id === featureId)?.cells;
 }
 
 function candidates(
@@ -500,7 +562,7 @@ async function state(
     carrot = resources.find((item) => item.code === 'carrot');
   if (!wood || !carrot || !wood.productionUpdatedAt)
     throw new Error('Village resource seed is incomplete');
-  return {
+  const villageState: VillageState = {
     serverTime: at.toISOString(),
     world: {
       id: village.worldId,
@@ -528,6 +590,7 @@ async function state(
       extractions: await Promise.all(extractionRows.map((row) => readExtraction(tx, village.worldId, village.villageId, row.id))),
     },
     buildingTypes: definitions,
+    travelRoutes: [],
     region: {
       originCellX: ground.originCellX,
       originCellY: ground.originCellY,
@@ -558,9 +621,11 @@ async function state(
           footprint = row ? (byBuilding.get(logicalBuildingId) ?? []) : [],
           activeCells = footprint.filter((item) => item.pendingExpansionId === null),
           pendingCells = footprint.filter((item) => item.pendingExpansionId !== null),
-          expansion = pendingCells[0]?.pendingExpansionId
-            ? expansionById.get(pendingCells[0].pendingExpansionId)
-            : undefined,
+          gardenExpansions = [...new Set(pendingCells.flatMap((item) => item.pendingExpansionId ? [item.pendingExpansionId] : []))]
+            .flatMap((id) => { const item = expansionById.get(id); return item ? [{ id, startedAt: item.startedAt.toISOString(),
+              completesAt: item.completesAt.toISOString(), cells: pendingCells.filter((cell) => cell.pendingExpansionId === id)
+                .map((cell) => ({ cellX: cell.cellX, cellY: cell.cellY })) }] : []; })
+            .sort((a, b) => a.completesAt.localeCompare(b.completesAt) || a.id.localeCompare(b.id)),
           plots = row?.buildingType === 'garden' ? projectedPlots.filter((plot) =>
             (componentBuildings.get(logicalBuildingId) ?? new Set([row.buildingId])).has(plot.buildingId)) : [];
         return {
@@ -601,14 +666,11 @@ async function state(
                             capacity: plot.capacity, productionPerHour: plot.productionPerHour,
                             productionUpdatedAt: plot.productionUpdatedAt.toISOString(), full: plot.amount >= plot.capacity,
                             harvest: harvest ? { id: harvest.id, startedAt: harvest.startedAt.toISOString(),
-                              completesAt: harvest.completesAt.toISOString(), reservedCarrots: number(harvest.reservedCarrots) } : null };
+                              completesAt: harvest.completesAt.toISOString(), reservedCarrots: number(harvest.reservedCarrots),
+                              transportMs: harvest.transportMs, path: harvest.pathCells ?? [] } : null };
                         }),
-                        expansion: expansion ? {
-                          id: expansion.id,
-                          startedAt: expansion.startedAt.toISOString(),
-                          completesAt: expansion.completesAt.toISOString(),
-                          cells: pendingCells.map((item) => ({ cellX: item.cellX, cellY: item.cellY })),
-                        } : null,
+                        expansion: gardenExpansions[0] ?? null,
+                        expansions: gardenExpansions,
                         harvest: [...(componentBuildings.get(logicalBuildingId) ?? new Set([row.buildingId]))]
                           .map((id) => legacyHarvestByBuilding.get(id)).find(Boolean) ? (() => {
                           const harvest = [...(componentBuildings.get(logicalBuildingId) ?? new Set([row.buildingId]))]
@@ -617,6 +679,7 @@ async function state(
                             id: harvest.id, startedAt: harvest.startedAt.toISOString(),
                             completesAt: harvest.completesAt.toISOString(), workerCount: harvest.workerCount,
                             reservedCarrots: number(harvest.reservedCarrots),
+                            transportMs: harvest.transportMs, path: harvest.pathCells ?? [],
                           };
                         })() : null,
                       }
@@ -644,6 +707,8 @@ async function state(
       })
       .filter((cell) => cell.canBuild || cell.footprint !== null),
   };
+  villageState.travelRoutes = buildTravelNetwork(villageState);
+  return villageState;
 }
 
 async function definition(
@@ -995,14 +1060,15 @@ export async function expandGarden(
       .leftJoin('buildings', (join) => join.onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId')
         .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'))
       .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY', 'worldCellOccupancies.pendingExpansionId',
-        'buildings.buildingType', 'buildings.villageId'])
+        'buildings.buildingType', 'buildings.villageId', 'buildings.status'])
       .where('worldCellOccupancies.worldId', '=', village.worldId).execute();
     const occupiedAt = new Map(occupiedRows.map((item) => [worldCellKey(item.cellX, item.cellY), item]));
     const newCells: SpatialCell[] = [];
     for (const cell of selection.cells) {
       const occupied = occupiedAt.get(worldCellKey(cell.cellX, cell.cellY));
       if (!occupied) { await assertBuildable(tx, village, cell.cellX, cell.cellY); newCells.push(cell); continue; }
-      if (occupied.pendingExpansionId !== null || occupied.buildingType !== 'garden' || occupied.villageId !== village.villageId)
+      if (occupied.pendingExpansionId !== null || occupied.buildingType !== 'garden' || occupied.villageId !== village.villageId
+        || occupied.status !== 'completed')
         throw new HttpError(409, 'CELL_OCCUPIED', 'Une case de la sélection est occupée ou encore en chantier.');
     }
     if (!selection.cells.some((cell) => activeCells.some((active) =>
@@ -1198,7 +1264,11 @@ export async function harvestGarden(
     const legacyHarvest = await tx.selectFrom('gardenHarvests').select('id').where('worldId', '=', village.worldId)
       .where('buildingId', 'in', componentIds).where('plotCellX', 'is', null).where('status', '=', 'in-progress').executeTakeFirst();
     if (legacyHarvest) throw new HttpError(409, 'GARDEN_HARVEST_IN_PROGRESS', 'Une récolte existante est encore en cours sur ce Jardin.');
-    await startGardenHarvest(tx, village.worldId, village.villageId, target.buildingId, x, y, legacyCommandId, at);
+    const routes = (await state(tx, accountId, worldSlug, economy)).travelRoutes;
+    const path = routes.find((route) => route.kind === 'garden' && route.destination.cellX === x && route.destination.cellY === y)?.cells;
+    if (!path) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun chemin praticable vers cette parcelle.');
+    await startGardenHarvest(tx, village.worldId, village.villageId, target.buildingId, x, y, legacyCommandId, at,
+      path, (path.length - 1) * 1_000);
     return state(tx, accountId, worldSlug, economy);
   });
 }
@@ -1212,7 +1282,20 @@ export async function startVillageStoneExtraction(
     const village = await ownedVillage(tx, accountId, worldSlug);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
-    const id = await startStoneExtraction(tx, village, economy, featureId, commandId, workerCount);
+    const previous = await tx.selectFrom('depositExtractions').select('id').where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('commandId', '=', commandId).executeTakeFirst();
+    if (!previous) {
+      const eligibility = await stoneDepositDetails(tx, village, economy, featureId);
+      const reason = eligibility.eligibility.workerOptions[0]?.reasonCode;
+      if (reason && reason !== 'WORKERS_UNAVAILABLE')
+        throw new HttpError(409, reason, 'Ce gisement ne peut pas être exploité actuellement.');
+    }
+    const path = previous ? [] : await stoneTravelPath(tx, village, featureId,
+      (await state(tx, accountId, worldSlug, economy)).travelRoutes
+        .find((route) => route.kind === 'stone' && route.id === featureId)?.cells);
+    if (!path) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun chemin praticable vers ce gisement.');
+    const id = await startStoneExtraction(tx, village, economy, featureId, commandId, workerCount,
+      path, (path.length - 1) * 1_000);
     return { villageState: await state(tx, accountId, worldSlug, economy),
       extraction: await readExtraction(tx, village.worldId, village.villageId, id),
       deposit: await readStoneDeposit(tx, village.worldId, featureId) };
@@ -1226,7 +1309,10 @@ export async function getStoneDepositDetails(
     const village = await ownedVillage(tx, accountId, worldSlug);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
-    return stoneDepositDetails(tx, village, economy, featureId);
+    const path = await stoneTravelPath(tx, village, featureId,
+      (await state(tx, accountId, worldSlug, economy)).travelRoutes
+        .find((route) => route.kind === 'stone' && route.id === featureId)?.cells);
+    return stoneDepositDetails(tx, village, economy, featureId, path ? (path.length - 1) * 1_000 : 0, Boolean(path));
   });
 }
 

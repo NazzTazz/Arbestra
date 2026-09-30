@@ -19,6 +19,7 @@ import * as stoneDepositExtractionsMigration from './migrations/012_stone_deposi
 import * as dwellingLevelTwoMigration from './migrations/013_dwelling_level_two.js';
 import * as villageAccomplishmentsMigration from './migrations/014_village_accomplishments.js';
 import * as gardenPlotsMigration from './migrations/015_garden_plots.js';
+import * as travelPathsMigration from './migrations/016_travel_paths.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -38,6 +39,7 @@ const migrationProvider: MigrationProvider = {
       '013_dwelling_level_two': dwellingLevelTwoMigration,
       '014_village_accomplishments': villageAccomplishmentsMigration,
       '015_garden_plots': gardenPlotsMigration,
+      '016_travel_paths': travelPathsMigration,
     };
   },
 };

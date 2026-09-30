@@ -38,6 +38,13 @@ export const BuildingTypeDefinitionSchema = Type.Object({
 });
 export type BuildingTypeDefinition = Static<typeof BuildingTypeDefinitionSchema>;
 
+const GardenExpansionSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }),
+  startedAt: Type.String({ format: 'date-time' }),
+  completesAt: Type.String({ format: 'date-time' }),
+  cells: Type.Array(Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) })),
+});
+
 export const GardenSchema = Type.Object({
   storedCarrots: Type.Integer({ minimum: 0 }),
   capacity: Type.Integer({ minimum: 0 }),
@@ -56,18 +63,18 @@ export const GardenSchema = Type.Object({
     harvest: Type.Union([Type.Object({
       id: Type.String({ format: 'uuid' }), startedAt: Type.String({ format: 'date-time' }),
       completesAt: Type.String({ format: 'date-time' }), reservedCarrots: Type.Integer({ minimum: 0 }),
+      transportMs: Type.Integer({ minimum: 0 }),
+      path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
     }), Type.Null()]),
   })),
-  expansion: Type.Union([Type.Object({
-    id: Type.String({ format: 'uuid' }),
-    startedAt: Type.String({ format: 'date-time' }),
-    completesAt: Type.String({ format: 'date-time' }),
-    cells: Type.Array(Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) })),
-  }), Type.Null()]),
+  expansion: Type.Union([GardenExpansionSchema, Type.Null()]),
+  expansions: Type.Optional(Type.Array(GardenExpansionSchema)),
   harvest: Type.Union([Type.Object({
     id: Type.String({ format: 'uuid' }), startedAt: Type.String({ format: 'date-time' }),
     completesAt: Type.String({ format: 'date-time' }), workerCount: Type.Integer({ minimum: 1 }),
     reservedCarrots: Type.Integer({ minimum: 0 }),
+    transportMs: Type.Integer({ minimum: 0 }),
+    path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
   }), Type.Null()]),
 });
 export type Garden = Static<typeof GardenSchema>;
@@ -90,6 +97,8 @@ export const ExtractionSchema = Type.Object({
   status: Type.Union([Type.Literal('in-progress'), Type.Literal('completed')]),
   startedAt: Type.String({ format: 'date-time' }), completesAt: Type.String({ format: 'date-time' }),
   completedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  transportMs: Type.Integer({ minimum: 0 }),
+  path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
 });
 export type Extraction = Static<typeof ExtractionSchema>;
 
@@ -155,6 +164,11 @@ export const VillageStateSchema = Type.Object({
     extractions: Type.Array(ExtractionSchema),
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),
+  travelRoutes: Type.Array(Type.Object({
+    id: Type.String(), kind: Type.Union([Type.Literal('building'), Type.Literal('garden'), Type.Literal('stone')]),
+    destination: Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }),
+    cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
+  })),
   region: Type.Object({
     originCellX: Type.Integer({ minimum: 0 }), originCellY: Type.Integer({ minimum: 0 }),
     width: Type.Integer({ minimum: 1 }), height: Type.Integer({ minimum: 1 }),

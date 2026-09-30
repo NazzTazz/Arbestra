@@ -1,6 +1,6 @@
 # Construction spatiale et Jardin surfacique
 
-Statut : **implémenté dans le worktree ; parcours clavier desktop/mobile automatisés validés**.
+Statut : **implémenté dans le worktree**. Preuves serveur et navigateur du 30 septembre dans la [reprise courante](../../SESSION-HANDOFF.md).
 
 ## Principe
 
@@ -128,7 +128,7 @@ avec `{ "commandId": "…", "cellX": 1024, "cellY": 512 }`. Le reçu est idempot
 Le snapshot Jardin expose :
 
 - `activeCellCount`, `pendingCellCount` ;
-- une éventuelle expansion avec `id`, `startedAt`, `completesAt` et ses cellules ;
+- `expansions`, toutes les extensions en cours avec `id`, `startedAt`, `completesAt` et leurs cellules propres ; `expansion` conserve la première pour compatibilité ;
 - `plots`, avec coordonnées, stock projeté, capacité, taux, saturation et trajet éventuel ;
 - chaque `VillageCell.footprint.state` reste `active | reserved`.
 
@@ -145,7 +145,7 @@ Mode normal :
 Mode **Construire** :
 
 - entrée par une commande dédiée au bord inférieur du monde, raccourci `B` sur desktop ;
-- grille détaillée des cellules valides ;
+- contours blancs continus et léger voile bleuté sur les seules cellules `canBuild` du snapshot, suivant le relief et masqués par les bâtiments et features au premier plan ;
 - choix du type, puis sélection de surface ;
 - Jardin : drag rectangulaire desktop, premier/deuxième coin au tactile ;
 - aperçu distinct des parcelles existantes, nouvelles et obstacles, avec coût sur les seules nouvelles cellules ;
@@ -153,10 +153,14 @@ Mode **Construire** :
 
 Le bouton **Étendre** d’un Jardin réutilise ce sélecteur, limité aux extensions valides. Annuler une prévisualisation ne produit aucune écriture. Une commande confirmée n’est pas annulable dans cette tranche.
 
+**Gérer les Jardins** ouvre directement le seul Jardin ou propose toutes les composantes, avec leurs coordonnées. Après une fusion, le choix se résout vers la composante restante. Chaque parcelle possède un bouton accessible au clavier. Le glissé de récolte parcourt les intersections réelles du segment avec la grille, y compris le dernier segment au relâchement, et déduplique les coordonnées canoniques. Hors construction, un départ sur une parcelle récoltable consomme le glissé ; départ sur sol libre, glissé droit et zoom conservent les commandes caméra.
+
+La file client ordonne les départs. Une réponse réseau incertaine garde le même reçu par monde/village/coordonnée, même si la fusion change l'ID canonique ou si un snapshot montre déjà le trajet. Reprise automatique toutes les deux secondes et au retour en ligne/focus, ou bouton Réessayer ; les cibles suivantes attendent sa résolution. Un manque d'habitants abandonne les départs restants du geste sans réservation différée. Indicateur de parcelle et bouton en attente sont distincts d'un trajet accepté ; le symbole plein reste une présentation du snapshot. Les intentions sont conservées pendant la session React, sans persistance après rechargement complet.
+
 ## Migration des Jardins existants
 
 - Jardin terminé : conserver toutes ses occupations comme actives, fixer `level = 1`, recalculer taux et capacité depuis leur nombre.
-- Migration 015 : répartir l'ancien stock entier par quotient/reste entre les parcelles actives, conserver le reliquat exact et laisser les trajets globaux déjà partis terminer une seule fois.
+- Migration 015 : matérialiser chronologiquement les changements échus et la production due à sa borne commune avant répartition par quotient/reste ; conserver le reliquat exact et laisser les trajets globaux déjà partis terminer une seule fois. Voir [Économie](./economy.md) pour la limite sur les bases déjà migrées.
 - Construction initiale en cours : conserver le bâtiment et toute son emprise sous `buildings.status`.
 - Ancien passage niveau 1 → 2 en cours : convertir ses timestamps et sa cellule réservée en `building_expansions`, remettre le Jardin existant à `completed`, niveau 1.
 - Supprimer les lignes catalogue Jardin niveau 2 ; les valeurs Jardin niveau 1 deviennent les valeurs par cellule.
@@ -174,7 +178,7 @@ Aucune carotte accumulée ni aucun coût déjà payé ne doit être perdu ou rej
 - clic sur toute cellule = même Jardin ;
 - migration fidèle des Jardins à une et deux cellules.
 
-Le parcours explicite de récolte au clavier est couvert sur Chromium desktop et profil mobile. La [recette du 7 septembre](../REVIEW-2026-09-07-JARDINS.md) reproduit toutefois des cellules sautées par le calcul de balayage et un chantier initial toléré à tort par le serveur. Le glissé souris/tactile et les parcours d'extension/fusion restent à vérifier dans le navigateur après correction.
+Les défauts de la [recette du 7 septembre](../REVIEW-2026-09-07-JARDINS.md) sont corrigés. Chromium desktop et Pixel 7 couvrent glissé rapide, retour sur ses pas, manque d'habitants, clavier, caméra, extension tolérante, fusion visible et réponse perdue ; les tests SQL couvrent saturation à la migration, échéances, concurrence forcée et rollback. La recette finale ouvre aussi un village après exécution de la vraie migration 015 et vérifie la protection puis la livraison unique de son ancien trajet global. La reprise courante précise les fixtures et les limites de cette validation.
 
 ## Hors scope
 

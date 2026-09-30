@@ -1,6 +1,6 @@
 # Jardins — récolte par parcelle, fusion et agrandissement tolérant
 
-Date : 7 septembre 2026. Base vérifiée : `master`, `b148f37`. **Statut : prête à implémenter.** Les décisions gameplay ci-dessous sont validées par Tristan ; les propositions de structure sont des recommandations techniques. Cette rédaction ne livre aucun code ni migration.
+Date de cadrage : 7 septembre 2026, base historique `master`, `b148f37`. **Statut au 30 septembre : implémentée et validée dans le worktree, non commitée.** Les décisions gameplay ci-dessous sont validées par Tristan ; les propositions de structure sont des recommandations techniques. Voir la [reprise courante](../SESSION-HANDOFF.md) pour les preuves terminées et l'état Git.
 
 ## Résultat joueur et décisions validées
 
@@ -14,9 +14,9 @@ Date : 7 septembre 2026. Base vérifiée : `master`, `b148f37`. **Statut : prêt
 
 La direction graphique générale prend Age of Empires IV comme référence. Les marqueurs de saturation et le geste de récolte prennent Elvenar comme référence d'UX. Cette tranche adapte les Jardins à ces intentions ; elle n'engage pas une refonte artistique générale ni la copie d'assets.
 
-## Existant prouvé par lecture
+## Existant historique au cadrage du 7 septembre
 
-Les références décrivent l'existant, pas la cible :
+Les références suivantes décrivent l'existant du 7 septembre avant cette tranche, pas le code actuel :
 
 - `apps/api/src/modules/population/garden-harvest.ts` : `startGardenHarvest()` demande autant d'habitants que de cellules actives, vide le buffer global, réserve les carottes et crée un trajet de 60 secondes. Une seule récolte active par bâtiment est admise. `completeGardenHarvestAt()` crédite les carottes réservées et libère les habitants.
 - `apps/api/src/modules/villages/economy.ts` et `service.ts` : buffer, projection et résumé Jardin à l'échelle du bâtiment. Les ancres et emprises associent toutes les cellules au même bâtiment.

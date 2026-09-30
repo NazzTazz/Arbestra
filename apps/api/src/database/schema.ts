@@ -247,6 +247,8 @@ export interface DepositExtractionsTable {
   completedAt: Timestamp | null;
   workerCount: number;
   reservedAmount: ColumnType<string, number | string, number | string>;
+  transportMs: ColumnType<number, number | undefined, number>;
+  pathCells: ColumnType<Array<{ cellX: number; cellY: number }> | null, Array<{ cellX: number; cellY: number }> | null | undefined, Array<{ cellX: number; cellY: number }> | null>;
 }
 
 export interface BuildingHiddenSuppliesTable {
@@ -272,6 +274,8 @@ export interface GardenHarvestsTable {
   reservedCarrots: ColumnType<string, number | string, number | string>;
   plotCellX: ColumnType<number | null, number | null | undefined, number | null>;
   plotCellY: ColumnType<number | null, number | null | undefined, number | null>;
+  transportMs: ColumnType<number, number | undefined, number>;
+  pathCells: ColumnType<Array<{ cellX: number; cellY: number }> | null, Array<{ cellX: number; cellY: number }> | null | undefined, Array<{ cellX: number; cellY: number }> | null>;
 }
 
 export interface GardenPlotsTable {
