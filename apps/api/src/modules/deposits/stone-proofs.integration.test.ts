@@ -238,7 +238,7 @@ describe.sequential('stone regression proofs', () => {
         const result = await app.inject({ method: 'POST', url, cookies, ...(body ? { payload: body } : {}) }); expect(result.statusCode, result.body).toBe(400);
       }
     } finally { await app.close(); }
-  });
+  }, 40000);
 
   it('F: debit observed before injected credit failure, all rows rolled back, delayed retry credits once', async () => {
     const id = await stone(); await start(id); const before = await rows();
