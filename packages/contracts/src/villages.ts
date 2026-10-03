@@ -45,6 +45,21 @@ const GardenExpansionSchema = Type.Object({
   cells: Type.Array(Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) })),
 });
 
+export const GardenHarvestStopSchema = Type.Object({
+  cellX: Type.Integer({minimum:0}), cellY: Type.Integer({minimum:0}),
+  path: Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer()})),
+  arrivesAfterMs: Type.Integer({minimum:0}), workEndsAfterMs: Type.Integer({minimum:0}),
+  reservedCarrots: Type.Integer({minimum:0}),
+});
+export type GardenHarvestStop = Static<typeof GardenHarvestStopSchema>;
+const GardenTourProperties = {
+  stops: Type.Optional(Type.Array(GardenHarvestStopSchema)),
+  returnPath: Type.Optional(Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer()}))),
+};
+export const GardenSelectionHarvestRequestSchema = Type.Object({
+  commandId:Type.String({format:'uuid'}),
+  cells:Type.Array(Type.Object({cellX:Type.Integer({minimum:0}),cellY:Type.Integer({minimum:0})}),{minItems:1,maxItems:100}),
+});
 export const GardenSchema = Type.Object({
   storedCarrots: Type.Integer({ minimum: 0 }),
   capacity: Type.Integer({ minimum: 0 }),
@@ -65,6 +80,7 @@ export const GardenSchema = Type.Object({
       completesAt: Type.String({ format: 'date-time' }), reservedCarrots: Type.Integer({ minimum: 0 }),
       transportMs: Type.Integer({ minimum: 0 }),
       path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
+      ...GardenTourProperties,
     }), Type.Null()]),
   })),
   expansion: Type.Union([GardenExpansionSchema, Type.Null()]),
@@ -81,7 +97,11 @@ export type Garden = Static<typeof GardenSchema>;
 
 export const StoneDepositSchema = Type.Object({
   featureId: Type.String({ format: 'uuid' }),
-  resourceCode: Type.Literal('stone'),
+  resourceCode: Type.Union([Type.Literal('stone'), Type.Literal('wood')]),
+  canClear: Type.Optional(Type.Boolean()),
+  cleared: Type.Optional(Type.Boolean()),
+  blocksCell: Type.Optional(Type.Boolean()),
+  regrowthPerHour: Type.Optional(Type.Number({ minimum: 0 })),
   cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }),
   initialAmount: Type.Integer({ minimum: 1 }), remainingAmount: Type.Integer({ minimum: 0 }),
   reservedAmount: Type.Integer({ minimum: 0 }), availableAmount: Type.Integer({ minimum: 0 }),
@@ -90,7 +110,15 @@ export const StoneDepositSchema = Type.Object({
 });
 export type StoneDeposit = Static<typeof StoneDepositSchema>;
 
+export const NaturalFeatureSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }), type: Type.String(), cellX: Type.Integer({ minimum: 0 }),
+  cellY: Type.Integer({ minimum: 0 }), variantSeed: Type.Integer(),
+  deposit: Type.Union([StoneDepositSchema, Type.Null()]),
+});
+export type NaturalFeature = Static<typeof NaturalFeatureSchema>;
+
 export const ExtractionSchema = Type.Object({
+  resourceCode: Type.Optional(Type.Union([Type.Literal('stone'), Type.Literal('wood')])),
   cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }),
   id: Type.String({ format: 'uuid' }), featureId: Type.String({ format: 'uuid' }),
   workerCount: Type.Integer({ minimum: 1 }), reservedAmount: Type.Integer({ minimum: 1 }),
@@ -102,6 +130,32 @@ export const ExtractionSchema = Type.Object({
 });
 export type Extraction = Static<typeof ExtractionSchema>;
 
+export const ExtractionWorksiteTargetSchema = Type.Object({
+  featureId: Type.String({ format: 'uuid' }), cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }),
+  status: Type.Union([Type.Literal('pending'), Type.Literal('completed'), Type.Literal('external'), Type.Literal('abandoned')]),
+  reason: Type.Union([Type.String(), Type.Null()]),
+});
+export const ExtractionWorksiteSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }), resourceCode: Type.Union([Type.Literal('stone'), Type.Literal('wood')]),
+  mode: Type.Union([Type.Literal('extract'), Type.Literal('cut'), Type.Literal('clear')]),
+  status: Type.Union([Type.Literal('running'), Type.Literal('paused'), Type.Literal('stopping'), Type.Literal('stopped'), Type.Literal('completed')]),
+  workerCap: Type.Integer({ minimum: 1, maximum: 10 }), deliveredAmount: Type.Integer({ minimum: 0 }),
+  waitReason: Type.Union([Type.String(), Type.Null()]),
+  nextWakeAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  targets: Type.Array(ExtractionWorksiteTargetSchema),
+  activeExtraction: Type.Union([ExtractionSchema, Type.Null()]),
+});
+export type ExtractionWorksite = Static<typeof ExtractionWorksiteSchema>;
+
+export const BuildingVisualLayoutSchema = Type.Object({
+  recipe: Type.Union([Type.Literal('town-hall'), Type.Literal('stone-house')]),
+  version: Type.Literal(1),
+  quarterTurns: Type.Integer({ minimum: 0, maximum: 3 }),
+  entranceFace: Type.Union([Type.Literal('-x'),Type.Literal('+x'),Type.Literal('-z'),Type.Literal('+z')]),
+  offset: Type.Tuple([Type.Number(),Type.Number()]),
+});
+export type BuildingVisualLayout = Static<typeof BuildingVisualLayoutSchema>;
+
 export const BuildingSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
   type: BuildingTypeSchema,
@@ -112,6 +166,7 @@ export const BuildingSchema = Type.Object({
   constructionCompletesAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
   completedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
   hiddenSuppliesAvailable: Type.Boolean(),
+  visualLayout: Type.Optional(Type.Union([BuildingVisualLayoutSchema, Type.Null()])),
   garden: Type.Union([GardenSchema, Type.Null()]),
 });
 export type Building = Static<typeof BuildingSchema>;
@@ -159,13 +214,19 @@ export const VillageStateSchema = Type.Object({
       total: Type.Integer({ minimum: 0 }), housingCapacity: Type.Integer({ minimum: 0 }),
       available: Type.Integer({ minimum: 0 }), working: Type.Integer({ minimum: 0 }), resting: Type.Integer({ minimum: 0 }),
       energyCounts: Type.Array(Type.Integer({ minimum: 0 })),
+      cohorts: Type.Optional(Type.Array(Type.Object({id:Type.String({format:'uuid'}),memberCount:Type.Integer({minimum:1}),
+        activity:Type.Union([Type.Literal('idle'),Type.Literal('working'),Type.Literal('resting')]),restBuildingId:Type.Union([Type.String({format:'uuid'}),Type.Null()]),
+        restingSince:Type.Union([Type.String({format:'date-time'}),Type.Null()])}))),
+      restHousing:Type.Optional(Type.Array(Type.Object({buildingId:Type.String({format:'uuid'}),capacity:Type.Integer({minimum:0}),restingCount:Type.Integer({minimum:0})}))),
+      restingWithoutHousing:Type.Optional(Type.Integer({minimum:0})),
     }),
     accomplishments: Type.Array(VillageAccomplishmentSchema),
     extractions: Type.Array(ExtractionSchema),
+    worksites: Type.Array(ExtractionWorksiteSchema),
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),
   travelRoutes: Type.Array(Type.Object({
-    id: Type.String(), kind: Type.Union([Type.Literal('building'), Type.Literal('garden'), Type.Literal('stone')]),
+    id: Type.String(), kind: Type.Union([Type.Literal('building'), Type.Literal('garden'), Type.Literal('stone'), Type.Literal('wood')]),
     destination: Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }),
     cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
   })),
@@ -174,11 +235,7 @@ export const VillageStateSchema = Type.Object({
     width: Type.Integer({ minimum: 1 }), height: Type.Integer({ minimum: 1 }),
     terrainCodes: Type.Array(Type.Integer({ minimum: 1 })),
     elevations: Type.Array(Type.Integer()),
-    features: Type.Array(Type.Object({
-      id: Type.String({ format: 'uuid' }), type: Type.String(), cellX: Type.Integer({ minimum: 0 }),
-      cellY: Type.Integer({ minimum: 0 }), variantSeed: Type.Integer(),
-      deposit: Type.Union([StoneDepositSchema, Type.Null()]),
-    })),
+    features: Type.Array(NaturalFeatureSchema),
   }),
   cells: Type.Array(VillageCellSchema),
 });
@@ -223,7 +280,28 @@ export const ExtractionRequestSchema = Type.Object({
 }, { additionalProperties: false });
 export type ExtractionRequest = Static<typeof ExtractionRequestSchema>;
 
+export const StartExtractionWorksiteRequestSchema = Type.Object({
+  commandId: Type.String({ format: 'uuid' }),
+  mode: Type.Union([Type.Literal('extract'), Type.Literal('cut'), Type.Literal('clear')]),
+  workerCap: Type.Integer({ minimum: 1, maximum: 10 }),
+  featureIds: Type.Array(Type.String({ format: 'uuid' }), { minItems: 1, maxItems: 64 }),
+}, { additionalProperties: false });
+export type StartExtractionWorksiteRequest = Static<typeof StartExtractionWorksiteRequestSchema>;
+export const ExtractionWorksiteSelectionSchema = Type.Object({
+  included: Type.Array(Type.Object({ featureId: Type.String({ format: 'uuid' }), cellX: Type.Integer(), cellY: Type.Integer() })),
+  excluded: Type.Array(Type.Object({ featureId: Type.String({ format: 'uuid' }), reason: Type.String() })),
+});
+export type ExtractionWorksiteSelection = Static<typeof ExtractionWorksiteSelectionSchema>;
+export const ChangeExtractionWorksiteRequestSchema = Type.Object({
+  commandId: Type.String({ format: 'uuid' }),
+  action: Type.Union([Type.Literal('pause'), Type.Literal('resume'), Type.Literal('stop'), Type.Literal('set-cap')]),
+  workerCap: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+}, { additionalProperties: false });
+export type ChangeExtractionWorksiteRequest = Static<typeof ChangeExtractionWorksiteRequestSchema>;
+export const ExtractionWorksiteResponseSchema = Type.Object({ villageState: VillageStateSchema, worksite: ExtractionWorksiteSchema });
+
 export const DepositDetailsSchema = Type.Object({
+  transportMs: Type.Optional(Type.Integer({ minimum: 0 })),
   serverTime: Type.String({ format: 'date-time' }), deposit: StoneDepositSchema,
   eligibility: Type.Object({
     inRange: Type.Boolean(), onBoundary: Type.Boolean(), protected: Type.Boolean(), lotAmount: Type.Integer({ minimum: 0, maximum: 100 }),
@@ -237,3 +315,9 @@ export type DepositDetails = Static<typeof DepositDetailsSchema>;
 
 export const ExtractionResponseSchema = Type.Object({ villageState: VillageStateSchema, extraction: ExtractionSchema, deposit: StoneDepositSchema });
 export type ExtractionResponse = Static<typeof ExtractionResponseSchema>;
+
+export const CatDiscoveryResponseSchema = Type.Object({
+  newlyCompleted: Type.Boolean(),
+  villageState: VillageStateSchema,
+});
+export type CatDiscoveryResponse = Static<typeof CatDiscoveryResponseSchema>;

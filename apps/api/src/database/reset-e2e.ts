@@ -35,6 +35,7 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await transaction.deleteFrom('populationCohorts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('gardenHarvests').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('depositExtractions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('extractionWorksites').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('buildingHiddenSupplies').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('buildings')
         .where('worldId', '=', DEVELOPMENT_IDS.world)
@@ -42,6 +43,7 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
         .execute();
       await transaction.updateTable('buildings').set({
         level: 1, targetLevel: null, status: 'completed', constructionStartedAt: null,
+        visualLayout: null,
         constructionCompletesAt: null, completedAt: sql`transaction_timestamp()`,
       }).where('id', '=', DEVELOPMENT_IDS.townHall).execute();
       await transaction.deleteFrom('worldCellOccupancies')

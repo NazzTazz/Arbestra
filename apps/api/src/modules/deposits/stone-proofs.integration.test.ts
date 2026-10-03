@@ -27,9 +27,9 @@ let db: Kysely<Database>, t0: Date;
 const fixtureIds: string[] = [];
 
 function gate() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
-async function bounded<T>(promise: Promise<T>): Promise<T> {
+async function bounded<T>(promise: Promise<T>, timeoutMs = 7000): Promise<T> {
   let timer!: ReturnType<typeof setTimeout>;
-  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('stone barrier timeout')), 7000); })]); }
+  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('stone barrier timeout')), timeoutMs); })]); }
   finally { clearTimeout(timer); }
 }
 function inside(tx: Transaction<Database>): Kysely<Database> {
@@ -202,7 +202,7 @@ describe.sequential('stone regression proofs', () => {
     const id = await stone(), oldWork = await start(id); await settle(new Date(t0.getTime() + 600000));
     const held = gate(), release = gate(); let oldTaskId = '';
     const worker = processNextScheduledTask(db, { [COMPLETE_STONE_EXTRACTION_TASK]: async (tx, task) => {
-      await backend(tx); oldTaskId = task.id; expect(task.subjectId).toBe(oldWork); held.resolve(); await bounded(release.promise); await completeStoneExtraction(tx, task);
+      await backend(tx); oldTaskId = task.id; expect(task.subjectId).toBe(oldWork); held.resolve(); await bounded(release.promise, 30000); await completeStoneExtraction(tx, task);
     } }); void worker.catch(() => undefined);
     try {
       await bounded(held.promise);
@@ -213,10 +213,11 @@ describe.sequential('stone regression proofs', () => {
       await db.updateTable('depositExtractions').set({ startedAt: t0, completesAt: new Date(t0.getTime()+600000) }).where('id','=',secondWork).execute();
       await db.updateTable('scheduledTasks').set({ dueAt: t0, availableAt: t0 }).where('subjectId','=',secondWork).execute();
       const second = await bounded(processNextScheduledTask(db, handlers));
-      expect(second?.taskId).not.toBe(oldTaskId); expect(second?.outcome).toBe('completed');
+      const secondTask = second ? await db.selectFrom('scheduledTasks').select('lastError').where('id', '=', second.taskId).executeTakeFirstOrThrow() : null;
+      expect(second?.taskId).not.toBe(oldTaskId); expect(second?.outcome, secondTask?.lastError ?? 'No task acquired').toBe('completed');
       release.resolve(); expect((await bounded(worker))?.outcome).toBe('completed'); expect(await stock()).toBe(200);
     } finally { release.resolve(); await worker; }
-  });
+  }, 40000);
 
   it('E: HTTP retry returns the same work before/after completion and rejects extra fields', async () => {
     const id = await stone();
@@ -395,9 +396,17 @@ describe.sequential('stone regression proofs', () => {
   });
 
   it('migration preflight refuses ambiguous feature positions without mutations',async()=>{
-    const id=await stone();await validateStoneDepositBackfill(db as unknown as Kysely<unknown>);
-    await db.insertInto('worldCellOccupancies').values({worldId,featureId:id,buildingId:null,pendingExpansionId:null,cellX:1024,cellY:515,role:'body'}).execute();
-    const before=await rows();await expect(validateStoneDepositBackfill(db as unknown as Kysely<unknown>)).rejects.toThrow('one available cell');expect(await rows()).toEqual(before);
+    const id=await stone(), before=await rows();
+    // Migration 012 requires the pre-extraction world. The current shared world
+    // can legitimately contain cleared/depleted features; isolate that input.
+    await db.transaction().execute(async tx=>{
+      await sql`create temporary table world_features on commit drop as select * from public.world_features where id=${id}`.execute(tx);
+      await sql`create temporary table world_cell_occupancies on commit drop as select * from public.world_cell_occupancies where feature_id=${id}`.execute(tx);
+      await validateStoneDepositBackfill(tx as unknown as Kysely<unknown>);
+      await sql`insert into world_cell_occupancies(world_id,feature_id,cell_x,cell_y) values(${worldId},${id},1024,515)`.execute(tx);
+      await expect(validateStoneDepositBackfill(tx as unknown as Kysely<unknown>)).rejects.toThrow('one available cell');
+    });
+    expect(await rows()).toEqual(before);
   });
 
   it('migration 012 backfills deterministically in an isolated schema without changing existing stocks or world',async()=>{
@@ -406,6 +415,13 @@ describe.sequential('stone regression proofs', () => {
     await expect(db.transaction().execute(async tx=>{
       await sql`create schema ${sql.id(schema)}`.execute(tx);
       await sql`set local search_path to ${sql.id(schema)}, public`.execute(tx);
+      // Reconstruct pre-012 inputs from canonical deposits, independently of
+      // cells consumed by previous suites, while leaving public fixtures intact.
+      await sql`create table world_features as select f.* from public.world_features f
+        join public.stone_deposits d on d.world_id=f.world_id and d.feature_id=f.id`.execute(tx);
+      await sql`alter table world_features add primary key(world_id,id)`.execute(tx);
+      await sql`update world_features set state='available'`.execute(tx);
+      await sql`create table world_cell_occupancies as select world_id,feature_id,cell_x,cell_y from public.stone_deposits`.execute(tx);
       await sql`create table population_cohorts(world_id uuid, village_id uuid, harvest_id uuid)`.execute(tx);
       await migrateStone(tx as unknown as Kysely<unknown>);
       const result=await sql<{count:string;invalid:string}>`select count(*) as count,

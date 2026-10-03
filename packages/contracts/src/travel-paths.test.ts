@@ -4,6 +4,22 @@ import type { VillageState } from './villages.js';
 import { buildTravelNetwork } from './travel-paths.js';
 
 describe('travel network', () => {
+  it('routes only requested woodlands and traverses reclaimed cells using the exact server flag', () => {
+    const state = {
+      world: { widthCells: 9, heightCells: 9 }, village: { anchorCellX: 2, anchorCellY: 4 },
+      region: { originCellX: 0, originCellY: 0, width: 9, height: 9, terrainCodes: Array(81).fill(1),
+        features: [
+          { id: 'reclaimed', type: 'woodland', cellX: 3, cellY: 4, deposit: { state: 'available', blocksCell: false } },
+          { id: 'target', type: 'woodland', cellX: 4, cellY: 4, deposit: { state: 'available', blocksCell: true } },
+        ] }, cells: [],
+    } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
+    expect(buildTravelNetwork(state)).toHaveLength(0);
+    expect(buildTravelNetwork(state, ['target'])).toMatchObject([{ id: 'target', kind: 'wood',
+      cells: [{ cellX: 2, cellY: 4 }, { cellX: 3, cellY: 4 }, { cellX: 4, cellY: 4 }] }]);
+    state.region.features[0]!.deposit!.blocksCell = true;
+    const detour = buildTravelNetwork(state, ['target'])[0]!;
+    expect(detour.cells).not.toContainEqual({ cellX: 3, cellY: 4 });
+  });
   it('detours around an occupied cell using only cardinal steps', () => {
     const world = { widthCells: 7, heightCells: 7 };
     const state = {

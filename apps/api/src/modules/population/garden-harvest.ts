@@ -15,11 +15,11 @@ export async function startGardenHarvest(
   cellX: number, cellY: number, commandId: string, through: Date,
   path: TravelCell[] = [], transportMs = 0,
 ) {
-  const repeated = await tx.selectFrom('gardenHarvests').select(['id', 'plotCellX', 'plotCellY'])
+  const repeated = await tx.selectFrom('gardenHarvests').select(['id', 'plotCellX', 'plotCellY', 'stops'])
     .where('worldId', '=', worldId).where('villageId', '=', villageId)
     .where('commandId', '=', commandId).executeTakeFirst();
   if (repeated) {
-    if (repeated.plotCellX !== cellX || repeated.plotCellY !== cellY)
+    if (repeated.stops.length > 1 || repeated.plotCellX !== cellX || repeated.plotCellY !== cellY)
       throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée pour une autre parcelle.');
     return repeated.id;
   }
@@ -32,8 +32,8 @@ export async function startGardenHarvest(
     .forUpdate().executeTakeFirst();
   if (!plot || plot.buildingId !== buildingId)
     throw new HttpError(404, 'GARDEN_PLOT_NOT_READY', 'Parcelle de Jardin récoltable introuvable.');
-  const activeHarvest = await tx.selectFrom('gardenHarvests').select('id').where('worldId', '=', worldId)
-    .where('plotCellX', '=', cellX).where('plotCellY', '=', cellY).where('status', '=', 'in-progress').executeTakeFirst();
+  const activeHarvest = (await tx.selectFrom('gardenHarvests').select(['id','plotCellX','plotCellY','stops']).where('worldId', '=', worldId)
+    .where('villageId','=',villageId).where('status', '=', 'in-progress').execute()).find(h=>h.plotCellX===cellX&&h.plotCellY===cellY||h.stops.some(p=>p.cellX===cellX&&p.cellY===cellY));
   if (activeHarvest) throw new HttpError(409, 'GARDEN_HARVEST_IN_PROGRESS', 'Une récolte est déjà en cours sur cette parcelle.');
   const legacyHarvest = await tx.selectFrom('gardenHarvests').select('id').where('worldId', '=', worldId)
     .where('buildingId', '=', buildingId).where('plotCellX', 'is', null).where('status', '=', 'in-progress').executeTakeFirst();
@@ -65,8 +65,14 @@ export async function completeGardenHarvestAt(tx: Transaction<Database>, worldId
   if (!harvest || harvest.status !== 'in-progress' || harvest.completesAt.getTime() !== through.getTime()) return;
   const cohorts = await materializeCohorts(tx, worldId, villageId, through);
   await releaseWorkers(tx, cohorts.filter((cohort) => cohort.harvestId === harvestId), harvest.workerCount, through);
-  await tx.updateTable('villageResources').set({ amount: sql`amount + ${harvest.reservedCarrots}::bigint` })
-    .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', 'carrot').execute();
+  const credited = await tx.updateTable('villageResources').set({ amount: sql`amount + ${harvest.reservedCarrots}::bigint` })
+    .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', 'carrot').executeTakeFirstOrThrow();
+  if (Number(credited.numUpdatedRows) !== 1) throw new Error('Garden harvest credit invariant failed');
+  if (BigInt(harvest.reservedCarrots) > 0n) {
+    await tx.insertInto('villageAccomplishments').values({
+      worldId, villageId, code: 'first-harvest', completedAt: through,
+    }).onConflict(oc => oc.columns(['worldId', 'villageId', 'code']).doNothing()).execute();
+  }
   await tx.updateTable('gardenHarvests').set({ status: 'completed', completedAt: through })
     .where('id', '=', harvestId).execute();
 }

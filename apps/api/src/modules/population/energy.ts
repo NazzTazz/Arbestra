@@ -73,6 +73,12 @@ export function canWorkFor(state: EnergyState, milliseconds: number): boolean {
   return exact >= 0;
 }
 
+/** A resting cohort becomes available again only when its energy is full. */
+export function millisecondsUntilRested(state: EnergyState): number | null {
+  if (state.activity !== 'resting') return null;
+  return Math.max(0, Math.ceil((10 * UNITS - state.energy * UNITS - state.progress) / RATE_PER_MILLISECOND.resting));
+}
+
 /** The displayed bar only loses a point after the full point was spent. */
 export function displayedEnergy(state: EnergyState): number {
   return (state.activity === 'idle' || state.activity === 'working') && state.progress > 0

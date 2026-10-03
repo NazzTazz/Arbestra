@@ -1,4 +1,5 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
+import type {BuildingVisualLayout,GardenHarvestStop,TravelCell} from '@arbestra/contracts';
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -53,6 +54,7 @@ export interface BuildingsTable {
   constructionCompletesAt: Timestamp | null;
   completedAt: Timestamp | null;
   createdAt: Generated<Timestamp>;
+  visualLayout: ColumnType<BuildingVisualLayout|null,BuildingVisualLayout|null|undefined,BuildingVisualLayout|null>;
 }
 
 export interface ResourceTypesTable {
@@ -220,6 +222,7 @@ export interface PopulationCohortsTable {
   foodUsedSinceRest: number;
   harvestId: string | null;
   extractionId: string | null;
+  restBuildingId: ColumnType<string|null,string|null|undefined,string|null>;
   createdAt: Generated<Timestamp>;
 }
 
@@ -236,6 +239,9 @@ export interface StoneDepositsTable {
 }
 
 export interface DepositExtractionsTable {
+  worksiteId: ColumnType<string | null, string | null | undefined, string | null>;
+  resourceCode: ColumnType<'stone' | 'wood', 'stone' | 'wood' | undefined, 'stone' | 'wood'>;
+  woodDebitedAt: ColumnType<Date | null, Date | null | undefined, Date | null>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -251,6 +257,48 @@ export interface DepositExtractionsTable {
   pathCells: ColumnType<Array<{ cellX: number; cellY: number }> | null, Array<{ cellX: number; cellY: number }> | null | undefined, Array<{ cellX: number; cellY: number }> | null>;
 }
 
+export interface ExtractionWorksitesTable {
+  id: Generated<string>;
+  worldId: string;
+  villageId: string;
+  commandId: string;
+  requestedFeatureIds: string[];
+  requestedWorkerCap: number;
+  resourceCode: 'stone' | 'wood';
+  mode: 'extract' | 'cut' | 'clear';
+  status: ColumnType<'running' | 'paused' | 'stopping' | 'stopped' | 'completed', 'running' | 'paused' | 'stopping' | 'stopped' | 'completed' | undefined, 'running' | 'paused' | 'stopping' | 'stopped' | 'completed'>;
+  workerCap: number;
+  deliveredAmount: ColumnType<string, number | string | undefined, number | string>;
+  waitReason: string | null;
+  nextWakeAt: Timestamp | null;
+  wakeVersion: Generated<number>;
+  lastDepartureAt: Timestamp | null;
+  createdAt: Generated<Timestamp>;
+  updatedAt: Timestamp;
+}
+
+export interface ExtractionWorksiteTargetsTable {
+  worksiteId: string;
+  worldId: string;
+  villageId: string;
+  featureId: string;
+  ordinal: number;
+  status: ColumnType<'pending' | 'completed' | 'external' | 'abandoned', 'pending' | 'completed' | 'external' | 'abandoned' | undefined, 'pending' | 'completed' | 'external' | 'abandoned'>;
+  admittedAt: Timestamp | null;
+  thresholdReachedAt: Timestamp | null;
+  completedAt: Timestamp | null;
+  reason: string | null;
+}
+
+export interface ExtractionWorksiteCommandsTable {
+  worldId: string;
+  villageId: string;
+  commandId: string;
+  worksiteId: string;
+  action: 'pause' | 'resume' | 'stop' | 'set-cap';
+  workerCap: number | null;
+}
+
 export interface BuildingHiddenSuppliesTable {
   worldId: string;
   villageId: string;
@@ -261,6 +309,8 @@ export interface BuildingHiddenSuppliesTable {
 }
 
 export interface GardenHarvestsTable {
+  stops: ColumnType<GardenHarvestStop[],GardenHarvestStop[]|undefined,GardenHarvestStop[]>;
+  returnPathCells: ColumnType<TravelCell[]|null,TravelCell[]|null|undefined,TravelCell[]|null>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -314,6 +364,15 @@ export interface SessionsTable {
 }
 
 export interface Database {
+    extractionWorksites: ExtractionWorksitesTable;
+    extractionWorksiteTargets: ExtractionWorksiteTargetsTable;
+    extractionWorksiteCommands: ExtractionWorksiteCommandsTable;
+  woodlandDeposits: StoneDepositsTable & {
+    regrowthPeriodMs: ColumnType<string, number | string | undefined, number | string>;
+    regrowthUpdatedAt: Timestamp;
+    cleared: ColumnType<boolean, boolean | undefined, boolean>;
+  };
+  resourceDeposits: StoneDepositsTable & { resourceCode: 'stone' | 'wood'; cleared: boolean; blocksCell: boolean };
   accounts: AccountsTable;
   worlds: WorldsTable;
   worldMemberships: WorldMembershipsTable;

@@ -20,6 +20,14 @@ import * as dwellingLevelTwoMigration from './migrations/013_dwelling_level_two.
 import * as villageAccomplishmentsMigration from './migrations/014_village_accomplishments.js';
 import * as gardenPlotsMigration from './migrations/015_garden_plots.js';
 import * as travelPathsMigration from './migrations/016_travel_paths.js';
+import * as woodlandCuttingMigration from './migrations/017_woodland_cutting.js';
+import * as extractionWorksitesMigration from './migrations/018_extraction_worksites.js';
+import * as worksiteSelectionReceiptsMigration from './migrations/019_worksite_selection_receipts.js';
+import * as worksiteInitialCapMigration from './migrations/020_worksite_initial_cap.js';
+import * as gardenHarvestToursMigration from './migrations/021_garden_harvest_tours.js';
+import * as restHousingMigration from './migrations/022_rest_housing.js';
+import * as buildingVisualLayoutMigration from './migrations/023_building_visual_layout.js';
+import * as barracksCatalogMigration from './migrations/024_barracks_catalog.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -40,6 +48,14 @@ const migrationProvider: MigrationProvider = {
       '014_village_accomplishments': villageAccomplishmentsMigration,
       '015_garden_plots': gardenPlotsMigration,
       '016_travel_paths': travelPathsMigration,
+      '017_woodland_cutting': woodlandCuttingMigration,
+      '018_extraction_worksites': extractionWorksitesMigration,
+      '019_worksite_selection_receipts': worksiteSelectionReceiptsMigration,
+      '020_worksite_initial_cap': worksiteInitialCapMigration,
+      '021_garden_harvest_tours': gardenHarvestToursMigration,
+      '022_rest_housing': restHousingMigration,
+      '023_building_visual_layout': buildingVisualLayoutMigration,
+      '024_barracks_catalog': barracksCatalogMigration,
     };
   },
 };

@@ -410,6 +410,13 @@ export async function generateWorld(
       )
       .execute();
     const stones = batch.filter((feature) => feature.featureTypeCode === 'stone_outcrop');
+    const woods = batch.filter((feature) => feature.featureTypeCode === 'woodland');
+    if (woods.length) await transaction.insertInto('woodlandDeposits').values(woods.map(feature => ({
+      worldId, featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY,
+      initialAmount: 300, remainingAmount: 300, reservedAmount: 0, revision: 1,
+      regrowthPeriodMs: 1_209_600_000, regrowthUpdatedAt: sql`statement_timestamp()`,
+      updatedAt: sql`statement_timestamp()`,
+    }))).onConflict(oc => oc.columns(['worldId', 'featureId']).doNothing()).execute();
     if (stones.length) await transaction.insertInto('stoneDeposits').values(stones.map((feature) => ({
       worldId, featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY,
       initialAmount: stoneDepositAmount(feature.variantSeed), remainingAmount: stoneDepositAmount(feature.variantSeed),

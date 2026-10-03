@@ -3,7 +3,7 @@ import type { VillageState } from './villages.js';
 export interface TravelCell { cellX: number; cellY: number }
 export interface TravelRoute {
   id: string;
-  kind: 'building' | 'garden' | 'stone';
+  kind: 'building' | 'garden' | 'stone' | 'wood';
   destination: TravelCell;
   cells: TravelCell[];
 }
@@ -52,11 +52,12 @@ class StepQueue {
 }
 
 /** Deterministic cardinal route, with a bounded preference for shared tracks. */
-export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>): TravelRoute[] {
+export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>, woodlandTargets: readonly string[] = []): TravelRoute[] {
   const { world, village, region } = state;
   const start = { cellX: village.anchorCellX, cellY: village.anchorCellY };
   const blocked = new Set(state.cells.filter((cell) => cell.footprint).map(key));
   for (const feature of region.features) {
+    if (feature.type === 'woodland' && (feature.deposit?.blocksCell === false || feature.deposit?.cleared)) continue;
     if (feature.type !== 'stone_outcrop' || feature.deposit?.state !== 'depleted') blocked.add(key(feature));
   }
   const goals: Array<Pick<TravelRoute, 'id' | 'kind' | 'destination'>> = [];
@@ -68,8 +69,8 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
       id: `${cell.building!.id}:${key(plot)}`, kind: 'garden', destination: plot,
     });
   }
-  for (const feature of region.features) if (feature.type === 'stone_outcrop' && feature.deposit?.state === 'available') {
-    goals.push({ id: feature.id, kind: 'stone', destination: feature });
+  for (const feature of region.features) if ((feature.type === 'stone_outcrop' || feature.type === 'woodland' && woodlandTargets.includes(feature.id)) && feature.deposit?.state === 'available') {
+    goals.push({ id: feature.id, kind: feature.type === 'woodland' ? 'wood' : 'stone', destination: feature });
   }
   goals.sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
   const shared = new Set<string>();

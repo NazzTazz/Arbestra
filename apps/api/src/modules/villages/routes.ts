@@ -1,14 +1,17 @@
 import { Type } from '@sinclair/typebox';
+import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
+import {harvestGardenSelection} from './service.js';
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 
-import { BuildRequestSchema, DepositDetailsSchema, ExpansionRequestSchema, ExtractionRequestSchema, ExtractionResponseSchema, HarvestRequestSchema, PopulationCommandRequestSchema, UpgradeRequestSchema, VillageStateSchema } from '@arbestra/contracts';
+import { CatDiscoveryResponseSchema, BuildRequestSchema, DepositDetailsSchema, ExpansionRequestSchema, ExtractionRequestSchema, ExtractionResponseSchema, ExtractionWorksiteResponseSchema, ExtractionWorksiteSelectionSchema, StartExtractionWorksiteRequestSchema, ChangeExtractionWorksiteRequestSchema, HarvestRequestSchema, PopulationCommandRequestSchema, UpgradeRequestSchema, VillageStateSchema } from '@arbestra/contracts';
+import type { StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest } from '@arbestra/contracts';
 
 import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
-import { constructBuilding, constructBuildingArea, discoverBuildingSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillageState, harvestGarden, restPopulation, startVillageStoneExtraction, upgradeBuilding } from './service.js';
+import { clearVillageWoodland, discoverCatEyes, constructBuilding, constructBuildingArea, discoverBuildingSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillageState, harvestGarden, restPopulation, startVillageStoneExtraction, startVillageWorksite, previewVillageWorksite, changeVillageWorksite, upgradeBuilding } from './service.js';
 
 const WorldParametersSchema = Type.Object({ worldSlug: Type.String({ minLength: 1, maxLength: 64 }) });
 const VillageParametersSchema = Type.Object({
@@ -32,6 +35,14 @@ export async function registerVillageRoutes(
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug } = request.params as { worldSlug: string };
     return getVillageState(db, account.id, worldSlug);
+  });
+
+  app.post('/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes', {
+    schema: { params: VillageParametersSchema, response: { 200: CatDiscoveryResponseSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return discoverCatEyes(db, account.id, worldSlug, villageId);
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings', {
@@ -92,6 +103,14 @@ export async function registerVillageRoutes(
     return reply.status(201).send(state);
   });
 
+  app.post('/api/worlds/:worldSlug/villages/:villageId/garden-harvests', {
+    schema:{params:VillageParametersSchema,body:GardenSelectionHarvestRequestSchema,response:{200:VillageStateSchema}},
+  },async request=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);
+    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    const {commandId,cells}=request.body as {commandId:string;cells:TravelCell[]};
+    return harvestGardenSelection(db,account.id,worldSlug,villageId,cells,commandId);
+  });
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/harvest', {
     schema: { params: BuildingParametersSchema, body: HarvestRequestSchema, response: { 200: VillageStateSchema } },
   }, async (request) => {
@@ -121,6 +140,42 @@ export async function registerVillageRoutes(
     const { worldSlug, villageId, featureId } = request.params as { worldSlug: string; villageId: string; featureId: string };
     const { commandId, workerCount } = request.body as { commandId: string; workerCount: number };
     return startVillageStoneExtraction(db, account.id, worldSlug, villageId, featureId, commandId, workerCount);
+  });
+
+  app.post('/api/worlds/:worldSlug/villages/:villageId/worksites', {
+    schema: { params: VillageParametersSchema, body: StartExtractionWorksiteRequestSchema,
+      response: { 200: ExtractionWorksiteResponseSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return startVillageWorksite(db, account.id, worldSlug, villageId, request.body as StartExtractionWorksiteRequest);
+  });
+
+  app.post('/api/worlds/:worldSlug/villages/:villageId/worksites/preview', {
+    schema: { params: VillageParametersSchema, body: StartExtractionWorksiteRequestSchema,
+      response: { 200: ExtractionWorksiteSelectionSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return previewVillageWorksite(db, account.id, worldSlug, villageId, request.body as StartExtractionWorksiteRequest);
+  });
+
+  app.post('/api/worlds/:worldSlug/villages/:villageId/worksites/:worksiteId', {
+    schema: { params: Type.Object({ ...VillageParametersSchema.properties, worksiteId: Type.String({ format: 'uuid' }) }),
+      body: ChangeExtractionWorksiteRequestSchema, response: { 200: ExtractionWorksiteResponseSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId, worksiteId } = request.params as { worldSlug: string; villageId: string; worksiteId: string };
+    return changeVillageWorksite(db, account.id, worldSlug, villageId, worksiteId, request.body as ChangeExtractionWorksiteRequest);
+  });
+
+  app.post('/api/worlds/:worldSlug/villages/:villageId/features/:featureId/clear', {
+    schema: { params: Type.Object({ ...VillageParametersSchema.properties, featureId: Type.String({ format: 'uuid' }) }),
+      response: { 200: VillageStateSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId, featureId } = request.params as { worldSlug: string; villageId: string; featureId: string };
+    return clearVillageWoodland(db, account.id, worldSlug, villageId, featureId);
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/discover-supplies', {

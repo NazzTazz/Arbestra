@@ -16,6 +16,7 @@ import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { COMPLETE_CONSTRUCTION_TASK, completeConstruction } from './complete-construction.js';
+import {configureTownHallFactory,getVillageState} from './service.js';
 
 const databaseUrl = testDatabaseUrl();
 const taskHandlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction };
@@ -47,6 +48,39 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     return cookie;
   }
 
+  it('factory pilot reserves exactly two cells and retains its persistent layout on repeat',async()=>{
+    const cell={cellX:DEVELOPMENT_CELLS.townHall.cellX,cellY:DEVELOPMENT_CELLS.townHall.cellY-1};
+    const before=await db.selectFrom('villageResources').selectAll().where('villageId','=',DEVELOPMENT_IDS.village).orderBy('resourceCode').execute();
+    await configureTownHallFactory(db,DEVELOPMENT_IDS.account,'aube',DEVELOPMENT_IDS.village,cell.cellX,cell.cellY,false);
+    expect(await db.selectFrom('villageResources').selectAll().where('villageId','=',DEVELOPMENT_IDS.village).orderBy('resourceCode').execute()).toEqual(before);
+    expect(await db.selectFrom('worldCellOccupancies').selectAll().where('buildingId','=',DEVELOPMENT_IDS.townHall).execute()).toHaveLength(1);
+    await configureTownHallFactory(db,DEVELOPMENT_IDS.account,'aube',DEVELOPMENT_IDS.village,cell.cellX,cell.cellY);
+    await configureTownHallFactory(db,DEVELOPMENT_IDS.account,'aube',DEVELOPMENT_IDS.village,cell.cellX,cell.cellY);
+    const snapshot=await getVillageState(db,DEVELOPMENT_IDS.account,'aube');
+    expect(snapshot.cells.filter(c=>c.footprint?.buildingId===DEVELOPMENT_IDS.townHall)).toHaveLength(2);
+    expect(snapshot.cells.find(c=>c.building?.id===DEVELOPMENT_IDS.townHall)?.building?.visualLayout).toEqual({recipe:'town-hall',version:1,quarterTurns:0,entranceFace:'-x',offset:[0,0]});
+    expect(await db.selectFrom('buildings').select(['level','targetLevel','status']).where('id','=',DEVELOPMENT_IDS.townHall).executeTakeFirstOrThrow()).toEqual({level:1,targetLevel:null,status:'completed'});
+  });
+
+  it('factory catalog exposes the barracks without enabling construction or inventing costs',async()=>{
+    const snapshot=await getVillageState(db,DEVELOPMENT_IDS.account,'aube');
+    expect(snapshot.buildingTypes.find(t=>t.code==='barracks')).toMatchObject({displayName:'Caserne',buildable:false,levels:[],productionMode:'none'});
+    const cookie=await authenticatedCookie();
+    const response=await app.inject({method:'POST',url:`/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/buildings`,headers:{cookie},payload:{buildingType:'barracks',...DEVELOPMENT_CELLS.dwelling}});
+    expect(response.statusCode).toBe(409);
+    expect(await db.selectFrom('buildings').select('id').where('buildingType','=','barracks').execute()).toHaveLength(0);
+  });
+
+  it('factory pilot rejects an occupied target without changing its layout or footprint',async()=>{
+    const cell={cellX:DEVELOPMENT_CELLS.townHall.cellX,cellY:DEVELOPMENT_CELLS.townHall.cellY-1};
+    const other=await db.insertInto('buildings').values({worldId:DEVELOPMENT_IDS.world,villageId:DEVELOPMENT_IDS.village,buildingType:'dwelling',level:1,targetLevel:null,status:'completed',constructionStartedAt:null,constructionCompletesAt:null,completedAt:new Date()}).returning('id').executeTakeFirstOrThrow();
+    await db.insertInto('worldCellOccupancies').values({worldId:DEVELOPMENT_IDS.world,...cell,buildingId:other.id,featureId:null,role:'anchor'}).execute();
+    const before=await db.selectFrom('buildings').selectAll().where('id','=',DEVELOPMENT_IDS.townHall).executeTakeFirstOrThrow();
+    await expect(configureTownHallFactory(db,DEVELOPMENT_IDS.account,'aube',DEVELOPMENT_IDS.village,cell.cellX,cell.cellY)).rejects.toMatchObject({code:'CELL_OCCUPIED'});
+    expect(await db.selectFrom('buildings').selectAll().where('id','=',DEVELOPMENT_IDS.townHall).executeTakeFirstOrThrow()).toEqual(before);
+    expect(await db.selectFrom('worldCellOccupancies').selectAll().where('buildingId','=',DEVELOPMENT_IDS.townHall).execute()).toHaveLength(1);
+  });
+
   async function requestConstruction(cookie: string) {
     return app.inject({
       method: 'POST',
@@ -69,6 +103,25 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     }).where('subjectId', '=', building.id).execute();
     return building.id;
   }
+
+  it('records cat eyes once with ownership checks and returns the persistent journal on retry', async () => {
+    const url = `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/discover-cat-eyes`;
+    expect((await app.inject({ method: 'POST', url })).statusCode).toBe(401);
+    const cookie = await authenticatedCookie(), headers = { cookie };
+    expect((await app.inject({ method: 'POST', url: url.replace('aube', 'unknown'), headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: url.replace(DEVELOPMENT_IDS.village, randomUUID()), headers })).statusCode).toBe(404);
+    const first = await app.inject({ method: 'POST', url, headers });
+    expect(first.statusCode).toBe(200); expect(first.json().newlyCompleted).toBe(true);
+    const entry = first.json().villageState.village.accomplishments.find((item: { code: string }) => item.code === 'cat-eyes');
+    expect(entry).toEqual({ code: 'cat-eyes', completedAt: first.json().villageState.serverTime });
+    const retry = await app.inject({ method: 'POST', url, headers });
+    expect(retry.statusCode).toBe(200); expect(retry.json().newlyCompleted).toBe(false);
+    expect(retry.json().villageState.village.accomplishments.filter((item: { code: string }) => item.code === 'cat-eyes')).toEqual([entry]);
+    const snapshot = await app.inject({ url: '/api/worlds/aube/village', headers });
+    expect(snapshot.json().village.accomplishments).toContainEqual(entry);
+    expect(snapshot.json().village.resources.find((item: { code: string }) => item.code === 'carrot').amount)
+      .toBe(first.json().villageState.village.resources.find((item: { code: string }) => item.code === 'carrot').amount);
+  });
 
   it('creates the action and task atomically with PostgreSQL time', async () => {
     const response = await requestConstruction(await authenticatedCookie());

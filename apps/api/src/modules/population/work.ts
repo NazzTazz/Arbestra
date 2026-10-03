@@ -1,6 +1,7 @@
 import type { Selectable, Transaction } from 'kysely';
 import type { Database, PopulationCohortsTable } from '../../database/schema.js';
 import { advanceEnergy, canWorkFor, type EnergyState } from './energy.js';
+import {allocateRestHousing} from './housing.js';
 
 type Cohort = Selectable<PopulationCohortsTable>;
 type Assignment = { harvestId: string; extractionId: null } | { harvestId: null; extractionId: string };
@@ -21,11 +22,26 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
   for (const cohort of cohorts) {
     const energy = advanceEnergy(energyState(cohort), through);
     const values = { energy: energy.energy, energyProgress: energy.progress, activity: energy.activity,
-      restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt };
+      restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt,
+      restBuildingId:energy.activity==='resting'&&withoutAssignment(cohort)?cohort.restBuildingId:null };
     await tx.updateTable('populationCohorts').set(values).where('worldId', '=', worldId).where('id', '=', cohort.id).execute();
     Object.assign(cohort, values);
   }
-  return cohorts;
+  return allocateRestHousing(tx,worldId,villageId,cohorts);
+}
+
+/** Snapshots only persist activity transitions and bed changes, not every
+ * cohort's energy cursor on each polling request. Full work materialization
+ * remains in commands and chronological completions. */
+export async function reconcileRestHousing(tx:Transaction<Database>,worldId:string,villageId:string,through:Date){
+  const cohorts=await tx.selectFrom('populationCohorts').selectAll().where('worldId','=',worldId).where('villageId','=',villageId).orderBy('id').forUpdate().execute();
+  for(const cohort of cohorts){const e=advanceEnergy(energyState(cohort),through);
+    if(e.activity===cohort.activity&&(e.activity==='resting'||cohort.restBuildingId===null))continue;
+    const values={activity:e.activity,energy:e.energy,energyProgress:e.progress,restingSince:e.restingSince,
+      foodUsedSinceRest:e.foodUsedSinceRest,energyUpdatedAt:e.updatedAt,restBuildingId:e.activity==='resting'&&withoutAssignment(cohort)?cohort.restBuildingId:null};
+    await tx.updateTable('populationCohorts').set(values).where('worldId','=',worldId).where('id','=',cohort.id).execute();Object.assign(cohort,values);
+  }
+  return allocateRestHousing(tx,worldId,villageId,cohorts);
 }
 
 export function eligibleWorkers(cohorts: Cohort[], durationMs: number): Cohort[] {
@@ -61,7 +77,7 @@ export async function releaseWorkers(tx: Transaction<Database>, workers: Cohort[
   for (const cohort of workers) {
     const empty = cohort.energy === 0 && cohort.energyProgress === 0;
     await tx.updateTable('populationCohorts').set({ activity: empty ? 'resting' : 'idle',
-      restingSince: empty ? through : null, harvestId: null, extractionId: null })
+      restingSince: empty ? through : null, harvestId: null, extractionId: null,restBuildingId:null })
       .where('worldId', '=', cohort.worldId).where('id', '=', cohort.id).execute();
   }
 }

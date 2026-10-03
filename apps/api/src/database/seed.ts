@@ -6,6 +6,7 @@ import { loadConfig } from '../config.js';
 import { hashPassword } from '../security/passwords.js';
 import { createDatabase } from './connection.js';
 import { generateWorld } from '../modules/worlds/generation.js';
+import {configureTownHallFactory} from '../modules/villages/service.js';
 
 export const DEVELOPMENT_IDS = {
   account: '10000000-0000-4000-8000-000000000001',
@@ -27,7 +28,8 @@ export const DEVELOPMENT_CELLS = {
   gardenNorth: { cellX: ANCHOR_X, cellY: ANCHOR_Y + 1 },
 } as const;
 
-export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl): Promise<void> {
+export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl, factoryPilot=false): Promise<void> {
+  let createdHall=false;
   const db = createDatabase(databaseUrl);
   const passwordHash = await hashPassword('arbestra');
   try {
@@ -63,12 +65,13 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
         baseRatePerHour: 60, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
       }).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
 
-      await transaction.insertInto('buildings').values({
+      const insertedHall=await transaction.insertInto('buildings').values({
         id: DEVELOPMENT_IDS.townHall, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
         buildingType: 'town-hall', level: 1, targetLevel: null,
         status: 'completed', constructionStartedAt: null, constructionCompletesAt: null,
         completedAt: sql`transaction_timestamp()`,
-      }).onConflict((conflict) => conflict.column('id').doNothing()).execute();
+      }).onConflict((conflict) => conflict.column('id').doNothing()).returning('id').executeTakeFirst();
+      createdHall=Boolean(insertedHall);
       await transaction.insertInto('worldCellOccupancies').values({
         worldId: DEVELOPMENT_IDS.world,
         ...DEVELOPMENT_CELLS.townHall, buildingId: DEVELOPMENT_IDS.townHall, featureId: null, role: 'anchor',
@@ -90,12 +93,13 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
       }).onConflict((conflict) => conflict.columns(['worldId', 'buildingId']).doNothing()).execute();
       await generateWorld(transaction, DEVELOPMENT_IDS.world);
     });
+    if(createdHall&&factoryPilot)await configureTownHallFactory(db,DEVELOPMENT_IDS.account,'aube',DEVELOPMENT_IDS.village,DEVELOPMENT_CELLS.townHall.cellX,DEVELOPMENT_CELLS.townHall.cellY-1,true,'+x');
   } finally {
     await db.destroy();
   }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await seedDevelopmentData();
+  await seedDevelopmentData(loadConfig().databaseUrl,true);
   console.info('Development data seeded.');
 }

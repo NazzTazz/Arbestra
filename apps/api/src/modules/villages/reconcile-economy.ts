@@ -4,6 +4,7 @@ import type { Database } from '../../database/schema.js';
 import { materializeBuildingBuffer, materializeVillageResource } from './economy.js';
 import { completeGardenHarvestAt } from '../population/garden-harvest.js';
 import { completeStoneExtractionAt } from '../deposits/stone-extractions.js';
+import { materializeWoodland } from '../deposits/woodland.js';
 
 export interface VillageEconomy {
   worldId: string;
@@ -20,6 +21,8 @@ type DueTransition =
 /** The village row serializes all economic mutations for that village. */
 export async function beginVillageEconomy(
   transaction: Transaction<Database>, worldId: string, villageId: string, depositFeatureId?: string,
+  woodCells: Array<{cellX: number; cellY: number}> = [],
+  targetFeatureIds: string[] = [],
 ): Promise<VillageEconomy> {
   await transaction.selectFrom('villages').select('id')
     .where('worldId', '=', worldId).where('id', '=', villageId)
@@ -28,15 +31,35 @@ export async function beginVillageEconomy(
   const through = (await transaction.selectNoFrom(sql<Date>`statement_timestamp()`.as('through'))
     .executeTakeFirstOrThrow()).through;
   const economy = { worldId, villageId, through };
+  // Project every resource read in the command/snapshot at the same post-lock H.
+  await sql`select set_config('arbestra.economy_through',${through.toISOString()},true)`.execute(transaction);
   const dueDeposits = await transaction.selectFrom('depositExtractions').select('featureId')
     .where('worldId', '=', worldId).where('villageId', '=', villageId).where('status', '=', 'in-progress')
     .where('completesAt', '<=', through).execute();
-  const depositIds = [...new Set([...dueDeposits.map((row) => row.featureId), ...(depositFeatureId ? [depositFeatureId.toLowerCase()] : [])])]
+  const worksiteTargets = await transaction.selectFrom('extractionWorksiteTargets').innerJoin('extractionWorksites', 'extractionWorksites.id', 'extractionWorksiteTargets.worksiteId')
+    .select('extractionWorksiteTargets.featureId').where('extractionWorksiteTargets.worldId', '=', worldId)
+    .where('extractionWorksiteTargets.villageId', '=', villageId).where('extractionWorksiteTargets.status', '=', 'pending')
+    // A resume command can admit a new lot in this same transaction. Prelock
+    // paused targets before that command, in the same order as running ones.
+    .where('extractionWorksites.status', 'in', ['running', 'paused']).limit(512).execute();
+  const depositIds = [...new Set([...dueDeposits.map((row) => row.featureId), ...worksiteTargets.map(row => row.featureId),
+    ...targetFeatureIds.map(id => id.toLowerCase()), ...(depositFeatureId ? [depositFeatureId.toLowerCase()] : [])])]
     .sort(); // Canonical UUID strings have the same order as PostgreSQL UUID bytes.
   // Several villages may complete work on the same deposits. Acquiring the
   // shared rows in one global order prevents village X/Y lock inversions.
   for (const featureId of depositIds) await transaction.selectFrom('stoneDeposits').select('featureId')
     .where('worldId', '=', worldId).where('featureId', '=', featureId).forUpdate().executeTakeFirst();
+  const village = await transaction.selectFrom('villages').innerJoin('worlds', 'worlds.id', 'villages.worldId')
+    .select(['anchorCellX', 'anchorCellY', 'widthCells', 'heightCells']).where('villages.id', '=', villageId)
+    .where('villages.worldId', '=', worldId).executeTakeFirstOrThrow();
+  const woods = await transaction.selectFrom('woodlandDeposits').select('featureId').where('worldId', '=', worldId)
+    .where(eb => eb.or([
+      sql<boolean>`least(abs(cell_x-${village.anchorCellX}),${village.widthCells}-abs(cell_x-${village.anchorCellX})) <= 32
+        and least(abs(cell_y-${village.anchorCellY}),${village.heightCells}-abs(cell_y-${village.anchorCellY})) <= 32`,
+      ...(depositIds.length ? [eb('featureId', 'in', depositIds)] : []),
+      ...woodCells.map(c => eb.and([eb('cellX', '=', c.cellX), eb('cellY', '=', c.cellY)])),
+    ])).orderBy('featureId').forUpdate().execute();
+  for (const wood of woods) await materializeWoodland(transaction, worldId, wood.featureId, through);
   await reconcileVillageEconomy(transaction, economy);
   return economy;
 }
