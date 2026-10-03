@@ -69,7 +69,7 @@ export function buildTerrainUnit(scene: Scene, chunk: TerrainChunk, offsetX: num
             const byPatch = hash(Math.floor(worldCellX / 5), Math.floor(worldCellY / 5));
             const palette = current.code === 2 ? waterColors : stoneColors;
             const variant = Math.floor(((byCell * 0.65 + byPatch * 0.35) % 1) * (current.code === 1 ? 8 : palette.length));
-            const color = current.code === 1 ? white : palette[variant]!;
+            const color = current.code === 0 ? Color3.FromHexString('#535563') : current.code === 1 ? white : palette[variant]!;
             const left = centerX - TILE_SIZE / 2, right = centerX + TILE_SIZE / 2;
             const back = centerZ - TILE_SIZE / 2, front = centerZ + TILE_SIZE / 2;
             const top = current.height;

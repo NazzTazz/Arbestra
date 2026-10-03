@@ -22,7 +22,7 @@ export interface WorkerHooks {
   localPath?:(path:TravelCell[])=>Vector3[];
   leisurePath?:(buildingId:string,path:TravelCell[])=>Vector3[];
 }
-interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idle'; count:number;
+interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idle'|'survey'; count:number;
   featureId:string|null; path:TravelCell[]; target:TravelCell; startedAt:number; completesAt:number; transportMs:number;
   stops?:GardenHarvestStop[];returnPath?:TravelCell[];leisure?:IdleLeg[]; }
 type Phase='outbound'|'install'|'rotate'|'work'|'load'|'inbound'|'inside'|'done';
@@ -69,11 +69,23 @@ export class VillageWorkers {
       missions.push({id:h.id,key:`${state.world.id}:${state.village.id}:${h.id}`,resource:'garden',count:1,featureId:null,
         path:h.path,target:h.stops?.[0]??plot,startedAt:Date.parse(h.startedAt),completesAt:Date.parse(h.completesAt),transportMs:h.transportMs,
         ...(h.stops?.length?{stops:h.stops,returnPath:h.returnPath??[]}: {})});}
+    for (const activity of state.science?.activities ?? []) {
+      if (activity.villageId !== state.village.id || !['survey','exploration'].includes(activity.kind) || !activity.path.length) continue;
+      const path = activity.path.slice(0, Math.ceil(activity.path.length / 2));
+      missions.push({ id:activity.id, key:`${identity}:${activity.id}`, resource:'survey', count:1, featureId:null,
+        path, target:path[path.length-1]!, startedAt:Date.parse(activity.startedAt), completesAt:Date.parse(activity.completesAt),
+        transportMs:Math.max(0,path.length-1)*1000 });
+    }
     missions.push(...this.#idleMissions(state));
     this.#latest.clear();for(const m of missions)this.#latest.set(m.key,m);
     for(const key of this.#pending)if(!this.#latest.has(key))this.#pending.delete(key);
     for(const id of this.#finished)if(!missions.some(m=>m.id===id))this.#finished.delete(id);
     for(const [key,g]of this.#groups){g.retired=this.#latest.get(key)?.id!==g.mission.id;
+      if(g.mission.resource==='survey'){
+        const next=this.#latest.get(key);
+        if(next && next.completesAt!==g.mission.completesAt){g.mission=next;g.route=this.#route(next);g.layout=this.#layout(next,g.route);
+          for(const person of g.people)this.#reconstructPerson(person,g,now);this.#graphDirty=true;}
+      }
       if(g.mission.resource==='idle'){
         const next=this.#latest.get(key);if(!next){this.#disposeGroup(g);this.#groups.delete(key);this.#graphDirty=true;continue;}
         if(JSON.stringify(next.leisure)!==JSON.stringify(g.mission.leisure)){g.mission=next;this.#reconstructPerson(g.people[0]!,g,now);this.#graphDirty=true;}
@@ -114,11 +126,11 @@ export class VillageWorkers {
     const vectors=stop>0?(this.hooks.localPath??this.hooks.path)(path):this.hooks.path(path);
     const p=vectors.map((v,i)=>this.#point(v,stop===0&&i<2?.5:this.hooks.width?.(v)??.8));
     if(!p.length)p.push(this.#point(this.hooks.project(m.target)));
-    if(m.resource!=='garden'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
+    if(m.resource!=='garden'&&m.resource!=='survey'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
       if(length>.95){b.x-=(b.x-a.x)/length*.95;b.z-=(b.z-a.z)/length*.95;b.key=this.hooks.key(b);}}
     return p;
   }
-  #layout(m:Mission,route:WorkerPoint[],stop=0){if(m.resource==='idle'){const end=route[route.length-1]!;return {stations:[{...end,role:'walk' as const,facing:0,pair:-1}],approach:end,variant:'front' as const};}
+  #layout(m:Mission,route:WorkerPoint[],stop=0){if(m.resource==='idle'||m.resource==='survey'){const end=route[route.length-1]!;return {stations:[{...end,role:'walk' as const,facing:0,pair:-1}],approach:end,variant:'front' as const};}
     const target=this.hooks.project(m.stops?.[stop]??m.target),last=route[Math.max(0,route.length-2)]??target;
     return worksiteLayout(m.resource,m.count,target,last,(p,r)=>this.hooks.free(p,r,m.featureId)
       &&![...this.#groups.values()].some(g=>g.mission.id!==m.id&&g.layout.stations.some(s=>Math.hypot(p.x-s.x,p.z-s.z)<r+.27)));}
@@ -210,7 +222,7 @@ export class VillageWorkers {
   }
   #props(g:Group){
     const m=g.mission;
-    if(m.resource==='garden'||m.resource==='idle')return;
+    if(m.resource==='garden'||m.resource==='idle'||m.resource==='survey')return;
     const sawPairs=new Map<number,WorkerPoint[]>();
     for(const s of g.layout.stations)if(s.role==='saw'&&(g.layout.variant!=='compact'||s.pair===0)){const points=sawPairs.get(s.pair)??[];points.push(s.workAt??s);sawPairs.set(s.pair,points);}
     for(const [pair,points]of sawPairs){if(points.length<2)continue;const a=points[0]!,b=points[1]!,x=(a.x+b.x)/2,z=(a.z+b.z)/2;
@@ -265,7 +277,7 @@ export class VillageWorkers {
     }
     if(p.phase==='outbound'&&p.actor.done&&now>=p.connectorRetry){
       const from={...p.actor.position},target=this.hooks.project(m.target);
-      const connector=m.resource==='garden'?[from,station]:worksiteConnector(from,station,target,(q,r)=>this.hooks.free(q,r,m.featureId));
+      const connector=m.resource==='garden'||m.resource==='survey'?[from,station]:worksiteConnector(from,station,target,(q,r)=>this.hooks.free(q,r,m.featureId));
       if(!connector){p.connectorRetry=now+1000;p.actor.waitingSince??=now;return;}
       p.phase='install';p.phaseAt=now;p.arrivedAt=now;p.actor.waitingSince=null;p.actor.path=connector;
       p.actor.distance=0;p.actor.done=false;p.actor.member=0;p.actor.formation=0;p.actor.startAt=now;p.actor.rank=100+p.index;p.actor.speed=1.6;}
@@ -307,7 +319,7 @@ export class VillageWorkers {
     const returnAt=m.stops?.length?m.startedAt+m.stops[m.stops.length-1]!.workEndsAfterMs:m.completesAt-m.transportMs;
     if((p.phase==='work'||p.phase==='rotate')&&now>=Math.max(returnAt,p.arrivedAt+600)){p.phase='load';p.phaseAt=now;}
     if(p.phase==='load'&&now-p.phaseAt>=450&&now>=p.connectorRetry){
-      const back=this.#backRoute(g),connector=m.resource==='garden'?[{...p.actor.position},back[0]!]:worksiteConnector(p.actor.position,back[0]!,this.hooks.project(m.target),(q,r)=>this.hooks.free(q,r,m.featureId));
+      const back=this.#backRoute(g),connector=m.resource==='garden'||m.resource==='survey'?[{...p.actor.position},back[0]!]:worksiteConnector(p.actor.position,back[0]!,this.hooks.project(m.target),(q,r)=>this.hooks.free(q,r,m.featureId));
       if(!connector){p.connectorRetry=now+1000;p.actor.waitingSince??=now;return;}
       p.phase='inbound';p.phaseAt=now;p.actor.path=[...connector,...back.slice(1)];
       p.actor.distance=0;p.actor.done=false;p.actor.member=p.index%2;p.actor.formation=0;p.actor.startAt=now+Math.floor(p.index/2)*120;p.actor.direction=-1;p.actor.rank=Math.floor(p.index/2);
@@ -380,7 +392,7 @@ export class VillageWorkers {
       else if(g.mission.count===2&&p.role==='break')role=cycle<8_000?'break':'carry';
     }else if(working&&g.mission.resource==='wood'&&g.mission.count<=2&&cycle>=8_000)role='wood-chop';
     const loaded=p.phase==='load'||p.phase==='inbound'||g.stop>0&&g.mission.resource==='garden'||working&&role==='carry'&&(p.role!=='carry'||p.actor.distance>1.25);
-    p.cargo.setEnabled(loaded);p.tool.setEnabled(working&&role!=='saw'&&role!=='carry');
+    p.cargo.setEnabled(loaded&&g.mission.resource!=='survey');p.tool.setEnabled(working&&role!=='saw'&&role!=='carry'&&role!=='walk');
     if(!animateLimbs)return;
     const [left,right,legL,legR]=p.limbs;
     const swing=moving?Math.sin(p.walk)*.55:0;left!.rotation.set(swing,0,0);right!.rotation.set(-swing,0,0);

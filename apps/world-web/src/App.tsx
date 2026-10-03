@@ -14,6 +14,8 @@ import { OracleJournal } from './ui/OracleJournal';
 import { useOracleHint } from './ui/useOracleHint';
 import { BuildingPanel, DepositPanel, PopulationPanel, WorksitePanel } from './ui/PlayerPanels';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
+import { SciencePanel } from './ui/SciencePanel';
+import { commandScience } from './api/client';
 
 const VillageScene = lazy(() => import('./scene/VillageScene').then((module) => ({ default: module.VillageScene })));
 const worldSlug = new URLSearchParams(window.location.search).get('world') ?? 'aube';
@@ -42,6 +44,7 @@ export function App() {
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
   const [showPopulation, setShowPopulation] = useState(false);
   const [showJournal, setShowJournal] = useState(false);
+  const [showScience, setShowScience] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ScreenAnchor | null>(null);
   const [construction, setConstruction] = useState<ConstructionChoice | null>(null);
   const [selection, setSelection] = useState<CellRange | null>(null);
@@ -87,6 +90,14 @@ export function App() {
     const previous = stateRef.current;
     if (previous && snapshot.state.serverTime < previous.serverTime) return;
     if (previous) {
+      if (previous.science && snapshot.state.science) {
+        const before = previous.science, after = snapshot.state.science;
+        if (!before.programs.some(p => p.code === 'astronomy-1' && !['available','blocked'].includes(p.status))
+          && after.programs.some(p => p.code === 'astronomy-1' && !['available','blocked'].includes(p.status)))
+          pushNotification('Les récits des habitants intriguent les chercheurs : une campagne astronomique commence.');
+        for (const program of after.programs) if (program.status === 'acquired' && !before.programs.some(p => p.code === program.code && p.status === 'acquired'))
+          pushNotification(program.code === 'astronomy-1' ? 'Le monde est annulaire. Dézoome pour découvrir sa forme.' : `Connaissance acquise : ${program.title}`);
+      }
       const priorAccomplishments = new Set(previous.village.accomplishments.map((item) => item.code));
       if (snapshot.state.village.accomplishments.some(item => item.code === 'cat-eyes' && !priorAccomplishments.has(item.code))) setOracleCat(true);
       const delivered = new Map(previous.village.worksites.map(site => [site.id, site.deliveredAmount]));
@@ -149,7 +160,7 @@ export function App() {
 
   const refresh = useCallback(async () => {
     if (actionInFlight.current) return;
-    try { applySnapshot(await getVillage(worldSlug)); } catch { /* Background refresh is best effort. */ }
+    try { applySnapshot(await getVillage(worldSlug, stateRef.current?.village.id)); } catch { /* Background refresh is best effort. */ }
   }, [applySnapshot]);
 
   useEffect(() => { void getVillage(worldSlug).then(applySnapshot).catch((reason) => {
@@ -164,10 +175,10 @@ export function App() {
   const hasExtraction = (state?.village.extractions.length ?? 0) > 0 || (state?.village.worksites.some(site => site.status === 'running') ?? false);
   const hasRestingPopulation = (state?.village.population.resting ?? 0) > 0;
   useEffect(() => {
-    if (!hasFastTransition && !hasExtraction && !hasRestingPopulation && !selectedFeatureId && !hasGarden) return;
+    if (!hasFastTransition && !hasExtraction && !hasRestingPopulation && !selectedFeatureId && !hasGarden && !state?.science?.universities.length) return;
     const timer = window.setInterval(() => void refresh(), hasFastTransition ? 500 : hasExtraction || selectedFeatureId ? 2_000 : 10_000);
     return () => window.clearInterval(timer);
-  }, [hasFastTransition, hasExtraction, hasRestingPopulation, selectedFeatureId, hasGarden, refresh]);
+  }, [hasFastTransition, hasExtraction, hasRestingPopulation, selectedFeatureId, hasGarden, state?.science?.universities.length, refresh]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const loadDeposit = useCallback(async (featureId: string) => {
@@ -192,7 +203,9 @@ export function App() {
   }, [showGardens, gardenSites]);
   const definition = state?.buildingTypes.find((item) => item.code === construction?.type);
   const spatial = definition?.progressionMode === 'spatial';
-  const area = useMemo(() => state && selection ? previewArea(state, selection, spatial, construction?.buildingId) : null, [state, selection, spatial, construction?.buildingId]);
+  const area = useMemo(() => state && selection ? previewArea(state, construction?.type === 'university'
+    ? { first: { cellX: selection.last.cellX - 2, cellY: selection.last.cellY - 2 }, last: { cellX: selection.last.cellX + 2, cellY: selection.last.cellY + 3 } }
+    : selection, spatial || construction?.type === 'university', construction?.buildingId) : null, [state, selection, spatial, construction?.buildingId, construction?.type]);
   const woodFeatures = useMemo(() => state?.region.features.filter(feature => feature.type === 'woodland') ?? [], [state]);
   const woodPreview = useMemo(() => {
     const chosen = new Set(woodFeatureIds);
@@ -263,7 +276,7 @@ export function App() {
     if (tap && spatial) { setSelection({ first: touchOrigin.current ?? first, last }); touchOrigin.current = touchOrigin.current ? null : first; }
     else { touchOrigin.current = null; setSelection({ first: spatial ? first : last, last }); }
   }
-  function confirmConstruction() { if (terrainView !== 'village' || !state || !construction?.type || !area || selectionError || !area.cells.length) return; const command = construction; const anchor = spatial ? selection!.first : area.cells[0]!; void runAction(() => command.buildingId ? expandGarden(state.world.slug, state.village.id, command.buildingId, area.cells) : buildBuilding(state.world.slug, state.village.id, command.type!, anchor, area.cells), command.buildingId ? 'Extension du Jardin lancée' : 'Construction lancée', true); }
+  function confirmConstruction() { if (terrainView !== 'village' || !state || !construction?.type || !area || selectionError || !area.cells.length) return; const command = construction; const anchor = command.type === 'university' ? selection!.last : spatial ? selection!.first : area.cells[0]!; void runAction(() => command.buildingId ? expandGarden(state.world.slug, state.village.id, command.buildingId, area.cells) : buildBuilding(state.world.slug, state.village.id, command.type!, anchor, area.cells), command.buildingId ? 'Extension du Jardin lancée' : 'Construction lancée', true); }
   function queuePlotHarvest(cell: Cell | null, newGesture = false, commit = false) {
     if (!cell) { if(newGesture) harvestQueue.cancelGesture(); else harvestQueue.finishGesture(); return; }
     if (terrainView !== 'village') return;
@@ -323,6 +336,8 @@ export function App() {
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
     <Hud state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => { closePanels(); setShowPopulation(true); setMenuAnchor(populationAnchor()); }} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    {state.science && <button className="science-access" type="button" onClick={() => setShowScience(value => !value)}>Arbre des connaissances</button>}
+    {showScience && state.science && <SciencePanel target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <div className="travel-debug"><button type="button" aria-pressed={showTravelPaths} onClick={() => setShowTravelPaths((value) => !value)}>Chemins · debug</button>{showTravelPaths ? <div className="travel-debug-details"><label>Itinéraire <select value={selectedRouteId ?? ''} onChange={(event) => setSelectedRouteId(event.target.value || null)}><option value="">Tous ({state.travelRoutes.length})</option>{state.travelRoutes.map((route) => <option key={route.id} value={route.id}>{route.kind} · {route.destination.cellX}, {route.destination.cellY} · {route.cells.length - 1} s / trajet</option>)}</select></label><small>Transport aller et retour : 1 s par case. Travail sur place : durée propre à la tâche.</small></div> : null}</div>
     {gardenSites.length && terrainView === 'village' ? <button type="button" className="garden-access" onClick={() => {
       closePanels(); if (gardenSites.length === 1) setSelectedSiteId(gardenSites[0]!.id); else setShowGardens(true);

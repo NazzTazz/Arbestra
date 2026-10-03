@@ -250,3 +250,32 @@ button { font: inherit; }
 .worksite-card p { margin: 5px 0; }
 .worksite-card label, .wood-selection-panel label { display: block; margin: 8px 0; }
 .worksite-card select, .wood-selection-panel select { max-width: 100%; }
+/* University and progressively revealed knowledge tree. */
+.science-access { position:absolute;left:16px;top:66px;z-index:8;padding:.65rem 1rem;background:#293729ed;color:#ede5cf;border:1px solid #8d9063;border-radius:6px; }
+.science-panel { position:absolute;z-index:35;top:70px;left:50%;transform:translateX(-50%);width:min(1040px,94vw);max-height:calc(100vh - 100px);overflow:auto;padding:24px;background:#1c2526f5;color:#eee6d1;border:1px solid #8c9071;border-radius:12px;box-shadow:0 18px 70px #0009;backdrop-filter:blur(8px); }
+.science-panel header { display:flex;align-items:start;justify-content:space-between;gap:20px; }
+.science-panel h2,.science-panel h3,.science-panel h4 { font-family:Georgia,serif;font-weight:normal; }
+.science-panel h2 { margin:.25rem 0 1rem;font-size:1.9rem; }
+.science-panel small { color:#c0c5b4; }
+.science-panel button { padding:.5rem .8rem;margin:.3rem .4rem .3rem 0;background:#344746;color:#efe7d1;border:1px solid #748b7a;border-radius:5px;cursor:pointer; }
+.science-panel button:disabled { opacity:.45;cursor:default; }
+.science-capacity { background:#ffffff08;padding:12px 16px;border-radius:7px; }
+.science-panel select,.science-panel input[type=number] { padding:6px;background:#0c1616;color:#eee;border:1px solid #6c8173;border-radius:4px; }
+.knowledge-tree { display:flex;gap:22px;margin:18px 0;align-items:start; }
+.knowledge-branch { flex:1;min-width:0; }
+.knowledge-node { position:relative;padding:16px;margin-bottom:24px;background:#34413d;border:1px solid #829174;border-radius:7px; }
+.knowledge-node + .knowledge-node::before { content:'↓';position:absolute;top:-24px;left:50%;color:#a9ae87; }
+.knowledge-node h4 { font-size:1.25rem;margin:.5rem 0; }
+.knowledge-node p { font-size:.88rem;line-height:1.45; }
+.knowledge-node.blocked { opacity:.55; }
+.knowledge-node.acquired { border-color:#c1b578;background:#414a34; }
+.knowledge-node.working { border-color:#8fc1c0; }
+.knowledge-node.waiting-data { border-style:dashed; }
+.knowledge-node progress { width:100%;accent-color:#bbc395; }
+.science-evidence { color:#d5bc83; }
+.knowledge-prerequisites { color:#a8c6c2; }
+.science-target { display:flex;gap:12px;flex-wrap:wrap; }
+.science-target label { display:flex;flex-direction:column;gap:5px; }
+.science-target input { width:100px; }
+.science-expeditions,.science-solar { border-top:1px solid #ffffff23;padding-top:16px; }
+@media(max-width:700px) { .knowledge-tree { flex-direction:column; }.knowledge-branch { width:100%; }.science-panel { padding:16px; } }

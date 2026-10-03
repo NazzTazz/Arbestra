@@ -17,6 +17,8 @@ import '@babylonjs/core/Shaders/particles.fragment';
 import { roadEdges, roadInnerCorners } from './road-profile';
 import { delta, type WorldSpace } from './world-space';
 
+export interface BrazierPoint { x: number; y: number; z: number; seed: number }
+
 /** Full canonical topology, not the currently streamed subset. */
 export function roadCorners(routes: readonly TravelRoute[], width: number, height: number): TravelCell[] {
   const nodes = new Map<string, { cell: TravelCell; directions: Set<string> }>();
@@ -90,7 +92,7 @@ export class VillageBraziers {
     ctx.putImageData(pixels,0,0); this.#fire.update();
   }
   update(routes: readonly TravelRoute[], space: WorldSpace,
-    ground: (cell: TravelCell) => { code: number; height: number } | null, occupied: Set<string>): void {
+    ground: (cell: TravelCell) => { code: number; height: number } | null, occupied: Set<string>, extraPoints: readonly BrazierPoint[] = []): void {
     const points = roadInnerCorners(routes,space.width,space.height).flatMap(({cell,sx,sz}) => {
       const g = ground(cell); if (!g || g.code !== 1 || occupied.has(`${cell.cellX}:${cell.cellY}`)) return [];
       const p = space.project(cell);
@@ -98,6 +100,10 @@ export class VillageBraziers {
       const seed=hash-Math.floor(hash);
       return [{ x:p.x+sx*.80,y:g.height+.02,z:p.z+sz*.80, seed }];
     });
+    this.updatePoints([...points, ...extraPoints]);
+  }
+  /** Explicit decorative positions, without creating roads or resource entities. */
+  updatePoints(points: readonly BrazierPoint[], parent?: Mesh): void {
     const signature = JSON.stringify(points); if (signature === this.#signature) return;
     this.#signature = signature; this.#nextBind = 0;
     const previous = new Map(this.#items.map(item => [item.key, item]));
@@ -128,6 +134,7 @@ export class VillageBraziers {
       }
       const masonry = Mesh.MergeMeshes(meshes, true, false)!;
       masonry.name = 'brazier-masonry'; masonry.isPickable = false;
+      if (parent) masonry.setParent(parent);
       meshes.length = 0; meshes.push(masonry);
       const flame=new ParticleSystem(`brazier-fire-${index}`,24,this.scene);
       flame.particleTexture=this.#fire; flame.emitter=new Vector3(p.x,p.y+.10,p.z);

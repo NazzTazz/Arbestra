@@ -1,4 +1,13 @@
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
+import type { ScienceCommand } from '@arbestra/contracts';
+
+export const sciencePreview = () => import.meta.env.DEV && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sciencePreview') === '1';
+const terrainHeaders = () => sciencePreview() ? { 'x-arbestra-science-preview': '1' } : {};
+
+export function commandScience(worldSlug: string, villageId: string, command: ScienceCommand): Promise<TimedVillageState> {
+  return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/science`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(command) });
+}
 
 export async function previewWorksite(worldSlug: string, villageId: string, order: StartExtractionWorksiteRequest): Promise<ExtractionWorksiteSelection> {
   return parseResponse<ExtractionWorksiteSelection>(await fetch(
@@ -59,32 +68,32 @@ function requestState(path: string, init?: RequestInit): Promise<TimedVillageSta
   return villageRequest(fetch(path, { credentials: 'same-origin', ...init }), requestedAt);
 }
 
-export function getVillage(worldSlug: string): Promise<TimedVillageState> {
-  return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/village`);
+export function getVillage(worldSlug: string, villageId?: string): Promise<TimedVillageState> {
+  return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/village${villageId ? `?villageId=${encodeURIComponent(villageId)}` : ''}`);
 }
 
 export async function getTerrain(worldSlug: string, chunks: Array<{ chunkX: number; chunkY: number }>, signal: AbortSignal): Promise<TerrainResponse> {
   const query = chunks.map((c) => `${c.chunkX},${c.chunkY}`).join(';');
-  return parseResponse<TerrainResponse>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain?chunks=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal }));
+  return parseResponse<TerrainResponse>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain?chunks=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal, headers: terrainHeaders() }));
 }
 
 export async function getTerrainUpdates(worldSlug: string, chunks: Array<{ chunkX: number; chunkY: number }>, signal: AbortSignal): Promise<TerrainUpdatesResponse> {
   const query = chunks.map(c => `${c.chunkX},${c.chunkY}`).join(';');
-  return parseResponse<TerrainUpdatesResponse>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/updates?chunks=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal }));
+  return parseResponse<TerrainUpdatesResponse>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/updates?chunks=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal, headers: terrainHeaders() }));
 }
 
 export async function getTerrainOverview(worldSlug: string, signal: AbortSignal): Promise<TerrainOverview> {
   return parseResponse<TerrainOverview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/overview`,
-    { credentials: 'same-origin', signal }));
+    { credentials: 'same-origin', signal, headers: terrainHeaders() }));
 }
 export async function getTerrainVillages(worldSlug: string, x: number, y: number, signal: AbortSignal): Promise<TerrainVillageOverview> {
   return parseResponse<TerrainVillageOverview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/overview/villages?x=${Math.floor(x)}&y=${Math.floor(y)}`,
-    { credentials: 'same-origin', signal }));
+    { credentials: 'same-origin', signal, headers: terrainHeaders() }));
 }
 
 export async function getTerrainVegetationOverview(worldSlug: string, signal: AbortSignal): Promise<TerrainVegetationOverview> {
   return parseResponse<TerrainVegetationOverview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/overview/vegetation`,
-    { credentials: 'same-origin', signal }));
+    { credentials: 'same-origin', signal, headers: terrainHeaders() }));
 }
 
 export function buildBuilding(

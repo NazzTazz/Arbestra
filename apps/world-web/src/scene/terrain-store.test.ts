@@ -25,6 +25,14 @@ function harness() {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('requests newly authorized ground after a returned map instead of retaining an unknown cached chunk', async () => {
+    const h = harness(); h.demand(); h.advance(100);
+    await h.settle(0, { ...chunk(), terrainCodes: new Array(34 ** 2).fill(0) });
+    h.store.geographyChanged(); h.advance(1);
+    expect(h.requests[1]!.updatesOnly).toBe(false);
+    await h.settle(1);
+    expect(h.store.entries.get('0:0')!.chunk!.terrainCodes[0]).toBe(1);
+  });
   it('pauses regional requests, ignores cancelled replies and retains immutable chunks for village return', async () => {
     const h = harness(); h.demand(); h.advance(100); await h.settle(0);
     const geometry = h.store.entries.get('0:0')!.chunk!.terrainCodes;

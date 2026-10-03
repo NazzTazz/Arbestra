@@ -42,6 +42,7 @@ export function torusCell(point: Vector3, world: TerrainOverview['world']): Trav
 }
 
 function color(data: TerrainOverview, vegetation: TerrainVegetationOverview | null, index: number): [number, number, number] {
+  if (data.knowledgeCoverage && !data.knowledgeCoverage[index]) return [83, 85, 99];
   const water = data.waterCoverage[index]! / 255, rock = data.rockCoverage[index]! / 255;
   const wood = vegetation && vegetation.world.id === data.world.id && vegetation.world.generationVersion === data.world.generationVersion
     && vegetation.gridWidth === data.gridWidth && vegetation.gridHeight === data.gridHeight
@@ -181,6 +182,7 @@ export class TorusOverview {
   #fitRadius = 8.2;
   #anchor = Vector3.Zero();
   #surfaceView = false;
+  #globalModelAvailable = true;
   #entryRadius = SURFACE_RADIUS;
   #normal = Vector3.Up();
   #previousRadius = Infinity;
@@ -227,6 +229,12 @@ export class TorusOverview {
     } catch (error) { this.scene.dispose(); throw error; }
   }
   setVegetation(data: TerrainVegetationOverview): void { this.#vegetation = data; this.#draw(); }
+  setGeography(data: TerrainOverview): void { this.#data = data; this.#draw(); }
+  setGlobalModel(available: boolean): void {
+    this.#globalModelAvailable = available;
+    this.camera.upperRadiusLimit = available ? this.#fitRadius * 2.8 : Math.max(this.#entryRadius, Math.min(.48, this.#entryRadius * 1.6));
+    if (!available) this.camera.radius = Math.min(this.camera.radius, this.camera.upperRadiusLimit);
+  }
   fit(engine: Engine): void {
     const aspect = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const radius = Math.max(8.2, 3.9 / (Math.tan(this.camera.fov / 2) * aspect));
@@ -234,6 +242,7 @@ export class TorusOverview {
     this.camera.lowerRadiusLimit = this.#surfaceView ? this.#entryRadius * .67 : radius * 0.72;
     this.camera.upperRadiusLimit = radius * 2.8;
     if (!this.#surfaceView && this.camera.radius < radius) this.camera.radius = radius;
+    if (!this.#globalModelAvailable) this.setGlobalModel(false);
   }
   enter(target: TravelCell, planarAlpha: number, planarRadius = 260, planarBeta = 0, planarFov = .8): void {
     this.#lastDisplayPhase = null; this.#displayPhaseOffset = 0;
@@ -246,6 +255,7 @@ export class TorusOverview {
     this.camera.minZ = .01;
     this.camera.lowerRadiusLimit = this.#entryRadius * .67;
     this.#anchor = attachSurfaceCamera(this.camera, this.#cosmology.root, target, this.#data.world, planarAlpha, this.#entryRadius);
+    this.setGlobalModel(this.#globalModelAvailable);
   }
   mark(village: TravelCell, target: TravelCell): void {
     for (const [marker, cell] of [[this.#villageMarker, village], [this.#targetMarker, target]] as const) {
@@ -355,6 +365,7 @@ export class TorusOverview {
       alpha: this.camera.alpha, beta: this.camera.beta };
   }
   showSolarProfile(): void {
+    if (!this.#globalModelAvailable) return;
     if (!this.#savedNavigation) this.#savedNavigation = { target: this.camera.target.clone(), position: this.camera.position.clone(), up: this.camera.upVector.clone(), radius: this.camera.radius };
     this.camera.lowerRadiusLimit = this.#fitRadius * .7;
     this.#surfaceView = false; this.camera.parent = null; this.camera.upVector = Vector3.Up(); this.camera.setTarget(Vector3.Zero());
@@ -362,6 +373,7 @@ export class TorusOverview {
     this.camera.alpha = -Math.PI / 2; this.camera.beta = Math.PI / 2;
   }
   showCatEyes(): void {
+    if (!this.#globalModelAvailable) return;
     this.showSolarProfile();
     const eyes = this.#cosmology.eyePosition();
     this.camera.setTarget(eyes);

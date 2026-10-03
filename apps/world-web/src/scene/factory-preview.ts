@@ -12,6 +12,9 @@ import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {TimberThatch} from './timber-thatch';
 import {buildingPlan,HALL_RECIPE,HOUSE_RECIPE,type BuildingRecipe} from './building-plan';
 import {buildBarracks} from './barracks-factory';
+import { CAMPUS_SUBDIVISIONS, MATHEMATICS_CROWN_WIDTH } from './mathematics-factory';
+import { buildUniversity } from './university-factory';
+import { CELL_UNITS } from './world-space';
 
 // Isolated local workshop: no requests, village commands or public building editor.
 document.body.style.cssText='margin:0;background:#24372d;color:#f4eedb;font:15px Georgia,serif';
@@ -39,17 +42,41 @@ let footprint:Mesh|null=null;
 const footprintMaterial=new StandardMaterial('workshop-footprint-fill',scene);
 scene.setRenderingAutoClearDepthStencil(1,false);
 footprintMaterial.diffuseColor=Color3.FromHexString('#b6d4e5');footprintMaterial.emissiveColor=new Color3(.12,.18,.22);footprintMaterial.specularColor=Color3.Black();footprintMaterial.alpha=.12;footprintMaterial.zOffset=-1;
-function showFootprint(columns:number,rows:number,turn:number){
+function showFootprint(columns:number,rows:number,turn:number,subdivisions=1){
   footprint?.dispose(false,false);footprint=new Mesh('workshop-footprint',scene);footprint.rotation.y=turn*Math.PI/2;
-  const width=columns*2.5,depth=rows*2.5,lines:Vector3[][]=[];
-  for(let x=0;x<=columns;x++)lines.push([new Vector3(-width/2+x*2.5,.014,-depth/2),new Vector3(-width/2+x*2.5,.014,depth/2)]);
-  for(let z=0;z<=rows;z++)lines.push([new Vector3(-width/2,.014,-depth/2+z*2.5),new Vector3(width/2,.014,-depth/2+z*2.5)]);
-  const grid=MeshBuilder.CreateLineSystem('workshop-footprint-grid',{lines},scene);grid.color=Color3.FromHexString('#d9e6ed');grid.alpha=.85;grid.parent=footprint;grid.isPickable=false;grid.renderingGroupId=1;
+  const width=columns*CELL_UNITS,depth=rows*CELL_UNITS,lines:Vector3[][]=[];
+  for(let x=0;x<=columns;x++)lines.push([new Vector3(-width/2+x*CELL_UNITS,.014,-depth/2),new Vector3(-width/2+x*CELL_UNITS,.014,depth/2)]);
+  for(let z=0;z<=rows;z++)lines.push([new Vector3(-width/2,.014,-depth/2+z*CELL_UNITS),new Vector3(width/2,.014,-depth/2+z*CELL_UNITS)]);
+  const grid=MeshBuilder.CreateLineSystem('workshop-footprint-grid',{lines},scene);grid.color=Color3.FromHexString('#ffffff');grid.alpha=.95;grid.parent=footprint;grid.isPickable=false;grid.renderingGroupId=1;
+  if(subdivisions>1){
+    const minorLines:Vector3[][]=[],halfLines:Vector3[][]=[],step=CELL_UNITS/subdivisions;
+    for(let x=1;x<columns*subdivisions;x++)if(x%subdivisions){
+      const group=x%subdivisions===subdivisions/2?halfLines:minorLines;
+      group.push([new Vector3(-width/2+x*step,.014,-depth/2),new Vector3(-width/2+x*step,.014,depth/2)]);
+    }
+    for(let z=1;z<rows*subdivisions;z++)if(z%subdivisions){
+      const group=z%subdivisions===subdivisions/2?halfLines:minorLines;
+      group.push([new Vector3(-width/2,.014,-depth/2+z*step),new Vector3(width/2,.014,-depth/2+z*step)]);
+    }
+    const minorGrid=MeshBuilder.CreateLineSystem('workshop-subcell-grid',{lines:minorLines},scene);minorGrid.color=Color3.FromHexString('#214e91');minorGrid.alpha=.38;minorGrid.parent=footprint;minorGrid.isPickable=false;minorGrid.renderingGroupId=1;
+    if(halfLines.length){
+      const halfGrid=MeshBuilder.CreateLineSystem('workshop-halfcell-grid',{lines:halfLines},scene);halfGrid.color=Color3.FromHexString('#4685cf');halfGrid.alpha=.72;halfGrid.parent=footprint;halfGrid.isPickable=false;halfGrid.renderingGroupId=1;
+    }
+  }
   const fill=MeshBuilder.CreateGround('workshop-footprint-fill',{width,height:depth},scene);fill.position.y=.01;fill.material=footprintMaterial;fill.parent=footprint;fill.isPickable=false;
   canvas.dataset.footprint=`${columns}x${rows}`;
+  canvas.dataset.subdivisions=String(subdivisions);
 }
 const choice=(id:string)=>(document.getElementById(id) as HTMLSelectElement).value;
 function render(){root?.dispose(false,false);const name=choice('recipe'),works=choice('phase')==='works',turn=Number(choice('turn'));
+  if(name.startsWith('university-')){
+    const level=Number(name.slice(-1));showFootprint(5,6,turn,CAMPUS_SUBDIVISIONS);
+    const start=performance.now();root=new Mesh('workshop-university',scene);root.rotation.y=turn*Math.PI/2;
+    buildUniversity(root,kit,level,works?'works':'finished',level-1,{mathematics:false,astronomy:false},true);
+    const meshes=root.getChildMeshes().filter(m=>m.getTotalVertices()>0),vertices=meshes.reduce((n,m)=>n+m.getTotalVertices(),0);
+    document.getElementById('budget')!.textContent=`Campus ${level} · 40 × 48 sous-cases · Maths : ${level===3?'38 × 6 au sol, 22 × 6 aux deux niveaux supérieurs':'22 × 6, '+level+' niveau(x)'} + pavillon central ${MATHEMATICS_CROWN_WIDTH} × 6 · socle ${level===3?5:3} × 1 cases / ${level*2} marches · Médecine : ${level===1?'8 × 22':level===2?'C : 8 × 22 + deux ailes 8 × 6':'C + étage 8 × 22'} · toit plat · Géographie : 3 × 1 cases, ${level===1?'plain-pied':level===2?'chapeau central':'podium 2 / 3 / 1'} · ${vertices.toLocaleString('fr')} sommets · ${meshes.length} meshes · ${(performance.now()-start).toFixed(0)} ms`;
+    canvas.dataset.ready='true';canvas.dataset.vertices=String(vertices);canvas.dataset.meshes=String(meshes.length);camera.radius=24;camera.target.y=1.4;return;
+  }
   if(name==='barracks'){
     showFootprint(2,5,turn);
     const start=performance.now();root=new Mesh('workshop-barracks',scene);root.rotation.y=turn*Math.PI/2;buildBarracks(root,kit,works?'works':'finished');
@@ -69,5 +96,7 @@ function render(){root?.dispose(false,false);const name=choice('recipe'),works=c
 }
 for(const id of ['recipe','phase','turn'])document.getElementById(id)!.addEventListener('change',render);
 const barracksOption=document.createElement('option');barracksOption.value='barracks';barracksOption.textContent='Caserne · cour d’entraînement';document.getElementById('recipe')!.append(barracksOption);
+for(let level=1;level<=3;level++){const option=document.createElement('option');option.value=`university-${level}`;option.textContent=`Université · niveau ${level}`;document.getElementById('recipe')!.append(option);}
+(document.getElementById('recipe') as HTMLSelectElement).value='university-1';
 render();engine.runRenderLoop(()=>scene.render());window.addEventListener('resize',()=>engine.resize());
 window.addEventListener('pagehide',()=>{scene.dispose();engine.dispose();},{once:true});

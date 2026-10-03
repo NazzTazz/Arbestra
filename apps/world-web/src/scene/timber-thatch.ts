@@ -92,7 +92,8 @@ export class TimberThatch {
     }
     t.update(false);return t;
   }
-  build(parent:Mesh,plan?:BuildingPlan){
+  build(parent:Mesh,plan?:BuildingPlan,roofOpening?:readonly [number,number]){
+    const flatStone=plan?.recipe.roof.style==='flat-stone';
     const batches=new Map<StandardMaterial,Mesh[]>();
     const add=(m:Mesh,mat:StandardMaterial)=>{
       m.material=mat;
@@ -125,9 +126,12 @@ export class TimberThatch {
     const worksHeight=plan?Math.ceil(Math.max(plan.sourceLevels*plan.recipe.courses*plan.recipe.module.height,plan.height*.65)/plan.recipe.module.height)*plan.recipe.module.height:0;
     const angle=(plan?.recipe.roof.slope??35)*Math.PI/180,half=plan?plan.width/2:1.225,eave=plan?(plan.phase==='works'?worksHeight:plan.height):.86,rise=half*Math.tan(angle),ridge=eave+rise;
     const roofHalfZ=plan?plan.depth/2+Math.max(plan.recipe.roof.overhang,plan.depth*(plan.recipe.roof.lengthExtraRatio??0)/2):1.32;
+    // A raised central pavilion replaces this section of the lower roof.
+    const roofRanges:readonly (readonly [number,number])[]=roofOpening?[[-roofHalfZ,roofOpening[0]],[roofOpening[1],roofHalfZ]]:[[-roofHalfZ,roofHalfZ]];
     const trussHalfZ=plan?plan.depth/2-.07:1.075;
     const trussIntervals=plan?Math.ceil(trussHalfZ*2/plan.recipe.roof.trussSpacing):2;
-    const trussZ=Array.from({length:trussIntervals+1},(_,i)=>-trussHalfZ+i*trussHalfZ*2/trussIntervals);
+    const trussZ=Array.from({length:trussIntervals+1},(_,i)=>-trussHalfZ+i*trussHalfZ*2/trussIntervals).filter(z=>!roofOpening||z<=roofOpening[0]||z>=roofOpening[1]);
+    if(roofOpening){trussZ.push(roofOpening[0],roofOpening[1]);trussZ.sort((a,b)=>a-b);}
     const frameHalf=.153/2,purlinSize=.07,chevronSize=.035,lathSize=.018,plankSize=.038;
     const roofNormalOffset=frameHalf+purlinSize+plankSize;
     const edge=half+(plan?(plan.recipe.roof.sideOverhang??plan.recipe.roof.overhang):.245)-(plan?roofNormalOffset*Math.sin(angle):0),len=edge/Math.cos(angle),rows=plan?Math.ceil(len/.42):4,step=len/rows;
@@ -136,6 +140,7 @@ export class TimberThatch {
     const purlinOffset=frameHalf+purlinSize/2,chevronOffset=frameHalf+purlinSize-chevronSize/2;
     const lathOffset=frameHalf+purlinSize-lathSize/2;
     const point=(side:number,distance:number,offset:number,z:number)=>v(side*(distance*Math.cos(angle)+offset*Math.sin(angle)),ridge-distance*Math.sin(angle)+offset*Math.cos(angle),z);
+    if(!flatStone){
     // Three six-member king-post trusses, including the two gables.
     for(const z of trussZ){
       beam('hall-tie',v(-half,eave,z),v(half,eave,z),.123,.153);
@@ -143,7 +148,7 @@ export class TimberThatch {
       beam('hall-rafter-right',v(half,eave,z),v(0,ridge,z),.123,.153);
       beam('hall-king-post',v(0,eave,z),v(0,ridge,z),.123,.153);
       // Short braces perpendicular to each rafter form right triangles at the king post.
-      for(const sign of [-1,1]){const x=.26,y=ridge-x*Math.tan(angle);
+      for(const sign of [-1,1]){const x=Math.min(.26,rise/(Math.tan(angle)+1/Math.tan(angle))*.9),y=ridge-x*Math.tan(angle);
         beam('hall-strut',v(0,y-x/Math.tan(angle),z),v(sign*x,y,z),.075);}
       // Small wooden peg heads on the gable faces.
       for(const x of [-half+.1,0,half-.1]){
@@ -154,35 +159,75 @@ export class TimberThatch {
     // One continuous ridge purlin, visible through both open gables.
     const ridgePurlinY=ridge+(frameHalf+purlinSize)/Math.cos(angle)-.10;
     // Project beyond the ridge boards (z ±1.4), so the exposed end cannot be hidden by the roof.
-    beam('hall-ridge-purlin',v(0,ridgePurlinY,-roofHalfZ-.02),v(0,ridgePurlinY,roofHalfZ+.02),.11,.20);
+    for(const [lo,hi] of roofRanges)beam('hall-ridge-purlin',v(0,ridgePurlinY,lo-(lo===-roofHalfZ?.02:0)),v(0,ridgePurlinY,hi+(hi===roofHalfZ?.02:0)),.11,.20);
     // Every layer is placed by contact along the roof normal, not arbitrary world-Y offsets.
     for(const side of [-1,1]){
-      for(const distance of [half*.5/Math.cos(angle),half/Math.cos(angle)]){
-        const m=MeshBuilder.CreateBox('hall-purlin',{width:purlinSize,height:purlinSize,depth:roofHalfZ*2-.1},this.scene);
-        m.rotation.z=-side*angle;m.position=point(side,distance,purlinOffset,0);add(m,this.wood);
+      for(const distance of [half*.5/Math.cos(angle),half/Math.cos(angle)])for(const [lo,hi] of roofRanges){
+        const m=MeshBuilder.CreateBox('hall-purlin',{width:purlinSize,height:purlinSize,depth:hi-lo-.1},this.scene);
+        m.rotation.z=-side*angle;m.position=point(side,distance,purlinOffset,(lo+hi)/2);add(m,this.wood);
       }
       const chevrons=Math.ceil((roofHalfZ*2-.1)/.32);
       for(let i=0;i<=chevrons;i++){const z=-roofHalfZ+.05+i*(roofHalfZ*2-.1)/chevrons;
+        if(roofOpening&&z>roofOpening[0]&&z<roofOpening[1])continue;
         beam('hall-chevron',point(side,0,chevronOffset,z),point(side,structuralLen,chevronOffset,z),chevronSize,.035);}
       for(let row=0;row<structuralRows;row++){
 
-        for(const distance of [row*structuralLen/structuralRows+.06,Math.min(structuralLen-.03,(row+1)*structuralLen/structuralRows)]){
-          const m=MeshBuilder.CreateBox('hall-lath',{width:.04,height:lathSize,depth:roofHalfZ*2},this.scene);
-          m.rotation.z=-side*angle;m.position=point(side,distance,lathOffset,0);add(m,this.wood);
+        for(const distance of [row*structuralLen/structuralRows+.06,Math.min(structuralLen-.03,(row+1)*structuralLen/structuralRows)])for(const [lo,hi] of roofRanges){
+          const m=MeshBuilder.CreateBox('hall-lath',{width:.04,height:lathSize,depth:hi-lo},this.scene);
+          m.rotation.z=-side*angle;m.position=point(side,distance,lathOffset,(lo+hi)/2);add(m,this.wood);
         }
       }
+    }
     }
     // Flat ceiling atop the inhabited box; timbers run parallel to the ridge, not up the slopes.
     const liningCount=Math.ceil(half*2/.15),liningStep=half*2/liningCount;
     for(let i=0;i<liningCount;i++){
       const x=-half+(i+.5)*liningStep;
-      beam('hall-flat-ceiling-timber',v(x,eave-.025,-trussHalfZ),v(x,eave-.025,trussHalfZ),liningStep-.003,.05);
+      if(!flatStone)for(const [lo,hi] of roofRanges)beam('hall-flat-ceiling-timber',v(x,eave-.025,Math.max(lo,-trussHalfZ)),v(x,eave-.025,Math.min(hi,trussHalfZ)),liningStep-.003,.05);
       if(plan)for(let level=1;level<plan.recipe.levels;level++){const y=level*(plan.recipe.courses*plan.recipe.module.height+plan.recipe.floorThickness);const odd=plan.recipe.rotateOddLevels&&level%2===1;beam('hall-floor',odd?v(-trussHalfZ,y,-x):v(x,y,-trussHalfZ),odd?v(trussHalfZ,y,-x):v(x,y,trussHalfZ),liningStep-.003,.05);}
     }
     // Hay rests on the horizontal deck between trusses; the sloping roof stays exposed.
-    for(let bay=0;bay<trussZ.length-1;bay++){const z=(trussZ[bay]!+trussZ[bay+1]!)/2;
+    if(!flatStone)for(let bay=0;bay<trussZ.length-1;bay++){const z=(trussZ[bay]!+trussZ[bay+1]!)/2;
+      if(roofOpening&&z>roofOpening[0]&&z<roofOpening[1])continue;
       const fill=MeshBuilder.CreateBox('hall-ceiling-hay-bay',{width:half*2-.25,height:.075,depth:trussZ[bay+1]!-trussZ[bay]!-.18},this.scene);
       fill.position.set(0,eave+.075/2,z);add(fill,this.hay);
+    }
+    if(flatStone&&plan&&plan.phase!=='works'){
+      const module=plan.recipe.module,slabHeight=.08,rimWidth=module.length/2;
+      // The slab stays inside the walls; the crown replaces the central opening.
+      for(const [lo,hi] of roofRanges)beam('factory-stone-flat-roof',v(0,eave+slabHeight/2,lo),v(0,eave+slabHeight/2,hi),half*2,slabHeight,this.stone);
+      // Joined annexes have no gable at the seam: no parapet across that join.
+      const hasEnd=(sign:number)=>plan.stones.some(stone=>stone.axis==='x'&&stone.y>plan.height-module.height&&Math.abs(stone.z-sign*(plan.depth/2-module.thickness/2))<1e-8);
+      const rim=(axis:'x'|'z',lo:number,hi:number,fixed:number,row:number)=>{
+        const y=eave+slabHeight+(row+.5)*module.height;
+        let start=lo;
+        while(start<hi-1e-8){
+          const end=Math.min(hi,start===lo&&row%2?lo+module.length/2:start+module.length);
+          const at=(u:number)=>axis==='x'?v(u,y,fixed):v(fixed,y,u);
+          const stone=beam('factory-stone-roof-parapet',at(start+module.joint/2),at(end-module.joint/2),module.height-module.joint,rimWidth-module.joint,this.stone);
+          stone.rotationQuaternion=hallStoneCrossRotation(axis).multiply(stone.rotationQuaternion!);
+          start=end;
+        }
+      };
+      for(let row=0;row<1;row++){
+        for(const [lo,hi] of roofRanges){
+          const left=lo===-roofHalfZ&&hasEnd(-1),right=hi===roofHalfZ&&hasEnd(1);
+          for(const sign of [-1,1]){
+            // A removed lateral wall is a module join, not an exposed roof edge.
+            const spans=plan.stones.filter(stone=>stone.axis==='z'&&stone.y>plan.height-module.height&&Math.abs(stone.x-sign*(half-module.thickness/2))<1e-8)
+              .map(stone=>[stone.z-(stone.length+module.joint)/2,stone.z+(stone.length+module.joint)/2] as [number,number]).sort((a,b)=>a[0]-b[0]);
+            const edges:Array<[number,number]>=[];
+            for(const span of spans){const last=edges[edges.length-1];if(last&&span[0]<=last[1]+1e-8)last[1]=Math.max(last[1],span[1]);else edges.push([...span]);}
+            for(const [a,b] of edges){
+              const start=Math.max(a,lo+(left&&row%2===0?rimWidth:0)),end=Math.min(b,hi-(right&&row%2===0?rimWidth:0));
+              if(end-start>module.joint)rim('z',start,end,sign*(half-rimWidth/2),row);
+            }
+          }
+          const inset=row%2?rimWidth:0;
+          if(left)rim('x',-half+inset,half-inset,-roofHalfZ+rimWidth/2,row);
+          if(right)rim('x',-half+inset,half-inset,roofHalfZ-rimWidth/2,row);
+        }
+      }
     }
     // Both gables stay open: no daub hides the truss or the ridge purlin.
     // Low-poly cut-stone masonry with staggered vertical joints, without wooden wall framing.
@@ -200,7 +245,7 @@ export class TimberThatch {
         if(opening.top>limit)continue;
         const dist=opening.face.endsWith('x')?plan.width/2:plan.depth/2;
         const at=(u:number,y:number,d=dist)=>{const p=facePoint(opening.face,u,y,d);return v(p.x,p.y,p.z);};
-        if(opening.door){
+        if(opening.door&&!plan.recipe.entrance.open){
           const door=timberDoor(this.scene,this.wood,opening.right-opening.left,opening.top-opening.bottom-.02,timberBeamGeometry);
           door.position=at((opening.left+opening.right)/2,opening.bottom+.01,dist-.025);
           door.rotation.y=({'-x':-Math.PI/2,'+x':Math.PI/2,'-z':Math.PI,'+z':0})[opening.face];
@@ -295,15 +340,15 @@ export class TimberThatch {
     }
     // Individually nailed flush boards. Half-board offset on alternating courses.
     const span=roofHalfZ*2,boardWidth=.245;
-    if(!plan||plan.phase!=='works'){
+    if(!flatStone&&(!plan||plan.phase!=='works')){
     for(const side of [-1,1]){
       const along=v(side*Math.cos(angle),-Math.sin(angle),0),normal=v(side*Math.sin(angle),Math.cos(angle),0);
       const origin=v(0,ridge,0);
       for(let row=0;row<rows;row++){
         const start=row*step,end=Math.min(len,start+step),length=end-start-.003;
         const offset=row%2?boardWidth/2:0;
-        for(let column=-1;column<Math.ceil(span/boardWidth)+1;column++){
-          const lo=Math.max(-span/2,-span/2+column*boardWidth+offset),hi=Math.min(span/2,-span/2+(column+1)*boardWidth+offset);
+        for(let column=-1;column<Math.ceil(span/boardWidth)+1;column++)for(const [rangeLo,rangeHi] of roofRanges){
+          const lo=Math.max(rangeLo,-span/2+column*boardWidth+offset),hi=Math.min(rangeHi,-span/2+(column+1)*boardWidth+offset);
           if(hi-lo<.025)continue;
           const height=lathOffset+lathSize/2+plankSize/2;
           const board=MeshBuilder.CreateBox('hall-roof-plank',{width:length,height:plankSize,depth:hi-lo-.006},this.scene);
@@ -316,9 +361,11 @@ export class TimberThatch {
         }
       }
       // Two narrow ridge boards cover the seam instead of a thick rounded cap.
-      const cap=MeshBuilder.CreateBox('hall-board-ridge',{width:.42,height:.035,depth:roofHalfZ*2+.01},this.scene);
+      for(const [lo,hi] of roofRanges){
+      const cap=MeshBuilder.CreateBox('hall-board-ridge',{width:.42,height:.035,depth:hi-lo+(roofOpening?0:.01)},this.scene);
       const capApex=v(0,ridge+(lathOffset+lathSize/2+plankSize)/Math.cos(angle)+.025,0);
-      cap.rotation.z=-side*angle;cap.position=capApex.add(along.scale(.17));add(cap,this.boards);
+      cap.rotation.z=-side*angle;cap.position=capApex.add(along.scale(.17));cap.position.z=(lo+hi)/2;add(cap,this.boards);
+      }
     }
     }
     if(plan?.phase==='works'){

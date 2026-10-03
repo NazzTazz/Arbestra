@@ -48,6 +48,13 @@ export class TerrainStore {
     const e = this.entries.get(key);
     if (e) { e.invalidation++; e.freshAt = -Infinity; e.retryAt = 0; this.changed.add(key); }
   }
+  geographyChanged(): void {
+    // Ground normally remains cached. A newly returned map changes that ground
+    // authorization, so an updates-only refresh is insufficient.
+    for (const controller of this.#controllers) { this.#cancelled.add(controller); controller.abort(); }
+    for (const key of this.entries.keys()) this.changed.add(key);
+    this.entries.clear(); this.#nextDemandAt = this.now();
+  }
   deposit(deposit: StoneDeposit): void {
     const previous = this.revisions.get(deposit.featureId);
     if (previous && previous.revision >= deposit.revision) return;

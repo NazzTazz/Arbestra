@@ -12,9 +12,11 @@ export interface BuildingRecipe {
   module: { length: number; height: number; thickness: number; joint: number };
   courses: number; levels: number; floorThickness: number;
   rotateOddLevels?: boolean;
-  entrance: { face: Face; centre: number; width: number; courses: number };
+  entrance: { face: Face; centre: number; width: number; courses: number; enabled?: boolean; open?: boolean };
   windows: Partial<Record<Face, number[]>>;
-  roof: { slope: number; overhang: number; sideOverhang?: number; lengthExtraRatio?:number; allowOutsideFootprint?: boolean; trussSpacing: number; maxSpan: number };
+  // Explicit bays: centre in half-modules, width in modules, heights in courses.
+  windowOpenings?: Array<{face:Face;level:number;centre:number;width:number;sill:number;courses:number}>;
+  roof: { slope: number; overhang: number; sideOverhang?: number; lengthExtraRatio?:number; allowOutsideFootprint?: boolean; trussSpacing: number; maxSpan: number; style?: 'flat-stone' };
   walls?: { courses: number; gateWidth: number };
 }
 export interface PlanInput {
@@ -83,7 +85,7 @@ export function buildingPlan(input:PlanInput):BuildingPlan {
   const openings:Opening[]=[];
   for(const face of FACES){
     const length=face.endsWith('x')?depth:width,half=length/2,side=face.endsWith('x')?width/2:depth/2;
-    if(face===r.entrance.face){const centre=r.entrance.centre*m.length/2,w=r.entrance.width*m.length;
+    if(face===r.entrance.face&&r.entrance.enabled!==false){const centre=r.entrance.centre*m.length/2,w=r.entrance.width*m.length;
       assert(Number.isInteger(r.entrance.centre)&&Number.isInteger(r.entrance.width)&&Number.isInteger(r.entrance.courses),'door off lattice');
       openings.push({face,left:centre-w/2,right:centre+w/2,bottom:0,top:r.entrance.courses*m.height,door:true});}
     for(let level=0;level<r.levels;level++){
@@ -102,7 +104,13 @@ export function buildingPlan(input:PlanInput):BuildingPlan {
       }
       for(const u of positions)openings.push({face,left:u-m.length,right:u+m.length,bottom,top:bottom+3*m.height,door:false});
     }
-    for(const o of openings.filter(o=>o.face===face))assert(o.left>=-half+m.thickness&&o.right<=half-m.thickness&&o.top<=height-m.height,'opening exceeds wall');
+    for(const bay of r.windowOpenings??[]){
+      if(bay.face!==face)continue;
+      assert([bay.level,bay.centre,bay.width,bay.sill,bay.courses].every(Number.isInteger)&&bay.level>=0&&bay.level<r.levels&&bay.width>0&&bay.sill>=0&&bay.courses>0,'invalid explicit window');
+      const centre=bay.centre*m.length/2,bottom=bay.level*(r.courses*m.height+r.floorThickness)+bay.sill*m.height;
+      openings.push({face,left:centre-bay.width*m.length/2,right:centre+bay.width*m.length/2,bottom,top:bottom+bay.courses*m.height,door:false});
+    }
+    for(const o of openings.filter(o=>o.face===face))assert(o.left>=-half+m.thickness-1e-8&&o.right<=half-m.thickness+1e-8&&o.top<=height-m.height+1e-8,'opening exceeds wall');
     if(r.walls&&face===r.entrance.face){const free=available[face.endsWith('x')?0:1]!/2-side-(face.endsWith('x')?Math.abs(ox):Math.abs(oz))-m.thickness;
       assert(free>=WORKER_CLEARANCE,'muret leaves insufficient passage');}
   }

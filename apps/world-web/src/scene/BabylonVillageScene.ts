@@ -1,6 +1,8 @@
 import { VillageWorkers } from './village-workers';
 import { TimberThatch } from './timber-thatch';
 import {barracksPreviewPlacement,buildBarracks} from './barracks-factory';
+import { buildUniversity } from './university-factory';
+import { sciencePreview } from '../api/client';
 import { roadDisplayRoutes, roadInnerCorners, roadEdges, ROAD_HALF_WIDTH } from './road-profile';
 import { WeatherMap, WeatherMaterial } from './weather-view';
 import { LocalRain } from './weather-rain';
@@ -132,12 +134,15 @@ export class BabylonVillageScene {
   readonly #transition = new LodTransition(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450);
   #pendingView: TerrainViewMode | null = null;
   #arrival: { started: number; name: string; time: string; from: LandingPose; fromTarget: TravelCell } | null = null;
-  #flyover: { requested: number; started: number | null; landing: boolean } | null = null;
+  #flyover: { requested: number; started: number | null; landing: boolean; local?: boolean } | null = null;
+  #geographyRevision = 0;
+  #globalModelAvailable(): boolean { return sciencePreview() || this.#state?.science?.globalModelAvailable === true; }
   readonly #flyoverKey = (event: KeyboardEvent): void => {
     if(event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
     if(event.code==='KeyV' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault(); event.stopPropagation(); this.startFlyover();
     } else if(event.code==='KeyC' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (!this.#globalModelAvailable()) return;
       event.preventDefault(); event.stopPropagation();
       this.#endFlyover(); this.skipArrival(true);
       this.#pendingCatView = true; this.showWorld();
@@ -720,7 +725,15 @@ export class BabylonVillageScene {
         (f) => this.#buildFeature(f), (c, x, y) => this.#buildDecor(c, x, y), (features) => this.#buildWoodland(features),
         () => this.#space!.inverse(this.#camera.target.x, this.#camera.target.z));
     }
+    const revision = state.science?.geographyRevision ?? 0;
+    if (this.#geographyRevision && revision !== this.#geographyRevision) {
+      this.#store!.geographyChanged(); this.#overviewAbort?.abort(); this.#overviewAbort = new AbortController();
+      this.#overview = null; this.#overviewLoading = false; this.#overviewRetryAt = 0;
+      this.#vegetationLoading = false; this.#vegetationDue = 0; this.#villagesLoading = false; this.#villagesDue = 0;
+    }
+    this.#geographyRevision = revision;
     this.#state = state; this.#store!.observe(state); this.#showTravel = showTravelPaths; this.#selectedRoute = selectedRouteId;
+    this.#torusOverview?.setGlobalModel(this.#globalModelAvailable());
     state = { ...state, cells: state.cells.map(c => ({ ...c, ...this.#space!.projectFrom(c, this.#villageAnchor) })) };
 
     if (import.meta.env.MODE === 'e2e') {
@@ -786,11 +799,11 @@ export class BabylonVillageScene {
       if(site.footprint && !site.building && site.footprint.buildingType!=='garden') continue;
       const key=site.building?.id??site.id;
       const footprint=site.building?state.cells.filter(c=>c.footprint?.buildingId===site.building!.id).map(c=>[c.cellX,c.cellY]):[];
-      const signature=JSON.stringify([state.world.id,site.x,site.z,site.building?.type,site.building?.status,site.building?.level,site.building?.targetLevel,site.building?.visualLayout,footprint,plans.get(key)?.murets,site.footprint?.state,this.#gardenStages.get(site.id),this.#fullGardenSites.has(site.id),!site.building&&!site.footprint?[site.canBuild,this.#highlightedSiteIds.has(site.id)]:null]);
+      const signature=JSON.stringify([state.world.id,site.x,site.z,site.building?.type,site.building?.status,site.building?.level,site.building?.targetLevel,site.building?.visualLayout,footprint,plans.get(key)?.murets,site.footprint?.state,this.#gardenStages.get(site.id),this.#fullGardenSites.has(site.id),site.building?.type==='university'?[state.science?.levels.mathematics,state.science?.levels.astronomy]:null,!site.building&&!site.footprint?[site.canBuild,this.#highlightedSiteIds.has(site.id)]:null]);
       retained.add(key);
       let cached=this.#buildingCache.get(key);
       if(cached?.signature!==signature){cached?.mesh.dispose(false,false);
-      const mesh = site.building?.visualLayout ? this.#createFactoryBuilding(site,plans.get(key)!)
+      const mesh = site.building?.type === 'university' ? this.#createUniversity(site) : site.building?.visualLayout ? this.#createFactoryBuilding(site,plans.get(key)!)
         : site.building?.status === 'under-construction'
         ? this.#createConstructionSite(site)
         : site.footprint?.buildingType === 'garden'
@@ -1162,8 +1175,16 @@ export class BabylonVillageScene {
     const displayRoutes = roadDisplayRoutes(state.travelRoutes, occupied);
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
+    const campusFires = state.cells.flatMap(site => {
+      if (site.building?.type !== 'university' || site.building.status !== 'completed' || site.building.level !== 3) return [];
+      const centre = this.#universityCentre(site);
+      return [-1, 1].flatMap(sign => [3.125, 4.375, 5.625].map((x, index) => ({
+        x: centre.x + sign * x, y: centre.y + .02, z: centre.z + 2.5 * TILE_SIZE - (TILE_SIZE / 2 + .18),
+        seed: (index + (sign > 0 ? 3 : 0) + .5) / 6,
+      })));
+    });
     this.#villageBraziers.update(displayRoutes, this.#space!, cell => this.#renderer!.rendered(cell.cellX,cell.cellY)
-      ? this.#store!.ground(cell.cellX,cell.cellY) : null, occupied);
+      ? this.#store!.ground(cell.cellX,cell.cellY) : null, occupied, campusFires);
     this.#villageRoads ??= new VillageRoads(this.#scene);
     this.#villageRoads.update(JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.version, displayRoutes]),
       displayRoutes, this.#space!, cell => this.#renderer!.rendered(cell.cellX, cell.cellY)
@@ -1386,6 +1407,26 @@ export class BabylonVillageScene {
     this.#timberThatch ??= new TimberThatch(this.#scene);
     this.#timberThatch.build(body);
     this.#createContactShadow(body, 2.75, 2.45);
+    return this.#registerStructure(body);
+  }
+
+  #universityCentre(site: VillageCell): Vector3 {
+    const cells = this.#state!.cells.filter(c => c.footprint?.buildingId === site.building!.id);
+    const dx = cells.map(c => delta(c.cellX, site.cellX, this.#state!.world.widthCells));
+    const dz = cells.map(c => delta(c.cellY, site.cellY, this.#state!.world.heightCells));
+    const heights = cells.map(c => this.#store?.ground(c.cellX, c.cellY)?.height ?? 0);
+    const point = this.#space!.projectFrom(site, this.#villageAnchor);
+    return new Vector3(point.x + (Math.min(...dx) + Math.max(...dx)) * TILE_SIZE / 2,
+      Math.max(0, ...heights), point.z + (Math.min(...dz) + Math.max(...dz)) * TILE_SIZE / 2);
+  }
+
+  #createUniversity(site: VillageCell): Mesh {
+    const body = new BabylonMesh(`university-${site.building!.id}`, this.#scene);
+    body.position.copyFrom(this.#universityCentre(site));
+    this.#timberThatch ??= new TimberThatch(this.#scene);
+    buildUniversity(body, this.#timberThatch, site.building!.targetLevel ?? site.building!.level,
+      site.building!.status === 'under-construction' ? 'works' : 'finished', site.building!.targetLevel ? site.building!.level : 0,
+      { mathematics: (this.#state!.science?.levels.mathematics ?? 0) >= 3, astronomy: (this.#state!.science?.levels.astronomy ?? 0) >= 1 });
     return this.#registerStructure(body);
   }
 
@@ -1631,6 +1672,7 @@ export class BabylonVillageScene {
     for (const feature of this.#e2eFeatures) { feature.x -= shift.x; feature.z -= shift.z; }
     this.#renderer?.shift(shift.x, shift.z);
     this.#regionalOverview.shift(shift.x, shift.z);
+    if (this.#state) this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
   }
 
   readonly #testCamera = (event: Event): void => {
@@ -1653,7 +1695,7 @@ export class BabylonVillageScene {
 
   public acceptDeposit(deposit: StoneDeposit): void { this.#store?.deposit(deposit); }
   public setCosmologyDebug(enabled: boolean): void {
-    this.#cosmologyDebug = enabled;
+    this.#cosmologyDebug = enabled && this.#globalModelAvailable();
     if (!enabled) { this.#pendingSolarProfile = false; this.#torusOverview?.restoreNavigation(); this.#cosmologyPhase = null; this.#cosmologyPeriod = COSMOLOGY.periodMs; }
   }
   public setCosmologyServerOffset(offsetMs: number): void { this.#cosmologyServerOffsetMs = offsetMs; }
@@ -1754,6 +1796,10 @@ export class BabylonVillageScene {
   public startFlyover(): void {
     if(this.#flyover || !this.#state || this.#transition.active) return;
     this.skipArrival();
+    if (!this.#globalModelAvailable()) {
+      this.showRegion(); this.#flyover = { requested: performance.now(), started: performance.now(), landing: false, local: true };
+      this.#camera.detachControl(); return;
+    }
     this.#flyover={requested:performance.now(),started:null,landing:false};
     this.#camera.detachControl(); this.#torusOverview?.camera.detachControl();
     if(this.#mode!=='world') this.showWorld();
@@ -1766,6 +1812,19 @@ export class BabylonVillageScene {
   }
   #updateFlyover(now: number): void {
     const shot=this.#flyover; if(!shot || !this.#state) return;
+    if (shot.local && !shot.landing) {
+      const regional = (this.#state.science?.knowledgeCoefficient ?? 0) >= .15 && (this.#state.science?.levels.geography ?? 0) >= 1;
+      const duration = regional ? 5000 : 1200, progress = Math.min(1, (now - shot.requested) / duration);
+      if (regional && this.#space) {
+        const focus = this.#space.project(townHallFocus(this.#state)), glide = (1 - progress) ** 2;
+        this.#camera.target.set(focus.x + glide * 18, .45, focus.z - glide * 12);
+        this.#camera.radius = 170 + glide * 80;
+      }
+      if (progress >= 1) {
+        shot.landing = true; this.showVillage();
+      }
+      return;
+    }
     if(import.meta.env.DEV) this.#canvas.dataset.flyover=JSON.stringify({stage:shot.landing?'landing':shot.started===null?'waiting':now-shot.started<12000?'orbit':'descent',elapsed:shot.started===null?0:now-shot.started});
     if(this.#transition.failed || now-shot.requested>45000) { this.#endFlyover(); return; }
     if(shot.landing) {
@@ -1896,8 +1955,9 @@ export class BabylonVillageScene {
       this.#overviewLoading = true;
       void getTerrainOverview(world.slug, signal).then((data) => {
         if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
-        const view = new TorusOverview(this.#engine, data, this.#villageAnchor,
+        const view = this.#torusOverview ?? new TorusOverview(this.#engine, data, this.#villageAnchor,
           this.#space!.inverse(this.#camera.target.x, this.#camera.target.z), () => this.#weather);
+        view.setGeography(data); view.setGlobalModel(this.#globalModelAvailable());
         this.#overview = data; this.#regionalOverview.set(data); this.#torusOverview = view;
         if (this.#requestedWorld) this.showWorld();
 

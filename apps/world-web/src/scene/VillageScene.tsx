@@ -1,6 +1,7 @@
 import type { VillageArrival } from './village-arrival';
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { CosmologyDebug } from './CosmologyDebug';
+import { sciencePreview } from '../api/client';
 
 import type { StoneDeposit, VillageState } from '@arbestra/contracts';
 
@@ -39,6 +40,7 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
   const [cosmologyDebug, setCosmologyDebug] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BabylonVillageScene | null>(null);
+  const loginSceneRef = useRef<BabylonVillageScene | null>(null);
   const getScene = useCallback(() => sceneRef.current, []);
   const selectionHandlerRef = useRef(onSiteSelected);
   const featureHandlerRef = useRef(onFeatureSelected);
@@ -82,6 +84,10 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
 
   useEffect(() => {
     sceneRef.current?.update(state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId);
+    if (sceneRef.current && loginSceneRef.current !== sceneRef.current) {
+      loginSceneRef.current = sceneRef.current;
+      sceneRef.current.startFlyover();
+    }
   }, [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId]);
 
   useImperativeHandle(terrainRef, () => ({ acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit) }), []);
@@ -120,8 +126,9 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
       {viewMode === 'village' && <button type="button" onClick={() => sceneRef.current?.showRegion()}>Explorer la région</button>}
       {viewMode !== 'village' && <button type="button" onClick={() => sceneRef.current?.showVillage()}>Mon village</button>}
       {viewMode === 'world' && <button type="button" onClick={() => sceneRef.current?.showRegion()}>Voir cette région</button>}
-      {viewMode !== 'world' && <button type="button" onClick={() => sceneRef.current?.showWorld()}>Monde torique</button>}
-      <button type="button" aria-pressed={cosmologyDebug} onClick={() => setCosmologyDebug(value => !value)}>Cosmologie · debug</button>
+      {viewMode !== 'world' && <button type="button" onClick={() => sceneRef.current?.showWorld()}>{state.science?.globalModelAvailable || sciencePreview() ? 'Monde torique' : 'Observer la courbure'}</button>}
+      {(state.science?.globalModelAvailable || sciencePreview()) && <button type="button" aria-pressed={cosmologyDebug} onClick={() => setCosmologyDebug(value => !value)}>Cosmologie · debug</button>}
+      {sciencePreview() && <span>Sciences · aperçu développeur</span>}
     </div>
     {arrival && <div className="village-arrival" role="dialog" aria-label={`Arrivée à ${arrival.name}`} onClick={event => { event.stopPropagation(); sceneRef.current?.skipArrival(true); }}
       onWheel={event => { event.stopPropagation(); sceneRef.current?.zoomDuringArrival(event.deltaY); }}
