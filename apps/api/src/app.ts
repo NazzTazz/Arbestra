@@ -7,6 +7,7 @@ import type { Database } from './database/schema.js';
 import { HttpError } from './errors.js';
 import { registerAuthRoutes } from './modules/auth/routes.js';
 import { registerVillageRoutes } from './modules/villages/routes.js';
+import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
 
 export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise<FastifyInstance> {
   const app = Fastify({ logger: config.isProduction });
@@ -26,5 +27,6 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   app.get('/api/health', async () => ({ status: 'ok' }));
   await registerAuthRoutes(app, db, config);
   await registerVillageRoutes(app, db, config);
+  await registerTerrainRoutes(app, db, config);
   return app;
 }
