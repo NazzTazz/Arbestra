@@ -1,5 +1,17 @@
 # Jardins — récolte par parcelle, fusion et agrandissement tolérant
 
+## Amendement validé — tournées de récolte, 2 octobre 2026
+
+Cet amendement remplace les anciennes règles de départ par parcelle ci-dessous. Un geste de sélection multiple crée **une mission avec un seul villageois** au relâchement du pointeur. Il sort de l'hôtel de ville, visite les parcelles dans l'ordre du geste, travaille 60 secondes sur chacune, puis rapporte toute la récolte en un seul retour. Le transport prend une seconde par case sur le réseau de chemins existant, avec passage direct entre les parcelles sélectionnées qui partagent un côté, couture torique incluse. Aucun retour intermédiaire ni crédit anticipé. Un clic simple crée la même mission avec une seule parcelle ; un geste annulé ne lance rien.
+
+Le serveur canonicalise et déduplique les coordonnées, limite la sélection à 100 parcelles, exige un habitant avec assez d'énergie pour la tournée entière et réserve atomiquement les carottes entières présentes sur toutes les cibles au départ. Si une cible est vide, inaccessible ou déjà engagée, la commande entière est refusée ; aucun départ partiel. Les fractions et la production ultérieure restent sur les parcelles. Toutes les cibles sont indisponibles pour une autre récolte jusqu'au retour final. Les parcelles non sélectionnées restent récoltables. Une réponse réseau perdue conserve le reçu et l'ordre de toute la sélection ; une reprise ne crée pas un second départ, même après fusion.
+
+Migration additive 021 : étapes et chemin de retour persistés sur `garden_harvests`, valeurs vides pour les anciennes missions, dont les échéances restent inchangées. Chaque parcelle expose le même identifiant de tournée, sa propre quantité réservée et le parcours complet ; le rendu déduplique cet identifiant et reconstruit l'étape courante après F5 ou changement de LOD. Un seul crédit agrégé, une seule libération, une seule notification planifiée au retour. Les animations ne déclenchent aucun crédit.
+
+Animation validée et implémentée : sur chaque parcelle, le jardinier parcourt les trois rangs en S, avec deux demi-tours arrondis. Le parcours reste contenu dans la parcelle, commence et finit au centre pour raccorder les trajets. Sa progression est déterministe sur les 60 secondes déjà prévues, reconstruite à l'instant courant après rechargement, changement de LOD ou recentrage. Marche et geste des bras accompagnent le déplacement ; aucun temps métier ni crédit supplémentaire.
+
+Implémentation dans le worktree ; preuves et recette courante dans `SESSION-HANDOFF.md`. Les paragraphes antérieurs restent un historique des règles ayant conduit à cette tranche.
+
 Date de cadrage : 7 septembre 2026, base historique `master`, `b148f37`. **Statut au 30 septembre : implémentée et validée dans le worktree, non commitée.** Les décisions gameplay ci-dessous sont validées par Tristan ; les propositions de structure sont des recommandations techniques. Voir la [reprise courante](../SESSION-HANDOFF.md) pour les preuves terminées et l'état Git.
 
 ## Résultat joueur et décisions validées

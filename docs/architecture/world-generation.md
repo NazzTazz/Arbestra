@@ -87,7 +87,7 @@ Les seuils visuels et densités appartiennent au fichier de configuration du gé
 
 ## Contrat de lecture initial
 
-Le snapshot du village reçoit une région fixe de `64 × 64` cellules autour de son ancre : origine canonique, terrains, élévations et features. La représentation reste compatible avec les chunks, sans implémenter maintenant un moteur de streaming.
+Le snapshot du village conserve une région fixe de `64 × 64` cellules autour de son ancre : origine canonique, terrains, élévations et features. Le [streamer terrain](../SPEC-STREAMING-TERRAIN.md) ajoute une lecture indépendante des chunks persistés, avec halo diagonal d'une cellule, contrôle de session/village et cohérence SQL repeatable-read read-only. Le premier chargement lit `/terrain` ; la revalidation d'un chunk conservé utilise `/terrain/updates`, qui ne lit pas `world_chunks` et ne transfère ni terrains ni élévations. Il ne génère rien et ne réconcilie pas l'économie ; les listes complètes de features/occupations ne couvrent que les intérieurs demandés. La position des gisements épuisés vient de `stone_deposits` même après libération de leur occupation.
 
 Babylon :
 
@@ -115,4 +115,8 @@ La migration crée uniquement le schéma. Une commande explicite génère `aube`
 
 ## Hors scope
 
-Spawn, colonisation exceptionnelle, extraction, terrassement, régénération des ressources, biomes avancés, déplacements, brouillard de guerre, streaming et planète-donut.
+Spawn, colonisation exceptionnelle, terrassement, biomes avancés, déplacements, brouillard de guerre et planète-donut. Streaming et exploitation sont traités dans leurs tranches distinctes.
+
+## Stock des bosquets (017)
+
+Chaque feature `woodland` générée reçoit un `woodland_deposits` dans la même transaction : 300 bois et une période de repousse de base de 14 jours, avec curseur serveur. La migration 017 initialise conservativement les bosquets existants depuis leurs occupations sans régénérer le monde ni toucher aux bâtiments/stocks villages. Un monde `ready` n'est jamais réapprovisionné par la génération. Les coordonnées du bosquet restent dans cette table quand son occupation disparaît ; les lectures terrain et aperçus de végétation suivent son stock, indépendamment des occupations.

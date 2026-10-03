@@ -61,6 +61,8 @@ Les chantiers occupent leur emprise mais n’étendent pas encore la zone. La zo
 
 Le client ne dessine la grille interactive que pour les cellules exposées par cette dérivation. La région de terrain reçue n’est pas implicitement constructible et un clic hors d’une géométrie interactive ne sélectionne aucune cellule.
 
+Grille, voile et plaques des cellules libres sont visibles uniquement en mode construction, sur les cellules `canBuild`. Le fondu Village/Région multiplie l'opacité de base des plaques ; il ne doit pas les rendre visibles hors de ce mode ni remplacer leur transparence par celle des bâtiments.
+
 ## Commandes et contrats
 
 - Construire : `POST /api/worlds/:slug/villages/:villageId/buildings` avec `{ buildingType, cellX, cellY }`.
@@ -97,3 +99,9 @@ Extraction, terrassement, rendements des gisements, territoire politique, quête
 ## Pierre épuisée (012)
 
 La position persiste dans `stone_deposits` après suppression de l’occupation. Le snapshot conserve la feature depleted comme trace, qui ne bloque pas `canBuild`. La cellule libérée reste soumise au terrain et aux autres règles de construction. Les commandes recherchent le UUID dans le monde, jamais dans la fenêtre 64×64. Les rochers sont invalidés individuellement par ID/révision, indépendamment du terrain.
+
+## Bosquet libéré et défriché (017)
+
+La position persiste dans `woodland_deposits`, même sans occupation. À stock physique ≤10 % du stock initial, l'occupation feature est supprimée ; au-dessus, la repousse réoccupe une case inutilisée. Les chunks en lecture seule projettent cette occupation sans déclencher l'économie des villages. Le booléen autoritatif `blocksCell` conserve la précision du seuil malgré les fractions de repousse.
+
+Une construction autorisée réserve la case puis arrête la repousse sous le même verrou du bosquet. Le défrichage supprime uniquement le bois non réservé et stoppe durablement la repousse ; les missions déjà engagées gardent leur lot. Les protections, terrains, emprises et périmètre historique de construction restent applicables. La propriété future par hôtel de ville le plus proche n'est pas une nouvelle autorisation ni une partition persistante implémentée ici.
