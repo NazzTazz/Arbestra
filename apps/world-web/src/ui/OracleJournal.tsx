@@ -1,6 +1,12 @@
 import type { VillageAccomplishment } from '@arbestra/contracts';
 
 const entries: Record<string, { title: string; description: string }> = {
+  'first-woodcut': { title: 'La première coupe', description: 'Un premier lot de bois a rejoint les réserves du village.' },
+  'first-harvest': {
+    title: 'Première récolte',
+    description: 'Les premières carottes du Jardin ont rejoint les réserves du village.',
+  },
+  'cat-eyes': { title: 'Les yeux dans les yeux', description: 'Deux reflets dans le noir. L’Oracle cherchait son chat.' },
   'town-hall-supplies': {
     title: 'Les anciennes réserves',
     description: "2 000 carottes découvertes dans l'Hôtel de ville.",

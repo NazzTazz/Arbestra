@@ -6,6 +6,7 @@ const secondsUntil = (iso: string, now: number) => Math.max(0, Math.ceil((Date.p
 export function PopulationPanel({ population, pending, count, onCount, onFeed, onRest }: { population: VillageState['village']['population']; pending: boolean; count: number; onCount: (count: number) => void; onFeed: () => void; onRest: () => void }) {
   return <div className="building-details population-panel"><span>Habitants</span><strong>{population.total} / {population.housingCapacity} couchages</strong><p>{population.available} disponibles · {population.working} au travail · {population.resting} au repos</p>
     <div className="energy-list" aria-label="Répartition de l’énergie">{population.energyCounts.map((amount, energy) => amount ? <span key={energy}>Énergie {energy} : {amount}</span> : null)}</div>
+    {population.restHousing ? <p>Au repos : {population.restHousing.reduce((n,h)=>n+h.restingCount,0)} avec un couchage{population.restingWithoutHousing ? ` · ${population.restingWithoutHousing} sans couchage` : ''}</p> : null}
     <label>Effectif <input type="number" min="1" max={Math.max(1, population.available)} value={count} onChange={(event) => onCount(Number(event.target.value))} /></label>
     <button type="button" disabled={pending || population.available < 1} onClick={onFeed}>Faire manger</button><button type="button" disabled={pending || population.available < 1} onClick={onRest}>Envoyer au repos</button></div>;
 }
@@ -32,11 +33,34 @@ export function BuildingPanel({ building, definition, serverNow, pending, pendin
     {upgradeCost !== undefined ? <button type="button" disabled={pending || building.status !== 'completed'} onClick={onUpgrade}>Améliorer — {upgradeCost} bois</button> : null}</div>;
 }
 
-export function DepositPanel({ details, loading, pending, workerCount, onWorkerCount, onStart }: { details: DepositDetails | null; loading: boolean; pending: boolean; workerCount: number; onWorkerCount: (count: number) => void; onStart: () => void }) {
-  if (loading && !details) return <div className="building-details"><strong>Gisement de pierre</strong><p>Inspection…</p></div>;
-  if (!details) return <div className="building-details"><strong>Gisement de pierre</strong><p>Détails indisponibles.</p></div>;
-  const option = details.eligibility.workerOptions.find((item) => item.workerCount === workerCount);
-  return <div className="building-details"><span>Ressource naturelle</span><strong>Gisement de pierre</strong><p>{format(details.deposit.availableAmount)} disponibles · {format(details.deposit.remainingAmount)} restantes</p><p>Prochain lot : {format(details.eligibility.lotAmount)} pierre</p>
-    <label>Travailleurs <select value={workerCount} onChange={(event) => onWorkerCount(Number(event.target.value))}>{details.eligibility.workerOptions.map((item) => <option key={item.workerCount} value={item.workerCount}>{item.workerCount} · {Math.ceil(item.durationMs / 60_000)} min</option>)}</select></label>
-    {option && !option.canStart ? <p className="error">{option.reasonCode === 'WORKERS_UNAVAILABLE' ? 'Habitants disponibles et reposés insuffisants.' : 'Ce travail ne peut pas démarrer.'}</p> : null}<button type="button" disabled={pending || !option?.canStart} onClick={onStart}>Extraire avec {workerCount} habitant{workerCount > 1 ? 's' : ''}</button></div>;
+export function DepositPanel({ details, loading, pending, workerCount, onWorkerCount, onStart, onSelectZone }: { details: DepositDetails | null; loading: boolean; pending: boolean; workerCount: number; onWorkerCount: (count: number) => void; onStart: (mode: 'extract' | 'cut' | 'clear') => void; onSelectZone: () => void }) {
+  if (loading && !details) return <div className="building-details"><strong>Ressource naturelle</strong><p>Inspection…</p></div>;
+  if (!details) return <div className="building-details"><strong>Ressource naturelle</strong><p>Détails indisponibles.</p></div>;
+  const wood = details.deposit.resourceCode === 'wood';
+  const access = details.eligibility.inRange && !details.eligibility.protected && details.eligibility.onBoundary;
+  return <div className="building-details"><span>Ressource naturelle</span><strong>{wood ? 'Bosquet' : 'Gisement de pierre'}</strong>
+    <p>{format(details.deposit.availableAmount)} disponibles · {format(details.deposit.remainingAmount)} restantes</p>
+    <label>Habitants mobilisés au maximum <input type="range" min="1" max="10" value={workerCount} onChange={event => onWorkerCount(Number(event.target.value))} /> <strong>{workerCount}</strong></label>
+    <p>Le trajet s’ajoute au temps de travail. Les équipes fatiguées sont relevées et se reposent.</p>
+    {!access && <p className="error">Ce gisement est hors de portée, protégé ou inaccessible.</p>}
+    {wood ? <><p>{details.deposit.cleared ? 'Bosquet défriché' : `Repousse : ${details.deposit.regrowthPerHour?.toFixed(2) ?? '0,89'} bois/h`}</p>
+      <button type="button" disabled={pending || !access || details.deposit.cleared} onClick={() => onStart('cut')}>Couper jusqu’à 10 %</button>
+      <button type="button" disabled={pending || !access || details.deposit.cleared} onClick={() => onStart('clear')}>Défricher durablement</button>
+      <button type="button" disabled={pending} onClick={onSelectZone}>Définir une zone bois</button></>
+      : <button type="button" disabled={pending || !access || details.deposit.remainingAmount < 1} onClick={() => onStart('extract')}>Exploiter jusqu’à épuisement</button>}</div>;
+}
+
+export function WorksitePanel({ worksites, pending, onAction }: { worksites: VillageState['village']['worksites']; pending: boolean;
+  onAction: (id: string, action: 'pause' | 'resume' | 'stop' | 'set-cap', cap?: number) => void }) {
+  const waitLabels: Record<string, string> = { 'stock-reserved': 'bois réservé ailleurs', access: 'accès bloqué',
+    'workers-resting': 'équipe au repos', 'route-too-long': 'trajet trop long pour une équipe reposée', waiting: 'en attente' };
+  return <div className="worksite-panel"><strong>Chantiers</strong>{worksites.length === 0 ? <p>Aucun chantier.</p> : worksites.map(site => {
+    const done = site.targets.filter(target => target.status !== 'pending').length;
+    return <div className="worksite-card" key={site.id}><strong>{site.mode === 'extract' ? 'Pierre' : site.mode === 'clear' ? 'Défrichage' : 'Coupe'} · {done}/{site.targets.length}</strong>
+      <p>{site.status === 'running' ? site.waitReason ? `En attente : ${waitLabels[site.waitReason] ?? site.waitReason}` : 'En activité' : site.status === 'paused' ? site.activeExtraction ? 'Pause demandée · retour en cours' : 'En pause' : site.status === 'stopping' ? 'Arrêt demandé · retour en cours' : site.status === 'completed' ? 'Terminé' : 'Arrêté'}</p>
+      <p>{format(site.deliveredAmount)} {site.resourceCode === 'wood' ? 'bois' : 'pierre'} livrés{site.activeExtraction ? ` · ${site.activeExtraction.workerCount} habitants · retour dans ${secondsUntil(site.activeExtraction.completesAt, Date.now())} s` : ''}</p>
+      {site.status === 'running' || site.status === 'paused' ? <><label>Plafond <select aria-label="Plafond du chantier" disabled={pending} value={site.workerCap} onChange={event => onAction(site.id, 'set-cap', Number(event.target.value))}>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} habitant{index ? 's' : ''}</option>)}</select></label>
+        <button disabled={pending} onClick={() => onAction(site.id, site.status === 'running' ? 'pause' : 'resume')}>{site.status === 'running' ? 'Pause' : 'Reprendre'}</button>
+        <button disabled={pending} onClick={() => onAction(site.id, 'stop')}>Arrêter</button></> : null}</div>;
+  })}</div>;
 }

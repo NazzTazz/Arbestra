@@ -17,6 +17,10 @@ button { font: inherit; }
 .travel-debug-details select { max-width: 100%; }
 .game-shell::after { content: ''; position: absolute; z-index: 1; inset: 40px 0 0; box-shadow: inset 0 0 8rem rgb(8 21 16 / 20%); pointer-events: none; }
 .village-canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+.village-canvas:focus-visible { outline: 2px solid #b9e5e8; outline-offset: -3px; }
+.world-view-controls { position: absolute; z-index: 5; right: 1rem; bottom: 1rem; display: flex; gap: .4rem; align-items: center; padding: .4rem; border-radius: .4rem; color: #e9faff; background: rgb(16 39 47 / 88%); }
+.world-view-controls button { min-height: 40px; padding: .35rem .55rem; color: #e9faff; background: rgb(36 71 73 / 90%); border: 1px solid #70c4d5; border-radius: .3rem; cursor: pointer; }
+.world-view-controls button:focus-visible { outline: 2px solid #fff3a6; outline-offset: 2px; }
 
 .top-bar {
   position: absolute;
@@ -210,3 +214,39 @@ button { font: inherit; }
 @media (max-width: 520px) {
   .harvest-pending { z-index: 6; top: auto; bottom: 8.5rem; left: 1rem; right: 1rem; }
 }
+
+.terrain-loading { position: fixed; bottom: 4.5rem; right: 1rem; padding: .4rem .7rem; background: #20383bcc; color: #edf5f4; border-radius: .35rem; font-size: .8rem; pointer-events: none; z-index: 2; }
+.terrain-loading button { pointer-events: auto; margin-left: .6rem; min-height: 44px; color: inherit; background: #344c50; border: 1px solid #9ab5b9; border-radius: .25rem; cursor: pointer; }
+.cosmology-debug {
+  position: absolute; right: 16px; top: 76px; z-index: 25;
+  width: min(310px, calc(100vw - 32px)); padding: 12px;
+  background: rgba(19, 32, 36, .94); color: #edf0df; border: 1px solid #697d78;
+  border-radius: 8px; font-size: 12px; max-height: calc(100dvh - 170px); overflow: auto;
+}
+.cosmology-debug label { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+.cosmology-debug input[type="range"] { flex: 1; min-width: 60px; }
+.cosmology-debug input[type="number"] { width: 60px; }
+.cosmology-actions { display: flex; gap: 6px; margin-top: 8px; }
+.cosmology-debug button { padding: 6px; background: #344f50; color: #fff; border: 1px solid #6c8583; border-radius: 4px; }
+.cosmology-regime { display: grid; gap: 3px; margin: 9px 0; }
+.cosmology-regime svg { width: 100%; height: 12px; }
+.cosmology-debug small { color: #bac6bc; }
+.world-view-controls { flex-wrap: wrap; max-width: calc(100vw - 32px); }
+
+.village-arrival { position: absolute; inset: 0; z-index: 100; display: grid; place-items: center; cursor: default; }
+.village-arrival-veil { position: absolute; inset: 0; pointer-events: none; }
+.village-arrival-black { position: absolute; inset: 0; background: #000; pointer-events: none; }
+.village-arrival-mist { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 18% 82%, #82959e 0%, transparent 52%), radial-gradient(ellipse at 80% 95%, #9aabb1 0%, transparent 58%); filter: blur(12px); }
+.village-arrival-title { position: relative; display: grid; gap: 1.15rem; text-align: center; max-width: 88%; color: #f2ebdc; text-shadow: 0 2px 22px #000b; pointer-events: none; }
+.village-arrival-title strong { font: 400 clamp(2.2rem, 5vw, 4.4rem) 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif; letter-spacing: .1em; overflow-wrap: anywhere; }
+.village-arrival-title span { font: 400 clamp(.8rem, 1.6vw, 1.1rem) 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif; letter-spacing: .18em; font-variant: small-caps; }
+.village-arrival > button { position: absolute; bottom: 2rem; right: 2rem; opacity: .45; background: transparent; border: 0; color: #ece6da; }
+.oracle-cat-visit { position: absolute; z-index: 80; bottom: 5rem; left: 50%; transform: translateX(-50%); width: min(26rem, 88vw); padding: 1.2rem; background: #172526ed; color: #efeeda; border: 1px solid #9ca894; border-radius: .6rem; }
+.worksite-access { position: absolute; left: 16px; bottom: 132px; z-index: 30; }
+.worksite-panel, .wood-selection-panel { position: absolute; left: 16px; bottom: 176px; z-index: 31; width: min(330px, calc(100vw - 32px)); max-height: 48vh; overflow: auto; padding: 14px; border: 1px solid #a3b8a0; border-radius: 8px; background: rgba(20, 37, 31, .96); color: #f5f6e9; box-shadow: 0 12px 30px #0008; }
+.wood-selection-panel { left: auto; right: 16px; bottom: 96px; }
+.worksite-panel button, .wood-selection-panel button { margin: 5px 5px 0 0; }
+.worksite-card { border-top: 1px solid #ffffff30; padding: 10px 0; }
+.worksite-card p { margin: 5px 0; }
+.worksite-card label, .wood-selection-panel label { display: block; margin: 8px 0; }
+.worksite-card select, .wood-selection-panel select { max-width: 100%; }

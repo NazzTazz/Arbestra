@@ -50,6 +50,12 @@ test('une inspection lente laisse démarrer une extraction', async ({ page, isMo
   } finally { await db.destroy(); }
 
   let inspections = 0;
+  let streamed = false;
+  page.on('response', async response => {
+    if (!response.url().includes('/terrain?') || !response.ok()) return;
+    const body = await response.json().catch(() => null) as { chunks?: Array<{ features: Array<{ id: string }> }> } | null;
+    if (body?.chunks?.some(c => c.features.some(f => f.id === featureId))) streamed = true;
+  });
   await page.route((url) => url.pathname.endsWith(`/features/${featureId}`), async (route) => {
     inspections++;
     await new Promise((resolve) => setTimeout(resolve, 3_000));
@@ -62,8 +68,13 @@ test('une inspection lente laisse démarrer une extraction', async ({ page, isMo
   await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
   const canvas = page.getByTestId('village-canvas');
   await expect(canvas).toBeVisible({ timeout: 40_000 });
-  await expect.poll(() => canvas.evaluate((element, id) =>
-    (JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string }>).some((item) => item.id === id), featureId)).toBe(true);
+  try {
+    await expect.poll(() => canvas.evaluate((element, id) =>
+      (JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string }>).some((item) => item.id === id), featureId), { timeout: 30000 }).toBe(true);
+  } catch (error) {
+    console.log('stone render diagnostics', { streamed, streaming: await canvas.getAttribute('data-terrain-streaming'), features: await canvas.getAttribute('data-feature-screens') });
+    throw error;
+  }
   const point = await canvas.evaluate((element, id) => {
     const positions = JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string; x: number; y: number }>;
     const feature = positions.find((item) => item.id === id);
