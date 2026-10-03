@@ -6,15 +6,15 @@ Arbestra est un monolithe modulaire TypeScript :
 - `world-web` sépare React (état/UI) de Babylon.js (rendu/interactions spatiales) ;
 - `api` porte les règles métier, les sessions opaques et le worker ;
 - PostgreSQL 17 est la source de vérité, avec `world_id` dans chaque agrégat de monde ;
-- `contracts` contient uniquement les contrats JSON réellement partagés.
+- `contracts` contient les contrats JSON et la géométrie cosmologique déterministe partagée entre serveur et rendu.
 
 HTTP JSON est le défaut. SSE/WebSocket, Redis et queues externes restent absents jusqu’à un besoin démontré.
 
 ## Direction produit, distincte de l'architecture livrée
 
-La [spec Université, sciences et découverte du monde](../SPEC-UNIVERSITE-SCIENCES-DECOUVERTE.md) consolide le futur parcours jusqu'à Astronomie 1 : connaissances par joueur/monde, centres universitaires, relevés et exploration, Arbre des connaissances progressif, représentation torique et cinématique conditionnées par les acquis. **Non implémenté dans cette session** ; paramètres et contrats de contenu encore ouverts. Météorologie, Ballistique et Topologie sont des extensions cadrées, sans nouvelle architecture livrée.
+Le [socle Université et sciences](science.md) est implémenté dans le worktree : capacités locales, connaissances partagées par joueur/monde, programmes, qualifications, relevés, rapports datés et Astronomie 1 spontanée. La [spec](../SPEC-UNIVERSITE-SCIENCES-DECOUVERTE.md) conserve les arbitrages et le barème de recette. Le premier campus graphique, accepté dans l'atelier, est intégré sur une emprise réelle 5 × 6 pour recette humaine ; Médecine, Météorologie, Ballistique et Topologie restent des extensions.
 
-La [factory modulaire des bâtiments](../SPEC-FACTORY-BATIMENTS.md) est implémentée pour le kit de l'hôtel de ville et des maisons : emprise réelle, implantation durable, dimensions en modules, entrée latérale, niveaux habitables/fenêtres et murets. Elle fournit un état intermédiaire de travaux entre recettes de niveaux métier, piloté par l'état serveur, et un atelier visuel isolé. L'hôtel pilote occupe deux cellules ; les bâtiments historiques sans layout conservent leur représentation. La caserne est disponible au catalogue non constructible et dans l'atelier ; balcons et Université restent des prolongements à concevoir. Voir le handoff pour les vérifications courantes.
+La [factory modulaire des bâtiments](../SPEC-FACTORY-BATIMENTS.md) est implémentée pour le kit de l'hôtel de ville et des maisons : emprise réelle, implantation durable, dimensions en modules, entrée latérale, niveaux habitables/fenêtres et murets. Elle fournit un état intermédiaire de travaux entre recettes de niveaux métier, piloté par l'état serveur, et un atelier visuel isolé. L'hôtel pilote occupe deux cellules ; les bâtiments historiques sans layout conservent leur représentation. La caserne est disponible au catalogue non constructible et dans l'atelier ; l'Université utilise désormais une composition commune atelier/jeu de trois départements sur un terrain herbeux 5 × 6 ; balcons et futurs départements restent à concevoir. Voir le handoff pour les vérifications courantes.
 
 La [tranche première récolte et coupe de bois](../SPEC-SOL-2026-10-02-CLOTURE-RECOLTE-BOIS.md) est implémentée dans le worktree : journal transactionnel, bosquets renouvelables, missions réutilisant cohortes/worker, libération à 90 % d'épuisement et défrichage conservant les lots engagés. La migration 017 est appliquée localement ; [économie](economy.md) décrit les verrous/projections et le [handoff](../../SESSION-HANDOFF.md) les tests ciblés actuels et la recette visuelle restante.
 

@@ -1,5 +1,7 @@
 # Catalogue de bâtiments
 
+Université, migration 025 : type vertical sans production, emprise fixe de **5 × 6 cases**, trois niveaux de capacités 1/2/3 centres et 5/10/15 habitants. Construction facturée une seule fois pour les 30 cases ; améliorations sans nouvel agrandissement une fois cette emprise réservée. Ancre : offsets X −2..+2 et Y −2..+3 ; centre graphique +1/2 case en profondeur. Anciennes Universités 3 × 3 : adaptation explicite `adaptUniversityCampus`, également vérifiée à leur prochaine amélioration, sans frais ni modification de niveau ; nouvelles cases revalidées transactionnellement, aucun voisin écrasé et aucune écriture de réservation pendant une lecture de snapshot. La [science](science.md) décrit les centres et les acquis partagés. Première représentation acceptée par Tristan : trois départements, terrain herbeux, sept arbres décoratifs et six braseros au niveau 3. Composition commune à l'atelier et au jeu ; intégration graphique sur la carte encore à recetter.
+
 `building_types` décrit un type stable ; `building_type_levels`, ses niveaux, durées, coûts et productions. Ajouter un type connu ne nécessite pas de modifier le schéma. `CONSTRUCTION_DURATION_MS` remplace temporairement les durées du catalogue en développement/test seulement.
 
 Stratégies fermées :

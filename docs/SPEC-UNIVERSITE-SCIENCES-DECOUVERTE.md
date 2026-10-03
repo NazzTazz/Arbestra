@@ -1,8 +1,8 @@
 # Université, sciences et découverte du monde
 
-Date : 3 octobre 2026. Base relue : `main`, `0a0873a`, avec un worktree comportant de nombreuses tranches non commitées.
+Date : 3 octobre 2026. Cadrage initial sur 0a0873a ; base d’implémentation : main, 6360bc4. État de consolidation et publication : voir le handoff courant.
 
-Statut : **spécification fonctionnelle consolidée ; cadrage restant sur les paramètres et contrats de contenu indiqués en section 15**. Les arbitrages structurels ci-dessous sont validés. Ce document n'annonce aucune implémentation scientifique et n'autorise pas à coder.
+Statut : **socle scientifique implémenté, recette humaine en cours**. Autorisation d’implémenter donnée par Tristan après consolidation ; réglages de première passe validés ci-dessous. Migration 025 appliquée en test et développement. La première représentation du campus 5 × 6, conçue pas à pas, est acceptée dans l’atelier et intégrée au jeu. Son instance de recette à Aube a été retirée à la demande de Tristan : cette implantation perturbait les chemins. La réimplantation et le parcours visuel en jeu restent à valider.
 
 ## 1. Intention et périmètre
 
@@ -12,7 +12,7 @@ Première tranche jouable validée : Université, Mathématiques 1–3, Géograp
 
 Extensions cadrées, sans réalisation dans cette tranche : Médecine, Météorologie, Ballistique, Topologie, espionnage et conséquences militaires/agricoles. L'intégration architecturale détaillée de l'Université à la building factory fera l'objet d'une passe visuelle dédiée ; ses principes sont fixés ici, pas ses dimensions ni ses recettes finales.
 
-## 2. Existant vérifié et frontière de cette spec
+## 2. Existant vérifié lors du cadrage et frontière de cette spec
 
 Lecture ciblée, sans exécution ni validation navigateur :
 
@@ -200,7 +200,7 @@ Vue accessible depuis l'Université, commune aux connaissances du joueur/monde :
 
 ### Coefficient de connaissance du monde
 
-**Validé : coefficient propre au joueur/monde, dérivé des acquis**, et non nouvelle monnaie ou jauge à remplir séparément. Les seuils scientifiques commandent les grandes révélations ; la cartographie connue enrichit le parcours. La formule numérique et les seuils secondaires ne sont pas encore fixés.
+**Validé : coefficient propre au joueur/monde, dérivé des acquis**, et non nouvelle monnaie ou jauge à remplir séparément. Les seuils scientifiques commandent les grandes révélations ; la cartographie connue enrichit le parcours. Réglage de présentation provisoire : 80 % du coefficient vient des six paliers du socle, 20 % des relevés distincts, plafonnés à vingt. Le profil régional nécessite Géographie 1 et un coefficient de 0,15 ; sinon repli local. Astronomie 1 reste indispensable au profil global. Ces valeurs n’accordent aucune autorisation métier.
 
 | Profil autorisé | Cinématique de connexion / V |
 |---|---|
@@ -212,11 +212,43 @@ Accumuler des relevés ne permet jamais de contourner Astronomie 1 pour voir le 
 
 ## 12. Architecture visible et monuments
 
-Direction validée pour la future passe factory : véritable composition architecturale autour d'une cour, avec silhouettes conçues par niveau plutôt qu'empilement de blocs. Les agrandissements rendent lisibles les centres/effectifs supplémentaires. La cour et les circulations doivent rester cohérentes avec l'entrée, l'emprise et les états de travaux existants de la factory.
+Direction validée pour la passe factory interactive : campus sur une emprise de **5 × 6 cases**, avec un bâtiment propre à chaque département, dont un bâtiment de Médecine. Chaque bâtiment sera stylisé séparément pour les trois niveaux d'Université, en commençant par les Mathématiques, puis les compositions seront assemblées. Des extensions par blocs matérialiseront les capacités supplémentaires des centres ; leur raccordement métier reste à préciser. La cour et les circulations doivent rester cohérentes avec l'entrée, l'emprise et les états de travaux existants de la factory.
 
-Chaque transition prise en charge prévoit un état intermédiaire de travaux, conformément à la spec factory. Les dimensions, nombre de niveaux, capacités et recettes exactes ne sont pas encore validés.
+Chaque transition prise en charge prévoit un état intermédiaire de travaux, conformément à la spec factory. Capacités et coûts de la première passe restent ceux de la section 15. L'atelier et la construction réservent désormais 5 × 6 cases (30 cellules). Les anciens campus peuvent être adaptés explicitement, sans frais, après revalidation de chaque nouvelle case ; aucune adaptation n'est effectuée en lecture de snapshot. La composition graphique reste provisoire et sera reprise pas à pas avec Tristan, sans tests pendant cette recette interactive.
+
+Prévoir des emplacements pour les statues. Recette décorative validée : trois arbres dans la courette de Médecine, trois côté Géographie et un entre Médecine et Mathématiques, à gauche du grand escalier, soit sept arbres dans le campus. Ils sont présents aux trois niveaux, non exploitables et ne créent aucun gisement. Entrées, volumes construits et escalier restent dégagés ; silhouette low-poly du jeu, regroupée par matériau. Première représentation d'atelier acceptée par Tristan ; placement fin du décor encore en recette interactive.
+
+Point de départ de la recette : **Université 1, canevas vide**, avec la grille 5 × 6 subdivisée, puis ajout de Mathématiques, Médecine et Géographie. Les trois recettes d'atelier montrent désormais ces départements, sans ancienne double-aile, cour ni monuments. La même composition est désormais utilisée en jeu. L'Université de recette d'Aube a été retirée à la demande de Tristan après agrandissement : son implantation perturbait les chemins. Le choix d'une nouvelle implantation reste ouvert.
+
+Médecine : **emprise 2 × 3 cases, devant à gauche du campus**, validée ; deux cases en largeur, trois en profondeur. Toits plats en pierre sur le principe de Mathématiques : dalle 0,08, rebord d'une demi-pierre de large et d'une assise de haut. Niveau 1 : corps 8 × 22 sous-cases, de plain-pied. Niveau 2 : ajout de deux ailes 8 × 6 aux extrémités vers la cour (+X), formant un C ouvert sur celle-ci ; enveloppe 16 × 22. Niveau 3 : même C au sol, avec un étage supplémentaire 8 × 22 sur le corps initial. Corps aligné à gauche de la réservation, centre local X/Z = (−5 ; −3,75) ; ailes centrées à X/Z = (−2,5 ; −6,25) et (−2,5 ; −1,25). Les raccords suppriment les murs communs du rez-de-chaussée et les rebords internes, en prolongeant les pierres d'angle pour fermer les façades. Entrée centrale vers la cour et fenêtres dépolies du kit. État intermédiaire : corps conservé et ailes en travaux au niveau 2 ; ailes conservées et étage en travaux au niveau 3. Silhouette et détails d'ouvertures à recetter humainement, sans nouvelle capacité médicale ni occupation serveur.
+
+Géographie : **3 × 1 cases à droite du campus, façade vers la cour**, validé. Toit plat comme Médecine au niveau 1 ; un chapeau central d'un bloc à toit plat au niveau 2 ; configuration en podium à toit plat au niveau 3. Première interprétation d'atelier, à recetter : corps longitudinal de 6 × 22 sous-cases, composé de trois modules contigus 6 × 8 / 6 × 6 / 6 × 8. Nombre de niveaux avant/centre/fond : 1/1/1, puis 1/2/1, puis 2/3/1. Centre local X/Z (5 ; −3,75), façade d'entrée centrale vers −X. Les murs partagés disparaissent jusqu'à la hauteur commune des volumes ; les murs des niveaux supérieurs restent fermés. Parquet continu aux raccords, rives absentes contre les parties plus hautes, fenêtres dépolies. En travaux, seuls les volumes nouveaux ou rehaussés sont partiels. Dimensions internes et choix précis des hauteurs du podium restent une recette proposée ; aucune capacité scientifique ne se déduit des étages visibles.
+
+Premier bâtiment, Mathématiques : silhouette fine et longue validée. Convention validée : chaque case comporte **8 × 8 sous-cases**, soit 64 sous-cases. Une unité horizontale vaut 1/8 de case (0,3125 dans le rendu actuel) ; le campus mesure donc 40 × 48 sous-cases. Les longueurs de murs sont exprimées en nombres entiers de sous-cases. Le module de pierre du département vaut une sous-case en longueur et une demi-sous-case en épaisseur, joints compris ; hauteur d'assise conservée à 0,14. Aucune modification implicite des bâtiments existants.
+
+Dimensions validées et branchées dans l'atelier :
+
+| Niveau d'Université | Corps de Mathématiques, hors toiture | Niveaux du corps, hors pavillon central |
+|---|---|---|
+| 1 | 22 × 6 sous-cases, sur trois cases de longueur | Un niveau |
+| 2 | 22 × 6 sous-cases, sur trois cases de longueur | Deux niveaux |
+| 3 | 38 × 6 au rez-de-chaussée, sur cinq cases ; 22 × 6 aux niveaux supérieurs | Trois niveaux au total ; les deux niveaux supérieurs sont centrés |
+
+Implantation de recette : Mathématiques est centré dans la rangée du fond du campus. Sa façade d'entrée et le chapeau sont retournés de 180° vers la cour, en conservant leur alignement. L'entrée est désormais un passage ouvert sous un préau de pierre à deux colonnes ; la porte en bois et la petite fenêtre voisine sont retirées. Le socle en pierre occupe 3 × 1 cases aux niveaux 1/2 et 5 × 1 au niveau 3. Un escalier central très large dessert le palier devant l'entrée : deux, quatre puis six marches. Réglage visuel de départ : largeur deux cases, giron une sous-case, hauteur de marche une assise (0,14). Socle, bâtiment et escalier partagent la même transformation ; les marches se développent vers la cour à l'intérieur du campus. Leur emprise décorative ne réserve pas de nouvelles cellules serveur pendant cette étape d'atelier.
+
+Au niveau 3 achevé, six braseros bordent le grand escalier de Mathématiques : trois de chaque côté, contre la face avant du socle, au niveau du sol. Le modèle et les petites flammes désynchronisées du village sont réutilisés. Dans l'atelier sans cycle solaire, les feux sont allumés pour la recette ; aucun effet économique. Les niveaux 1/2 et l'état de travaux n'ajoutent pas ces foyers.
+
+Le niveau 3 assemble un corps central de 22 × 6 sur trois niveaux et deux extensions de 8 × 6 de plain-pied. Les murs intérieurs aux raccords sont supprimés au rez-de-chaussée. Pierre claire, parquet et menuiseries réutilisent le kit ; ouvertures et placement définitif sur le campus restent à recetter. Les corps principal et latéraux portent désormais une toiture plate en pierre, à fleur des murs, avec un rebord périphérique d'une demi-pierre de large (une demi-sous-case, 0,15625). Hauteur du rebord : une assise (0,14), au-dessus d'une dalle de 0,08. Les pierres de rive s'assemblent sans chevauchement aux angles ; aucun rebord ne traverse les jonctions avec les corps plus hauts. Aucune nouvelle capacité métier déduite des étages visuels.
+
+Aux raccords, les assises longitudinales autrefois arrêtées contre les retours d'angle sont prolongées jusqu'à la jonction. Supprimer un pignon intérieur ne doit pas laisser de vide dans les façades extérieures ; l'alternance des assises et les joints sont conservés. Correctif de recette appliqué au niveau 3, validation visuelle encore humaine.
+
+Ornement commun aux trois recettes : un **niveau supplémentaire central de 10 × 6 sous-cases**, posé au sommet du corps central. Le bâtiment atteint ainsi deux, trois puis quatre niveaux au point le plus haut. Sa toiture est abaissée avec une pente de recette de 20° (au lieu de 35°), avec le faîtage perpendiculaire à l'axe long du bâtiment, et le pignon et sa ferme de charpente exposés vers la façade ; les pignons restent ouverts au-dessus des murs. Lui seul conserve toiture en bois et charpente apparente, avec un débord des pignons d'une demi-sous-case. La dalle plate inférieure est interrompue sur dix sous-cases sous ce pavillon. Ce module supérieur n'a pas de porte extérieure. En état de travaux, il repose sur la hauteur intermédiaire du corps représenté, sans flotter au-dessus. Le volume reste à recetter visuellement.
 
 Les grands paliers scientifiques, notamment Mathématiques 3 et Astronomie 1, débloquent des monuments commémoratifs **dans toutes les Universités du joueur sur ce monde**, y compris futures. Le niveau du bâtiment exprime sa capacité ; les monuments expriment les acquis communs.
+
+Ouvertures de Mathématiques, recette courante : le chapeau reçoit en façade une unique grande baie, large de neuf sous-cases sur les dix du mur, avec une allège d'une assise et huit assises de hauteur libre. Le rez-de-chaussée central n'a plus de petite fenêtre ni de vantail en bois ; son passage d'entrée élargi est abrité sous un préau de pierre porté par deux colonnes, dans l'axe de l'escalier ; les annexes du niveau 3 reçoivent les mêmes fenêtres hautes et fines : trois par grande façade et une sur leur extrémité extérieure, sans porte supplémentaire. Les étages de 22 subdivisions ont sept fenêtres hautes et fines régulièrement espacées par grande façade et une par extrémité : une sous-case de large, sept assises de hauteur libre. Encadrements et tablettes utilisent le kit existant. Les baies sont découpées dans les pierres, pas représentées par des rectangles opaques. Ces ouvertures restent à recetter visuellement.
+
+Toutes les fenêtres de Mathématiques reçoivent un voile de verre dépoli légèrement bleuté, grande baie comprise. Le vitrage floute l'image réellement visible derrière la fenêtre avec un grain discret ; il ne remplace pas l'ouverture par un aplat. Une capture Babylon de 512 × 512, partagée dans l'atelier, exclut les vitrages et n'est rendue que lorsqu'ils sont présents. Les surfaces sont fusionnées par module et supprimées avec lui ; aucun vitrage sur les portes ou les ouvertures inachevées. Ce rendu est partagé par l'atelier et le campus en jeu.
 
 Prévoir des emplacements intégrés à la composition et préservés lors des agrandissements. Le placement automatique ou personnalisable, le coût éventuel et les modèles sont ouverts. Géomètre pour Maths 3 et anneau pour Astronomie 1 sont des pistes visuelles, pas des recettes approuvées. Un monument non débloqué ne doit pas divulguer la découverte.
 
@@ -226,7 +258,7 @@ Prévoir des emplacements intégrés à la composition et préservés lors des a
 
 Le département est accessible dès l'Université, sans prérequis en Mathématiques ou Géographie. Ses premières recherches reposent sur l'observation et la pratique ; des outils de mesure pourront intervenir ultérieurement, sans dépendance supplémentaire fixée ici.
 
-L'Université porte recherche et formation dans ses centres existants ; une aile médicale dédiée matérialisera ensuite le développement du département. Sa construction n'est pas un prérequis aux premières études. Une **infirmerie distincte** accueille les patients et les soignants ; les observations issues des soins peuvent alimenter la recherche. L'aile relève de la future composition factory, sans nouvelle organisation universitaire parallèle.
+L'Université porte recherche et formation dans ses centres existants ; un bâtiment médical dédié au sein du campus matérialisera ensuite le développement du département. Sa construction n'est pas un prérequis aux premières études. Une **infirmerie distincte** accueille les patients et les soignants ; les observations issues des soins peuvent alimenter la recherche. Le bâtiment médical relève de la composition factory, sans nouvelle organisation universitaire parallèle.
 
 | Palier | Formation débloquée | Capacité |
 |---|---|---|
@@ -276,20 +308,29 @@ Un rechargement ou une déconnexion n'efface ni données ni travail et ne relanc
 
 Proposition de continuité à confirmer avant prise en charge de destruction/conquête : conserver les acquis malgré la perte d'une Université ; seule la capacité disponible disparaît. Aucune règle de conquête/transfert de qualifications n'est définie ici.
 
-## 15. Points ouverts et borne de préparation à l'implémentation
+## 15. Réglages de première passe validés le 3 octobre
 
-Ne pas présenter ces valeurs ou règles comme déjà arbitrées :
+Ces barèmes sont des points de départ ajustables en recette, pas une cible d’équilibrage définitive.
 
-1. **Équilibrage :** coûts/durées de construction, formation/recherche/relevés, centres et effectifs par niveau, plafonds de programmes, effectifs d'expédition. Préparer un petit tableau pour arbitrage, pas des valeurs cachées dans le code.
-2. **Contrats de preuve :** contenu mesuré par programme, durée suffisante des observations solaires, pertinence des deux lieux de Maths 3 et conditions de validation reproductibles. Une observation locale doit rester suffisante pour déclencher Astronomie partout. Définir l'intervalle utilisé avant de parler de nombre de cycles ou de pourcentage éclairé.
-3. **Programmes :** découpage minimal des programmes par palier et éventuelles dépenses automatiques d'Astronomie 1. Aucun prélèvement matériel non arbitré ne découle du seul démarrage avec un habitant.
-4. **Missions :** transmission seulement au retour recommandée ; informations de suivi visibles pendant le voyage, rappel, interruption, taille d'équipe et limites opérationnelles des trajets distants à préciser. Ne pas créer implicitement combat/perte d'équipes.
-5. **Capacité :** ordre équitable des reprises concurrentes, sens d'une pause lorsqu'un programme reçoit plusieurs contributions, devenir des affectations lors d'une indisponibilité du bâtiment. La non-préemption et la pause manuelle prioritaire sont déjà fixées.
-6. **Présentation :** seuils du coefficient, profil régional exact, réglage du zoom pré-Astronomie et schéma minimal des informations publiques d'une implantation. Concevoir sans divulguer la surface inconnue.
-7. **Factory :** emprise/recettes/niveaux de l'Université et placement des monuments. Passe architecturale dédiée ; les acquis ne justifient pas des dimensions improvisées.
-8. **Comptes de développement/existants :** politique d'initialisation des connaissances et éventuel bypass de recette ; ne pas transformer l'ancien accès visuel au monde en progrès scientifique arbitraire.
+| Université | Centres | Habitants simultanés, recherche et formation comprises | Bois / pierre | Durée |
+|---|---:|---:|---:|---:|
+| Construction niveau 1 | 1 | 5 | 500 / 300 | 10 min |
+| Amélioration niveau 2 | 2 | 10 | 1 000 / 600 | 20 min |
+| Amélioration niveau 3 | 3 | 15 | 2 000 / 1 200 | 40 min |
 
-Ces points n'annulent pas les arbitrages structurels ; ils empêchent de déclarer toute la tranche immédiatement prête à coder sans compléter son contenu minimal. Les extensions militaires, météorologiques et topologiques n'ont pas à être détaillées pour lever ces points.
+Un programme explicite par palier : Mathématiques 1/2/3 demande 10/20/40 minutes-personnes ; Géographie 1/2, 10/20 ; Astronomie 1, 30. Aucune dépense matérielle automatique de recherche. L’effectif simultané choisi est plafonné à quinze par programme partagé ; chaque Université respecte aussi sa capacité locale.
+
+Recherche : 75 % du travail théorique peut avancer sans les preuves ; les 25 % finaux valident le modèle. Une pause laisse finir les lots engagés puis libère les moyens. La réalisation utilise des lots d’une minute, dans le maximum de dix minutes validé. Les centres libres examinent les contributions les moins récemment démarrées, sans préemption. Après traitement d’un retard, les nouveaux lots partent à la borne actuelle, sans inventer des départs passés.
+
+Preuves : deux relevés rapportés depuis deux cases distinctes pour Mathématiques 3 et Géographie 2, réutilisables. Pour Astronomie, observations locales depuis l’achèvement de la première Université pendant vingt-quatre heures réelles, soit le cycle combiné soleil/tore ; validation après le travail de recherche. Ces observations emploient la cosmologie existante, sans modifier le soleil ou la rotation.
+
+Cartographes : formation en dix minutes, un habitant réel et un centre. Qualification persistante lors des fragments de cohorte et des autres affectations. Relevé de soixante secondes par lieu ; trajet d’une seconde par case. Expédition avec un cartographe, objectif et budget total incluant relevé et retour. Reconnaissance partielle si le budget impose le demi-tour ; rappel possible, rapport partiel au retour, sans perte ni combat. Aucun lieu non visité n’est révélé. Une interface provisoire permet de reprendre les coordonnées du gisement sélectionné ou de saisir un objectif.
+
+Comptes existants : aucun acquis scientifique offert. Le périmètre historique de chaque village est connu (64 × 64 dans le snapshot actuel) ; les autres cellules se découvrent par les parcours rapportés. Le bypass de présentation `?sciencePreview=1`, limité au développement, permet la recette des vues et du terrain complet sans attribuer de maîtrise ni d’autorisation d’exploitation.
+
+Bâtiment : emprise fonctionnelle 5 × 6 cases, 30 cellules réservées et coût facturé une seule fois. Offsets autour de l'ancre : X −2..+2, Y −2..+3 ; centre graphique calculé sur l'emprise canonique. La composition Mathématiques/Médecine/Géographie, herbe et sept arbres a été acceptée dans l'atelier puis intégrée au rendu du jeu. L'ancienne double-aile est retirée. Adaptation conservatrice des anciens campus via service explicite et à leur prochaine amélioration ; aucun voisin écrasé, aucune réservation cachée dans le snapshot. L'instance de recette d'Aube a ensuite été retirée sur demande, car son implantation gênait les chemins ; placement futur à recetter. Les emplacements/monuments de Mathématiques 3 et Astronomie 1 existent comme présentation provisoire, déduite des acquis partagés.
+
+Restent ouverts : réglage esthétique du campus et des statues, ergonomie cartographique des objectifs, valeur fine du coefficient et limite visuelle avant Astronomie. Destruction/conquête, professions médicales, météorologie, topologie, ballistique, espionnage restent hors scope.
 
 ## 16. Critères d'acceptation fonctionnels
 
@@ -314,8 +355,8 @@ Ces points n'annulent pas les arbitrages structurels ; ils empêchent de déclar
 19. Les monuments des grands acquis sont disponibles dans toutes les Universités, anciennes et nouvelles, du bon joueur/monde.
 20. La passe architecturale respecte emprise, entrée, cour, composition par niveau et état intermédiaire de travaux, sans mêler statue et capacité de recherche.
 
-## 17. Suite bornée
+## 17. Réalisation et suite
 
-Compléter les contrats minimaux de contenu et l'équilibrage avec Tristan, puis implémenter le socle par parcours : capacité/recherche → formation/relevés → exploration/connaissance → Astronomie/caméra/arbre/cinématique. La passe visuelle Université se prépare sur la factory existante. Ce séquencement ne constitue pas une autorisation de coder.
+Le socle métier, le panneau des connaissances, les relevés/explorations et les restrictions de représentation sont branchés. Voir [l’architecture scientifique](architecture/science.md) et la tête du [handoff](../SESSION-HANDOFF.md) pour les preuves actuelles et les réserves de recette. Une spec décrit les résultats attendus ; chaque critère n’a pas encore fait l’objet d’un contrôle humain complet.
 
-Vérification de cette session : relecture documentaire et cohérence des décisions, aucune exécution applicative ni campagne E2E. Les critères ci-dessus sont des critères futurs, pas des résultats de tests.
+Suite : recette interactive du fonctionnement scientifique et conception du campus pas à pas avec Tristan, sans tests pendant cette passe visuelle. Aucun développement des extensions de la section 13 dans cette tranche.
