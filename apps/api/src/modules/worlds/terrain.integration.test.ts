@@ -26,16 +26,19 @@ describe.sequential('read-only streamed terrain', () => {
     await resetE2eState(databaseUrl);
     const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'player@arbestra.local', password: 'arbestra' } });
     cookie = String(login.headers['set-cookie']).split(';')[0]!;
-  });
+  }, 60_000); // Bound database reset/login separately from each terrain assertion.
   afterAll(async () => { await app?.close(); await db?.deleteFrom('accounts').where('email', 'like', '%@terrain.test').execute(); await db?.destroy(); });
-  const request = (chunks: string, world = 'aube', auth = cookie) => app.inject({ url: `/api/worlds/${world}/terrain?chunks=${encodeURIComponent(chunks)}`, headers: { cookie: auth } });
-  const updates = (chunks: string, world = 'aube', auth = cookie) => app.inject({ url: `/api/worlds/${world}/terrain/updates?chunks=${encodeURIComponent(chunks)}`, headers: { cookie: auth } });
+  // These geometry/read-only proofs deliberately inspect full generated terrain.
+  // Player knowledge and the production preview guard are covered separately.
+  const previewHeaders = { 'x-arbestra-science-preview': '1' };
+  const request = (chunks: string, world = 'aube', auth = cookie) => app.inject({ url: `/api/worlds/${world}/terrain?chunks=${encodeURIComponent(chunks)}`, headers: { cookie: auth, ...previewHeaders } });
+  const updates = (chunks: string, world = 'aube', auth = cookie) => app.inject({ url: `/api/worlds/${world}/terrain/updates?chunks=${encodeURIComponent(chunks)}`, headers: { cookie: auth, ...previewHeaders } });
 
   it('serves an authorized, bounded overview of persisted terrain and separate vegetation', async () => {
     const url = '/api/worlds/aube/terrain/overview';
     expect((await app.inject({ url })).statusCode).toBe(401);
     expect((await app.inject({ url: '/api/worlds/other/terrain/overview', headers: { cookie } })).statusCode).toBe(404);
-    const response = await app.inject({ url, headers: { cookie } });
+    const response = await app.inject({ url, headers: { cookie, ...previewHeaders } });
     expect(response.statusCode).toBe(200);
     const overview = response.json<TerrainOverview>();
     expect(overview.gridWidth).toBe(512); expect(overview.gridHeight).toBe(256);
@@ -47,9 +50,9 @@ describe.sequential('read-only streamed terrain', () => {
     expect(overview.waterCoverage[0]).toBe(Math.round(first.filter(i => persisted.terrainCodes[i] === 2).length * 255 / 16));
     expect(overview.waterCoverage[0]! + overview.rockCoverage[0]!).toBeLessThanOrEqual(255);
     const etag = response.headers.etag;
-    expect((await app.inject({ url, headers: { cookie, 'if-none-match': etag } })).statusCode).toBe(304);
+    expect((await app.inject({ url, headers: { cookie, ...previewHeaders, 'if-none-match': etag } })).statusCode).toBe(304);
     expect((await app.inject({ url, headers: { 'if-none-match': etag } })).statusCode).toBe(401);
-    const vegetation = await app.inject({ url: `${url}/vegetation`, headers: { cookie } });
+    const vegetation = await app.inject({ url: `${url}/vegetation`, headers: { cookie, ...previewHeaders } });
     expect(vegetation.statusCode).toBe(200);
     const density = vegetation.json<TerrainVegetationOverview>();
     expect(density.woodlandCoverage).toHaveLength(512 * 256);
@@ -90,6 +93,23 @@ describe.sequential('read-only streamed terrain', () => {
         .where(eb => eb.or([eb('buildingId', '=', DEVELOPMENT_IDS.townHall), eb.and([eb('cellX', 'in', [2047, 0]), eb('cellY', '=', 1023)])])).execute();
       if (occupancies.length) await db.insertInto('worldCellOccupancies').values(occupancies).execute();
     }
+  });
+
+  it('masks player geography over HTTP and ignores the preview header in production', async()=>{
+    const url='/api/worlds/aube/terrain?chunks=0%2C0';
+    const normal=await app.inject({url,headers:{cookie}});
+    expect(normal.statusCode).toBe(200);
+    expect(normal.json<TerrainResponse>().chunks[0]!.terrainCodes.every(c=>c===0)).toBe(true);
+    const prod=await buildApp({databaseUrl,host:'127.0.0.1',port:0,isProduction:true,cookieName:'arbestra_session',sessionTtlDays:30,
+      constructionDurationOverrideMs:null,scheduledTaskPollIntervalMs:250},db);
+    try{
+      const attempted=await prod.inject({url,headers:{cookie,...previewHeaders}});
+      expect(attempted.statusCode).toBe(200);
+      expect(attempted.json<TerrainResponse>().chunks[0]!.terrainCodes.every(c=>c===0)).toBe(true);
+      const overview=await prod.inject({url:'/api/worlds/aube/terrain/overview',headers:{cookie,...previewHeaders,'if-none-match':'"old-world-cache"'}});
+      expect(overview.statusCode).toBe(200);expect(overview.headers['cache-control']).toBe('private, no-store');
+      expect(overview.json<TerrainOverview>().knowledgeCoverage![0]).toBe(0);
+    }finally{await prod.close();}
   });
 
   it('refreshes only mutable data with the same access and batch bounds, without reading world_chunks', async () => {
@@ -191,7 +211,7 @@ describe.sequential('read-only streamed terrain', () => {
       transformQuery(args) { if (JSON.stringify(args.node).includes(mode === 'full' ? 'world_chunks' : 'world_cell_occupancies')) ids.add(args.queryId); return args.node; },
       async transformResult(args) { if (ids.has(args.queryId)) { reached(); await blocked; } return args.result; },
     };
-    const reader = (mode === 'full' ? getTerrain : getTerrainUpdates)(db.withPlugin(plugin), DEVELOPMENT_IDS.account, 'aube', `${Math.floor(stone.cellX / 32)},${Math.floor(stone.cellY / 32)}`);
+    const reader = (mode === 'full' ? getTerrain : getTerrainUpdates)(db.withPlugin(plugin), DEVELOPMENT_IDS.account, 'aube', `${Math.floor(stone.cellX / 32)},${Math.floor(stone.cellY / 32)}`, true);
     let result: TerrainResponse | TerrainUpdatesResponse | undefined;
     try {
       await Promise.race([observed, new Promise((_, reject) => setTimeout(() => reject(new Error('terrain barrier not reached')), 3000))]);

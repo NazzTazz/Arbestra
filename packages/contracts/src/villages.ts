@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { ScienceStateSchema } from './science.js';
 
 export const BuildingTypeSchema = Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9-]*$' });
 export type BuildingType = Static<typeof BuildingTypeSchema>;
@@ -198,6 +199,7 @@ export const VillageAccomplishmentSchema = Type.Object({
 export type VillageAccomplishment = Static<typeof VillageAccomplishmentSchema>;
 
 export const VillageStateSchema = Type.Object({
+  science: Type.Optional(ScienceStateSchema),
   serverTime: Type.String({ format: 'date-time' }),
   world: Type.Object({
     id: Type.String({ format: 'uuid' }), slug: Type.String(), name: Type.String(),

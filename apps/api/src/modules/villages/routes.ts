@@ -1,4 +1,6 @@
 import { Type } from '@sinclair/typebox';
+import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
+import { commandVillageScience } from './service.js';
 import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
 import {harvestGardenSelection} from './service.js';
 import type { FastifyInstance } from 'fastify';
@@ -29,12 +31,19 @@ export async function registerVillageRoutes(
   db: Kysely<Database>,
   config: AppConfig,
 ): Promise<void> {
+  app.post('/api/worlds/:worldSlug/villages/:villageId/science', {
+    schema: { params: VillageParametersSchema, body: ScienceCommandSchema, response: { 200: VillageStateSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return commandVillageScience(db, account.id, worldSlug, villageId, request.body as ScienceCommand);
+  });
   app.get('/api/worlds/:worldSlug/village', {
-    schema: { params: WorldParametersSchema, response: { 200: VillageStateSchema } },
+    schema: { params: WorldParametersSchema, querystring: Type.Object({ villageId: Type.Optional(Type.String({ format: 'uuid' })) }), response: { 200: VillageStateSchema } },
   }, async (request) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug } = request.params as { worldSlug: string };
-    return getVillageState(db, account.id, worldSlug);
+    return getVillageState(db, account.id, worldSlug, (request.query as { villageId?: string }).villageId);
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes', {

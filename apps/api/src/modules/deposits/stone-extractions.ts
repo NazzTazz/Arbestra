@@ -9,6 +9,7 @@ import { beginRest, canWorkFor } from '../population/energy.js';
 import { normalizeCell, toroidalChebyshev } from '../worlds/coordinates.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
 import { materializeWoodland } from './woodland.js';
+import { hasRecognizedDepositAccess } from '../science/deposit-access.js';
 
 export const COMPLETE_STONE_EXTRACTION_TASK = 'deposit.extraction.complete';
 export const STONE_EXTRACTION_LOT = 100;
@@ -33,7 +34,8 @@ async function isWithinVillageRange(tx: Transaction<Database>, village: Extracti
     .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
     .where('worldCellOccupancies.worldId', '=', village.worldId).where('buildings.villageId', '=', village.villageId)
     .where('buildings.status', '=', 'completed').where('worldCellOccupancies.pendingExpansionId', 'is', null).execute();
-  return cells.some((cell) => toroidalChebyshev(cell.cellX, cell.cellY, cellX, cellY, village.widthCells, village.heightCells) <= 8);
+  return cells.some((cell) => toroidalChebyshev(cell.cellX, cell.cellY, cellX, cellY, village.widthCells, village.heightCells) <= 8)
+    || await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, { cellX, cellY });
 }
 
 async function isOnStoneBoundary(tx: Transaction<Database>, village: ExtractionVillage, cellX: number, cellY: number): Promise<boolean> {

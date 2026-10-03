@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
+    "./cosmology": { "types": "./src/cosmology.ts", "import": "./dist/cosmology.js" },
     ".": {
       "types": "./src/index.ts",
       "import": "./dist/index.js"

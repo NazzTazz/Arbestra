@@ -9,7 +9,8 @@ export const TerrainUpdatesChunkSchema = Type.Object({
 });
 export const TerrainChunkSchema = Type.Composite([TerrainUpdatesChunkSchema, Type.Object({
   // Halo of one cell, including the four corners; row-major (S + 2)^2.
-  terrainCodes: Type.Array(Type.Integer({ minimum: 1 })), elevations: Type.Array(Type.Integer()),
+  // 0 is indeterminate geography, never an actual terrain type.
+  terrainCodes: Type.Array(Type.Integer({ minimum: 0 })), elevations: Type.Array(Type.Integer()),
 })]);
 export type TerrainChunk = Static<typeof TerrainChunkSchema>;
 export type TerrainUpdatesChunk = Static<typeof TerrainUpdatesChunkSchema>;
@@ -34,6 +35,7 @@ const OverviewIdentitySchema = Type.Object({
   gridWidth: Type.Integer({ minimum: 1, maximum: 512 }), gridHeight: Type.Integer({ minimum: 1, maximum: 512 }),
 });
 export const TerrainOverviewSchema = Type.Composite([OverviewIdentitySchema, Type.Object({
+  knowledgeCoverage: Type.Optional(CoverageSchema),
   meanElevations: ElevationSchema, minElevations: ElevationSchema, maxElevations: ElevationSchema,
   waterCoverage: CoverageSchema, rockCoverage: CoverageSchema,
 })]);

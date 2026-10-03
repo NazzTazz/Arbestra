@@ -222,6 +222,8 @@ export interface PopulationCohortsTable {
   foodUsedSinceRest: number;
   harvestId: string | null;
   extractionId: string | null;
+  scienceActivityId: ColumnType<string | null, string | null | undefined, string | null>;
+  cartographer: ColumnType<boolean, boolean | undefined, boolean>;
   restBuildingId: ColumnType<string|null,string|null|undefined,string|null>;
   createdAt: Generated<Timestamp>;
 }
@@ -364,6 +366,20 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  playerScience: { worldId: string; accountId: string; observationsSince: Timestamp | null; solarReport: JSONColumnType<Record<string, unknown> | null, string | null, string | null> };
+  sciencePrograms: { worldId: string; accountId: string; code: string; discipline: 'mathematics' | 'geography' | 'astronomy';
+    level: number; workDoneMs: ColumnType<string, string | number | undefined, string | number>; paused: ColumnType<boolean, boolean | undefined, boolean>;
+    acquiredAt: Timestamp | null; createdAt: Timestamp; workerCap: number };
+  scienceContributions: { worldId: string; villageId: string; buildingId: string; accountId: string; programCode: string;
+    workerCap: number; requestedAt: Timestamp; lastStartedAt: Timestamp | null };
+  scienceActivities: { id: Generated<string>; worldId: string; villageId: string; accountId: string; buildingId: string | null;
+    programCode: string | null; kind: 'research' | 'training' | 'survey' | 'exploration'; status: 'in-progress' | 'completed';
+    workerCount: number; workMs: ColumnType<string, string | number, string | number>; startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;
+    pathCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]>; surveyCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]> };
+  sciencePlaces: { worldId: string; accountId: string; cellX: number; cellY: number; terrainCode: number; elevation: number;
+    observedAt: Timestamp; surveyed: boolean; sourceActivityId: string | null };
+  scienceVillageReports: { worldId: string; accountId: string; villageId: string; name: string; anchorCellX: number; anchorCellY: number;
+    observedAt: Timestamp; blocks: JSONColumnType<Array<{ x: number; y: number; width: number; depth: number; garden: boolean }>> };
     extractionWorksites: ExtractionWorksitesTable;
     extractionWorksiteTargets: ExtractionWorksiteTargetsTable;
     extractionWorksiteCommands: ExtractionWorksiteCommandsTable;

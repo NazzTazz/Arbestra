@@ -28,6 +28,7 @@ import * as gardenHarvestToursMigration from './migrations/021_garden_harvest_to
 import * as restHousingMigration from './migrations/022_rest_housing.js';
 import * as buildingVisualLayoutMigration from './migrations/023_building_visual_layout.js';
 import * as barracksCatalogMigration from './migrations/024_barracks_catalog.js';
+import * as universityScienceMigration from './migrations/025_university_science.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -56,6 +57,7 @@ const migrationProvider: MigrationProvider = {
       '022_rest_housing': restHousingMigration,
       '023_building_visual_layout': buildingVisualLayoutMigration,
       '024_barracks_catalog': barracksCatalogMigration,
+      '025_university_science': universityScienceMigration,
     };
   },
 };

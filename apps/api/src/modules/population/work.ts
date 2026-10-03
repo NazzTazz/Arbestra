@@ -4,15 +4,17 @@ import { advanceEnergy, canWorkFor, type EnergyState } from './energy.js';
 import {allocateRestHousing} from './housing.js';
 
 type Cohort = Selectable<PopulationCohortsTable>;
-type Assignment = { harvestId: string; extractionId: null } | { harvestId: null; extractionId: string };
+type Assignment = { harvestId: string; extractionId: null; scienceActivityId?: null }
+  | { harvestId: null; extractionId: string; scienceActivityId?: null }
+  | { harvestId: null; extractionId: null; scienceActivityId: string };
 
 export function energyState(cohort: Cohort): EnergyState {
   return { energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
     restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt };
 }
 
-export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'>): boolean {
-  return cohort.harvestId === null && cohort.extractionId === null;
+export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'> & { scienceActivityId?: string | null }): boolean {
+  return cohort.harvestId === null && cohort.extractionId === null && !cohort.scienceActivityId;
 }
 
 /** The village lock and chronological reconciliation protect every cursor. */
@@ -64,7 +66,7 @@ export async function assignWorkers(tx: Transaction<Database>, cohorts: Cohort[]
       await tx.insertInto('populationCohorts').values({ worldId: cohort.worldId, villageId: cohort.villageId,
         originVillageId: cohort.originVillageId, memberCount, activity: 'working', energy: cohort.energy,
         energyProgress: cohort.energyProgress, energyUpdatedAt: cohort.energyUpdatedAt,
-        restingSince: null, foodUsedSinceRest: cohort.foodUsedSinceRest, ...assignment }).execute();
+        restingSince: null, foodUsedSinceRest: cohort.foodUsedSinceRest, cartographer: cohort.cartographer, ...assignment }).execute();
     }
     needed -= memberCount;
   }
@@ -77,7 +79,7 @@ export async function releaseWorkers(tx: Transaction<Database>, workers: Cohort[
   for (const cohort of workers) {
     const empty = cohort.energy === 0 && cohort.energyProgress === 0;
     await tx.updateTable('populationCohorts').set({ activity: empty ? 'resting' : 'idle',
-      restingSince: empty ? through : null, harvestId: null, extractionId: null,restBuildingId:null })
+      restingSince: empty ? through : null, harvestId: null, extractionId: null, scienceActivityId: null,restBuildingId:null })
       .where('worldId', '=', cohort.worldId).where('id', '=', cohort.id).execute();
   }
 }

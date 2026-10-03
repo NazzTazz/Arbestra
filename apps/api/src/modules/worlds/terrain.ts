@@ -4,6 +4,7 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { normalizeCell } from './coordinates.js';
 import { safeAmount } from '../deposits/stone-extractions.js';
+import { knownGeography } from '../science/knowledge.js';
 
 export function parseTerrainChunks(raw: string): Array<{ chunkX: number; chunkY: number }> {
   const entries = raw.split(';');
@@ -16,17 +17,17 @@ export function parseTerrainChunks(raw: string): Array<{ chunkX: number; chunkY:
   });
 }
 
-export async function getTerrain(db: Kysely<Database>, accountId: string, slug: string, raw: string): Promise<TerrainResponse> {
-  return readTerrain(db, accountId, slug, raw, true);
+export async function getTerrain(db: Kysely<Database>, accountId: string, slug: string, raw: string, preview = false): Promise<TerrainResponse> {
+  return readTerrain(db, accountId, slug, raw, true, preview);
 }
 
-export async function getTerrainUpdates(db: Kysely<Database>, accountId: string, slug: string, raw: string): Promise<TerrainUpdatesResponse> {
-  const data = await readTerrain(db, accountId, slug, raw, false);
+export async function getTerrainUpdates(db: Kysely<Database>, accountId: string, slug: string, raw: string, preview = false): Promise<TerrainUpdatesResponse> {
+  const data = await readTerrain(db, accountId, slug, raw, false, preview);
   return { world: data.world, chunks: data.chunks.map(c => ({ chunkX: c.chunkX, chunkY: c.chunkY,
     originCellX: c.originCellX, originCellY: c.originCellY, features: c.features, occupiedCells: c.occupiedCells })) };
 }
 
-async function readTerrain(db: Kysely<Database>, accountId: string, slug: string, raw: string, includeGround: boolean): Promise<TerrainResponse> {
+async function readTerrain(db: Kysely<Database>, accountId: string, slug: string, raw: string, includeGround: boolean, preview: boolean): Promise<TerrainResponse> {
   const requested = parseTerrainChunks(raw);
   return db.transaction().setIsolationLevel('repeatable read').execute(async (tx) => {
     await sql`set transaction read only`.execute(tx);
@@ -36,6 +37,8 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
       .where('worlds.slug', '=', slug).where('villages.ownerAccountId', '=', accountId).executeTakeFirst();
     if (!world) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.');
     const { id: worldId, chunkSize: size, widthCells: width, heightCells: height } = world;
+    const knowledge = await knownGeography(tx, worldId, accountId, width, height);
+    const known = (p: { cellX: number; cellY: number }) => preview || knowledge.known(p);
     if (world.generationStatus !== 'ready' || width % size || height % size) throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain indisponible.');
     const wanted = [...new Map(requested.map((c) => {
       const chunkX = normalizeCell(c.chunkX, width / size), chunkY = normalizeCell(c.chunkY, height / size);
@@ -51,7 +54,10 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
     if (rows.length !== halo.size || rows.some((r) => r.generationVersion !== world.generationVersion || r.terrainCodes.length !== size * size || r.elevations.length !== size * size))
       throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain incomplet.');
     const byChunk = new Map(rows.map((r) => [`${r.chunkX}:${r.chunkY}`, r]));
-    const occupancies = await tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY', 'featureId']).where('worldId', '=', worldId)
+    const ownBuildings = await tx.selectFrom('buildings').innerJoin('villages', join => join.onRef('villages.id', '=', 'buildings.villageId').onRef('villages.worldId', '=', 'buildings.worldId'))
+      .select('buildings.id').where('buildings.worldId', '=', worldId).where('villages.ownerAccountId', '=', accountId).execute();
+    const ownBuildingIds = new Set(ownBuildings.map(b => b.id));
+    const occupancies = await tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY', 'featureId', 'buildingId']).where('worldId', '=', worldId)
       .where((eb) => eb.or(wanted.map((c) => eb.and([
         eb('cellX', '>=', c.chunkX * size), eb('cellX', '<', (c.chunkX + 1) * size),
         eb('cellY', '>=', c.chunkY * size), eb('cellY', '<', (c.chunkY + 1) * size),
@@ -78,11 +84,14 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
         const cx = normalizeCell(originCellX + dx, width), cy = normalizeCell(originCellY + dy, height);
         const row = byChunk.get(`${Math.floor(cx / size)}:${Math.floor(cy / size)}`)!;
         const index = (cy % size) * size + cx % size;
-        terrainCodes.push(row.terrainCodes[index]!); elevations.push(row.elevations[index]!);
+        const visible = known({ cellX: cx, cellY: cy });
+        terrainCodes.push(visible ? row.terrainCodes[index]! : 0); elevations.push(visible ? row.elevations[index]! : 0);
       }
-      const inside = (p: { cellX: number; cellY: number }) => p.cellX >= originCellX && p.cellX < originCellX + size && p.cellY >= originCellY && p.cellY < originCellY + size;
+      const inside = (p: { cellX: number; cellY: number }) => known(p) && p.cellX >= originCellX && p.cellX < originCellX + size && p.cellY >= originCellY && p.cellY < originCellY + size;
       const woods = features.filter(f => f.resourceCode === 'wood');
       const occupiedCells = occupancies.filter(inside).filter(o => {
+        // Foreign settlements are dated reports, never a live occupancy feed.
+        if (!preview && o.buildingId && !ownBuildingIds.has(o.buildingId)) return false;
         const wood = woods.find(w => w.id === o.featureId);
         return !wood || wood.blocksCell;
       }).map(({ cellX, cellY }) => ({ cellX, cellY }));

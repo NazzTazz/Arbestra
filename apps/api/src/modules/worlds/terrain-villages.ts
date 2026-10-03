@@ -4,7 +4,7 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 
 /** Nearby public exteriors, bounded independently of economic reconciliation. */
-export async function getTerrainVillages(db: Kysely<Database>, world: TerrainOverview['world'], x: number, y: number): Promise<TerrainVillageOverview> {
+export async function getTerrainVillages(db: Kysely<Database>, world: TerrainOverview['world'], x: number, y: number, accountId?: string, preview = false): Promise<TerrainVillageOverview> {
   const normalize = (n: number, size: number) => ((n % size) + size) % size;
   x = normalize(x, world.widthCells); y = normalize(y, world.heightCells);
   return db.transaction().setIsolationLevel('repeatable read').execute(async tx => {
@@ -15,12 +15,19 @@ export async function getTerrainVillages(db: Kysely<Database>, world: TerrainOve
       throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain modifié pendant la lecture.');
     const rows = await sql<{ id: string; anchorCellX: number; anchorCellY: number }>`
       select id, anchor_cell_x, anchor_cell_y from villages where world_id = ${world.id}
+      ${accountId && !preview ? sql`and owner_account_id = ${accountId}` : sql``}
       and least(abs(anchor_cell_x - ${x}), ${world.widthCells} - abs(anchor_cell_x - ${x})) <= 320
       and least(abs(anchor_cell_y - ${y}), ${world.heightCells} - abs(anchor_cell_y - ${y})) <= 320
       order by greatest(least(abs(anchor_cell_x - ${x}), ${world.widthCells} - abs(anchor_cell_x - ${x})),
         least(abs(anchor_cell_y - ${y}), ${world.heightCells} - abs(anchor_cell_y - ${y}))), id limit 33`.execute(tx);
+    const reports = accountId && !preview ? await tx.selectFrom('scienceVillageReports').selectAll().where('worldId', '=', world.id).where('accountId', '=', accountId).execute() : [];
+    const distance = (n: number, centre: number, size: number) => Math.min(Math.abs(n - centre), size - Math.abs(n - centre));
+    const nearbyReports = reports.filter(r => distance(r.anchorCellX, x, world.widthCells) <= 320 && distance(r.anchorCellY, y, world.heightCells) <= 320)
+      .sort((a, b) => Math.max(distance(a.anchorCellX, x, world.widthCells), distance(a.anchorCellY, y, world.heightCells))
+        - Math.max(distance(b.anchorCellX, x, world.widthCells), distance(b.anchorCellY, y, world.heightCells)) || a.villageId.localeCompare(b.villageId));
     const villages = rows.rows.slice(0, 32);
-    if (!villages.length) return { world, sampledAt: new Date().toISOString(), truncated: false, villages: [] };
+    const reportVillages = nearbyReports.slice(0, Math.max(0, 32 - villages.length)).map(r => ({ id: r.villageId, anchorCellX: r.anchorCellX, anchorCellY: r.anchorCellY, blocks: r.blocks }));
+    if (!villages.length) return { world, sampledAt: new Date().toISOString(), truncated: nearbyReports.length > 32, villages: reportVillages };
     const blocks = await sql<{ villageId: string; garden: boolean; underConstruction:boolean; x: number; y: number; width: number; depth: number }>`
       with cells as (
         select b.id, b.village_id, b.building_type = 'garden' as garden, b.status='under-construction' as under_construction,
@@ -39,8 +46,8 @@ export async function getTerrainVillages(db: Kysely<Database>, world: TerrainOve
           row_number() over(partition by village_id order by id) as rank
         from cells group by id, village_id, garden, under_construction
       ) select village_id, garden, under_construction, x, y, width, depth from grouped where rank <= 64`.execute(tx);
-    return { world, sampledAt: new Date().toISOString(), truncated: rows.rows.length > 32,
-      villages: villages.map(v => ({ id: v.id, anchorCellX: v.anchorCellX, anchorCellY: v.anchorCellY,
-        blocks: blocks.rows.filter(b => b.villageId === v.id).map(({ garden, underConstruction, x, y, width, depth }) => ({ garden, x, y, width, depth, ...(underConstruction?{underConstruction:true}:{}) })) })) };
+    return { world, sampledAt: new Date().toISOString(), truncated: rows.rows.length + nearbyReports.length > 32,
+      villages: [...villages.map(v => ({ id: v.id, anchorCellX: v.anchorCellX, anchorCellY: v.anchorCellY,
+        blocks: blocks.rows.filter(b => b.villageId === v.id).map(({ garden, underConstruction, x, y, width, depth }) => ({ garden, x, y, width, depth, ...(underConstruction?{underConstruction:true}:{}) })) })), ...reportVillages] };
   });
 }

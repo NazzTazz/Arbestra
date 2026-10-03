@@ -5,6 +5,7 @@ import { materializeBuildingBuffer, materializeVillageResource } from './economy
 import { completeGardenHarvestAt } from '../population/garden-harvest.js';
 import { completeStoneExtractionAt } from '../deposits/stone-extractions.js';
 import { materializeWoodland } from '../deposits/woodland.js';
+import { completeScienceAt } from '../science/service.js';
 
 export interface VillageEconomy {
   worldId: string;
@@ -16,7 +17,8 @@ type DueTransition =
   | { id: string; through: Date; type: 'construction' }
   | { id: string; through: Date; type: 'expansion' }
   | { id: string; through: Date; type: 'harvest' }
-  | { id: string; through: Date; type: 'extraction' };
+  | { id: string; through: Date; type: 'extraction' }
+  | { id: string; through: Date; type: 'science' };
 
 /** The village row serializes all economic mutations for that village. */
 export async function beginVillageEconomy(
@@ -68,7 +70,7 @@ export async function beginVillageEconomy(
 export async function reconcileVillageEconomy(
   transaction: Transaction<Database>, economy: VillageEconomy,
 ): Promise<void> {
-  const [constructions, expansions, harvests, extractions] = await Promise.all([
+  const [constructions, expansions, harvests, extractions, science] = await Promise.all([
     transaction.selectFrom('buildings').select(['id', 'constructionCompletesAt'])
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('status', '=', 'under-construction').where('constructionCompletesAt', '<=', economy.through).execute(),
@@ -81,6 +83,8 @@ export async function reconcileVillageEconomy(
     transaction.selectFrom('depositExtractions').select(['id', 'completesAt'])
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('status', '=', 'in-progress').where('completesAt', '<=', economy.through).execute(),
+    transaction.selectFrom('scienceActivities').select(['id', 'completesAt']).where('worldId', '=', economy.worldId)
+      .where('villageId', '=', economy.villageId).where('status', '=', 'in-progress').where('completesAt', '<=', economy.through).execute(),
   ]);
   const due: DueTransition[] = [
     ...constructions.flatMap((building) => building.constructionCompletesAt
@@ -88,6 +92,7 @@ export async function reconcileVillageEconomy(
     ...expansions.map((expansion) => ({ id: expansion.id, through: expansion.completesAt, type: 'expansion' as const })),
     ...harvests.map((harvest) => ({ id: harvest.id, through: harvest.completesAt, type: 'harvest' as const })),
     ...extractions.map((extraction) => ({ id: extraction.id, through: extraction.completesAt, type: 'extraction' as const })),
+    ...science.map(activity => ({ id: activity.id, through: activity.completesAt, type: 'science' as const })),
   ].sort((left, right) => left.through.getTime() - right.through.getTime()
     || left.id.localeCompare(right.id) || left.type.localeCompare(right.type));
   for (const transition of due) {
@@ -97,6 +102,8 @@ export async function reconcileVillageEconomy(
       await completeExpansionAt(transaction, economy, transition.id, transition.through);
     else if (transition.type === 'harvest')
       await completeGardenHarvestAt(transaction, economy.worldId, economy.villageId, transition.id, transition.through);
+    else if (transition.type === 'science')
+      await completeScienceAt(transaction, economy, transition.id, transition.through);
     else
       await completeStoneExtractionAt(transaction, economy.worldId, economy.villageId, transition.id, transition.through);
   }

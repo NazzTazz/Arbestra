@@ -39,6 +39,9 @@ import {planGardenTour} from '@arbestra/contracts';
 import {housingCapacity} from '../population/housing.js';
 import {reconcileRestHousing} from '../population/work.js';
 import { materializeCohorts, withoutAssignment } from '../population/work.js';
+import { admitScience, scienceSnapshot, scienceCommand } from '../science/service.js';
+import type { ScienceCommand } from '@arbestra/contracts';
+import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/deposit-access.js';
 import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
 import { startStoneExtraction, stoneDepositDetails, readExtraction, readStoneDeposit, safeAmount } from '../deposits/stone-extractions.js';
 import { admitWorksites, changeWorksite, createWorksite, readWorksites } from '../deposits/worksites.js';
@@ -67,6 +70,7 @@ async function ownedVillage(
   tx: Transaction<Database>,
   accountId: string,
   worldSlug: string,
+  villageId?: string,
 ): Promise<OwnedVillage> {
   const row = await tx
     .selectFrom('villages')
@@ -93,6 +97,8 @@ async function ownedVillage(
     ])
     .where('worlds.slug', '=', worldSlug)
     .where('villages.ownerAccountId', '=', accountId)
+    .where(eb => villageId ? eb('villages.id', '=', villageId) : sql<boolean>`true`)
+    .orderBy('villages.id')
     .executeTakeFirst();
   if (!row)
     throw new HttpError(
@@ -230,10 +236,13 @@ async function snapshot(
 /** Route beyond the visual snapshot, using real world chunks and occupancy in a bounded corridor. */
 export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedVillage, featureId: string,
   visiblePath?: TravelCell[]): Promise<TravelCell[] | undefined> {
-  if (visiblePath) return visiblePath;
   const deposit = await tx.selectFrom('resourceDeposits').select(['cellX', 'cellY', 'remainingAmount', 'resourceCode'])
     .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
   if (!deposit || Number(deposit.remainingAmount) <= 0) return undefined;
+  const recognized = await recognizedDepositRoute(tx, village.worldId, village.villageId, deposit);
+  if (recognized) return recognized;
+  if (await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit)) return undefined;
+  if (visiblePath) return visiblePath;
   const dx = wrappedDelta(deposit.cellX, village.anchorCellX, village.widthCells);
   const dy = wrappedDelta(deposit.cellY, village.anchorCellY, village.heightCells);
   // World-reach commands can target arbitrarily remote cells. Keep this case bounded
@@ -394,7 +403,7 @@ async function state(
   worldSlug: string,
   existingEconomy?: VillageEconomy,
 ): Promise<VillageState> {
-  const village = await ownedVillage(tx, accountId, worldSlug);
+  const village = await ownedVillage(tx, accountId, worldSlug, existingEconomy?.villageId);
   const economy = existingEconomy ?? await beginVillageEconomy(tx, village.worldId, village.villageId);
   if (economy.worldId !== village.worldId || economy.villageId !== village.villageId)
     throw new Error('Village economy context does not match the requested village');
@@ -402,6 +411,7 @@ async function state(
   // transition created by the command before its snapshot is assembled.
   await reconcileVillageEconomy(tx, economy);
   await admitWorksites(tx, economy, village, featureId => stoneTravelPath(tx, village, featureId));
+  await admitScience(tx, economy);
   const at = economy.through;
   const [
     ground,
@@ -581,6 +591,7 @@ async function state(
   if (!wood || !carrot || !wood.productionUpdatedAt)
     throw new Error('Village resource seed is incomplete');
   const villageState: VillageState = {
+    science: await scienceSnapshot(tx, economy),
     serverTime: at.toISOString(),
     world: {
       id: village.worldId,
@@ -905,8 +916,22 @@ export function getVillageState(
   db: Kysely<Database>,
   accountId: string,
   worldSlug: string,
+  villageId?: string,
 ) {
-  return db.transaction().execute((tx) => state(tx, accountId, worldSlug));
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    return state(tx, accountId, worldSlug, await beginVillageEconomy(tx, village.worldId, village.villageId));
+  });
+}
+
+export async function commandVillageScience(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: ScienceCommand): Promise<VillageState> {
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    await scienceCommand(tx, economy, command);
+    return state(tx, accountId, worldSlug, economy);
+  });
 }
 
 /** Explicit administrative pilot conversion. No catalog upgrade, cost or implicit migration. */
@@ -939,6 +964,44 @@ export async function configureTownHallFactory(db:Kysely<Database>,accountId:str
     return preview;
   });}catch(error){if(error===previewRollback)return preview;throw error;}
 }
+function universityCampusCells(anchor: SpatialCell): SpatialCell[] {
+  return Array.from({ length: 30 }, (_, index) => ({ cellX: anchor.cellX + index % 5 - 2, cellY: anchor.cellY + Math.floor(index / 5) - 2 }));
+}
+
+/** Conservative adaptation of existing campuses; village/business locks are already held. */
+async function ensureUniversityCampus(tx: Transaction<Database>, village: OwnedVillage, buildingId: string, anchor: SpatialCell) {
+  const cells = universityCampusCells(anchor).map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) }));
+  const existing = await tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY']).where('worldId', '=', village.worldId).where('buildingId', '=', buildingId).execute();
+  const expected = new Set(cells.map(c => worldCellKey(c.cellX, c.cellY)));
+  if (existing.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
+    throw new HttpError(409, 'INVALID_BUILDING_FOOTPRINT', 'L’emprise existante ne correspond pas à ce campus.');
+  const occupied = new Set(existing.map(c => worldCellKey(c.cellX, c.cellY)));
+  const added = cells.filter(c => !occupied.has(worldCellKey(c.cellX, c.cellY)));
+  if (!added.length) return;
+  const ground = await snapshot(tx, village);
+  const heights = cells.map(c => ground.elevations[normalizeCell(c.cellY - ground.originCellY, village.heightCells) * SNAPSHOT_SIZE + normalizeCell(c.cellX - ground.originCellX, village.widthCells)]!);
+  if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
+    throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
+  for (const cell of added) await assertBuildable(tx, village, cell.cellX, cell.cellY);
+  await reserveSelection(tx, village.worldId, buildingId, anchor, added, null, false);
+}
+
+/** Explicit deployment/recipe adaptation, never performed by a snapshot read. */
+export async function adaptUniversityCampus(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string): Promise<void> {
+  await db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    const anchor = await tx.selectFrom('worldCellOccupancies').innerJoin('buildings', 'buildings.id', 'worldCellOccupancies.buildingId')
+      .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
+      .where('worldCellOccupancies.worldId', '=', village.worldId).where('worldCellOccupancies.buildingId', '=', buildingId)
+      .where('buildings.villageId', '=', village.villageId).where('buildings.buildingType', '=', 'university').where('worldCellOccupancies.role', '=', 'anchor').executeTakeFirst();
+    if (!anchor) throw new HttpError(404, 'BUILDING_NOT_FOUND', 'Université introuvable.');
+    const cells = universityCampusCells(anchor).map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) }));
+    await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells);
+    await tx.selectFrom('buildings').select('id').where('worldId', '=', village.worldId).where('id', '=', buildingId).forUpdate().executeTakeFirstOrThrow();
+    await ensureUniversityCampus(tx, village, buildingId, anchor);
+  });
+}
+
 export async function constructBuilding(
   db: Kysely<Database>,
   accountId: string,
@@ -949,8 +1012,12 @@ export async function constructBuilding(
   buildingType: BuildingType,
   durationOverride: number | null,
 ): Promise<VillageState> {
+  if (buildingType === 'university') {
+    const cells = universityCampusCells({ cellX, cellY });
+    return constructBuildingArea(db, accountId, worldSlug, villageId, buildingType, { cellX, cellY }, cells, durationOverride);
+  }
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId)
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const x = normalizeCell(cellX, village.widthCells);
@@ -1043,14 +1110,22 @@ export async function constructBuildingArea(
   buildingType: BuildingType, anchor: SpatialCell, rawCells: SpatialCell[], durationOverride: number | null,
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells).cells);
     const at = economy.through;
     const item = await definition(tx, buildingType, 1);
     if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
     const selection = normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells);
-    if (item.code !== 'garden' && selection.cells.length !== 1)
+    if (item.code === 'university') {
+      const expected = new Set(universityCampusCells(anchor).map(c => worldCellKey(normalizeCell(c.cellX, village.widthCells), normalizeCell(c.cellY, village.heightCells))));
+      if (selection.cells.length !== 30 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
+        throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'L’Université occupe 5 × 6 cases autour de son ancre.');
+      const ground = await snapshot(tx, village);
+      const heights = selection.cells.map(c => ground.elevations[normalizeCell(c.cellY - ground.originCellY, village.heightCells) * SNAPSHOT_SIZE + normalizeCell(c.cellX - ground.originCellX, village.widthCells)]!);
+      if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
+        throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
+    } else if (item.code !== 'garden' && selection.cells.length !== 1)
       throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Ce bâtiment occupe exactement une case.');
     if (item.instanceLimitPerVillage !== null) {
       await sql`select pg_advisory_xact_lock(hashtextextended(${`${village.worldId}:${village.villageId}:${buildingType}`}, 0))`.execute(tx);
@@ -1084,7 +1159,7 @@ export async function expandGarden(
   buildingId: string, rawCells: SpatialCell[], durationOverride: number | null,
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, rawCells.map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) })));
     const at = economy.through;
@@ -1167,10 +1242,18 @@ export async function upgradeBuilding(
     return expandGarden(db, accountId, worldSlug, villageId, buildingId,
       [{ cellX: extensionCellX, cellY: extensionCellY }], durationOverride);
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId)
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    const campusAnchor = await tx.selectFrom('buildings').innerJoin('worldCellOccupancies', join =>
+      join.onRef('worldCellOccupancies.worldId', '=', 'buildings.worldId').onRef('worldCellOccupancies.buildingId', '=', 'buildings.id'))
+      .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
+      .where('buildings.worldId', '=', village.worldId).where('buildings.villageId', '=', village.villageId)
+      .where('buildings.id', '=', buildingId).where('buildings.buildingType', '=', 'university').where('worldCellOccupancies.role', '=', 'anchor').executeTakeFirst();
+    const campusCells = campusAnchor ? universityCampusCells(campusAnchor).map(c => ({
+      cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells),
+    })) : undefined;
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, campusCells);
     const at = economy.through;
     const building = await tx
       .selectFrom('buildings')
@@ -1202,6 +1285,7 @@ export async function upgradeBuilding(
         'BUILDING_BUSY',
         'Ce bâtiment est déjà en chantier.',
       );
+    if (building.buildingType === 'university') await ensureUniversityCampus(tx, village, building.id, building);
     const item = await definition(
       tx,
       building.buildingType,
@@ -1307,7 +1391,7 @@ export async function harvestGarden(
   commandId: string = randomUUID(),
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId)
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
@@ -1361,7 +1445,7 @@ export async function startVillageStoneExtraction(
   featureId: string, commandId: string, workerCount: number,
 ): Promise<ExtractionResponse> {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
     const previous = await tx.selectFrom('depositExtractions').select('id').where('worldId', '=', village.worldId)
@@ -1390,7 +1474,7 @@ export async function getStoneDepositDetails(
   db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, featureId: string,
 ) {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
     const woodland = (await readStoneDeposit(tx, village.worldId, featureId)).resourceCode === 'wood';
@@ -1404,7 +1488,7 @@ export async function getStoneDepositDetails(
 export async function clearVillageWoodland(db: Kysely<Database>, accountId: string, worldSlug: string,
   villageId: string, featureId: string): Promise<VillageState> {
   return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
     const details = await stoneDepositDetails(tx, village, economy, featureId);
@@ -1418,7 +1502,7 @@ export async function clearVillageWoodland(db: Kysely<Database>, accountId: stri
 export async function startVillageWorksite(db: Kysely<Database>, accountId: string, worldSlug: string,
   villageId: string, request: StartExtractionWorksiteRequest) {
   return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [], request.featureIds);
     const previous = await tx.selectFrom('extractionWorksites').select('id').where('worldId', '=', village.worldId)
@@ -1475,7 +1559,7 @@ async function prepareWorksiteSelection(tx: Transaction<Database>, village: Owne
 export async function previewVillageWorksite(db: Kysely<Database>, accountId: string, worldSlug: string,
   villageId: string, request: StartExtractionWorksiteRequest): Promise<ExtractionWorksiteSelection> {
   return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [], request.featureIds);
     return prepareWorksiteSelection(tx, village, economy, request);
@@ -1485,7 +1569,7 @@ export async function previewVillageWorksite(db: Kysely<Database>, accountId: st
 export async function changeVillageWorksite(db: Kysely<Database>, accountId: string, worldSlug: string,
   villageId: string, worksiteId: string, request: ChangeExtractionWorksiteRequest) {
   return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await changeWorksite(tx, economy, worksiteId, request);
@@ -1499,7 +1583,7 @@ export async function changeVillageWorksite(db: Kysely<Database>, accountId: str
 export async function discoverBuildingSuppliesInTransaction(
   tx: Transaction<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string,
 ): Promise<VillageState> {
-  const village = await ownedVillage(tx, accountId, worldSlug);
+  const village = await ownedVillage(tx, accountId, worldSlug, villageId);
   if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
   const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
   const supply = await tx.selectFrom('buildingHiddenSupplies').selectAll().where('worldId', '=', village.worldId)
@@ -1574,7 +1658,7 @@ async function populationCommand(
     else {
       await tx.updateTable('populationCohorts').set({ memberCount: cohort.memberCount - memberCount }).where('id', '=', cohort.id).execute();
       await tx.insertInto('populationCohorts').values({ worldId: village.worldId, villageId: village.villageId,
-        originVillageId: cohort.originVillageId, memberCount, ...values, harvestId: null, extractionId: null }).execute();
+        originVillageId: cohort.originVillageId, memberCount, ...values, harvestId: null, extractionId: null, cartographer: cohort.cartographer }).execute();
     }
     remaining -= memberCount;
   }
@@ -1586,7 +1670,7 @@ export async function feedPopulation(
   db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, commandId: string, count: number,
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await populationCommand(tx, village, economy, commandId, count, 'feed');
@@ -1598,7 +1682,7 @@ export async function restPopulation(
   db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, commandId: string, count: number,
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await populationCommand(tx, village, economy, commandId, count, 'rest');
@@ -1609,7 +1693,7 @@ export async function restPopulation(
 /** Visual discovery is reported by the client; ownership, time and uniqueness are authoritative. */
 export async function discoverCatEyes(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
   return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug);
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     const inserted = await tx.insertInto('villageAccomplishments').values({

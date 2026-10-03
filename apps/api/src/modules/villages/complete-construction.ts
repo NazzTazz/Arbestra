@@ -7,6 +7,7 @@ import { COMPLETE_GARDEN_HARVEST_TASK } from '../population/garden-harvest.js';
 import { COMPLETE_STONE_EXTRACTION_TASK } from '../deposits/stone-extractions.js';
 import { WAKE_EXTRACTION_WORKSITE_TASK } from '../deposits/worksites.js';
 import { admitVillageWorksites } from './worksite-admission.js';
+import { admitScience } from '../science/service.js';
 
 export const COMPLETE_CONSTRUCTION_TASK = 'building.complete';
 export const COMPLETE_EXPANSION_TASK = 'building-expansion.complete';
@@ -20,7 +21,10 @@ export async function completeConstruction(
 ): Promise<void> {
   const building = await transaction.selectFrom('buildings').select('villageId')
     .where('worldId', '=', task.worldId).where('id', '=', task.subjectId).executeTakeFirst();
-  if (building) await beginVillageEconomy(transaction, task.worldId, building.villageId);
+  if (building) {
+    const economy = await beginVillageEconomy(transaction, task.worldId, building.villageId);
+    await admitScience(transaction, economy);
+  }
 }
 
 export async function completeExpansion(
