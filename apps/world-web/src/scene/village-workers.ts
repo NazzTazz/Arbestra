@@ -47,6 +47,9 @@ export class VillageWorkers {
   readonly #finished=new Set<string>();
   readonly #pending=new Set<string>();
   #identity:string|null=null;
+  #populationMode = false;
+  #populationFocus: string | null = null;
+  #populationFilter = 'all';
   constructor(readonly scene:Scene,readonly materials:Materials,readonly hooks:WorkerHooks){}
   get figures():VillageWorkerFigure[]{return [...this.#groups.values()].flatMap(g=>g.people);}
   get metrics(){return {figures:this.figures.length,idleRepresentatives:[...this.#groups.values()].filter(g=>g.mission.resource==='idle').length,blocked:this.#traffic.blocked,pending:this.#pending.size,
@@ -152,6 +155,8 @@ export class VillageWorkers {
     const meshes:Mesh[]=[],skin=this.materials.skin[appearance.skin]!,clothes=this.materials.clothes[appearance.clothes]!,hair=this.materials.hair[appearance.hair]!;
     const box=(name:string,w:number,h:number,d:number,x:number,y:number,z:number,mat:StandardMaterial,parent=root)=>{const mesh=this.#box(`${root.name}-${name}`,w,h,d,x,y,z,mat,parent);meshes.push(mesh);return mesh;};
     box('body',.24,.27,.15,0,.15,0,clothes);box('head',.15,.15,.15,0,.36,0,skin);
+    const populationId = m.resource === 'idle' ? m.id.split(':')[3]! : m.id;
+    for (const mesh of meshes) mesh.metadata = { populationId, populationActivity: m.resource === 'idle' ? 'idle' : 'working', populationKind: m.resource === 'survey' ? 'science' : m.resource };
     box('hair',.16,.045,.16,0,.45,0,hair);box('face',.055,.035,.012,0,.34,.08,hair);
     const limbs:TransformNode[]=[];
     for(const side of [-1,1]){const arm=new TransformNode(`${root.name}-arm`,this.scene);arm.parent=root;arm.position.set(side*.16,.27,0);box('arm',.075,.22,.075,0,-.11,0,clothes,arm);limbs.push(arm);}
@@ -405,7 +410,30 @@ export class VillageWorkers {
       else {const strike=Math.pow((Math.sin(phase)+1)/2,2),arc=role==='break'?1.15:role==='garden'?.65:2.1;
         right!.rotation.x=-.2-strike*arc;left!.rotation.x=-.25-strike*arc*.43;}}
   }
-  setVisibility(blend:number){for(const g of this.#groups.values()){for(const p of g.people)for(const mesh of p.meshes)mesh.visibility*=blend;for(const mesh of g.root.getChildMeshes())mesh.visibility=blend;}}
+  populationPosition(id: string) {
+    for (const group of this.#groups.values()) for (const person of group.people) {
+      const body = person.meshes[0];
+      if (body?.metadata?.populationId === id && body.visibility > .05) return body.getAbsolutePosition();
+    }
+    return null;
+  }
+  setPopulationFocus(enabled: boolean, focus: string | null, filter: string) {
+    this.#populationMode = enabled; this.#populationFocus = focus; this.#populationFilter = filter;
+  }
+  setVisibility(blend:number){for(const g of this.#groups.values()){
+    for(const mesh of g.root.getChildMeshes())mesh.visibility=blend;
+    for(const p of g.people) {
+      const body = p.meshes[0]!, meta = body.metadata;
+      const matches = (!this.#populationFocus || meta.populationId === this.#populationFocus)
+        && (this.#populationFilter === 'all' || this.#populationFilter === 'training' ? this.#populationFilter === 'all' || meta.populationKind === 'science' : meta.populationActivity === this.#populationFilter);
+      for(const mesh of p.meshes) mesh.visibility *= blend * (this.#populationMode && !matches ? .25 : 1);
+      body.isPickable = this.#populationMode;
+      const outlined = this.#populationMode && matches;
+      if (outlined && !meta.populationOutlined) { body.enableEdgesRendering(); body.edgesColor.set(.8,1,.85,1); body.edgesWidth = 2; }
+      else if (!outlined && meta.populationOutlined) body.disableEdgesRendering();
+      meta.populationOutlined = outlined;
+    }
+  }}
   #disposeGroup(g:Group){for(const p of g.people)p.dispose();g.root.dispose(false,false);}
   dispose(){for(const g of this.#groups.values())this.#disposeGroup(g);this.#boxSource?.dispose(false,false);this.#boxSource=null;this.#groups.clear();this.#latest.clear();this.#pending.clear();this.#finished.clear();this.#traffic.reset();}
 }

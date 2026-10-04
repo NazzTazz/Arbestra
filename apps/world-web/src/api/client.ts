@@ -1,5 +1,17 @@
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
+import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
+
+export async function previewExploitation(worldSlug: string, villageId: string, order: ExploitationRequest): Promise<ExploitationPreview> {
+  return parseResponse<ExploitationPreview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/exploitation/preview`, {
+    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(order),
+  }));
+}
+export function startExploitation(worldSlug: string, villageId: string, order: ExploitationRequest): Promise<TimedVillageState> {
+  return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/exploitation`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(order),
+  });
+}
 
 export const sciencePreview = () => import.meta.env.DEV && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sciencePreview') === '1';
 const terrainHeaders = () => sciencePreview() ? { 'x-arbestra-science-preview': '1' } : {};
@@ -102,17 +114,20 @@ export function buildBuilding(
   buildingType: BuildingType,
   anchor: { cellX: number; cellY: number },
   cells: Array<{ cellX: number; cellY: number }>,
+  commandId: string = crypto.randomUUID(),
+  expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
 ): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
   );
 }
 
-export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>): Promise<TimedVillageState> {
+export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>,
+  commandId: string = crypto.randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = []): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cells }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) },
   );
 }
 
@@ -120,11 +135,13 @@ export function upgradeBuilding(
   worldSlug: string,
   villageId: string,
   buildingId: string,
-  extensionCell?: { extensionCellX: number; extensionCellY: number },
+  commandId: string = crypto.randomUUID(),
+  expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
+  expectedLevel?: number,
 ): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/upgrade`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(extensionCell ? extensionCell : {}) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, expectedLevel }) },
   );
 }
 

@@ -1,3 +1,5 @@
+import { buildSawmill } from './sawmill-factory';
+import { buildPresentation } from './building-presentation';
 import { VillageWorkers } from './village-workers';
 import { TimberThatch } from './timber-thatch';
 import {barracksPreviewPlacement,buildBarracks} from './barracks-factory';
@@ -87,12 +89,13 @@ export class BabylonVillageScene {
   #selectedFeatureId: string | null = null;
   readonly #onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void;
   readonly #selectableMeshes = new Map<string, Mesh>();
-  readonly #onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
+  readonly #onSiteSelected: (siteId: string, anchor: ScreenAnchor, inspect?: boolean) => void;
   readonly #onCameraMoved: () => void;
   readonly #onTerrainLoading: (loading: TerrainStatus) => void;
   #terrainLoading: TerrainStatus = null;
-  readonly #onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void;
-  readonly #onGardenHarvest: (cell: Cell | null, newGesture: boolean) => void;
+  readonly #onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void;
+  readonly #onGardenHarvest: (cell: Cell | null, newGesture: boolean, previewOnly?: boolean) => void;
+  readonly #onWorldGestureCancelled: () => void;
   readonly #previewMeshes: Mesh[] = [];
   readonly #pendingHarvestMeshes: Mesh[] = [];
   readonly #pendingHarvestMaterial: StandardMaterial;
@@ -105,6 +108,11 @@ export class BabylonVillageScene {
   readonly #darkTimberMaterial: StandardMaterial;
   readonly #roofMaterial: StandardMaterial;
   #timberThatch: TimberThatch | null = null;
+  #constructionGhost: Mesh | null = null;
+  #constructionGhostCode: string | null = null;
+  #ghostMaterials: StandardMaterial[] = [];
+  #ghostOwnMaterials: Set<import('@babylonjs/core/Materials/material').Material> = new Set();
+
   #buildingCache = new Map<string,{signature:string;mesh:Mesh}>();
   #factoryGenerationCount=0;
   readonly #stoneMaterial: StandardMaterial;
@@ -142,7 +150,7 @@ export class BabylonVillageScene {
     if(event.code==='KeyV' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault(); event.stopPropagation(); this.startFlyover();
     } else if(event.code==='KeyC' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      if (!this.#globalModelAvailable()) return;
+      if (!import.meta.env.DEV || !this.#cosmologyDebug || !this.#globalModelAvailable()) return;
       event.preventDefault(); event.stopPropagation();
       this.#endFlyover(); this.skipArrival(true);
       this.#pendingCatView = true; this.showWorld();
@@ -182,6 +190,7 @@ export class BabylonVillageScene {
   readonly #ambientLight: HemisphericLight;
   #cosmologyDebug = false;
   #cosmologyPhase: number | null = null;
+  #villageSolarPreview: number | null = null;
   #cosmologyPeriod: number = COSMOLOGY.periodMs;
   #pendingSolarProfile = false;
   #pendingCatView = false;
@@ -209,12 +218,19 @@ export class BabylonVillageScene {
   #harvestableSites = new Set<string>();
   #fullGardenSites = new Set<string>();
   #gardenStages = new Map<string, number>();
+  #hoveredHarvestCell = '';
   #harvestVisited = new Set<string>();
   #villageAnchor: Cell = { cellX: 0, cellY: 0 };
   #space: WorldSpace | null = null;
   #store: TerrainStore | null = null;
   #renderer: TerrainRenderer | null = null;
   #state: VillageState | null = null;
+  #worldMode: 'exploration' | 'exploitation' | 'population' | 'construction' = 'exploration';
+  #populationFocus: string | null = null;
+  #populationFilter = 'all';
+  readonly #resourceMarkers = new Map<string, Mesh>();
+  #resourceOverlayAt = 0;
+  #resourceOverlayMaterial: StandardMaterial | null = null;
   #showTravel = false;
   #selectedRoute: string | null = null;
   #projectionVersion = -1;
@@ -225,9 +241,28 @@ export class BabylonVillageScene {
   #viewSignature = '';
   #terrainDemand: ReturnType<typeof terrainDemand> = [];
   #terrainIntersects: ((x: number, y: number, size: number) => boolean) | undefined;
-  readonly #resumeTerrain = (): void => { this.#eyesSince = null; if (!document.hidden) this.#store?.revalidate(); };
+  readonly #resumeTerrain = (): void => {
+    this.#eyesSince = null;
+    if (document.hidden) this.#handlePointerCancel();
+    else this.#store?.revalidate();
+  };
+  #spaceNavigation = false;
+  #onBuildingHover: (id: string | null) => void = () => {};
+  #constructionAction: 'build' | 'upgrade' | 'extend' | null = null;
+  readonly #navigationKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      const owned = Boolean(this.#pointerDown?.harvest || this.#pointerDown?.mouseArea);
+      this.#handlePointerCancel();
+      if (owned) { event.preventDefault(); event.stopImmediatePropagation(); }
+      return;
+    }
+    if (event.code !== 'Space' || (event.target as HTMLElement | null)?.closest('input, textarea, select, button')) return;
+    this.#spaceNavigation = true;
+    if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
+  };
+  readonly #navigationKeyUp = (event: KeyboardEvent): void => { if (event.code === 'Space') this.#spaceNavigation = false; };
 
-  #pointerDown: { x: number; y: number; pointerId: number; mouseArea: boolean; harvest: boolean; first: Cell | null; lastPoint: Cell | null } | null = null;
+  #pointerDown: { x: number; y: number; pointerId: number; inspect: boolean; mouseArea: boolean; harvest: boolean; first: Cell | null; lastPoint: Cell | null } | null = null;
   #lastDragCell = '';
   #lastPreviewSignature = '';
   #lastVisualSignature = '';
@@ -242,18 +277,19 @@ export class BabylonVillageScene {
 
   readonly #handlePointerDown = (event: PointerEvent): void => {
     if (this.#transition.active || this.#arrival || this.#flyover) return;
-    if (!event.isPrimary) { this.#pointerDown = null; return; }
+    if (!event.isPrimary) { this.#handlePointerCancel(); return; }
     if (event.button !== 0) return;
+    if (this.#spaceNavigation) return;
     if (this.#mode === 'world') {
-      this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId,
+      this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, inspect: event.shiftKey,
         mouseArea: false, harvest: false, first: null, lastPoint: null };
       return;
     }
     if (this.#mode === 'region') return;
-    const mouseArea = this.#selectingArea && event.pointerType !== 'touch';
+    const mouseArea = this.#selectingArea && this.#worldMode === 'construction' && !event.shiftKey;
     const first = this.#cellAtPointer(event);
-    const harvest = !this.#constructionMode && first !== null && this.#harvestableSites.has(cellKey(first));
-    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, mouseArea, harvest, first, lastPoint: this.#gridPointAtPointer(event) };
+    const harvest = this.#worldMode === 'exploitation' && first !== null && !event.shiftKey;
+    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, inspect: event.shiftKey, mouseArea, harvest, first, lastPoint: this.#gridPointAtPointer(event) };
     if (mouseArea || harvest) {
       // Consume only the construction drag. Right-drag, wheel and touch camera
       // gestures keep their usual controls.
@@ -271,6 +307,16 @@ export class BabylonVillageScene {
   };
 
   readonly #handlePointerMove = (event: PointerEvent): void => {
+    if (!this.#pointerDown && this.#worldMode === 'exploitation' && this.#mode === 'village' && !this.#arrival && !this.#flyover) {
+      const cell = this.#cellAtPointer(event), key = cell ? cellKey(cell) : '';
+      if (cell && key !== this.#hoveredHarvestCell) { this.#hoveredHarvestCell = key; this.#onGardenHarvest(cell, true, true); }
+    }
+    if (!this.#pointerDown && this.#worldMode === 'construction' && this.#constructionAction === 'upgrade' && this.#mode === 'village') {
+      const bounds = this.#canvas.getBoundingClientRect();
+      const pick = this.#scene.pick(event.clientX - bounds.left, event.clientY - bounds.top,
+        mesh => mesh.isPickable && typeof mesh.metadata?.siteId === 'string');
+      this.#onBuildingHover(pick.pickedMesh?.metadata?.siteId ?? null);
+    }
     if (this.#pointerDown?.harvest && this.#pointerDown.pointerId === event.pointerId) {
       event.stopImmediatePropagation(); event.preventDefault();
       this.#continueHarvest(event);
@@ -282,6 +328,14 @@ export class BabylonVillageScene {
       if (last && this.#pointerDown.first && cellKey(last) !== this.#lastDragCell) {
         this.#lastDragCell = cellKey(last);
         this.#onAreaGesture(this.#pointerDown.first, last, false);
+      }
+      return;
+    }
+    if (!this.#pointerDown && this.#selectingArea && this.#worldMode === 'construction' && this.#mode === 'village') {
+      const cell = this.#cellAtPointer(event);
+      if (cell && cellKey(cell) !== this.#lastDragCell) {
+        this.#lastDragCell = cellKey(cell);
+        this.#onAreaGesture(cell, cell, false);
       }
       return;
     }
@@ -304,8 +358,10 @@ export class BabylonVillageScene {
       return;
     }
     if (this.#mode === 'region') { this.#pointerDown = null; return; }
+    if (this.#worldMode === 'exploration') { this.#pointerDown = null; return; }
     const gesture = this.#pointerDown;
     if (gesture.harvest) {
+      if (!this.#endsOnWorldSurface(event)) { this.#handlePointerCancel(); return; }
       this.#continueHarvest(event);
       this.#onGardenHarvest(null, false);
       this.#pointerDown = null; event.stopImmediatePropagation(); event.preventDefault();
@@ -313,11 +369,12 @@ export class BabylonVillageScene {
       return;
     }
     if (gesture.mouseArea) {
+      if (!this.#endsOnWorldSurface(event)) { this.#handlePointerCancel(); return; }
       this.#pointerDown = null;
       event.stopImmediatePropagation();
       if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
       const last = this.#cellAtPointer(event);
-      if (gesture.first && last) this.#onAreaGesture(gesture.first, last, false);
+      if (gesture.first && last) this.#onAreaGesture(gesture.first, last, true);
       return;
     }
     const moved = Math.hypot(
@@ -327,7 +384,7 @@ export class BabylonVillageScene {
     this.#pointerDown = null;
     if (moved >= 8) return;
 
-    if (this.#selectingArea) {
+    if (this.#selectingArea && this.#worldMode === 'construction' && !gesture.inspect) {
       const cell = this.#cellAtPointer(event);
       if (cell) this.#onAreaGesture(cell, cell, true);
       return;
@@ -337,13 +394,18 @@ export class BabylonVillageScene {
     const picked = this.#scene.pick(
       event.clientX - bounds.left,
       event.clientY - bounds.top,
-      (mesh) => mesh.isPickable && (typeof mesh.metadata?.siteId === 'string' || typeof mesh.metadata?.featureId === 'string'),
+      (mesh) => mesh.isPickable && (typeof mesh.metadata?.siteId === 'string' || typeof mesh.metadata?.featureId === 'string'
+        || this.#worldMode === 'population' && typeof mesh.metadata?.populationId === 'string'),
     );
     const pickedMetadata = picked.pickedMesh?.metadata;
+    if (this.#worldMode === 'population' && typeof pickedMetadata?.populationId === 'string') {
+      this.#onSiteSelected(`population:${pickedMetadata.populationId}`, { x: event.clientX, y: event.clientY }); return;
+    }
     const featureId = (picked.thinInstanceIndex >= 0
       ? pickedMetadata?.instanceFeatureIds?.[picked.thinInstanceIndex]
       : pickedMetadata?.featureId) as string | undefined;
     if (featureId) {
+      if (this.#worldMode !== 'exploitation') return;
       this.#selectedSiteId = null;
       this.#applySelection();
       this.#selectedFeatureId = featureId;
@@ -352,19 +414,38 @@ export class BabylonVillageScene {
       return;
     }
     const siteId = picked.pickedMesh?.metadata?.siteId as string | undefined;
-    if (siteId) this.selectSite(siteId, { x: event.clientX, y: event.clientY });
+    if (siteId) this.selectSite(siteId, { x: event.clientX, y: event.clientY }, gesture.inspect);
     else this.#clearSelection();
   };
-  readonly #handlePointerCancel = (): void => {
-    if(this.#pointerDown?.harvest) this.#onGardenHarvest(null, true);
+  /** React cancellation and native cancellation clear the same pointer owner. */
+  public cancelGesture(): void {
+    const gesture = this.#pointerDown;
     this.#pointerDown = null;
+    this.#lastDragCell = ''; this.#hoveredHarvestCell = '';
+    this.#harvestVisited.clear();
+    if (gesture && this.#canvas.hasPointerCapture(gesture.pointerId)) this.#canvas.releasePointerCapture(gesture.pointerId);
+  }
+  readonly #handlePointerCancel = (): void => {
+    const hadWorldGesture = Boolean(this.#pointerDown?.harvest || this.#pointerDown?.mouseArea);
+    this.cancelGesture();
+    if (hadWorldGesture) this.#onWorldGestureCancelled();
   };
+  public setConstructionAction(action: 'build' | 'upgrade' | 'extend' | null, onHover: (id: string | null) => void): void {
+    if (action !== this.#constructionAction) { this.cancelGesture(); this.#lastDragCell = ''; }
+    this.#constructionAction = action; this.#onBuildingHover = onHover;
+  }
   readonly #handleWheel = (event: WheelEvent): void => {
     if(this.#flyover) return;
+    if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
     if (this.#mode === 'world' && event.deltaY < 0 && this.#torusOverview
       && this.#torusOverview.camera.radius <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.1) this.showRegion();
     else if (this.#mode !== 'world') this.#clearSelection();
   };
+
+  #endsOnWorldSurface(event: PointerEvent): boolean {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    return element === this.#canvas;
+  }
 
   #continueHarvest(event: PointerEvent): void {
     const last = this.#gridPointAtPointer(event), previous = this.#pointerDown?.lastPoint;
@@ -377,11 +458,12 @@ export class BabylonVillageScene {
 
   public constructor(
     canvas: HTMLCanvasElement,
-    onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void,
+    onSiteSelected: (siteId: string, anchor: ScreenAnchor, inspect?: boolean) => void,
     onCameraMoved: () => void,
-    onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void,
+    onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void,
     onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void = () => {},
-    onGardenHarvest: (cell: Cell | null, newGesture: boolean) => void = () => {},
+    onGardenHarvest: (cell: Cell | null, newGesture: boolean, previewOnly?: boolean) => void = () => {},
+    onWorldGestureCancelled: () => void = () => {},
     onTerrainLoading: (loading: TerrainStatus) => void = () => {},
     onViewChanged: (mode: TerrainViewMode) => void = () => {},
     private readonly onArrival: (arrival: VillageArrival | null) => void = () => {},
@@ -394,6 +476,7 @@ export class BabylonVillageScene {
     this.#onCameraMoved = onCameraMoved;
     this.#onAreaGesture = onAreaGesture;
     this.#onGardenHarvest = onGardenHarvest;
+    this.#onWorldGestureCancelled = onWorldGestureCancelled;
     this.#onTerrainLoading = onTerrainLoading;
     this.#onViewChanged = onViewChanged;
     this.#engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
@@ -568,6 +651,7 @@ export class BabylonVillageScene {
     canvas.addEventListener('pointermove', this.#handlePointerMove, { capture: true });
     canvas.addEventListener('pointerup', this.#handlePointerUp, { capture: true });
     canvas.addEventListener('pointercancel', this.#handlePointerCancel, { capture: true });
+    canvas.addEventListener('lostpointercapture', this.#handlePointerCancel);
     canvas.addEventListener('wheel', this.#handleWheel, { capture: true, passive: true });
 
     if (import.meta.env.MODE === 'e2e') {
@@ -575,7 +659,10 @@ export class BabylonVillageScene {
       canvas.addEventListener('terrain-metrics-reset', this.#testMetricsReset);
     }
     window.addEventListener('online', this.#resumeTerrain);
+    window.addEventListener('blur', this.#handlePointerCancel);
     window.addEventListener('keydown',this.#flyoverKey,true);
+    window.addEventListener('keydown', this.#navigationKeyDown, true);
+    window.addEventListener('keyup', this.#navigationKeyUp, true);
     document.addEventListener('visibilitychange', this.#resumeTerrain);
     this.#resizeObserver = new ResizeObserver(() => { this.#engine.resize(); this.#torusOverview?.fit(this.#engine); });
     this.#resizeObserver.observe(canvas);
@@ -629,6 +716,7 @@ export class BabylonVillageScene {
         this.#canvas.dataset.regionalVillages = String(this.#regionalVillages.meshes.size);
       }
       const workerServerNow = Date.now() - this.#serverOffsetMs;
+      this.#updateResourceOverlay(now);
       if (import.meta.env.DEV&&now-this.#workerDebugAt>500) {this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);this.#workerDebugAt=now;}
       this.#weather?.update(Date.now() + this.#cosmologyServerOffsetMs);
       this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
@@ -641,6 +729,7 @@ export class BabylonVillageScene {
       if (this.#mode !== 'world') {
         this.#workers.animate(workerServerNow, this.#mode === 'village' && this.#camera.radius < 165);
         const figureBlend = 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
+        this.#workers.setPopulationFocus(this.#worldMode === 'population', this.#populationFocus, this.#populationFilter);
         this.#workers.setVisibility(figureBlend);
         this.#animateWater(now);
         this.#scene.render();
@@ -844,13 +933,14 @@ export class BabylonVillageScene {
     this.#applySelection();
   }
 
-  public selectSite(siteId: string, anchor: ScreenAnchor): void {
+  public selectSite(siteId: string, anchor: ScreenAnchor, inspect = false): void {
+    if (this.#worldMode === 'exploration') return;
     if (!this.#selectableMeshes.has(siteId)) return;
     this.#selectedFeatureId = null;
     this.#applyFeatureSelection();
     this.#selectedSiteId = siteId;
     this.#applySelection();
-    this.#onSiteSelected(siteId, anchor);
+    this.#onSiteSelected(siteId, anchor, inspect);
   }
 
   #cellAtPointer(event: PointerEvent): Cell | null {
@@ -868,6 +958,76 @@ export class BabylonVillageScene {
     return this.#space?.inverse(ray.origin.x + ray.direction.x * distance, ray.origin.z + ray.direction.z * distance) ?? null;
   }
 
+  public setWorldMode(mode: 'exploration' | 'exploitation' | 'population' | 'construction'): void {
+    if (mode !== 'exploration') this.setVillageSolarPreview(null);
+    if (mode === this.#worldMode) return;
+    this.#handlePointerCancel();
+    this.#worldMode = mode;
+    this.#selectedSiteId = null; this.#selectedFeatureId = null;
+    this.#applySelection(); this.#applyFeatureSelection();
+    this.#canvas.dataset.worldMode = mode;
+    this.#resourceOverlayAt = 0;
+  }
+
+  public featuresAt(cell: Cell) {
+    const chunk = this.#store?.chunk(this.#store.key(cell.cellX, cell.cellY));
+    return (chunk?.features ?? this.#state?.region.features ?? []).filter(f => cellKey(f) === cellKey(cell));
+  }
+
+  #updateResourceOverlay(now: number): void {
+    if (this.#worldMode !== 'exploitation' || this.#mode !== 'village') {
+      if (this.#resourceMarkers.size) { for (const mesh of this.#resourceMarkers.values()) mesh.dispose(false, false); this.#resourceMarkers.clear(); }
+      return;
+    }
+    if (!this.#space || !this.#store || now < this.#resourceOverlayAt) return;
+    this.#resourceOverlayAt = now + 700;
+    const cells = new Map<string, Cell>();
+    for (const key of this.#harvestableSites) { const [cellX, cellY] = key.split(':').map(Number); cells.set(key, { cellX: cellX!, cellY: cellY! }); }
+    for (const demand of this.#store.demand.filter(d => d.visible)) for (const f of this.#store.chunk(demand.key)?.features ?? [])
+      if (f.deposit && !f.deposit.cleared && f.deposit.availableAmount > 0) cells.set(cellKey(f), f);
+    const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
+    const visible = [...cells.values()].filter(c => this.#renderer?.rendered(c.cellX, c.cellY) && (this.#store!.ground(c.cellX, c.cellY)?.code ?? 0) > 0)
+      .sort((a, b) => Math.abs(delta(a.cellX, target.cellX, this.#store!.world.widthCells)) + Math.abs(delta(a.cellY, target.cellY, this.#store!.world.heightCells))
+        - Math.abs(delta(b.cellX, target.cellX, this.#store!.world.widthCells)) - Math.abs(delta(b.cellY, target.cellY, this.#store!.world.heightCells))).slice(0, 128);
+    const retained = new Set(visible.map(cellKey));
+    this.#resourceOverlayMaterial ??= this.#material('exploitables-accent', '#b7dac0', .3, '#354d3b');
+    for (const c of visible) {
+      const key = cellKey(c); let marker = this.#resourceMarkers.get(key);
+      if (!marker) {
+        marker = MeshBuilder.CreateTorus(`exploitable-${key}`, { diameter: 2.0, thickness: .05, tessellation: 16 }, this.#scene);
+        marker.material = this.#resourceOverlayMaterial; marker.isPickable = false;
+        this.#resourceMarkers.set(key, marker);
+      }
+      const p = this.#space.project(c); marker.position.set(p.x, this.#store.ground(c.cellX, c.cellY)!.height + .18, p.z);
+      marker.visibility = Math.max(0, 1 - (this.#camera.radius - 110) / 50);
+    }
+    for (const [key, mesh] of this.#resourceMarkers) if (!retained.has(key)) { mesh.dispose(false, false); this.#resourceMarkers.delete(key); }
+  }
+
+  public setPopulationFocus(focus: string | null, filter: string): void {
+    this.#populationFocus = focus; this.#populationFilter = filter;
+  }
+
+  public projectCell(cell: Cell): ScreenAnchor | null {
+    if (!this.#space || this.#mode !== 'village') return null;
+    const p = this.#space.project(cell), ground = this.#store?.ground(cell.cellX, cell.cellY);
+    return this.#projectPoint(new Vector3(p.x, (ground?.height ?? 0) + .5, p.z));
+  }
+
+  public projectPopulation(id: string): ScreenAnchor | null {
+    const position = this.#workers.populationPosition(id);
+    return position && this.#mode === 'village' ? this.#projectPoint(position) : null;
+  }
+
+  #projectPoint(position: Vector3): ScreenAnchor | null {
+    const point = Vector3.Project(position, Matrix.Identity(),
+      this.#scene.getTransformMatrix(), this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight()));
+    if (point.z < 0 || point.z > 1) return null;
+    const bounds = this.#canvas.getBoundingClientRect();
+    const x = bounds.left + point.x * bounds.width / this.#engine.getRenderWidth(), y = bounds.top + point.y * bounds.height / this.#engine.getRenderHeight();
+    return x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom ? null : { x, y };
+  }
+
   public updateAreaSelection(enabled: boolean, preview: AreaPreview | null, invalid: boolean): void {
     this.#selectingArea = enabled;
     const signature = JSON.stringify([preview, invalid]);
@@ -881,7 +1041,7 @@ export class BabylonVillageScene {
       const p = this.#space!.projectFrom(cell, this.#villageAnchor);
       mesh.position.set(
         p.x,
-        0.15,
+        (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.15,
         p.z,
       );
       mesh.material = obstacles.has(cellKey(cell)) ? this.#invalidAreaMaterial
@@ -890,6 +1050,41 @@ export class BabylonVillageScene {
       mesh.isPickable = false;
       this.#previewMeshes.push(mesh);
     }
+  }
+
+  public updateConstructionGhost(code: string | null, preview: AreaPreview | null, invalid: boolean): void {
+    if (!code || !preview?.cells.length || !this.#space || this.#mode !== 'village') {
+      this.#constructionGhost?.setEnabled(false); return;
+    }
+    // Gardens are already a crop-surface footprint, including arbitrary spatial extensions.
+    if (code === 'garden') { this.#constructionGhost?.setEnabled(false); return; }
+    if (code !== this.#constructionGhostCode) {
+      this.#constructionGhost?.dispose(false, false);
+      for (const m of this.#ghostMaterials) m.dispose(false, true);
+      for (const m of this.#ghostOwnMaterials) m.dispose(false, true);
+      this.#ghostMaterials = []; this.#ghostOwnMaterials.clear();
+      this.#timberThatch ??= new TimberThatch(this.#scene);
+      const previous = new Set(this.#scene.materials);
+      this.#constructionGhost = buildPresentation(this.#timberThatch, code);
+      this.#constructionGhostCode = code;
+      this.#ghostOwnMaterials = new Set(this.#scene.materials.filter(m => !previous.has(m)));
+      const clones = new Map<StandardMaterial, StandardMaterial>();
+      for (const mesh of this.#constructionGhost.getChildMeshes()) {
+        if (!(mesh.material instanceof StandardMaterial)) continue;
+        const source = mesh.material;
+        let material = clones.get(source);
+        if (!material) { material = source.clone(`ghost-${source.name}`); material.alpha = .58; material.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND; material.backFaceCulling = true; clones.set(source, material); }
+        mesh.material = material; mesh.isPickable = false;
+      }
+      this.#ghostMaterials = [...clones.values()];
+    }
+    const positions = preview.cells.map(cell => this.#space!.projectFrom(cell, this.#villageAnchor));
+    const x = (Math.min(...positions.map(p => p.x)) + Math.max(...positions.map(p => p.x))) / 2;
+    const z = (Math.min(...positions.map(p => p.z)) + Math.max(...positions.map(p => p.z))) / 2;
+    const ground = Math.max(...preview.cells.map(cell => this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0));
+    this.#constructionGhost!.position.set(x, ground + .03, z);
+    this.#constructionGhost!.setEnabled(true);
+    for (const material of this.#ghostMaterials) material.emissiveColor.set(invalid ? .38 : .04, invalid ? .03 : .18, .06);
   }
 
   public updateHarvestPending(cells: Cell[]): void {
@@ -1442,109 +1637,7 @@ export class BabylonVillageScene {
 
   #createSawmill(site: VillageCell): Mesh {
     const level = site.building?.level ?? 1;
-    const foundation = MeshBuilder.CreateBox(`sawmill-${site.id}`, { width: 2.28, depth: 2.02, height: 0.16 }, this.#scene);
-    foundation.position.set(site.x, 0.09, site.z);
-    foundation.material = this.#stoneMaterial;
-
-    const box = (name: string, width: number, height: number, depth: number, x: number, y: number, z: number, material: StandardMaterial): Mesh => {
-      const mesh = MeshBuilder.CreateBox(`${name}-${site.id}`, { width, height, depth }, this.#scene);
-      mesh.parent = foundation;
-      mesh.position.set(x, y, z);
-      mesh.material = material;
-      mesh.isPickable = false;
-      return mesh;
-    };
-    const log = (name: string, x: number, y: number, z: number, length: number, radius = 0.11, alongZ = true): Mesh => {
-      const mesh = MeshBuilder.CreateCylinder(`${name}-${site.id}`, { height: length, diameter: radius * 2, tessellation: 8 }, this.#scene);
-      mesh.parent = foundation;
-      mesh.position.set(x, y, z);
-      mesh.rotation.x = alongZ ? Math.PI / 2 : 0;
-      mesh.rotation.z = alongZ ? 0 : Math.PI / 2;
-      mesh.material = this.#lightTimberMaterial;
-      mesh.isPickable = false;
-      return mesh;
-    };
-
-    // A working yard breaks the building's footprint into the surrounding grass.
-    for (const [x, z, diameter, scaleX, material, rotation] of [
-      [-0.12, 0.06, 2.82, 1.08, this.#packedEarthMaterial, 0.18],
-      [0.92, -0.6, 0.88, 1.3, this.#sawdustMaterial, -0.34],
-      [-1.02, 0.72, 0.92, 1.42, this.#packedEarthMaterial, 0.52],
-    ] as const) {
-      const patch = MeshBuilder.CreateCylinder(`sawmill-yard-${site.id}-${x}-${z}`, { height: 0.022, diameter, tessellation: 9 }, this.#scene);
-      patch.parent = foundation;
-      patch.position.set(x, -0.068, z);
-      patch.scaling.x = scaleX;
-      patch.rotation.y = rotation;
-      patch.material = material;
-      patch.isPickable = false;
-    }
-
-    // Dark rear mass and partial plank walls suggest an interior without closing the workshop.
-    box('sawmill-dark-interior', 1.62, 1.02, 0.12, 0, 0.62, 0.72, this.#darkTimberMaterial);
-    box('sawmill-left-wall', 0.13, 1.0, 1.38, -0.81, 0.6, 0.04, this.#timberMaterial);
-    box('sawmill-right-wall', 0.13, 0.68, 1.38, 0.81, 0.44, 0.04, this.#timberMaterial);
-
-    // Visible post-and-beam frame carries the silhouette.
-    for (const x of [-0.9, 0.9]) {
-      for (const z of [-0.76, 0.76]) box('sawmill-post', 0.14, 1.46, 0.14, x, 0.78, z, this.#darkTimberMaterial);
-    }
-    box('sawmill-front-beam', 2.0, 0.15, 0.15, 0, 1.46, -0.76, this.#darkTimberMaterial);
-    box('sawmill-back-beam', 2.0, 0.15, 0.15, 0, 1.46, 0.76, this.#darkTimberMaterial);
-    box('sawmill-ridge-beam', 0.14, 0.14, 2.28, 0, 1.88, 0, this.#darkTimberMaterial);
-
-    const leftRoof = box('sawmill-roof-left', 1.3, 0.13, 2.34, -0.54, 1.65, 0, this.#roofMaterial);
-    leftRoof.rotation.z = 0.5;
-    const rightRoof = box('sawmill-roof-right', 1.3, 0.13, 2.34, 0.54, 1.65, 0, this.#roofMaterial);
-    rightRoof.rotation.z = -0.5;
-
-    // The open front contains an actual work platform and a readable saw station.
-    box('sawmill-platform', 1.48, 0.12, 0.54, -0.06, 0.1, -0.94, this.#timberMaterial);
-    box('sawmill-saw-bench', 1.18, 0.12, 0.4, 0.14, 0.59, -0.47, this.#lightTimberMaterial);
-    for (const x of [-0.39, 0.67]) box('sawmill-bench-leg', 0.1, 0.48, 0.1, x, 0.34, -0.47, this.#darkTimberMaterial);
-    const blade = MeshBuilder.CreateCylinder(`sawmill-blade-${site.id}`, { height: 0.055, diameter: 0.5, tessellation: 12 }, this.#scene);
-    blade.parent = foundation;
-    blade.position.set(0.12, 0.77, -0.47);
-    blade.rotation.z = Math.PI / 2;
-    blade.material = this.#stoneMaterial;
-    blade.isPickable = false;
-
-    // Raw timber and a stump introduce deliberate asymmetry at ground level.
-    for (let index = 0; index < 4; index += 1) log('sawmill-log-pile', -1.04 + (index % 2) * 0.22, 0.18 + Math.floor(index / 2) * 0.2, 0.34, 1.22 - (index % 2) * 0.12);
-    const stump = MeshBuilder.CreateCylinder(`sawmill-stump-${site.id}`, { height: 0.28, diameterTop: 0.42, diameterBottom: 0.5, tessellation: 9 }, this.#scene);
-    stump.parent = foundation;
-    stump.position.set(1.18, 0.08, 0.83);
-    stump.material = this.#trunkMaterial;
-    stump.isPickable = false;
-
-    // Higher levels grow through useful annexes, never through stacked storeys.
-    if (level >= 2) {
-      const leanToRoof = box('sawmill-lean-to-roof', 1.12, 0.11, 1.92, 1.26, 1.09, 0.08, this.#roofMaterial);
-      leanToRoof.rotation.z = -0.2;
-      for (const z of [-0.72, 0.78]) box('sawmill-lean-to-post', 0.11, 0.98, 0.11, 1.68, 0.52, z, this.#darkTimberMaterial);
-      box('sawmill-drying-rack', 0.14, 0.72, 1.42, 1.42, 0.47, 0.04, this.#darkTimberMaterial);
-      for (const y of [0.3, 0.55, 0.8]) log('sawmill-racked-timber', 1.38, y, 0.04, 1.28, 0.07, true);
-    }
-
-    if (level >= 3) {
-      box('sawmill-roof-monitor-dark', 0.68, 0.34, 0.7, 0, 2.01, 0.26, this.#darkTimberMaterial);
-      const monitorLeft = box('sawmill-roof-monitor-left', 0.5, 0.09, 0.86, -0.2, 2.27, 0.26, this.#roofMaterial);
-      monitorLeft.rotation.z = 0.44;
-      const monitorRight = box('sawmill-roof-monitor-right', 0.5, 0.09, 0.86, 0.2, 2.27, 0.26, this.#roofMaterial);
-      monitorRight.rotation.z = -0.44;
-      box('sawmill-hoist', 0.12, 0.12, 1.18, 0.6, 1.38, -1.24, this.#darkTimberMaterial).rotation.y = -0.18;
-    }
-
-    for (const [x, z, scale] of [[-1.4, -0.82, 0.18], [1.36, -0.96, 0.14], [-1.28, 1.02, 0.12]] as const) {
-      const stone = MeshBuilder.CreateIcoSphere(`sawmill-yard-stone-${site.id}-${x}`, { radius: scale, subdivisions: 1 }, this.#scene);
-      stone.parent = foundation;
-      stone.position.set(x, scale * 0.45 - 0.06, z);
-      stone.scaling.y = 0.58;
-      stone.rotation.y = x;
-      stone.material = this.#stoneMaterial;
-      stone.isPickable = false;
-    }
-
+    const foundation = buildSawmill(this.#scene, { stone: this.#stoneMaterial, lightTimber: this.#lightTimberMaterial, packedEarth: this.#packedEarthMaterial, sawdust: this.#sawdustMaterial, darkTimber: this.#darkTimberMaterial, timber: this.#timberMaterial, roof: this.#roofMaterial, trunk: this.#trunkMaterial }, site.id, level, site.x, site.z);
     this.#createContactShadow(foundation, level >= 2 ? 3.5 : 2.65, 2.45);
     return this.#registerStructure(foundation);
   }
@@ -1664,6 +1757,8 @@ export class BabylonVillageScene {
     this.#camera.target.x -= shift.x; this.#camera.target.z -= shift.z;
     this.#camera.position.x -= shift.x; this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
+    for (const mesh of this.#resourceMarkers.values()) { mesh.position.x -= shift.x; mesh.position.z -= shift.z; }
+    this.#resourceOverlayAt = 0;
     for (const mesh of [...this.#villageMeshes, ...this.#previewMeshes, ...this.#pendingHarvestMeshes,
       this.#selectionMarker, this.#buildableGrid, this.#buildableArea].filter((m): m is Mesh => m !== null)) {
       mesh.position.x -= villageShift.x; mesh.position.z -= villageShift.z; mesh.computeWorldMatrix(true);
@@ -1699,6 +1794,19 @@ export class BabylonVillageScene {
     if (!enabled) { this.#pendingSolarProfile = false; this.#torusOverview?.restoreNavigation(); this.#cosmologyPhase = null; this.#cosmologyPeriod = COSMOLOGY.periodMs; }
   }
   public setCosmologyServerOffset(offsetMs: number): void { this.#cosmologyServerOffsetMs = offsetMs; }
+  public setVillageSolarPreview(fraction: number | null): void {
+    if (fraction !== null && (this.#worldMode !== 'exploration' || this.#mode !== 'village' || this.#transition.active || this.#arrival || this.#flyover)) return;
+    this.#villageSolarPreview = fraction === null ? null : Math.max(0, Math.min(1, fraction)) * TAU;
+    this.#cosmologyNextAt = 0;
+  }
+  public getVillageSolarView() {
+    if (!this.#space) return undefined;
+    const serverMs = Date.now() + this.#cosmologyServerOffsetMs;
+    const phase = this.#villageSolarPreview ?? cyclePhase(serverMs);
+    const u = this.#villageAnchor.cellX / this.#space.width * TAU, v = this.#villageAnchor.cellY / this.#space.height * TAU + Math.PI;
+    if (!this.#clock || this.#clock.u !== u || this.#clock.v !== v) this.#clock = new SolarClock(u, v);
+    return { fraction: (phase / TAU) % 1, label: this.#clock.label(serverMs, phase), preview: this.#villageSolarPreview !== null };
+  }
   public setCosmologyPhase(fraction: number | null): void {
     this.#cosmologyPhase = fraction === null ? null : Math.max(0, Math.min(1, fraction)) * TAU;
     this.#cosmologyNextAt = 0;
@@ -1714,7 +1822,8 @@ export class BabylonVillageScene {
   public getCosmologyDiagnostics() { return this.#cosmologyMetrics; }
   #updateCosmology(serverMs: number, now: number): void {
     if (!this.#state || !this.#space) return;
-    const phase = this.#cosmologyPhase ?? cyclePhase(serverMs, combinedPeriod(this.#cosmologyPeriod));
+    const preview = this.#mode === 'village' && this.#worldMode === 'exploration' && !this.#arrival && !this.#flyover && !this.#transition.active ? this.#villageSolarPreview : null;
+    const phase = preview ?? this.#cosmologyPhase ?? cyclePhase(serverMs, combinedPeriod(this.#cosmologyPeriod));
     if (this.#mode === 'world') this.#torusOverview?.updateCosmology(phase,
       (serverMs - COSMOLOGY.epochMs) / this.#cosmologyPeriod, now, this.#cosmologyDebug);
     if (now < this.#cosmologyNextAt) return;
@@ -2103,12 +2212,16 @@ export class BabylonVillageScene {
     this.#canvas.removeEventListener('terrain-camera', this.#testCamera);
     this.#canvas.removeEventListener('terrain-metrics-reset', this.#testMetricsReset);
     window.removeEventListener('online', this.#resumeTerrain);
+    window.removeEventListener('blur', this.#handlePointerCancel);
     document.removeEventListener('visibilitychange', this.#resumeTerrain);
+    window.removeEventListener('keydown', this.#navigationKeyDown, true);
+    window.removeEventListener('keyup', this.#navigationKeyUp, true);
     this.#renderer?.dispose(); this.#store?.dispose();
     this.#canvas.removeEventListener('pointerdown', this.#handlePointerDown, { capture: true });
     this.#canvas.removeEventListener('pointermove', this.#handlePointerMove, { capture: true });
     this.#canvas.removeEventListener('pointerup', this.#handlePointerUp, { capture: true });
     this.#canvas.removeEventListener('pointercancel', this.#handlePointerCancel, { capture: true });
+    this.#canvas.removeEventListener('lostpointercapture', this.#handlePointerCancel);
     this.#canvas.removeEventListener('wheel', this.#handleWheel, { capture: true });
     this.#resizeObserver.disconnect();
     this.#workers.dispose();

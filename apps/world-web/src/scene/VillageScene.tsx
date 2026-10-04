@@ -1,15 +1,21 @@
 import type { VillageArrival } from './village-arrival';
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { CosmologyDebug } from './CosmologyDebug';
+import { createPortal } from 'react-dom';
+import { VillageSolarPreview } from './VillageSolarPreview';
 import { sciencePreview } from '../api/client';
 
-import type { StoneDeposit, VillageState } from '@arbestra/contracts';
+import type { NaturalFeature, StoneDeposit, VillageState } from '@arbestra/contracts';
 
 import { BabylonVillageScene, type TerrainStatus, type TerrainViewMode } from './BabylonVillageScene';
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import type { AreaPreview, Cell } from './construction-selection';
+import type { ActiveWorldMode } from '../ui/world-mode';
 
 interface VillageSceneProps {
+  worldMode: ActiveWorldMode;
+  populationFocus?: string | null;
+  populationFilter?: string;
   state: VillageState;
   serverOffsetMs: number;
   terrainRef: Ref<TerrainHandle>;
@@ -18,26 +24,34 @@ interface VillageSceneProps {
   constructionMode?: boolean;
   showTravelPaths?: boolean;
   selectedRouteId?: string | null;
+  cosmologyDebug?: boolean;
+  paletteOpen?: boolean;
+  devOpen?: boolean;
+  constructionType?: string | null;
+  constructionAction?: 'build' | 'upgrade' | 'extend' | null;
+  onBuildingHover?: (id: string | null) => void;
   selectingArea: boolean;
   preview: AreaPreview | null;
   previewInvalid: boolean;
-  onAreaGesture: (first: Cell, last: Cell, tap: boolean) => void;
-  onGardenHarvest: (cell: Cell | null, newGesture?: boolean) => void;
-  onSiteSelected: (siteId: string, anchor: ScreenAnchor) => void;
+  onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void;
+  onGardenHarvest: (cell: Cell | null, newGesture?: boolean, previewOnly?: boolean) => void;
+  onWorldGestureCancelled?: () => void;
+  onSiteSelected: (siteId: string, anchor: ScreenAnchor, inspect?: boolean) => void;
   onFeatureSelected?: (featureId: string, anchor: ScreenAnchor) => void;
   onCameraMoved: () => void;
   onArrivalActive?: (active: boolean) => void;
   onEyesFound?: () => void;
   onViewChanged?: (mode: TerrainViewMode) => void;
 }
-export interface TerrainHandle { acceptDeposit: (deposit: StoneDeposit) => void }
+export interface TerrainHandle { cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
 
-export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
+export function VillageScene({ worldMode, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
   const [arrival, setArrival] = useState<VillageArrival | null>(null);
-  const callbacks = useRef({ onArrivalActive, onEyesFound }); callbacks.current = { onArrivalActive, onEyesFound };
+  const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled }); callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled };
+  const [devTarget, setDevTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setDevTarget(devOpen ? document.getElementById('dev-cosmology-slot') : null); }, [devOpen, cosmologyDebug]);
   const [loading, setLoading] = useState<TerrainStatus>(null);
   const [viewMode, setViewMode] = useState<TerrainViewMode>('village');
-  const [cosmologyDebug, setCosmologyDebug] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BabylonVillageScene | null>(null);
   const loginSceneRef = useRef<BabylonVillageScene | null>(null);
@@ -61,11 +75,12 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
     setArrival(null);
     const scene = new BabylonVillageScene(
       canvas,
-      (siteId, anchor) => selectionHandlerRef.current(siteId, anchor),
+      (siteId, anchor, inspect) => selectionHandlerRef.current(siteId, anchor, inspect),
       () => cameraHandlerRef.current(),
-      (first, last, tap) => areaHandlerRef.current(first, last, tap),
+      (first, last, commit) => areaHandlerRef.current(first, last, commit),
       (featureId, anchor) => featureHandlerRef.current?.(featureId, anchor),
-      (cell, newGesture) => harvestHandlerRef.current(cell, newGesture),
+      (cell, newGesture, previewOnly) => harvestHandlerRef.current(cell, newGesture, previewOnly),
+      () => callbacks.current.onWorldGestureCancelled?.(),
       setLoading,
       mode => { setViewMode(mode); viewHandlerRef.current?.(mode); },
       value => {
@@ -90,13 +105,20 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
     }
   }, [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId]);
 
-  useImperativeHandle(terrainRef, () => ({ acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit) }), []);
+  useImperativeHandle(terrainRef, () => ({ cancelGesture: () => sceneRef.current?.cancelGesture(), resetCosmology: () => { sceneRef.current?.setCosmologyPhase(null); sceneRef.current?.setCosmologyPeriod(28800); }, featuresAt: cell => sceneRef.current?.featuresAt(cell) ?? [], acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit),
+    projectPopulation: id => sceneRef.current?.projectPopulation(id) ?? null,
+    showVillage: () => sceneRef.current?.showVillage(), projectCell: cell => sceneRef.current?.projectCell(cell) ?? null,
+    setWorldMode: mode => sceneRef.current?.setWorldMode(mode) }), []);
+  useEffect(() => { sceneRef.current?.setWorldMode(worldMode); }, [worldMode, state.world.id]);
+  useEffect(() => { sceneRef.current?.setPopulationFocus(populationFocus, populationFilter); }, [populationFocus, populationFilter, state.world.id]);
 
   useEffect(() => { sceneRef.current?.updateHarvestPending(pendingHarvestCells); }, [state, pendingHarvestCells]);
 
   useEffect(() => {
     sceneRef.current?.updateAreaSelection(selectingArea, preview, previewInvalid);
   }, [selectingArea, preview, previewInvalid]);
+  useEffect(() => { sceneRef.current?.updateConstructionGhost(selectingArea ? constructionType : null, preview, previewInvalid); }, [constructionType, selectingArea, preview, previewInvalid]);
+  useEffect(() => { sceneRef.current?.setConstructionAction(constructionAction, id => onBuildingHover?.(id)); }, [constructionAction, onBuildingHover]);
   useEffect(() => { sceneRef.current?.setCosmologyDebug(cosmologyDebug); }, [cosmologyDebug, state.world.id]);
   useEffect(() => { sceneRef.current?.setCosmologyServerOffset(serverOffsetMs); }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
 
@@ -127,8 +149,6 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
       {viewMode !== 'village' && <button type="button" onClick={() => sceneRef.current?.showVillage()}>Mon village</button>}
       {viewMode === 'world' && <button type="button" onClick={() => sceneRef.current?.showRegion()}>Voir cette région</button>}
       {viewMode !== 'world' && <button type="button" onClick={() => sceneRef.current?.showWorld()}>{state.science?.globalModelAvailable || sciencePreview() ? 'Monde torique' : 'Observer la courbure'}</button>}
-      {(state.science?.globalModelAvailable || sciencePreview()) && <button type="button" aria-pressed={cosmologyDebug} onClick={() => setCosmologyDebug(value => !value)}>Cosmologie · debug</button>}
-      {sciencePreview() && <span>Sciences · aperçu développeur</span>}
     </div>
     {arrival && <div className="village-arrival" role="dialog" aria-label={`Arrivée à ${arrival.name}`} onClick={event => { event.stopPropagation(); sceneRef.current?.skipArrival(true); }}
       onWheel={event => { event.stopPropagation(); sceneRef.current?.zoomDuringArrival(event.deltaY); }}
@@ -139,6 +159,7 @@ export function VillageScene({ state, serverOffsetMs, terrainRef, pendingHarvest
       <div className="village-arrival-title" style={{ opacity: arrival.title }}><strong>{arrival.name}</strong><span>({arrival.time})</span></div>
       <button autoFocus type="button" onClick={() => sceneRef.current?.skipArrival(true)}>Passer</button>
     </div>}
-    {cosmologyDebug && <CosmologyDebug scene={getScene} />}
+    {cosmologyDebug && devOpen && devTarget && createPortal(<CosmologyDebug scene={getScene} />, devTarget)}
+    {worldMode === 'exploration' && viewMode === 'village' && !arrival && !cosmologyDebug && paletteOpen && <VillageSolarPreview scene={getScene} onChoose={() => {}} />}
     {loading && viewMode !== 'world' ? <div className="terrain-loading" role="status">{loading === 'retry' ? 'Terrain : connexion interrompue' : 'Chargement du terrain…'}{loading === 'retry' ? <button onClick={() => sceneRef.current?.retryTerrain()}>Réessayer</button> : null}</div> : null}</>;
 }
