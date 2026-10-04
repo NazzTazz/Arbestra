@@ -1,5 +1,17 @@
 # Économie
 
+## Ordres d'exploitation mixtes (026)
+
+`exploitation_orders` coordonne une tournée Jardin et jusqu'à deux chantiers, bois/pierre. Chaque enfant conserve ses missions, réservations, notifications et crédits au retour. L'ordre porte le plafond simultané commun, la fenêtre réelle depuis confirmation, la cohorte initiale et les réglages détaillés facultatifs. Les références sont liées au même monde/village ; aucune autorité ne vient du viewport.
+
+L'aperçu et le lancement prennent le village puis tous les gisements concernés dans l'ordre canonique, via `beginVillageEconomy`. L'aperçu réconcilie les transitions dues sans admettre de nouveaux départs. Le lancement revalide toute la sélection et la cohorte avant création ; une cible devenue invalide rejette l'ensemble. L'UUID et le payload canonique forment l'intention idempotente : reprise exacte sans doublon, payload différent rejeté.
+
+Le maximum d'aperçu simule des premières équipes disjointes, Jardin puis bois/pierre, sur des copies des cohortes projetées. `workingTeam` dans `population/work.ts` est partagé avec les admissions réelles : l'énergie doit couvrir le travail à l'effectif candidat **et** l'aller-retour. Une personne admissible au lot court ne suffit pas à rendre admissible une longue tournée Jardin. Cette estimation ne réserve personne. Pour un ordre Auto (`initialAdmission: required`), le lancement vérifie aussi qu'au moins un départ réel a été admis avant de terminer la transaction ; sinon l'ensemble est annulé. L'ordonnanceur et la revalidation restent autoritaires.
+
+Après les commandes manuelles, `admitExploitationGardens` applique les échéances puis admet les tournées, avant les départs de `admitWorksites`. Les affectations actives, transports compris, consomment le plafond. Un Jardin admissible garde une place ; un Jardin bloqué ne prive pas les autres activités de cette place. En réglage commun, le reste est partagé entre chantiers ouverts ; après livraison Jardin, la place est réaffectable au prochain lot. Les plafonds détaillés restent des limites enfants, jamais un renfort en milieu de lot.
+
+Les lots engagés sont honorés à leurs échéances, y compris une tournée Jardin entière. Les nouveaux départs ont lieu à la borne réelle et cessent à l'expiration de la fenêtre, même si le worker est en retard. Les réveils durables utilisent `deposit.worksite.wake`, avec un payload d'ordre distinct des anciens réveils de chantier. Une commande/réconciliation ne modifie ni n'acquitte les tâches existantes ; le scheduler finalise uniquement la tâche acquise.
+
 ## Première récolte — accomplissement
 
 La finalisation d'une récolte positive insère `first-harvest` dans `village_accomplishments`, dans la même transaction que le crédit des carottes et à l'échéance logique de la récolte. L'unicité monde/village/code empêche les doublons. Aucun bonus économique supplémentaire ni rattrapage historique : les villages existants débloquent l'entrée à leur prochaine récolte positive. Le Grimoire affiche « Première récolte » ; un snapshot révélant une nouvelle entrée déclenche un bref message Oracle, sans célébration au chargement initial. Implémenté le 2 octobre 2026, à valider en recette ; aucun test exécuté pour cette passe.

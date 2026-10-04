@@ -8,6 +8,8 @@ import type { Kysely } from 'kysely';
 
 import { CatDiscoveryResponseSchema, BuildRequestSchema, DepositDetailsSchema, ExpansionRequestSchema, ExtractionRequestSchema, ExtractionResponseSchema, ExtractionWorksiteResponseSchema, ExtractionWorksiteSelectionSchema, StartExtractionWorksiteRequestSchema, ChangeExtractionWorksiteRequestSchema, HarvestRequestSchema, PopulationCommandRequestSchema, UpgradeRequestSchema, VillageStateSchema } from '@arbestra/contracts';
 import type { StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest } from '@arbestra/contracts';
+import { ExploitationRequestSchema, ExploitationPreviewSchema, type ExploitationRequest } from '@arbestra/contracts';
+import { previewVillageExploitation, startVillageExploitation } from './service.js';
 
 import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
@@ -31,6 +33,13 @@ export async function registerVillageRoutes(
   db: Kysely<Database>,
   config: AppConfig,
 ): Promise<void> {
+  for (const preview of [true, false]) app.post(`/api/worlds/:worldSlug/villages/:villageId/exploitation${preview ? '/preview' : ''}`, {
+    schema: { params: VillageParametersSchema, body: ExploitationRequestSchema, response: { 200: preview ? ExploitationPreviewSchema : VillageStateSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return (preview ? previewVillageExploitation : startVillageExploitation)(db, account.id, worldSlug, villageId, request.body as ExploitationRequest);
+  });
   app.post('/api/worlds/:worldSlug/villages/:villageId/science', {
     schema: { params: VillageParametersSchema, body: ScienceCommandSchema, response: { 200: VillageStateSchema } },
   }, async request => {
@@ -66,7 +75,7 @@ export async function registerVillageRoutes(
       worldSlug: string;
       villageId: string;
     };
-    const body = request.body as { buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
+    const body = request.body as { commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }>; buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
     const state = body.cells ? await constructBuildingArea(
       db,
       account.id,
@@ -76,7 +85,9 @@ export async function registerVillageRoutes(
       { cellX: body.anchorCellX!, cellY: body.anchorCellY! },
       body.cells,
       config.constructionDurationOverrideMs,
-    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs);
+      body.commandId,
+      body.expectedCosts,
+    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts);
     return reply.status(201).send(state);
   });
 
@@ -85,8 +96,8 @@ export async function registerVillageRoutes(
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
-    const { cells } = request.body as { cells: Array<{ cellX: number; cellY: number }> };
-    const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs);
+    const { cells, commandId, expectedCosts } = request.body as { cells: Array<{ cellX: number; cellY: number }>; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }> };
+    const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs, commandId, expectedCosts);
     return reply.status(201).send(state);
   });
 
@@ -108,6 +119,9 @@ export async function registerVillageRoutes(
       undefined,
       undefined,
       config.constructionDurationOverrideMs,
+      (request.body as { commandId?: string }).commandId,
+      (request.body as { expectedCosts?: Array<{ resourceCode: string; amount: number }> }).expectedCosts,
+      (request.body as { expectedLevel?: number }).expectedLevel,
     );
     return reply.status(201).send(state);
   });

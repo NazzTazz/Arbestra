@@ -8,7 +8,7 @@ import {COMPLETE_GARDEN_HARVEST_TASK} from './garden-harvest.js';
 
 /** The caller owns the village lock, post-lock bound and the canonical selection. */
 export async function startGardenTour(tx:Transaction<Database>,worldId:string,villageId:string,commandId:string,through:Date,
-  plan:{stops:Array<Omit<GardenHarvestStop,'reservedCarrots'>>;returnPath:TravelCell[];durationMs:number}){
+  plan:{stops:Array<Omit<GardenHarvestStop,'reservedCarrots'>>;returnPath:TravelCell[];durationMs:number}, preferredCohortId?: string, exploitationOrderId?: string){
   const plots=await tx.selectFrom('gardenPlots').selectAll().where('worldId','=',worldId).where('villageId','=',villageId)
     .where(eb=>eb.or(plan.stops.map(p=>eb.and([eb('cellX','=',p.cellX),eb('cellY','=',p.cellY)]))))
     .orderBy('cellX').orderBy('cellY').forUpdate().execute();
@@ -20,7 +20,7 @@ export async function startGardenTour(tx:Transaction<Database>,worldId:string,vi
   const overlaps=active.some(h=>plan.stops.some(p=>h.plotCellX===p.cellX&&h.plotCellY===p.cellY
     ||h.stops.some(s=>s.cellX===p.cellX&&s.cellY===p.cellY)||h.plotCellX===null&&plots.some(plot=>plot.cellX===p.cellX&&plot.cellY===p.cellY&&plot.buildingId===h.buildingId)));
   if(overlaps)throw new HttpError(409,'GARDEN_HARVEST_IN_PROGRESS','Une parcelle sélectionnée est déjà en récolte.');
-  const cohorts=await materializeCohorts(tx,worldId,villageId,through),eligible=eligibleWorkers(cohorts,plan.durationMs);
+  const cohorts=await materializeCohorts(tx,worldId,villageId,through),eligible=eligibleWorkers(cohorts,plan.durationMs).filter(c=>!preferredCohortId||c.id===preferredCohortId);
   if(!eligible.some(c=>c.memberCount>=1))throw new HttpError(409,'HARVESTERS_UNAVAILABLE','Aucun habitant disponible avec assez d’énergie pour toute la tournée.');
   const amounts=new Map<string,number>();
   for(const plot of plots){const buffer=await materializeGardenPlot(tx,worldId,plot.cellX,plot.cellY,through);
@@ -28,7 +28,7 @@ export async function startGardenTour(tx:Transaction<Database>,worldId:string,vi
     amounts.set(`${plot.cellX}:${plot.cellY}`,buffer.amount);}
   const stops=plan.stops.map(s=>({...s,reservedCarrots:amounts.get(`${s.cellX}:${s.cellY}`)!})),first=stops[0]!;
   const buildingId=plots.find(p=>p.cellX===first.cellX&&p.cellY===first.cellY)!.buildingId;
-  const harvest=await tx.insertInto('gardenHarvests').values({worldId,villageId,buildingId,commandId,status:'in-progress',
+  const harvest=await tx.insertInto('gardenHarvests').values({worldId,villageId,buildingId,commandId,status:'in-progress', exploitationOrderId: exploitationOrderId ?? null,
     plotCellX:first.cellX,plotCellY:first.cellY,workerCount:1,startedAt:through,completesAt:new Date(through.getTime()+plan.durationMs),completedAt:null,
     reservedCarrots:stops.reduce((sum,s)=>sum+s.reservedCarrots,0),transportMs:first.arrivesAfterMs,
     pathCells:sql`${JSON.stringify(first.path)}::jsonb`,stops:sql`${JSON.stringify(stops)}::jsonb`,returnPathCells:sql`${JSON.stringify(plan.returnPath)}::jsonb`}).returning('id').executeTakeFirstOrThrow();

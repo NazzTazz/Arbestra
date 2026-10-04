@@ -51,6 +51,16 @@ export function eligibleWorkers(cohorts: Cohort[], durationMs: number): Cohort[]
     && canWorkFor(energyState(cohort), durationMs)).sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** Shared by previews and real departures; more workers can shorten the work. */
+export function workingTeam(cohorts: Cohort[], cap: number, durationFor: (count: number) => number, preferredId?: string) {
+  for (let count = Math.min(cap, cohorts.reduce((n, c) => n + c.memberCount, 0)); count >= 1; count--) {
+    const durationMs = durationFor(count);
+    const eligible = eligibleWorkers(cohorts, durationMs).filter(c => !preferredId || c.id === preferredId);
+    if (eligible.reduce((n, c) => n + c.memberCount, 0) >= count) return { count, durationMs, cohorts: eligible };
+  }
+  return { count: 0, durationMs: 0, cohorts: [] as Cohort[] };
+}
+
 /** Caller has validated the complete count before inserting the work. */
 export async function assignWorkers(tx: Transaction<Database>, cohorts: Cohort[], count: number, assignment: Assignment): Promise<void> {
   let needed = count;

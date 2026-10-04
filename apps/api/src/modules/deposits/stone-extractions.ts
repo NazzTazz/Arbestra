@@ -125,7 +125,7 @@ export async function startStoneExtraction(
   tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy,
   featureId: string, commandId: string, workerCount: number,
   path: TravelCell[] = [], transportMs = 0,
-  worksite?: { id: string; amount: number },
+  worksite?: { id: string; amount: number; preferredCohortId?: string },
 ): Promise<string> {
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > STONE_EXTRACTION_MAX_WORKERS)
     throw new HttpError(400, 'EXTRACTION_WORKER_COUNT_INVALID', 'Effectif d’extraction invalide.');
@@ -148,7 +148,7 @@ export async function startStoneExtraction(
   if (amount < 1 || amount > STONE_EXTRACTION_LOT || amount > available) throw new HttpError(409, 'DEPOSIT_FULLY_COMMITTED', 'Lot indisponible.');
   const durationMs = stoneExtractionDuration(workerCount, worksite ? amount : STONE_EXTRACTION_LOT) + transportMs * 2;
   const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
-  const candidates = eligibleWorkers(cohorts, durationMs);
+  const candidates = eligibleWorkers(cohorts, durationMs).filter(c => !worksite?.preferredCohortId || c.id === worksite.preferredCohortId);
   if (candidates.reduce((total, cohort) => total + cohort.memberCount, 0) < workerCount)
     throw new HttpError(409, 'WORKERS_UNAVAILABLE', 'Habitants disponibles et reposés insuffisants.');
   const extraction = await tx.insertInto('depositExtractions').values({ worldId: village.worldId, villageId: village.villageId,

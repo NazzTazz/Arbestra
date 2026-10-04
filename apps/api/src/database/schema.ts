@@ -1,5 +1,5 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
-import type {BuildingVisualLayout,GardenHarvestStop,TravelCell} from '@arbestra/contracts';
+import type {BuildingVisualLayout,GardenHarvestStop,TravelCell,ExploitationRequest} from '@arbestra/contracts';
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -55,6 +55,16 @@ export interface BuildingsTable {
   completedAt: Timestamp | null;
   createdAt: Generated<Timestamp>;
   visualLayout: ColumnType<BuildingVisualLayout|null,BuildingVisualLayout|null|undefined,BuildingVisualLayout|null>;
+}
+
+export interface BuildingCommandReceiptsTable {
+  worldId: string;
+  villageId: string;
+  commandId: string;
+  commandType: 'construct' | 'upgrade' | 'expand';
+  request: ColumnType<unknown, string, string>;
+  buildingId: string | null;
+  createdAt: Generated<Timestamp>;
 }
 
 export interface ResourceTypesTable {
@@ -260,6 +270,7 @@ export interface DepositExtractionsTable {
 }
 
 export interface ExtractionWorksitesTable {
+  exploitationOrderId: ColumnType<string | null, string | null | undefined, string | null>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -311,6 +322,7 @@ export interface BuildingHiddenSuppliesTable {
 }
 
 export interface GardenHarvestsTable {
+  exploitationOrderId: ColumnType<string | null, string | null | undefined, string | null>;
   stops: ColumnType<GardenHarvestStop[],GardenHarvestStop[]|undefined,GardenHarvestStop[]>;
   returnPathCells: ColumnType<TravelCell[]|null,TravelCell[]|null|undefined,TravelCell[]|null>;
   id: Generated<string>;
@@ -366,6 +378,15 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  exploitationOrders: {
+    id: Generated<string>; worldId: string; villageId: string; commandId: string;
+    request: ColumnType<ExploitationRequest, string, string>;
+    workerCap: number; confirmedAt: Timestamp; deadline: Timestamp | null;
+    cohortId: string | null; initialRemaining: number;
+    gardenStatus: 'pending' | 'active' | 'completed' | 'closed';
+    gardenPlan: ColumnType<{stops: Array<Omit<GardenHarvestStop, 'reservedCarrots'>>; returnPath: TravelCell[]; durationMs: number} | null, string | null, string | null>;
+    nextWakeAt: Timestamp | null;
+  };
   playerScience: { worldId: string; accountId: string; observationsSince: Timestamp | null; solarReport: JSONColumnType<Record<string, unknown> | null, string | null, string | null> };
   sciencePrograms: { worldId: string; accountId: string; code: string; discipline: 'mathematics' | 'geography' | 'astronomy';
     level: number; workDoneMs: ColumnType<string, string | number | undefined, string | number>; paused: ColumnType<boolean, boolean | undefined, boolean>;
@@ -394,6 +415,7 @@ export interface Database {
   worldMemberships: WorldMembershipsTable;
   villages: VillagesTable;
   buildings: BuildingsTable;
+  buildingCommandReceipts: BuildingCommandReceiptsTable;
   terrainTypes: TerrainTypesTable;
   worldChunks: WorldChunksTable;
   worldClearings: WorldClearingsTable;

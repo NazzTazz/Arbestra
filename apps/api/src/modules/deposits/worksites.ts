@@ -3,8 +3,9 @@ import { sql, type Transaction } from 'kysely';
 import type { ExtractionWorksite, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, TravelCell } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { eligibleWorkers, materializeCohorts } from '../population/work.js';
+import { materializeCohorts, workingTeam } from '../population/work.js';
 import { millisecondsUntilRested } from '../population/energy.js';
+import { consumeInitialWorkers, worksiteOrderBudget } from '../villages/exploitation-budget.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
 import { clearWoodland } from './woodland.js';
 import { readExtraction, readStoneDeposit, startStoneExtraction, stoneDepositDetails, stoneExtractionDuration } from './stone-extractions.js';
@@ -35,7 +36,7 @@ export async function readWorksites(tx: Transaction<Database>, worldId: string, 
 }
 
 export async function createWorksite(tx: Transaction<Database>, economy: VillageEconomy,
-  request: StartExtractionWorksiteRequest, acceptedFeatureIds = request.featureIds): Promise<string> {
+  request: StartExtractionWorksiteRequest, acceptedFeatureIds = request.featureIds, exploitationOrderId?: string): Promise<string> {
   const existing = await tx.selectFrom('extractionWorksites').selectAll().where('worldId', '=', economy.worldId)
     .where('villageId', '=', economy.villageId).where('commandId', '=', request.commandId).executeTakeFirst();
   if (existing) {
@@ -51,7 +52,7 @@ export async function createWorksite(tx: Transaction<Database>, economy: Village
   if (active.length >= MAX_ACTIVE_WORKSITES) throw new HttpError(409, 'WORKSITE_LIMIT', 'Trop de chantiers actifs.');
   const resourceCode = request.mode === 'extract' ? 'stone' : 'wood';
   const created = await tx.insertInto('extractionWorksites').values({ worldId: economy.worldId, villageId: economy.villageId,
-    commandId: request.commandId, requestedFeatureIds: request.featureIds.map(id => id.toLowerCase()),
+    commandId: request.commandId, requestedFeatureIds: request.featureIds.map(id => id.toLowerCase()), exploitationOrderId: exploitationOrderId ?? null,
     resourceCode, mode: request.mode, status: 'running', workerCap: request.workerCap,
     requestedWorkerCap: request.workerCap,
     deliveredAmount: 0, waitReason: null, nextWakeAt: null, lastDepartureAt: null,
@@ -198,14 +199,14 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
     await tx.updateTable('extractionWorksiteTargets').set({ admittedAt: economy.through })
       .where('worksiteId', '=', site.id).where('featureId', '=', next.featureId).where('admittedAt', 'is', null).execute();
     const transportMs = next.distance * 1_000;
-    const cohorts = await materializeCohorts(tx, economy.worldId, economy.villageId, economy.through);
-    let workers = 0;
-    for (let count = site.workerCap; count >= 1; count--) {
-      const duration = stoneExtractionDuration(count, next.amount) + 2 * transportMs;
-      if (eligibleWorkers(cohorts, duration).reduce((n, cohort) => n + cohort.memberCount, 0) >= count) {
-        workers = count; break;
-      }
+    const budget = site.exploitationOrderId ? await worksiteOrderBudget(tx, economy, site.exploitationOrderId, site.resourceCode, site.workerCap) : { cap: site.workerCap };
+    if (budget.cap < 1) {
+      await tx.updateTable('extractionWorksites').set({ waitReason: 'shared-budget', updatedAt: economy.through }).where('id', '=', site.id).execute();
+      continue;
     }
+    const cohorts = await materializeCohorts(tx, economy.worldId, economy.villageId, economy.through);
+    const workers = workingTeam(cohorts, budget.cap,
+      count => stoneExtractionDuration(count, next.amount) + 2 * transportMs, budget.preferredCohortId).count;
     if (!workers) {
       const minimum = stoneExtractionDuration(site.workerCap, 1) + 2 * transportMs;
       const reason = minimum > 10 * 60 * 60 * 1_000 ? 'route-too-long' : 'workers-resting';
@@ -221,7 +222,8 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
     }
     await startStoneExtraction(tx, { worldId: economy.worldId, villageId: economy.villageId,
       widthCells: village.widthCells, heightCells: village.heightCells }, economy, next.featureId, randomUUID(), workers,
-      next.path, transportMs, { id: site.id, amount: next.amount });
+      next.path, transportMs, { id: site.id, amount: next.amount, ...(budget.preferredCohortId ? { preferredCohortId: budget.preferredCohortId } : {}) });
+    if (site.exploitationOrderId) await consumeInitialWorkers(tx, site.exploitationOrderId, workers);
     await tx.updateTable('extractionWorksites').set({ lastDepartureAt: economy.through, waitReason: null,
       nextWakeAt: null, wakeVersion: sql`wake_version + 1`, updatedAt: economy.through.toISOString() }).where('id', '=', site.id).execute();
   }

@@ -58,6 +58,12 @@ export async function completeStoneExtraction(
 }
 
 export async function wakeExtractionWorksite(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
+  if (typeof task.payload.exploitationOrderId === 'string') {
+    const order = await transaction.selectFrom('exploitationOrders').select('villageId').where('worldId', '=', task.worldId)
+      .where('id', '=', task.payload.exploitationOrderId).executeTakeFirst();
+    if (order) await admitVillageWorksites(transaction, await beginVillageEconomy(transaction, task.worldId, order.villageId));
+    return;
+  }
   const worksiteId = task.payload.worksiteId;
   const version = task.payload.version;
   if (typeof worksiteId !== 'string' || typeof version !== 'number') return;

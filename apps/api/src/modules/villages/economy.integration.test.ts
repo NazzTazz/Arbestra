@@ -559,6 +559,26 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(Number(wood.amount)).toBe(1950);
   });
 
+  it('replays the same idempotent construction without a second building or debit', async () => {
+    const commandId = randomUUID();
+    const before = await db.selectFrom('villageResources').select('amount').where('villageId', '=', DEVELOPMENT_IDS.village)
+      .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
+    const catalog = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+    const expectedCosts = catalog.buildingTypes.find(item => item.code === 'sawmill')!.levels.find(level => level.level === 1)!.costs;
+    await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
+      DEVELOPMENT_CELLS.sawmill.cellX, DEVELOPMENT_CELLS.sawmill.cellY, 'sawmill', 600_000, commandId, expectedCosts);
+    const repeated = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
+      DEVELOPMENT_CELLS.sawmill.cellX, DEVELOPMENT_CELLS.sawmill.cellY, 'sawmill', 600_000, commandId, expectedCosts);
+    expect(repeated.cells.filter(cell => cell.building?.type === 'sawmill')).toHaveLength(1);
+    const after = await db.selectFrom('villageResources').select('amount').where('villageId', '=', DEVELOPMENT_IDS.village)
+      .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
+    expect(Number(before.amount) - Number(after.amount)).toBe(expectedCosts.find(cost => cost.resourceCode === 'wood')?.amount ?? 0);
+    expect(await db.selectFrom('buildingCommandReceipts').select('commandId').where('commandId', '=', commandId).execute()).toHaveLength(1);
+    await expect(constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
+      DEVELOPMENT_CELLS.garden.cellX, DEVELOPMENT_CELLS.garden.cellY, 'sawmill', 600_000, commandId, expectedCosts))
+      .rejects.toMatchObject({ code: 'COMMAND_ID_CONFLICT' });
+  });
+
   it('treats a generated feature occupation as authoritative', async () => {
     const featureId = '60000000-0000-4000-8000-000000000001';
     try {

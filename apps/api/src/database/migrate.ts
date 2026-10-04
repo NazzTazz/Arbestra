@@ -29,6 +29,8 @@ import * as restHousingMigration from './migrations/022_rest_housing.js';
 import * as buildingVisualLayoutMigration from './migrations/023_building_visual_layout.js';
 import * as barracksCatalogMigration from './migrations/024_barracks_catalog.js';
 import * as universityScienceMigration from './migrations/025_university_science.js';
+import * as exploitationOrdersMigration from './migrations/026_exploitation_orders.js';
+import * as buildingCommandReceiptsMigration from './migrations/027_building_command_receipts.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -58,6 +60,8 @@ const migrationProvider: MigrationProvider = {
       '023_building_visual_layout': buildingVisualLayoutMigration,
       '024_barracks_catalog': barracksCatalogMigration,
       '025_university_science': universityScienceMigration,
+      '026_exploitation_orders': exploitationOrdersMigration,
+      '027_building_command_receipts': buildingCommandReceiptsMigration,
     };
   },
 };
