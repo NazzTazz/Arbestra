@@ -31,25 +31,28 @@ export class RegionalVillages {
   readonly #material: StandardMaterial;
   #data: TerrainVillageOverview | null = null;
   #version = -1;
+  #ownVillage = '';
   #dirty = false;
   constructor(private readonly scene: Scene) {
     this.#material = new StandardMaterial('regional-villages-material', scene);
     this.#material.diffuseColor = Color3.White(); this.#material.specularColor = Color3.Black();
   }
   set(data: TerrainVillageOverview): void { this.#data = data; this.#dirty = true; }
-  update(space: WorldSpace, ownVillage: string, blend: number): void {
-    if (this.#data && (this.#dirty || this.#version !== space.version)) {
+  update(space: WorldSpace, ownVillage: string): void {
+    if (this.#data && (this.#dirty || this.#version !== space.version || this.#ownVillage !== ownVillage)) {
       for (const mesh of this.meshes.values()) mesh.dispose(); this.meshes.clear();
       for (const village of this.#data.villages) {
+        // The loaded village retains its actual buildings at regional zoom.
+        if (village.id === ownVillage) continue;
         const p = space.project({ cellX: village.anchorCellX, cellY: village.anchorCellY });
         const blocks = village.blocks.map(b => ({ x: p.x + b.x * CELL_UNITS, z: p.z + b.y * CELL_UNITS,
           y: b.garden ? .12 : 1.3, width: b.width * CELL_UNITS * .94, depth: b.depth * CELL_UNITS * .94,
           height: b.garden ? .18 : b.underConstruction?1.8:2.5, color: b.garden ? [.38, .24, .12] : b.underConstruction?[.54,.45,.32]:[.44, .24, .12] }));
-        if (blocks.length) this.meshes.set(village.id, volumeMesh(this.scene, `regional-village-${village.id}`, blocks, this.#material));
+        const key = village.id ?? `silhouette-${village.anchorCellX}:${village.anchorCellY}`;
+        if (blocks.length) this.meshes.set(key, volumeMesh(this.scene, `regional-village-${key}`, blocks, this.#material));
       }
-      this.#dirty = false; this.#version = space.version;
+      this.#dirty = false; this.#version = space.version; this.#ownVillage = ownVillage;
     }
-    for (const [id, mesh] of this.meshes) { mesh.visibility = id === ownVillage ? blend : 1; mesh.setEnabled(id !== ownVillage || blend > 0); }
   }
   clear(): void { for (const mesh of this.meshes.values()) mesh.dispose(); this.meshes.clear(); this.#data = null; }
   dispose(): void { this.clear(); this.#material.dispose(); }

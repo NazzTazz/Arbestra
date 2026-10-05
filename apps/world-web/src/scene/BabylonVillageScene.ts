@@ -770,13 +770,12 @@ export class BabylonVillageScene {
       this.#loadOverview(now);
       if (this.#space && this.#state) {
         const blend = Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
-        this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1 - blend);
+        this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1);
         this.#regionalOverview.detailBlend(blend);
-        const ownBlend = this.#regionalVillages.meshes.has(this.#state.village.id) ? blend : 0;
         for (const root of this.#villageMeshes) for (const mesh of [root, ...root.getChildMeshes()]) {
-          mesh.visibility = (mesh.metadata?.baseVisibility ?? 1) * (1 - ownBlend);
+          mesh.visibility = (mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
         }
-        this.#regionalVillages.update(this.#space, this.#state.village.id, blend);
+        this.#regionalVillages.update(this.#space, this.#state.village.id);
         for (const mesh of this.#renderer?.meshes() ?? []) {
           mesh.visibility = this.#overview ? 1 - blend : 1;
         }
@@ -788,7 +787,7 @@ export class BabylonVillageScene {
       this.#weather?.update(Date.now() + this.#cosmologyServerOffsetMs);
       this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
       this.#villageBraziers?.animate(now, this.#villageNight,
-        this.#mode === 'world' ? 0 : 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50)));
+        this.#mode === 'world' ? 0 : 1);
       this.#rain.update(this.#camera.target, this.#rainIntensity, this.#mode === 'village' && this.#camera.radius < 160);
       this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
       this.#ambientLight.intensity = .08 + (this.#baseAmbient - .08) * this.#presentationLight;
@@ -2162,7 +2161,7 @@ export class BabylonVillageScene {
     this.#buildableGrid?.setEnabled(mode === 'village');
     this.#buildableArea?.setEnabled(mode === 'village');
     for (const mesh of this.#previewMeshes) mesh.setEnabled(mode === 'village');
-    this.#infrastructureRenderer?.visible(mode==='village');this.#infrastructurePreview?.visible(mode==='village');if(mode!=='village')this.#infrastructureGhost?.setEnabled(false);
+    this.#infrastructureRenderer?.visible(mode!=='world');this.#infrastructurePreview?.visible(mode==='village');if(mode!=='village')this.#infrastructureGhost?.setEnabled(false);
     this.#onCameraMoved(); this.#onViewChanged(mode);
   }
   #updateViewMode(): void {
