@@ -42,7 +42,6 @@ export function torusCell(point: Vector3, world: TerrainOverview['world']): Trav
 }
 
 function color(data: TerrainOverview, vegetation: TerrainVegetationOverview | null, index: number): [number, number, number] {
-  if (data.knowledgeCoverage && !data.knowledgeCoverage[index]) return [83, 85, 99];
   const water = data.waterCoverage[index]! / 255, rock = data.rockCoverage[index]! / 255;
   const wood = vegetation && vegetation.world.id === data.world.id && vegetation.world.generationVersion === data.world.generationVersion
     && vegetation.gridWidth === data.gridWidth && vegetation.gridHeight === data.gridHeight

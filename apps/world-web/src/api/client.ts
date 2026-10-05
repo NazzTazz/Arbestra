@@ -1,6 +1,11 @@
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
+import type {InfrastructureRequest,InfrastructurePreview} from '@arbestra/contracts';
+export async function previewInfrastructure(slug:string,villageId:string,request:InfrastructureRequest):Promise<InfrastructurePreview>{
+  return parseResponse(await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure/preview`,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(request)}));
+}
+export function commandInfrastructure(slug:string,villageId:string,request:InfrastructureRequest){return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)});}
 
 export async function previewExploitation(worldSlug: string, villageId: string, order: ExploitationRequest): Promise<ExploitationPreview> {
   return parseResponse<ExploitationPreview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/exploitation/preview`, {
@@ -116,10 +121,11 @@ export function buildBuilding(
   cells: Array<{ cellX: number; cellY: number }>,
   commandId: string = crypto.randomUUID(),
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
+  quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, quarterTurns, houseVariant, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
   );
 }
 
@@ -217,4 +223,8 @@ export async function discoverCatEyes(worldSlug: string, villageId: string): Pro
   const receivedAt = Date.now(), result = await parseResponse<CatDiscoveryResponse>(response);
   return { state: result.villageState, newlyCompleted: result.newlyCompleted,
     serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2 };
+}
+export async function setFactoryEnabled(worldSlug:string,enabled:boolean,villageId?:string):Promise<TimedVillageState>{
+  const response=await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/dev/factory-access`,{method:'PUT',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({enabled})});
+  await parseResponse(response);return getVillage(worldSlug,villageId);
 }

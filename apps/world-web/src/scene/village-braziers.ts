@@ -1,4 +1,4 @@
-import type { TravelCell, TravelRoute } from '@arbestra/contracts';
+import {automaticBraziers,type VillageState,type TravelCell,type TravelRoute,type InfrastructurePlan,subCellKey} from '@arbestra/contracts';
 import type { Scene } from '@babylonjs/core/scene';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
@@ -7,6 +7,8 @@ import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
+import { ClusteredLightContainer } from '@babylonjs/core/Lights/Clustered/clusteredLightContainer';
+import '@babylonjs/core/Lights/Clustered/clusteredLightingSceneComponent';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
@@ -17,7 +19,7 @@ import '@babylonjs/core/Shaders/particles.fragment';
 import { roadEdges, roadInnerCorners } from './road-profile';
 import { delta, type WorldSpace } from './world-space';
 
-export interface BrazierPoint { x: number; y: number; z: number; seed: number }
+export interface BrazierPoint { x: number; y: number; z: number; seed: number;id?:string }
 
 /** Full canonical topology, not the currently streamed subset. */
 export function roadCorners(routes: readonly TravelRoute[], width: number, height: number): TravelCell[] {
@@ -75,6 +77,8 @@ export class VillageBraziers {
   #signature = '';
   #nextBind = 0;
   #lighting = false;
+  #cluster: ClusteredLightContainer | null = null;
+  #clusterChecked = false;
   readonly #stone: StandardMaterial;
   readonly #fire: DynamicTexture;
   constructor(private readonly scene: Scene) {
@@ -92,15 +96,18 @@ export class VillageBraziers {
     ctx.putImageData(pixels,0,0); this.#fire.update();
   }
   update(routes: readonly TravelRoute[], space: WorldSpace,
-    ground: (cell: TravelCell) => { code: number; height: number } | null, occupied: Set<string>, extraPoints: readonly BrazierPoint[] = []): void {
-    const points = roadInnerCorners(routes,space.width,space.height).flatMap(({cell,sx,sz}) => {
+    ground: (cell: TravelCell) => { code: number; height: number } | null, occupied: Set<string>, extraPoints: readonly BrazierPoint[] = [],plan?:InfrastructurePlan,snapshot?:VillageState,automatic?:ReturnType<typeof automaticBraziers>): void {
+    const points = snapshot?(automatic??automaticBraziers(snapshot)).flatMap(e=>{const g=ground(e);if(!g)return [];const p=space.project({cellX:e.position.x/8,cellY:e.position.y/8});return [{x:p.x,y:g.height+.02,z:p.z,seed:(e.position.x*13+e.position.y*7)%97/97,id:e.id}];}):roadInnerCorners(routes,space.width,space.height).flatMap(({cell,sx,sz}) => {
+      const id=`auto:${cell.cellX}:${cell.cellY}:${sx}:${sz}`;
+      if(plan?.manualLighting.includes(`${cell.cellX}:${cell.cellY}`)||plan?.suppressedBraziers.includes(id))return [];
       const g = ground(cell); if (!g || g.code !== 1 || occupied.has(`${cell.cellX}:${cell.cellY}`)) return [];
       const p = space.project(cell);
       const hash=Math.sin(cell.cellX*127.1+cell.cellY*311.7+sx*19.1+sz*47.3)*43758.5453;
       const seed=hash-Math.floor(hash);
-      return [{ x:p.x+sx*.80,y:g.height+.02,z:p.z+sz*.80, seed }];
+      return [{ x:p.x+sx*.80,y:g.height+.02,z:p.z+sz*.80, seed,id }];
     });
-    this.updatePoints([...points, ...extraPoints]);
+    const manual=plan?.equipment.flatMap(e=>{const key=subCellKey(e,{widthCells:space.width,heightCells:space.height}).split(':').map(Number),g=ground({cellX:key[0]!,cellY:key[1]!});if(!g)return [];const p=space.project({cellX:e.x/8,cellY:e.y/8});return [{x:p.x,y:g.height+.02,z:p.z,seed:(e.x*13+e.y*7)%97/97,id:e.id}];})??[];
+    this.updatePoints([...points,...manual, ...extraPoints]);
   }
   /** Explicit decorative positions, without creating roads or resource entities. */
   updatePoints(points: readonly BrazierPoint[], parent?: Mesh): void {
@@ -133,7 +140,7 @@ export class VillageBraziers {
         mesh.rotation.y = block.angle; mesh.material = this.#stone; mesh.isPickable = false; meshes.push(mesh);
       }
       const masonry = Mesh.MergeMeshes(meshes, true, false)!;
-      masonry.name = 'brazier-masonry'; masonry.isPickable = false;
+      masonry.name = 'brazier-masonry'; masonry.isPickable = Boolean(p.id);masonry.metadata=p.id?{equipmentId:p.id}:null;
       if (parent) masonry.setParent(parent);
       meshes.length = 0; meshes.push(masonry);
       const flame=new ParticleSystem(`brazier-fire-${index}`,24,this.scene);
@@ -155,19 +162,32 @@ export class VillageBraziers {
       flame.blendMode=ParticleSystem.BLENDMODE_ADD;
       const light = new PointLight(`brazier-light-${index}`,new Vector3(p.x,p.y+.16,p.z),this.scene);
       light.diffuse = new Color3(1,.51,.16); light.specular = Color3.Black(); light.range=5; light.intensity=0;
-      light.includedOnlyMeshes = meshes;
       light.setEnabled(false);
+      if (!this.#clusterChecked) {
+        this.#clusterChecked = true;
+        if (ClusteredLightContainer.IsLightSupported(light)) {
+          this.#cluster = new ClusteredLightContainer('village-brazier-cluster', [], this.scene);
+          this.#cluster.maxRange = 5;
+          // Existing frozen materials must compile the new light type once.
+          for (const material of this.scene.materials) if (material.isFrozen) material.unfreeze();
+        }
+        const canvas=this.scene.getEngine().getRenderingCanvas();
+        if(import.meta.env.DEV&&canvas)canvas.dataset.brazierLighting=this.#cluster?'clustered':'bounded';
+      }
+      if(this.#cluster)this.#cluster.addLight(light);
+      else light.includedOnlyMeshes = meshes;
       this.#items.push({key,meshes,flame,burning:false,light,phase:p.seed*Math.PI*2,tempo:.8+p.seed*.4});
     }
     for (const item of previous.values()) {
-      item.flame.dispose(false); item.light.dispose();
+      item.flame.dispose(false); this.#cluster?.removeLight(item.light); item.light.dispose();
       for (const mesh of item.meshes) mesh.dispose(false,false);
     }
   }
   animate(now: number, night: boolean, alpha: number): void {
     const lighting = night && alpha > 0;
     if (lighting !== this.#lighting) { this.#lighting = lighting; this.#nextBind = 0; }
-    if (!lighting) for (const item of this.#items) if (item.light.isEnabled()) item.light.setEnabled(false);
+    if(this.#cluster&&this.#cluster.isEnabled()!==lighting)this.#cluster.setEnabled(lighting);
+    if (!this.#cluster&&!lighting) for (const item of this.#items) if (item.light.isEnabled()) item.light.setEnabled(false);
     if (alpha <= 0) {
       for (const item of this.#items) {
         item.light.intensity=0; for (const mesh of item.meshes) mesh.setEnabled(false);
@@ -175,7 +195,7 @@ export class VillageBraziers {
       }
       this.#nextBind=0; return;
     }
-    if (lighting && now >= this.#nextBind) {
+    if (!this.#cluster && lighting && now >= this.#nextBind) {
       this.#nextBind=now+1000;
       const eye = this.scene.activeCamera?.globalPosition ?? Vector3.Zero();
       const active = this.#items.slice().sort((a, b) => Vector3.DistanceSquared(a.light.position, eye)
@@ -194,6 +214,6 @@ export class VillageBraziers {
       item.light.intensity=night ? .9*flicker*alpha : 0;
     }
   }
-  #clear(): void { for (const item of this.#items) { item.flame.dispose(false); item.light.dispose(); for (const mesh of item.meshes) mesh.dispose(false,false); } this.#items=[]; }
-  dispose(): void { this.#clear(); this.#stone.dispose(); this.#fire.dispose(); }
+  #clear(): void { for (const item of this.#items) { item.flame.dispose(false); this.#cluster?.removeLight(item.light); item.light.dispose(); for (const mesh of item.meshes) mesh.dispose(false,false); } this.#items=[]; }
+  dispose(): void { this.#clear(); this.#cluster?.dispose(false,true); this.#cluster=null; this.#stone.dispose(); this.#fire.dispose(); }
 }

@@ -8,6 +8,7 @@ import { needsDiagonalShorePatch, shoreFaceCorners, shoreInset } from './shore-p
 import { normalize, WorldSpace } from './world-space';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { ROAD_DEPTH, roadTileRects, roadTileBorders } from './road-profile';
+import type {RoadPixel} from '@arbestra/contracts';
 const TILE_SIZE = 2.5;
 export const RENDER_UNIT_CELLS = TERRAIN_STREAMING.renderUnitCells;
 export function hash(x: number, z: number): number {
@@ -16,7 +17,7 @@ export function hash(x: number, z: number): number {
 }
 export function buildTerrainUnit(scene: Scene, chunk: TerrainChunk, offsetX: number, offsetY: number,
   space: WorldSpace, material: StandardMaterial, waterMaterial: StandardMaterial,
-  roads: ReadonlyMap<string, number> = new Map()): Mesh[] {
+  roads: ReadonlyMap<string, number> = new Map(), infrastructure:ReadonlyMap<string,RoadPixel>=new Map()): Mesh[] {
   const size = Math.sqrt(chunk.terrainCodes.length) - 2, stride = size + 2;
   const origin = space.project({ cellX: chunk.originCellX, cellY: chunk.originCellY });
   const result: Mesh[] = [];
@@ -74,7 +75,17 @@ export function buildTerrainUnit(scene: Scene, chunk: TerrainChunk, offsetX: num
             const back = centerZ - TILE_SIZE / 2, front = centerZ + TILE_SIZE / 2;
             const top = current.height;
             const road = current.code === 1 ? roads.get(`${worldCellX}:${worldCellY}`) : undefined;
-            if (road === undefined) {
+            const edited=infrastructure.has(`cell:${worldCellX}:${worldCellY}`);
+            if(edited){
+              for(let iy=0;iy<16;iy++){let start=0;
+                const dug=(ix:number)=>{const px=((worldCellX*16-8+ix)%(space.width*16)+space.width*16)%(space.width*16),py=((worldCellY*16-8+iy)%(space.height*16)+space.height*16)%(space.height*16);
+                  const p=infrastructure.get(`${px}:${py}`);return Boolean(p?.manual&&p.material!=='none');};
+                for(let ix=1;ix<=16;ix++)if(ix===16||dug(ix)!==dug(start)){
+                  const excavated=dug(start),y=top-(excavated?ROAD_DEPTH:0),x0=left+start*TILE_SIZE/16,x1=left+ix*TILE_SIZE/16,z0=back+iy*TILE_SIZE/16,z1=z0+TILE_SIZE/16;
+                  quad([x0,y,z0,x1,y,z0,x1,y,z1,x0,y,z1],excavated?earthSide:color,excavated?24:variant);start=ix;
+                }
+              }
+            }else if (road === undefined) {
               quad([left, top, back, right, top, back, right, top, front, left, top, front], color,
                 current.code === 1 ? variant : 24);
             } else {

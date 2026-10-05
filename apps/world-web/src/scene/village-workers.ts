@@ -1,3 +1,4 @@
+import {travelDuration} from '@arbestra/contracts';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -27,6 +28,10 @@ interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idl
   stops?:GardenHarvestStop[];returnPath?:TravelCell[];leisure?:IdleLeg[]; }
 type Phase='outbound'|'install'|'rotate'|'work'|'load'|'inbound'|'inside'|'done';
 export interface VillageWorkerFigure {root:TransformNode; dispose:()=>void;}
+export interface RepresentativeInfo {
+  id:string; name:string; cohortSize:number|null; energy:number|null; qualifications:string[];
+  destination:string; mode:string;
+}
 interface Person extends VillageWorkerFigure {actor:TrafficActor; index:number; role:WorkerRole; phase:Phase;
   phaseAt:number; arrivedAt:number; limbs:TransformNode[]; tool:TransformNode; cargo:TransformNode;
   meshes:Mesh[]; angle:number; fade:number; visible:boolean; walk:number; last:WorkerPoint; previous:WorkerPoint; working:boolean; connectorRetry:number; }
@@ -50,6 +55,9 @@ export class VillageWorkers {
   #populationMode = false;
   #populationFocus: string | null = null;
   #populationFilter = 'all';
+  #snapshot:VillageState|null=null;
+  #frozenRepresentative:string|null=null;
+  #hiddenRepresentative:string|null=null;
   constructor(readonly scene:Scene,readonly materials:Materials,readonly hooks:WorkerHooks){}
   get figures():VillageWorkerFigure[]{return [...this.#groups.values()].flatMap(g=>g.people);}
   get metrics(){return {figures:this.figures.length,idleRepresentatives:[...this.#groups.values()].filter(g=>g.mission.resource==='idle').length,blocked:this.#traffic.blocked,pending:this.#pending.size,
@@ -58,6 +66,7 @@ export class VillageWorkers {
     layouts:[...this.#groups.values()].map(g=>({id:g.mission.id,resource:g.mission.resource,variant:g.layout.variant,roles:g.people.map(p=>p.role),phases:g.people.map(p=>p.phase)}))};}
 
   sync(state:VillageState,now:number) {
+    this.#snapshot=state;
     const identity=`${state.world.id}:${state.village.id}`;
     if(this.#identity!==null&&this.#identity!==identity){
       for(const g of this.#groups.values())this.#disposeGroup(g);
@@ -77,7 +86,7 @@ export class VillageWorkers {
       const path = activity.path.slice(0, Math.ceil(activity.path.length / 2));
       missions.push({ id:activity.id, key:`${identity}:${activity.id}`, resource:'survey', count:1, featureId:null,
         path, target:path[path.length-1]!, startedAt:Date.parse(activity.startedAt), completesAt:Date.parse(activity.completesAt),
-        transportMs:Math.max(0,path.length-1)*1000 });
+        transportMs:travelDuration(path,state.world) });
     }
     missions.push(...this.#idleMissions(state));
     this.#latest.clear();for(const m of missions)this.#latest.set(m.key,m);
@@ -156,7 +165,7 @@ export class VillageWorkers {
     const box=(name:string,w:number,h:number,d:number,x:number,y:number,z:number,mat:StandardMaterial,parent=root)=>{const mesh=this.#box(`${root.name}-${name}`,w,h,d,x,y,z,mat,parent);meshes.push(mesh);return mesh;};
     box('body',.24,.27,.15,0,.15,0,clothes);box('head',.15,.15,.15,0,.36,0,skin);
     const populationId = m.resource === 'idle' ? m.id.split(':')[3]! : m.id;
-    for (const mesh of meshes) mesh.metadata = { populationId, populationActivity: m.resource === 'idle' ? 'idle' : 'working', populationKind: m.resource === 'survey' ? 'science' : m.resource };
+    for (const mesh of meshes) mesh.metadata = { populationId, representativeId:`${m.id}:${index}`, populationActivity: m.resource === 'idle' ? 'idle' : 'working', populationKind: m.resource === 'survey' ? 'science' : m.resource };
     box('hair',.16,.045,.16,0,.45,0,hair);box('face',.055,.035,.012,0,.34,.08,hair);
     const limbs:TransformNode[]=[];
     for(const side of [-1,1]){const arm=new TransformNode(`${root.name}-arm`,this.scene);arm.parent=root;arm.position.set(side*.16,.27,0);box('arm',.075,.22,.075,0,-.11,0,clothes,arm);limbs.push(arm);}
@@ -374,6 +383,10 @@ export class VillageWorkers {
     this.#admit(now);
   }
   #renderPerson(p:Person,g:Group,now:number,animateLimbs:boolean){
+    if(p.meshes[0]?.metadata?.representativeId===this.#frozenRepresentative){
+      for(const mesh of p.meshes)mesh.visibility=1;
+      return;
+    }
     if(p.phase==='done'||p.phase==='inside'){p.root.setEnabled(false);return;}
     const gardening=p.phase==='work'&&g.mission.resource==='garden';
     const travelling=gardening||['outbound','install','rotate','inbound'].includes(p.phase)||p.phase==='work'&&p.role==='carry'&&!p.actor.done;
@@ -410,6 +423,34 @@ export class VillageWorkers {
       else {const strike=Math.pow((Math.sin(phase)+1)/2,2),arc=role==='break'?1.15:role==='garden'?.65:2.1;
         right!.rotation.x=-.2-strike*arc;left!.rotation.x=-.25-strike*arc*.43;}}
   }
+  freezeRepresentative(id:string|null){this.#frozenRepresentative=id;}
+  hideRepresentative(id:string|null){this.#hiddenRepresentative=id;}
+  representativePose(id:string){
+    for(const g of this.#groups.values())for(const p of g.people)
+      if(p.meshes[0]?.metadata?.representativeId===id&&p.root.isEnabled())
+        return {position:p.root.position.clone(),heading:p.root.rotation.y};
+    return null;
+  }
+  representativeInfo(id:string):RepresentativeInfo|null {
+    for(const g of this.#groups.values())for(const p of g.people){
+      if(p.meshes[0]?.metadata?.representativeId!==id||!p.root.isEnabled())continue;
+      const m=g.mission, cohorts=this.#snapshot?.village.population?.cohorts??[];
+      let index=p.index;
+      const cohort=m.resource==='idle'?cohorts.find(c=>c.id===p.meshes[0]!.metadata.populationId)
+        :cohorts.filter(c=>c.assignmentId===m.id).sort((a,b)=>a.id.localeCompare(b.id)).find(c=>{index-=c.memberCount;return index<0;});
+      let hash=2166136261;for(const char of id)hash=Math.imul(hash^char.charCodeAt(0),16777619)>>>0;
+      const names=['Alix','Camille','Lou','Sacha','Élie','Noa','Charlie','Jules','Morgan','Robin','Léonie','Malo','Ari','Adèle','Nour','Maël'];
+      const target=m.stops?.[g.stop]??m.target;
+      const home=m.leisure?.[g.stop]?.to;
+      const building=this.#snapshot?.cells.find(c=>c.building?.id===home)?.building;
+      const destination=p.phase==='inbound'?'Hôtel de ville':m.resource==='idle'
+        ?building?.type==='town-hall'?'Hôtel de ville':'Maison'
+        :`${m.resource==='garden'?'Jardin':m.resource==='wood'?'Bosquet':m.resource==='stone'?'Gisement de pierre':'Relevé'} · ${target.cellX}, ${target.cellY}`;
+      return {id,name:names[hash%names.length]!,cohortSize:cohort?.memberCount??null,energy:cohort?.energy??null,
+        qualifications:cohort?[cohort.cartographer?'Cartographe':'Aucune qualification spécialisée']:['Non renseignées'],
+        destination,mode:m.resource==='idle'?'Balade':m.resource==='wood'||m.resource==='stone'?'Chantier':m.resource==='garden'?'Mission de récolte':'Mission de reconnaissance'};
+    }return null;
+  }
   populationPosition(id: string) {
     for (const group of this.#groups.values()) for (const person of group.people) {
       const body = person.meshes[0];
@@ -427,7 +468,8 @@ export class VillageWorkers {
       const matches = (!this.#populationFocus || meta.populationId === this.#populationFocus)
         && (this.#populationFilter === 'all' || this.#populationFilter === 'training' ? this.#populationFilter === 'all' || meta.populationKind === 'science' : meta.populationActivity === this.#populationFilter);
       for(const mesh of p.meshes) mesh.visibility *= blend * (this.#populationMode && !matches ? .25 : 1);
-      body.isPickable = this.#populationMode;
+      if(body.metadata.representativeId===this.#hiddenRepresentative)for(const mesh of p.meshes)mesh.visibility=0;
+      body.isPickable = this.#populationMode && body.metadata.representativeId!==this.#hiddenRepresentative;
       const outlined = this.#populationMode && matches;
       if (outlined && !meta.populationOutlined) { body.enableEdgesRendering(); body.edgesColor.set(.8,1,.85,1); body.edgesWidth = 2; }
       else if (!outlined && meta.populationOutlined) body.disableEdgesRendering();

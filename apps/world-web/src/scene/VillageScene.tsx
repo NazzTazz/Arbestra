@@ -1,9 +1,12 @@
+import type {InfrastructureGesture} from './infrastructure-renderer';
+import type {InfrastructureOperation,SubPoint} from '@arbestra/contracts';
+import type { RepresentativeInfo } from './village-workers';
+import type { InhabitantCameraMode } from './inhabitant-camera';
 import type { VillageArrival } from './village-arrival';
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { CosmologyDebug } from './CosmologyDebug';
 import { createPortal } from 'react-dom';
 import { VillageSolarPreview } from './VillageSolarPreview';
-import { sciencePreview } from '../api/client';
 
 import type { NaturalFeature, StoneDeposit, VillageState } from '@arbestra/contracts';
 
@@ -16,6 +19,7 @@ interface VillageSceneProps {
   worldMode: ActiveWorldMode;
   populationFocus?: string | null;
   populationFilter?: string;
+  noclip?: boolean;
   state: VillageState;
   serverOffsetMs: number;
   terrainRef: Ref<TerrainHandle>;
@@ -28,6 +32,8 @@ interface VillageSceneProps {
   paletteOpen?: boolean;
   devOpen?: boolean;
   constructionType?: string | null;
+  constructionQuarterTurns?:number;
+  constructionHouseVariant?:'stone'|'logs'|'beams';
   constructionAction?: 'build' | 'upgrade' | 'extend' | null;
   onBuildingHover?: (id: string | null) => void;
   selectingArea: boolean;
@@ -43,9 +49,9 @@ interface VillageSceneProps {
   onEyesFound?: () => void;
   onViewChanged?: (mode: TerrainViewMode) => void;
 }
-export interface TerrainHandle { cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
+export interface TerrainHandle { ready:()=>boolean; infrastructureTool:(handler:((gesture:InfrastructureGesture)=>void)|null)=>void; infrastructurePreview:(operation:InfrastructureOperation|null,invalid?:boolean,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan)=>void; equipmentAt:(point:SubPoint,pickedId?:string)=>{id:string;version:number;position:SubPoint;quarterTurns:number}|null; selectRepresentative:(id:string|null)=>void; representativeInfo:(id:string)=>RepresentativeInfo|null; projectRepresentative:(id:string)=>ScreenAnchor|null; representativeCamera:(mode:'pov'|'follow'|'village')=>void; representativeCameraMode:()=>InhabitantCameraMode; cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
 
-export function VillageScene({ worldMode, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
+export function VillageScene({ worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
   const [arrival, setArrival] = useState<VillageArrival | null>(null);
   const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled }); callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled };
   const [devTarget, setDevTarget] = useState<HTMLElement | null>(null);
@@ -95,29 +101,35 @@ export function VillageScene({ worldMode, populationFocus = null, populationFilt
       scene.dispose();
       sceneRef.current = null;
     };
-  }, [state.world.id, state.world.generationVersion]);
+  }, [state.world.id, state.world.generationVersion, BabylonVillageScene]);
 
   useEffect(() => {
-    sceneRef.current?.update(state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId);
-    if (sceneRef.current && loginSceneRef.current !== sceneRef.current) {
-      loginSceneRef.current = sceneRef.current;
-      sceneRef.current.startFlyover();
-    }
-  }, [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId]);
+    // React's development mount probe is disposed before the next frame. Do not
+    // manufacture an entire campus for that discarded scene (or a stale snapshot).
+    const frame = requestAnimationFrame(() => {
+      sceneRef.current?.update(state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId);
+      if (sceneRef.current && loginSceneRef.current !== sceneRef.current) {
+        loginSceneRef.current = sceneRef.current;
+        sceneRef.current.startFlyover();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId, BabylonVillageScene]);
 
-  useImperativeHandle(terrainRef, () => ({ cancelGesture: () => sceneRef.current?.cancelGesture(), resetCosmology: () => { sceneRef.current?.setCosmologyPhase(null); sceneRef.current?.setCosmologyPeriod(28800); }, featuresAt: cell => sceneRef.current?.featuresAt(cell) ?? [], acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit),
+  useImperativeHandle(terrainRef, () => ({ ready:()=>Boolean(sceneRef.current), infrastructureTool:handler=>sceneRef.current?.infrastructureTool(handler),infrastructurePreview:(op,invalid,preparedPlan)=>sceneRef.current?.infrastructurePreview(op,invalid,preparedPlan),equipmentAt:(p,pickedId)=>sceneRef.current?.equipmentAt(p,pickedId)??null,selectRepresentative:id=>sceneRef.current?.selectRepresentative(id), representativeInfo:id=>sceneRef.current?.representativeInfo(id)??null, projectRepresentative:id=>sceneRef.current?.projectRepresentative(id)??null, representativeCamera:mode=>sceneRef.current?.representativeCamera(mode), representativeCameraMode:()=>sceneRef.current?.representativeCameraMode??'village', cancelGesture: () => sceneRef.current?.cancelGesture(), resetCosmology: () => { sceneRef.current?.setCosmologyPhase(null); sceneRef.current?.setCosmologyPeriod(28800); }, featuresAt: cell => sceneRef.current?.featuresAt(cell) ?? [], acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit),
     projectPopulation: id => sceneRef.current?.projectPopulation(id) ?? null,
     showVillage: () => sceneRef.current?.showVillage(), projectCell: cell => sceneRef.current?.projectCell(cell) ?? null,
     setWorldMode: mode => sceneRef.current?.setWorldMode(mode) }), []);
-  useEffect(() => { sceneRef.current?.setWorldMode(worldMode); }, [worldMode, state.world.id]);
-  useEffect(() => { sceneRef.current?.setPopulationFocus(populationFocus, populationFilter); }, [populationFocus, populationFilter, state.world.id]);
+  useEffect(() => { sceneRef.current?.setWorldMode(worldMode); }, [worldMode, state.world.id, BabylonVillageScene]);
+  useEffect(() => { sceneRef.current?.setNoclip(noclip); }, [noclip,state.world.id,BabylonVillageScene]);
+  useEffect(() => { sceneRef.current?.setPopulationFocus(populationFocus, populationFilter); }, [populationFocus, populationFilter, state.world.id, BabylonVillageScene]);
 
   useEffect(() => { sceneRef.current?.updateHarvestPending(pendingHarvestCells); }, [state, pendingHarvestCells]);
 
   useEffect(() => {
     sceneRef.current?.updateAreaSelection(selectingArea, preview, previewInvalid);
   }, [selectingArea, preview, previewInvalid]);
-  useEffect(() => { sceneRef.current?.updateConstructionGhost(selectingArea ? constructionType : null, preview, previewInvalid); }, [constructionType, selectingArea, preview, previewInvalid]);
+  useEffect(() => { sceneRef.current?.updateConstructionGhost(selectingArea ? constructionType : null, preview, previewInvalid,constructionQuarterTurns,constructionHouseVariant); }, [constructionType, selectingArea, preview, previewInvalid,constructionQuarterTurns,constructionHouseVariant]);
   useEffect(() => { sceneRef.current?.setConstructionAction(constructionAction, id => onBuildingHover?.(id)); }, [constructionAction, onBuildingHover]);
   useEffect(() => { sceneRef.current?.setCosmologyDebug(cosmologyDebug); }, [cosmologyDebug, state.world.id]);
   useEffect(() => { sceneRef.current?.setCosmologyServerOffset(serverOffsetMs); }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
@@ -143,13 +155,6 @@ export function VillageScene({ worldMode, populationFocus = null, populationFilt
   };
 
   return <><canvas ref={canvasRef} className="village-canvas" data-testid="village-canvas" aria-label="Vue stratégique du village" tabIndex={0} onKeyDown={keyDown} data-view-mode={viewMode} />
-    <div className="world-view-controls" aria-label="Échelle de la carte">
-      <span>{viewMode === 'village' ? 'Village' : viewMode === 'region' ? 'Région' : 'Monde'}</span>
-      {viewMode === 'village' && <button type="button" onClick={() => sceneRef.current?.showRegion()}>Explorer la région</button>}
-      {viewMode !== 'village' && <button type="button" onClick={() => sceneRef.current?.showVillage()}>Mon village</button>}
-      {viewMode === 'world' && <button type="button" onClick={() => sceneRef.current?.showRegion()}>Voir cette région</button>}
-      {viewMode !== 'world' && <button type="button" onClick={() => sceneRef.current?.showWorld()}>{state.science?.globalModelAvailable || sciencePreview() ? 'Monde torique' : 'Observer la courbure'}</button>}
-    </div>
     {arrival && <div className="village-arrival" role="dialog" aria-label={`Arrivée à ${arrival.name}`} onClick={event => { event.stopPropagation(); sceneRef.current?.skipArrival(true); }}
       onWheel={event => { event.stopPropagation(); sceneRef.current?.zoomDuringArrival(event.deltaY); }}
       onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); sceneRef.current?.skipArrival(true); } }}>

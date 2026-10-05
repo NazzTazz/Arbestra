@@ -1,12 +1,10 @@
 export type WorldMode = 'exploration' | 'exploitation' | 'population' | 'construction' | 'amenagement' | 'army';
 export type ActiveWorldMode = Exclude<WorldMode, 'amenagement' | 'army'>;
 export const WORLD_MODES: Array<{ id: WorldMode; label: string; icon: string; available: boolean }> = [
-  { id: 'exploration', label: 'Exploration', icon: '⌖', available: true },
-  { id: 'exploitation', label: 'Exploitation', icon: '♨', available: true },
+  { id: 'exploration', label: 'Vue libre', icon: '⌖', available: true },
+  { id: 'construction', label: 'Constructions', icon: '⌂', available: true },
   { id: 'population', label: 'Population', icon: '♟', available: true },
-  { id: 'construction', label: 'Construction', icon: '⌂', available: true },
-  { id: 'amenagement', label: 'Aménagement', icon: '⌁', available: false },
-  { id: 'army', label: 'Armée', icon: '⚑', available: false },
+  { id: 'exploitation', label: 'Exploitation', icon: '♨', available: true },
 ];
 
 /** HUD intent is independent of the terrain LOD. */

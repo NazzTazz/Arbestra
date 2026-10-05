@@ -4,6 +4,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { NaturalFeature, TerrainChunk, TravelCell, TravelRoute } from '@arbestra/contracts';
 import { pavedProfiles } from './road-profile';
+import {infrastructurePlanSurface,type InfrastructurePlan,type RoadPixel} from '@arbestra/contracts';
 import { buildTerrainUnit, RENDER_UNIT_CELLS as UNIT } from './terrain-unit';
 import { type ChunkDemand, WorldSpace, normalize, delta } from './world-space';
 import type { TerrainStore } from './terrain-store';
@@ -22,6 +23,15 @@ export class TerrainRenderer {
   #shown = true;
   #roads = new Map<string, number>();
   #roadSignature = '';
+  #infrastructure:Map<string,RoadPixel>=new Map();
+  #infrastructureRevision=-1;
+  setInfrastructure(plan:InfrastructurePlan){
+    if(plan.revision===this.#infrastructureRevision)return;this.#infrastructureRevision=plan.revision;
+    this.#infrastructure=infrastructurePlanSurface(plan,{widthCells:this.space.width,heightCells:this.space.height});
+    for(const p of [...this.#infrastructure.values()])this.#infrastructure.set(`cell:${Math.floor((p.x+8)/16)%this.space.width}:${Math.floor((p.y+8)/16)%this.space.height}`,p);
+    this.#roadSignature='';
+    for(const key of this.#visible){const chunk=this.store.chunk(key);if(chunk)this.#queue(key,chunk);}
+  }
   setRoads(routes: readonly TravelRoute[]): void {
     const next = pavedProfiles(routes, this.space.width, this.space.height);
     const signature = JSON.stringify([...next].sort(([a], [b]) => a.localeCompare(b)));
@@ -122,8 +132,8 @@ export class TerrainRenderer {
         const [cellX, cellY] = key.split(':').map(Number);
         return inside({cellX:cellX!, cellY:cellY!});
       }));
-      add(`ground:${x}:${y}`, JSON.stringify([...roads].sort(([a], [b]) => a.localeCompare(b))), true, inside(focus) ? -2 : 0, cx, cy,
-        () => buildTerrainUnit(this.scene, chunk, x, y, this.space, this.groundMaterial, this.waterMaterial, roads));
+      add(`ground:${x}:${y}`, JSON.stringify([this.#infrastructureRevision,[...roads].sort(([a], [b]) => a.localeCompare(b))]), true, inside(focus) ? -2 : 0, cx, cy,
+        () => buildTerrainUnit(this.scene, chunk, x, y, this.space, this.groundMaterial, this.waterMaterial, roads,this.#infrastructure));
       add(`decor:${x}:${y}`, signature, false, 2, cx, cy, () => this.decor(chunk, x, y));
     }
     const featureCenter = (f: NaturalFeature) => ({

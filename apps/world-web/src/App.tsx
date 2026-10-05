@@ -1,4 +1,9 @@
-import { upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
+import { RepresentativePanel } from './ui/RepresentativePanel';
+import {setFactoryEnabled} from './api/client';
+import { InfrastructureTools } from './ui/InfrastructureTools';
+import type { RepresentativeInfo } from './scene/village-workers';
+import type { InhabitantCameraMode } from './scene/inhabitant-camera';
+import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
 import { discoverCatEyes } from './api/client';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbestra/contracts';
@@ -6,7 +11,7 @@ import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
 import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, upgradeBuilding } from './api/client';
-import { cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
+import { campusRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
 import { WorldModeNavigation, type ActiveWorldMode } from './ui/world-mode';
@@ -36,7 +41,7 @@ type ConstructionCommand = {
   expectedCosts: Array<{ resourceCode: string; amount: number }>;
   success: string;
 } & ({
-  kind: 'build'; buildingType: BuildingType; anchor: Cell; cells: Cell[];
+  kind: 'build'; houseVariant: 'stone'|'logs'|'beams'; buildingType: BuildingType; anchor: Cell; cells: Cell[]; quarterTurns:number;
 } | {
   kind: 'expand'; buildingId: string; cells: Cell[];
 } | {
@@ -67,11 +72,19 @@ export function App() {
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
   const [showPopulation, setShowPopulation] = useState(false);
   const [populationFocus, setPopulationFocus] = useState<string | null>(null);
+  const [representativeId,setRepresentativeId]=useState<string|null>(null);
+  const [representative,setRepresentative]=useState<RepresentativeInfo|null>(null);
+  const [representativeView,setRepresentativeView]=useState<InhabitantCameraMode>('village');
+  const [noclip,setNoclip]=useState(false);
   const [populationFilter, setPopulationFilter] = useState('all');
   const [showJournal, setShowJournal] = useState(false);
   const [showScience, setShowScience] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ScreenAnchor | null>(null);
   const [construction, setConstruction] = useState<ConstructionChoice | null>(null);
+  const [constructionDomain,setConstructionDomain]=useState<'buildings'|'infrastructure'>('buildings');
+  const [quarterTurns,setQuarterTurns]=useState(0);
+  const [houseVariant,setHouseVariant]=useState<'stone'|'logs'|'beams'>('logs');
+  const [workshop,setWorkshop]=useState<'buildings'|'infrastructure'|null>(null);
   const [constructionIntentState, setConstructionIntentState] = useState<ConstructionIntentState>('idle');
   const constructionCommand = useRef<ConstructionCommand | null>(null);
   const [selection, setSelection] = useState<CellRange | null>(null);
@@ -162,7 +175,7 @@ export function App() {
   }, [applySnapshot]);
 
   const [worldMode, setWorldMode] = useState<ActiveWorldMode>('exploration');
-  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
+  const [paletteCollapsed, setPaletteCollapsed] = useState(true);
   const modeNavigation = useRef(new WorldModeNavigation());
   const modeRef = useRef(worldMode); modeRef.current = worldMode;
   const [exploitationSettings, setExploitationSettings] = useState<ExploitationSettings>(() => {
@@ -182,7 +195,7 @@ export function App() {
   const releasedExploitation = useRef<string | null>(null);
   const [hoveredBuildingId, setHoveredBuildingId] = useState<string | null>(null);
   const shownUpgrade = useRef<UpgradePreview | null>(null);
-  const presentedArea = useRef<{ cells: Cell[]; costs: Array<{ resourceCode: string; amount: number }> } | null>(null);
+  const presentedArea = useRef<{ cells: Cell[]; costs: Array<{ resourceCode: string; amount: number }>; buildingId: string | undefined; quarterTurns:number; houseVariant:string } | null>(null);
   const hoveredExploitation = useRef<{ key: string; settings: string; request: ExploitationRequest } | null>(null);
   const presentedExploitation = useRef<{ commandId: string; preview: ExploitationPreview } | null>(null);
   const acceptedExploitation = useRef(new Set<string>());
@@ -291,29 +304,33 @@ export function App() {
       ...(state.science?.activities.filter(a => a.buildingId === selectedBuilding.id).map(a => a.id) ?? [])].filter((id): id is string => !!id))];
   }, [selectedBuilding, state]);
   const definition = state?.buildingTypes.find((item) => item.code === construction?.type);
+  const context = state && selection && construction?.type
+    ? constructionContext(state, construction.type, selection.first, selection.last) : null;
+  const contextualConstruction = construction ? { type: construction.type, action: context?.action ?? 'build', ...(context?.buildingId ? { buildingId: context.buildingId } : {}) } : null;
+  const extensionId = context?.action === 'extend' ? context.buildingId : undefined;
   const spatial = definition?.progressionMode === 'spatial';
-  const area = useMemo(() => state && selection ? previewArea(state, construction?.type === 'university'
-    ? { first: { cellX: selection.last.cellX - 2, cellY: selection.last.cellY - 2 }, last: { cellX: selection.last.cellX + 2, cellY: selection.last.cellY + 3 } }
-    : selection, spatial || construction?.type === 'university', construction?.buildingId) : null, [state, selection, spatial, construction?.buildingId, construction?.type]);
+  const area = useMemo(() => state && selection && context?.action !== 'upgrade' ? previewArea(state, construction?.type === 'university'
+    ? campusRange(selection.last,quarterTurns)
+    : selection, spatial || construction?.type === 'university', extensionId) : null, [state, selection, spatial, extensionId, construction?.type, context?.action,quarterTurns]);
   const highlightedSiteIds = useMemo(() => {
     if (!state || !construction?.buildingId) return [];
     const active = state.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active');
     return state.cells.filter((cell) => cell.canBuild && active.some((other) => touchesCell(cell, other, state.world))).map(cellKey);
   }, [state, construction?.buildingId]);
-  const level = construction?.buildingId ? state?.cells.find((cell) => cell.building?.id === construction.buildingId)?.building?.level ?? 1 : 1;
+  const level = extensionId ? state?.cells.find((cell) => cell.building?.id === extensionId)?.building?.level ?? 1 : 1;
   const costs = (definition?.levels.find((item) => item.level === level)?.costs ?? []).map((cost) => ({ ...cost, amount: cost.amount * (spatial ? area?.count ?? 0 : 1) }));
   const serverNow = now + serverOffsetMs;
   const displayedWood = state ? Math.floor(state.village.wood + state.village.woodProductionPerHour * Math.max(0, serverNow - Date.parse(state.serverTime)) / 3_600_000) : 0;
   const affordable = costs.every((cost) => cost.amount <= (cost.resourceCode === 'wood' ? displayedWood : state?.village.resources.find((resource) => resource.code === cost.resourceCode)?.amount ?? 0));
   const selectionError = area?.error ?? (area && !affordable ? 'Ressources insuffisantes.' : null);
-  const existingGardenCells = construction?.buildingId ? state?.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active').length ?? 0 : 0;
+  const existingGardenCells = extensionId ? state?.cells.filter((cell) => cell.footprint?.buildingId === extensionId && cell.footprint?.state === 'active').length ?? 0 : 0;
   const gardenWorkerNeed = spatial && area ? existingGardenCells + area.count : null;
 
-  const upgrade = state && construction?.action === 'upgrade' ? upgradePreview(state, hoveredBuildingId) : null;
+  const upgrade = state && context?.action === 'upgrade' ? upgradePreview(state, context.siteId ?? hoveredBuildingId) : null;
   useEffect(() => { shownUpgrade.current = paletteCollapsed ? null : upgrade; });
-  useEffect(() => { presentedArea.current = area ? { cells: area.cells, costs } : null; });
+  useEffect(() => { presentedArea.current = area ? { cells: area.cells, costs, buildingId: extensionId, quarterTurns, houseVariant } : null; });
 
-  function closePanels() { depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setShowGardens(false); setMenuAnchor(null); }
+  function closePanels() { terrainRef.current?.selectRepresentative(null); setRepresentativeId(null);setRepresentative(null);setRepresentativeView('village'); depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setShowGardens(false); setMenuAnchor(null); }
   function clearPreview() { terrainRef.current?.cancelGesture(); setHoveredBuildingId(null); shownUpgrade.current = null; presentedArea.current = null; touchOrigin.current = null; setSelection(null); setError(null); }
   function exitConstruction() { setConstruction(null); clearPreview(); }
   async function runAction(action: () => Promise<TimedVillageState>, success?: string, exit = false): Promise<boolean> {
@@ -331,7 +348,7 @@ export function App() {
     sessionStorage.setItem(pendingConstructionKey(command.villageId), JSON.stringify(command));
     try {
       const snapshot = command.kind === 'build'
-        ? await buildBuilding(command.worldSlug, command.villageId, command.buildingType, command.anchor, command.cells, command.commandId, command.expectedCosts)
+        ? await buildBuilding(command.worldSlug, command.villageId, command.buildingType, command.anchor, command.cells, command.commandId, command.expectedCosts,command.quarterTurns,command.houseVariant)
         : command.kind === 'expand'
           ? await expandGarden(command.worldSlug, command.villageId, command.buildingId, command.cells, command.commandId, command.expectedCosts)
           : await upgradeBuilding(command.worldSlug, command.villageId, command.buildingId, command.commandId, command.expectedCosts, command.expectedLevel);
@@ -366,11 +383,12 @@ export function App() {
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.closest('input, textarea, select')) return;
       if (event.key.toLowerCase() === 'b') { event.preventDefault(); chooseMode(modeRef.current === 'construction' ? 'exploration' : 'construction'); }
+      if (event.key.toLowerCase()==='r'&&!event.repeat&&modeRef.current==='construction'&&constructionDomain==='buildings'&&construction?.type&&!paletteCollapsed&&!workshop) { event.preventDefault();setQuarterTurns(t=>(t+1)%4);return; }
       if (event.key === 'Escape') {
         event.preventDefault();
         if (exploitationIntentState === 'uncertain' || constructionIntentState === 'uncertain') { setPaletteCollapsed(true); return; }
         if (mixedRequest || selection || mixedGesture.current) { cancelWorldGesture(); return; }
-        if (selectedSiteId || selectedFeatureId || showPopulation || showJournal || showScience || showWorksites || showGardens) { closePanels(); setShowScience(false); setShowWorksites(false); return; }
+        if (representativeId || selectedSiteId || selectedFeatureId || showPopulation || showJournal || showScience || showWorksites || showGardens) { closePanels(); setShowScience(false); setShowWorksites(false); return; }
         if (modeRef.current === 'construction' && construction?.type) { clearPreview(); setConstruction({ action: construction.action, type: construction.action === 'extend' ? 'garden' : null }); return; }
         setPaletteCollapsed(true);
       }
@@ -378,6 +396,7 @@ export function App() {
     window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
   });
   useEffect(() => {
+    if(representativeId)return;
     if (!selectedSiteId && !selectedFeatureId && !populationFocus) return;
     const timer = window.setInterval(() => {
       const current = stateRef.current;
@@ -388,22 +407,51 @@ export function App() {
       if (anchor) setMenuAnchor(anchor); else closePanels();
     }, 100);
     return () => window.clearInterval(timer);
-  }, [selectedSiteId, selectedFeatureId, populationFocus]);
+  }, [selectedSiteId, selectedFeatureId, populationFocus, representativeId]);
 
+
+  useEffect(()=>{
+    if(!representativeId)return;
+    const timer=window.setInterval(()=>{
+      const view=terrainRef.current?.representativeCameraMode()??'village';setRepresentativeView(view);
+      const info=terrainRef.current?.representativeInfo(representativeId);
+      if(info)setRepresentative(info);
+      else if(view==='village'){closePanels();return;}
+      if(view==='village'){
+        const anchor=terrainRef.current?.projectRepresentative(representativeId);
+        if(anchor)setMenuAnchor(anchor);
+      }
+    },200);
+    return ()=>window.clearInterval(timer);
+  },[representativeId]);
 
   function handleAreaGesture(first: Cell, last: Cell, commit: boolean) {
-    if (modeRef.current !== 'construction' || terrainView !== 'village' || actionInFlight.current || arrivalActive
+    if (paletteCollapsed || modeRef.current !== 'construction' || terrainView !== 'village' || actionInFlight.current || arrivalActive
       || constructionIntentState === 'uncertain') return;
     if (!construction || construction.action === 'upgrade' || !construction.type || construction.action === 'extend' && !construction.buildingId) return;
     setError(null);
     touchOrigin.current = null;
-    const nextSelection = { first: spatial ? first : last, last };
+    const nextSelection = { first, last };
     setSelection(nextSelection);
     if (!commit || !state) return;
+    const intent = constructionContext(state, construction.type, first, last);
+    if (intent.action === 'upgrade') {
+      const currentQuote = upgradePreview(state, intent.siteId!);
+      if (!sameUpgradeQuote(shownUpgrade.current, currentQuote)) {
+        setError(currentQuote?.error ?? 'Le devis a changé. Vérifiez le coût affiché avant de recommencer.');
+        setPaletteCollapsed(false); return;
+      }
+      const quote = shownUpgrade.current!;
+      void executeConstruction({ kind: 'upgrade', commandId: crypto.randomUUID(), worldSlug: state.world.slug,
+        villageId: state.village.id, buildingId: quote.buildingId, expectedCosts: quote.costs,
+        expectedLevel: quote.nextLevel, success: `Amélioration de ${quote.name} lancée` });
+      return;
+    }
+    const buildingId = intent.action === 'extend' ? intent.buildingId : undefined;
     const nextArea = previewArea(state, construction.type === 'university'
-      ? { first: { cellX: last.cellX - 2, cellY: last.cellY - 2 }, last: { cellX: last.cellX + 2, cellY: last.cellY + 3 } }
-      : nextSelection, Boolean(spatial || construction.type === 'university'), construction.buildingId);
-    const currentLevel = construction.buildingId ? state.cells.find(cell => cell.building?.id === construction.buildingId)?.building?.level ?? 1 : 1;
+      ? campusRange(last,quarterTurns)
+      : nextSelection, Boolean(spatial || construction.type === 'university'), buildingId);
+    const currentLevel = buildingId ? state.cells.find(cell => cell.building?.id === buildingId)?.building?.level ?? 1 : 1;
     const currentDefinition = state.buildingTypes.find(item => item.code === construction.type);
     const nextCosts = (currentDefinition?.levels.find(item => item.level === currentLevel)?.costs ?? [])
       .map(cost => ({ ...cost, amount: cost.amount * (spatial ? nextArea.count : 1) }));
@@ -412,16 +460,17 @@ export function App() {
       : state.village.resources.find(resource => resource.code === cost.resourceCode)?.amount ?? 0));
     const nextError = nextArea.error ?? (!canAfford ? 'Ressources insuffisantes.' : null);
     if (nextError || !nextArea.cells.length) { setError(nextError); return; }
+    if (buildingId && nextArea.count === 0) return;
     const shown = presentedArea.current;
-    if (!shown || JSON.stringify(shown.cells) !== JSON.stringify(nextArea.cells) || JSON.stringify(shown.costs) !== JSON.stringify(nextCosts)) {
+    if (!shown || shown.houseVariant !== houseVariant || shown.quarterTurns !== quarterTurns || shown.buildingId !== buildingId || JSON.stringify(shown.cells) !== JSON.stringify(nextArea.cells) || JSON.stringify(shown.costs) !== JSON.stringify(nextCosts)) {
       setError('L’aperçu a changé. Vérifiez l’emprise et le coût, puis cliquez à nouveau.'); setPaletteCollapsed(false); return;
     }
     const anchor = construction.type === 'university' ? last : spatial ? first : nextArea.cells[0]!;
-    const command: ConstructionCommand = construction.buildingId
+    const command: ConstructionCommand = buildingId
       ? { kind: 'expand', commandId: crypto.randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
-        buildingId: construction.buildingId, cells: nextArea.cells, expectedCosts: nextCosts, success: 'Extension du Jardin lancée' }
+        buildingId, cells: nextArea.cells, expectedCosts: nextCosts, success: 'Extension du Jardin lancée' }
       : { kind: 'build', commandId: crypto.randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
-        buildingType: construction.type as BuildingType, anchor, cells: nextArea.cells, expectedCosts: nextCosts, success: 'Construction lancée' };
+        houseVariant, buildingType: construction.type as BuildingType, anchor, cells: nextArea.cells, quarterTurns, expectedCosts: nextCosts, success: 'Construction lancée' };
     void executeConstruction(command);
   }
   function newMixedRequest(): ExploitationRequest {
@@ -455,12 +504,17 @@ export function App() {
     cancelWorldGesture();
     exitConstruction();
   }
-  function chooseMode(mode: ActiveWorldMode) {
+  function toggleHud() {
+    cancelWorldGesture(); closePanels(); setShowScience(false); setShowWorksites(false);
+    setPaletteCollapsed(value=>!value);
+  }
+  function chooseMode(mode: ActiveWorldMode, toggleActive = false) {
+    if(toggleActive && mode===modeRef.current){toggleHud();return;}
     if (mode !== 'exploitation') setExploitationSettings(current => ({ ...current, woodMode: 'cut' }));
     cancelDraft(); closePanels(); setShowScience(false); setShowWorksites(false); setPopulationFocus(null); setPopulationFilter('all');
     if (modeNavigation.current.choose(mode)) { terrainRef.current?.showVillage(); return; }
     modeRef.current = mode; setWorldMode(mode); terrainRef.current?.setWorldMode(mode);
-    setPaletteCollapsed(false);
+    setPaletteCollapsed(mode==='exploration');
     if (mode === 'construction') setConstruction({ action: 'build', type: null });
     if (mode === 'population') { setShowPopulation(true); setMenuAnchor(populationAnchor()); }
     if (mode === 'exploitation' && uncertainRequest.current) {
@@ -475,7 +529,7 @@ export function App() {
     if (view === 'village' && mode === 'population') { setShowPopulation(true); setMenuAnchor(populationAnchor()); }
   }
   function collectExploitation(cell: Cell | null, newGesture = false, previewOnly = false) {
-    if (modeRef.current !== 'exploitation' || terrainView !== 'village' || arrivalActive || actionInFlight.current || uncertainRequest.current) return;
+    if (paletteCollapsed || modeRef.current !== 'exploitation' || terrainView !== 'village' || arrivalActive || actionInFlight.current || uncertainRequest.current) return;
     if (previewOnly && (mixedGesture.current || exploitationIntentState !== 'idle' || showDev)) return;
     if (!cell) {
       if (!newGesture && mixedGesture.current) {
@@ -632,31 +686,36 @@ export function App() {
   if (needsLogin) return <main className="center-message"><a href={LOBBY_URL}>Se connecter pour entrer dans ce monde</a></main>;
   if (!state) return <main className="center-message" role="alert">{error ?? 'Village indisponible.'}</main>;
   return <main className="game-shell">
-    <Suspense fallback={<div className="center-message">L'oracle se rhabille...</div>}><VillageScene worldMode={worldMode} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
+    <Suspense fallback={<div className="center-message">L'oracle se rhabille...</div>}><VillageScene worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
       pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : []} highlightedSiteIds={highlightedSiteIds}
-      constructionMode={worldMode === 'construction' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
+      constructionMode={!paletteCollapsed && !workshop && worldMode === 'construction' && constructionDomain==='buildings' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
-      selectingArea={worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
+      constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
         && (construction?.action !== 'extend' || Boolean(construction.buildingId)) && !pendingAction && terrainView === 'village'}
-      preview={worldMode === 'construction' ? area : null} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture}
+      preview={!paletteCollapsed && worldMode === 'construction' ? area : null} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture}
       onGardenHarvest={collectExploitation} onWorldGestureCancelled={cancelWorldGesture} onSiteSelected={(id, anchor, inspect) => {
+        if(modeRef.current==='population'&&id.startsWith('representative:')){
+          closePanels();setPopulationFocus(null);const personId=id.slice(15);
+          terrainRef.current?.selectRepresentative(personId);setRepresentativeId(personId);
+          setRepresentative(terrainRef.current?.representativeInfo(personId)??null);setMenuAnchor(anchor);return;
+        }
         if (modeRef.current === 'population' && id.startsWith('population:')) { closePanels(); setPopulationFocus(id.slice(11)); setShowPopulation(true); setMenuAnchor(anchor); return; }
         if (modeRef.current === 'construction') { useConstructionTarget(id, anchor, inspect); return; }
         if (modeRef.current !== 'exploration') { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); if (modeRef.current === 'population') setShowPopulation(true); }
       }} onFeatureSelected={(id, anchor) => {
         if (modeRef.current === 'exploitation') { closePanels(); setSelectedFeatureId(id); setMenuAnchor(anchor); }
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
-    <WorldModeBar mode={worldMode} onChoose={chooseMode} />
-    {worldMode === 'exploitation' && terrainView === 'village' && <ExploitationPalette settings={exploitationSettings} population={state.village.population}
+    <WorldModeBar mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
+    {worldMode === 'exploitation' && terrainView === 'village' && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population}
       request={mixedRequest} preview={mixedPreview} intentState={exploitationIntentState} error={error} pending={pendingAction || arrivalActive} collapsed={paletteCollapsed}
-      onChange={changeExploitationSettings} onToggle={() => setPaletteCollapsed(value => !value)}
+      onChange={changeExploitationSettings} onToggle={toggleHud}
       onWorksites={() => { closePanels(); setShowWorksites(value => !value); }}
       onGardens={() => { closePanels(); setShowGardens(true); setMenuAnchor({ x: 16, y: window.innerHeight - 300 }); }}
       onConfirmClear={() => { if (mixedRequest) void submitExploitation(mixedRequest); }}
       onCancelIntent={cancelWorldGesture}
-      onRetry={retryExploitation} onRemoveTarget={removeExploitationTarget} />}
-    {worldMode === 'population' && terrainView === 'village' && <div className="mode-toolbar population-toolbar">
+      onRetry={retryExploitation} onRemoveTarget={removeExploitationTarget} /></div>}
+    {worldMode === 'population' && !paletteCollapsed && terrainView === 'village' && <div className="mode-toolbar population-toolbar">
       <span>Population {state.village.population.total} · Repos {state.village.population.resting} · Disponibles {state.village.population.available} · Affectés {state.village.population.working}</span>
       <button type="button" onClick={() => { closePanels(); setShowPopulation(true); setMenuAnchor({ x: window.innerWidth / 2, y: window.innerHeight - 280 }); }}>Habitants et cohortes</button>
       <button type="button" onClick={() => setShowScience(value => !value)}>Arbre des connaissances</button></div>}
@@ -664,14 +723,15 @@ export function App() {
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
-    <Hud state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
     {showScience && worldMode === 'population' && terrainView === 'village' && state.science && <SciencePanel target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (modeRef.current !== 'population' || arrivalActive) return; void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
-    <DevDrawer open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
+    <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmology={cosmologyDebug} onOpen={open => { setShowDev(open); if (open) cancelWorldGesture(); }} onTravelPaths={setShowTravelPaths}
-      onRoute={setSelectedRouteId} onCosmology={setCosmologyDebug} onReset={() => { terrainRef.current?.resetCosmology(); setCosmologyDebug(false); setShowTravelPaths(false); setSelectedRouteId(null); }} />
+      onRoute={setSelectedRouteId} onCosmology={setCosmologyDebug} onReset={() => { setNoclip(false);terrainRef.current?.resetCosmology(); setCosmologyDebug(false); setShowTravelPaths(false); setSelectedRouteId(null); }} />
     {showWorksites && worldMode === 'exploitation' && terrainView === 'village' && <WorksitePanel orders={state.village.exploitationOrders ?? []} serverNow={serverNow} worksites={state.village.worksites} pending={pendingAction} onAction={commandWorksite} />}
     {menuAnchor && showGardens && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><div><strong>Choisir un Jardin</strong>{gardenSites.map((site, index) => <button type="button" key={site.id} onClick={() => { setShowGardens(false); setSelectedSiteId(site.id); }}>Jardin {index + 1} · {site.cellX}, {site.cellY} · {site.building!.garden!.activeCellCount} parcelle(s)</button>)}</div></WorldContextMenu> : null}
+    {representative && menuAnchor && worldMode==='population' && <WorldContextMenu anchor={representativeView==='village'?menuAnchor:{x:window.innerWidth-330,y:110}}><RepresentativePanel person={representative} view={representativeView} onView={mode=>terrainRef.current?.representativeCamera(mode)} onClose={closePanels}/></WorldContextMenu>}
     {menuAnchor && showPopulation && worldMode === 'population' ? <WorldContextMenu anchor={menuAnchor}><PopulationPanel buildingId={selectedBuilding?.id ?? null} assignmentIds={buildingAssignmentIds} focus={populationFocus} onFocus={(id, filter) => { setPopulationFocus(id); setPopulationFilter(filter); }} population={state.village.population} pending={pendingAction} count={populationCount} onCount={(count) => setPopulationCount(Math.max(1, Math.min(state.village.population.available || 1, count || 1)))} onFeed={() => runPopulation('feed')} onRest={() => runPopulation('rest')} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode={worldMode} building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {
@@ -682,10 +742,12 @@ export function App() {
       closePanels(); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
       pushNotification(`Outil ${family === 'wood' ? woodMode === 'clear' ? 'Défrichage' : 'Bois' : 'Pierre'} prêt · glissez dans le monde.`);
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
-    {terrainView === 'village' && worldMode === 'construction' && construction ? <ConstructionPanel upgrade={upgrade} construction={construction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} population={state.village.population} gardenWorkerNeed={gardenWorkerNeed}
+    {terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} onHouseVariant={setHouseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
       intentState={constructionIntentState} onRetry={retryConstruction} onClearError={clearConstructionError}
       collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={type => { clearConstructionError(); clearPreview(); setConstruction({ action: 'build', type }); }}
-      onTool={action => { clearConstructionError(); clearPreview(); setConstruction({ action, type: action === 'extend' ? 'garden' : null }); }}
-      onClear={() => { clearConstructionError(); clearPreview(); setConstruction({ action: 'build', type: null }); }} onCancel={() => chooseMode('exploration')} /> : null}
+      domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
+      infrastructure={<InfrastructureTools state={state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
+      onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
+    {workshop&&<section className="factory-workshop" aria-label="Atelier"><button onClick={()=>setWorkshop(null)}>Retour au village</button>{state.factoryEnabled?<iframe title={`Atelier ${workshop}`} src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}/>:<p>L’accès aux ateliers a été désactivé.</p>}</section>}
   </main>;
 }

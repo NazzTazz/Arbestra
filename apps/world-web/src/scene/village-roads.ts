@@ -101,15 +101,15 @@ export class VillageRoads {
       for (let i = 0; i < count; i++) {
         const cx = x + dx * step * (i + .5), cz = z + dz * step * (i + .5);
         const cell = space.inverse(cx, cz), seed = cell.cellX * 31 + cell.cellY * 17 + i;
-        const box = VertexData.CreateBox({ width: step - .004, height: .085, depth: .13 });
-        const base = curbPositions.length / 3, y = (ground(cell)?.height ?? fallbackHeight) - .034;
+        const box = VertexData.CreateBox({ width: step, height: .04, depth: .625 });
+        const base = curbPositions.length / 3, y = (ground(cell)?.height ?? fallbackHeight) - .016;
         for (let v = 0; v < box.positions!.length; v += 3) {
           let bx = box.positions![v]!, by = box.positions![v+1]!, bz = box.positions![v+2]!;
           const corner = (bx > 0 ? 1 : 0) + (by > 0 ? 2 : 0) + (bz > 0 ? 4 : 0);
           const endFace = bx > 0;
           // Trim/extend only the end face to meet the adjoining row on a diagonal.
-          if(i===0 && !endFace) bx+=startMiter*(.065-bz);
-          if(i===count-1 && endFace) bx+=endMiter*(.065-bz);
+          if(i===0 && !endFace) bx+=startMiter*(.3125-bz);
+          if(i===count-1 && endFace) bx+=endMiter*(.3125-bz);
           bx += (noise(seed + corner, 1) - .5) * .002;
           by += (noise(seed + corner, 2) - .5) * .002;
           bz += (noise(seed + corner, 3) - .5) * .002;
@@ -212,7 +212,7 @@ export class VillageRoads {
           const other=borders.find(b=>b!==e && (b.x0===x&&b.z0===z || b.x1===x&&b.z1===z));
           return other ? other.nx*dx+other.nz*dz : 0;
         };
-        curbRow(p.x+e.x0+e.nx*.065,p.z+e.z0+e.nz*.065,
+        curbRow(p.x+e.x0+e.nx*.3125,p.z+e.z0+e.nz*.3125,
           dx,dz,length,g.height,miter(e.x0,e.z0),miter(e.x1,e.z1));
       }
     }

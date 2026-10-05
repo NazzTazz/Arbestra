@@ -1,4 +1,21 @@
 import type { VillageState } from '@arbestra/contracts';
+import type { Cell } from '../scene/construction-selection';
+
+/** Resolve the gesture's origin, not whichever neighbour its last cell touches. */
+export function constructionContext(state: VillageState, type: string, first: Cell, last: Cell):
+  { action: 'build' | 'upgrade' | 'extend'; buildingId?: string; siteId?: string } {
+  const at = (cell: Cell) => {
+    const site = state.cells.find(c => c.cellX === cell.cellX && c.cellY === cell.cellY);
+    const owner = site?.building ? site : state.cells.find(c => c.building?.id === site?.footprint?.buildingId);
+    return owner?.building ? owner : null;
+  };
+  const origin = at(first), target = at(last);
+  if (origin?.building?.type !== type) return { action: 'build' };
+  if (type === 'garden') return { action: 'extend', buildingId: origin.building.id, siteId: origin.id };
+  if (target?.building?.id === origin.building.id)
+    return { action: 'upgrade', buildingId: origin.building.id, siteId: origin.id };
+  return { action: 'build' };
+}
 
 export function upgradePreview(state: VillageState, siteId: string | null) {
   const site = state.cells.find(cell => cell.id === siteId);

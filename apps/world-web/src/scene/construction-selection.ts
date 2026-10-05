@@ -5,6 +5,11 @@ export interface CellRange { first: Cell; last: Cell }
 export interface AreaPreview { cells: Cell[]; count: number; error: string | null; newCells?: Cell[]; existingCells?: Cell[]; obstacleCells?: Cell[] }
 export const MAX_SELECTION_CELLS = 100;
 export const cellKey = (cell: Cell): string => `${cell.cellX}:${cell.cellY}`;
+export function campusRange(anchor:Cell,quarterTurns:number):CellRange {
+  const rotate=(x:number,y:number)=>quarterTurns===0?{x,y}:quarterTurns===1?{x:y,y:-x}:quarterTurns===2?{x:-x,y:-y}:{x:-y,y:x};
+  const a=rotate(-2,-2),b=rotate(2,3);
+  return {first:{cellX:anchor.cellX+Math.min(a.x,b.x),cellY:anchor.cellY+Math.min(a.y,b.y)},last:{cellX:anchor.cellX+Math.max(a.x,b.x),cellY:anchor.cellY+Math.max(a.y,b.y)}};
+}
 const normalize = (value: number, size: number): number => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number): number => normalize(value - origin + size / 2, size) - size / 2;
 

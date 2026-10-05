@@ -1,8 +1,10 @@
 import type { TerrainViewMode } from '../scene/BabylonVillageScene';
 import type { VillageState } from '@arbestra/contracts';
 
-export function DevDrawer({ open, view, state, showTravelPaths, selectedRouteId, cosmology,
-  onOpen, onTravelPaths, onRoute, onCosmology, onReset }: {
+export function DevDrawer({ noclip, onNoclip, open, view, state, showTravelPaths, selectedRouteId, cosmology,
+  onOpen, onTravelPaths, onRoute, onCosmology, onReset, onFactory }: {
+  noclip: boolean;
+  onNoclip:(value:boolean)=>void;
   open: boolean;
   view: TerrainViewMode;
   state: VillageState;
@@ -10,6 +12,7 @@ export function DevDrawer({ open, view, state, showTravelPaths, selectedRouteId,
   selectedRouteId: string | null;
   cosmology: boolean;
   onReset: () => void;
+  onFactory:(enabled:boolean)=>void;
   onOpen: (open: boolean) => void;
   onTravelPaths: (value: boolean) => void;
   onRoute: (id: string | null) => void;
@@ -17,10 +20,11 @@ export function DevDrawer({ open, view, state, showTravelPaths, selectedRouteId,
 }) {
   if (!import.meta.env.DEV) return null;
   return <aside className={`dev-shell${open ? ' is-open' : ''}`} aria-label="Outils développeur">
-    <button className="dev-toggle" type="button" aria-expanded={open} onClick={() => onOpen(!open)}>DEV{(cosmology || showTravelPaths) && <span className="dev-active" title="Visualisation DEV active"> · actif</span>}</button>
     {open && <div className="dev-drawer">
       <header><strong>Laboratoire</strong><button type="button" onClick={() => onOpen(false)}>Fermer</button></header>
+      <section><strong>Ateliers</strong><label><input type="checkbox" checked={Boolean(state.factoryEnabled)} onChange={event=>onFactory(event.target.checked)}/> Activer les ateliers Bâtiments et Infrastructure</label></section>
       <section><strong>Visualisations</strong>
+        <label><input type="checkbox" checked={noclip} onChange={event=>onNoclip(event.target.checked)}/> Passe-muraille</label>
         <label><input type="checkbox" checked={showTravelPaths} onChange={event => onTravelPaths(event.target.checked)}/> Chemins et transports</label>
         {showTravelPaths && <select value={selectedRouteId ?? ''} onChange={event => onRoute(event.target.value || null)}>
           <option value="">Tous les itinéraires ({state.travelRoutes.length})</option>

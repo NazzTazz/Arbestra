@@ -1,4 +1,5 @@
 import type { TravelCell, TravelRoute } from '@arbestra/contracts';
+import {coarseTravelPath} from '@arbestra/contracts';
 import { delta } from './world-space';
 
 export type RoadKind = 'paved' | 'earth';
@@ -7,10 +8,11 @@ export const ROAD_DEPTH = .06;
 export const ROAD_HALF_WIDTH = .47;
 
 /** Trim building access from decoration only; never bridge across an occupied cell. */
-export function roadDisplayRoutes(routes: readonly TravelRoute[], occupied: ReadonlySet<string>): TravelRoute[] {
+export function roadDisplayRoutes(routes: readonly TravelRoute[], occupied: ReadonlySet<string>, world?:{widthCells:number;heightCells:number}): TravelRoute[] {
   return routes.flatMap(route => {
     const runs: TravelCell[][] = []; let run: TravelCell[] = [];
-    for (const cell of route.cells) {
+    const coarse=world?coarseTravelPath(route.cells,world):route.cells;
+    for (const cell of coarse) {
       if (occupied.has(roadKey(cell))) {
         if (run.length > 1) runs.push(run);
         run = [];

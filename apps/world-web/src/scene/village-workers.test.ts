@@ -32,6 +32,28 @@ function fixture(free:(p:{x:number;z:number})=>boolean=()=>true){
   return {scene,material,view,rebase:(x:number)=>{shift=x;view.shift(x,0);},dispose:()=>{view.dispose();scene.dispose();engine.dispose();}};
 }
 
+it('freezes only the inspected representative while the team and its server assignment continue',()=>{
+  const f=fixture();try{
+    const state=snapshot('pair',epoch,2);
+    state.village.population={total:2,housingCapacity:30,available:0,working:2,resting:0,energyCounts:[],
+      cohorts:[{id:'cohort',memberCount:2,activity:'working',restBuildingId:null,restingSince:null,energy:8,assignmentId:'pair',cartographer:true}]};
+    f.view.sync(state,epoch);for(let t=0;t<2000;t+=16)f.view.animate(epoch+t,true);
+    const id='pair:0',before=f.view.representativePose(id)!;
+    expect(before).not.toBeNull();
+    const info=f.view.representativeInfo(id)!;
+    expect(info.energy).toBe(8);expect(info.qualifications).toEqual(['Cartographe']);expect(info.cohortSize).toBe(2);
+    f.view.freezeRepresentative(id);
+    const other=f.view.representativePose('pair:1')!.position.clone();
+    for(let t=2000;t<5000;t+=16)f.view.animate(epoch+t,true);
+    expect(f.view.representativePose(id)!.position.equals(before.position)).toBe(true);
+    expect(f.view.representativePose('pair:1')!.position.equals(other)).toBe(false);
+    f.view.sync(state,epoch+5000);expect(f.view.representativeInfo(id)!.name).toBe(info.name);
+    f.view.freezeRepresentative(null);f.view.animate(epoch+5016,true);
+    expect(f.view.representativePose(id)!.position.equals(before.position)).toBe(false);
+    expect(state.village.extractions[0]!.completesAt).toBe(new Date(epoch+80_000).toISOString());
+  }finally{f.dispose();}
+});
+
 it('reconstructs current work after reload and keeps all ten roles through snapshot and LOD changes',()=>{
   const f=fixture();try{
     f.view.sync(snapshot(),epoch+20_000);f.view.animate(epoch+20_000,true);
