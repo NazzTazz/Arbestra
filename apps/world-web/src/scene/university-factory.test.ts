@@ -23,10 +23,14 @@ it('builds and disposes a bounded material batch for works and finished levels',
       for (const mesh of meshes) {
         mesh.computeWorldMatrix(true);
         const box = mesh.getBoundingInfo().boundingBox;
-        expect(box.minimumWorld.x).toBeGreaterThanOrEqual(-6.25 - 1e-6);
-        expect(box.maximumWorld.x).toBeLessThanOrEqual(6.25 + 1e-6);
-        expect(box.minimumWorld.z).toBeGreaterThanOrEqual(-7.5 - 1e-6);
-        expect(box.maximumWorld.z).toBeLessThanOrEqual(7.5 + 1e-6);
+        // Scaffolding stands .08 outside the facade with .05-wide posts.
+        // Window sills project .06 and stone jambs .01 beyond the facade.
+        const oak = mesh.material?.name === 'hall-oak';
+        const projection = oak ? phase === 'works' ? .105 : .06 : mesh.material?.name === 'hall-cut-stone' ? .01 : 0;
+        expect(box.minimumWorld.x, `${phase}/${level}/${mesh.name}`).toBeGreaterThanOrEqual(-6.25 - projection - 1e-6);
+        expect(box.maximumWorld.x).toBeLessThanOrEqual(6.25 + projection + 1e-6);
+        expect(box.minimumWorld.z).toBeGreaterThanOrEqual(-7.5 - projection - 1e-6);
+        expect(box.maximumWorld.z).toBeLessThanOrEqual(7.5 + projection + 1e-6);
       }
       root.dispose(false, false);
       expect(scene.meshes.every(m => m.isDisposed())).toBe(true);

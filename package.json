@@ -7,6 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "factory:bake": "node scripts/bake-buildings.mjs",
     "build": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --filter @arbestra/api build && corepack pnpm --filter @arbestra/play-web build && corepack pnpm --filter @arbestra/world-web build",
     "dev": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --parallel --filter @arbestra/api --filter @arbestra/play-web --filter @arbestra/world-web dev",
     "db:migrate": "corepack pnpm --filter @arbestra/api db:migrate",

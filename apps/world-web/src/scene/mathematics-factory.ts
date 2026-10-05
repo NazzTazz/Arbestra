@@ -1,3 +1,4 @@
+import { BuildingGeometry } from './building-geometry';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { buildingPlan, HALL_RECIPE, type BuildingPlan, type BuildingRecipe } from './building-plan';
@@ -69,10 +70,10 @@ function mathematicsPlatform(parent: Mesh, kit: TimberThatch, level: number) {
   const width=(level===3?5:3)*CELL_UNITS,depth=CELL_UNITS;
   const steps=level*2,stepHeight=HALL_RECIPE.module.height,height=steps*stepHeight;
   const stoneLength=CAMPUS_SUBCELL_UNITS,wallThickness=stoneLength/2,joint=HALL_RECIPE.module.joint;
-  const parts: Mesh[]=[];
+  const parts: BuildingGeometry[]=[];
   const block=(name:string,x:number,y:number,z:number,w:number,h:number,d:number)=>{
-    const mesh=new Mesh(name,kit.scene);timberBeamGeometry(h,w,d,true,1).applyToMesh(mesh);
-    mesh.position.set(x,y,z);mesh.material=kit.stone;parts.push(mesh);
+    const mesh=new BuildingGeometry(name,timberBeamGeometry(h,w,d,true,1));
+    mesh.position.set(x,y,z);parts.push(mesh);
   };
   // Hollow masonry shell and continuous landing: no invisible solid brick fill.
   for(let course=0;course<steps;course++){
@@ -97,8 +98,8 @@ function mathematicsPlatform(parent: Mesh, kit: TimberThatch, level: number) {
     for(let column=0;column<16;column++)
       block('mathematics-stair',-stairWidth/2+(column+.5)*stoneLength,h/2,z,stoneLength-joint,h,CAMPUS_SUBCELL_UNITS-joint);
   }
-  const merged=Mesh.MergeMeshes(parts,true,true);
-  if(!merged)throw new Error('Mathematics platform geometry merge failed');
+  const merged=new Mesh('mathematics-stone-platform',kit.scene);
+  BuildingGeometry.merge(parts).applyToMesh(merged);
   merged.name='mathematics-stone-platform';merged.parent=parent;merged.material=kit.stone;merged.receiveShadows=true;merged.isPickable=false;
   return height;
 }

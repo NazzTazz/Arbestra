@@ -30,10 +30,11 @@ void main(){
 }`;
 
 /** One scene capture shared by all panes; glass is excluded from its own image. */
-class FrostedGlass {
+export class FrostedGlass {
   readonly material: ShaderMaterial;
   readonly capture: RenderTargetTexture;
   private panes = 0;
+  private listDirty = true;
   constructor(private readonly scene: Scene) {
     this.capture = new RenderTargetTexture('campus-glass-background', 512, scene, false, true);
     this.capture.wrapU = this.capture.wrapV = Texture.CLAMP_ADDRESSMODE;
@@ -41,13 +42,25 @@ class FrostedGlass {
       { attributes: ['position', 'uv'], uniforms: ['worldViewProjection'], samplers: ['background'] });
     this.material.backFaceCulling = false;
     this.material.setTexture('background', this.capture);
-    this.capture.renderListPredicate = mesh => mesh.material !== this.material && mesh.isEnabled() && mesh.isVisible && mesh.getTotalVertices() > 0;
+    // Babylon observes renderList mutations. Clearing and pushing every mesh via
+    // renderListPredicate invalidates light defines for the whole scene each frame.
+    // Visibility remains the object renderer's responsibility, not list membership.
+    this.capture.renderList=[];
+    scene.onNewMeshAddedObservable.add(()=>{this.listDirty=true;});
+    scene.onMeshRemovedObservable.add(()=>{this.listDirty=true;});
+    scene.onBeforeRenderTargetsRenderObservable.add(()=>{
+      if(!this.panes||!this.listDirty)return;
+      this.listDirty=false;
+      this.capture.renderList=scene.meshes.filter(mesh=>mesh.material!==this.material&&mesh.getTotalVertices()>0);
+    });
   }
   attach(mesh: Mesh) {
     mesh.material = this.material; mesh.isPickable = false;
+    this.listDirty=true;
     if(this.panes++ === 0)this.scene.customRenderTargets.push(this.capture);
     mesh.onDisposeObservable.addOnce(() => {
       if(--this.panes === 0){
+        this.capture.renderList=[];this.listDirty=true;
         const index=this.scene.customRenderTargets.indexOf(this.capture);
         if(index>=0)this.scene.customRenderTargets.splice(index,1);
       }
@@ -55,6 +68,12 @@ class FrostedGlass {
   }
 }
 const glasses = new WeakMap<Scene, FrostedGlass>();
+export function attachFrostedGlass(mesh: Mesh) {
+  mesh.metadata={...mesh.metadata,buildingAttachment:'glass'};
+  const scene=mesh.getScene();let glass=glasses.get(scene);
+  if(!glass){glass=new FrostedGlass(scene);glasses.set(scene,glass);}
+  glass.attach(mesh);
+}
 
 export function glazeWindows(parent: Mesh, plan: BuildingPlan) {
   const panes: Mesh[] = [];
@@ -75,7 +94,5 @@ export function glazeWindows(parent: Mesh, plan: BuildingPlan) {
   const merged=Mesh.MergeMeshes(panes,true,true);
   if(!merged)throw new Error('Window glass geometry merge failed');
   merged.name=`${parent.name}-glass`;merged.parent=parent;
-  const scene=parent.getScene();let glass=glasses.get(scene);
-  if(!glass){glass=new FrostedGlass(scene);glasses.set(scene,glass);}
-  glass.attach(merged);
+  attachFrostedGlass(merged);
 }

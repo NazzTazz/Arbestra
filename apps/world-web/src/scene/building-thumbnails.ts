@@ -1,8 +1,10 @@
+import manifest from './building-assets-manifest.json';
+const baked:Record<string,{url:string;thumbnail?:string}>=manifest;
 import { BuildingThumbnailCache } from './building-thumbnail-cache';
 
 // Bump whenever presentation recipes, materials/textures, camera or resolution change.
 // This includes the factories used by buildPresentation and public/tiles/garden-4.png.
-const THUMBNAIL_REVISION = 'factory-1-png-384x240';
+const THUMBNAIL_REVISION = 'factory-3-infrastructure-png-384x240';
 
 // Keep this module free of Babylon imports: a persistent hit needs only the pixels.
 const cache = new BuildingThumbnailCache(THUMBNAIL_REVISION, async (code, level) => {
@@ -11,9 +13,10 @@ const cache = new BuildingThumbnailCache(THUMBNAIL_REVISION, async (code, level)
 });
 
 export function peekBuildingThumbnail(code: string, level = 1): string | undefined {
-  return cache.peek(code, level);
+  return baked[`${code}-${level}-finished`]?.thumbnail??cache.peek(code, level);
 }
 
 export function buildingThumbnail(code: string, level = 1): Promise<string> {
-  return cache.get(code, level);
+  const thumbnail=baked[`${code}-${level}-finished`]?.thumbnail;
+  return thumbnail?Promise.resolve(thumbnail):cache.get(code, level);
 }

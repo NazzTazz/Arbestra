@@ -1,5 +1,5 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { BuildingGeometry } from './building-geometry';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { Vector3, Quaternion } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
@@ -7,7 +7,8 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import type { Scene } from '@babylonjs/core/scene';
 import { facePoint, type BuildingPlan } from './building-plan';
-import {timberDoor} from './timber-door';
+import {timberDoorGeometry} from './timber-door';
+import {timberWallMembers} from './timber-wall';
 
 export function hallWallCourse(row:number,axis:'x'|'z'){
   const halfX=1.245,halfZ=1.135,thickness=.16;
@@ -41,6 +42,7 @@ export function timberBeamGeometry(length:number,w:number,h:number,rounded=false
 
 /** Presentation kit. Coordinates are relative to the existing hall body/door. */
 export class TimberThatch {
+  enqueueBuild:((parent:Mesh,steps:Generator<void,Mesh,unknown>)=>void)|null=null;
   readonly wood:StandardMaterial;
   readonly boards:StandardMaterial;
   readonly nails:StandardMaterial;
@@ -93,20 +95,25 @@ export class TimberThatch {
     t.update(false);return t;
   }
   build(parent:Mesh,plan?:BuildingPlan,roofOpening?:readonly [number,number]){
+    const steps=this.buildSteps(parent,plan,roofOpening,this.enqueueBuild?8192:Infinity);
+    if(this.enqueueBuild)this.enqueueBuild(parent,steps);
+    else for(const step of steps)void step;
+    return parent;
+  }
+  *buildSteps(parent:Mesh,plan?:BuildingPlan,roofOpening?:readonly [number,number],batchVertices=Infinity):Generator<void,Mesh,unknown>{
+    if(parent.isDisposed())return parent;
     const flatStone=plan?.recipe.roof.style==='flat-stone';
-    const batches=new Map<StandardMaterial,Mesh[]>();
-    const add=(m:Mesh,mat:StandardMaterial)=>{
-      m.material=mat;
-      if(mat===this.stone&&!m.isVerticesDataPresent('color'))m.setVerticesData('color',new Array(m.getTotalVertices()*4).fill(1));
+    const batches=new Map<StandardMaterial,BuildingGeometry[]>();
+    const add=(m:BuildingGeometry,mat:StandardMaterial)=>{
+      if(mat===this.stone&&!m.getVerticesData('color'))m.setVerticesData('color',new Array(m.getTotalVertices()*4).fill(1));
       const a=batches.get(mat)??[];a.push(m);batches.set(mat,a);return m;
     };
     const beam=(name:string,a:Vector3,b:Vector3,w:number,h=w,material=this.wood)=>{
-      const m=new Mesh(name,this.scene);
-      timberBeamGeometry(Vector3.Distance(a,b),w,h,material===this.stone,plan?1:3).applyToMesh(m);
+      const m=new BuildingGeometry(name,timberBeamGeometry(Vector3.Distance(a,b),w,h,material===this.stone,plan?1:3));
       m.position=Vector3.Center(a,b);m.rotationQuaternion=new Quaternion();Quaternion.FromUnitVectorsToRef(Vector3.Up(),b.subtract(a).normalize(),m.rotationQuaternion);return add(m,material);
     };
     const v=(x:number,y:number,z:number)=>new Vector3(x,y,z);
-    const turnGrain=(piece:Mesh)=>{
+    const turnGrain=(piece:BuildingGeometry)=>{
       const uv=piece.getVerticesData('uv')!;
       for(let i=0;i<uv.length;i+=2){const u=uv[i]!;uv[i]=uv[i+1]!;uv[i+1]=1-u;}
       piece.setVerticesData('uv',uv);
@@ -116,9 +123,10 @@ export class TimberThatch {
     const floorDepth=plan?plan.depth-2*plan.recipe.module.thickness:1.95;
     const boardCount=Math.ceil(floorWidth/.14),floorBoardWidth=floorWidth/boardCount;
     for(let column=0;column<boardCount;column++){
+      if(column%8===0)yield;
       let z=-floorDepth/2;
       while(z<floorDepth/2-.001){const end=Math.min(floorDepth/2,z+(z===-floorDepth/2&&column%2?.35:.7));
-        const board=MeshBuilder.CreateBox('factory-parquet',{width:floorBoardWidth-.002,height:.035,depth:end-z-.002},this.scene);
+        const board=BuildingGeometry.box('factory-parquet',{width:floorBoardWidth-.002,height:.035,depth:end-z-.002});
         turnGrain(board);
         board.position.set(-floorWidth/2+(column+.5)*floorBoardWidth,(plan?0:-.76)+.0175,(z+end)/2);add(board,this.wood);z=end;
       }
@@ -152,7 +160,7 @@ export class TimberThatch {
         beam('hall-strut',v(0,y-x/Math.tan(angle),z),v(sign*x,y,z),.075);}
       // Small wooden peg heads on the gable faces.
       for(const x of [-half+.1,0,half-.1]){
-        const p=MeshBuilder.CreateCylinder('hall-peg',{diameter:.035,height:.018,tessellation:6},this.scene);
+        const p=BuildingGeometry.cylinder('hall-peg',{diameter:.035,height:.018,tessellation:6});
         p.rotation.x=Math.PI/2;p.position.set(x,eave,z+(z<0?-.085:.085));add(p,this.wood);
       }
     }
@@ -163,7 +171,7 @@ export class TimberThatch {
     // Every layer is placed by contact along the roof normal, not arbitrary world-Y offsets.
     for(const side of [-1,1]){
       for(const distance of [half*.5/Math.cos(angle),half/Math.cos(angle)])for(const [lo,hi] of roofRanges){
-        const m=MeshBuilder.CreateBox('hall-purlin',{width:purlinSize,height:purlinSize,depth:hi-lo-.1},this.scene);
+        const m=BuildingGeometry.box('hall-purlin',{width:purlinSize,height:purlinSize,depth:hi-lo-.1});
         m.rotation.z=-side*angle;m.position=point(side,distance,purlinOffset,(lo+hi)/2);add(m,this.wood);
       }
       const chevrons=Math.ceil((roofHalfZ*2-.1)/.32);
@@ -173,7 +181,7 @@ export class TimberThatch {
       for(let row=0;row<structuralRows;row++){
 
         for(const distance of [row*structuralLen/structuralRows+.06,Math.min(structuralLen-.03,(row+1)*structuralLen/structuralRows)])for(const [lo,hi] of roofRanges){
-          const m=MeshBuilder.CreateBox('hall-lath',{width:.04,height:lathSize,depth:hi-lo},this.scene);
+          const m=BuildingGeometry.box('hall-lath',{width:.04,height:lathSize,depth:hi-lo});
           m.rotation.z=-side*angle;m.position=point(side,distance,lathOffset,(lo+hi)/2);add(m,this.wood);
         }
       }
@@ -189,7 +197,7 @@ export class TimberThatch {
     // Hay rests on the horizontal deck between trusses; the sloping roof stays exposed.
     if(!flatStone)for(let bay=0;bay<trussZ.length-1;bay++){const z=(trussZ[bay]!+trussZ[bay+1]!)/2;
       if(roofOpening&&z>roofOpening[0]&&z<roofOpening[1])continue;
-      const fill=MeshBuilder.CreateBox('hall-ceiling-hay-bay',{width:half*2-.25,height:.075,depth:trussZ[bay+1]!-trussZ[bay]!-.18},this.scene);
+      const fill=BuildingGeometry.box('hall-ceiling-hay-bay',{width:half*2-.25,height:.075,depth:trussZ[bay+1]!-trussZ[bay]!-.18});
       fill.position.set(0,eave+.075/2,z);add(fill,this.hay);
     }
     if(flatStone&&plan&&plan.phase!=='works'){
@@ -234,27 +242,36 @@ export class TimberThatch {
     // Cut the actual wall geometry around each opening: no dark/glass decal hiding a solid body.
     if(plan){
       const works=plan.phase==='works',limit=works?worksHeight:plan.height;
-      for(const stone of plan.stones){if(stone.y>limit)continue;
+      let made=0;
+      const timber=plan.recipe.wallMaterial==='logs'||plan.recipe.wallMaterial==='beams';
+      for(const stone of timber?timberWallMembers(plan):plan.stones){if(stone.y>limit)continue;
+        if(++made%32===0)yield;
         const a=stone.axis==='x'?v(stone.x-stone.length/2,stone.y,stone.z):v(stone.x,stone.y,stone.z-stone.length/2);
         const b=stone.axis==='x'?v(stone.x+stone.length/2,stone.y,stone.z):v(stone.x,stone.y,stone.z+stone.length/2);
-        const block=beam('factory-stone',a,b,stone.height,stone.thickness,this.stone);
+        if(plan.recipe.wallMaterial==='logs'){
+          const log=BuildingGeometry.cylinder('factory-log',{height:stone.length,diameter:stone.height,tessellation:10});
+          log.position=Vector3.Center(a,b);log.rotationQuaternion=new Quaternion();
+          Quaternion.FromUnitVectorsToRef(Vector3.Up(),b.subtract(a).normalize(),log.rotationQuaternion);
+          add(log,this.wood);continue;
+        }
+        const block=beam(timber?'factory-beam':'factory-stone',a,b,stone.height,stone.thickness,timber?this.wood:this.stone);
         block.rotationQuaternion=hallStoneCrossRotation(stone.axis).multiply(block.rotationQuaternion!);
-        const colours:number[]=[];for(let i=0;i<block.getTotalVertices();i++)colours.push(stone.shade,stone.shade,stone.shade,1);block.setVerticesData('color',colours);
+        if(!timber){const colours:number[]=[];for(let i=0;i<block.getTotalVertices();i++)colours.push(stone.shade,stone.shade,stone.shade,1);block.setVerticesData('color',colours);}
       }
       for(const opening of plan.openings){
+        yield;
         if(opening.top>limit)continue;
         const dist=opening.face.endsWith('x')?plan.width/2:plan.depth/2;
         const at=(u:number,y:number,d=dist)=>{const p=facePoint(opening.face,u,y,d);return v(p.x,p.y,p.z);};
         if(opening.door&&!plan.recipe.entrance.open){
-          const door=timberDoor(this.scene,this.wood,opening.right-opening.left,opening.top-opening.bottom-.02,timberBeamGeometry);
+          const door=timberDoorGeometry(opening.right-opening.left,opening.top-opening.bottom-.02,timberBeamGeometry);
           door.position=at((opening.left+opening.right)/2,opening.bottom+.01,dist-.025);
           door.rotation.y=({'-x':-Math.PI/2,'+x':Math.PI/2,'-z':Math.PI,'+z':0})[opening.face];
           add(door,this.wood);
         }
         const wallThickness=plan.recipe.module.thickness,frameDepth=wallThickness+.02,frameWidth=.045;
-        const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=this.stone,d=dist-wallThickness/2)=>{
-          const piece=material===this.stone?new Mesh(name,this.scene):MeshBuilder.CreateBox(name,{width,height,depth},this.scene);
-          if(material===this.stone)timberBeamGeometry(height,width,depth,true,plan?1:3).applyToMesh(piece);
+        const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=timber?this.wood:this.stone,d=dist-wallThickness/2)=>{
+          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,plan?1:3)):BuildingGeometry.box(name,{width,height,depth});
           piece.position=at(u,y,d);
           if(opening.face.endsWith('x'))piece.rotation.y=Math.PI/2;
           if(material===this.wood)turnGrain(piece);
@@ -319,8 +336,7 @@ export class TimberThatch {
       for(const o of openings){
         const at=(u:number,y:number)=>axis==='x'?v(u,y,fixed):v(fixed,y,u);
         const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=this.stone,outside=false)=>{
-          const piece=material===this.stone?new Mesh(name,this.scene):MeshBuilder.CreateBox(name,{width,height,depth},this.scene);
-          if(material===this.stone)timberBeamGeometry(height,width,depth,true,3).applyToMesh(piece);
+          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,3)):BuildingGeometry.box(name,{width,height,depth});
           piece.position=at(u,y);if(outside){if(axis==='x')piece.position.z+=sign*.098;else piece.position.x+=sign*.098;}
           if(axis==='z')piece.rotation.y=Math.PI/2;if(material===this.wood)turnGrain(piece);add(piece,material);
         };
@@ -335,7 +351,7 @@ export class TimberThatch {
     wall('x',-1,[window(-.72),window(.72),{left:-.275,right:.275,bottom:-.76,top:.08}]);
     wall('x',1,[window(-.72),window(.72)]);
     for(const sign of [-1,1])wall('z',sign,[window(0)]);
-    const door=timberDoor(this.scene,this.wood,.55,.84,timberBeamGeometry);
+    const door=timberDoorGeometry(.55,.84,timberBeamGeometry);
     door.position.set(0,-.76,-1.10);door.rotation.y=Math.PI;add(door,this.wood);
     }
     // Individually nailed flush boards. Half-board offset on alternating courses.
@@ -345,24 +361,25 @@ export class TimberThatch {
       const along=v(side*Math.cos(angle),-Math.sin(angle),0),normal=v(side*Math.sin(angle),Math.cos(angle),0);
       const origin=v(0,ridge,0);
       for(let row=0;row<rows;row++){
+        yield;
         const start=row*step,end=Math.min(len,start+step),length=end-start-.003;
         const offset=row%2?boardWidth/2:0;
         for(let column=-1;column<Math.ceil(span/boardWidth)+1;column++)for(const [rangeLo,rangeHi] of roofRanges){
           const lo=Math.max(rangeLo,-span/2+column*boardWidth+offset),hi=Math.min(rangeHi,-span/2+(column+1)*boardWidth+offset);
           if(hi-lo<.025)continue;
           const height=lathOffset+lathSize/2+plankSize/2;
-          const board=MeshBuilder.CreateBox('hall-roof-plank',{width:length,height:plankSize,depth:hi-lo-.006},this.scene);
+          const board=BuildingGeometry.box('hall-roof-plank',{width:length,height:plankSize,depth:hi-lo-.006});
           board.rotation.z=-side*angle;board.position=origin.add(along.scale((start+end)/2)).add(normal.scale(height));board.position.z=(lo+hi)/2;add(board,this.boards);
           for(const z of [lo+.045,hi-.045]){
             if(hi-lo<.11&&z!==lo+.045)continue;
-            const nail=MeshBuilder.CreateCylinder('hall-plank-nail',{diameter:.018,height:.007,tessellation:6},this.scene);
+            const nail=BuildingGeometry.cylinder('hall-plank-nail',{diameter:.018,height:.007,tessellation:6});
             nail.rotation.z=-side*angle;nail.position=origin.add(along.scale(start+.1)).add(normal.scale(height+.024));nail.position.z=z;add(nail,this.nails);
           }
         }
       }
       // Two narrow ridge boards cover the seam instead of a thick rounded cap.
       for(const [lo,hi] of roofRanges){
-      const cap=MeshBuilder.CreateBox('hall-board-ridge',{width:.42,height:.035,depth:hi-lo+(roofOpening?0:.01)},this.scene);
+      const cap=BuildingGeometry.box('hall-board-ridge',{width:.42,height:.035,depth:hi-lo+(roofOpening?0:.01)});
       const capApex=v(0,ridge+(lathOffset+lathSize/2+plankSize)/Math.cos(angle)+.025,0);
       cap.rotation.z=-side*angle;cap.position=capApex.add(along.scale(.17));cap.position.z=(lo+hi)/2;add(cap,this.boards);
       }
@@ -370,9 +387,19 @@ export class TimberThatch {
     }
     if(plan?.phase==='works'){
       // Exposed frame only: remove completed roof layers and hay from the construction view.
-      for(const [mat,parts] of batches)batches.set(mat,parts.filter(m=>{const remove=/hall-(purlin|chevron|lath|ceiling-hay|flat-ceiling)/.test(m.name);if(remove)m.dispose();return !remove;}));
+      for(const [mat,parts] of batches)batches.set(mat,parts.filter(m=>{const remove=/hall-(purlin|chevron|lath|ceiling-hay|flat-ceiling)/.test(m.name);return !remove;}));
     }
-    for(const [mat,parts] of batches){const merged=Mesh.MergeMeshes(parts,true,true);if(!parts.length)continue;if(!merged)throw new Error('Building geometry merge failed');merged.name=`${parent.name}-${mat.name}`;merged.parent=parent;merged.material=mat;merged.receiveShadows=true;}
+    for(const [mat,parts] of batches){
+      for(let start=0;start<parts.length;){
+        if(parent.isDisposed())return parent;
+        let end=start,total=0;
+        while(end<parts.length&&(end===start||total+parts[end]!.getTotalVertices()<=batchVertices))total+=parts[end++]!.getTotalVertices();
+        const merged=new Mesh(`${parent.name}-${mat.name}${start?`-${start}`:''}`,this.scene);
+        BuildingGeometry.merge(parts.slice(start,end)).applyToMesh(merged);
+        merged.parent=parent;merged.material=mat;merged.receiveShadows=true;start=end;
+        yield;
+      }
+    }
     return parent;
   }
 }

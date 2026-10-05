@@ -14,8 +14,14 @@ export function buildUniversity(root: Mesh, kit: TimberThatch, level: number, ph
   buildMedicine(root, kit, level, phase);
   buildGeography(root, kit, level, phase);
   buildCampusTrees(root, kit);
+  if(phase==='finished')buildUniversityMonuments(root,kit,monuments);
+  for (const child of root.getChildMeshes()) child.isPickable = false;
+  return root;
+}
+
+export function buildUniversityMonuments(root:Mesh,kit:TimberThatch,monuments:{mathematics:boolean;astronomy:boolean}) {
   const parts: Mesh[] = [];
-  if (phase === 'finished') for (const [enabled, x, astronomical] of [[monuments.mathematics, -.7, false], [monuments.astronomy, .7, true]] as const) {
+  for (const [enabled, x, astronomical] of [[monuments.mathematics, -.7, false], [monuments.astronomy, .7, true]] as const) {
     if (!enabled) continue;
     const plinth = MeshBuilder.CreateBox('university-monument-plinth', { width: .4, height: .24, depth: .4 }, kit.scene);
     plinth.position.set(x, .12, 1.8); parts.push(plinth);

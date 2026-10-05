@@ -12,7 +12,9 @@ export interface BuildingRecipe {
   module: { length: number; height: number; thickness: number; joint: number };
   courses: number; levels: number; floorThickness: number;
   rotateOddLevels?: boolean;
+  wallMaterial?: 'stone' | 'logs' | 'beams';
   entrance: { face: Face; centre: number; width: number; courses: number; enabled?: boolean; open?: boolean };
+  accesses?:Array<{id:string;face:Face;centre:number;width:number;courses:number;principal:boolean}>;
   windows: Partial<Record<Face, number[]>>;
   // Explicit bays: centre in half-modules, width in modules, heights in courses.
   windowOpenings?: Array<{face:Face;level:number;centre:number;width:number;sill:number;courses:number}>;
@@ -30,6 +32,7 @@ export interface BuildingPlan {
   origin:Point; rotation:number; width:number; depth:number; height:number; base:number;
   footprint:{width:number;depth:number}; fill:[number,number]; openings:Opening[]; stones:Stone[];
   entry:{inside:Point;threshold:Point;outside:Point;gate:Point;normal:Point};
+  accesses:Array<{id:string;principal:boolean;width:number;entry:BuildingPlan['entry']}>;
   murets:WallSegment[]; bounds:{halfX:number;halfZ:number};
 }
 export const CELL_UNITS=2.5;
@@ -41,6 +44,35 @@ export const HALL_RECIPE:BuildingRecipe={id:'town-hall',version:1,modules:[8,16]
 export const HOUSE_RECIPE:BuildingRecipe={...HALL_RECIPE,id:'stone-house',modules:[6,6],courses:10,
   rotateOddLevels:true,
   entrance:{face:'-z',centre:0,width:2,courses:6},windows:{'-x':[1],'+x':[1],'-z':[0],'+z':[1]}};
+export const LOG_HOUSE_RECIPE:BuildingRecipe={...HOUSE_RECIPE,id:'log-house',wallMaterial:'logs'};
+export const BEAM_HOUSE_RECIPE:BuildingRecipe={...HOUSE_RECIPE,id:'beam-house',wallMaterial:'beams'};
+
+function windowCentres(length:number,module:BuildingRecipe['module'],level:number,count:number,doors:readonly Opening[]):number[]|null{
+  const half=length/2,slots:number[]=[],positions:number[]=[];
+  for(let u=-half+2*module.length;u<=half-2*module.length+1e-8;u+=module.length/2)
+    if(level>0||doors.every(door=>u+module.length<=door.left-module.thickness||u-module.length>=door.right+module.thickness))slots.push(u);
+  for(let i=0;i<count;i++){
+    const desired=count===1?0:-half+(i+1)*length/(count+1),candidates=slots.filter(u=>positions.every(p=>Math.abs(p-u)>=3*module.length-1e-8));
+    candidates.sort((a,b)=>Math.abs(a-desired)-Math.abs(b-desired)||a-b);
+    if(!candidates.length)return null;positions.push(candidates[0]!);
+  }return positions;
+}
+
+/** Atelier changes to doors also rebalance the windows on those ground-floor walls. */
+export function withBuildingAccesses(recipe:BuildingRecipe,face:Face,secondary=false):BuildingRecipe{
+  assert(Boolean(recipe.modules),'access editing requires explicit body modules');
+  const opposite={'-x':'+x','+x':'-x','-z':'+z','+z':'-z'} as const,m=recipe.module;
+  const accesses=[{id:'main',...recipe.entrance,face,principal:true},...(secondary?[{id:'secondary',...recipe.entrance,face:opposite[face],principal:false}]:[])];
+  const windows={...recipe.windows};
+  for(const f of FACES){
+    const doors=accesses.filter(a=>a.face===f).map(a=>({face:f,left:(a.centre-a.width)*m.length/2,right:(a.centre+a.width)*m.length/2,bottom:0,top:a.courses*m.height,door:true}));
+    if(!doors.length)continue;
+    let count=windows[f]?.[0]??0;const length=recipe.modules![f.endsWith('x')?1:0]*m.length;
+    while(count>0&&!windowCentres(length,m,0,count,doors))count--;
+    windows[f]=Array.from({length:recipe.levels},(_,level)=>level?recipe.windows[f]?.[level]??recipe.windows[f]?.[0]??0:count);
+  }
+  return {...recipe,entrance:{...recipe.entrance,face},accesses,windows};
+}
 
 function assert(ok:boolean,message:string):asserts ok {if(!ok)throw new Error(`Building recipe: ${message}`);}
 export function facePoint(face:Face,u:number,y:number,distance:number):Point {
@@ -85,24 +117,17 @@ export function buildingPlan(input:PlanInput):BuildingPlan {
   const openings:Opening[]=[];
   for(const face of FACES){
     const length=face.endsWith('x')?depth:width,half=length/2,side=face.endsWith('x')?width/2:depth/2;
-    if(face===r.entrance.face&&r.entrance.enabled!==false){const centre=r.entrance.centre*m.length/2,w=r.entrance.width*m.length;
-      assert(Number.isInteger(r.entrance.centre)&&Number.isInteger(r.entrance.width)&&Number.isInteger(r.entrance.courses),'door off lattice');
-      openings.push({face,left:centre-w/2,right:centre+w/2,bottom:0,top:r.entrance.courses*m.height,door:true});}
+    const doors=r.accesses??(r.entrance.enabled!==false?[{id:'main',principal:true,...r.entrance}]:[]);
+    for(const door of doors.filter(d=>d.face===face)){const centre=door.centre*m.length/2,w=door.width*m.length;
+      assert(Number.isInteger(door.centre)&&Number.isInteger(door.width)&&Number.isInteger(door.courses),'door off lattice');
+      openings.push({face,left:centre-w/2,right:centre+w/2,bottom:0,top:door.courses*m.height,door:true});}
     for(let level=0;level<r.levels;level++){
       const count=r.windows[face]?.[level]??r.windows[face]?.[0]??0;
       assert(Number.isInteger(count)&&count>=0,'invalid window count');
       const bottom=level*(r.courses*m.height+r.floorThickness)+4*m.height;
-      const door=openings.find(o=>o.face===face&&o.door),positions:number[]=[];
-      // Deterministic balanced slots, excluding the entrance on the ground level.
-      const slots:number[]=[];for(let u=-half+2*m.length;u<=half-2*m.length+1e-8;u+=m.length/2)
-        if(level>0||!door||u+m.length<=door.left-m.thickness||u-m.length>=door.right+m.thickness)slots.push(u);
-      for(let i=0;i<count;i++){
-        const desired=count===1?0:-half+(i+1)*length/(count+1);
-        const candidates=slots.filter(u=>positions.every(p=>Math.abs(p-u)>=3*m.length-1e-8));
-        candidates.sort((a,b)=>Math.abs(a-desired)-Math.abs(b-desired)||a-b);
-        assert(candidates.length>0,'windows cannot fit');positions.push(candidates[0]!);
-      }
-      for(const u of positions)openings.push({face,left:u-m.length,right:u+m.length,bottom,top:bottom+3*m.height,door:false});
+      const positions=windowCentres(length,m,level,count,openings.filter(o=>o.face===face&&o.door));
+      assert(positions!==null,'windows cannot fit');
+      for(const u of positions!)openings.push({face,left:u-m.length,right:u+m.length,bottom,top:bottom+3*m.height,door:false});
     }
     for(const bay of r.windowOpenings??[]){
       if(bay.face!==face)continue;
@@ -117,6 +142,12 @@ export function buildingPlan(input:PlanInput):BuildingPlan {
   const face=r.entrance.face,normal=facePoint(face,0,0,1),distance=face.endsWith('x')?width/2:depth/2,u=r.entrance.centre*m.length/2;
   const edge=available[face.endsWith('x')?0:1]!/2-(face[0]==='-'?-1:1)*(face.endsWith('x')?ox:oz);
   const entry={normal,inside:facePoint(face,u,0,distance-.08),threshold:facePoint(face,u,0,distance),outside:facePoint(face,u,0,distance+WORKER_CLEARANCE),gate:facePoint(face,u,0,edge)};
+  const accesses=(r.accesses??(r.entrance.enabled!==false?[{id:'main',principal:true,...r.entrance}]:[])).map(door=>{
+    const d=door.face.endsWith('x')?width/2:depth/2,centre=door.centre*m.length/2;
+    const gate=available[door.face.endsWith('x')?0:1]!/2-(door.face[0]==='-'?-1:1)*(door.face.endsWith('x')?ox:oz);
+    return {id:door.id,principal:door.principal,width:door.width*m.length,entry:{normal:facePoint(door.face,0,0,1),inside:facePoint(door.face,centre,0,d-.08),threshold:facePoint(door.face,centre,0,d),outside:facePoint(door.face,centre,0,d+WORKER_CLEARANCE),gate:facePoint(door.face,centre,0,gate)}};
+  });
+  assert(new Set(accesses.map(a=>a.id)).size===accesses.length&&(!accesses.length||accesses.filter(a=>a.principal).length===1),'accesses need unique identities and one principal');
   const stones:Stone[]=[];
   for(let level=0;level<r.levels;level++)for(let row=level>0&&r.floorThickness>m.joint?-1:0;row<r.courses;row++)for(const wallFace of FACES){
     const axis=wallFace.endsWith('x')?'z':'x',through=(row%2===0)===(axis==='x'),half=(axis==='x'?width:depth)/2;
@@ -151,17 +182,17 @@ export function buildingPlan(input:PlanInput):BuildingPlan {
       for(const [a,b] of cuts)if(b!-a!>.001)murets.push({a:facePoint(f,a!,0,perp-normalShift-m.thickness/2),b:facePoint(f,b!,0,perp-normalShift-m.thickness/2),height:r.walls.courses*m.height,thickness:m.thickness,key:`${input.id}:${f}:${a}`,owner:input.id});
     }
   }
-  return {id:input.id,recipe:r,phase:input.phase??'finished',sourceLevels:input.sourceLevels??0,origin,rotation,width,depth,height,base,footprint:{width:fw,depth:fd},fill:[width/available[0]!,depth/available[1]!],openings,stones,entry,murets,bounds:{halfX:width/2+sideOverhang,halfZ:depth/2+endOverhang}};
+  return {id:input.id,recipe:r,phase:input.phase??'finished',sourceLevels:input.sourceLevels??0,origin,rotation,width,depth,height,base,footprint:{width:fw,depth:fd},fill:[width/available[0]!,depth/available[1]!],openings,stones,entry:accesses.find(a=>a.principal)?.entry??entry,accesses,murets,bounds:{halfX:width/2+sideOverhang,halfZ:depth/2+endOverhang}};
 }
 
 export function recipeFor(building:Building):{recipe:BuildingRecipe;phase:'finished'|'works';sourceLevels:number}|null {
   const layout=building.visualLayout;if(!layout)return null;
-  const base=layout.recipe==='town-hall'?HALL_RECIPE:HOUSE_RECIPE;
+  const base=layout.recipe==='town-hall'?HALL_RECIPE:layout.recipe==='log-house'?LOG_HOUSE_RECIPE:layout.recipe==='beam-house'?BEAM_HOUSE_RECIPE:HOUSE_RECIPE;
   const level=building.status==='under-construction'?(building.targetLevel??building.level):building.level;
   // Explicit recipes, rather than a universal level-to-floor mapping.
-  const levels=base.id==='stone-house'&&level===2?2:1;
+  const levels=base.id!=='town-hall'&&level===2?2:1;
   return {recipe:{...base,levels,entrance:{...base.entrance,face:layout.entranceFace}},phase:building.status==='under-construction'?'works':'finished',
-    sourceLevels:building.targetLevel!==null?(base.id==='stone-house'&&building.level===2?2:1):0};
+    sourceLevels:building.targetLevel!==null?(base.id!=='town-hall'&&building.level===2?2:1):0};
 }
 export function planForSite(state:VillageState,site:VillageCell):BuildingPlan|null {
   if(!site.building)return null;const resolved=recipeFor(site.building);if(!resolved)return null;

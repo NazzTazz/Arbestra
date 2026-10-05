@@ -1,7 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { buildingPlan, entranceConnector, HALL_RECIPE, HOUSE_RECIPE, resolveMurets, transformPoint, type PlanInput } from './building-plan';
+import { buildingPlan, entranceConnector, HALL_RECIPE, HOUSE_RECIPE, withBuildingAccesses, resolveMurets, transformPoint, type PlanInput } from './building-plan';
 const input:PlanInput={id:'hall',anchor:{cellX:9,cellY:9},cells:[{cellX:9,cellY:9},{cellX:9,cellY:10}],world:{widthCells:32,heightCells:32},recipe:HALL_RECIPE};
 describe('modular building factory',()=>{
+  it('rebalances ground-floor windows for two entrances on any house facade without losing upstairs windows',()=>{
+    const baseline=buildingPlan({...input,cells:[input.anchor],recipe:{...HOUSE_RECIPE,levels:2}});
+    const upperWindows=baseline.openings.filter(o=>!o.door&&o.bottom>HOUSE_RECIPE.courses*HOUSE_RECIPE.module.height);
+    for(const face of ['-x','+x','-z','+z'] as const){
+      const recipe=withBuildingAccesses({...HOUSE_RECIPE,levels:2},face,true),plan=buildingPlan({...input,cells:[input.anchor],recipe});
+      expect(plan.accesses).toHaveLength(2);expect(plan.openings.filter(o=>o.door)).toHaveLength(2);
+      for(const door of plan.openings.filter(o=>o.door)){
+        expect(plan.openings.some(o=>!o.door&&o.face===door.face&&o.bottom<door.top&&o.left<door.right&&o.right>door.left)).toBe(false);
+      }
+      // The odd storey turns 90 degrees; compare its actual openings, not the ground-floor faces.
+      expect(plan.openings.filter(o=>!o.door&&o.bottom>HOUSE_RECIPE.courses*HOUSE_RECIPE.module.height)).toEqual(upperWindows);
+    }
+  });
   it('assembles a wrapped footprint, preserves exact modules and stone courses',()=>{
     const p=buildingPlan({...input,anchor:{cellX:9,cellY:31},cells:[{cellX:9,cellY:31},{cellX:9,cellY:0}]});
     expect(p.origin.z).toBe(1.25);expect(p.width).toBeCloseTo(2.24);expect(p.depth).toBeCloseTo(4.48);

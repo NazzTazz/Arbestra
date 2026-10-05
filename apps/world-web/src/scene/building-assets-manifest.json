@@ -1,0 +1,92 @@
+{
+  "university-1-finished": {
+    "url": "/buildings/university-1-finished-9bb96e90a1e20819.abmesh.gz",
+    "bytes": 1683113,
+    "thumbnail": "/buildings/university-1-08e0adb5a83b36fb.png"
+  },
+  "university-1-works": {
+    "url": "/buildings/university-1-works-e655e41b0a708ef4.abmesh.gz",
+    "bytes": 1074108
+  },
+  "university-2-finished": {
+    "url": "/buildings/university-2-finished-9832163229ec2882.abmesh.gz",
+    "bytes": 2477221,
+    "thumbnail": "/buildings/university-2-a2dbdf4a635883e6.png"
+  },
+  "university-2-works": {
+    "url": "/buildings/university-2-works-31aca3f8b1381a19.abmesh.gz",
+    "bytes": 1867511
+  },
+  "university-3-finished": {
+    "url": "/buildings/university-3-finished-e6fc3256aa6fd2d5.abmesh.gz",
+    "bytes": 3882716,
+    "thumbnail": "/buildings/university-3-515a4e42885267ef.png"
+  },
+  "university-3-works": {
+    "url": "/buildings/university-3-works-b1f88677acf382b8.abmesh.gz",
+    "bytes": 2733284
+  },
+  "dwelling-1-finished": {
+    "url": "/buildings/dwelling-1-finished-c3e47b732c468c03.abmesh.gz",
+    "bytes": 430315,
+    "thumbnail": "/buildings/dwelling-1-2d2f8c036f81563d.png"
+  },
+  "dwelling-1-works": {
+    "url": "/buildings/dwelling-1-works-918060a22bab3e71.abmesh.gz",
+    "bytes": 234720
+  },
+  "dwelling-2-finished": {
+    "url": "/buildings/dwelling-2-finished-b6ccc0d6aaec17dc.abmesh.gz",
+    "bytes": 575248,
+    "thumbnail": "/buildings/dwelling-2-cd44899513d73171.png"
+  },
+  "dwelling-2-works": {
+    "url": "/buildings/dwelling-2-works-8e9d6244f062fe69.abmesh.gz",
+    "bytes": 343793
+  },
+  "dwelling-logs-1-finished": {
+    "url": "/buildings/dwelling-logs-1-finished-9345e215fafdbe72.abmesh.gz",
+    "bytes": 318031,
+    "thumbnail": "/buildings/dwelling-logs-1-32470d0adb731e8e.png"
+  },
+  "dwelling-logs-1-works": {
+    "url": "/buildings/dwelling-logs-1-works-fca95b6dce2ebaf7.abmesh.gz",
+    "bytes": 154534
+  },
+  "dwelling-logs-2-finished": {
+    "url": "/buildings/dwelling-logs-2-finished-38ca5c5459085251.abmesh.gz",
+    "bytes": 340274,
+    "thumbnail": "/buildings/dwelling-logs-2-de9e900ed2d0c1e7.png"
+  },
+  "dwelling-logs-2-works": {
+    "url": "/buildings/dwelling-logs-2-works-6bf26f1dc90626d8.abmesh.gz",
+    "bytes": 170735
+  },
+  "dwelling-beams-1-finished": {
+    "url": "/buildings/dwelling-beams-1-finished-b6a6fe5bcbdc3034.abmesh.gz",
+    "bytes": 338655,
+    "thumbnail": "/buildings/dwelling-beams-1-db187d367c4e18b7.png"
+  },
+  "dwelling-beams-1-works": {
+    "url": "/buildings/dwelling-beams-1-works-ed9c05b4ab47ce65.abmesh.gz",
+    "bytes": 168529
+  },
+  "dwelling-beams-2-finished": {
+    "url": "/buildings/dwelling-beams-2-finished-0b0ffc417ae2bc41.abmesh.gz",
+    "bytes": 377222,
+    "thumbnail": "/buildings/dwelling-beams-2-16610159a0aec9bf.png"
+  },
+  "dwelling-beams-2-works": {
+    "url": "/buildings/dwelling-beams-2-works-0e5872fc901db23d.abmesh.gz",
+    "bytes": 197761
+  },
+  "town-hall-1-finished": {
+    "url": "/buildings/town-hall-1-finished-52ae8aa37ad5b5ef.abmesh.gz",
+    "bytes": 688738,
+    "thumbnail": "/buildings/town-hall-1-103c5e2d5fa54056.png"
+  },
+  "town-hall-1-works": {
+    "url": "/buildings/town-hall-1-works-8af9c104d52d718e.abmesh.gz",
+    "bytes": 362687
+  }
+}
