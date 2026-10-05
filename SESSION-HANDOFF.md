@@ -1,3 +1,224 @@
+# Clôture Git par tranches — 5 octobre 2026
+
+Tristan demande de committer et pousser l’état courant. Branche `main`, distant `origin/main` vérifié après fetch : aucun commit distant à intégrer. Modifications regroupées par dépendances : paysage/connaissance, Infrastructure serveur/contrats, bâtiments et assets, outils Village/HUD/habitants, maintien du village au dézoom, chargement des shaders nocturnes, adaptation des preuves de navigation, puis cette passation. L’export local `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` reste hors commits ; aucun secret ni artefact de recette ajouté.
+
+Vérifications de cette clôture : `corepack pnpm lint` terminé avec succès ; lint ciblé des tests retouchés également. `corepack pnpm build` racine terminé avec code 0 après relance hors restriction esbuild du sandbox ; avertissement de taille de bundle conservé. Vérification des 20 assets : présence, tailles, SHA-256 correspondant aux noms, gzip/AB01 et PNG du manifeste.
+
+`corepack pnpm test` initial : 370 tests, 365 verts et 5 échecs dans 3 fichiers. Le campus échouait aussi avec la factory précédente de Git : l’assertion omettait les échafaudages (.105), appuis (.06) et jambages (.01) ; elle les distingue désormais, sans changement du modèle, et le test complet campus est vert. Les preuves Jardin/pierre utilisaient encore le comptage des cellules comme durée ; elles vérifient maintenant les trajets fractionnaires tout en conservant les assertions de travail, crédit et idempotence. La fixture de fusion réserve ses extensions avant le départ et enregistre un trajet historique contournant la future jonction, explicitement vérifié hors de l’emprise protégée ; la protection serveur des passages engagés reste inchangée.
+
+Reprises terminées : campus complet (1 test vert), puis filtre `records the stone route|credits only the reserved|adds the recorded|preserves both departures` sur les deux fichiers DB (3 verts, fusion encore en échec), puis `garden-review.integration.test.ts -t 'preserves both departures'` vert après finalisation de la fixture. Les cinq échecs initiaux ont donc chacun une reprise verte ; les 365 autres cas de la suite initiale restent verts. **Pas de seconde exécution intégrale des 370 tests revendiquée.** Les tentatives intermédiaires de fixture ont été éliminées ; aucun code métier modifié par ces corrections de tests.
+
+Base exclusivement utilisée pour les tests : `127.0.0.1:5432/arbestra_test`. Aucun reset, seed ou migration de développement pendant cette clôture. Pas de nouvelle suite E2E ; les recettes navigateur déjà réalisées restent détaillées ci-dessous, notamment le correctif nocturne vérifié dans Chrome et accepté par Tristan. Les limites de performance prolongée et recettes restantes de chaque tranche sont conservées ; cette clôture Git ne les transforme pas en validation acquise.
+
+# Nuit : shaders des lumières manquants — 5 octobre 2026
+
+Diagnostic dans **l’onglet Chrome réel de Tristan** : seules les flammes et ombres de contact restent visibles ; les shaders Babylon `lightProxy` vertex/fragment contiennent le HTML de la SPA au lieu du GLSL (erreur `<` ligne 11). Le mécanisme exact ayant rendu ce chargement défaillant dans cette session n’est pas établi.
+
+Correction bornée dans `village-braziers.ts` : imports explicites des deux shaders GLSL avant le premier rendu. Régression rouge avant correction, puis les 4 tests braseros verts ; typecheck world-web, lint ciblé et diff check verts.
+
+Validation dans le même onglet après rechargement complet et phase cosmologique 0 : bâtiments, routes, trottoirs et halos visibles ; soleil à 0, cluster actif, aucun effet compilé non prêt. Tristan confirme le résultat. Aucun nouvel ajustement esthétique. Le laboratoire est laissé ouvert avec la nuit forcée pour inspection. Aucun changement métier ni commit/push pendant ce correctif.
+
+
+# Disparition nocturne signalée — diagnostic ouvert — 5 octobre 2026
+
+À la demande de Tristan, historique Git consulté : HEAD `ffb6707`, dernier changement de scène commit `2e0f94b`. Comparaison automatique par extraction : constructeur des lumières et méthode `#updateCosmology` actuels **identiques à HEAD**, après retrait des essais. Aucun commit intermédiaire ne capture l'état juste avant FXAA/lumière diurne. Diff majeur restant dans la lumière : `ClusteredLightContainer` remplace le chemin historique à six PointLight (ajout antérieur aux essais et précédemment validé par Tristan, non commité). Cette différence ne prouve pas la cause ; ne pas restaurer tout le fichier et perdre les autres changements. Aucun changement applicatif fait pendant cette consultation.
+
+Tristan fournit une capture montrant seulement flammes, pluie et disques d'ombres, sans ville. **Ne pas considérer le correctif du fondu ci-dessous comme résolution de ce signalement.** Aucun autre réglage ajouté au hasard. Reproduction sur session navigateur neuve : login 200, phase cosmologique 0, zoom 36, soleil 0, 351 meshes bâtis présents et visibles, aucun mesh non prêt ni erreur de compilation de matériau ; cluster contenant 57 lumières. Capture `test-results/nuit-geometrie.png` : bâtiments et halos nocturnes présents, observés à résolution normale. Essai de changements de phase : dernier état nocturne confirmé (soleil 0, cluster actif, meshes prêts) ; certains échantillons intermédiaires étaient pris avant l'application de la phase, ne pas les présenter comme des transitions validées. Session fermée. Question à Tristan : le défaut persiste-t-il après Ctrl+F5 depuis le retrait des essais ? **Cause non établie, aucune guérison prétendue.** Aucun commit/push ni commande métier.
+
+# Nuit après conservation des bâtiments au dézoom — 5 octobre 2026
+
+Tristan signale que la nuit est cassée ; précision du symptôme demandée, sans réponse à cette entrée. Incohérence certaine corrigée : après conservation des bâtiments/routes en Région, les braseros avaient encore leur ancien fondu 110–160 et s'éteignaient entièrement au-delà. Ils restent maintenant visibles et éclairants jusqu'au passage en Monde, comme les bâtiments. Aucun nouveau réglage de lumière.
+
+Typecheck world-web et lint ciblé verts. Navigateur dev : phase cosmologique 0, soleil 0 et cluster de braseros actif au rayon 180 ; six maçonneries du campus chargées, activées et visibilité 1. Les braseros de voirie n'étaient pas chargés dans cette recette (dézoom précoce pendant le streaming) ; ne pas prétendre leur parcours complet vérifié. Capture `test-results/nuit-dezoom.png` regardée. **Ce correctif traite l'extinction au dézoom ; le signalement global reste à préciser si la nuit est également cassée au zoom proche.** Serveurs utilisateur conservés, aucune commande métier, aucun commit/push.
+
+# Village au dézoom — 5 octobre 2026
+
+Tristan rejette le remplacement des bâtiments par des blocs au dézoom. Correctif borné : le village chargé conserve ses bâtiments réels et ses routes en Région ; ils ne sont masqués qu'en Monde. Le fondu entre rayons 110 et 160 reste celui du terrain, pas celui des bâtiments. `RegionalVillages` exclut le village chargé des volumes de remplacement et invalide aussi son cache quand cette identité change. Les silhouettes étrangères restent distinctes, anonymes si inconnues et non pickables ; aucune nouvelle donnée serveur. Les ghosts Infrastructure restent limités au Village.
+
+Régression rouge avant correction : les deux cas régionaux comptaient encore le village chargé parmi les volumes. Après correction : 5 tests verts (2 villages régionaux, 3 transitions LOD), typecheck world-web, lint ciblé et diff check verts. Navigateur sur dev : arrivée terminée, caméra portée au rayon 180, 351 meshes de bâtiments réels visibles ; capture `test-results/village-dezoom.png` regardée à résolution normale, toits et formes réelles conservés. Pas de bloc régional observé, mais le chargement effectif du payload régional n'a pas été instrumenté dans cette recette ; son exclusion est couverte par les tests. **Ce correctif conserve la géométrie détaillée : aucun nouveau LOD géométrique ni gain GPU revendiqué, coût prolongé en Région non mesuré.** Session fermée, serveurs utilisateur conservés ; aucune commande métier, aucun commit/push. Worktree antérieur préservé.
+
+# Retrait des essais visuels — 5 octobre 2026
+
+Vérifications du retrait : typecheck world-web, lint ciblé et diff check verts ; absence de FXAA et retour des formules lumineuses contrôlés dans le code. Pas de nouvelle recette navigateur.
+
+Tristan rejette le FXAA et le nouvel éclairage diurne : **les deux essais ci-dessous sont annulés**. Import et passes FXAA retirés ; bloc cosmologique lumineux rétabli exactement à son état avant essai (soleil 0,85 de jour, formule ambiante précédente, aucune variation ajoutée de couleur, contraste, exposition ou ombres de contact). Les réglages initiaux et toutes les autres modifications, notamment les trottoirs, sont conservés. Rechargement complet de la page nécessaire pour détruire les anciens post-process et recréer les matériaux avec leurs valeurs initiales. Aucun commit/push.
+
+# FXAA général — 5 octobre 2026 — historique annulé
+
+Demande de Tristan : ajouter un petit FXAA général. `FxaaPostProcess` natif Babylon ajouté aux deux caméras existantes de la scène principale (stratégique et habitant), une seule passe à pleine résolution, paramètres standard, sans pipeline d'effets supplémentaire. Les vues village/région/monde rendues par la caméra stratégique partagent le filtre. HUD React inchangé ; destruction des post-process assurée par les caméras à la destruction de la scène (code Babylon installé vérifié).
+
+Lint ciblé et typecheck world-web verts. Recette navigateur tentée sur dev : login HTTP 500, écran « Une erreur est survenue », aucune scène créée. **Compilation GPU et résultat visuel à valider** une fois le serveur accessible. Session isolée fermée ; serveurs utilisateur conservés. Aucun changement de données, aucun commit/push.
+
+# Essai de lumière diurne — 5 octobre 2026 — historique annulé
+
+Tristan juge le jour fade et autorise un essai. Réglage borné dans `BabylonVillageScene.#updateCosmology` : remplissage ambiant réduit, soleil renforcé et moins jaune, contraste augmenté, exposition légèrement réduite, ombres de contact renforcées. Pondération continue par lumière directe bornée à [0,1] ; à la nuit, intensités, couleurs, exposition 0,92, contraste 1,18 et alpha de contact 0,18 retrouvent exactement leurs anciennes valeurs. Aucun nouveau générateur d'ombres portées, post-process, antialiasing ou changement du modèle cosmologique.
+
+Typecheck world-web et lint du fichier verts. Recette navigateur isolée sur dev : aperçu solaire existant utilisé, nuit confirmée (soleil 0, ambiant 0,34, contraste 1,18, exposition 0,92), puis jour confirmé à 21:00 du cycle combiné (« 2nd jour 9:00 »). Observation diurne : soleil ~1,13, ambiant ~0,23, contraste ~1,30, exposition ~0,88, alpha de contact ~0,258. Capture `test-results/lumiere-jour.png` ignorée par Git, regardée à résolution normale (hardware scaling 1,2 réglé uniquement dans le navigateur de recette). Faces sombres plus marquées et pavage clair lisible ; appréciation esthétique finale à Tristan. Session fermée, serveurs utilisateur conservés. Aucune commande métier, aucun commit/push ; worktree antérieur conservé.
+
+# Trottoirs continus — 5 octobre 2026
+
+**Validé par Tristan :** trottoirs de 2 subdivisions (¼ de case) par côté, traversables partout, sans encoche ni traitement particulier devant les sorties de bâtiments. Implémentation : surface commune sur grille 1/16 pour rendu manuel/ghost/miniature/atelier et contrôles serveur, union sans recouvrement de la chaussée ; routes automatiques élargies aussi. Trottoirs bas, famille HUD renommée. Ancien champ `border` conservé, tarifs linéaires conservés, aucune migration ni facturation rétroactive. Les anciens plans ne génèrent plus de barrières de navigation. Les aménagements voisins et l'emprise des nouvelles constructions respectent également les trottoirs.
+
+Preuves : régression de navigation rouge avant correction (contournement forcé), puis verte ; reproduction rétrospective isolée de la largeur ancienne rouge. 37 tests ciblés verts (14 serveur, 15 navigation, 4 infrastructure, 2 renderer, 2 routes). Typechecks API/world-web et lint ciblés verts. Contrôle de construction relancé après extension de la protection aux trottoirs : vert. Nouvelle régression de protection du trottoir extérieur verte : 38 cas distincts vérifiés au total. Recette navigateur : carte ouverte, Construction → Infrastructure et libellé « Trottoirs en pierre (¼ de case par côté) » vérifiés. Connexion terrain interrompue à plusieurs reprises : rendu final en village **à valider**, non prétendu vérifié. Session navigateur isolée fermée ; serveurs utilisateur conservés. Aucune commande métier sur dev, aucun commit/push ; worktree antérieur préservé.
+
+# Saisie des braseros — 5 octobre 2026
+
+Signalement de Tristan : déplacement impossible. La saisie utilisait uniquement la proximité d’un point projeté sur le plan Y=0,075, distinct de la géométrie visible sur le relief. Le relâchement transmet désormais l’ID de la maçonnerie touchée par le picking Babylon ; la sélection préfère cette identité, conserve le fallback torique au sol et refuse une identité périmée. Le ghost démarre à la position canonique de l’objet. Aucune modification des permissions, coûts, collisions ou commandes serveur.
+
+Régression pure : substituer rétrospectivement l’ancien choix par proximité sélectionne le mauvais objet ; assertion rouge, correctif restauré. Typecheck world-web et lint ciblés passés. Recette navigateur sur dev, session isolée : brasero automatique `auto:1093:18:sub:8745:136:-1:1` réellement touché, état « Objet saisi », déplacement gratuit proposé, ghost déplacé par le pointeur puis Échap. Aucune commande de déplacement ni suppression exécutée ; serveurs utilisateur laissés actifs. La persistance du déplacement reste à confirmer par Tristan. Aucun commit/push ; worktree antérieur conservé.
+
+Tests finaux : 5 tests verts (sélection 2, braseros 3). `git diff --check` passé.
+
+# Latence Infrastructure — 5 octobre 2026
+
+Lenteur signalée par Tristan pendant l’aperçu et après validation. Correctif borné : géométrie commune de raffinement préparée une seule fois pour le réseau, rasterisations répétées du devis supprimées, comparaison des surfaces sans sérialisation par pixel. Le HUD mémorise le devis et le transmet au ghost ; double appel d’aperçu retiré, mouvements sur une même subdivision ignorés. Au plus un devis HTTP en vol, changements de pointeur regroupés, aucun nouvel aperçu lancé pendant une commande. Validation serveur, coûts, reçus, annulation et missions engagées conservés.
+
+Profil local avec rollback complet sur le village de développement : première lecture économie ~333 ms, snapshot ~9494 ms, préparation de devis ~342–412 ms ; après correction économie ~304 ms, snapshot ~2832 ms, devis ~167–216 ms. **Le joueur a ajouté une route entre les mesures (4 → 5 routes manuelles, 64 trajets) : comparaison indicative, pas benchmark à données strictement identiques ni mesure clic → image.** Aucun tracé, débit ou changement économique conservé par le profil ; test temporaire supprimé.
+
+Vérifications terminées : 37 tests persistants ciblés verts (14 DB Infrastructure, 15 navigation, 4 géométrie/coûts, 3 trajets, 1 renderer), plus 1 profil temporaire. Contrats reconstruits, typecheck world-web et lint ciblé verts. Navigateur isolé sur les serveurs dev existants : palette Infrastructure, aperçu terre de 2,25 cases / 1,125 case², devis gratuit avec réserve conservée, annulation Échap ; aucune commande de route exécutée, aucune erreur navigateur relevée. Qualité réduite : pas de benchmark GPU ni mesure complète du délai après relâchement. La fluidité et cette latence restent à confirmer par Tristan. Serveurs utilisateur laissés actifs, navigateur isolé fermé. Aucun commit/push ; modifications antérieures conservées. Aucune migration ni remise à zéro dev.
+
+# Paysage visible implémenté — recette visuelle à compléter — 5 octobre 2026
+
+Paysage sans masque scientifique, silhouettes étrangères anonymes, rapports datés préservés et fiches de gisement inconnu protégées. Astronomie, droits métier et budgets conservés. Tests ciblés, typecheck monorepo et lint ciblés passés ; reproductions rétrospectives documentées. Navigateur : Région et verrou Astronomie vérifiés, tore accessible après acquisition ; captures nocturnes seulement, aspect diurne et silhouettes étrangères encore à valider. [Preuves et limites](docs/HANDOFF-PAYSAGE-VISIBLE.md). Aucun changement de base dev, aucun commit/push ; worktree antérieur conservé. Limiter les nouvelles vérifications : consommation de quota jugée excessive par Tristan.
+
+# Cadrage précédent : paysage visible, connaissance acquise — 5 octobre 2026
+
+**Arbitrage validé, non implémenté.** Handoff court et prompt de reprise : [docs/HANDOFF-PAYSAGE-VISIBLE.md](docs/HANDOFF-PAYSAGE-VISIBLE.md). Paysage librement visible en Région/Monde ; silhouettes étrangères visibles, renseignements réservés aux reconnaissances. Astronomie 1 et droits métier conservés. Ne pas confondre retrait du masque visuel et acquisition de connaissances.
+
+Depuis l'entrée précédente : clustered lighting natif branché pour les braseros, rendu validé par Tristan avec capture. Trois tests ciblés existants, typecheck world-web et lint ciblé passés ; performances et lifecycle approfondi non mesurés. Détails et limites dans le handoff lié. Aucun commit/push. Consulter les mécanismes Babylon natifs avant de coder un équivalent maison.
+
+# Retrait des miniatures et accès LOD du HUD — 5 octobre 2026
+
+Décision explicite de Tristan : supprimer la maquette village et le tore du HUD, puis supprimer aussi les accès texte Village/Région/Monde. Navigation conservée par zoom/dézoom. Composant LodNavigator, générateur lod-miniatures, capture depuis BabylonVillageScene et styles associés supprimés. Essai du rendu réel du tore abandonné : aucune modification finale de CosmologyWorld, TorusOverview ou TorusFog.
+
+Vérification navigateur isolée après rechargement : aucun sélecteur LOD, flammes des braseros visibles de nuit, hôtel de ville avec pierre claire/toit brun en aperçu 2:24. Les défauts signalés (absence de flammes/hôtel noir) ne sont plus reproduits ; cela ne prouve pas leur cause initiale. Captures ignorées dans test-results/village-without-miniatures.png et village-light-check.png. Typecheck world-web et lint ciblé passés. Aucun test E2E, changement économique, commit ou push. Worktree préexistant conservé.
+
+# Latence de construction — 5 octobre 2026
+
+Correctif ciblé serveur : `materializeWoodlands` classe en une requête les bosquets pleins, non réservés, correctement occupés/disponibles et sans retour physique dû. Ceux-ci ne sont plus réécrits individuellement à chaque commande/snapshot. Les verrous UUID restent acquis avant cette classification ; les autres bosquets conservent la réconciliation historique (repousse, retours, occupations).
+
+Profil local avec rollback intégral, sans conserver les constructions ni débits : première mesure économie ~2,15 s + snapshot ~2,03 s ; après optimisation économie ~0,65 s + snapshot ~2,06 s. Les 66 réconciliations individuelles deviennent 5 plus la classification. À chaud, une commande réelle `constructBuildingArea` a pris ~613 ms ; cette dernière mesure n'est pas un benchmark HTTP/clic→image comparable à la première. Le délai visuel complet reste à recetter. Script de profil supprimé, aucune remise à zéro du village.
+
+Vérifications : 12 tests DB woodland passés (dont non-réécriture des bosquets pleins, réparation d'occupation et repousse), typecheck API et lint ciblé passés. Aucun E2E. Worktree préexistant conservé ; aucun commit/push pour ce correctif.
+
+# Remise à zéro de Clairière pour recette builder — 5 octobre 2026
+
+Demande explicite de Tristan exécutée sur la base locale `arbestra`, monde `aube`, village `30000000-0000-4000-8000-000000000001`. Il a choisi de conserver uniquement l'hôtel de ville niveau 1. Suppression des autres bâtiments/jardins et de leurs occupations/données dépendantes, activités/contributions locales et historique d'aménagement ; plan Infrastructure vidé, révision 13. Notifications du scheduler non modifiées. Population (210), acquis scientifiques, gisements et terrain préservés. Stocks fixés dans la transaction à **200000 bois / 150000 carottes / 20000 pierre**. Snapshot après commit : un seul hôtel de ville niveau 1, 130 cases constructibles, zéro route manuelle/équipement, zéro travailleur affecté. Sauvegarde ciblée ignorée par Git : `test-results/clairiere-before-builder-reset-20261005.json`.
+
+**Tristan a déjà recommencé à construire pendant la vérification suivante** : six destinations bâtiment et bois consommé observés. Ne surtout pas réexécuter le nettoyage ni remettre les stocks pour « corriger » cette différence. Les chemins automatiques sont dérivés des bâtiments/gisements et se recalculent normalement ; les routes manuelles anciennes ont été supprimées. Aucun changement du code de jeu, aucun commit/push pour cette opération ; script temporaire supprimé.
+
+# Assets factory et maisons bois — 5 octobre 2026
+
+Implémentation en direct autorisée, avec tests ciblés légers. Worktree `main`, base `ffb6707`, modifications antérieures conservées ; **aucun commit/push**. Coûts existants des maisons explicitement validés pour Troncs/Madriers ; scierie et ressources inchangées.
+
+- Pack 3D compilé : Université 1–3, maisons Pierre/Troncs/Madriers 1–2, hôtel de ville standard ; achevé/travaux, plus PNG showroom. Source éditable conservée. Commande `corepack pnpm factory:bake`, Vite sur 5174 requis. Manifeste et assets doivent être livrés ensemble. Voir [spec factory](docs/SPEC-FACTORY-BATIMENTS.md).
+- Géométrie binaire `AB01` gzip, hiérarchie/matériaux Babylon, cache par scène et navigateur, clones partageant la géométrie. Carte et ghost précalculés ; verre, monuments et feux restent vivants. La maquette attend les assets. Les représentations historiques non migrées et recettes atypiques restent sur leur chemin existant ; scierie/caserne/Infrastructure non converties.
+- Mesure du campus 3 : **3 882 716 octets compressés / 37 644 928 décompressés**, contre 93 791 658 octets pour le JSON intermédiaire abandonné. Pas une mesure de mémoire totale ni de FPS. En navigateur : **3 campus prêts, 123 meshes, 43 géométries distinctes, 30 ensembles de vitres** ; géométries partagées, monuments individuels inclus.
+- Habitat propose Troncs/Madriers/Pierre ; aperçu et commande suivent le choix. Recette persistée via `houseVariant`, conservée après amélioration ; anciens bâtiments inchangés. Atelier : deux variantes, niveaux 1 et 2, ouvertures et rotation. Coins alternés et extrémités saillantes, toiture existante conservée.
+- Migration **029** additive à la contrainte de recette : validée sur `127.0.0.1:5432/arbestra_test`, puis appliquée en dev pour recette autorisée. Aucun seed/reset dev. L'échec initial des deux tests a révélé l'ancienne contrainte SQL, puis les deux sont passés après migration.
+- Vérifications terminées : **18 tests ciblés** (15 plan/murs/verre, 1 format binaire, 2 DB construction/retry/amélioration), typecheck du monorepo, lint ciblé. Pas de suite E2E ni de build applicatif complet. Recette navigateur : campus chargé, showroom Troncs, atelier Madriers 1 et Troncs 2 ; captures dans `test-results/building-assets-*.png`. Capture campus avec caméra rapprochée et éclairage de contrôle dans une session isolée, pas validation du cycle solaire.
+- À poursuivre avec Tristan : proportions et aspect des maisons bois ; raccord économique ultérieur bois d'œuvre/scierie, coûts distincts et ères par approvisionnement. Aucun système d'artisanat ni verrou d'ère implémenté dans cette tranche visuelle. Ne pas attribuer au bake une résolution de toutes les latences terrain/API.
+
+# Corrections de contre-recette Infrastructure — 5 octobre 2026
+
+Corrections implémentées et vérifiées sur `main` / base `ffb6707`, sans commit/push. Modifications préexistantes conservées. [Rapport et bilan](docs/REVIEW-INFRASTRUCTURE-2026-10-05.md).
+
+- **Lenteur principale trouvée dans le verre du campus** : `renderListPredicate` vidait/remplissait la liste des meshes à chaque image et déclenchait les invalidations de lumières Babylon. Liste désormais stable, renouvelée lors d'ajout/retrait de meshes ; verre exclu de sa propre capture, rendu conservé.
+- **Mesures stabilisées en vue Village**, mêmes 10 chunks et aucun bâtiment en génération : nuit **47,1 images/s** (contre 6,7), p95 49,9 ms (contre 333) ; aperçu diurne 2:24 **53,8 images/s** (contre 4,1), p95 33,3 ms (contre 349). Session automatisée locale, pas une garantie sur tous les GPU. La première mesure à 56,5 images/s incluait l'arrivée et a été écartée de la comparaison.
+- `village.townHallBuildingId` optionnel publié par le serveur depuis les bâtiments du village ; contexte territorial filtré par `villageId`. Le routage ne confond plus ancre du village et ancre du bâtiment. Compatibilité des anciens contextes par emprise à l'ancre, sans sélectionner arbitrairement un hôtel de ville voisin.
+- Raffinement guidé par le réseau commun. Sur la même copie aux ancres alignées que l'audit : 16 → 12 intersections, 3 → 1 boucle, calcul à froid 4,12 → 1,37 s. Le village réel utilise maintenant 33 trajets version 2, confirmé par GET authentifié. Les trajets engagés ne sont pas réécrits.
+- Les **7 destinations écartées ont un accès réellement bloqué dans l'implantation existante** : 5 portes contre les jardins, 2 dans une poche fermée entre campus et maisons. Pas de traversée forcée ni de démolition/modification de données pour les rendre accessibles. Il faudra libérer leurs accès si souhaité.
+- Braseros : retrait des bras fantômes vers des cases occupées/éditées, conformément au découpage de la chaussée. Sur le snapshot réel avec trajets anciens, 94 → 54 positions automatiques ; avec le réseau corrigé, 47. Les quatre demi-bras hérités et les aménagements manuels sont conservés.
+- Rendu : cache des dérivés spatiaux de voirie/braseros/obstacles ; plus de double calcul des feux. Le renderer manuel compare les hauteurs réellement touchées et la projection, et conserve ses meshes lors d'une révision de chunk distant.
+- **Vérifications terminées** : 40 tests purs ciblés (navigation, infrastructure, trajets, Jardins, habitants, renderer et verre), 12 tests DB Infrastructure sur `127.0.0.1:5432/arbestra_test`, lint et typecheck verts. Les deux premières régressions ont été observées rouges avant correction. Contrats reconstruits ; pas de suite E2E ni de build applicatif complet. Captures et mesures dans `test-results/infrastructure-review/`.
+- Aucun reset/migration ni aménagement de la base dev. Les snapshots de recette réconcilient normalement l'économie. Serveurs dev laissés actifs. Quelques à-coups restent mesurables ; la latence HTTP complète n'a pas été attribuée à un coût SQL précis. Finition visuelle à poursuivre avec Tristan si nécessaire.
+
+## Audit initial, conservé pour historique
+
+# Contre-recette Infrastructure — 5 octobre 2026
+
+**Tranche à corriger avant validation.** Revue demandée par Tristan après lenteurs et intersections suspectes : [rapport détaillé](docs/REVIEW-INFRASTRUCTURE-2026-10-05.md). Aucun correctif applicatif effectué pendant cet audit.
+
+- Village réel : ancre du village `(1102,21)`, hôtel de ville `(1101,21)` ; `refineTravelRoute` revient silencieusement au réseau ancien (40 trajets, aucun version 2). Le routage fin de la livraison n'est donc pas exercé ici.
+- Copie uniquement en mémoire avec ancres alignées : le raffinement indépendant fait passer 40 trajets à 33 et introduit 3 boucles après projection à la case ; calcul à froid ~4,1 s. Les sept échecs demandent un diagnostic par cible. Ne pas corriger seulement la recherche de l'hôtel de ville.
+- Lenteur reproduite dans le navigateur de recette : 6,7 images/s la nuit, 4,1 dans l'aperçu diurne, terrain déjà chargé. Profil matériaux/lumières coûteux ; invalidation globale de `InfrastructureRenderer` sur la version du streamer confirmée. Ce n'est pas un benchmark du GPU utilisateur ni la preuve que les flammes sont seules responsables.
+- Réseau réel inchangé : 17 intersections hors bâtiments, aucune boucle ; quatre demi-bras hérités perpendiculaires existent dans le plan manuel. L'origine de chaque intersection visuellement indésirable reste à localiser ; ne pas attribuer au raffinement inactif le symptôme actuel.
+- Preuves locales dans `test-results/infrastructure-review/`. Pas de suite E2E, pas de reset/migration ni édition du plan village, pas de commit/push ; serveurs dev conservés. Résultats de livraison ci-dessous historiques, non réexécutés pendant l'audit.
+
+# Infrastructure implémentée / recette humaine — 5 octobre 2026
+
+Base `main` / `ffb6707`. Tranche `docs/SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md` implémentée dans le worktree ; les changements HUD/habitants/factory préexistants sont conservés. Aucun commit ni push effectué pour cette demande. L'export brut de conversation reste non suivi.
+
+**Décision courante de Tristan : ateliers activés via DEV, pas via admin.** Drawer DEV → « Activer les ateliers Bâtiments et Infrastructure ». Capability authentifiée par monde, persistée côté serveur ; les deux showrooms exposent alors « Créer un bâtiment ». Accès direct vérifié et révocation périodique ; serveur de production refuse le réglage et la capability. Aucun rôle administrateur. Les anciennes mentions admin ci-dessous sont historiques et remplacées par cette décision.
+
+## Livraison
+
+- Infrastructure utilise le showroom de Constructions : Voirie / Bordures / Éclairage. Passage nu et terre gratuits, deux pavages, largeur 2–8 subdivisions, bordures extérieures. Aperçu, coût fractionnaire/réserve et erreurs dans le HUD ; réalisation directe au relâchement. Clic droit annule les portions acceptées de la session en ordre inverse ; Échap termine le geste local sans retirer les réalisations. Réponse incertaine : retry exact, pas de nouvel identifiant ou nouveau prix automatique.
+- Plan persistant et reçus idempotents, réserve prépayée de matière (256 unités/pierre), transactions et undo exact sans annuler la production. Suppression ordinaire sans remboursement ; déplacement de brasero gratuit. Braseros automatiques identifiés, objets saisis au clic, R, déplacement/suppression, politique manuelle durable par case et restauration explicite de l'automatisme. Le rendu utilise le même plan de surface pour chaussée, excavation, raccords, bordures et collisions.
+- Accès partagés et multiples, portes réelles aux nouveaux départs, R aux bâtiments et équipements ; occupation rectangulaire/campus réellement tournée et orientation conservée en amélioration. Atelier Infrastructure sur grille 8×8, mêmes générateurs que showroom/ghost/carte ; fixtures droits, angle, T, carrefour, accès et brasero, paramètres bornés. Atelier Bâtiments conserve ses commandes ; les recettes composées n'exposent pas de faux accès modulaires. Pas de publication de recette ou d'éditeur de méta-blocs.
+- Nouveaux trajets versionnés : précision fine près des accès et géométries éditées, gros tronçons ailleurs. Longueur physique torique à 1 s/case, même pour un long tronçon ; préférence de route indépendante de sa vitesse. Missions engagées et échéances inchangées. Le réseau partagé inclut les obstacles des plans voisins susceptibles de croiser la région locale ; l'édition ne reçoit que le plan du village autorisé.
+- Verrouillage : tâche worker éventuelle → village → navigation du monde → borne H → gisements canoniques → métier. Navigation partagée pour les admissions/relectures, exclusive dès l'entrée pour construction/aménagement ; aucune conversion tardive de partagé vers exclusif. Cela empêche une édition d'obstacle de s'intercaler dans l'admission d'un trajet voisin. Aucun verrou d'un autre village après un gisement, pas de SERIALIZABLE global ; notifications existantes inchangées.
+- Corrections de finition : vraie maison pour la fixture d'accès (un conflit porte/fenêtre empêchait sa génération), fenêtres de rez-de-chaussée rééquilibrées sans retirer les fenêtres d'étage tournées ; indicateur de disponibilité d'atelier après le rendu effectif de la génération sélectionnée ; libellés des lanceurs disposés dans la colonne latérale du showroom ; collisions des animations de chantier fondées sur les équipements actuels, sans braseros fantômes après suppression.
+
+## Preuves actuelles
+
+- Migration additive **028** validée sur `127.0.0.1:5432/arbestra_test`, puis appliquée à `127.0.0.1:5432/arbestra` via `db:migrate`. Aucun reset/seed ni édition de stocks ou d'aménagements du village de développement.
+- **11 tests DB Infrastructure verts** : fractions, no-op, replay, undo LIFO, devis périmé, insuffisance, concurrence forcée avec attente PostgreSQL observée, rollback après écritures prouvées, emprise protégée, missions engagées, équipements, rotation/upgrade/campus, capability DEV et refus production. Deux preuves supplémentaires couvrent le verrou de navigation face à un village voisin et la séparation plan de navigation/plan éditable.
+- Après l'ajout du verrou de navigation : **61 tests DB connexes verts**, exécutés séquentiellement (économie 27, sciences 9, chantiers 10, bois 11, tournée Jardin 4). Les tâches worker, échéances, crédits et affectations restent couverts par ces scénarios.
+- Dernière passe pure : **32 tests verts** (building-plan 10, building-factory 5, navigation Infrastructure 11, tournées 3, trajets 3). Les **13 tests travailleurs** étaient également verts après le raccord des collisions. Tests Infrastructure/intention précédents verts ; aucun résultat de suite générale revendiqué.
+- `pnpm lint`, `pnpm typecheck` et `pnpm build` racine terminés avec succès.
+- Recette navigateur isolée, API sans worker sur la base de test, world-web 5176/lobby 5177 : showroom et ses quatre vrais modèles, activation DEV et lanceurs des deux ateliers, aller/retour atelier conservant le domaine, vraies géométries d'accès et maison à deux accès. Sur carte : portion pavée payée puis annulation exacte (stock restauré), placement de brasero tourné avec R, saisie et déplacement gratuit (identité conservée/version incrémentée), suppression sans remboursement et politique manuelle conservée. Aucune modale sur ces gestes. Capture nocturne vérifiée. Pas de suite E2E exécutée.
+- Une première passe DB avait échoué à cause d'un bosquet synthétique de cette tranche laissé par le reset rapide qui conserve les features. Seule cette fixture de test a été supprimée, cleanup explicite ajouté ; les suites concernées ont été relancées vertes. La fixture d'accès a réellement reproduit une erreur de génération avant correction ; le test NullEngine la couvre désormais. Une attente de fenêtre à l'étage dans un nouveau test a aussi été corrigée pour respecter la rotation de 90° déjà voulue par Tristan, sans modifier cette règle de bâtiment.
+
+## Limites / prochaine recette
+
+Tranche implémentée, **qualité visuelle et fluidité prolongée à valider avec Tristan** : raccords et bordures sur de grands tracés, accès réels du village, manipulations rapides et éclairage nocturne. Les mesures locales de raffinement sont nettement meilleures après passages mixtes gros/fins et cache borné, mais ne constituent pas un budget garanti pour tous les villages. Les trajets territoriaux conservent leurs tronçons distants ; aucun nouveau pathfinder mondial ni garantie d'optimalité globale n'est revendiqué.
+
+Artisans, commerce, ères, usure, réparations, chevaux, vitesse par matériau, végétation/mobilier/monuments manuels, méta-blocs et publication de recipes restent hors livraison. Les deux ateliers sont des outils DEV, sans mutation économique. La représentation de bâtiments, terres et futurs voisinages doit continuer à respecter les connaissances scientifiques et les droits serveur.
+
+---
+
+# Spécification Infrastructure — 4 octobre 2026
+
+Complément validé : accès aux deux ateliers par une entrée « Créer un bâtiment » dans leur showroom respectif, visible lorsque l'option est cochée dans l'admin. Lanceur sans coût ni placement ; activation serveur, retour au contexte HUD. Contrat ajouté aux specs Infrastructure/HUD/Factory, 17e critère de recette. Aucun mécanisme admin correspondant trouvé dans les sources inspectées : raccord minimal à implémenter, pas une capacité existante revendiquée. Toujours documentation uniquement.
+
+Demande courante accomplie au niveau documentaire : confrontation au code et rédaction de `docs/SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md`, liens depuis HUD, factory et index architecture. Aucun code applicatif modifié dans cette passe, aucune migration, aucun test exécuté. Worktree préexistant conservé ; aucun commit/push demandé pour cette spécification.
+
+Arbitrages consolidés : voirie orthogonale au huitième de case, largeur 2–8 (défaut 4), bordures extérieures de demi-subdivision ; passage nu/terre gratuits, deux pavages à 4 pierres/case de surface, bordures 1 pierre/case de longueur/côté, brasero 2 pierres + 1 bois. Réalisation immédiate. Routes manuelles prioritaires, transport serveur au prochain départ, missions engagées conservées, braseros éditables et politique manuelle persistante. Accès multiples des factories et rotation R de tout le placement ; atelier Infrastructure sans éditeur complet de méta-blocs.
+
+Écart économique arbitré pendant la lecture : stocks existants entiers ; Tristan valide la réserve de matière prépayée par village pour conserver les fractions sans refondre les stocks. Autres écarts documentés : routage actuel à la case, départs aux portes ajoutés en partie côté rendu, variantes de routage scientifique, commandes de construction sans orientation, braseros décoratifs non persistés. Ne pas livrer cette tranche comme un simple rendu de routes. La spec distingue recommandations techniques et règles produit, migrations conservatrices, cas de concurrence/annulation et 16 critères de recette.
+
+# Repli des modes et finition showroom — 4 octobre 2026
+
+Recliquer le mode actif replie le HUD à sa seule entrée ; le rouvrir conserve sa configuration. Vue libre est repliée au démarrage et ouvre son aperçu solaire au clic. Les outils monde sont suspendus quand la palette est repliée. Coin supérieur droit du sélecteur arrondi ; palette secondaire réduite de 10 px, Construction/showroom à 142 px. Dernière demande : bordure blanche du showroom retirée, dégradé blanc 15 % → 0 % conservé, sans halo.
+
+Typecheck world-web et lint App/WorldModeBar terminés verts pour le repli. Contrôle navigateur isolé du CSS final : bordure 0 px, ombre aucune, hauteur 142 px et dégradé conformes. Navigation complète en jeu à recetter humainement ; pas de nouvelle suite E2E. Modifications non commitées.
+
+# Icônes des domaines — ajustement interactif
+
+Le sélecteur Construction ne contient plus que deux icônes verticales exclusives : maison niveau 1 issue de la factory et carrefour pavé avec brasero (géométrie de présentation, cache de miniatures réutilisé). Changer de domaine annule le placement en cours ; Infrastructure est consultable mais ses outils restent à venir. Devis/erreurs déplacés hors du bloc ; « Masquer les modèles » et « Quitter » retirés. Showroom élargi ; bordure blanche 1 px à 30 %, sans halo. Correction finale de Tristan : dégradé blanc **15 % à gauche → 0 % à droite**, et non 80 → 100. Icônes validées par Tristan. Typecheck world-web et lint ciblé verts ; aucune nouvelle suite E2E ni commande métier. Non commité.
+
+# Showroom et construction contextuelle — 4 octobre 2026
+
+Suite interactive, non commitée : retrait des trois verbes et du texte d'accueil/rappels clavier ; catégories juste au-dessus des ressources ; showroom séparé à droite, aligné en hauteur avec le HUD, blanc 18 %, bordure bleue 2 px, noms au-dessus des modèles réels mis en cache et ressources à droite. Infrastructure reste inactive. Maison sur maison résout une amélioration, Jardin tracé depuis une parcelle existante résout une extension du Jardin d'origine. Les devis présentés sont comparés à nouveau (dont l'identité du Jardin), les commandes idempotentes et revalidations serveur restent inchangées. Les raccourcis fonctionnent toujours, seuls leurs libellés d'aide sont retirés.
+
+Vérification courante : 7 tests ciblés intention/sélection verts, typecheck world-web et lint ciblé verts. Recette visuelle isolée des vrais composants avec données fictives et modèles factory Jardin/Scierie chargés : voile 18 %, contour 2 px, hauteur 152 px, catégories et prix contrôlés. Pas de commandes métier sur le village ni de suite E2E. Le parcours complet sur carte reste à recetter : navigateur isolé déconnecté ; recherche d'identifiants de démonstration refusée par l'auto-review (aucun identifiant récupéré) ; accès CUA à l'onglet existant expiré. La recette isolée ne prétend pas valider une admission serveur.
+
+# Passe interactive HUD, habitants et chargement — 4 octobre 2026
+
+Base `main` / `ffb6707`. Changements de cette passe non commités ; aucun push, migration ou changement volontaire des données de développement. L'export brut de conversation reste non suivi. Les demandes successives de Tristan sont regroupées dans cette passe : chargement du monde, représentants/POV, bleu nuit, navigation miniature et colonne des modes.
+
+- HUD : Vue libre / Constructions / Population / Exploitation en colonne à gauche de la palette. Constructions expose Bâtiments et Infrastructure à venir (pas d'édition manuelle des routes). DEV est à droite des ressources. Fonds bleu nuit 80 % / 60 %, bordure claire 2 px ; les fiches évitent la palette réelle, avec défilement sur petits écrans. Contrat mis à jour en tête de `docs/SPEC-GUI-HUD-MODES.md`.
+- Habitants : sélection d'un représentant visible, gel de son apparence seulement ; prénom déterministe visuel, énergie/qualifications de la cohorte, destination et activité. POV suit son trajet ; ZQSD prend la main en marche libre, une case/seconde. Hauteur 1,70 m transposée à l'échelle des figurants. Suivi arrière à 45°, Échap/retour village. Collisions simples sur emprises/eau/obstacles ; Passe-muraille dans DEV. Pas de simulation individuelle ni de modification des crédits/durées.
+- LOD : captures ponctuelles des modèles du village et symbole du tore avec atmosphère. Cache mémoire borné à quatre images, promesses dédupliquées, aucun moteur permanent supplémentaire ; génération différée après travaux graphiques et transitions. Disponibilité scientifique préservée. La capture exclut les particules dormantes de la vérification de disponibilité et conserve son render target pendant la compilation des shaders (attente bornée), notamment pour les jardins instanciés. À distinguer du cache persistant des miniatures Construction déjà livré.
+- Chargement : profilage navigateur attribuant une grosse partie du blocage à la factory du campus et aux milliers de buffers temporaires. `BuildingGeometry` assemble positions/normales/UV/couleurs côté CPU ; seuls les lots finaux sont envoyés au GPU. Le campus s'assemble progressivement avec budget CPU de 8 ms par image et lots de 8 192 sommets, annulation lors de destruction. React diffère l'update d'une frame pour éviter la construction du montage StrictMode jeté. Rebaser le campus le repositionne sans recréer sa géométrie.
+
+Preuves de cette passe : régression buffers observée rouge avant correction (5 063 appels pour un hôtel, limite 25), puis verte ; comparaison de géométrie avec MergeMeshes (positions, normales, UV, couleurs, indices) ; construction progressive/cancellation ; représentants gelés sans pause métier ; déplacement avec glissement et absence de traversée. Deux exécutions ciblées terminées vertes : 13 tests factory/géométrie/charpente/modes, puis 14 tests habitants/caméra. Typecheck world-web et lint client terminés avec succès, dernière modification Babylon relintée/typecheckée. Pas de suite DB ou E2E.
+
+Recette navigateur isolée : monde affiché, colonne et DEV contrôlés sur captures ; palette Bâtiments/Infrastructure vérifiée ; sélection d'un représentant avec données réelles, POV, override Z en marche libre, Échap et suivi arrière vérifiés. Le positionnement initial de la fiche sous la palette a été reproduit et corrigé. Une réponse API 500 transitoire a empêché un rechargement ; la même requête est ensuite revenue à 200 sans modification serveur. La session automatisée utilise du rendu logiciel réduit à 5 FPS : ne pas extrapoler un délai de chargement universel. La génération complète du campus reste coûteuse, mais n'immobilise plus tout le premier affichage. Finition et fluidité sur le navigateur matériel de Tristan à recetter. L'ancien échec de limites géométriques Médecine ci-dessous n'a pas été traité.
+
+Complément de validation de la passe interactive ci-dessus : les deux images LOD de 256 px sont apparues automatiquement après `pendingBuildingJobs = 0`, contrôlées sur capture (maquette du village et tore). La limite du moteur de la session automatisée a été portée de 5 à 45 FPS pour ce dernier contrôle, sans changer les sources ni revendiquer un benchmark matériel. DEV/Passe-muraille et palette Bâtiments/Infrastructure également vérifiés. La session navigateur de recette est fermée ; les serveurs restent actifs.
+
 # Clôture Git du HUD — 4 octobre 2026
 
 Tristan a demandé les commits et le push avant une passe interactive de petits ajustements. Les changements relus de la tranche sont répartis en deux commits de code, **poussés sur `origin/main`** :
@@ -1185,3 +1406,33 @@ Status: implemented, migration `008_spatial_gardens` applied to `arbestra_test` 
 ## Git
 
 Dernier commit de référence : `c75115f feat: establish world and economy foundations` (déjà poussé). La tranche présente n'est pas committée.
+
+---
+
+## Prompt de reprise pour Sol — Infrastructure (4 octobre 2026)
+
+Réglage conseillé à Tristan : GPT-6.1-Sol, effort High pour la réalisation ; Medium pour les retouches visuelles interactives. Ce conseil ne demande ni changement automatique de modèle ni délégation.
+
+> Implémente la tranche décrite dans `docs/SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md`, y compris son complément sur les deux ateliers accessibles depuis le showroom lorsque la fonctionnalité est cochée dans l'admin. Les arbitrages produit sont faits : ne recommence pas une session de design. Vérifie les recommandations techniques contre le code et conserve les garanties de la spec.
+>
+> Commence par `AGENTS.md`, `git status --short`, le dernier commit et la tête de ce handoff, puis la spec Infrastructure et les seules références HUD/factory/architecture pertinentes. Le long historique qui précède ce prompt n'est pas l'état courant. Base lors de sa rédaction : `main`, `ffb6707`, avec de nombreux changements non committés appartenant aux passes précédentes. Préserve-les ; ne réinitialise rien, ne réécris pas leur historique et ne touche pas à l'export brut de conversation non suivi.
+>
+> Le résultat attendu est une tranche utilisable dans le jeu, pas seulement un rendu de routes :
+>
+> - Infrastructure utilise **le showroom existant**, dans Constructions, à côté du domaine Bâtiments. Préparation dans le HUD, exécution directe dans le monde, aucune modale ni second formulaire pour les actions ordinaires.
+> - Voirie orthogonale au huitième de case, largeur 2–8 subdivisions (défaut 4), bordures extérieures optionnelles d'une demi-subdivision. Passage nu gratuit mais routable et protégé, terre gratuite, deux pavages (3×1 et 4×2), raccords et accès correctement ouverts.
+> - Paiement réel et réserve de matière prépayée, reçus idempotents, revalidation serveur et annulation exacte des portions. Clic droit annule la dernière portion de route ; Échap termine sans retirer les portions acceptées.
+> - Les nouvelles missions empruntent le réseau édité avec une durée correspondant à leur longueur, sans bonus de vitesse lié au matériau. Les missions engagées conservent parcours et échéances ; supprimer le revêtement laisse le terrain praticable. Les véritables obstacles ne coupent pas leurs passages.
+> - Braseros éditables : clic sur un existant le saisit, clic gauche le déplace, clic droit le supprime, Échap restaure son état initial. Politique manuelle persistante par case, aucune réapparition automatique surprise, rétablissement explicite. Ne pas rendre éditables les décors internes des bâtiments.
+> - Accès multiples déclarés par les factories et partagés avec le serveur. R tourne le placement de 90°, **emprise réservée et accès compris**, pour bâtiments et équipements. Aucun déplacement généralisé de bâtiments existants.
+> - Atelier Infrastructure réutilisant le socle de l'atelier Bâtiments, sa grille 8×8, ses prévisualisations et les mêmes générateurs que le jeu. Dans chacun des showrooms, une entrée « Créer un bâtiment » ouvre l'atelier correspondant, sans coût ni ghost. Une option admin serveur contrôle ces deux entrées et leur accès. Aucun mécanisme admin correspondant n'a été trouvé lors de la confrontation : vérifier l'existant et réaliser le raccord minimal protégé, sans inventer une autorisation depuis le client ni refondre le back-office.
+>
+> Avance dans l'ordre recommandé de la spec : contrats géométriques/accès et compatibilité legacy ; commandes, persistance et économie ; routage métier ; atelier/rendu ; gestes HUD et recette. Travaille par incréments cohérents, mais poursuis jusqu'à couvrir le périmètre. Signale un blocage produit réel plutôt que d'inventer une nouvelle mécanique.
+>
+> Points sensibles prouvés par la lecture : les parcours actuels sont à la case entière et certaines durées comptent leurs sommets ; les portes sont en partie ajoutées côté Babylon ; le routage scientifique possède ses propres entrées ; les braseros sont dérivés ; la commande ordinaire de construction n'a pas d'orientation ; les stocks sont entiers. Traite ces raccords explicitement. Ne multiplie pas les durées par huit et ne modifie pas rétroactivement les missions existantes.
+>
+> Hors scope : commerce, artisans/tailleur de pierre, ères, usure/maintenance, chevaux/carrioles, chantiers de terrassement, éditeur complet de méta-blocs, publication de recettes utilisateur et nouveau moteur de foule. Préserver leurs points de raccordement ne signifie pas les implémenter.
+>
+> Vérification proportionnée : tests ciblés de géométrie, durée, coûts/réserve, annulation, migration et autorité ; concurrence DB forcée lorsque nécessaire ; typecheck/lint des parties touchées. Recette navigateur des gestes et raccords, avec Tristan pour les itérations graphiques. Pas de campagne E2E générale pour cette passe. Aucun reset de développement ; respecter les règles d'autorisation des migrations et ne pas récupérer d'identifiants pour contourner une session navigateur déconnectée. Ne présente pas les anciens tests du handoff comme des résultats actuels.
+>
+> Utilise les **17 critères d'acceptation** de la spec comme contrôle de sortie. Mets à jour les références affectées et la tête du handoff avec ce qui est réellement réalisé, vérifié et encore à recetter. Aucun commit/push automatique n'est demandé par ce prompt ; préserver le worktree est prioritaire. Ne lance pas de sous-agents sans autorisation explicite.
