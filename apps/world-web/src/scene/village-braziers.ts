@@ -9,6 +9,10 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { ClusteredLightContainer } from '@babylonjs/core/Lights/Clustered/clusteredLightContainer';
 import '@babylonjs/core/Lights/Clustered/clusteredLightingSceneComponent';
+// Register before rendering: a missing shader falls back to an HTTP file lookup,
+// which the SPA dev server answers with HTML instead of GLSL.
+import '@babylonjs/core/Shaders/lightProxy.vertex';
+import '@babylonjs/core/Shaders/lightProxy.fragment';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';

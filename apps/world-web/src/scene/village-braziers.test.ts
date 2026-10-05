@@ -5,8 +5,14 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { ShaderStore } from '@babylonjs/core/Engines/shaderStore';
 import { bindBrazierLights, brazierBlocks, roadCorners } from './village-braziers';
 import type { TravelRoute } from '@arbestra/contracts';
+
+it('registers clustered light shaders before the first night frame', () => {
+  expect(ShaderStore.ShadersStore.lightProxyVertexShader).toContain('gl_Position');
+  expect(ShaderStore.ShadersStore.lightProxyPixelShader).toContain('void main');
+});
 
 it('preserves unchanged light bindings and material readiness, but follows moving objects', () => {
   const engine = new NullEngine(), scene = new Scene(engine);
