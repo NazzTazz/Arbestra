@@ -1,4 +1,5 @@
 import { sql, type Kysely, type Transaction } from 'kysely';
+import { pathIntersectsBox, travelDuration } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { randomUUID } from 'node:crypto';
 import { up as migrateGardenPlots } from '../../database/migrations/015_garden_plots.js';
@@ -166,7 +167,7 @@ it('rolls back an accepted plot departure after an identified injected failure',
   expect(await gardenRows()).toEqual(before);
 });
 
-it('credits only the reserved plot at exactly 60 seconds and never credits it twice', async () => {
+it('credits only the reserved plot at its return deadline and never credits it twice', async () => {
   const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden',
     DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth], 0);
   const id = state.cells.find((cell) => cell.building?.garden)!.building!.id;
@@ -175,7 +176,7 @@ it('credits only the reserved plot at exactly 60 seconds and never credits it tw
   await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
     DEVELOPMENT_CELLS.garden.cellX, DEVELOPMENT_CELLS.garden.cellY, randomUUID());
   const work = await db.selectFrom('gardenHarvests').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).executeTakeFirstOrThrow();
-  expect(work.completesAt.getTime() - work.startedAt.getTime()).toBe(60_000);
+  expect(work.completesAt.getTime() - work.startedAt.getTime()).toBe(60_000 + work.transportMs * 2);
   const carrots = async () => Number((await db.selectFrom('villageResources').select('amount')
     .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'carrot').executeTakeFirstOrThrow()).amount);
   const initial = await carrots();
@@ -209,7 +210,7 @@ it('adds the recorded outward and return travel to a plot harvest without shorte
   const harvest = result.cells.flatMap((cell) => cell.building?.garden?.plots ?? [])
     .find((plot) => plot.cellX === DEVELOPMENT_CELLS.gardenNorth.cellX && plot.cellY === DEVELOPMENT_CELLS.gardenNorth.cellY)!.harvest!;
   expect(harvest.path.length).toBeGreaterThan(1);
-  expect(harvest.transportMs).toBe((harvest.path.length - 1) * 1_000);
+  expect(harvest.transportMs).toBe(travelDuration(harvest.path, state.world));
   expect(Date.parse(harvest.completesAt) - Date.parse(harvest.startedAt)).toBe(60_000 + harvest.transportMs * 2);
   expect((await db.selectFrom('gardenHarvests').select('pathCells').where('id', '=', harvest.id).executeTakeFirstOrThrow()).pathCells)
     .toEqual(harvest.path);
@@ -225,9 +226,23 @@ it('preserves both departures and both extensions when Gardens fuse and old rece
   await db.updateTable('gardenPlots').set({ storedAmount: 10, remainder: 0, productionUpdatedAt: new Date() }).where('worldId', '=', DEVELOPMENT_IDS.world).execute();
   const receipts = [randomUUID(), randomUUID()];
   for (const [index, cell] of [left, right].entries()) {
-    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, ids[index]!, cell.cellX, cell.cellY, receipts[index]!);
+    // Reserve the extension before departure so the committed path avoids it.
     await expandGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, ids[index]!,
       [{ cellX: cell.cellX, cellY: cell.cellY - 1 }], 600_000 + index * 60_000);
+    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, ids[index]!, cell.cellX, cell.cellY, receipts[index]!);
+    // A historical departure can use the southern approach rather than today's
+    // shared shortest route through the future fusion cell. Keep it committed.
+    const work = await db.selectFrom('gardenHarvests').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world)
+      .where('buildingId', '=', ids[index]!).executeTakeFirstOrThrow();
+    const start = work.pathCells![0]!;
+    const path = [start, { cellX: start.cellX, cellY: left.cellY + 1 },
+      { cellX: cell.cellX + .5, cellY: left.cellY + 1 }, { cellX: cell.cellX + .5, cellY: cell.cellY }];
+    const world = { widthCells: 2048, heightCells: 1024 };
+    expect(pathIntersectsBox(path, { cellX: left.cellX + 1, cellY: left.cellY }, .499, .499, world)).toBe(false);
+    const transportMs = travelDuration(path, world);
+    await db.updateTable('gardenHarvests').set({ pathCells: sql`${JSON.stringify(path)}::jsonb`, transportMs,
+      completesAt: new Date(work.startedAt.getTime() + 60_000 + transportMs * 2) })
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('id', '=', work.id).execute();
   }
   const beforeHarvests = await db.selectFrom('gardenHarvests').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).orderBy('id').execute();
   const beforeExpansions = await db.selectFrom('buildingExpansions').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).orderBy('id').execute();

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { travelDuration } from '@arbestra/contracts';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabase } from '../../database/connection.js';
@@ -139,7 +140,7 @@ describe.sequential('stone regression proofs', () => {
     const result = await startVillageStoneExtraction(db, DEVELOPMENT_IDS.account, 'aube', villageId, id, randomUUID(), 1);
     const work = result.extraction;
     expect(work.path.length).toBeGreaterThan(1);
-    expect(work.transportMs).toBe((work.path.length - 1) * 1_000);
+    expect(work.transportMs).toBe(travelDuration(work.path, { widthCells: 2048, heightCells: 1024 }));
     expect(Date.parse(work.completesAt) - Date.parse(work.startedAt)).toBe(600_000 + work.transportMs * 2);
     const detail = await getStoneDepositDetails(db, DEVELOPMENT_IDS.account, 'aube', villageId, id);
     expect(detail.eligibility.workerOptions[0]?.durationMs).toBe(600_000 + work.transportMs * 2);
