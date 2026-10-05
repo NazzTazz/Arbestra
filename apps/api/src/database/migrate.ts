@@ -31,6 +31,8 @@ import * as barracksCatalogMigration from './migrations/024_barracks_catalog.js'
 import * as universityScienceMigration from './migrations/025_university_science.js';
 import * as exploitationOrdersMigration from './migrations/026_exploitation_orders.js';
 import * as buildingCommandReceiptsMigration from './migrations/027_building_command_receipts.js';
+import * as infrastructureMigration from './migrations/028_infrastructure.js';
+import * as timberHouseRecipesMigration from './migrations/029_timber_house_recipes.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -62,6 +64,8 @@ const migrationProvider: MigrationProvider = {
       '025_university_science': universityScienceMigration,
       '026_exploitation_orders': exploitationOrdersMigration,
       '027_building_command_receipts': buildingCommandReceiptsMigration,
+      '028_infrastructure': infrastructureMigration,
+      '029_timber_house_recipes': timberHouseRecipesMigration,
     };
   },
 };

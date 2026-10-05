@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import type { VillageState } from './villages.js';
-import { buildTravelNetwork } from './travel-paths.js';
+import { buildTravelNetwork, travelDuration } from './travel-paths.js';
 
 describe('travel network', () => {
+  it('counts physical length on long territorial legs and wrapped fine segments', () => {
+    const world={widthCells:2048,heightCells:1024};
+    expect(travelDuration([{cellX:0,cellY:5},{cellX:150,cellY:5}],world)).toBe(150_000);
+    expect(travelDuration([{cellX:2047.875,cellY:5},{cellX:0.125,cellY:5}],world)).toBe(250);
+    expect(travelDuration([{cellX:2047,cellY:5},{cellX:0,cellY:5}])).toBe(1000);
+  });
   it('routes only requested woodlands and traverses reclaimed cells using the exact server flag', () => {
     const state = {
       world: { widthCells: 9, heightCells: 9 }, village: { anchorCellX: 2, anchorCellY: 4 },

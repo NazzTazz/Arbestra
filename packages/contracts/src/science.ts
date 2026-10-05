@@ -35,7 +35,7 @@ export const ScienceStateSchema = Type.Object({
     kind: Type.Union([Type.Literal('research'), Type.Literal('training'), Type.Literal('survey'), Type.Literal('exploration')]),
     programCode: Type.Union([Type.String(), Type.Null()]), workerCount: Type.Integer({ minimum: 1 }),
     startedAt: Type.String({ format: 'date-time' }), completesAt: Type.String({ format: 'date-time' }),
-    path: Type.Array(PointSchema), target: Type.Union([PointSchema, Type.Null()]),
+    path: Type.Array(Type.Object({cellX:Type.Number(),cellY:Type.Number()})), target: Type.Union([PointSchema, Type.Null()]),
   })),
   cartographers: Type.Integer({ minimum: 0 }),
   surveyedPlaces: Type.Integer({ minimum: 0 }),

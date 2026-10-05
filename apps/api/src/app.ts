@@ -8,6 +8,7 @@ import { HttpError } from './errors.js';
 import { registerAuthRoutes } from './modules/auth/routes.js';
 import { registerVillageRoutes } from './modules/villages/routes.js';
 import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
+import {registerFactorySettings} from './modules/villages/factory-settings.js';
 
 export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise<FastifyInstance> {
   const app = Fastify({ logger: config.isProduction });
@@ -28,5 +29,6 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerAuthRoutes(app, db, config);
   await registerVillageRoutes(app, db, config);
   await registerTerrainRoutes(app, db, config);
+  await registerFactorySettings(app,db,config);
   return app;
 }

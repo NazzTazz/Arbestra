@@ -1,3 +1,4 @@
+import {travelDuration} from '@arbestra/contracts';
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -7,7 +8,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS } from '../../database/seed.js';
-import { clearWoodland, materializeWoodland } from './woodland.js';
+import { clearWoodland, materializeWoodland, materializeWoodlands } from './woodland.js';
 import { completeStoneExtractionAt, readStoneDeposit, startStoneExtraction } from './stone-extractions.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
 import { getStoneDepositDetails, startVillageStoneExtraction, clearVillageWoodland } from '../villages/service.js';
@@ -41,6 +42,22 @@ async function fixture(run: (tx: Transaction<Database>, id: string, t: Date) => 
 const village = { worldId, villageId, widthCells: 2048, heightCells: 1024 };
 const stock = (tx: Transaction<Database>) => tx.selectFrom('villageResources').select('amount')
   .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
+
+it('leaves settled full woodlands untouched but reconciles depleted stock and missing occupancy',async()=>{
+  await fixture(async(tx,id,t)=>{
+    const before=await tx.selectFrom('woodlandDeposits').selectAll().where('featureId','=',id).executeTakeFirstOrThrow();
+    await materializeWoodlands(tx,worldId,[id],new Date(t.getTime()+3600000));
+    expect(await tx.selectFrom('woodlandDeposits').selectAll().where('featureId','=',id).executeTakeFirstOrThrow()).toEqual(before);
+    await tx.deleteFrom('worldCellOccupancies').where('worldId','=',worldId).where('featureId','=',id).execute();
+    await materializeWoodlands(tx,worldId,[id],new Date(t.getTime()+3600000));
+    expect(await tx.selectFrom('worldCellOccupancies').select('featureId').where('worldId','=',worldId).where('featureId','=',id).execute()).toHaveLength(1);
+    await tx.updateTable('woodlandDeposits').set({remainingAmount:0,regrowthUpdatedAt:t}).where('worldId','=',worldId).where('featureId','=',id).execute();
+    await materializeWoodlands(tx,worldId,[id],new Date(t.getTime()+3600000));
+    const grown=await tx.selectFrom('woodlandDeposits').select('remainingAmount').where('featureId','=',id).executeTakeFirstOrThrow();
+    expect(Number(grown.remainingAmount)).toBeCloseTo(300/336,8);
+    expect(await tx.selectFrom('worldCellOccupancies').select('featureId').where('worldId','=',worldId).where('featureId','=',id).execute()).toHaveLength(0);
+  });
+});
 
 it('regrows over fourteen days, retains fractions across reads, caps stock and reblocks an unused cell', async () => {
   await fixture(async (tx, id, t) => {
@@ -134,7 +151,7 @@ it('serves woodland details and starts the existing API service with a real path
     const result = await startVillageStoneExtraction(source, DEVELOPMENT_IDS.account, 'aube', villageId, id, randomUUID(), 1);
     expect(result.extraction.resourceCode).toBe('wood');
     expect(result.extraction.path.length).toBeGreaterThan(1);
-    expect(result.extraction.transportMs).toBe((result.extraction.path.length - 1) * 1000);
+    expect(result.extraction.transportMs).toBe(travelDuration(result.extraction.path,{widthCells:2048,heightCells:1024}));
     expect(Date.parse(result.extraction.completesAt) - Date.parse(result.extraction.startedAt)).toBe(600000 + result.extraction.transportMs * 2);
     expect(result.deposit.availableAmount).toBe(200);
   });

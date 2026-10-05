@@ -2,6 +2,21 @@ import { sql, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 
+/** Caller has already locked these woodland rows in UUID order. Full, correctly
+ * occupied deposits without physical returns have nothing to reconcile. */
+export async function materializeWoodlands(tx:Transaction<Database>,worldId:string,ids:string[],through:Date) {
+  if(!ids.length)return;
+  const settled=await tx.selectFrom('woodlandDeposits as w').select('w.featureId')
+    .where('w.worldId','=',worldId).where('w.featureId','in',ids)
+    .where('w.cleared','=',false).whereRef('w.remainingAmount','=','w.initialAmount')
+    .where('w.reservedAmount','=','0')
+    .where(sql<boolean>`exists(select 1 from world_cell_occupancies o where o.world_id=w.world_id and o.cell_x=w.cell_x and o.cell_y=w.cell_y and o.feature_id=w.feature_id and o.building_id is null)`)
+    .where(sql<boolean>`exists(select 1 from world_features f where f.world_id=w.world_id and f.id=w.feature_id and f.state='available')`)
+    .where(sql<boolean>`not exists(select 1 from deposit_extractions e where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood' and e.wood_debited_at is null and e.completes_at<=${through})`).execute();
+  const skip=new Set(settled.map(w=>w.featureId));
+  for(const id of ids)if(!skip.has(id))await materializeWoodland(tx,worldId,id,through);
+}
+
 /** All callers acquire stone rows first, then woodland UUIDs, before transitions. */
 export async function materializeWoodland(tx: Transaction<Database>, worldId: string, featureId: string, through: Date) {
   const before = await tx.selectFrom('woodlandDeposits').selectAll().where('worldId', '=', worldId)

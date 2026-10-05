@@ -1,5 +1,19 @@
 # Économie
 
+La réconciliation des bosquets voisins conserve les verrous par UUID, puis classe en une requête les bosquets pleins sans réservation ni retour physique dû, dont l'occupation et la disponibilité sont cohérentes. Ces bosquets ne demandent aucune écriture ni déplacement du curseur de repousse. Tous les autres suivent la matérialisation historique, notamment pour réparer une occupation ou traiter une récolte/repousse.
+
+## Aménagements immédiats (028)
+
+`village_infrastructure` conserve par monde/village les tracés orthogonaux au huitième de case, leurs remplacements, les équipements manuels et les politiques d'éclairage. Les pixels de surface, pierres et flammes sont dérivés, jamais des entités persistantes individuelles. `infrastructure_receipts` conserve la requête idempotente, le devis et les plans avant/après nécessaires à l'annulation de session.
+
+La réserve prépayée contient de 0 à 255 unités, une pierre valant 256 unités. Le devis compte la surface nouvellement pavée, les bordures nouvelles et le brasero éventuellement acheté ; seul le manque de matière est débité en pierres entières. Terre et passage nu sont gratuits. Un déplacement ne repaie pas le brasero. Suppression et changement de matériau ne remboursent pas ; l'undo exact restitue le débit et le reliquat de la dernière portion acceptée, sans annuler la production ou une autre commande métier.
+
+`beginVillageEconomy` prend le village, puis le verrou transactionnel de navigation du monde, puis la borne et les gisements. La lecture partagée couvre aussi les nouveaux départs automatiques ; les commandes d'aménagement et de construction choisissent la propriété exclusive dès l'entrée, sans upgrade tardif d'un verrou partagé. Les économies de plusieurs villages peuvent ainsi avancer en parallèle ; un obstacle ne s'intercale pas entre le calcul d'un trajet et son admission. Révision, devis, terrain, emprises, obstacles, droits et parcours déjà engagés sont revalidés avant mutation. Les plans et trajets des autres villages sont lus sans prendre leurs verrous après le village local. La pile inverse refuse une restauration devenue dangereuse. Un retry exact réutilise son identifiant ; une réutilisation avec un payload différent est refusée.
+
+Les nouveaux trajets utilisent les vrais seuils des portes, les sous-cases près des géométries éditées et les cellules ordinaires ailleurs. Le contexte de navigation intègre aussi les obstacles des plans voisins dont les périmètres peuvent croiser la zone locale ; le plan exposé pour l'édition reste celui du village autorisé. La durée est la longueur physique torique à une seconde par case ; le matériau change la préférence de routage, pas la vitesse. Les trajets, durées, réservations et échéances déjà engagés ne sont pas réécrits.
+
+Les deux ateliers sont isolés de l'économie : réglage DEV authentifié par monde, accès direct vérifié et révocation, aucun rôle administrateur ni publication de recettes. Voir la [spec Infrastructure](../SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md) et le handoff pour les preuves actuelles.
+
 ## Ordres d'exploitation mixtes (026)
 
 `exploitation_orders` coordonne une tournée Jardin et jusqu'à deux chantiers, bois/pierre. Chaque enfant conserve ses missions, réservations, notifications et crédits au retour. L'ordre porte le plafond simultané commun, la fenêtre réelle depuis confirmation, la cohorte initiale et les réglages détaillés facultatifs. Les références sont liées au même monde/village ; aucune autorité ne vient du viewport.

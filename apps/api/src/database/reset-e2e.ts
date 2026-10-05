@@ -30,6 +30,9 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
     await db.transaction().execute(async (transaction) => {
       await transaction.deleteFrom('sessions').execute();
       await transaction.deleteFrom('scheduledTasks').execute();
+      await transaction.deleteFrom('infrastructureReceipts').where('worldId','=',DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('villageInfrastructure').where('worldId','=',DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('worldFactorySettings').where('worldId','=',DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('populationCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('villageAccomplishments').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('populationCohorts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
@@ -48,7 +51,7 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
         .execute();
       await transaction.updateTable('buildings').set({
         level: 1, targetLevel: null, status: 'completed', constructionStartedAt: null,
-        visualLayout: null,
+        visualLayout: null,quarterTurns:0,
         constructionCompletesAt: null, completedAt: sql`transaction_timestamp()`,
       }).where('id', '=', DEVELOPMENT_IDS.townHall).execute();
       await transaction.deleteFrom('worldCellOccupancies')

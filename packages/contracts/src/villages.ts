@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { ScienceStateSchema } from './science.js';
 import { ExploitationOrderSchema } from './exploitation.js';
+import {InfrastructurePlanSchema} from './infrastructure.js';
 
 export const BuildingTypeSchema = Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9-]*$' });
 export type BuildingType = Static<typeof BuildingTypeSchema>;
@@ -49,14 +50,14 @@ const GardenExpansionSchema = Type.Object({
 
 export const GardenHarvestStopSchema = Type.Object({
   cellX: Type.Integer({minimum:0}), cellY: Type.Integer({minimum:0}),
-  path: Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer()})),
+  path: Type.Array(Type.Object({cellX:Type.Number(),cellY:Type.Number()})),
   arrivesAfterMs: Type.Integer({minimum:0}), workEndsAfterMs: Type.Integer({minimum:0}),
   reservedCarrots: Type.Integer({minimum:0}),
 });
 export type GardenHarvestStop = Static<typeof GardenHarvestStopSchema>;
 const GardenTourProperties = {
   stops: Type.Optional(Type.Array(GardenHarvestStopSchema)),
-  returnPath: Type.Optional(Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer()}))),
+  returnPath: Type.Optional(Type.Array(Type.Object({cellX:Type.Number(),cellY:Type.Number()}))),
 };
 export const GardenSelectionHarvestRequestSchema = Type.Object({
   commandId:Type.String({format:'uuid'}),
@@ -81,7 +82,7 @@ export const GardenSchema = Type.Object({
       id: Type.String({ format: 'uuid' }), startedAt: Type.String({ format: 'date-time' }),
       completesAt: Type.String({ format: 'date-time' }), reservedCarrots: Type.Integer({ minimum: 0 }),
       transportMs: Type.Integer({ minimum: 0 }),
-      path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
+      path: Type.Array(Type.Object({ cellX: Type.Number(), cellY: Type.Number() })),
       ...GardenTourProperties,
     }), Type.Null()]),
   })),
@@ -92,7 +93,7 @@ export const GardenSchema = Type.Object({
     completesAt: Type.String({ format: 'date-time' }), workerCount: Type.Integer({ minimum: 1 }),
     reservedCarrots: Type.Integer({ minimum: 0 }),
     transportMs: Type.Integer({ minimum: 0 }),
-    path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
+    path: Type.Array(Type.Object({ cellX: Type.Number(), cellY: Type.Number() })),
   }), Type.Null()]),
 });
 export type Garden = Static<typeof GardenSchema>;
@@ -128,7 +129,7 @@ export const ExtractionSchema = Type.Object({
   startedAt: Type.String({ format: 'date-time' }), completesAt: Type.String({ format: 'date-time' }),
   completedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
   transportMs: Type.Integer({ minimum: 0 }),
-  path: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
+  path: Type.Array(Type.Object({ cellX: Type.Number(), cellY: Type.Number() })),
 });
 export type Extraction = Static<typeof ExtractionSchema>;
 
@@ -150,7 +151,7 @@ export const ExtractionWorksiteSchema = Type.Object({
 export type ExtractionWorksite = Static<typeof ExtractionWorksiteSchema>;
 
 export const BuildingVisualLayoutSchema = Type.Object({
-  recipe: Type.Union([Type.Literal('town-hall'), Type.Literal('stone-house')]),
+  recipe: Type.Union([Type.Literal('town-hall'), Type.Literal('stone-house'), Type.Literal('log-house'), Type.Literal('beam-house')]),
   version: Type.Literal(1),
   quarterTurns: Type.Integer({ minimum: 0, maximum: 3 }),
   entranceFace: Type.Union([Type.Literal('-x'),Type.Literal('+x'),Type.Literal('-z'),Type.Literal('+z')]),
@@ -159,6 +160,8 @@ export const BuildingVisualLayoutSchema = Type.Object({
 export type BuildingVisualLayout = Static<typeof BuildingVisualLayoutSchema>;
 
 export const BuildingSchema = Type.Object({
+  quarterTurns: Type.Optional(Type.Integer({minimum:0,maximum:3})),
+  accesses: Type.Optional(Type.Array(Type.Object({id:Type.String(),x:Type.Number(),y:Type.Number(),dx:Type.Integer({minimum:-1,maximum:1}),dy:Type.Integer({minimum:-1,maximum:1}),width:Type.Number({exclusiveMinimum:0}),principal:Type.Boolean()}))),
   id: Type.String({ format: 'uuid' }),
   type: BuildingTypeSchema,
   level: Type.Integer({ minimum: 1 }),
@@ -200,6 +203,8 @@ export const VillageAccomplishmentSchema = Type.Object({
 export type VillageAccomplishment = Static<typeof VillageAccomplishmentSchema>;
 
 export const VillageStateSchema = Type.Object({
+  infrastructure:Type.Optional(InfrastructurePlanSchema),
+  factoryEnabled:Type.Optional(Type.Boolean()),
   science: Type.Optional(ScienceStateSchema),
   serverTime: Type.String({ format: 'date-time' }),
   world: Type.Object({
@@ -209,6 +214,7 @@ export const VillageStateSchema = Type.Object({
   }),
   village: Type.Object({
     id: Type.String({ format: 'uuid' }), name: Type.String(), anchorCellX: Type.Integer(), anchorCellY: Type.Integer(),
+    townHallBuildingId: Type.Optional(Type.String({ format: 'uuid' })),
     resources: Type.Array(ResourceStockSchema),
     wood: Type.Integer({ minimum: 0 }), carrots: Type.Integer({ minimum: 0 }),
     woodProductionPerHour: Type.Number({ minimum: 0 }),
@@ -234,9 +240,10 @@ export const VillageStateSchema = Type.Object({
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),
   travelRoutes: Type.Array(Type.Object({
+    version:Type.Optional(Type.Literal(2)),
     id: Type.String(), kind: Type.Union([Type.Literal('building'), Type.Literal('garden'), Type.Literal('stone'), Type.Literal('wood')]),
     destination: Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }),
-    cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() })),
+    cells: Type.Array(Type.Object({ cellX: Type.Number(), cellY: Type.Number() })),
   })),
   region: Type.Object({
     originCellX: Type.Integer({ minimum: 0 }), originCellY: Type.Integer({ minimum: 0 }),
@@ -251,10 +258,12 @@ export type VillageState = Static<typeof VillageStateSchema>;
 
 const ExpectedCostsSchema = Type.Array(Type.Object({ resourceCode: Type.String(), amount: Type.Integer({ minimum: 0 }) }), { maxItems: 16 });
 const CommandGuardSchema = {
+  quarterTurns: Type.Optional(Type.Integer({minimum:0,maximum:3})),
   commandId: Type.Optional(Type.String({ format: 'uuid' })),
   expectedCosts: Type.Optional(ExpectedCostsSchema),
 };
 const SpatialBuildRequestSchema = Type.Object({
+  houseVariant: Type.Optional(Type.Union([Type.Literal('stone'), Type.Literal('logs'), Type.Literal('beams')])),
   ...CommandGuardSchema,
   buildingType: BuildingTypeSchema,
   anchorCellX: Type.Integer(),
@@ -262,6 +271,7 @@ const SpatialBuildRequestSchema = Type.Object({
   cells: Type.Array(Type.Object({ cellX: Type.Integer(), cellY: Type.Integer() }), { minItems: 1, maxItems: 100 }),
 });
 const LegacyBuildRequestSchema = Type.Object({
+  houseVariant: Type.Optional(Type.Union([Type.Literal('stone'), Type.Literal('logs'), Type.Literal('beams')])),
   ...CommandGuardSchema,
   buildingType: BuildingTypeSchema,
   cellX: Type.Integer(),

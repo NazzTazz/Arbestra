@@ -1,3 +1,4 @@
+import {travelDuration} from '@arbestra/contracts';
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import type { ExtractionWorksite, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, TravelCell } from '@arbestra/contracts';
@@ -165,12 +166,12 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
       if (!path) { waitingAccess = true; continue; }
       if (deposit.availableAmount < 1) {
         waitingStock = true;
-        if (!waitingTarget || path.length - 1 < waitingTarget.distance)
-          waitingTarget = { featureId: target.featureId, distance: path.length - 1 };
+        if (!waitingTarget || travelDuration(path)/1000 < waitingTarget.distance)
+          waitingTarget = { featureId: target.featureId, distance: travelDuration(path)/1000 };
         continue;
       }
       candidates.push({ featureId: target.featureId, amount: Math.min(100, deposit.availableAmount),
-        path, distance: path.length - 1 });
+        path, distance: travelDuration(path)/1000 });
     }
     if (!candidates.length) {
       const remaining = await tx.selectFrom('extractionWorksiteTargets').select('featureId')

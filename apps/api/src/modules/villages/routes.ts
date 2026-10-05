@@ -1,6 +1,8 @@
 import { Type } from '@sinclair/typebox';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
+import {InfrastructureRequestSchema,type InfrastructureRequest,InfrastructurePreviewSchema} from '@arbestra/contracts';
+import {infrastructureCommand,infrastructurePreview} from './infrastructure.js';
 import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
 import {harvestGardenSelection} from './service.js';
 import type { FastifyInstance } from 'fastify';
@@ -33,6 +35,10 @@ export async function registerVillageRoutes(
   db: Kysely<Database>,
   config: AppConfig,
 ): Promise<void> {
+  for(const preview of [true,false])app.post(`/api/worlds/:worldSlug/villages/:villageId/infrastructure${preview?'/preview':''}`,{
+    schema:{params:VillageParametersSchema,body:InfrastructureRequestSchema,response:{200:preview?InfrastructurePreviewSchema:VillageStateSchema}},
+  },async request=>{const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    return (preview?infrastructurePreview:infrastructureCommand)(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest);});
   for (const preview of [true, false]) app.post(`/api/worlds/:worldSlug/villages/:villageId/exploitation${preview ? '/preview' : ''}`, {
     schema: { params: VillageParametersSchema, body: ExploitationRequestSchema, response: { 200: preview ? ExploitationPreviewSchema : VillageStateSchema } },
   }, async request => {
@@ -75,7 +81,7 @@ export async function registerVillageRoutes(
       worldSlug: string;
       villageId: string;
     };
-    const body = request.body as { commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }>; buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
+    const body = request.body as {houseVariant?:'stone'|'logs'|'beams'; quarterTurns?:number; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }>; buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
     const state = body.cells ? await constructBuildingArea(
       db,
       account.id,
@@ -87,7 +93,8 @@ export async function registerVillageRoutes(
       config.constructionDurationOverrideMs,
       body.commandId,
       body.expectedCosts,
-    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts);
+      body.quarterTurns, body.houseVariant,
+    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts,body.quarterTurns,body.houseVariant);
     return reply.status(201).send(state);
   });
 

@@ -11,7 +11,8 @@ import type {
   ChangeExtractionWorksiteRequest,
   ExtractionWorksiteSelection,
 } from '@arbestra/contracts';
-import { buildTravelNetwork, exploitationAdmissionCap } from '@arbestra/contracts';
+import { buildTravelNetwork, exploitationAdmissionCap,travelDuration,refineTravelRoute } from '@arbestra/contracts';
+import {readInfrastructure,readNavigationInfrastructure,factoryCapability,assertNoInfrastructure} from './infrastructure.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import {
@@ -53,7 +54,7 @@ import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contrac
 const CELL_SIZE = 2.5;
 const SNAPSHOT_SIZE = 64;
 const BUILD_RADIUS = 5;
-interface OwnedVillage {
+export interface OwnedVillage {
   worldId: string;
   worldSlug: string;
   worldName: string;
@@ -70,7 +71,7 @@ interface OwnedVillage {
 }
 const number = (value: string | number) => Number(value);
 
-async function ownedVillage(
+export async function ownedVillage(
   tx: Transaction<Database>,
   accountId: string,
   worldSlug: string,
@@ -244,9 +245,9 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
     .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
   if (!deposit || Number(deposit.remainingAmount) <= 0) return undefined;
   const recognized = await recognizedDepositRoute(tx, village.worldId, village.villageId, deposit);
-  if (recognized) return recognized;
+  if (recognized) return refineVillagePath(tx,village,recognized,featureId);
   if (await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit)) return undefined;
-  if (visiblePath) return visiblePath;
+  if (visiblePath) return refineVillagePath(tx,village,visiblePath,featureId);
   const dx = wrappedDelta(deposit.cellX, village.anchorCellX, village.widthCells);
   const dy = wrappedDelta(deposit.cellY, village.anchorCellY, village.heightCells);
   // World-reach commands can target arbitrarily remote cells. Keep this case bounded
@@ -261,7 +262,7 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
       cellX: deposit.cellX,
       cellY: normalizeCell(village.anchorCellY + Math.sign(dy) * i, village.heightCells),
     });
-    return path;
+    return refineVillagePath(tx,village,path,featureId);
   }
   const width = Math.min(village.widthCells, Math.abs(dx) + 17);
   const height = Math.min(village.heightCells, Math.abs(dy) + 17);
@@ -297,7 +298,23 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
         type: deposit.resourceCode === 'wood' ? 'woodland' : 'stone_outcrop', deposit: { state: 'available' } }] },
     cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
   } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
-  return buildTravelNetwork(routeState, [featureId]).find((route) => route.id === featureId)?.cells;
+  const path=buildTravelNetwork(routeState, [featureId]).find((route) => route.id === featureId)?.cells;
+  return path?refineVillagePath(tx,village,path,featureId):undefined;
+}
+
+export async function refineVillagePath(tx:Transaction<Database>,village:Pick<OwnedVillage,'worldId'|'villageId'|'anchorCellX'|'anchorCellY'|'widthCells'|'heightCells'|'chunkSize'|'generationVersion'>,path:TravelCell[],id:string):Promise<TravelCell[]>{
+  const full=village as OwnedVillage,ground=await snapshot(tx,full),features=await featuresInSnapshot(tx,full,ground);
+  const rows=await tx.selectFrom('worldCellOccupancies').leftJoin('buildings',join=>join.onRef('buildings.id','=','worldCellOccupancies.buildingId').onRef('buildings.worldId','=','worldCellOccupancies.worldId'))
+    .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY','worldCellOccupancies.role','buildings.id','buildings.villageId','buildings.buildingType','buildings.visualLayout','buildings.quarterTurns'])
+    .where('worldCellOccupancies.worldId','=',village.worldId).where('worldCellOccupancies.buildingId','is not',null).execute();
+  const context={world:village,village:{anchorCellX:village.anchorCellX,anchorCellY:village.anchorCellY,
+    townHallBuildingId:rows.find(r=>r.villageId===village.villageId&&r.buildingType==='town-hall')?.id},
+    region:{originCellX:ground.originCellX,originCellY:ground.originCellY,width:64,height:64,terrainCodes:ground.terrainCodes,
+      features:features.map(f=>({...f,type:f.featureTypeCode,deposit:{blocksCell:f.blocksCell,cleared:f.cleared,state:Number(f.remainingAmount)===0?'depleted':'available'}}))},
+    cells:rows.map(r=>({cellX:r.cellX,cellY:r.cellY,footprint:{buildingId:r.id},building:r.role==='anchor'?{id:r.id,type:r.buildingType,visualLayout:r.visualLayout,quarterTurns:r.visualLayout?.quarterTurns??r.quarterTurns}:null})),
+    infrastructure:await readNavigationInfrastructure(tx,village)} as unknown as Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>;
+  const route=refineTravelRoute(context,{id,kind:'stone',cells:path,destination:path.at(-1)!});
+  if(!route)throw new HttpError(409,'DESTINATION_UNREACHABLE','Aucun accès praticable depuis le village.');return route.cells;
 }
 
 function candidates(
@@ -401,7 +418,7 @@ function protectedCell(
   );
 }
 
-async function state(
+export async function state(
   tx: Transaction<Database>,
   accountId: string,
   worldSlug: string,
@@ -468,6 +485,7 @@ async function state(
         'buildings.constructionCompletesAt',
         'buildings.completedAt',
         'buildings.visualLayout',
+        'buildings.quarterTurns',
       ])
       .where('worldCellOccupancies.worldId', '=', village.worldId)
       .where('buildings.villageId', '=', village.villageId)
@@ -601,6 +619,7 @@ async function state(
     carrot = resources.find((item) => item.code === 'carrot');
   if (!wood || !carrot || !wood.productionUpdatedAt)
     throw new Error('Village resource seed is incomplete');
+  const townHallBuildingId=occupancyRows.find(row=>row.buildingType==='town-hall')?.buildingId;
   const villageState: VillageState = {
     science: await scienceSnapshot(tx, economy),
     serverTime: at.toISOString(),
@@ -620,6 +639,7 @@ async function state(
       name: village.villageName,
       anchorCellX: village.anchorCellX,
       anchorCellY: village.anchorCellY,
+      ...(townHallBuildingId?{townHallBuildingId}:{}),
       resources,
       wood: wood.amount,
       carrots: carrot.amount,
@@ -695,6 +715,7 @@ async function state(
                   completedAt: row.completedAt?.toISOString() ?? null,
                   hiddenSuppliesAvailable: hiddenSupplies.get(row.buildingId) ?? false,
                   visualLayout: row.visualLayout,
+                  quarterTurns: row.visualLayout?.quarterTurns??row.quarterTurns,
                   garden: row.buildingType === 'garden' && plots.length
                     ? {
                         storedCarrots: plots.reduce((sum, plot) => sum + plot.amount, 0),
@@ -751,7 +772,9 @@ async function state(
       })
       .filter((cell) => cell.canBuild || cell.footprint !== null),
   };
-  villageState.travelRoutes = buildTravelNetwork(villageState);
+  villageState.infrastructure=await readInfrastructure(tx,village.worldId,village.villageId);
+  villageState.factoryEnabled=await factoryCapability(tx,village.worldId);
+  villageState.travelRoutes = buildTravelNetwork({...villageState,infrastructure:await readNavigationInfrastructure(tx,village,villageState.infrastructure)});
   // Reuse committed mission paths; do not search routes to every woodland in the snapshot.
   for (const extraction of villageState.village.extractions) if (extraction.resourceCode === 'wood' && extraction.path.length) {
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',
@@ -805,7 +828,7 @@ async function definition(
   ]);
   return { ...row, costs, production };
 }
-async function debit(
+export async function debit(
   tx: Transaction<Database>,
   worldId: string,
   villageId: string,
@@ -843,6 +866,7 @@ async function assertBuildable(
   cellX: number,
   cellY: number,
 ) {
+  await assertNoInfrastructure(tx,village.worldId,[{cellX,cellY}],village);
   const ground = await snapshot(tx, village);
   if (ground.terrainAt(cellX, cellY) !== TERRAIN.grassland)
     throw new HttpError(
@@ -954,7 +978,7 @@ export async function configureTownHallFactory(db:Kysely<Database>,accountId:str
     const village=await ownedVillage(tx,accountId,worldSlug);
     if(village.villageId!==villageId)throw new HttpError(404,'VILLAGE_NOT_FOUND','Village introuvable.');
     const x=normalizeCell(cellX,village.widthCells),y=normalizeCell(cellY,village.heightCells);
-    const economy=await beginVillageEconomy(tx,village.worldId,villageId,undefined,[{cellX:x,cellY:y}]);
+    const economy=await beginVillageEconomy(tx,village.worldId,villageId,undefined,[{cellX:x,cellY:y}],[],true);
     await reconcileVillageEconomy(tx,economy);
     const hall=await tx.selectFrom('buildings').selectAll().where('worldId','=',village.worldId).where('villageId','=',villageId).where('buildingType','=','town-hall').forUpdate().executeTakeFirstOrThrow();
     if(hall.status!=='completed')throw new HttpError(409,'BUILDING_BUSY','Hôtel de ville en travaux.');
@@ -976,13 +1000,15 @@ export async function configureTownHallFactory(db:Kysely<Database>,accountId:str
     return preview;
   });}catch(error){if(error===previewRollback)return preview;throw error;}
 }
-function universityCampusCells(anchor: SpatialCell): SpatialCell[] {
-  return Array.from({ length: 30 }, (_, index) => ({ cellX: anchor.cellX + index % 5 - 2, cellY: anchor.cellY + Math.floor(index / 5) - 2 }));
+function universityCampusCells(anchor: SpatialCell,quarterTurns=0): SpatialCell[] {
+  return Array.from({ length: 30 }, (_, index) => {const x=index%5-2,y=Math.floor(index/5)-2;
+    return {cellX:anchor.cellX+(quarterTurns===0?x:quarterTurns===1?y:quarterTurns===2?-x:-y),cellY:anchor.cellY+(quarterTurns===0?y:quarterTurns===1?-x:quarterTurns===2?-y:x)};});
 }
 
 /** Conservative adaptation of existing campuses; village/business locks are already held. */
 async function ensureUniversityCampus(tx: Transaction<Database>, village: OwnedVillage, buildingId: string, anchor: SpatialCell) {
-  const cells = universityCampusCells(anchor).map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) }));
+  const building=await tx.selectFrom('buildings').select('quarterTurns').where('worldId','=',village.worldId).where('id','=',buildingId).where('villageId','=',village.villageId).executeTakeFirstOrThrow();
+  const cells = universityCampusCells(anchor,building.quarterTurns).map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) }));
   const existing = await tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY']).where('worldId', '=', village.worldId).where('buildingId', '=', buildingId).execute();
   const expected = new Set(cells.map(c => worldCellKey(c.cellX, c.cellY)));
   if (existing.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
@@ -1008,7 +1034,7 @@ export async function adaptUniversityCampus(db: Kysely<Database>, accountId: str
       .where('buildings.villageId', '=', village.villageId).where('buildings.buildingType', '=', 'university').where('worldCellOccupancies.role', '=', 'anchor').executeTakeFirst();
     if (!anchor) throw new HttpError(404, 'BUILDING_NOT_FOUND', 'Université introuvable.');
     const cells = universityCampusCells(anchor).map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) }));
-    await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells);
+    await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells,[],true);
     await tx.selectFrom('buildings').select('id').where('worldId', '=', village.worldId).where('id', '=', buildingId).forUpdate().executeTakeFirstOrThrow();
     await ensureUniversityCampus(tx, village, buildingId, anchor);
   });
@@ -1041,7 +1067,8 @@ async function claimBuildingCommand(tx: Transaction<Database>, village: OwnedVil
   const existing = await tx.selectFrom('buildingCommandReceipts').select(['commandType', 'request'])
     .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).where('commandId', '=', commandId)
     .executeTakeFirstOrThrow();
-  if (existing.commandType !== commandType || !isDeepStrictEqual(existing.request, request))
+  const comparable=(value:unknown)=>commandType==='construct'&&value&&typeof value==='object'?{quarterTurns:0,...value}:value;
+  if (existing.commandType !== commandType || !isDeepStrictEqual(comparable(existing.request), comparable(request)))
     throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention de construction a déjà été utilisée différemment.');
   return true;
 }
@@ -1063,10 +1090,11 @@ export async function constructBuilding(
   durationOverride: number | null,
   commandId?: string,
   expectedCosts?: ExpectedCost[],
+  quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<VillageState> {
   if (buildingType === 'university') {
     const cells = universityCampusCells({ cellX, cellY });
-    return constructBuildingArea(db, accountId, worldSlug, villageId, buildingType, { cellX, cellY }, cells, durationOverride, commandId, expectedCosts);
+    return constructBuildingArea(db, accountId, worldSlug, villageId, buildingType, { cellX, cellY }, cells.map(c=>{const dx=c.cellX-cellX,dy=c.cellY-cellY;return {cellX:cellX+(quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy),cellY:cellY+(quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx)};}), durationOverride, commandId, expectedCosts,quarterTurns,houseVariant);
   }
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
@@ -1074,9 +1102,9 @@ export async function constructBuilding(
       throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const x = normalizeCell(cellX, village.widthCells);
     const y = normalizeCell(cellY, village.heightCells);
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [{ cellX: normalizeCell(cellX, village.widthCells), cellY: normalizeCell(cellY, village.heightCells) }]);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [{ cellX: normalizeCell(cellX, village.widthCells), cellY: normalizeCell(cellY, village.heightCells) }],[],true);
     const at = economy.through;
-    const commandRequest = { buildingType, cellX: x, cellY: y, expectedCosts: canonicalCosts(expectedCosts) };
+    const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, cellX: x, cellY: y, expectedCosts: canonicalCosts(expectedCosts) };
     if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return state(tx, accountId, worldSlug, economy);
     const item = await definition(tx, buildingType, 1);
     if (!item.buildable)
@@ -1122,7 +1150,7 @@ export async function constructBuilding(
         constructionStartedAt: at,
         constructionCompletesAt: completesAt,
         completedAt: null,
-        visualLayout: buildingType === 'dwelling' ? {recipe:'stone-house',version:1,quarterTurns:0,entranceFace:'-z',offset:[0,0]} : null,
+        quarterTurns, visualLayout: buildingType === 'dwelling' ? {recipe:houseVariant==='logs'?'log-house':houseVariant==='beams'?'beam-house':'stone-house',version:1,quarterTurns,entranceFace:'-z',offset:[0,0]} : null,
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -1164,20 +1192,20 @@ export async function constructBuilding(
 export async function constructBuildingArea(
   db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
   buildingType: BuildingType, anchor: SpatialCell, rawCells: SpatialCell[], durationOverride: number | null,
-  commandId?: string, expectedCosts?: ExpectedCost[],
+  commandId?: string, expectedCosts?: ExpectedCost[], quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<VillageState> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells).cells);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells).cells,[],true);
     const at = economy.through;
     const selection = normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells);
-    const commandRequest = { buildingType, anchor: selection.anchor, cells: selection.cells, expectedCosts: canonicalCosts(expectedCosts) };
+    const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, anchor: selection.anchor, cells: selection.cells, expectedCosts: canonicalCosts(expectedCosts) };
     if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return state(tx, accountId, worldSlug, economy);
     const item = await definition(tx, buildingType, 1);
     if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
     if (item.code === 'university') {
-      const expected = new Set(universityCampusCells(anchor).map(c => worldCellKey(normalizeCell(c.cellX, village.widthCells), normalizeCell(c.cellY, village.heightCells))));
+      const expected = new Set(universityCampusCells(anchor).map(c => { const dx=c.cellX-anchor.cellX,dy=c.cellY-anchor.cellY; const x=quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy;const y=quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx;return worldCellKey(normalizeCell(anchor.cellX+x,village.widthCells),normalizeCell(anchor.cellY+y,village.heightCells)); }));
       if (selection.cells.length !== 30 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
         throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'L’Université occupe 5 × 6 cases autour de son ancre.');
       const ground = await snapshot(tx, village);
@@ -1199,7 +1227,8 @@ export async function constructBuildingArea(
     await debit(tx, village.worldId, village.villageId, actualCosts, at);
     const completesAt = new Date(at.getTime() + (durationOverride ?? item.constructionDurationSeconds * 1_000));
     const building = await tx.insertInto('buildings').values({
-      worldId: village.worldId, villageId: village.villageId, buildingType, level: 1, targetLevel: null,
+      visualLayout: buildingType==='dwelling'?{recipe:houseVariant==='logs'?'log-house':houseVariant==='beams'?'beam-house':'stone-house',version:1,quarterTurns,entranceFace:'-z',offset:[0,0]}:null,
+      quarterTurns, worldId: village.worldId, villageId: village.villageId, buildingType, level: 1, targetLevel: null,
       status: 'under-construction', constructionStartedAt: at, constructionCompletesAt: completesAt, completedAt: null,
     }).returning('id').executeTakeFirstOrThrow();
     await reserveSelection(tx, village.worldId, building.id, selection.anchor, selection.cells);
@@ -1224,7 +1253,7 @@ export async function expandGarden(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, rawCells.map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) })));
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, rawCells.map(c => ({ cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells) })),[],true);
     const at = economy.through;
     const canonicalSelection = normalizeSpatialSelection(rawCells[0]!, rawCells, village.widthCells, village.heightCells);
     const commandRequest = { buildingId, cells: canonicalSelection.cells, expectedCosts: canonicalCosts(expectedCosts) };
@@ -1325,7 +1354,7 @@ export async function upgradeBuilding(
     const campusCells = campusAnchor ? universityCampusCells(campusAnchor).map(c => ({
       cellX: normalizeCell(c.cellX, village.widthCells), cellY: normalizeCell(c.cellY, village.heightCells),
     })) : undefined;
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, campusCells);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, campusCells,[],true);
     const at = economy.through;
     const commandRequest = { buildingId, expectedLevel: expectedLevel ?? null, expectedCosts: canonicalCosts(expectedCosts) };
     if (await claimBuildingCommand(tx, village, commandId, 'upgrade', commandRequest)) return state(tx, accountId, worldSlug, economy);
@@ -1512,7 +1541,7 @@ export async function harvestGarden(
     const path = routes.find((route) => route.kind === 'garden' && route.destination.cellX === x && route.destination.cellY === y)?.cells;
     if (!path) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun chemin praticable vers cette parcelle.');
     await startGardenHarvest(tx, village.worldId, village.villageId, target.buildingId, x, y, legacyCommandId, at,
-      path, (path.length - 1) * 1_000);
+      path, travelDuration(path, village));
     return state(tx, accountId, worldSlug, economy);
   });
 }
@@ -1541,7 +1570,7 @@ export async function startVillageStoneExtraction(
         .find((route) => route.kind === 'stone' && route.id === featureId)?.cells);
     if (!path) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun chemin praticable vers ce gisement.');
     const id = await startStoneExtraction(tx, village, economy, featureId, commandId, workerCount,
-      path, (path.length - 1) * 1_000);
+      path, travelDuration(path, village));
     return { villageState: await state(tx, accountId, worldSlug, economy),
       extraction: await readExtraction(tx, village.worldId, village.villageId, id),
       deposit: await readStoneDeposit(tx, village.worldId, featureId) };
@@ -1563,7 +1592,7 @@ export async function getStoneDepositDetails(
     const path = await stoneTravelPath(tx, village, featureId,
       woodland ? undefined : (await state(tx, accountId, worldSlug, economy)).travelRoutes
         .find((route) => route.kind === 'stone' && route.id === featureId)?.cells);
-    return stoneDepositDetails(tx, village, economy, featureId, path ? (path.length - 1) * 1_000 : 0, Boolean(path));
+    return stoneDepositDetails(tx, village, economy, featureId, path ? travelDuration(path, village) : 0, Boolean(path));
   });
 }
 
@@ -1635,7 +1664,7 @@ async function prepareExploitation(tx: Transaction<Database>, village: OwnedVill
     const path = await stoneTravelPath(tx, village, id);
     const amount = Math.min(100, deposit.availableAmount,
       Math.max(0, deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)));
-    const transportMs = path ? (path.length - 1) * 1_000 : Infinity;
+    const transportMs = path ? travelDuration(path, village) : Infinity;
     const previous = lots[family];
     if (path && amount > 0 && (!previous || transportMs < previous.transportMs || transportMs === previous.transportMs && id < previous.id))
       lots[family] = { id, amount, transportMs };
@@ -1713,7 +1742,7 @@ export async function startVillageExploitation(db: Kysely<Database>, accountId: 
         const path = await stoneTravelPath(tx, village, id);
         const amount = Math.min(100, deposit.availableAmount, Math.max(0, deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)));
         const count = Math.min(10, request.workerCap, initial.memberCount, request.activityCaps?.[family] ?? 10);
-        if (path && amount > 0 && count > 0) durations.push(stoneExtractionDuration(count, amount) + 2 * (path.length - 1) * 1_000);
+        if (path && amount > 0 && count > 0) durations.push(stoneExtractionDuration(count, amount) + 2 * travelDuration(path, village));
       }
       const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
       if (!durations.some(duration => eligibleWorkers(cohorts, duration).some(c => c.id === initial.id)))

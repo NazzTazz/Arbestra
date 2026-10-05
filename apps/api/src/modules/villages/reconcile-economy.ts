@@ -4,7 +4,7 @@ import type { Database } from '../../database/schema.js';
 import { materializeBuildingBuffer, materializeVillageResource } from './economy.js';
 import { completeGardenHarvestAt } from '../population/garden-harvest.js';
 import { completeStoneExtractionAt } from '../deposits/stone-extractions.js';
-import { materializeWoodland } from '../deposits/woodland.js';
+import { materializeWoodlands } from '../deposits/woodland.js';
 import { completeScienceAt } from '../science/service.js';
 
 export interface VillageEconomy {
@@ -25,10 +25,16 @@ export async function beginVillageEconomy(
   transaction: Transaction<Database>, worldId: string, villageId: string, depositFeatureId?: string,
   woodCells: Array<{cellX: number; cellY: number}> = [],
   targetFeatureIds: string[] = [],
+  navigationWrite = false,
 ): Promise<VillageEconomy> {
   await transaction.selectFrom('villages').select('id')
     .where('worldId', '=', worldId).where('id', '=', villageId)
     .forUpdate().executeTakeFirstOrThrow();
+  // Readers may admit trips, including automatic worksite relaunches. Acquire
+  // before deposits; a spatial writer must never upgrade a shared lock later.
+  const navigationKey=`infrastructure:${worldId}`;
+  if(navigationWrite)await sql`select pg_advisory_xact_lock(hashtextextended(${navigationKey},0))`.execute(transaction);
+  else await sql`select pg_advisory_xact_lock_shared(hashtextextended(${navigationKey},0))`.execute(transaction);
   // Read after waiting for the village lock: transaction_timestamp may be stale.
   const through = (await transaction.selectNoFrom(sql<Date>`statement_timestamp()`.as('through'))
     .executeTakeFirstOrThrow()).through;
@@ -61,7 +67,7 @@ export async function beginVillageEconomy(
       ...(depositIds.length ? [eb('featureId', 'in', depositIds)] : []),
       ...woodCells.map(c => eb.and([eb('cellX', '=', c.cellX), eb('cellY', '=', c.cellY)])),
     ])).orderBy('featureId').forUpdate().execute();
-  for (const wood of woods) await materializeWoodland(transaction, worldId, wood.featureId, through);
+  await materializeWoodlands(transaction, worldId, woods.map(wood=>wood.featureId), through);
   await reconcileVillageEconomy(transaction, economy);
   return economy;
 }

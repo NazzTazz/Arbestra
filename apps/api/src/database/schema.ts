@@ -1,5 +1,5 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
-import type {BuildingVisualLayout,GardenHarvestStop,TravelCell,ExploitationRequest} from '@arbestra/contracts';
+import type {BuildingVisualLayout,GardenHarvestStop,TravelCell,ExploitationRequest,InfrastructurePlan,InfrastructureQuote} from '@arbestra/contracts';
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -43,6 +43,7 @@ export interface VillagesTable {
 }
 
 export interface BuildingsTable {
+  quarterTurns:Generated<number>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -378,6 +379,10 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  villageInfrastructure:{worldId:string;villageId:string;plan:JSONColumnType<InfrastructurePlan>};
+  infrastructureReceipts:{worldId:string;villageId:string;commandId:string;sessionId:string;request:JSONColumnType<object>;
+    beforePlan:JSONColumnType<InfrastructurePlan>;afterPlan:JSONColumnType<InfrastructurePlan>;quote:JSONColumnType<InfrastructureQuote>;undone:Generated<boolean>;createdAt:Generated<Timestamp>};
+  worldFactorySettings:{worldId:string;enabled:boolean};
   exploitationOrders: {
     id: Generated<string>; worldId: string; villageId: string; commandId: string;
     request: ColumnType<ExploitationRequest, string, string>;

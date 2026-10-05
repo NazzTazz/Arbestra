@@ -1,3 +1,4 @@
+import {travelDuration} from '@arbestra/contracts';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -119,7 +120,7 @@ it('keeps training durable and reports a survey only on its return, including it
     await scienceCommand(tx, trained, { action: 'survey', target: { cellX: 1026, cellY: 512 }, budgetSeconds: 120 });
     let state = await scienceSnapshot(tx, trained); expect(state.surveyedPlaces).toBe(0);
     const mission = state.activities[0]!;
-    expect(Date.parse(mission.completesAt) - Date.parse(mission.startedAt)).toBe(64000);
+    expect(Date.parse(mission.completesAt) - Date.parse(mission.startedAt)).toBe(60_000+travelDuration(mission.path,{widthCells:2048,heightCells:1024}));
     const returned = await finishBatch(tx, trained); state = await scienceSnapshot(tx, returned);
     expect(state.surveyedPlaces).toBe(1); expect(state.cartographers).toBe(1); expect(state.activities).toHaveLength(0);
     expect((await tx.selectFrom('populationCohorts').select('scienceActivityId').where('cartographer', '=', true).where('worldId', '=', ids.world).executeTakeFirstOrThrow()).scienceActivityId).toBeNull();
