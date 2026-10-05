@@ -38,7 +38,7 @@ describe.sequential('read-only streamed terrain', () => {
     const url = '/api/worlds/aube/terrain/overview';
     expect((await app.inject({ url })).statusCode).toBe(401);
     expect((await app.inject({ url: '/api/worlds/other/terrain/overview', headers: { cookie } })).statusCode).toBe(404);
-    const response = await app.inject({ url, headers: { cookie, ...previewHeaders } });
+    const response = await app.inject({ url, headers: { cookie } });
     expect(response.statusCode).toBe(200);
     const overview = response.json<TerrainOverview>();
     expect(overview.gridWidth).toBe(512); expect(overview.gridHeight).toBe(256);
@@ -52,7 +52,7 @@ describe.sequential('read-only streamed terrain', () => {
     const etag = response.headers.etag;
     expect((await app.inject({ url, headers: { cookie, ...previewHeaders, 'if-none-match': etag } })).statusCode).toBe(304);
     expect((await app.inject({ url, headers: { 'if-none-match': etag } })).statusCode).toBe(401);
-    const vegetation = await app.inject({ url: `${url}/vegetation`, headers: { cookie, ...previewHeaders } });
+    const vegetation = await app.inject({ url: `${url}/vegetation`, headers: { cookie } });
     expect(vegetation.statusCode).toBe(200);
     const density = vegetation.json<TerrainVegetationOverview>();
     expect(density.woodlandCoverage).toHaveLength(512 * 256);
@@ -95,20 +95,58 @@ describe.sequential('read-only streamed terrain', () => {
     }
   });
 
-  it('masks player geography over HTTP and ignores the preview header in production', async()=>{
+  it('projects anonymous foreign volumes and preserves dated reports without duplicates', async () => {
+    const worldId = DEVELOPMENT_IDS.world, accountId = randomUUID(), villageId = randomUUID();
+    const url = '/api/worlds/aube/terrain/overview/villages?x=1024&y=512';
+    try {
+      await db.insertInto('accounts').values({ id: accountId, email: `${accountId}@terrain.test`, passwordHash: 'unused' }).execute();
+      await db.insertInto('worldMemberships').values({ worldId, accountId, playerName: 'Foreign silhouette' }).execute();
+      await db.insertInto('villages').values({ id: villageId, worldId, ownerAccountId: accountId, name: 'Secret name', anchorCellX: 1030, anchorCellY: 520 }).execute();
+      const building = await db.insertInto('buildings').values({ worldId, villageId, buildingType: 'dwelling', level: 1,
+        status: 'under-construction', targetLevel: null, constructionStartedAt: new Date(), constructionCompletesAt: new Date(Date.now() + 60000), completedAt: null }).returning('id').executeTakeFirstOrThrow();
+      await db.insertInto('worldCellOccupancies').values({ worldId, buildingId: building.id, featureId: null, cellX: 1030, cellY: 520, role: 'anchor' }).execute();
+      const read = async () => (await app.inject({ url, headers: { cookie } })).json();
+      const anonymous = (await read()).villages.find((v: { anchorCellX: number }) => v.anchorCellX === 1030);
+      expect(anonymous).toEqual({ anchorCellX: 1030, anchorCellY: 520, blocks: [{ x: 0, y: 0, width: 1, depth: 1 }] });
+      expect(JSON.stringify(anonymous)).not.toMatch(new RegExp(`${villageId}|${building.id}|Secret|garden|underConstruction`));
+      await db.insertInto('playerScience').values({ worldId, accountId: DEVELOPMENT_IDS.account, observationsSince: null, solarReport: null }).execute();
+      const observedAt = new Date('2026-01-01T00:00:00Z');
+      const blocks = [{ x: -2, y: 0, width: 2, depth: 1, garden: false }];
+      await db.insertInto('scienceVillageReports').values({ worldId, accountId: DEVELOPMENT_IDS.account, villageId,
+        name: 'Old report name', anchorCellX: 1030, anchorCellY: 520, observedAt, blocks: JSON.stringify(blocks) }).execute();
+      const reported = (await read()).villages.filter((v: { anchorCellX: number }) => v.anchorCellX === 1030);
+      expect(reported).toEqual([{ id: villageId, anchorCellX: 1030, anchorCellY: 520, blocks }]);
+      expect(await db.selectFrom('scienceVillageReports').select(['name', 'observedAt', 'blocks']).where('worldId', '=', worldId)
+        .where('accountId', '=', DEVELOPMENT_IDS.account).where('villageId', '=', villageId).executeTakeFirstOrThrow())
+        .toEqual({ name: 'Old report name', observedAt, blocks });
+    } finally {
+      await db.deleteFrom('scienceVillageReports').where('worldId', '=', worldId).where('villageId', '=', villageId).execute();
+      await db.deleteFrom('playerScience').where('worldId', '=', worldId).where('accountId', '=', DEVELOPMENT_IDS.account).execute();
+      await db.deleteFrom('worldCellOccupancies').where('worldId', '=', worldId).where('buildingId', 'in',
+        db.selectFrom('buildings').select('id').where('worldId', '=', worldId).where('villageId', '=', villageId)).execute();
+      await db.deleteFrom('buildings').where('worldId', '=', worldId).where('villageId', '=', villageId).execute();
+      await db.deleteFrom('villages').where('worldId', '=', worldId).where('id', '=', villageId).execute();
+      await db.deleteFrom('worldMemberships').where('worldId', '=', worldId).where('accountId', '=', accountId).execute();
+      await db.deleteFrom('accounts').where('id', '=', accountId).execute();
+    }
+  });
+
+  it('shows player landscape over HTTP but ignores the deposit preview header in production', async()=>{
     const url='/api/worlds/aube/terrain?chunks=0%2C0';
     const normal=await app.inject({url,headers:{cookie}});
     expect(normal.statusCode).toBe(200);
-    expect(normal.json<TerrainResponse>().chunks[0]!.terrainCodes.every(c=>c===0)).toBe(true);
+    expect(normal.json<TerrainResponse>().chunks[0]!.terrainCodes.every(c=>c>0)).toBe(true);
     const prod=await buildApp({databaseUrl,host:'127.0.0.1',port:0,isProduction:true,cookieName:'arbestra_session',sessionTtlDays:30,
       constructionDurationOverrideMs:null,scheduledTaskPollIntervalMs:250},db);
     try{
       const attempted=await prod.inject({url,headers:{cookie,...previewHeaders}});
       expect(attempted.statusCode).toBe(200);
-      expect(attempted.json<TerrainResponse>().chunks[0]!.terrainCodes.every(c=>c===0)).toBe(true);
+      expect(attempted.json<TerrainResponse>().chunks[0]!.terrainCodes.every(c=>c>0)).toBe(true);
       const overview=await prod.inject({url:'/api/worlds/aube/terrain/overview',headers:{cookie,...previewHeaders,'if-none-match':'"old-world-cache"'}});
       expect(overview.statusCode).toBe(200);expect(overview.headers['cache-control']).toBe('private, no-store');
-      expect(overview.json<TerrainOverview>().knowledgeCoverage![0]).toBe(0);
+      expect(overview.json()).not.toHaveProperty('knowledgeCoverage');
+      expect(overview.json<TerrainOverview>().meanElevations).toEqual((await app.inject({url:'/api/worlds/aube/terrain/overview',headers:{cookie}})).json<TerrainOverview>().meanElevations);
+      expect(attempted.json<TerrainResponse>().chunks[0]!.features.every(f=>f.deposit===null)).toBe(true);
     }finally{await prod.close();}
   });
 

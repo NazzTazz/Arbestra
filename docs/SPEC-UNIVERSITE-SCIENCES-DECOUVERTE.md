@@ -35,7 +35,7 @@ Les villages d'un même joueur sur un même monde partagent les connaissances. A
 
 Une observation empirique peut précéder sa compréhension. Un habitant peut rapporter un village rencontré avant Géographie 2 ; ce palier ouvre l'exploration organisée de l'inconnu, pas l'existence des autres villages.
 
-Astronomie 1 révèle la forme générale du monde, pas toute sa géographie. Une région inconnue reste indéterminée : ni côtes exactes, ni gisements, ni implantations dévoilés par une texture décorative, un survol ou un niveau de détail.
+Arbitrage du 5 octobre 2026 : relief, eaux, forêts et zones rocheuses sont visibles sans relevé, ainsi que les silhouettes anonymes des implantations étrangères. La caméra ne fournit ni identité, fiche, richesses de gisement, stocks, réservations, effectifs ou activités. Voir ne crée aucun relevé, preuve ou droit métier. Astronomie 1 reste nécessaire au tore global.
 
 ## 4. Université et capacité de travail
 
@@ -140,7 +140,7 @@ La connaissance ne crée pas de passage à travers un obstacle, ne révèle pas 
 
 | État | Connaissance disponible |
 |---|---|
-| Inconnu | Pas de rapport ; surface indéterminée. |
+| Inconnu | Paysage visible, silhouette anonyme ; aucun rapport ni renseignement métier. |
 | Repéré | Témoignage, localisation approximative et caractéristiques réellement observées. |
 | Relevé | Mesures cartographiques précises ; accès reconnu lorsque le trajet a été étudié. |
 
@@ -208,7 +208,7 @@ Vue accessible depuis l'Université, commune aux connaissances du joueur/monde :
 | Connaissance régionale | Survol des territoires cartographiés, transition nuageuse puis village. |
 | Astronomie 1 acquise | Départ autour du tore, approche de la région puis arrivée au village. |
 
-Accumuler des relevés ne permet jamais de contourner Astronomie 1 pour voir le tore entier. Après ce palier, les zones inconnues restent indéterminées pendant le survol. En l'absence d'un parcours régional suffisamment connu, utiliser le profil local autorisé plutôt que révéler du terrain réel. Ce repli est une prescription de cohérence, pas un nouveau palier.
+Accumuler des relevés ne permet jamais de contourner Astronomie 1 pour voir le tore entier. Après ce palier, tout le paysage est visible pendant le survol, sans acquisition de connaissance. Les profils de cinématique restent dérivés des acquis ; ils ne constituent pas un masque du paysage.
 
 ## 12. Architecture visible et monuments
 
@@ -348,7 +348,7 @@ Restent ouverts : réglage esthétique du campus et des statues, ergonomie carto
 12. Astronomie 1 démarre spontanément une seule fois après ses conditions, avec un centre libre et un habitant disponible ; une région à régime solaire simple n'est pas bloquée.
 13. Déconnexion/reconnexion préserve travail, observations et pauses ; aucune progression ne dépend des figurants ou du rendu du ciel.
 14. Avant Astronomie 1, aucune entrée normale — V/C compris — ne révèle le tore entier ; des indices restent perceptibles.
-15. Après Astronomie 1, le dézoom global est libre sans cinématique forcée ; les zones non relevées restent indéterminées.
+15. Après Astronomie 1, le dézoom global est libre sans cinématique forcée ; le paysage entier est visible sans créer de relevé.
 16. L'acquisition ne provoque ni saut de lieu/orientation/phase lumineuse, ni modification rétroactive de mission ; les futurs départs utilisent les meilleurs accès connus.
 17. L'Arbre des connaissances est progressivement révélé et ne divulgue pas le tore via ses textes, liens ou monuments verrouillés.
 18. Le coefficient dérivé adapte connexion/V ; beaucoup de cartographie ne remplace jamais le seuil Astronomie 1.

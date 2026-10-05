@@ -84,18 +84,17 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
         const cx = normalizeCell(originCellX + dx, width), cy = normalizeCell(originCellY + dy, height);
         const row = byChunk.get(`${Math.floor(cx / size)}:${Math.floor(cy / size)}`)!;
         const index = (cy % size) * size + cx % size;
-        const visible = known({ cellX: cx, cellY: cy });
-        terrainCodes.push(visible ? row.terrainCodes[index]! : 0); elevations.push(visible ? row.elevations[index]! : 0);
+        terrainCodes.push(row.terrainCodes[index]!); elevations.push(row.elevations[index]!);
       }
-      const inside = (p: { cellX: number; cellY: number }) => known(p) && p.cellX >= originCellX && p.cellX < originCellX + size && p.cellY >= originCellY && p.cellY < originCellY + size;
+      const inside = (p: { cellX: number; cellY: number }) => p.cellX >= originCellX && p.cellX < originCellX + size && p.cellY >= originCellY && p.cellY < originCellY + size;
       const woods = features.filter(f => f.resourceCode === 'wood');
-      const occupiedCells = occupancies.filter(inside).filter(o => {
+      const occupiedCells = occupancies.filter(inside).filter(known).filter(o => {
         // Foreign settlements are dated reports, never a live occupancy feed.
         if (!preview && o.buildingId && !ownBuildingIds.has(o.buildingId)) return false;
         const wood = woods.find(w => w.id === o.featureId);
         return !wood || wood.blocksCell;
       }).map(({ cellX, cellY }) => ({ cellX, cellY }));
-      for (const wood of woods.filter(inside)) if (wood.blocksCell
+      for (const wood of woods.filter(inside).filter(known)) if (wood.blocksCell
         && !occupiedCells.some(o => o.cellX === wood.cellX && o.cellY === wood.cellY))
         occupiedCells.push({ cellX: wood.cellX, cellY: wood.cellY });
       return { ...c, originCellX, originCellY, terrainCodes, elevations, occupiedCells,
@@ -103,7 +102,7 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
           const remainingAmount = f.remainingAmount === null ? null : safeAmount(f.remainingAmount);
           const reservedAmount = f.reservedAmount === null ? 0 : safeAmount(f.reservedAmount);
           return [f.id, { id: f.id, type: f.featureTypeCode, cellX: f.cellX, cellY: f.cellY, variantSeed: f.variantSeed,
-            deposit: remainingAmount === null ? null : { featureId: f.id, resourceCode: f.resourceCode!, blocksCell: f.blocksCell!, cleared: f.cleared ?? false, cellX: f.cellX, cellY: f.cellY,
+            deposit: !known(f) || remainingAmount === null ? null : { featureId: f.id, resourceCode: f.resourceCode!, blocksCell: f.blocksCell!, cleared: f.cleared ?? false, cellX: f.cellX, cellY: f.cellY,
               initialAmount: safeAmount(f.initialAmount!), remainingAmount, reservedAmount, availableAmount: remainingAmount - reservedAmount,
               state: f.cleared || remainingAmount === 0 ? 'depleted' as const : 'available' as const, revision: safeAmount(f.revision!), updatedAt: f.updatedAt!.toISOString() } }] as const;
         })).values()] };

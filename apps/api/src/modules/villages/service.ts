@@ -43,6 +43,7 @@ import { eligibleWorkers, materializeCohorts, withoutAssignment, workingTeam } f
 import { admitScience, scienceSnapshot, scienceCommand } from '../science/service.js';
 import type { ScienceCommand } from '@arbestra/contracts';
 import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/deposit-access.js';
+import { knownGeography } from '../science/knowledge.js';
 import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
 import { startStoneExtraction, stoneDepositDetails, readExtraction, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
 import { admitWorksites, changeWorksite, createWorksite, readWorksites } from '../deposits/worksites.js';
@@ -1553,6 +1554,10 @@ export async function getStoneDepositDetails(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    const position = await tx.selectFrom('resourceDeposits').select(['cellX', 'cellY'])
+      .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
+    const knowledge = await knownGeography(tx, village.worldId, accountId, village.widthCells, village.heightCells);
+    if (!position || !knowledge.known(position)) throw new HttpError(404, 'DEPOSIT_NOT_FOUND', 'Gisement inconnu.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
     const woodland = (await readStoneDeposit(tx, village.worldId, featureId)).resourceCode === 'wood';
     const path = await stoneTravelPath(tx, village, featureId,

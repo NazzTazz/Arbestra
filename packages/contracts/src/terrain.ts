@@ -35,7 +35,6 @@ const OverviewIdentitySchema = Type.Object({
   gridWidth: Type.Integer({ minimum: 1, maximum: 512 }), gridHeight: Type.Integer({ minimum: 1, maximum: 512 }),
 });
 export const TerrainOverviewSchema = Type.Composite([OverviewIdentitySchema, Type.Object({
-  knowledgeCoverage: Type.Optional(CoverageSchema),
   meanElevations: ElevationSchema, minElevations: ElevationSchema, maxElevations: ElevationSchema,
   waterCoverage: CoverageSchema, rockCoverage: CoverageSchema,
 })]);
@@ -46,14 +45,15 @@ export const TerrainVegetationOverviewSchema = Type.Composite([OverviewIdentityS
 })]);
 export type TerrainVegetationOverview = Static<typeof TerrainVegetationOverviewSchema>;
 
-// Public exterior silhouettes only; no owner, stock, workers or building state.
+// Anonymous exteriors omit id and block metadata. Owned villages and dated
+// reports retain their known identity/details; report dates live in science.villageReports.
 export const TerrainVillageOverviewSchema = Type.Object({
   world: TerrainOverviewWorldSchema, sampledAt: Type.String(), truncated: Type.Boolean(),
   villages: Type.Array(Type.Object({
-    id: Type.String({ format: 'uuid' }), anchorCellX: Type.Integer(), anchorCellY: Type.Integer(),
+    id: Type.Optional(Type.String({ format: 'uuid' })), anchorCellX: Type.Integer(), anchorCellY: Type.Integer(),
     blocks: Type.Array(Type.Object({
       x: Type.Number(), y: Type.Number(), width: Type.Number({ minimum: 1 }), depth: Type.Number({ minimum: 1 }),
-      garden: Type.Boolean(),
+      garden: Type.Optional(Type.Boolean()),
       underConstruction: Type.Optional(Type.Boolean()),
     }), { maxItems: 64 }),
   }), { maxItems: 32 }),

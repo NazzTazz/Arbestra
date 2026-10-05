@@ -8,7 +8,6 @@ import { authenticate } from '../auth/service.js';
 import { getTerrain, getTerrainUpdates } from './terrain.js';
 import { authorizedOverviewWorld, getTerrainOverview, getTerrainVegetationOverview, overviewEtag } from './terrain-overview.js';
 import { getTerrainVillages } from './terrain-villages.js';
-import { knownOverview, knownVegetation } from '../science/knowledge.js';
 
 export async function registerTerrainRoutes(app: FastifyInstance, db: Kysely<Database>, config: AppConfig): Promise<void> {
   const params = Type.Object({ worldSlug: Type.String({ minLength: 1, maxLength: 64 }) });
@@ -38,17 +37,16 @@ export async function registerTerrainRoutes(app: FastifyInstance, db: Kysely<Dat
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const world = await authorizedOverviewWorld(db, account.id, (request.params as { worldSlug: string }).worldSlug);
     reply.header('Cache-Control', 'private, no-store');
-    const preview = !config.isProduction && request.headers['x-arbestra-science-preview'] === '1';
     const etag = overviewEtag(world);
-    if (preview && request.headers['if-none-match'] === etag) return reply.header('ETag', etag).code(304).send();
+    if (request.headers['if-none-match'] === etag) return reply.header('ETag', etag).code(304).send();
     const result = await getTerrainOverview(db, world);
-    return preview ? reply.header('ETag', etag).send(result) : knownOverview(db, result, account.id);
+    return reply.header('ETag', etag).send(result);
   });
   app.get('/api/worlds/:worldSlug/terrain/overview/vegetation', { schema: { params, response: { 200: TerrainVegetationOverviewSchema } } }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const world = await authorizedOverviewWorld(db, account.id, (request.params as { worldSlug: string }).worldSlug);
     reply.header('Cache-Control', 'private, no-store');
     const result = await getTerrainVegetationOverview(db, world);
-    return !config.isProduction && request.headers['x-arbestra-science-preview'] === '1' ? result : knownVegetation(db, result, account.id);
+    return result;
   });
 }

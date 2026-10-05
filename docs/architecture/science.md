@@ -20,9 +20,11 @@ Les premières observations solaires commencent à l’achèvement de la premiè
 
 ## Connaissance et représentation
 
-Le snapshot comprend `science` et sa révision géographique. La carte serveur masque les cellules inconnues, y compris features, relief et occupancies. Les overviews partagés sont clonés puis masqués par joueur ; une maille agrégée partiellement connue ne révèle pas le reste. Les périmètres historiques des villages restent connus. Aucune découverte scientifique ne dévoile toute la surface.
+Le snapshot comprend `science` et sa révision géographique. Le paysage est visible sans relevé : agrégats géographiques/végétaux partagés par monde et version, sol des chunks et éléments naturels. Les chunks inconnus ne transmettent aucune donnée de gisement ni occupation ; `knownGeography` reste la source des connaissances métier et protège aussi la lecture des fiches de gisement. La lecture est authentifiée et ne crée aucune connaissance. Les aperçus ne contiennent ni masque joueur ni données privées ; les réponses restent privées et non stockables.
 
-Le client invalide les chunks masqués lors d’un nouveau rapport et recharge leur terrain complet. Il réutilise la représentation torique lors d’une mise à jour de connaissance pour éviter un reset caméra. Astronomie 1 change la borne de zoom, sans remplacer le repère local, la rotation ou la phase lumineuse. Boutons, molette, V, C et debug cosmologique respectent cette condition. Connexion/V adoptent un profil local, régional ou global issu de la connaissance ; la vue globale exige toujours Astronomie 1.
+La projection régionale reste bornée à 32 villages et 64 volumes par village, à 320 cases par axe. Les inconnus ne transmettent que l’ancre et les rectangles bâtis, sans ID, Jardin ou travaux. Les villages propres gardent leurs détails ; les rapports acquis remplacent la silhouette sans doublon. Identité et date restent dans `science.villageReports`, sans rafraîchissement par la caméra.
+
+Le client recharge les renseignements des chunks lors d’un nouveau rapport et réutilise la représentation torique pour éviter un reset caméra. Astronomie 1 change la borne de zoom, sans remplacer le repère local, la rotation ou la phase lumineuse. Boutons, molette, V, C et debug cosmologique respectent cette condition. Connexion/V adoptent un profil local, régional ou global issu de la connaissance ; la vue globale exige toujours Astronomie 1.
 
 En développement uniquement, `?sciencePreview=1` et le header associé autorisent la recette visuelle complète. Ce contournement n’accorde aucune recherche et aucune autorisation métier ; le serveur ignore le header en production. Les cartographes visibles sont des représentants des missions serveur ; les animations ne créent aucune connaissance.
 

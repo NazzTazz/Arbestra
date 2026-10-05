@@ -10,11 +10,10 @@ import type { Database } from '../../database/schema.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from '../villages/reconcile-economy.js';
 import { admitScience, scienceCommand, scienceSnapshot } from './service.js';
 import { SCIENCE_PROGRAMS } from './programs.js';
-import { knownOverview } from './knowledge.js';
-import { getTerrain } from '../worlds/terrain.js';
+import { getTerrain, getTerrainUpdates } from '../worlds/terrain.js';
 import { wakeScience } from './worker.js';
 import { getTerrainVillages } from '../worlds/terrain-villages.js';
-import { constructBuilding, getVillageState } from '../villages/service.js';
+import { constructBuilding, getVillageState, getStoneDepositDetails } from '../villages/service.js';
 
 const url = testDatabaseUrl(), db = createDatabase(url), rollback = new Error('science fixture rollback');
 beforeAll(async () => { await migrateToLatest(url); await resetE2eState(url); });
@@ -143,18 +142,20 @@ it('starts astronomy spontaneously only after a real 24 hour observation window 
   });
 });
 
-it('masks unknown geography server side and never mutates the shared world overview cache', async () => {
-  await fixture(async tx => {
-    const data = { world: { id: ids.world, widthCells: 2048, heightCells: 1024, chunkSize: 32, generationVersion: 1 },
-      overviewVersion: 1, gridWidth: 512, gridHeight: 256, meanElevations: new Array(131072).fill(7), minElevations: new Array(131072).fill(3),
-      maxElevations: new Array(131072).fill(9), waterCoverage: new Array(131072).fill(200), rockCoverage: new Array(131072).fill(12) };
-    const masked = await knownOverview(tx, data, ids.account);
-    expect(masked.waterCoverage[0]).toBe(0); expect(masked.meanElevations[0]).toBe(0); expect(masked.knowledgeCoverage![0]).toBe(0);
-    expect(data.waterCoverage[0]).toBe(200);
-  });
+it('shows remote landscape without acquiring science or exposing deposit amounts', async () => {
+  const before = await db.selectFrom('sciencePlaces').selectAll().where('worldId', '=', ids.world).where('accountId', '=', ids.account).execute();
   const remote = await getTerrain(db, ids.account, 'aube', '0,0');
-  expect(remote.chunks[0]?.terrainCodes.every(code => code === 0)).toBe(true);
-  expect(remote.chunks[0]?.features).toEqual([]);
+  expect(remote.chunks[0]?.terrainCodes.every(code => code > 0)).toBe(true);
+  expect(remote.chunks[0]!.features.length).toBeGreaterThan(0);
+  expect(remote.chunks[0]?.features.every(f => f.deposit === null)).toBe(true);
+  expect(remote.chunks[0]?.occupiedCells).toEqual([]);
+  const updates = await getTerrainUpdates(db, ids.account, 'aube', '0,0');
+  expect(updates.chunks[0]!.features).toEqual(remote.chunks[0]!.features);
+  const full = await getTerrain(db, ids.account, 'aube', '0,0', true);
+  const deposit = full.chunks[0]!.features.find(f => f.deposit)!;
+  expect(deposit).toBeDefined();
+  await expect(getStoneDepositDetails(db, ids.account, 'aube', ids.village, deposit.id)).rejects.toMatchObject({ code: 'DEPOSIT_NOT_FOUND' });
+  expect(await db.selectFrom('sciencePlaces').selectAll().where('worldId', '=', ids.world).where('accountId', '=', ids.account).execute()).toEqual(before);
 });
 
 it('keeps a discovered village as a dated report after its live buildings change', async () => {
@@ -165,7 +166,8 @@ it('keeps a discovered village as a dated report after its live buildings change
     await db.insertInto('villages').values({id:villageId,worldId:ids.world,ownerAccountId:accountId,name:'Village inconnu',anchorCellX:1028,anchorCellY:512}).execute();
     await db.insertInto('playerScience').values({worldId:ids.world,accountId:ids.account,observationsSince:null,solarReport:null}).execute();
     const world=await db.selectFrom('worlds').select(['id','widthCells','heightCells','chunkSize','generationVersion']).where('id','=',ids.world).executeTakeFirstOrThrow();
-    expect((await getTerrainVillages(db,world,1024,512,ids.account)).villages.some(v=>v.id===villageId)).toBe(false);
+    const unknown = (await getTerrainVillages(db,world,1024,512,ids.account)).villages.find(v=>v.anchorCellX===1028)!;
+    expect(unknown).toEqual({ anchorCellX:1028, anchorCellY:512, blocks:[] });
     await db.insertInto('scienceVillageReports').values({worldId:ids.world,accountId:ids.account,villageId,name:'Nom relevé',anchorCellX:1028,anchorCellY:512,
       observedAt:new Date(),blocks:JSON.stringify([{x:0,y:0,width:1,depth:1,garden:false}])}).execute();
     const building=await db.insertInto('buildings').values({worldId:ids.world,villageId,buildingType:'dwelling',level:1,status:'completed',targetLevel:null,
