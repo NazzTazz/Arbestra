@@ -12,6 +12,7 @@ import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {TimberThatch} from './timber-thatch';
 import {buildingPlan,HALL_RECIPE,HOUSE_RECIPE,LOG_HOUSE_RECIPE,BEAM_HOUSE_RECIPE,withBuildingAccesses,type BuildingRecipe} from './building-plan';
 import {buildBarracks} from './barracks-factory';
+import { buildStonemason } from './stonemason-factory';
 import { CAMPUS_SUBDIVISIONS, MATHEMATICS_CROWN_WIDTH } from './mathematics-factory';
 import { buildUniversity } from './university-factory';
 import { CELL_UNITS } from './world-space';
@@ -75,7 +76,7 @@ function showFootprint(columns:number,rows:number,turn:number,subdivisions=8){
 }
 const choice=(id:string)=>(document.getElementById(id) as HTMLSelectElement).value;
 function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(Number(canvas.dataset.generation??0)+1);root?.dispose(false,false);const name=choice('recipe'),works=choice('phase')==='works',turn=Number(choice('turn'));
-  accessControls.hidden=name.startsWith('infra-')||name.startsWith('university-')||name==='barracks';
+  accessControls.hidden=name.startsWith('infra-')||name.startsWith('university-')||name==='barracks'||name==='stonemason';
   (document.getElementById('access-secondary') as HTMLInputElement).disabled=name==='wall';
   if(name.startsWith('infra-')) {
     const fixture=name.slice(6) as InfrastructureRecipe['fixture'];
@@ -96,6 +97,14 @@ function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(
     const meshes=root.getChildMeshes().filter(m=>m.getTotalVertices()>0),vertices=meshes.reduce((n,m)=>n+m.getTotalVertices(),0);
     document.getElementById('budget')!.textContent=`Campus ${level} · 40 × 48 sous-cases · Maths : ${level===3?'38 × 6 au sol, 22 × 6 aux deux niveaux supérieurs':'22 × 6, '+level+' niveau(x)'} + pavillon central ${MATHEMATICS_CROWN_WIDTH} × 6 · socle ${level===3?5:3} × 1 cases / ${level*2} marches · Médecine : ${level===1?'8 × 22':level===2?'C : 8 × 22 + deux ailes 8 × 6':'C + étage 8 × 22'} · toit plat · Géographie : 3 × 1 cases, ${level===1?'plain-pied':level===2?'chapeau central':'podium 2 / 3 / 1'} · ${vertices.toLocaleString('fr')} sommets · ${meshes.length} meshes · ${(performance.now()-start).toFixed(0)} ms`;
     canvas.dataset.vertices=String(vertices);canvas.dataset.meshes=String(meshes.length);camera.radius=24;camera.target.y=1.4;return;
+  }
+  if(name==='stonemason'){
+    showFootprint(2,2,turn);
+    root=new Mesh('workshop-stonemason',scene);root.rotation.y=turn*Math.PI/2;
+    buildStonemason(root,kit,works?'works':'finished');
+    const meshes=root.getChildMeshes(),vertices=meshes.reduce((n,m)=>n+m.getTotalVertices(),0);
+    document.getElementById('budget')!.textContent=`Tailleur de pierres · 2 × 2 cases · ${works?'charpente en montage, mur et piliers, matériaux en attente':'mur de fond, deux piliers pierre, pignon ouvert, trois postes de taille'} · ${vertices.toLocaleString('fr')} sommets · ${meshes.length} meshes`;
+    canvas.dataset.vertices=String(vertices);canvas.dataset.meshes=String(meshes.length);camera.radius=10;camera.target.y=.8;return;
   }
   if(name==='barracks'){
     showFootprint(2,5,turn);
@@ -119,8 +128,10 @@ function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(
 }
 for(const id of ['recipe','phase','turn'])document.getElementById(id)!.addEventListener('change',render);
 const barracksOption=document.createElement('option');barracksOption.value='barracks';barracksOption.textContent='Caserne · cour d’entraînement';document.getElementById('recipe')!.append(barracksOption);
+const stonemasonOption=document.createElement('option');stonemasonOption.value='stonemason';stonemasonOption.textContent='Tailleur de pierres · atelier ouvert';document.getElementById('recipe')!.append(stonemasonOption);
 for(let level=1;level<=3;level++){const option=document.createElement('option');option.value=`university-${level}`;option.textContent=`Université · niveau ${level}`;document.getElementById('recipe')!.append(option);}
 (document.getElementById('recipe') as HTMLSelectElement).value='university-1';
+if(query.get('recipe')==='stonemason')(document.getElementById('recipe') as HTMLSelectElement).value='stonemason';
 if(query.get('domain')==='infrastructure') {
   accessControls.hidden=true;
   for(const id of ['phase','roof-colour','stone-colour','frame-colour'])document.getElementById(id)!.closest('p')!.hidden=true;

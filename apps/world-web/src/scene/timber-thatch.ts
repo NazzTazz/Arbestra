@@ -100,7 +100,14 @@ export class TimberThatch {
     else for(const step of steps)void step;
     return parent;
   }
-  *buildSteps(parent:Mesh,plan?:BuildingPlan,roofOpening?:readonly [number,number],batchVertices=Infinity):Generator<void,Mesh,unknown>{
+  /** The usual exposed frame and covering, without the inhabited body or ceiling. */
+  buildRoof(parent:Mesh,plan:BuildingPlan){
+    const steps=this.buildSteps(parent,plan,undefined,this.enqueueBuild?8192:Infinity,true);
+    if(this.enqueueBuild)this.enqueueBuild(parent,steps);
+    else for(const step of steps)void step;
+    return parent;
+  }
+  *buildSteps(parent:Mesh,plan?:BuildingPlan,roofOpening?:readonly [number,number],batchVertices=Infinity,roofOnly=false):Generator<void,Mesh,unknown>{
     if(parent.isDisposed())return parent;
     const flatStone=plan?.recipe.roof.style==='flat-stone';
     const batches=new Map<StandardMaterial,BuildingGeometry[]>();
@@ -122,7 +129,7 @@ export class TimberThatch {
     const floorWidth=plan?plan.width-2*plan.recipe.module.thickness:2.17;
     const floorDepth=plan?plan.depth-2*plan.recipe.module.thickness:1.95;
     const boardCount=Math.ceil(floorWidth/.14),floorBoardWidth=floorWidth/boardCount;
-    for(let column=0;column<boardCount;column++){
+    if(!roofOnly)for(let column=0;column<boardCount;column++){
       if(column%8===0)yield;
       let z=-floorDepth/2;
       while(z<floorDepth/2-.001){const end=Math.min(floorDepth/2,z+(z===-floorDepth/2&&column%2?.35:.7));
@@ -191,11 +198,11 @@ export class TimberThatch {
     const liningCount=Math.ceil(half*2/.15),liningStep=half*2/liningCount;
     for(let i=0;i<liningCount;i++){
       const x=-half+(i+.5)*liningStep;
-      if(!flatStone)for(const [lo,hi] of roofRanges)beam('hall-flat-ceiling-timber',v(x,eave-.025,Math.max(lo,-trussHalfZ)),v(x,eave-.025,Math.min(hi,trussHalfZ)),liningStep-.003,.05);
-      if(plan)for(let level=1;level<plan.recipe.levels;level++){const y=level*(plan.recipe.courses*plan.recipe.module.height+plan.recipe.floorThickness);const odd=plan.recipe.rotateOddLevels&&level%2===1;beam('hall-floor',odd?v(-trussHalfZ,y,-x):v(x,y,-trussHalfZ),odd?v(trussHalfZ,y,-x):v(x,y,trussHalfZ),liningStep-.003,.05);}
+      if(!flatStone&&!roofOnly)for(const [lo,hi] of roofRanges)beam('hall-flat-ceiling-timber',v(x,eave-.025,Math.max(lo,-trussHalfZ)),v(x,eave-.025,Math.min(hi,trussHalfZ)),liningStep-.003,.05);
+      if(plan&&!roofOnly)for(let level=1;level<plan.recipe.levels;level++){const y=level*(plan.recipe.courses*plan.recipe.module.height+plan.recipe.floorThickness);const odd=plan.recipe.rotateOddLevels&&level%2===1;beam('hall-floor',odd?v(-trussHalfZ,y,-x):v(x,y,-trussHalfZ),odd?v(trussHalfZ,y,-x):v(x,y,trussHalfZ),liningStep-.003,.05);}
     }
     // Hay rests on the horizontal deck between trusses; the sloping roof stays exposed.
-    if(!flatStone)for(let bay=0;bay<trussZ.length-1;bay++){const z=(trussZ[bay]!+trussZ[bay+1]!)/2;
+    if(!flatStone&&!roofOnly)for(let bay=0;bay<trussZ.length-1;bay++){const z=(trussZ[bay]!+trussZ[bay+1]!)/2;
       if(roofOpening&&z>roofOpening[0]&&z<roofOpening[1])continue;
       const fill=BuildingGeometry.box('hall-ceiling-hay-bay',{width:half*2-.25,height:.075,depth:trussZ[bay+1]!-trussZ[bay]!-.18});
       fill.position.set(0,eave+.075/2,z);add(fill,this.hay);
@@ -240,7 +247,7 @@ export class TimberThatch {
     // Both gables stay open: no daub hides the truss or the ridge purlin.
     // Low-poly cut-stone masonry with staggered vertical joints, without wooden wall framing.
     // Cut the actual wall geometry around each opening: no dark/glass decal hiding a solid body.
-    if(plan){
+    if(plan&&!roofOnly){
       const works=plan.phase==='works',limit=works?worksHeight:plan.height;
       let made=0;
       const timber=plan.recipe.wallMaterial==='logs'||plan.recipe.wallMaterial==='beams';
@@ -300,7 +307,7 @@ export class TimberThatch {
       if(works){for(const side of [-1,1]){const x=side*(half+.08);for(const z of [-trussHalfZ,trussHalfZ])beam('factory-scaffold-post',v(x,0,z),v(x,eave+.1,z),.05);
         for(let y=.5;y<eave;y+=.6)beam('factory-scaffold-rail',v(x,y,-trussHalfZ),v(x,y,trussHalfZ),.045);
       }}
-    }else{
+    }else if(!roofOnly){
     type Opening={left:number;right:number;bottom:number;top:number};
     const window=(centre:number):Opening=>({left:centre-.20,right:centre+.20,bottom:-.06,top:.36});
     const wall=(axis:'x'|'z',sign:number,openings:Opening[])=>{
