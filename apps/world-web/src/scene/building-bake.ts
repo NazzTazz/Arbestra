@@ -21,7 +21,7 @@ export function bakeBuilding(code:string,level:number,phase:'finished'|'works') 
       const plan=buildingPlan({id:'asset',anchor:cells[0]!,cells,world:{widthCells:2048,heightCells:1024},recipe,phase,sourceLevels:Math.max(0,level-1)});
       kit.build(root,plan);
     }
-    // The runtime scene owns the shared background capture; only pane geometry is baked.
+    // The runtime scene owns the shared satin material; only pane geometry is baked.
     for(const mesh of root.getChildMeshes())if(mesh.metadata?.buildingAttachment==='glass')mesh.material=null;
     const bytes=encodeBuildingAsset(SceneSerializer.SerializeMesh(root,false,true));
     const parts:string[]=[];

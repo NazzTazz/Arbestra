@@ -60,7 +60,6 @@ export function VillageScene({ worldMode, noclip=false, populationFocus = null, 
   const [viewMode, setViewMode] = useState<TerrainViewMode>('village');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BabylonVillageScene | null>(null);
-  const loginSceneRef = useRef<BabylonVillageScene | null>(null);
   const getScene = useCallback(() => sceneRef.current, []);
   const selectionHandlerRef = useRef(onSiteSelected);
   const featureHandlerRef = useRef(onFeatureSelected);
@@ -108,10 +107,6 @@ export function VillageScene({ worldMode, noclip=false, populationFocus = null, 
     // manufacture an entire campus for that discarded scene (or a stale snapshot).
     const frame = requestAnimationFrame(() => {
       sceneRef.current?.update(state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId);
-      if (sceneRef.current && loginSceneRef.current !== sceneRef.current) {
-        loginSceneRef.current = sceneRef.current;
-        sceneRef.current.startFlyover();
-      }
     });
     return () => cancelAnimationFrame(frame);
   }, [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId, BabylonVillageScene]);

@@ -3,7 +3,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { buildingPlan, HALL_RECIPE, type BuildingPlan, type BuildingRecipe } from './building-plan';
 import { CELL_UNITS } from './world-space';
-import { TimberThatch, timberBeamGeometry } from './timber-thatch';
+import { TimberThatch, stoneBlockGeometry } from './timber-thatch';
 import { glazeWindows } from './frosted-glass';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { VillageBraziers } from './village-braziers';
@@ -77,7 +77,7 @@ function mathematicsPlatform(parent: Mesh, kit: TimberThatch, level: number) {
   const stoneLength=CAMPUS_SUBCELL_UNITS,wallThickness=stoneLength/2,joint=HALL_RECIPE.module.joint;
   const parts: BuildingGeometry[]=[];
   const block=(name:string,x:number,y:number,z:number,w:number,h:number,d:number)=>{
-    const mesh=new BuildingGeometry(name,timberBeamGeometry(h,w,d,true,1));
+    const mesh=new BuildingGeometry(name,stoneBlockGeometry(h,w,d));
     mesh.position.set(x,y,z);parts.push(mesh);
   };
   // Hollow masonry shell and continuous landing: no invisible solid brick fill.
@@ -113,7 +113,7 @@ function mathematicsPortico(parent: Mesh, kit: TimberThatch, platformHeight: num
   const parts: Mesh[]=[],unit=CAMPUS_SUBCELL_UNITS,course=HALL_RECIPE.module.height;
   const roofBottom=9*course,columnZ=4.5*unit,columnX=3.5*unit;
   const block=(name:string,x:number,y:number,z:number,width:number,height:number,depth:number)=>{
-    const mesh=new Mesh(name,kit.scene);timberBeamGeometry(height,width,depth,true,1).applyToMesh(mesh);
+    const mesh=new Mesh(name,kit.scene);stoneBlockGeometry(height,width,depth).applyToMesh(mesh);
     mesh.position.set(x,platformHeight+y,z);mesh.material=kit.stone;parts.push(mesh);
   };
   for(const sign of [-1,1]){

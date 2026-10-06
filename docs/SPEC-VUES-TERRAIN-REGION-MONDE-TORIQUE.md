@@ -20,6 +20,8 @@ Recette de vitesse : dans la vue torique, nuages ×10 ; soleil et rotation du to
 
 ### Survol clavier V et centrage de l'arrivée
 
+Révision du 6 octobre 2026 : à la demande de Tristan, le survol automatique à l'entrée et au rechargement est supprimé. Le village s'ouvre directement avec ses contrôles. La séquence volontaire sur V et les transitions entre échelles restent disponibles. Le test `village-entry.spec.ts` observe l'entrée et le rechargement pour interdire le survol et le dialogue d'arrivée automatiques.
+
 Tristan autorise une séquence de recette sur V (hors champs de saisie) : départ au dézoom maximal du tore, orbite complète de 12 s dans son repère tournant, approche de 6 s vers la normale du village, masque nuageux existant puis cinématique d'arrivée de 5,2 s. La rotation du tore et le mouvement solaire continuent. Les contrôles caméra sont suspendus pendant la séquence et restitués à la fin ; Échap permet l'interruption. Attente globale bornée à 45 s si la préparation échoue. Le survol automatique ne déclenche pas la découverte du Chat.
 
 Au zoom manuel vers la surface torique, redressement progressif vers la normale près du seuil de retour. L'arrivée Région→Village interpole aussi le point visé vers le centre de l'emprise de l'hôtel de ville, calculé en coordonnées canoniques avec gestion des coutures, plutôt que de conserver la cible régionale. Les tests ciblés couvrent ce centre et l'interpolation de directions opposées ; fluidité et cadrage sous tous les angles restent en recette humaine.

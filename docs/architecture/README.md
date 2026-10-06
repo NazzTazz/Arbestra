@@ -1,5 +1,7 @@
 # Architecture autoritaire
 
+La [première tranche d'optimisation du rendu](../SPEC-OPTIMISATION-RENDU-BATIMENTS.md) retire la capture du dépoli, réduit la géométrie droite du kit et instancie les recettes répétées. Le village s'ouvre directement, sans survol automatique. Le [rapport mesuré](../AUDIT-RENDU-3D-2026-10-06.md) distingue ces corrections des objectifs de fluidité/budgets encore non atteints.
+
 Le [marché Oracle](../SPEC-MARCHE-ORACLE.md) est implémenté dans le worktree avec un prototype accessible depuis l’hôtel de ville en Exploitation. La migration 034 ajoute son niveau 2 et les Anneaux à zéro ; les livraisons de troc sont intégrées à l’économie autoritaire. L’apparence niveau 2 validée en factory est intégrée au village ; l’UX commerciale reste un prototype. Commerce joueur, émission monétaire et armée restent futurs. Preuves et statut de recette dans le handoff courant.
 
 Arbestra est un monolithe modulaire TypeScript :

@@ -40,6 +40,23 @@ it('preserves unchanged light bindings and material readiness, but follows movin
   } finally { scene.dispose(); engine.dispose(); }
 });
 
+it('lights shared building sources at each visible instance position and clears stale bindings',()=>{
+  const engine=new NullEngine(),scene=new Scene(engine);
+  try{
+    const source=MeshBuilder.CreateBox('source',{},scene);source.isVisible=false;
+    source.material=new StandardMaterial('stone',scene);
+    const a=source.createInstance('a'),b=source.createInstance('b');a.position.x=20;b.position.x=40;
+    const left=new PointLight('left',new Vector3(20,0,0),scene),right=new PointLight('right',new Vector3(40,0,0),scene);
+    for(const mesh of [source,a,b])mesh.computeWorldMatrix(true);
+    bindBrazierLights([left,right],[source,a,b]);
+    expect(left.includedOnlyMeshes.map(m=>m.name)).toEqual(['a','source']);expect(right.includedOnlyMeshes.map(m=>m.name)).toEqual(['b','source']);
+    expect(source.lightSources).toContain(left);expect(source.lightSources).toContain(right);
+    a.dispose();bindBrazierLights([left,right],[source,b]);
+    expect(left.isEnabled()).toBe(false);expect(right.isEnabled()).toBe(true);
+    expect(source.lightSources.filter(l=>l.isEnabled())).toEqual([right]);
+  }finally{scene.dispose();engine.dispose();}
+});
+
 it('finds bends and intersections once, but not straight sections or endpoints across a toric seam',()=>{
   const cells=[{cellX:63,cellY:2},{cellX:0,cellY:2},{cellX:1,cellY:2},{cellX:1,cellY:3}];
   const route: TravelRoute={id:'a',kind:'building',cells,destination:cells[3]!};

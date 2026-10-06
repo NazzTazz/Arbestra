@@ -1,6 +1,26 @@
 import { expect,it } from 'vitest';
-import { hallWallCourse,hallStoneCrossRotation,timberBeamGeometry,timberFrameGeometry } from './timber-thatch';
+import { hallWallCourse,hallStoneCrossRotation,timberBeamGeometry,timberFrameGeometry,stoneBlockGeometry,compactTimberBeamGeometry } from './timber-thatch';
 import { Matrix,Quaternion,Vector3 } from '@babylonjs/core/Maths/math.vector';
+it('keeps chamfered timber bounds and exterior normals within 48 vertices',()=>{
+  for(const length of [3.16,.012]){
+    const data=compactTimberBeamGeometry(length,.22,.20),positions=data.positions!,normals=data.normals!;
+    expect(positions.length/3).toBeLessThanOrEqual(48);
+    for(const [axis,size] of [[0,.22],[1,length],[2,.20]]){
+      const values=Array.from({length:positions.length/3},(_,i)=>positions[i*3+axis!]!);
+      expect(Math.max(...values)-Math.min(...values)).toBeCloseTo(size!,6);
+    }
+    for(let i=0;i<positions.length;i+=3)expect(positions[i]!*normals[i]!+positions[i+1]!*normals[i+1]!+positions[i+2]!*normals[i+2]!).toBeGreaterThan(0);
+  }
+});
+it('keeps lightweight masonry bounds and exterior normals, including narrow opening cuts',()=>{
+  for(const length of [.29,.012]){
+    const data=stoneBlockGeometry(length,.137,.16),positions=data.positions!,normals=data.normals!;
+    expect(positions.length/3).toBeLessThanOrEqual(24);
+    const span=(axis:number)=>{const values=Array.from({length:positions.length/3},(_,i)=>positions[i*3+axis]!);return Math.max(...values)-Math.min(...values);};
+    expect(span(0)).toBeCloseTo(.137,6);expect(span(1)).toBeCloseTo(length,6);expect(span(2)).toBeCloseTo(.16,6);
+    for(let i=0;i<positions.length;i+=3)expect(positions[i]!*normals[i]!+positions[i+1]!*normals[i+1]!+positions[i+2]!*normals[i+2]!).toBeGreaterThan(0);
+  }
+});
 it('keeps raw frame members circular, at their bearing height, with exterior normals',()=>{
   for(const height of [.153,.2,.075,.035]){
     const geometry=timberFrameGeometry(2,.123,height,true),positions=geometry.positions!,normals=geometry.normals!;

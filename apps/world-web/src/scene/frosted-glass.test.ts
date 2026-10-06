@@ -2,19 +2,30 @@ import {it,expect} from 'vitest';
 import {NullEngine} from '@babylonjs/core/Engines/nullEngine';
 import {Scene} from '@babylonjs/core/scene';
 import {MeshBuilder} from '@babylonjs/core/Meshes/meshBuilder';
-import {FrostedGlass} from './frosted-glass';
+import {HemisphericLight} from '@babylonjs/core/Lights/hemisphericLight';
+import {Vector3} from '@babylonjs/core/Maths/math.vector';
+import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
+import {attachFrostedGlass} from './frosted-glass';
 
-it('keeps the background capture list stable and excludes glass while handling streamed meshes',async()=>{
+it('renders frosted panes without capturing the scene and shares their material across removal',()=>{
   const engine=new NullEngine(),scene=new Scene(engine);
   try{
-    const wall=MeshBuilder.CreateBox('wall',{},scene),pane=MeshBuilder.CreatePlane('glass',{},scene),glass=new FrostedGlass(scene);
-    glass.attach(pane);scene.onBeforeRenderTargetsRenderObservable.notifyObservers(scene);
-    const list=glass.capture.renderList;expect(list?.slice()).toEqual([wall]);expect(glass.capture.renderListPredicate).toBeUndefined();
-    scene.onBeforeRenderTargetsRenderObservable.notifyObservers(scene);expect(glass.capture.renderList).toBe(list);
-    const tree=MeshBuilder.CreateBox('tree',{},scene);
-    // Babylon defers the mesh-added notification until its geometry is assigned.
-    await new Promise(resolve=>setTimeout(resolve,20));scene.onBeforeRenderTargetsRenderObservable.notifyObservers(scene);
-    expect(glass.capture.renderList?.map(m=>m.name)).toEqual([wall.name,tree.name]);wall.dispose();scene.onBeforeRenderTargetsRenderObservable.notifyObservers(scene);
-    expect(glass.capture.renderList?.map(m=>m.name)).toEqual([tree.name]);pane.dispose();expect(scene.customRenderTargets).not.toContain(glass.capture);
+    MeshBuilder.CreateBox('wall',{},scene);
+    const first=MeshBuilder.CreatePlane('first',{},scene),second=MeshBuilder.CreatePlane('second',{},scene);
+    attachFrostedGlass(first);attachFrostedGlass(second);
+    expect(scene.customRenderTargets).toHaveLength(0);
+    expect(scene.textures.filter(t=>t.isRenderTarget)).toHaveLength(0);
+    expect(first.material).toBe(second.material);
+    expect(first.material!.needAlphaBlending()).toBeFalsy();
+    first.dispose(false,false);
+    expect(scene.materials).toContain(second.material);
+    expect(second.material!.getScene()).toBe(scene);
+    const material=second.material as StandardMaterial,reflection=material.reflectionTexture!;
+    expect(reflection.isRenderTarget).toBeFalsy();expect(reflection.getSize()).toMatchObject({width:32,height:16});
+    expect(material.diffuseFresnelParameters).toBeFalsy();
+    const daylight=new HemisphericLight('daylight',Vector3.Up(),scene);daylight.intensity=1;
+    scene.onBeforeRenderObservable.notifyObservers(scene);expect(reflection.level).toBeCloseTo(.7);
+    daylight.intensity=.1;scene.onBeforeRenderObservable.notifyObservers(scene);expect(reflection.level).toBeCloseTo(.07);
+    daylight.setEnabled(false);scene.onBeforeRenderObservable.notifyObservers(scene);expect(reflection.level).toBe(0);
   }finally{scene.dispose();engine.dispose();}
 });

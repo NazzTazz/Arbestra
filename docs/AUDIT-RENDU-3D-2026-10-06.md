@@ -2,6 +2,8 @@
 
 ## Résultat
 
+Suite du 6 octobre : la première tranche d'optimisation est maintenant implémentée, après le commit/push de sauvegarde `d0596a4`. Le texte d'étude ci-dessous conserve les mesures antérieures ; les résultats nouveaux sont dans la dernière section. La suppression de l'introduction automatique est aussi demandée et réalisée.
+
 Le village cumule deux coûts importants : une nouvelle passe de toute la scène pour le verre dépoli et un rendu détaillé comportant beaucoup de meshes et de géométrie. Supprimer la ReflectionProbe de la vitrine ne supprimait pas la capture `campus-glass-background`. Celle-ci porte les appels de dessin de **559 à 1 264 par frame** dans la scène stabilisée mesurée. Même sans cette capture, cette scène reste très loin de la cible de 45 FPS.
 
 Le tore possède un autre point de ralentissement : ses postprocess, dont le brouillard volumétrique. Leur désactivation expérimentale porte le débit observé d'environ **18–22 à 28 FPS**. Ce résultat concerne l'ensemble des postprocess ; il ne mesure pas isolément le shader du brouillard.
@@ -116,3 +118,32 @@ Le budget cible est 22.2 ms/frame à 45 FPS ; la spec des vues vise un P95 d'int
 Artefacts ignorés par Git dans `test-results/` : `render-audit.mjs`, `render-audit-results.json`, `render-audit-first-hardware.json`, `render-audit-cpu-stable.json`, `render-audit-village.png`. Le script utilise les identifiants publics du compte de développement du seed ; aucun secret d'environnement n'est copié. Reproduction : serveurs dev existants puis `node test-results/render-audit.mjs` ; nécessite Chrome et une session de développement compatible.
 
 Restent à mesurer : timings GPU par passe, build de production, profils jour/nuit et mouvement/picking, coût isolé de chaque famille de bâtiments et des ombres, API/réseau/décodage, mémoire prolongée, mobile réel. Aucun test applicatif lancé pour cette étude sans changement d'implémentation. La vérification effectuée porte sur les expériences navigateur, leurs résultats, le code lié et la documentation.
+
+## Première tranche réalisée et remesurée
+
+Dépoli : StandardMaterial opaque, petit reflet ciel/sol statique partagé 32 × 16, Fresnel et spéculaire. Une première variante diffuse était trop sombre, signalée par Tristan ; elle est remplacée par ce reflet statique. Aucun render target/probe ni dessin supplémentaire de scène. Le reflet suit les lumières, niveau .7 de jour et .238 de nuit dans le parcours vérifié (soleil .85 → 0, ambiante .34 la nuit). Les captures jour/nuit montrent des fenêtres gris bleuté et le contraste nocturne ; vitrine et six stocks exposés restent distincts et visibles.
+
+Géométrie : blocs droits à 24 sommets, bois à 48 sommets avec chanfrein de section conservé, petit chanfrein des extrémités supprimé. Joints et réservations restent géométriques ; pas de LOD nouveau. Instanciation native des recettes précompilées, transforms/UUID/culling individuels, matériaux communs conservés au retrait. Sources masquées enregistrées pour les lumières ; chemin alternatif des braseros adapté. Ombres de contact instanciées. Modèles et miniatures régénérés.
+
+Manifeste vérifié : 20 modèles, 10 miniatures de 384 × 240 ; tailles de fichiers et copies de production cohérentes. Total des modèles compressés : **18 359 710 → 8 064 007 octets (−56.1 %)**. Cela mesure les fichiers à transférer, pas la VRAM ni les temps de décodage.
+
+| Partie | Avant | Après |
+| --- | ---: | ---: |
+| Salle haute, lot pierre | 435 069 | 42 537 |
+| Campus Mathématiques, lot pierre | 178 640 | 38 280 |
+| Campus Médecine, lot pierre | 140 672 | 30 144 |
+| Socle Mathématiques | 75 376 | 16 152 |
+
+Mesure finale : même GPU Iris Plus / D3D11, viewport 1440 × 900, rendu 1200 × 750, plafond 45 FPS. Pose documentée reproduite : alpha −.6707963, beta 1, rayon 36, focale .501, cible locale [32.5, .45, 51.25]. **L'audit initial n'avait pas enregistré la cible/focale ; le cadrage identique ne peut donc pas être prouvé.** Population et météo ont également évolué. Le total logique de 1 519 076 sommets représente environ −55 % face à la référence de 3 371 161, mais inclut les sources/instances et le terrain résident. Ce n'est pas un pourcentage de réduction de mémoire GPU. 270 instances, 661 meshes actifs, 387 draws par frame en développement, zéro capture et zéro rendu de la scène du tore dans les trois fenêtres finales.
+
+Temps de frame, trois fenêtres de 10 s : développement, moyennes 433.7 / 147.9 / 88.5 ms, P95 1047.9 / 249.6 / 156.6 ms ; build de production, moyennes 199.0 / 195.2 / 206.5 ms, P95 687.5 / 377.2 / 384.7 ms. Variation importante, y compris après chargement des modèles : **aucun gain stable de FPS démontré, objectif P95 ≤ 40 ms non atteint**. Production : `navigator.webdriver` masqué uniquement dans la page de mesure pour neutraliser le profil automatique 5 FPS ; résolution et plafond normal vérifiés. L'absence d'instrumentation Babylon en production laisse son compteur interne de draws cumulatif : valeurs brutes 66 668 / 96 932 / 121 376 exclues comme mesures par frame. La première lecture de mémoire utilisant `getVerticesData()` sur tous les formats empaquetés a échoué ; corrigée pour lire les buffers bruts, sans assimiler une exception d'instrumentation à une panne du rendu.
+
+Les budgets proposés de 1.35 million de sommets, 220 draws et 400 meshes actifs ne sont pas atteints sur ce cadrage. Restent notamment la maçonnerie courbe à 84 640 + 40 152 sommets, le lot pierre du Tailleur à 50 556, les soumissions/préparations natives et le coût hors `scene.render()` : CPU du callback production moyen 123–184 ms, invocation de rendu village 109–135 ms. Les chiffres ne sont pas des timings GPU. La suppression de la capture est démontrée ; le problème global de fluidité reste ouvert.
+
+Contrôle distinct en production, même pose et qualité, compteur obtenu par différence début/fin de frame : **30 frames, 353–368 draws, moyenne 363.7**, 642 meshes actifs, 1 501 503 sommets logiques, 270 instances, zéro capture. Le terrain résident explique les petites différences de totaux avec les fenêtres précédentes. Compteur Babylon : 608 412 triangles actifs ; somme des données de buffers vertex uniques et indices : 20 084 260 octets (environ 19.2 Mio), sans textures, matrices d'instances, allocations du moteur ni copies CPU supplémentaires. Pas de mesure mémoire initiale équivalente : aucun gain de VRAM chiffré. La première tentative de ce contrôle utilisait une méthode absente sur le buffer GPU brut ; instrumentation corrigée pour lire les données des VertexBuffer, puis contrôle achevé avec succès.
+
+Factory isolée, capacité d'accès simulée dans la seule page de test : hôtel 2, campus 3, maison pierre 2 et troncs 2, états achevé/travaux, orientations 0°/180°. Zéro capture/probe ; exposition et vitrine présentes achevées et retirées aux travaux ; aucune erreur navigateur. Captures hôtel et maisons examinées. Ce test ne valide pas les autorisations serveur de la factory, inchangées. Première tentative sans authentification arrêtée par le contrôle d'accès, pas comptée comme preuve graphique.
+
+Vérifications : 38 fichiers / 153 tests de scène terminés verts ; test dépoli final relancé vert après ajout du reflet statique, couvrant partage, absence de capture et modulation des lumières. Régression de picking/removal de deux instances et de liaison des braseros. Typecheck racine, lint racine puis lint ciblé final et build world-web terminés verts (avertissement de gros chunks). Entrée/rechargement Chrome matériel : test `village-entry.spec.ts` vert, avec observation des changements de vue/dialogue dès le chargement ; première attente sur une métrique réservée au mode E2E puis mauvais nom de champ corrigés dans le test, sans les compter comme validations du produit. Aucun reset de base ni commande gameplay.
+
+Artefacts locaux ignorés : `render-final-dev-results.json`, `render-final-production-results.json`, captures `render-final-*-village.png` et `glass-final-day/night.png`, scripts de mesure. Les mesures historiques restent conservées. Reste à isoler le temps GPU, la contribution des soumissions/préparations et du callback hors rendu, ainsi qu'à vérifier mobile réel et fluidité prolongée.

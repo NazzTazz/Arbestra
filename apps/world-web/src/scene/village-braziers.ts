@@ -2,6 +2,7 @@ import {automaticBraziers,type VillageState,type TravelCell,type TravelRoute,typ
 import type { Scene } from '@babylonjs/core/scene';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
@@ -52,11 +53,18 @@ export function brazierBlocks() {
 export function bindBrazierLights(lights: readonly PointLight[], meshes: readonly AbstractMesh[]): void {
   const targets = lights.map(() => [] as AbstractMesh[]);
   for (const mesh of meshes) {
-    if (!mesh.isEnabled()) continue;
+    if (!mesh.isEnabled() || !mesh.isVisible) continue;
     const center = mesh.getBoundingInfo().boundingSphere.centerWorld;
     const near = lights.map((light, i) => ({ i, d: Vector3.DistanceSquared(center, light.position) }))
       .filter(p => p.d < 25).sort((a, b) => a.d - b.d).slice(0, 2);
-    for (const p of near) targets[p.i]!.push(mesh);
+    for (const p of near) {
+      targets[p.i]!.push(mesh);
+      if(mesh instanceof InstancedMesh&&!targets[p.i]!.includes(mesh.sourceMesh)){
+        targets[p.i]!.push(mesh.sourceMesh);
+        // Six bounded road lights plus the two global lights, attenuated per instance.
+        if(mesh.material instanceof StandardMaterial)mesh.material.maxSimultaneousLights=8;
+      }
+    }
     if (near.length) {
       if (mesh.material?.isFrozen) mesh.material.unfreeze();
       for (const sub of mesh.subMeshes ?? []) {

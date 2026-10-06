@@ -1,6 +1,7 @@
 import '@babylonjs/core/Loading/Plugins/babylonFileLoader';
 import {SceneLoader} from '@babylonjs/core/Loading/sceneLoader';
 import {Mesh} from '@babylonjs/core/Meshes/mesh';
+import {InstancedMesh} from '@babylonjs/core/Meshes/instancedMesh';
 import {Geometry} from '@babylonjs/core/Meshes/geometry';
 import {decodeBuildingAsset} from './building-asset-format';
 import type {Scene} from '@babylonjs/core/scene';
@@ -10,6 +11,27 @@ import manifestJson from './building-assets-manifest.json';
 
 export const buildingAssets:Record<string,{url:string;bytes:number;thumbnail?:string}>=manifestJson;
 const scenes=new WeakMap<Scene,Map<string,Promise<AssetContainer>>>();
+
+/** Native instances retain individual transforms, culling and picking, sharing each material draw. */
+export function instantiateBakedBuilding(container:AssetContainer,parent:Mesh){
+  for(const source of container.meshes){
+    source.receiveShadows=true;
+    if(source.metadata?.buildingAttachment==='glass'&&source instanceof Mesh)attachFrostedGlass(source);
+    // Babylon resolves an instance's lights through its source. Keep sources registered
+    // for lighting changes, but never draw/pick the template itself.
+    if(source.getTotalVertices()>0){source.isVisible=false;source.isPickable=false;
+      if(!parent.getScene().meshes.includes(source))parent.getScene().addMesh(source);
+    }
+  }
+  const model=container.instantiateModelsToScene(name=>`${parent.name}-${name}`,false,{doNotInstantiate:false});
+  for(const node of model.rootNodes){node.parent=parent;for(const mesh of node.getChildMeshes()){
+    const source=mesh instanceof InstancedMesh?mesh.sourceMesh:mesh;
+    mesh.metadata={...source.metadata,...parent.metadata};
+    mesh.isPickable=source.metadata?.buildingAttachment!=='glass'&&parent.isPickable;
+    mesh.isVisible=true;
+  }}
+  return model;
+}
 
 /** One download/geometry allocation per recipe per scene. Instances share geometry/materials. */
 export async function loadBakedBuilding(parent:Mesh,key:string):Promise<void> {
@@ -35,9 +57,5 @@ export async function loadBakedBuilding(parent:Mesh,key:string):Promise<void> {
     cache.set(key,promise);void promise.catch(()=>cache!.delete(key));
   }
   const container=await promise;if(parent.isDisposed()||scene.isDisposed)return;
-  const instance=container.instantiateModelsToScene(name=>`${parent.name}-${name}`,false,{doNotInstantiate:true});
-  for(const node of instance.rootNodes){node.parent=parent;for(const mesh of node.getChildMeshes()){
-    mesh.receiveShadows=true;mesh.metadata={...mesh.metadata,...parent.metadata};
-    if(mesh.metadata?.buildingAttachment==='glass'&&mesh instanceof Mesh)attachFrostedGlass(mesh);
-  }}
+  instantiateBakedBuilding(container,parent);
 }

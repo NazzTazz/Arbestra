@@ -144,6 +144,7 @@ export class BabylonVillageScene {
   readonly #scaffoldMaterial: StandardMaterial;
   readonly #selectionMaterial: StandardMaterial;
   readonly #contactShadowMaterial: StandardMaterial;
+  #contactShadowSource: Mesh | null = null;
   readonly #packedEarthMaterial: StandardMaterial;
   readonly #sawdustMaterial: StandardMaterial;
   readonly #selectionMarker: Mesh;
@@ -784,7 +785,10 @@ export class BabylonVillageScene {
         this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1);
         this.#regionalOverview.detailBlend(blend);
         for (const root of this.#villageMeshes) for (const mesh of [root, ...root.getChildMeshes()]) {
-          mesh.visibility = (mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
+          const visibility=(mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
+          // Native building instances share source visibility; each instance still owns culling/picking.
+          const target='sourceMesh' in mesh ? (mesh as import('@babylonjs/core/Meshes/instancedMesh').InstancedMesh).sourceMesh : mesh;
+          if(target.visibility!==visibility)target.visibility=visibility;
         }
         this.#regionalVillages.update(this.#space, this.#state.village.id);
         for (const mesh of this.#renderer?.meshes() ?? []) {
@@ -1968,15 +1972,19 @@ export class BabylonVillageScene {
     return root;
   }
 
-  #createContactShadow(parent: Mesh, width: number, depth: number): Mesh {
-    const shadow = MeshBuilder.CreateDisc(`contact-shadow-${parent.name}`, { radius: 0.5, tessellation: 16 }, this.#scene);
+  #createContactShadow(parent: Mesh, width: number, depth: number): void {
+    if (!this.#contactShadowSource) {
+      this.#contactShadowSource = MeshBuilder.CreateDisc('contact-shadow-source', { radius: 0.5, tessellation: 16 }, this.#scene);
+      this.#contactShadowSource.material = this.#contactShadowMaterial;
+      this.#contactShadowSource.isVisible = false;
+      this.#contactShadowSource.isPickable = false;
+    }
+    const shadow = this.#contactShadowSource.createInstance(`contact-shadow-${parent.name}`);
     shadow.parent = parent;
     shadow.rotation.x = Math.PI / 2;
     shadow.position.set(0.1, -parent.position.y + 0.035, 0.12);
     shadow.scaling.set(width, depth, 1);
-    shadow.material = this.#contactShadowMaterial;
     shadow.isPickable = false;
-    return shadow;
   }
 
   #applySelection(): void {

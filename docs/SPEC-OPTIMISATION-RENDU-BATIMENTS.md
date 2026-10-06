@@ -1,18 +1,20 @@
 # Optimisation du rendu des bâtiments
 
-Date : 6 octobre 2026. Statut : **spec, non implémentée**.
+Date : 6 octobre 2026. Statut : **première tranche implémentée ; budgets et fluidité à valider**.
 
 Source : [audit mesuré](AUDIT-RENDU-3D-2026-10-06.md). Demande de Tristan : simplifier le verre dépoli en acceptant une perte de qualité de reflets, spécifier la réduction des sommets et le regroupement des meshes.
 
 ## Décisions et périmètre
 
-**Validé par la demande** : perte de qualité des reflets du dépoli autorisée ; objectif de simplification géométrique et de regroupement à spécifier. Remplacer la capture de scène du dépoli par un matériau économique est la direction retenue de cette spec.
+**Validé par la demande** : perte de qualité des reflets du dépoli autorisée ; simplification géométrique et regroupement autorisés par « commit push puis fais les optimisations ». L'introduction automatique à la connexion est retirée à la demande suivante.
 
-**Proposé** : budgets numériques ci-dessous, représentation des microdétails par texture/normales, instanciation des recettes répétées et séparation des parties statiques/animées. Ces choix ne sont ni une livraison ni des gains démontrés.
+**Proposé, restant** : budgets numériques ci-dessous, représentation des microdétails par texture/normales, variantes par taille projetée et regroupements statiques supplémentaires. Ces cibles ne sont ni une livraison ni des gains démontrés.
+
+**Implémenté dans cette première tranche** : dépoli opaque StandardMaterial, reflet ciel/sol statique 32 × 16 partagé et modulé par les lumières, sans capture ni émission permanente ; blocs droits à 24 sommets conservant joints/ouvertures, bois chanfreiné à 48 sommets sans petit chanfrein axial ; instances natives des recettes précompilées et des ombres de contact. Les instances gardent transformations, culling et UUID individuels ; aucune fusion globale du village. Vitrine et exposition transparentes restent séparées. Modèles et miniatures régénérés. Aucun LOD nouveau ni remplacement des joints par une normal map dans cette tranche. Les budgets proposés ci-dessous restent des objectifs, pas des résultats acquis ; mesures et limites dans le [rapport](AUDIT-RENDU-3D-2026-10-06.md).
 
 **Ouvert** : niveau exact de lisibilité à travers le dépoli et seuils des variantes par taille projetée, à régler en factory et dans le village. Ces réglages ne bloquent pas les mesures isolées ni la préparation des lots statiques.
 
-**Hors scope** : économie, gameplay, migrations, changement d'emprises/ouvertures, réduction de la couverture terrain, nouvelle mécanique, refonte du streamer, modification des effets du tore. Cette demande porte sur la spécification ; aucun correctif graphique n'est implémenté ici.
+**Hors scope** : économie, gameplay, migrations, changement d'emprises/ouvertures, réduction de la couverture terrain, nouvelle mécanique, refonte du streamer, modification des effets du tore.
 
 ## 1. Dépoli sans capture de scène
 

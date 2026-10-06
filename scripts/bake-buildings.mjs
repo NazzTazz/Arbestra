@@ -11,7 +11,7 @@ import {gzipSync} from 'node:zlib';
 const selected=new Set(process.argv.slice(2));
 const recipes=[['university',3],['dwelling',2],['dwelling-logs',2],['dwelling-beams',2],['town-hall',1]];
 for(const code of selected)if(!recipes.some(([recipe])=>recipe===code))throw new Error(`Unknown building recipe: ${code}`);
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,args:process.platform==='win32'?['--use-angle=d3d11']:[]});
 const manifest=selected.size?JSON.parse(await readFile(new URL('../apps/world-web/src/scene/building-assets-manifest.json',import.meta.url),'utf8')):{};
 const directory=new URL('../apps/world-web/public/buildings/',import.meta.url);
 await mkdir(directory,{recursive:true});

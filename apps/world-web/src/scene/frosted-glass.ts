@@ -1,70 +1,46 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
-import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { FresnelParameters } from '@babylonjs/core/Materials/fresnelParameters';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import type { Scene } from '@babylonjs/core/scene';
 import { facePoint, type BuildingPlan } from './building-plan';
 
-const vertexSource = `precision highp float;
-attribute vec3 position;
-attribute vec2 uv;
-uniform mat4 worldViewProjection;
-varying vec4 screenPosition;
-varying vec2 glassUV;
-void main(){screenPosition=worldViewProjection*vec4(position,1.0);glassUV=uv;gl_Position=screenPosition;}`;
-const fragmentSource = `precision highp float;
-uniform sampler2D background;
-varying vec4 screenPosition;
-varying vec2 glassUV;
-void main(){
-  vec2 p=screenPosition.xy/screenPosition.w*.5+.5;
-  vec2 d=vec2(2.5/512.0);
-  vec3 c=texture2D(background,p).rgb*.25;
-  c+=(texture2D(background,p+vec2(d.x,0.0)).rgb+texture2D(background,p-vec2(d.x,0.0)).rgb
-    +texture2D(background,p+vec2(0.0,d.y)).rgb+texture2D(background,p-vec2(0.0,d.y)).rgb)*.125;
-  c+=(texture2D(background,p+d).rgb+texture2D(background,p-d).rgb
-    +texture2D(background,p+vec2(d.x,-d.y)).rgb+texture2D(background,p+vec2(-d.x,d.y)).rgb)*.0625;
-  float grain=fract(sin(dot(floor(glassUV*192.0),vec2(12.9898,78.233)))*43758.5453)-.5;
-  gl_FragColor=vec4(mix(c,vec3(.69,.80,.84),.18)+grain*.008,1.0);
-}`;
-
-/** One scene capture shared by all panes; glass is excluded from its own image. */
+/** Opaque satin glass, lit locally. It never captures or redraws the scene. */
 export class FrostedGlass {
-  readonly material: ShaderMaterial;
-  readonly capture: RenderTargetTexture;
-  private panes = 0;
-  private listDirty = true;
-  constructor(private readonly scene: Scene) {
-    this.capture = new RenderTargetTexture('campus-glass-background', 512, scene, false, true);
-    this.capture.wrapU = this.capture.wrapV = Texture.CLAMP_ADDRESSMODE;
-    this.material = new ShaderMaterial('campus-frosted-glass', scene, { vertexSource, fragmentSource },
-      { attributes: ['position', 'uv'], uniforms: ['worldViewProjection'], samplers: ['background'] });
+  readonly material: StandardMaterial;
+  constructor(scene: Scene) {
+    this.material = new StandardMaterial('campus-frosted-glass', scene);
+    this.material.diffuseColor = new Color3(.66, .76, .82);
+    this.material.specularColor = new Color3(.72, .84, .92);
+    this.material.specularPower = 64;
     this.material.backFaceCulling = false;
-    this.material.setTexture('background', this.capture);
-    // Babylon observes renderList mutations. Clearing and pushing every mesh via
-    // renderListPredicate invalidates light defines for the whole scene each frame.
-    // Visibility remains the object renderer's responsibility, not list membership.
-    this.capture.renderList=[];
-    scene.onNewMeshAddedObservable.add(()=>{this.listDirty=true;});
-    scene.onMeshRemovedObservable.add(()=>{this.listDirty=true;});
-    scene.onBeforeRenderTargetsRenderObservable.add(()=>{
-      if(!this.panes||!this.listDirty)return;
-      this.listDirty=false;
-      this.capture.renderList=scene.meshes.filter(mesh=>mesh.material!==this.material&&mesh.getTotalVertices()>0);
-    });
+    const fresnel = new FresnelParameters();
+    fresnel.leftColor = Color3.White();
+    fresnel.rightColor = new Color3(.45, .45, .45);
+    fresnel.power = 2;
+    this.material.reflectionFresnelParameters = fresnel;
+    // A blurred static sky/ground gradient: one tiny texture, no capture pass.
+    const width=32,height=16,pixels=new Uint8Array(width*height*4);
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const sky=y/(height-1),offset=(y*width+x)*4;
+      for(let c=0;c<3;c++)pixels[offset+c]=[65,77,58][c]!+([174,203,223][c]!-[65,77,58][c]!)*sky;
+      pixels[offset+3]=255;
+    }
+    const reflection=RawTexture.CreateRGBATexture(pixels,width,height,scene,false,false,Texture.BILINEAR_SAMPLINGMODE);
+    reflection.name='campus-frosted-static-environment';reflection.coordinatesMode=Texture.EQUIRECTANGULAR_MODE;
+    this.material.reflectionTexture=reflection;
+    const update=()=>{
+      const daylight=scene.lights.filter(l=>l.isEnabled()&&['DirectionalLight','HemisphericLight'].includes(l.getClassName())).reduce((sum,l)=>sum+l.intensity,0);
+      reflection.level=.7*Math.min(1,Math.max(0,daylight));
+    };
+    update();const observer=scene.onBeforeRenderObservable.add(update);
+    scene.onDisposeObservable.addOnce(()=>{scene.onBeforeRenderObservable.remove(observer);reflection.dispose();});
   }
   attach(mesh: Mesh) {
     mesh.material = this.material; mesh.isPickable = false;
-    this.listDirty=true;
-    if(this.panes++ === 0)this.scene.customRenderTargets.push(this.capture);
-    mesh.onDisposeObservable.addOnce(() => {
-      if(--this.panes === 0){
-        this.capture.renderList=[];this.listDirty=true;
-        const index=this.scene.customRenderTargets.indexOf(this.capture);
-        if(index>=0)this.scene.customRenderTargets.splice(index,1);
-      }
-    });
   }
 }
 const glasses = new WeakMap<Scene, FrostedGlass>();

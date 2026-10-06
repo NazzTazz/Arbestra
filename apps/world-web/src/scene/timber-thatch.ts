@@ -40,6 +40,30 @@ export function timberBeamGeometry(length:number,w:number,h:number,rounded=false
       const normals:number[]=[];VertexData.ComputeNormals(positions,indices,normals);d.positions=positions;d.indices=indices;d.normals=normals;d.uvs=uvs;return d;
 }
 
+/** Preserve each masonry block and its openings, with six faces instead of subpixel bevels. */
+export function stoneBlockGeometry(length:number,width:number,depth:number){
+  return BuildingGeometry.box('stone-block',{height:length,width,depth}).data;
+}
+
+/** Keep the timber cross-section chamfer; omit the tiny axial bevel at both ends. */
+export function compactTimberBeamGeometry(length:number,width:number,depth:number){
+  const bevel=Math.min(length,width,depth)*.1;
+  const ring=[[-width/2+bevel,-depth/2],[width/2-bevel,-depth/2],[width/2,-depth/2+bevel],[width/2,depth/2-bevel],[width/2-bevel,depth/2],[-width/2+bevel,depth/2],[-width/2,depth/2-bevel],[-width/2,-depth/2+bevel]];
+  const positions:number[]=[],indices:number[]=[],uvs:number[]=[];
+  for(let i=0;i<ring.length;i++){
+    const j=(i+1)%ring.length,base=positions.length/3;
+    for(const [k,y] of [[i,-length/2],[j,-length/2],[j,length/2],[i,length/2]])positions.push(ring[k!]![0]!,y!,ring[k!]![1]!);
+    indices.push(base,base+1,base+2,base,base+2,base+3);uvs.push(.02,0,.70,0,.70,1,.02,1);
+  }
+  for(const sign of [-1,1]){
+    const base=positions.length/3;
+    for(const [x,z] of ring){positions.push(x!,sign*length/2,z!);uvs.push(.765+(x!/width+.5)*.22,.445+(z!/depth+.5)*.109);}
+    for(let i=1;i<ring.length-1;i++)indices.push(base,base+i+(sign===1?0:1),base+i+(sign===1?1:0));
+  }
+  const data=new VertexData(),normals:number[]=[];VertexData.ComputeNormals(positions,indices,normals);
+  Object.assign(data,{positions,indices,uvs,normals});return data;
+}
+
 /** Round stock keeps the former bearing height and beam axis. */
 export function timberFrameGeometry(length:number,width:number,height:number,logs:boolean){
   return logs?BuildingGeometry.cylinder('frame-log',{height:length,diameter:height,tessellation:10}).data:timberBeamGeometry(length,width,height);
@@ -124,7 +148,7 @@ export class TimberThatch {
     };
     const beam=(name:string,a:Vector3,b:Vector3,w:number,h=w,material=this.wood)=>{
       const isFrame=/^hall-(tie|rafter-|king-post|strut|ridge-purlin|purlin|chevron|lath)/.test(name);
-      const m=new BuildingGeometry(name,logFrame&&isFrame?timberFrameGeometry(Vector3.Distance(a,b),w,h,true):timberBeamGeometry(Vector3.Distance(a,b),w,h,material===this.stone,material===this.stone?this.stoneProfile?.segments??(plan?1:3):plan?1:3,.1,this.stoneProfile?.radiusRatio??.04));
+      const m=new BuildingGeometry(name,material===this.stone?stoneBlockGeometry(Vector3.Distance(a,b),w,h):logFrame&&isFrame?timberFrameGeometry(Vector3.Distance(a,b),w,h,true):compactTimberBeamGeometry(Vector3.Distance(a,b),w,h));
       m.position=Vector3.Center(a,b);m.rotationQuaternion=new Quaternion();Quaternion.FromUnitVectorsToRef(Vector3.Up(),b.subtract(a).normalize(),m.rotationQuaternion);return add(m,material);
     };
     const v=(x:number,y:number,z:number)=>new Vector3(x,y,z);
@@ -288,7 +312,7 @@ export class TimberThatch {
         }
         const wallThickness=plan.recipe.module.thickness,frameDepth=wallThickness+.02,frameWidth=.045;
         const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=timber?this.wood:this.stone,d=dist-wallThickness/2)=>{
-          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,this.stoneProfile?.segments??(plan?1:3),.1,this.stoneProfile?.radiusRatio??.04)):BuildingGeometry.box(name,{width,height,depth});
+          const piece=material===this.stone?new BuildingGeometry(name,stoneBlockGeometry(height,width,depth)):BuildingGeometry.box(name,{width,height,depth});
           piece.position=at(u,y,d);
           if(opening.face.endsWith('x'))piece.rotation.y=Math.PI/2;
           if(material===this.wood)turnGrain(piece);
@@ -353,7 +377,7 @@ export class TimberThatch {
       for(const o of openings){
         const at=(u:number,y:number)=>axis==='x'?v(u,y,fixed):v(fixed,y,u);
         const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=this.stone,outside=false)=>{
-          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,this.stoneProfile?.segments??3,.1,this.stoneProfile?.radiusRatio??.04)):BuildingGeometry.box(name,{width,height,depth});
+          const piece=material===this.stone?new BuildingGeometry(name,stoneBlockGeometry(height,width,depth)):BuildingGeometry.box(name,{width,height,depth});
           piece.position=at(u,y);if(outside){if(axis==='x')piece.position.z+=sign*.098;else piece.position.x+=sign*.098;}
           if(axis==='z')piece.rotation.y=Math.PI/2;if(material===this.wood)turnGrain(piece);add(piece,material);
         };
