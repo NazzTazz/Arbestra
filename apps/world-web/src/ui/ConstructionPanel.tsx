@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { constructionCosts } from '@arbestra/contracts';
 import type { BuildingTypeDefinition } from '@arbestra/contracts';
 import type { AreaPreview } from '../scene/construction-selection';
 import type { UpgradePreview } from './construction-intent';
@@ -11,19 +12,19 @@ export interface ConstructionChoice {
   buildingId?: string;
 }
 const categoryOf = (code: string) => code === 'dwelling' ? 'Habitat' : code === 'garden' || code === 'sawmill' || code === 'stonemason' ? 'Production' : code === 'university' ? 'Savoir' : 'Administration';
-const resourceNames: Record<string, string> = { wood: 'bois', stone: 'pierre', carrots: 'carottes' };
+const resourceNames: Record<string, string> = { wood: 'bois brut', stone: 'pierre brute', timber:'bois d’œuvre','cut-stone':'pierre taillée',carrot: 'carottes' };
 const duration = (seconds: number) => seconds < 60 ? `${seconds} s` : `${Math.ceil(seconds / 60)} min`;
 export function CostLine({ costs }: { costs: Array<{ resourceCode: string; amount: number }> }) {
   return <span className="resource-costs">{costs.map(cost => <span key={cost.resourceCode}><i aria-hidden="true">{cost.resourceCode === 'wood' ? '▰' : cost.resourceCode === 'stone' ? '◆' : '●'}</i>{cost.amount.toLocaleString('fr-FR')} <small>{resourceNames[cost.resourceCode] ?? cost.resourceCode}</small></span>)}</span>;
 }
-export function ConstructionPanel({ houseVariant, onHouseVariant, construction, definitions, area, costs, error, pending, gardenWorkerNeed, upgrade,
+export function ConstructionPanel({ houseVariant, construction, definitions, area, costs, error, pending, gardenWorkerNeed, upgrade,
   intentState, collapsed, onToggle, onChoose, onDomainChange, onRetry, onClearError, domain, infrastructure, factoryEnabled, onWorkshop }: {
-  houseVariant:'stone'|'logs'|'beams'; onHouseVariant:(variant:'stone'|'logs'|'beams')=>void;
+  houseVariant:'stone'|'logs'|'beams';
   construction: ConstructionChoice; definitions: BuildingTypeDefinition[];
   area: AreaPreview | null; costs: Array<{ resourceCode: string; amount: number }>;
   upgrade: UpgradePreview | null; error: string | null; pending: boolean; gardenWorkerNeed: number | null;
   intentState: 'idle' | 'submitting' | 'error' | 'uncertain'; collapsed: boolean;
-  onToggle: () => void; onChoose: (type: string) => void; onDomainChange: (domain:'buildings'|'infrastructure') => void;
+  onToggle: () => void; onChoose: (type: string,variant?:'stone'|'logs'|'beams') => void; onDomainChange: (domain:'buildings'|'infrastructure') => void;
   domain:'buildings'|'infrastructure'; infrastructure:ReactNode; factoryEnabled:boolean; onWorkshop:()=>void;
   onRetry: () => void; onClearError: () => void;
 }) {
@@ -36,7 +37,7 @@ export function ConstructionPanel({ houseVariant, onHouseVariant, construction, 
   const status = intentState === 'uncertain' ? 'Résultat inconnu · vérifiez la même commande.'
     : pending ? 'Commande en cours…' : problem ?? (upgrade ? `${upgrade.name} · ${upgrade.level} → ${upgrade.nextLevel}`
     : area ? `${construction.action === 'extend' ? 'Extension' : 'Construction'} · ${area.count} case${area.count > 1 ? 's' : ''}` : '');
-  const shownCosts = upgrade ? upgrade.costs : area ? costs : level?.costs ?? [];
+  const shownCosts = upgrade ? upgrade.costs : area ? costs : constructionCosts(level,houseVariant);
   return <>
     <section className={`command-palette construction-palette${collapsed ? ' is-collapsed' : ''}`} aria-label="Palette de construction">
       <div className="construction-families" role="group" aria-label="Domaines de construction">
@@ -48,7 +49,7 @@ export function ConstructionPanel({ houseVariant, onHouseVariant, construction, 
       </div>
     </section>
     {domain==='buildings'&&(definition||status||intentState==='error'||intentState==='uncertain')&&<aside className="construction-feedback" aria-label="Action de construction">
-      {definition && <div className="construction-current"><strong>{definition.displayName}</strong><CostLine costs={shownCosts}/>
+      {definition && <div className="construction-current"><strong>{definition.code==='dwelling'&&construction.action==='build'?houseVariant==='logs'?'Maison en troncs':houseVariant==='beams'?'Maison en madriers':'Maison en pierre':definition.displayName}</strong><CostLine costs={shownCosts}/>
         {upgrade && upgrade.nextLevel > upgrade.level && <small>Amélioration · {duration(upgrade.durationSeconds)}</small>}
         {construction.action === 'extend' && gardenWorkerNeed !== null && <small>{gardenWorkerNeed} parcelles après extension</small>}
       </div>}
@@ -56,18 +57,18 @@ export function ConstructionPanel({ houseVariant, onHouseVariant, construction, 
       {(intentState === 'uncertain' || intentState === 'error') && <div className="intent-buttons"><button type="button" disabled={pending} onClick={onRetry}>{intentState === 'uncertain' ? 'Vérifier la même commande' : 'Réessayer'}</button>{intentState === 'error' && <button type="button" disabled={pending} onClick={onClearError}>Effacer l’erreur</button>}</div>}
     </aside>}
     {domain==='infrastructure'?infrastructure:<><nav className="construction-categories" aria-label="Familles de bâtiments">{groups.map(group => <button type="button" key={group} aria-pressed={category === group} onClick={() => { setCategory(group); if(collapsed)onToggle(); }}>{group}</button>)}</nav>
-    {!collapsed && category==='Habitat' && <div className="house-variants" role="group" aria-label="Matériau des maisons">{(['logs','beams','stone'] as const).map(variant=><button type="button" key={variant} disabled={locked} aria-pressed={houseVariant===variant} onClick={()=>onHouseVariant(variant)}>{variant==='logs'?'Troncs':variant==='beams'?'Madriers':'Pierre'}</button>)}</div>}
     {!collapsed && <section className="construction-showroom" aria-label={`Modèles · ${category}`}>
-      {definitions.filter(item => categoryOf(item.code) === category).map(item => {
+      {definitions.filter(item => categoryOf(item.code) === category).flatMap(item => (item.code==='dwelling'?(['logs','beams','stone'] as const):[null]).map(variant => {
         const initial = item.levels.find(entry => entry.level === 1), unavailable = !item.buildable || !initial;
         const presentation = BUILDING_PRESENTATIONS[item.code];
-        return <button className="showroom-model" type="button" key={item.code} disabled={locked || unavailable} aria-pressed={construction.type === item.code}
+        const name=variant==='logs'?'Maison en troncs':variant==='beams'?'Maison en madriers':variant==='stone'?'Maison en pierre':item.displayName;
+        return <button className="showroom-model" type="button" key={`${item.code}:${variant??''}`} aria-label={name} disabled={locked || unavailable} aria-pressed={construction.type === item.code&&(!variant||houseVariant===variant)}
           title={`${presentation?.purpose ?? item.displayName} ${presentation?.footprint ?? ''} ${unavailable ? 'Construction indisponible.' : `Travaux : ${duration(initial.constructionDurationSeconds)}.`}`}
-          onClick={() => onChoose(item.code)}>
-          <strong>{item.displayName}</strong><BuildingThumbnail code={item.code==='dwelling'&&houseVariant!=='stone'?`dwelling-${houseVariant}`:item.code}/>
-          {unavailable ? <em>Non constructible</em> : item.code==='stonemason' ? <em>Décoratif · gratuit</em> : <CostLine costs={initial.costs}/>}
+          onClick={() => onChoose(item.code,variant??undefined)}>
+          <strong>{name}</strong><BuildingThumbnail code={variant&&variant!=='stone'?`dwelling-${variant}`:item.code}/>
+          {unavailable ? <em>Non constructible</em> : <CostLine costs={constructionCosts(initial,variant??'stone')}/>}
         </button>;
-      })}
+      }))}
       {factoryEnabled&&<button className="showroom-model workshop-launcher" type="button" onClick={onWorkshop}><strong>Créer un bâtiment</strong><BuildingThumbnail code="town-hall"/><span className="resource-costs">＋ Atelier Bâtiments</span></button>}
     </section>}</>}
   </>;

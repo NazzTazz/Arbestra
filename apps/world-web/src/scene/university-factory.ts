@@ -4,12 +4,12 @@ import { TimberThatch } from './timber-thatch';
 import { buildMathematics } from './mathematics-factory';
 import { buildMedicine } from './medicine-factory';
 import { buildGeography } from './geography-factory';
-import { buildCampusGrass, buildCampusTrees } from './campus-decoration';
+import { buildCampusTrees } from './campus-decoration';
 
 /** One validated composition for both the isolated workshop and the village. */
 export function buildUniversity(root: Mesh, kit: TimberThatch, level: number, phase: 'finished' | 'works',
   _sourceLevel: number, monuments: { mathematics: boolean; astronomy: boolean }, previewFires = false) {
-  buildCampusGrass(root, kit);
+  // The campus uses the existing terrain as its lawn.
   buildMathematics(root, kit, level, phase, previewFires);
   buildMedicine(root, kit, level, phase);
   buildGeography(root, kit, level, phase);

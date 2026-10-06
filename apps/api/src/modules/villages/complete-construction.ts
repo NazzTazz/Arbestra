@@ -11,6 +11,16 @@ import { admitScience } from '../science/service.js';
 
 export const COMPLETE_CONSTRUCTION_TASK = 'building.complete';
 export const COMPLETE_EXPANSION_TASK = 'building-expansion.complete';
+export async function deliverMarket(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
+  const exchange = await transaction.selectFrom('marketExchanges').select('villageId')
+    .where('worldId', '=', task.worldId).where('id', '=', task.subjectId).executeTakeFirst();
+  if (exchange) await beginVillageEconomy(transaction, task.worldId, exchange.villageId);
+}
+export async function completeProcessing(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
+  const lot = await transaction.selectFrom('processingLots').select('villageId')
+    .where('worldId', '=', task.worldId).where('id', '=', task.subjectId).executeTakeFirst();
+  if (lot) await beginVillageEconomy(transaction, task.worldId, lot.villageId);
+}
 export { COMPLETE_GARDEN_HARVEST_TASK };
 export { COMPLETE_STONE_EXTRACTION_TASK };
 export { WAKE_EXTRACTION_WORKSITE_TASK };

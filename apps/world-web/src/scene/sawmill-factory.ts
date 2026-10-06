@@ -29,6 +29,14 @@ export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: stri
       mesh.isPickable = false;
       return mesh;
     };
+    const frame=(name:string,width:number,height:number,depth:number,x:number,y:number,z:number)=>{
+      if(level>1)return box(name,width,height,depth,x,y,z,materials.darkTimber);
+      const piece=MeshBuilder.CreateCylinder(`${name}-${id}`,{height:Math.max(width,height,depth),diameter:Math.min(width,height,depth),tessellation:10},scene);
+      piece.parent=foundation;piece.position.set(x,y,z);piece.material=materials.darkTimber;piece.isPickable=false;
+      if(width>height&&width>depth)piece.rotation.z=Math.PI/2;
+      else if(depth>height)piece.rotation.x=Math.PI/2;
+      return piece;
+    };
 
     // A working yard breaks the building's footprint into the surrounding grass.
     for (const [x, z, diameter, scaleX, material, rotation] of [
@@ -52,11 +60,11 @@ export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: stri
 
     // Visible post-and-beam frame carries the silhouette.
     for (const x of [-0.9, 0.9]) {
-      for (const z of [-0.76, 0.76]) box('sawmill-post', 0.14, 1.46, 0.14, x, 0.78, z, materials.darkTimber);
+      for (const z of [-0.76, 0.76]) frame('sawmill-post', 0.14, 1.46, 0.14, x, 0.78, z);
     }
-    box('sawmill-front-beam', 2.0, 0.15, 0.15, 0, 1.46, -0.76, materials.darkTimber);
-    box('sawmill-back-beam', 2.0, 0.15, 0.15, 0, 1.46, 0.76, materials.darkTimber);
-    box('sawmill-ridge-beam', 0.14, 0.14, 2.28, 0, 1.88, 0, materials.darkTimber);
+    frame('sawmill-front-beam', 2.0, 0.15, 0.15, 0, 1.46, -0.76);
+    frame('sawmill-back-beam', 2.0, 0.15, 0.15, 0, 1.46, 0.76);
+    frame('sawmill-ridge-beam', 0.14, 0.14, 2.28, 0, 1.88, 0);
 
     const leftRoof = box('sawmill-roof-left', 1.3, 0.13, 2.34, -0.54, 1.65, 0, materials.roof);
     leftRoof.rotation.z = 0.5;

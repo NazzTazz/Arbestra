@@ -148,7 +148,11 @@ describe.sequential('stone regression proofs', () => {
 
   it('B/J: depleted tombstones free their cell and expose consistent eligibility', async () => {
     const id = await stone(50);
-    await expect(constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', villageId, 1024, 514, 'dwelling', 0)).rejects.toBeDefined();
+    await db.updateTable('villageResources').set({amount:25}).where('worldId','=',worldId)
+      .where('villageId','=',villageId).where('resourceCode','=','timber').execute();
+    await db.updateTable('villageResources').set({amount:10}).where('worldId','=',worldId)
+      .where('villageId','=',villageId).where('resourceCode','=','cut-stone').execute();
+    await expect(constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', villageId, 1024, 514, 'dwelling', 0)).rejects.toMatchObject({code:'CELL_OCCUPIED'});
     await start(id); await settle(new Date(t0.getTime() + 600000));
     const snapshot = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube'); expect(await stock()).toBe(50);
     expect(snapshot.region.features.find((feature) => feature.id === id)?.deposit).toMatchObject({ state: 'depleted', remainingAmount: 0, reservedAmount: 0, revision: 3 });

@@ -51,6 +51,11 @@ export async function villageProductionPerHour(
   villageId: string,
   resourceCode: string,
 ): Promise<number> {
+  if (resourceCode === 'wood') {
+    const village = await transaction.selectFrom('villages').select('economyActivatedAt')
+      .where('worldId', '=', worldId).where('id', '=', villageId).executeTakeFirstOrThrow();
+    if (village.economyActivatedAt) return 0;
+  }
   const result = await transaction.selectFrom('villageResourceFlows')
     .leftJoin('buildings', (join) => join
       .onRef('buildings.worldId', '=', 'villageResourceFlows.worldId')

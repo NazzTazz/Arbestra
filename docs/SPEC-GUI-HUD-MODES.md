@@ -1,5 +1,9 @@
 # HUD principal et grammaire des actions dans le monde
 
+**Prototype Marché du 6 octobre :** clic ordinaire sur l’hôtel de ville en Exploitation ouvre sa fiche et le marché. Au niveau 1, bouton d’amélioration avec coût 500 bois d’œuvre + 120 pierres taillées ; au niveau 2 achevé, choix des ressources et de la quantité, devis Oracle serveur, confirmation et suivi des livraisons. Les cinq ressources sont issues du catalogue négociable. Solde des Anneaux affiché à zéro, usages monétaires futurs. Formulaire provisoire explicitement demandé ; présentation et UX finales restent à Tristan. [Spec Marché](SPEC-MARCHE-ORACLE.md).
+
+**Ajustement validé le 6 octobre :** Construire → Habitat montre directement Maison en troncs, Maison en madriers et Maison en pierre dans le showroom. Chaque modèle a sa miniature et son coût ; son clic choisit simultanément la recette et la variante. Le sélecteur préalable de matériau est supprimé. Troncs : 25 bois bruts ; madriers : 25 bois d’œuvre ; pierre : 25 bois d’œuvre + 10 pierres taillées. Voir le [catalogue](architecture/building-catalog.md) pour les améliorations.
+
 **Infrastructure implémentée dans le worktree, recette en cours :** [Infrastructure, voirie et atelier](SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md) définit les routes et bordures, braseros éditables, accès factory, rotation R et commandes immédiates. Ses gestes spécialisés (clic droit des routes / équipements) et son périmètre priment sur les propositions historiques ci-dessous. Voir le handoff pour les validations actuelles ; les anciennes mentions « à venir » décrivent la livraison HUD précédente.
 
 ## Ajustements interactifs du 4 octobre — prioritaires sur la disposition historique

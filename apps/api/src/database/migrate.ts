@@ -35,6 +35,10 @@ import * as infrastructureMigration from './migrations/028_infrastructure.js';
 import * as timberHouseRecipesMigration from './migrations/029_timber_house_recipes.js';
 
 import * as stonemasonCatalogMigration from './migrations/030_stonemason_catalog.js';
+import * as materialProcessingMigration from './migrations/031_material_processing.js';
+import * as stoneHouseCostsMigration from './migrations/032_stone_house_costs.js';
+import * as logHouseRawWoodMigration from './migrations/033_log_house_raw_wood.js';
+import * as oracleMarketMigration from './migrations/034_oracle_market.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -69,6 +73,10 @@ const migrationProvider: MigrationProvider = {
       '028_infrastructure': infrastructureMigration,
       '029_timber_house_recipes': timberHouseRecipesMigration,
       '030_stonemason_catalog': stonemasonCatalogMigration,
+      '031_material_processing': materialProcessingMigration,
+      '032_stone_house_costs': stoneHouseCostsMigration,
+      '033_log_house_raw_wood': logHouseRawWoodMigration,
+      '034_oracle_market': oracleMarketMigration,
     };
   },
 };

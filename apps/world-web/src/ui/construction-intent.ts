@@ -1,4 +1,5 @@
 import type { VillageState } from '@arbestra/contracts';
+import { constructionCosts } from '@arbestra/contracts';
 import type { Cell } from '../scene/construction-selection';
 
 /** Resolve the gesture's origin, not whichever neighbour its last cell touches. */
@@ -23,10 +24,11 @@ export function upgradePreview(state: VillageState, siteId: string | null) {
   if (!building) return null;
   const definition = state.buildingTypes.find(item => item.code === building.type);
   const next = definition?.levels.find(item => item.level === building.level + 1);
+  const costs=constructionCosts(next,building.visualLayout?.recipe==='log-house'?'logs':building.visualLayout?.recipe==='beam-house'?'beams':'stone');
   const error = building.status !== 'completed' ? 'Ce bâtiment est encore en travaux.' : !next ? 'Niveau maximal atteint.'
-    : next.costs.some(cost => cost.amount > (cost.resourceCode === 'wood' ? state.village.wood : state.village.resources.find(r => r.code === cost.resourceCode)?.amount ?? 0)) ? 'Ressources insuffisantes.' : null;
+    : costs.some(cost => cost.amount > (cost.resourceCode === 'wood' ? state.village.wood : state.village.resources.find(r => r.code === cost.resourceCode)?.amount ?? 0)) ? 'Ressources insuffisantes.' : null;
   return { siteId, buildingId: building.id, code: building.type, name: definition?.displayName ?? building.type,
-    level: building.level, nextLevel: next?.level ?? building.level, costs: next?.costs ?? [],
+    level: building.level, nextLevel: next?.level ?? building.level, costs,
     durationSeconds: next?.constructionDurationSeconds ?? 0, error };
 }
 export type UpgradePreview = NonNullable<ReturnType<typeof upgradePreview>>;

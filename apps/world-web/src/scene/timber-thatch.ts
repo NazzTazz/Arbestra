@@ -20,8 +20,8 @@ export function hallStoneCrossRotation(axis:'x'|'z',vertical=false){
   return axis==='z'?Quaternion.RotationAxis(vertical?Vector3.Up():Vector3.Forward(),Math.PI/2):Quaternion.Identity();
 }
 
-export function timberBeamGeometry(length:number,w:number,h:number,rounded=false,segments=3){
-  const d=new VertexData(),bevel=Math.min(w,h,length)*(rounded?.04:.1);
+export function timberBeamGeometry(length:number,w:number,h:number,rounded=false,segments=3,bevelRatio=.1,roundedRadiusRatio=.04){
+  const d=new VertexData(),bevel=Math.min(w,h,length)*(rounded?roundedRadiusRatio:bevelRatio);
       let ring=[[-w/2+bevel,-h/2],[w/2-bevel,-h/2],[w/2,-h/2+bevel],[w/2,h/2-bevel],[w/2-bevel,h/2],[-w/2+bevel,h/2],[-w/2,h/2-bevel],[-w/2,-h/2+bevel]];
       if(rounded){ring=[];const centres=[[w/2-bevel,-h/2+bevel],[w/2-bevel,h/2-bevel],[-w/2+bevel,h/2-bevel],[-w/2+bevel,-h/2+bevel]];
         for(let corner=0;corner<4;corner++)for(let step=0;step<=segments;step++){const angle=(-.5+corner*.5+step/(segments*2))*Math.PI;
@@ -40,6 +40,11 @@ export function timberBeamGeometry(length:number,w:number,h:number,rounded=false
       const normals:number[]=[];VertexData.ComputeNormals(positions,indices,normals);d.positions=positions;d.indices=indices;d.normals=normals;d.uvs=uvs;return d;
 }
 
+/** Round stock keeps the former bearing height and beam axis. */
+export function timberFrameGeometry(length:number,width:number,height:number,logs:boolean){
+  return logs?BuildingGeometry.cylinder('frame-log',{height:length,diameter:height,tessellation:10}).data:timberBeamGeometry(length,width,height);
+}
+
 /** Presentation kit. Coordinates are relative to the existing hall body/door. */
 export class TimberThatch {
   enqueueBuild:((parent:Mesh,steps:Generator<void,Mesh,unknown>)=>void)|null=null;
@@ -48,6 +53,7 @@ export class TimberThatch {
   readonly nails:StandardMaterial;
   readonly hay:StandardMaterial;
   readonly stone:StandardMaterial;
+  stoneProfile:{segments:number;radiusRatio:number}|undefined;
   constructor(readonly scene:Scene){
     this.wood=this.material('hall-oak','#ded5c8');
     this.boards=this.material('hall-roof-boards','#d7cbb9');
@@ -110,13 +116,15 @@ export class TimberThatch {
   *buildSteps(parent:Mesh,plan?:BuildingPlan,roofOpening?:readonly [number,number],batchVertices=Infinity,roofOnly=false):Generator<void,Mesh,unknown>{
     if(parent.isDisposed())return parent;
     const flatStone=plan?.recipe.roof.style==='flat-stone';
+    const logFrame=plan?.recipe.roof.frameMaterial==='logs';
     const batches=new Map<StandardMaterial,BuildingGeometry[]>();
     const add=(m:BuildingGeometry,mat:StandardMaterial)=>{
       if(mat===this.stone&&!m.getVerticesData('color'))m.setVerticesData('color',new Array(m.getTotalVertices()*4).fill(1));
       const a=batches.get(mat)??[];a.push(m);batches.set(mat,a);return m;
     };
     const beam=(name:string,a:Vector3,b:Vector3,w:number,h=w,material=this.wood)=>{
-      const m=new BuildingGeometry(name,timberBeamGeometry(Vector3.Distance(a,b),w,h,material===this.stone,plan?1:3));
+      const isFrame=/^hall-(tie|rafter-|king-post|strut|ridge-purlin|purlin|chevron|lath)/.test(name);
+      const m=new BuildingGeometry(name,logFrame&&isFrame?timberFrameGeometry(Vector3.Distance(a,b),w,h,true):timberBeamGeometry(Vector3.Distance(a,b),w,h,material===this.stone,material===this.stone?this.stoneProfile?.segments??(plan?1:3):plan?1:3,.1,this.stoneProfile?.radiusRatio??.04));
       m.position=Vector3.Center(a,b);m.rotationQuaternion=new Quaternion();Quaternion.FromUnitVectorsToRef(Vector3.Up(),b.subtract(a).normalize(),m.rotationQuaternion);return add(m,material);
     };
     const v=(x:number,y:number,z:number)=>new Vector3(x,y,z);
@@ -178,6 +186,7 @@ export class TimberThatch {
     // Every layer is placed by contact along the roof normal, not arbitrary world-Y offsets.
     for(const side of [-1,1]){
       for(const distance of [half*.5/Math.cos(angle),half/Math.cos(angle)])for(const [lo,hi] of roofRanges){
+        if(logFrame){beam('hall-purlin',point(side,distance,purlinOffset,lo+.05),point(side,distance,purlinOffset,hi-.05),purlinSize);continue;}
         const m=BuildingGeometry.box('hall-purlin',{width:purlinSize,height:purlinSize,depth:hi-lo-.1});
         m.rotation.z=-side*angle;m.position=point(side,distance,purlinOffset,(lo+hi)/2);add(m,this.wood);
       }
@@ -188,6 +197,7 @@ export class TimberThatch {
       for(let row=0;row<structuralRows;row++){
 
         for(const distance of [row*structuralLen/structuralRows+.06,Math.min(structuralLen-.03,(row+1)*structuralLen/structuralRows)])for(const [lo,hi] of roofRanges){
+          if(logFrame){beam('hall-lath',point(side,distance,lathOffset,lo),point(side,distance,lathOffset,hi),lathSize);continue;}
           const m=BuildingGeometry.box('hall-lath',{width:.04,height:lathSize,depth:hi-lo});
           m.rotation.z=-side*angle;m.position=point(side,distance,lathOffset,(lo+hi)/2);add(m,this.wood);
         }
@@ -278,7 +288,7 @@ export class TimberThatch {
         }
         const wallThickness=plan.recipe.module.thickness,frameDepth=wallThickness+.02,frameWidth=.045;
         const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=timber?this.wood:this.stone,d=dist-wallThickness/2)=>{
-          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,plan?1:3)):BuildingGeometry.box(name,{width,height,depth});
+          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,this.stoneProfile?.segments??(plan?1:3),.1,this.stoneProfile?.radiusRatio??.04)):BuildingGeometry.box(name,{width,height,depth});
           piece.position=at(u,y,d);
           if(opening.face.endsWith('x'))piece.rotation.y=Math.PI/2;
           if(material===this.wood)turnGrain(piece);
@@ -287,7 +297,7 @@ export class TimberThatch {
         // Stone lintel occupies the reserved masonry course above the opening.
         frame('factory-window-lintel',(opening.left+opening.right)/2,opening.top+plan.recipe.module.height/2,opening.right-opening.left+2*wallThickness-.003,plan.recipe.module.height-.003,frameDepth);
         const bottom=opening.bottom+(opening.door?0:.035);
-        for(const u of [opening.left+frameWidth/2,opening.right-frameWidth/2])frame('factory-window-jamb',u,(bottom+opening.top)/2,frameWidth,opening.top-bottom,frameDepth);
+        for(const [side,u] of [opening.left+frameWidth/2,opening.right-frameWidth/2].entries())if(side!==0||!opening.omitLeftJamb)frame('factory-window-jamb',u,(bottom+opening.top)/2,frameWidth,opening.top-bottom,frameDepth);
         if(!opening.door){
           frame('factory-window-sill',(opening.left+opening.right)/2,opening.bottom+.0175,opening.right-opening.left+.10,.035,wallThickness+.12,this.wood);
           for(const u of [opening.left+.0125,opening.right-.0125])frame('factory-window-wood-trim',u,(opening.bottom+.035+opening.top)/2,.065,opening.top-opening.bottom-.035,.025,this.wood,dist+.018);
@@ -343,7 +353,7 @@ export class TimberThatch {
       for(const o of openings){
         const at=(u:number,y:number)=>axis==='x'?v(u,y,fixed):v(fixed,y,u);
         const frame=(name:string,u:number,y:number,width:number,height:number,depth:number,material=this.stone,outside=false)=>{
-          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,3)):BuildingGeometry.box(name,{width,height,depth});
+          const piece=material===this.stone?new BuildingGeometry(name,timberBeamGeometry(height,width,depth,true,this.stoneProfile?.segments??3,.1,this.stoneProfile?.radiusRatio??.04)):BuildingGeometry.box(name,{width,height,depth});
           piece.position=at(u,y);if(outside){if(axis==='x')piece.position.z+=sign*.098;else piece.position.x+=sign*.098;}
           if(axis==='z')piece.rotation.y=Math.PI/2;if(material===this.wood)turnGrain(piece);add(piece,material);
         };

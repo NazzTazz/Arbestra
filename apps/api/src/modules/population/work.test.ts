@@ -5,7 +5,7 @@ import type { PopulationCohortsTable } from '../../database/schema.js';
 
 function cohort(id: string, count: number, minutes: number): Selectable<PopulationCohortsTable> {
   return { id, memberCount: count, energy: 0, energyProgress: 22 * minutes * 60000,
-    activity: 'idle', harvestId: null, extractionId: null, scienceActivityId: null,
+    activity: 'idle', harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: null,
     restingSince: null, foodUsedSinceRest: 0, energyUpdatedAt: new Date(0),
     createdAt: new Date(0) as unknown as Selectable<PopulationCohortsTable>['createdAt'],
     worldId: 'world', villageId: 'village', originVillageId: 'village', cartographer: false, restBuildingId: null };

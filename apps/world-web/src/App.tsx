@@ -1,4 +1,9 @@
 import { RepresentativePanel } from './ui/RepresentativePanel';
+import { ProcessingPanel } from './ui/ProcessingPanel';
+import { MarketPanel } from './ui/MarketPanel';
+import { commandMarket } from './api/client';
+import { constructionCosts } from '@arbestra/contracts';
+import { commandProcessing } from './api/client';
 import {setFactoryEnabled} from './api/client';
 import { InfrastructureTools } from './ui/InfrastructureTools';
 import type { RepresentativeInfo } from './scene/village-workers';
@@ -268,13 +273,15 @@ export function App() {
   const hasFastTransition = state?.cells.some((cell) => cell.building?.status === 'under-construction' || cell.building?.garden?.expansion
     || cell.building?.garden?.harvest || cell.building?.garden?.plots.some((plot) => plot.harvest)) ?? false;
   const hasGarden = state?.cells.some((cell) => Boolean(cell.building?.garden)) ?? false;
-  const hasExtraction = (state?.village.extractions.length ?? 0) > 0 || (state?.village.worksites.some(site => site.status === 'running') ?? false);
+  const hasExtraction = (state?.village.extractions.length ?? 0) > 0 || (state?.village.worksites.some(site => site.status === 'running') ?? false)
+    || (state?.village.processingOrders?.some(order=>!!order.currentLot) ?? false);
   const hasRestingPopulation = (state?.village.population.resting ?? 0) > 0;
+  const hasMarketDelivery = state?.village.market?.exchanges.some(exchange=>!exchange.completedAt) ?? false;
   useEffect(() => {
-    if (!hasFastTransition && !hasExtraction && !hasRestingPopulation && !selectedFeatureId && !hasGarden && !state?.science?.universities.length) return;
-    const timer = window.setInterval(() => void refresh(), hasFastTransition ? 500 : hasExtraction || selectedFeatureId ? 2_000 : 10_000);
+    if (!hasFastTransition && !hasExtraction && !hasMarketDelivery && !hasRestingPopulation && !selectedFeatureId && !hasGarden && !state?.science?.universities.length) return;
+    const timer = window.setInterval(() => void refresh(), hasFastTransition ? 500 : hasExtraction || hasMarketDelivery || selectedFeatureId ? 2_000 : 10_000);
     return () => window.clearInterval(timer);
-  }, [hasFastTransition, hasExtraction, hasRestingPopulation, selectedFeatureId, hasGarden, state?.science?.universities.length, refresh]);
+  }, [hasFastTransition, hasExtraction, hasMarketDelivery, hasRestingPopulation, selectedFeatureId, hasGarden, state?.science?.universities.length, refresh]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const loadDeposit = useCallback(async (featureId: string) => {
@@ -301,7 +308,8 @@ export function App() {
     if (!selectedBuilding || !state) return [];
     const garden = selectedBuilding.garden;
     return [...new Set([garden?.harvest?.id, ...(garden?.plots.map(p => p.harvest?.id) ?? []),
-      ...(state.science?.activities.filter(a => a.buildingId === selectedBuilding.id).map(a => a.id) ?? [])].filter((id): id is string => !!id))];
+      ...(state.science?.activities.filter(a => a.buildingId === selectedBuilding.id).map(a => a.id) ?? []),
+      ...(state.village.processingOrders?.filter(o=>o.buildingId===selectedBuilding.id).map(o=>o.currentLot?.id)??[])].filter((id): id is string => !!id))];
   }, [selectedBuilding, state]);
   const definition = state?.buildingTypes.find((item) => item.code === construction?.type);
   const context = state && selection && construction?.type
@@ -318,7 +326,7 @@ export function App() {
     return state.cells.filter((cell) => cell.canBuild && active.some((other) => touchesCell(cell, other, state.world))).map(cellKey);
   }, [state, construction?.buildingId]);
   const level = extensionId ? state?.cells.find((cell) => cell.building?.id === extensionId)?.building?.level ?? 1 : 1;
-  const costs = (definition?.levels.find((item) => item.level === level)?.costs ?? []).map((cost) => ({ ...cost, amount: cost.amount * (spatial ? area?.count ?? 0 : 1) }));
+  const costs = constructionCosts(definition?.levels.find((item) => item.level === level),houseVariant).map((cost) => ({ ...cost, amount: cost.amount * (spatial ? area?.count ?? 0 : 1) }));
   const serverNow = now + serverOffsetMs;
   const displayedWood = state ? Math.floor(state.village.wood + state.village.woodProductionPerHour * Math.max(0, serverNow - Date.parse(state.serverTime)) / 3_600_000) : 0;
   const affordable = costs.every((cost) => cost.amount <= (cost.resourceCode === 'wood' ? displayedWood : state?.village.resources.find((resource) => resource.code === cost.resourceCode)?.amount ?? 0));
@@ -453,7 +461,7 @@ export function App() {
       : construction.type === 'stonemason' ? stonemasonRange(last,quarterTurns) : nextSelection, Boolean(spatial || construction.type === 'university' || construction.type === 'stonemason'), buildingId);
     const currentLevel = buildingId ? state.cells.find(cell => cell.building?.id === buildingId)?.building?.level ?? 1 : 1;
     const currentDefinition = state.buildingTypes.find(item => item.code === construction.type);
-    const nextCosts = (currentDefinition?.levels.find(item => item.level === currentLevel)?.costs ?? [])
+    const nextCosts = constructionCosts(currentDefinition?.levels.find(item => item.level === currentLevel),houseVariant)
       .map(cost => ({ ...cost, amount: cost.amount * (spatial ? nextArea.count : 1) }));
     const currentWood = displayedWood;
     const canAfford = nextCosts.every(cost => cost.amount <= (cost.resourceCode === 'wood' ? currentWood
@@ -734,17 +742,23 @@ export function App() {
     {representative && menuAnchor && worldMode==='population' && <WorldContextMenu anchor={representativeView==='village'?menuAnchor:{x:window.innerWidth-330,y:110}}><RepresentativePanel person={representative} view={representativeView} onView={mode=>terrainRef.current?.representativeCamera(mode)} onClose={closePanels}/></WorldContextMenu>}
     {menuAnchor && showPopulation && worldMode === 'population' ? <WorldContextMenu anchor={menuAnchor}><PopulationPanel buildingId={selectedBuilding?.id ?? null} assignmentIds={buildingAssignmentIds} focus={populationFocus} onFocus={(id, filter) => { setPopulationFocus(id); setPopulationFilter(filter); }} population={state.village.population} pending={pendingAction} count={populationCount} onCount={(count) => setPopulationCount(Math.max(1, Math.min(state.village.population.available || 1, count || 1)))} onFeed={() => runPopulation('feed')} onRest={() => runPopulation('rest')} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
-    {menuAnchor && selectedBuilding && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode={worldMode} building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {
+    {menuAnchor && selectedBuilding && worldMode === 'exploitation' && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={state.village.processingOrders??[]} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={command=>runAction(()=>commandProcessing(worldSlug,state.village.id,command))}/></WorldContextMenu>}
+    {menuAnchor && selectedBuilding && worldMode === 'exploitation' && !state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode={worldMode} building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {
       closePanels(); setExploitationSettings(current => ({ ...current, filter: 'gardens' })); pushNotification('Outil Jardins prêt · glissez sur les parcelles à récolter.');
-    }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
+    }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />
+    {selectedBuilding.type==='town-hall'&&state.village.market&&<MarketPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} market={state.village.market} stocks={state.village.resources} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error}
+      onCommand={command=>runAction(()=>commandMarket(worldSlug,state.village.id,command))}
+      onUpgrade={()=>{const quote=upgradePreview(state,selectedSiteId);if(!quote||quote.error){setError(quote?.error??'Devis indisponible.');return;}
+        void executeConstruction({kind:'upgrade',commandId:crypto.randomUUID(),worldSlug,villageId:state.village.id,buildingId:quote.buildingId,expectedCosts:quote.costs,expectedLevel:quote.nextLevel,success:'Amélioration de l’hôtel de ville lancée'});}}/>}
+    {error&&selectedBuilding.type!=='town-hall'?<p className="error">{error}</p>:null}</WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && worldMode === 'construction' ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="population" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {}} onDiscover={() => {}} /></WorldContextMenu> : null}
     {menuAnchor && selectedFeatureId && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} onPrepare={(family, woodMode) => {
       closePanels(); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
       pushNotification(`Outil ${family === 'wood' ? woodMode === 'clear' ? 'Défrichage' : 'Bois' : 'Pierre'} prêt · glissez dans le monde.`);
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
-    {terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} onHouseVariant={setHouseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes.map(item=>item.code==='stonemason'?{...item,buildable:Boolean(state.factoryEnabled&&!state.cells.some(c=>c.building?.type==='stonemason'))}:item)} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
+    {terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
       intentState={constructionIntentState} onRetry={retryConstruction} onClearError={clearConstructionError}
-      collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={type => { clearConstructionError(); clearPreview(); setConstruction({ action: 'build', type }); }}
+      collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={(type,variant) => { clearConstructionError(); clearPreview(); if(variant)setHouseVariant(variant);setConstruction({ action: 'build', type }); }}
       domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
       infrastructure={<InfrastructureTools state={state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
       onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}

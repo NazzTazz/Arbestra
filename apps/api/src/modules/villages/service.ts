@@ -49,6 +49,10 @@ import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
 import { startStoneExtraction, stoneDepositDetails, readExtraction, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
 import { admitWorksites, changeWorksite, createWorksite, readWorksites } from '../deposits/worksites.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
+import { commandProcessing, previewProcessing, processingSnapshot } from './processing.js';
+import { commandMarket, previewMarket, marketSnapshot } from './market.js';
+import type { MarketCommand, MarketRequest } from '@arbestra/contracts';
+import type { ProcessingCommand } from '@arbestra/contracts';
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
 
 const CELL_SIZE = 2.5;
@@ -116,11 +120,13 @@ export async function ownedVillage(
 async function catalog(
   tx: Transaction<Database>,
 ): Promise<BuildingTypeDefinition[]> {
-  const [types, levels, costs, production] = await Promise.all([
+  const [types, levels, costs, production, recipes, variantCosts] = await Promise.all([
     tx.selectFrom('buildingTypes').selectAll().execute(),
     tx.selectFrom('buildingTypeLevels').selectAll().execute(),
     tx.selectFrom('buildingLevelCosts').selectAll().execute(),
     tx.selectFrom('buildingLevelProduction').selectAll().execute(),
+    tx.selectFrom('processingRecipes').selectAll().execute(),
+    tx.selectFrom('buildingVariantCosts').selectAll().execute(),
   ]);
   return types.map((type) => ({
     code: type.code as BuildingType,
@@ -137,6 +143,11 @@ async function catalog(
         constructionDurationSeconds: level.constructionDurationSeconds,
         additionalCellsRequired: level.additionalCellsRequired,
         visualVariant: level.visualVariant,
+        variantCosts: variantCosts.filter(c=>c.buildingTypeCode===type.code&&c.level===level.level)
+          .map(c=>({variant:c.variant,resourceCode:c.resourceCode,amount:Number(c.amount),...(c.replacesResourceCode?{replacesResourceCode:c.replacesResourceCode}:{})})),
+        ...Object.fromEntries(recipes.filter(recipe => recipe.buildingTypeCode === type.code && recipe.level === level.level)
+          .map(recipe => ['processing', { version:recipe.version,inputResource:recipe.inputResource,inputAmount:recipe.inputAmount,
+            outputResource:recipe.outputResource,outputAmount:recipe.outputAmount,workMs:recipe.workMs,workerCap:recipe.workerCap }])),
         costs: costs
           .filter(
             (cost) =>
@@ -146,7 +157,7 @@ async function catalog(
             resourceCode: cost.resourceCode,
             amount: number(cost.amount),
           })),
-        production: production
+        production: (type.productionMode === 'processing' ? [] : production)
           .filter(
             (item) =>
               item.buildingTypeCode === type.code && item.level === level.level,
@@ -506,7 +517,7 @@ export async function state(
         row.resourceCode,
         at,
       );
-      if (row.resourceCode === 'stone') safeAmount(projected.amount);
+      safeAmount(projected.amount);
       return {
         code: row.resourceCode,
         displayName: row.displayName,
@@ -520,7 +531,8 @@ export async function state(
   const [cohorts, housingRows, harvestRows, extractionRows, gardenPlotRows] = await Promise.all([
     reconcileRestHousing(tx,village.worldId,village.villageId,at),
     tx.selectFrom('buildings').select(['id','buildingType', 'level']).where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId).where('status', '=', 'completed').execute(),
+      .where('villageId', '=', village.villageId).where(eb=>eb.or([eb('status','=','completed'),eb.and([
+        eb('buildingType','=','town-hall'),eb('targetLevel','is not',null)])])).execute(),
     tx.selectFrom('gardenHarvests').selectAll().where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
     tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', village.worldId)
@@ -542,8 +554,8 @@ export async function state(
     cohorts: projectedCohorts.map(c=>({id:c.id,memberCount:c.memberCount,activity:c.energy.activity,
       restBuildingId:c.restBuildingId,restingSince:c.energy.restingSince?.toISOString()??null,
       energy: displayedEnergy(c.energy), cartographer: c.cartographer,
-      assignmentId: c.harvestId ?? c.extractionId ?? c.scienceActivityId,
-      assignmentKind: c.harvestId ? 'garden' as const : c.extractionId ? 'extraction' as const : c.scienceActivityId ? 'science' as const : null })),
+      assignmentId: c.harvestId ?? c.extractionId ?? c.scienceActivityId ?? c.processingLotId,
+      assignmentKind: c.harvestId ? 'garden' as const : c.extractionId ? 'extraction' as const : c.scienceActivityId ? 'science' as const : c.processingLotId ? 'processing' as const : null })),
     restHousing: housingRows.filter(b=>housingCapacity(b.buildingType,b.level)>0).map(b=>({buildingId:b.id,capacity:housingCapacity(b.buildingType,b.level),
       restingCount:projectedCohorts.filter(c=>c.restBuildingId===b.id).reduce((n,c)=>n+c.memberCount,0)})),
     restingWithoutHousing:projectedCohorts.filter(c=>c.energy.activity==='resting'&&withoutAssignment(c)&&c.restBuildingId===null).reduce((n,c)=>n+c.memberCount,0),
@@ -603,7 +615,7 @@ export async function state(
   const hiddenSupplies = new Map(hiddenSupplyRows.map((item) => [item.buildingId, item.claimedAt === null]));
   const available = candidates(
     occupancyRows
-      .filter((row) => row.status === 'completed' && row.pendingExpansionId === null)
+      .filter((row) => (row.status === 'completed'||row.buildingType==='town-hall'&&row.targetLevel!==null) && row.pendingExpansionId === null)
       .map((row) => ({ cellX: row.cellX, cellY: row.cellY })),
     village,
   );
@@ -650,6 +662,8 @@ export async function state(
       extractions: await Promise.all(extractionRows.map((row) => readExtraction(tx, village.worldId, village.villageId, row.id))),
       worksites: await readWorksites(tx, village.worldId, village.villageId),
       exploitationOrders: await readExploitationOrders(tx, economy),
+      processingOrders: await processingSnapshot(tx, economy),
+      market: await marketSnapshot(tx, economy),
     },
     buildingTypes: definitions,
     travelRoutes: [],
@@ -787,6 +801,7 @@ async function definition(
   tx: Transaction<Database>,
   buildingType: string,
   level: number,
+  houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ) {
   const row = await tx
     .selectFrom('buildingTypes')
@@ -812,7 +827,7 @@ async function definition(
       'BUILDING_LEVEL_UNKNOWN',
       'Ce niveau de bâtiment n’existe pas.',
     );
-  const [costs, production] = await Promise.all([
+  const [costs, production, variants] = await Promise.all([
     tx
       .selectFrom('buildingLevelCosts')
       .select(['resourceCode', 'amount'])
@@ -825,8 +840,12 @@ async function definition(
       .where('buildingTypeCode', '=', buildingType)
       .where('level', '=', level)
       .execute(),
+    tx.selectFrom('buildingVariantCosts').select(['resourceCode','amount','replacesResourceCode'])
+      .where('buildingTypeCode','=',buildingType).where('level','=',level).where('variant','=',houseVariant).execute(),
   ]);
-  return { ...row, costs, production };
+  const combined=new Map(costs.map(c=>[c.resourceCode,Number(c.amount)]));
+  for(const c of variants){if(c.replacesResourceCode)combined.delete(c.replacesResourceCode);combined.set(c.resourceCode,(combined.get(c.resourceCode)??0)+Number(c.amount));}
+  return { ...row, costs:[...combined].map(([resourceCode,amount])=>({resourceCode,amount})), production };
 }
 export async function debit(
   tx: Transaction<Database>,
@@ -898,7 +917,8 @@ async function assertBuildable(
     .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY', 'worldCellOccupancies.pendingExpansionId'])
     .where('worldCellOccupancies.worldId', '=', village.worldId)
     .where('buildings.villageId', '=', village.villageId)
-    .where('buildings.status', '=', 'completed')
+    .where(eb=>eb.or([eb('buildings.status','=','completed'),eb.and([
+      eb('buildings.buildingType','=','town-hall'),eb('buildings.targetLevel','is not',null)])]))
     .execute();
   if (!candidates(footprints.filter((footprint) => footprint.pendingExpansionId === null), village).has(worldCellKey(cellX, cellY)))
     throw new HttpError(
@@ -960,34 +980,6 @@ export function getVillageState(
   });
 }
 
-/** Development installation of the approved decorative workshop; no economic command. */
-export async function installDecorativeStonemason(
-  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, anchor: SpatialCell, quarterTurns = 0,
-): Promise<VillageState> {
-  return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const cells = [0, 1].flatMap(dx => [0, 1].map(dy => ({
-      cellX: normalizeCell(anchor.cellX + (quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy), village.widthCells),
-      cellY: normalizeCell(anchor.cellY + (quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx), village.heightCells),
-    })));
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells, [], true);
-    const existing = await tx.selectFrom('buildings').select('id').where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId).where('buildingType', '=', 'stonemason').executeTakeFirst();
-    if (existing) return state(tx, accountId, worldSlug, economy);
-    for (const cell of cells) await assertBuildable(tx, village, cell.cellX, cell.cellY);
-    const ground = await snapshot(tx, village);
-    const heights = cells.map(cell => ground.elevations[normalizeCell(cell.cellY - ground.originCellY, village.heightCells) * SNAPSHOT_SIZE + normalizeCell(cell.cellX - ground.originCellX, village.widthCells)]!);
-    if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
-      throw new HttpError(409, 'UNEVEN_TERRAIN', 'The decorative workshop requires level ground.');
-    const building = await tx.insertInto('buildings').values({ worldId: village.worldId, villageId: village.villageId,
-      buildingType: 'stonemason', level: 1, targetLevel: null, status: 'completed', quarterTurns,
-      constructionStartedAt: null, constructionCompletesAt: null, completedAt: economy.through, visualLayout: null,
-    }).returning('id').executeTakeFirstOrThrow();
-    await reserveSelection(tx, village.worldId, building.id, cells[0]!, cells);
-    return state(tx, accountId, worldSlug, economy);
-  });
-}
-
 export async function commandVillageScience(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: ScienceCommand): Promise<VillageState> {
   return db.transaction().execute(async tx => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
@@ -995,6 +987,39 @@ export async function commandVillageScience(db: Kysely<Database>, accountId: str
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await scienceCommand(tx, economy, command);
     return state(tx, accountId, worldSlug, economy);
+  });
+}
+
+export async function commandVillageProcessing(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: ProcessingCommand): Promise<VillageState> {
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    await commandProcessing(tx, economy, command);
+    return state(tx, accountId, worldSlug, economy);
+  });
+}
+
+export async function commandVillageMarket(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: MarketCommand): Promise<VillageState> {
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    await commandMarket(tx, economy, command);
+    return state(tx, accountId, worldSlug, economy);
+  });
+}
+export async function previewVillageMarket(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, request: MarketRequest) {
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    return previewMarket(tx, economy, request);
+  });
+}
+
+export async function previewVillageProcessing(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string, workerCount: number, orderId?: string) {
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    return previewProcessing(tx, economy, buildingId, workerCount, orderId);
   });
 }
 
@@ -1120,8 +1145,8 @@ export async function constructBuilding(
   expectedCosts?: ExpectedCost[],
   quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<VillageState> {
-  if (buildingType === 'university') {
-    const cells = universityCampusCells({ cellX, cellY });
+  if (buildingType === 'university' || buildingType === 'stonemason') {
+    const cells = buildingType === 'university' ? universityCampusCells({ cellX, cellY }) : [0,1].flatMap(dx => [0,1].map(dy => ({ cellX: cellX+dx, cellY: cellY+dy })));
     return constructBuildingArea(db, accountId, worldSlug, villageId, buildingType, { cellX, cellY }, cells.map(c=>{const dx=c.cellX-cellX,dy=c.cellY-cellY;return {cellX:cellX+(quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy),cellY:cellY+(quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx)};}), durationOverride, commandId, expectedCosts,quarterTurns,houseVariant);
   }
   return db.transaction().execute(async (tx) => {
@@ -1134,7 +1159,7 @@ export async function constructBuilding(
     const at = economy.through;
     const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, cellX: x, cellY: y, expectedCosts: canonicalCosts(expectedCosts) };
     if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return state(tx, accountId, worldSlug, economy);
-    const item = await definition(tx, buildingType, 1);
+    const item = await definition(tx, buildingType, 1, houseVariant);
     if (!item.buildable)
       throw new HttpError(
         409,
@@ -1230,7 +1255,7 @@ export async function constructBuildingArea(
     const selection = normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells);
     const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, anchor: selection.anchor, cells: selection.cells, expectedCosts: canonicalCosts(expectedCosts) };
     if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return state(tx, accountId, worldSlug, economy);
-    const item = await definition(tx, buildingType, 1);
+    const item = await definition(tx, buildingType, 1, houseVariant);
     if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
     if (item.code === 'university') {
       const expected = new Set(universityCampusCells(anchor).map(c => { const dx=c.cellX-anchor.cellX,dy=c.cellY-anchor.cellY; const x=quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy;const y=quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx;return worldCellKey(normalizeCell(anchor.cellX+x,village.widthCells),normalizeCell(anchor.cellY+y,village.heightCells)); }));
@@ -1240,6 +1265,16 @@ export async function constructBuildingArea(
       const heights = selection.cells.map(c => ground.elevations[normalizeCell(c.cellY - ground.originCellY, village.heightCells) * SNAPSHOT_SIZE + normalizeCell(c.cellX - ground.originCellX, village.widthCells)]!);
       if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
         throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
+    } else if (item.code === 'stonemason') {
+      const expected = new Set([0,1].flatMap(dx => [0,1].map(dy => worldCellKey(
+        normalizeCell(anchor.cellX + (quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy),village.widthCells),
+        normalizeCell(anchor.cellY + (quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx),village.heightCells)))));
+      if (selection.cells.length !== 4 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX,c.cellY))))
+        throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Le tailleur occupe 2 × 2 cases.');
+      const ground = await snapshot(tx, village);
+      const heights = selection.cells.map(c => ground.elevations[normalizeCell(c.cellY-ground.originCellY,village.heightCells)*SNAPSHOT_SIZE+normalizeCell(c.cellX-ground.originCellX,village.widthCells)]!);
+      if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights)-Math.min(...heights)>1)
+        throw new HttpError(409, 'UNEVEN_TERRAIN', 'Le tailleur demande une emprise plane.');
     } else if (item.code !== 'garden' && selection.cells.length !== 1)
       throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Ce bâtiment occupe exactement une case.');
     if (item.instanceLimitPerVillage !== null) {
@@ -1398,6 +1433,7 @@ export async function upgradeBuilding(
         'buildings.buildingType',
         'buildings.level',
         'buildings.status',
+        'buildings.visualLayout',
         'worldCellOccupancies.cellX',
         'worldCellOccupancies.cellY',
       ])
@@ -1418,11 +1454,15 @@ export async function upgradeBuilding(
       );
     if (expectedLevel !== undefined && building.level + 1 !== expectedLevel)
       throw new HttpError(409, 'BUILDING_LEVEL_CHANGED', 'Le niveau du bâtiment a changé. Vérifier la palette avant de recommencer.');
+    const order = await tx.selectFrom('processingOrders').select('id').where('worldId', '=', village.worldId)
+      .where('villageId', '=', villageId).where('buildingId', '=', buildingId).where('status', 'not in', ['completed','cancelled']).executeTakeFirst();
+    if (order) throw new HttpError(409, 'PROCESSING_BUSY', 'Terminez ou annulez l’ordre de fabrication avant d’améliorer l’atelier.');
     if (building.buildingType === 'university') await ensureUniversityCampus(tx, village, building.id, building);
     const item = await definition(
       tx,
       building.buildingType,
       building.level + 1,
+      building.visualLayout?.recipe==='log-house'?'logs':building.visualLayout?.recipe==='beam-house'?'beams':'stone',
     );
     assertAcceptedCosts(item.costs, expectedCosts);
     if (item.additionalCellsRequired === 1) {

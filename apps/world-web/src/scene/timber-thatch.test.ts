@@ -1,6 +1,17 @@
 import { expect,it } from 'vitest';
-import { hallWallCourse,hallStoneCrossRotation,timberBeamGeometry } from './timber-thatch';
+import { hallWallCourse,hallStoneCrossRotation,timberBeamGeometry,timberFrameGeometry } from './timber-thatch';
 import { Matrix,Quaternion,Vector3 } from '@babylonjs/core/Maths/math.vector';
+it('keeps raw frame members circular, at their bearing height, with exterior normals',()=>{
+  for(const height of [.153,.2,.075,.035]){
+    const geometry=timberFrameGeometry(2,.123,height,true),positions=geometry.positions!,normals=geometry.normals!;
+    for(let i=0;i<positions.length;i+=3){
+      const radius=Math.hypot(positions[i]!,positions[i+2]!);
+      if(radius>1e-6)expect(radius).toBeCloseTo(height/2,6);
+      expect(Math.abs(positions[i+1]!)).toBeLessThanOrEqual(1);
+      expect(positions[i]!*normals[i]!+positions[i+1]!*normals[i+1]!+positions[i+2]!*normals[i+2]!).toBeGreaterThan(0);
+    }
+  }
+});
 
 it('keeps stone height and wall thickness consistent on front and side walls',()=>{
   for(const axis of ['x','z'] as const){

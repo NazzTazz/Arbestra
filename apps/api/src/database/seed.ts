@@ -62,7 +62,7 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
       ]).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
       await transaction.insertInto('villageResourceFlows').values({
         worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'wood',
-        baseRatePerHour: 60, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
+        baseRatePerHour: 0, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
       }).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
 
       const insertedHall=await transaction.insertInto('buildings').values({

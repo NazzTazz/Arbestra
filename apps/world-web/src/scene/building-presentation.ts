@@ -9,6 +9,7 @@ import { buildUniversity } from './university-factory';
 import { buildBarracks } from './barracks-factory';
 import { buildStonemason } from './stonemason-factory';
 import { buildSawmill } from './sawmill-factory';
+import { buildTownHallMarket } from './town-hall-market-factory';
 import { brazierBlocks } from './village-braziers';
 import {buildInfrastructurePresentation} from './infrastructure-factory';
 
@@ -34,6 +35,7 @@ export function buildPresentation(kit: TimberThatch, code: string, level = 1): M
   else if (code === 'university') buildUniversity(root, kit, level, 'finished', 0, { mathematics: false, astronomy: false });
   else if (code === 'stonemason') buildStonemason(root, kit, 'finished', false);
   else if (code === 'barracks') buildBarracks(root, kit);
+  else if(code==='town-hall'&&level>=2)buildTownHallMarket(root,kit,'finished');
   else if (code.startsWith('dwelling') || code === 'town-hall') {
     const recipe = code.startsWith('dwelling') ? { ...(code==='dwelling-logs'?LOG_HOUSE_RECIPE:code==='dwelling-beams'?BEAM_HOUSE_RECIPE:HOUSE_RECIPE), levels: level >= 2 ? 2 : 1 } : HALL_RECIPE;
     const cells = code === 'town-hall' ? [{ cellX: 0, cellY: 0 }, { cellX: 0, cellY: 1 }] : [{ cellX: 0, cellY: 0 }];

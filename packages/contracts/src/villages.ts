@@ -2,6 +2,8 @@ import { Type, type Static } from '@sinclair/typebox';
 import { ScienceStateSchema } from './science.js';
 import { ExploitationOrderSchema } from './exploitation.js';
 import {InfrastructurePlanSchema} from './infrastructure.js';
+import { ProcessingRecipeSchema, ProcessingOrderSchema } from './processing.js';
+import { MarketStateSchema } from './market.js';
 
 export const BuildingTypeSchema = Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9-]*$' });
 export type BuildingType = Static<typeof BuildingTypeSchema>;
@@ -21,6 +23,8 @@ export const BuildingLevelDefinitionSchema = Type.Object({
   constructionDurationSeconds: Type.Integer({ minimum: 0 }),
   additionalCellsRequired: Type.Integer({ minimum: 0 }),
   visualVariant: Type.String(),
+  processing: Type.Optional(ProcessingRecipeSchema),
+    variantCosts: Type.Optional(Type.Array(Type.Object({variant:Type.Union([Type.Literal('stone'),Type.Literal('logs'),Type.Literal('beams')]),resourceCode:Type.String(),amount:Type.Integer({minimum:0}),replacesResourceCode:Type.Optional(Type.String())}))),
   costs: Type.Array(Type.Object({ resourceCode: Type.String(), amount: Type.Integer({ minimum: 0 }) })),
   production: Type.Array(Type.Object({
     resourceCode: Type.String(),
@@ -33,7 +37,7 @@ export const BuildingTypeDefinitionSchema = Type.Object({
   code: BuildingTypeSchema,
   displayName: Type.String(),
   progressionMode: Type.Union([Type.Literal('vertical'), Type.Literal('spatial'), Type.Literal('fixed-footprint')]),
-  productionMode: Type.Union([Type.Literal('none'), Type.Literal('direct'), Type.Literal('buffered')]),
+  productionMode: Type.Union([Type.Literal('none'), Type.Literal('direct'), Type.Literal('buffered'), Type.Literal('processing')]),
   instanceLimitPerVillage: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
   visualKey: Type.String(),
   buildable: Type.Boolean(),
@@ -228,7 +232,7 @@ export const VillageStateSchema = Type.Object({
         restingSince:Type.Union([Type.String({format:'date-time'}),Type.Null()]),
         energy: Type.Optional(Type.Integer({minimum:0,maximum:10})),
         assignmentId: Type.Optional(Type.Union([Type.String({format:'uuid'}),Type.Null()])),
-        assignmentKind: Type.Optional(Type.Union([Type.Literal('garden'),Type.Literal('extraction'),Type.Literal('science'),Type.Null()])),
+        assignmentKind: Type.Optional(Type.Union([Type.Literal('garden'),Type.Literal('extraction'),Type.Literal('science'),Type.Literal('processing'),Type.Null()])),
         cartographer: Type.Optional(Type.Boolean())}))),
       restHousing:Type.Optional(Type.Array(Type.Object({buildingId:Type.String({format:'uuid'}),capacity:Type.Integer({minimum:0}),restingCount:Type.Integer({minimum:0})}))),
       restingWithoutHousing:Type.Optional(Type.Integer({minimum:0})),
@@ -237,6 +241,8 @@ export const VillageStateSchema = Type.Object({
     extractions: Type.Array(ExtractionSchema),
     worksites: Type.Array(ExtractionWorksiteSchema),
     exploitationOrders: Type.Optional(Type.Array(ExploitationOrderSchema)),
+    processingOrders: Type.Optional(Type.Array(ProcessingOrderSchema)),
+    market: Type.Optional(MarketStateSchema),
   }),
   buildingTypes: Type.Array(BuildingTypeDefinitionSchema),
   travelRoutes: Type.Array(Type.Object({

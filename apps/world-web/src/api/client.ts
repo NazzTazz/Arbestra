@@ -1,5 +1,23 @@
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
+import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
+import type { MarketCommand, MarketRequest, MarketPreview } from '@arbestra/contracts';
+export function commandMarket(slug:string,villageId:string,command:MarketCommand):Promise<TimedVillageState> {
+  return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/market`,
+    {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(command)});
+}
+export async function previewMarket(slug:string,villageId:string,request:MarketRequest):Promise<MarketPreview> {
+  return parseResponse(await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/market/preview`,
+    {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(request)}));
+}
+export function commandProcessing(slug:string,villageId:string,command:ProcessingCommand):Promise<TimedVillageState> {
+  return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/processing`,
+    {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(command)});
+}
+export async function previewProcessing(slug:string,villageId:string,buildingId:string,workerCount:number,orderId?:string):Promise<ProcessingPreview> {
+  return parseResponse(await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/processing/preview`,
+    {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({buildingId,workerCount,...(orderId?{orderId}:{})})}));
+}
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
 import type {InfrastructureRequest,InfrastructurePreview} from '@arbestra/contracts';
 export async function previewInfrastructure(slug:string,villageId:string,request:InfrastructureRequest):Promise<InfrastructurePreview>{

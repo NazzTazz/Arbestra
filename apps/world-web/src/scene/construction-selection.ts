@@ -18,7 +18,7 @@ export function stonemasonRange(anchor:Cell,quarterTurns:number):CellRange {
 const normalize = (value: number, size: number): number => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number): number => normalize(value - origin + size / 2, size) - size / 2;
 
-export function touchesCell(a: Cell, b: Cell, world: VillageState['world']): boolean {
+export function touchesCell(a: Cell, b: Cell, world: Pick<VillageState['world'],'widthCells'|'heightCells'>): boolean {
   return Math.abs(delta(a.cellX, b.cellX, world.widthCells))
     + Math.abs(delta(a.cellY, b.cellY, world.heightCells)) === 1;
 }
@@ -44,7 +44,7 @@ export function cellsAlongSegment(from: Cell, to: Cell, world: Pick<VillageState
   return cells;
 }
 
-export function rectangleCells(range: CellRange, world: VillageState['world'], spatial: boolean): AreaPreview {
+export function rectangleCells(range: CellRange, world: Pick<VillageState['world'],'widthCells'|'heightCells'>, spatial: boolean): AreaPreview {
   if (!spatial) return { cells: [range.last], count: 1, error: null };
   const dx = delta(range.last.cellX, range.first.cellX, world.widthCells);
   const dy = delta(range.last.cellY, range.first.cellY, world.heightCells);

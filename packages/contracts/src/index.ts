@@ -9,3 +9,6 @@ export * from './infrastructure.js';
 export * from './building-access.js';
 export * from './automatic-braziers.js';
 export * from './path-obstacles.js';
+export * from './processing.js';
+export * from './building-costs.js';
+export * from './market.js';

@@ -8,9 +8,11 @@ export function Hud({ state, displayedWood, notifications, onPopulation, onJourn
   const population = state.village.population;
   return <header className="top-bar">
     <div className="world-identity"><span className="world-name">{state.world.name}</span><strong>{state.village.name}</strong></div>
-    <div className="resource resource--wood" aria-label={`${format(displayedWood)} bois`}><span className="resource-icon resource-icon--wood" aria-hidden="true" /><strong>{format(displayedWood)}</strong><small>+{state.village.woodProductionPerHour}/h</small></div>
+    <div className="resource resource--wood" title="Bois brut · retour de coupe" aria-label={`${format(displayedWood)} bois bruts`}><span className="resource-icon resource-icon--wood" aria-hidden="true" /><strong>{format(displayedWood)}</strong></div>
+    <div className="resource" title="Bois d’œuvre · fabrication à la scierie" aria-label={`${format(state.village.resources.find(r=>r.code==='timber')?.amount??0)} bois d’œuvre`}><span className="resource-icon resource-icon--timber" aria-hidden="true"/><strong>{format(state.village.resources.find(r=>r.code==='timber')?.amount??0)}</strong></div>
     <div className="resource" aria-label={`${format(state.village.carrots)} carottes`}><span className="resource-icon resource-icon--carrot" aria-hidden="true" /><strong>{format(state.village.carrots)}</strong></div>
-    <div className="resource" aria-label={`${format(stone)} pierre`}><span aria-hidden="true">◆</span><strong>{format(stone)}</strong></div>
+    <div className="resource" title="Pierre brute · retour d’extraction" aria-label={`${format(stone)} pierres brutes`}><span aria-hidden="true">◆</span><strong>{format(stone)}</strong></div>
+    <div className="resource" title="Pierre taillée · fabrication au tailleur" aria-label={`${format(state.village.resources.find(r=>r.code==='cut-stone')?.amount??0)} pierres taillées`}><span className="resource-icon resource-icon--cut-stone" aria-hidden="true"/><strong>{format(state.village.resources.find(r=>r.code==='cut-stone')?.amount??0)}</strong></div>
     <button className="population-button" type="button" onClick={onPopulation} aria-label="Gérer les habitants"><span aria-hidden="true">♟</span><strong>{population.total}/{population.housingCapacity}</strong><small>{population.available} libres</small></button>
     <button className="journal-button" type="button" onClick={onJournal} aria-label="Ouvrir le grimoire de l'Oracle"><span aria-hidden="true">◇</span><strong>Grimoire</strong>{state.village.accomplishments.length > 0 ? <small>{state.village.accomplishments.length}</small> : null}</button>
     <NotificationStack notifications={notifications} />

@@ -36,7 +36,14 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     };
     app = await buildApp(config, db);
   });
-  beforeEach(() => resetE2eState(databaseUrl));
+  beforeEach(async () => {
+    await resetE2eState(databaseUrl);
+    // These fixtures exercise deferred construction, with its actual refined price funded.
+    await db.updateTable('villageResources').set({amount:25}).where('worldId','=',DEVELOPMENT_IDS.world)
+      .where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','=','timber').execute();
+    await db.updateTable('villageResources').set({amount:10}).where('worldId','=',DEVELOPMENT_IDS.world)
+      .where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','=','cut-stone').execute();
+  });
   afterAll(async () => { await app?.close(); await db?.destroy(); });
 
   async function authenticatedCookie(): Promise<string> {
@@ -128,7 +135,9 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     expect(response.statusCode).toBe(201);
     const state = response.json<VillageState>();
     const building = state.cells.find((cell) => cell.cellX === DEVELOPMENT_CELLS.dwelling.cellX && cell.cellY === DEVELOPMENT_CELLS.dwelling.cellY)?.building;
-    expect(state.village.wood).toBe(1975);
+    expect(state.village.wood).toBe(2000);
+    expect(state.village.resources.find(r=>r.code==='timber')?.amount).toBe(0);
+    expect(state.village.resources.find(r=>r.code==='cut-stone')?.amount).toBe(0);
     expect(building?.status).toBe('under-construction');
     expect(Date.parse(building!.constructionCompletesAt!) - Date.parse(building!.constructionStartedAt!)).toBe(10_000);
     expect(Math.abs(Date.parse(state.serverTime) - Date.parse(building!.constructionStartedAt!))).toBeLessThan(10);
@@ -143,7 +152,10 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     expect(responses.map((response) => response.statusCode).sort()).toEqual([201, 409]);
     const wood = await db.selectFrom('villageResources').select('amount')
       .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(wood.amount)).toBe(1975);
+    expect(Number(wood.amount)).toBe(2000);
+    const refined=await db.selectFrom('villageResources').select(['resourceCode','amount'])
+      .where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','in',['timber','cut-stone']).execute();
+    expect(refined.map(r=>Number(r.amount))).toEqual([0,0]);
     expect(await db.selectFrom('worldCellOccupancies').select('buildingId').where('cellX', '=', DEVELOPMENT_CELLS.dwelling.cellX)
       .where('cellY', '=', DEVELOPMENT_CELLS.dwelling.cellY).where('role', '=', 'anchor').execute()).toHaveLength(1);
   });

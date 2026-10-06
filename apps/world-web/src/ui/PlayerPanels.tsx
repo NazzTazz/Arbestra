@@ -11,7 +11,7 @@ export function PopulationPanel({ population, pending, count, focus = null, onFo
   return <div className="building-details population-panel"><span>Habitants</span><strong>{population.total} / {population.housingCapacity} couchages</strong><p>{population.available} disponibles · {population.working} au travail · {population.resting} au repos</p>
     <div className="population-filters">{[['all','Tous'],['idle','Disponibles'],['working','Travail'],['resting','Repos'],['training','Science / formation']].map(([id,label]) => <button type="button" key={id} aria-pressed={filter === id} onClick={() => { setFilter(id!); onFocus?.(null, id!); }}>{label}</button>)}</div>
     <div className="cohort-list">{cohorts.map(c => <button type="button" key={c.id} aria-pressed={focus === c.id || focus === c.assignmentId} onClick={() => onFocus?.(focus === c.id ? null : c.id, filter)}>
-      {c.memberCount} personnes · {c.activity === 'resting' ? 'Repos' : c.activity === 'idle' ? 'Disponibles' : c.assignmentKind === 'garden' ? 'Récolte' : c.assignmentKind === 'extraction' ? 'Chantier' : 'Science'} · énergie {c.energy ?? '—'}{c.cartographer ? ' · cartographes' : ''}
+      {c.memberCount} personnes · {c.activity === 'resting' ? 'Repos' : c.activity === 'idle' ? 'Disponibles' : c.assignmentKind === 'garden' ? 'Récolte' : c.assignmentKind === 'extraction' ? 'Chantier' : c.assignmentKind === 'processing' ? 'Fabrication' : 'Science'} · énergie {c.energy ?? '—'}{c.cartographer ? ' · cartographes' : ''}
     </button>)}</div>
     <div className="energy-list" aria-label="Répartition de l’énergie">{population.energyCounts.map((amount, energy) => amount ? <span key={energy}>Énergie {energy} : {amount}</span> : null)}</div>
     {population.restHousing ? <p>Au repos : {population.restHousing.reduce((n,h)=>n+h.restingCount,0)} avec un couchage{population.restingWithoutHousing ? ` · ${population.restingWithoutHousing} sans couchage` : ''}</p> : null}
@@ -24,11 +24,10 @@ export function BuildingPanel({ mode, building, definition, serverNow, pending, 
   const current = definition.levels.find((level) => level.level === building.level);
   const next = definition.levels.find((level) => level.level === building.level + 1);
   const upgradeCost = next?.costs.find((cost) => cost.resourceCode === 'wood')?.amount;
-  const production = current?.production.find((item) => item.resourceCode === 'wood')?.ratePerHour ?? 0;
   const extensionCost = current?.costs.find((cost) => cost.resourceCode === 'wood')?.amount ?? 0;
   return <div className="building-details"><span>{definition.displayName}</span><strong>Niveau {building.level}{building.targetLevel ? ` → ${building.targetLevel}` : ''}</strong>
     {building.type === 'town-hall' ? building.hiddenSuppliesAvailable ? <><p>Un vieux coffre est dissimulé dans les réserves.</p>{mode === 'exploitation' && <button disabled={pending} type="button" onClick={onDiscover}>Fouiller les réserves</button>}</> : <p>Réserves fouillées · le coffre est vide.</p> : null}
-    {building.type === 'sawmill' ? <p>Production : +{production}/h</p> : null}
+    {current?.processing && <p>{current.processing.workerCap} poste(s) de fabrication.</p>}
     {garden ? <><p>{garden.activeCellCount} parcelle{garden.activeCellCount > 1 ? 's' : ''} active{garden.activeCellCount > 1 ? 's' : ''}{garden.pendingCellCount ? ` · ${garden.pendingCellCount} en chantier` : ''}</p>
       {garden.harvest ? <><p className="construction-status">Récolte en cours · retour dans {secondsUntil(garden.harvest.completesAt, serverNow)} s</p><p>{garden.harvest.workerCount} récolteurs · {format(garden.harvest.reservedCarrots)} carottes en transit</p></> : <p>Prêtes : {format(readyCarrots)} / {garden.capacity} carottes</p>}
       <p>Production : +{garden.productionPerHour}/h</p>{(garden.expansions ?? (garden.expansion ? [garden.expansion] : [])).map((expansion) => <p key={expansion.id} className="construction-status">Extension · {expansion.cells.length} parcelle(s) — {secondsUntil(expansion.completesAt, serverNow)} s</p>)}

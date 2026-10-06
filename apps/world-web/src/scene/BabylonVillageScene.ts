@@ -2,6 +2,7 @@ import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,
 import { InhabitantCamera } from './inhabitant-camera';
 import { buildStonemason } from './stonemason-factory';
 import { buildSawmill } from './sawmill-factory';
+import { buildTownHallMarket } from './town-hall-market-factory';
 import { buildPresentation } from './building-presentation';
 import { VillageWorkers } from './village-workers';
 import { TimberThatch } from './timber-thatch';
@@ -345,8 +346,17 @@ export class BabylonVillageScene {
     if (this.#mode === 'region') return;
     const mouseArea = this.#selectingArea && this.#worldMode === 'construction' && !event.shiftKey;
     const first = this.#cellAtPointer(event);
-    const harvest = this.#worldMode === 'exploitation' && first !== null && !event.shiftKey;
-    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, inspect: event.shiftKey, mouseArea, harvest, first, lastPoint: this.#gridPointAtPointer(event) };
+    let workshopInspection = false;
+    if(this.#worldMode==='exploitation' && this.#state){
+      const bounds=this.#canvas.getBoundingClientRect();
+      const pick=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,
+        mesh=>mesh.isPickable&&typeof mesh.metadata?.siteId==='string');
+      const site=this.#state.cells.find(c=>c.id===pick.pickedMesh?.metadata?.siteId);
+      const building=site?.building??this.#state.cells.find(c=>c.building?.id===site?.footprint?.buildingId)?.building;
+      workshopInspection=!!building&&(building.type==='town-hall'||this.#state.buildingTypes.some(t=>t.code===building.type&&t.productionMode==='processing'));
+    }
+    const harvest = this.#worldMode === 'exploitation' && first !== null && !event.shiftKey && !workshopInspection;
+    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, inspect: event.shiftKey||workshopInspection, mouseArea, harvest, first, lastPoint: this.#gridPointAtPointer(event) };
     if (mouseArea || harvest) {
       // Consume only the construction drag. Right-drag, wheel and touch camera
       // gestures keep their usual controls.
@@ -815,6 +825,15 @@ export class BabylonVillageScene {
       if (import.meta.env.DEV && this.#mode === 'world') this.#canvas.dataset.worldCamera = JSON.stringify(this.#torusOverview?.navigationMetrics());
       if (import.meta.env.MODE === 'e2e') {
         const viewport = this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight());
+        this.#canvas.dataset.worldInteractionReady=String(this.#mode==='village'&&!this.#transition.active&&!this.#arrival&&!this.#flyover);
+        this.#canvas.dataset.buildingScreens=JSON.stringify(this.#state?.cells.flatMap(site=>{
+          if(!site.building)return [];
+          const mesh=this.#buildingCache.get(site.building.id)?.mesh;if(!mesh)return [];
+          const bounds=mesh.getHierarchyBoundingVectors(true), centre=bounds.min.add(bounds.max).scale(.5);
+          centre.y=bounds.max.y-.1;
+          const point=Vector3.Project(centre,Matrix.Identity(),this.#scene.getTransformMatrix(),viewport);
+          return [{id:site.building.id,x:point.x/this.#engine.getRenderWidth(),y:point.y/this.#engine.getRenderHeight()}];
+        })??[]);
         this.#canvas.dataset.cellScreens = JSON.stringify(this.#e2eCells.map((cell) => {
           const point = Vector3.Project(new Vector3(cell.x, 0.075, cell.z), Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
           return { id: cell.id, x: point.x / this.#engine.getRenderWidth(), y: point.y / this.#engine.getRenderHeight() };
@@ -964,6 +983,7 @@ export class BabylonVillageScene {
       let cached=this.#buildingCache.get(key);
       if(cached?.signature!==signature){cached?.mesh.dispose(false,false);
       const mesh = site.building?.type === 'university' ? this.#createUniversity(site) : site.building?.visualLayout ? this.#createFactoryBuilding(site,plans.get(key)!)
+        : site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2?this.#createTownHall(site)
         : site.building?.status === 'under-construction'
         ? this.#createConstructionSite(site)
         : site.footprint?.buildingType === 'garden'
@@ -1780,6 +1800,11 @@ export class BabylonVillageScene {
     const body = new BabylonMesh(`town-hall-${site.id}`, this.#scene);
     body.position.set(site.x, 0.78, site.z);
     this.#timberThatch ??= new TimberThatch(this.#scene);
+    if((site.building?.targetLevel??site.building?.level??1)>=2){
+      body.position.y=0;
+      buildTownHallMarket(body,this.#timberThatch,site.building?.status==='under-construction'?'works':'finished');
+      this.#createContactShadow(body,2.32,4.56);return this.#registerStructure(body);
+    }
     this.#timberThatch.build(body);
     this.#createContactShadow(body, 2.75, 2.45);
     return this.#registerStructure(body);
@@ -1834,6 +1859,12 @@ export class BabylonVillageScene {
     const body=new BabylonMesh(`factory-${site.building!.id}`,this.#scene);
     body.position.set(site.x+plan.origin.x,plan.origin.y,site.z+plan.origin.z);
     body.rotation.y=plan.rotation;
+    if(site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2){
+      this.#timberThatch??=new TimberThatch(this.#scene);
+      buildTownHallMarket(body,this.#timberThatch,plan.phase);
+      this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
+      return this.#registerStructure(body);
+    }
     const code=plan.recipe.id==='town-hall'?'town-hall':plan.recipe.id==='log-house'?'dwelling-logs':plan.recipe.id==='beam-house'?'dwelling-beams':'dwelling';
     const key=`${code}-${plan.recipe.levels}-${plan.phase}`;
     if(buildingAssets[key]&&plan.recipe.entrance.face===(code==='town-hall'?'-x':'-z')&&!plan.murets.length

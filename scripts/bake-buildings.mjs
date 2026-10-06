@@ -1,5 +1,5 @@
 import {chromium} from '@playwright/test';
-import {mkdir,writeFile,readdir,unlink} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,readdir,unlink} from 'node:fs/promises';
 import {URL} from 'node:url';
 import process from 'node:process';
 import {Buffer} from 'node:buffer';
@@ -8,15 +8,19 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 
 // Asset compilation, not an E2E suite. Uses the real factory's canvas textures.
+const selected=new Set(process.argv.slice(2));
+const recipes=[['university',3],['dwelling',2],['dwelling-logs',2],['dwelling-beams',2],['town-hall',1]];
+for(const code of selected)if(!recipes.some(([recipe])=>recipe===code))throw new Error(`Unknown building recipe: ${code}`);
 const browser=await chromium.launch({headless:true});
-const manifest={};
+const manifest=selected.size?JSON.parse(await readFile(new URL('../apps/world-web/src/scene/building-assets-manifest.json',import.meta.url),'utf8')):{};
 const directory=new URL('../apps/world-web/public/buildings/',import.meta.url);
 await mkdir(directory,{recursive:true});
 try {
   const page=await browser.newPage();
   await page.route('**/__factory_bake__',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Factory asset compiler</title>'}));
   await page.goto(new URL('/__factory_bake__',process.env.FACTORY_BAKE_URL??'http://localhost:5174/').href);
-  for(const [code,levels] of [['university',3],['dwelling',2],['dwelling-logs',2],['dwelling-beams',2],['town-hall',1]]) {
+  for(const [code,levels] of recipes) {
+    if(selected.size&&!selected.has(code))continue;
     for(let level=1;level<=levels;level++)for(const phase of ['finished','works']) {
       const source=await page.evaluate(async ({code,level,phase})=>{
         const {bakeBuilding}=await import('/src/scene/building-bake.ts');

@@ -4,7 +4,7 @@ import { WORKER_CLEARANCE } from './worker-motion';
 
 export type Face = '-x' | '+x' | '-z' | '+z';
 export interface Point { x: number; y: number; z: number }
-export interface Opening { face: Face; left: number; right: number; bottom: number; top: number; door: boolean }
+export interface Opening { face: Face; left: number; right: number; bottom: number; top: number; door: boolean; omitLeftJamb?:boolean }
 export interface Stone { x: number; y: number; z: number; length: number; height: number; thickness: number; axis: 'x'|'z'; shade: number }
 export interface WallSegment { a: Point; b: Point; height: number; thickness: number; key: string; owner: string }
 export interface BuildingRecipe {
@@ -18,7 +18,7 @@ export interface BuildingRecipe {
   windows: Partial<Record<Face, number[]>>;
   // Explicit bays: centre in half-modules, width in modules, heights in courses.
   windowOpenings?: Array<{face:Face;level:number;centre:number;width:number;sill:number;courses:number}>;
-  roof: { slope: number; overhang: number; sideOverhang?: number; lengthExtraRatio?:number; allowOutsideFootprint?: boolean; trussSpacing: number; maxSpan: number; style?: 'flat-stone' };
+  roof: { slope: number; overhang: number; sideOverhang?: number; lengthExtraRatio?:number; allowOutsideFootprint?: boolean; trussSpacing: number; maxSpan: number; style?: 'flat-stone'; frameMaterial?: 'logs'|'beams' };
   walls?: { courses: number; gateWidth: number };
 }
 export interface PlanInput {
@@ -44,7 +44,7 @@ export const HALL_RECIPE:BuildingRecipe={id:'town-hall',version:1,modules:[8,16]
 export const HOUSE_RECIPE:BuildingRecipe={...HALL_RECIPE,id:'stone-house',modules:[6,6],courses:10,
   rotateOddLevels:true,
   entrance:{face:'-z',centre:0,width:2,courses:6},windows:{'-x':[1],'+x':[1],'-z':[0],'+z':[1]}};
-export const LOG_HOUSE_RECIPE:BuildingRecipe={...HOUSE_RECIPE,id:'log-house',wallMaterial:'logs'};
+export const LOG_HOUSE_RECIPE:BuildingRecipe={...HOUSE_RECIPE,id:'log-house',version:2,wallMaterial:'logs',roof:{...HOUSE_RECIPE.roof,frameMaterial:'logs'}};
 export const BEAM_HOUSE_RECIPE:BuildingRecipe={...HOUSE_RECIPE,id:'beam-house',wallMaterial:'beams'};
 
 function windowCentres(length:number,module:BuildingRecipe['module'],level:number,count:number,doors:readonly Opening[]):number[]|null{

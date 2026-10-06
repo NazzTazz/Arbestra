@@ -65,7 +65,11 @@ describe.sequential('economy with PostgreSQL', () => {
     await resetE2eState(databaseUrl);
     db = createDatabase(databaseUrl);
   });
-  beforeEach(() => resetE2eState(databaseUrl));
+  beforeEach(async () => {
+    await resetE2eState(databaseUrl);
+    // Explicit construction supplies for tests unrelated to starting production.
+    await db.updateTable('villageResources').set({amount:2000}).where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','in',['timber','cut-stone']).execute();
+  });
   afterAll(async () => { await db?.destroy(); });
 
   async function build(type: 'sawmill' | 'garden' | 'dwelling', cell: { cellX: number; cellY: number }): Promise<VillageState> {
@@ -103,6 +107,8 @@ describe.sequential('economy with PostgreSQL', () => {
   }
 
   async function prepareOutOfOrderDueTransitions(laterFirst = true) {
+    await db.updateTable('villageResources').set({amount:2000}).where('villageId','=',DEVELOPMENT_IDS.village)
+      .where('resourceCode','in',['timber','cut-stone']).execute();
     await build('sawmill', DEVELOPMENT_CELLS.sawmill);
     await build('garden', DEVELOPMENT_CELLS.garden);
     const buildings = await db.selectFrom('buildings').select(['id', 'buildingType'])
@@ -155,27 +161,27 @@ describe.sequential('economy with PostgreSQL', () => {
     return getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
   }
 
-  it('starts with whole resources and natural wood production', async () => {
+  it('starts with whole raw resources and no passive wood production', async () => {
     const state = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
     expect(state.village.wood).toBe(2000);
     expect(state.village.carrots).toBe(50);
-    expect(state.village.woodProductionPerHour).toBe(60);
+    expect(state.village.woodProductionPerHour).toBe(0);
     expect(Number.isInteger(state.village.wood)).toBe(true);
   });
 
-  it('uses catalog production for sawmill levels 1, 2 and 3', async () => {
+  it('keeps all three sawmill levels free of passive production', async () => {
     await build('sawmill', DEVELOPMENT_CELLS.sawmill);
     const id = await completeAt(DEVELOPMENT_CELLS.sawmill);
-    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(120);
+    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(0);
     await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, undefined, 10_000);
     await makeDue(id);
-    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(168);
+    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(0);
     await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id, undefined, undefined, 10_000);
     await makeDue(id);
-    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(254.4);
+    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.woodProductionPerHour).toBe(0);
   });
 
-  it('upgrades a dwelling for 300 wood and increases housing only at completion', async () => {
+  it('upgrades a dwelling for 300 timber and increases housing only at completion', async () => {
     await db.updateTable('villageResourceFlows').set({ baseRatePerHour: 0, remainder: 0,
       productionUpdatedAt: sql`statement_timestamp()` }).where('worldId', '=', DEVELOPMENT_IDS.world)
       .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').execute();
@@ -188,7 +194,8 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(pending.village.population.housingCapacity).toBe(30);
     expect(pending.cells.find((cell) => cell.building?.id === id)?.building)
       .toMatchObject({ level: 1, targetLevel: 2, status: 'under-construction' });
-    expect(before.village.wood - pending.village.wood).toBe(300);
+    expect(before.village.resources.find(r=>r.code==='timber')!.amount-pending.village.resources.find(r=>r.code==='timber')!.amount).toBe(300);
+    expect(pending.village.wood).toBe(before.village.wood);
     await makeDue(id);
     const completed = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
     expect(completed.village.population.housingCapacity).toBe(55);
@@ -218,14 +225,14 @@ describe.sequential('economy with PostgreSQL', () => {
     const afterLaterNotification = await db.selectFrom('villageResources').select('amount')
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
       .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(afterLaterNotification.amount)).toBe(1180);
+    expect(Number(afterLaterNotification.amount)).toBe(1000);
     expect((await db.selectFrom('buildings').select('status').where('id', '=', sawmill.id).executeTakeFirstOrThrow()).status)
       .toBe('completed');
     expect((await processNextScheduledTask(db, handlers))?.outcome).toBe('completed');
     const afterRetry = await db.selectFrom('villageResources').select('amount')
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
       .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(afterRetry.amount)).toBe(1180);
+    expect(Number(afterRetry.amount)).toBe(1000);
     const reversed = await outcome(t0);
 
     await resetE2eState(databaseUrl);
@@ -271,7 +278,7 @@ describe.sequential('economy with PostgreSQL', () => {
     const wood = await db.selectFrom('villageResources').select('amount')
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
       .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(wood.amount)).toBe(1180);
+    expect(Number(wood.amount)).toBe(1000);
   });
 
   it('keeps an old construction notification harmless after read reconciliation starts a new upgrade', async () => {
@@ -350,13 +357,13 @@ describe.sequential('economy with PostgreSQL', () => {
       expect(result.cells.find((cell) => cell.building?.id === sawmill.id)?.building)
         .toMatchObject({ level: 1, targetLevel: 2, status: 'under-construction' });
       const cost = await db.selectFrom('buildingLevelCosts').select('amount')
-        .where('buildingTypeCode', '=', 'sawmill').where('level', '=', 2).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
+        .where('buildingTypeCode', '=', 'sawmill').where('level', '=', 2).where('resourceCode', '=', 'timber').executeTakeFirstOrThrow();
       const started = new Date(result.serverTime);
       const tasks = await db.selectFrom('scheduledTasks').selectAll().where('subjectId', '=', sawmill.id).execute();
       expect(tasks).toHaveLength(2);
       expect(tasks.find((task) => task.dueAt > dueAt)?.dueAt.getTime()).toBe(started.getTime() + 60_000);
-      expect(result.village.wood)
-        .toBe(1060 + Math.floor(120 * (started.getTime() - dueAt.getTime()) / 3_600_000) - Number(cost.amount));
+      expect(result.village.resources.find(r=>r.code==='timber')!.amount).toBe(2000-Number(cost.amount));
+      expect(result.village.wood).toBe(1000);
       expect((await bounded(worker))?.outcome).toBe('completed');
       expect((await db.selectFrom('buildings').select(['level', 'targetLevel', 'status'])
         .where('id', '=', sawmill.id).executeTakeFirstOrThrow()))
@@ -388,7 +395,7 @@ describe.sequential('economy with PostgreSQL', () => {
     const afterLaterTask = await db.selectFrom('villageResources').select('amount')
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
       .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(afterLaterTask.amount)).toBe(1180);
+    expect(Number(afterLaterTask.amount)).toBe(1000);
     expect(await processNextScheduledTask(db, handlers)).toBeNull();
     // Advance only retry eligibility; its original economic deadline stays unchanged.
     await db.updateTable('scheduledTasks').set({ availableAt: retry.dueAt }).where('id', '=', retry.id).execute();
@@ -396,7 +403,7 @@ describe.sequential('economy with PostgreSQL', () => {
     const afterRetry = await db.selectFrom('villageResources').select('amount')
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
       .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(afterRetry.amount)).toBe(1180);
+    expect(Number(afterRetry.amount)).toBe(1000);
   });
 
   it('rolls back every due transition when a handler fails after reconciliation', async () => {
@@ -408,7 +415,7 @@ describe.sequential('economy with PostgreSQL', () => {
         const applied = await economicRows(transaction);
         expect(applied.buildings.filter((building) => [garden.id, sawmill.id].includes(building.id))
           .every((building) => building.status === 'completed')).toBe(true);
-        expect(Number(applied.resources.find((resource) => resource.resourceCode === 'wood')?.amount)).toBe(1180);
+        expect(Number(applied.resources.find((resource) => resource.resourceCode === 'wood')?.amount)).toBe(1000);
         throw new Error('crash after reconciliation');
       },
       [COMPLETE_EXPANSION_TASK]: completeExpansion,
@@ -435,10 +442,10 @@ describe.sequential('economy with PostgreSQL', () => {
     const recovered = await db.selectFrom('villageResources').select('amount')
       .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
       .where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
-    expect(Number(recovered.amount)).toBe(1180);
+    expect(Number(recovered.amount)).toBe(1000);
   });
 
-  it('preserves fractional production for transitions with the same deadline', async () => {
+  it('preserves the dormant wood remainder through simultaneous completions', async () => {
     for (const laterFirst of [true, false]) {
       if (!laterFirst) await resetE2eState(databaseUrl);
       const { sawmill, garden, t0 } = await prepareOutOfOrderDueTransitions(laterFirst);
@@ -457,11 +464,11 @@ describe.sequential('economy with PostgreSQL', () => {
         .toBe(laterFirst ? garden.id : sawmill.id);
       await db.transaction().execute(async (tx) => {
         await tx.selectFrom('villages').select('id').where('id', '=', DEVELOPMENT_IDS.village).forUpdate().executeTakeFirstOrThrow();
-        expect(await materializeVillageResource(tx, DEVELOPMENT_IDS.world, DEVELOPMENT_IDS.village, 'wood', horizon)).toBe(1001);
+        expect(await materializeVillageResource(tx, DEVELOPMENT_IDS.world, DEVELOPMENT_IDS.village, 'wood', horizon)).toBe(1000);
         const flow = await tx.selectFrom('villageResourceFlows').select(['remainder', 'productionUpdatedAt'])
           .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
         // Persisted remainders have a fixed numeric scale; allow its rounding.
-        expect(Number(flow.remainder)).toBeCloseTo(0.5 + 168 * 10 / 3600 + 254.4 * 10 / 3600 - 1, 10);
+        expect(Number(flow.remainder)).toBeCloseTo(0.5, 10);
         expect(flow.productionUpdatedAt).toEqual(horizon);
       });
     }
@@ -535,11 +542,11 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(building?.constructionCompletesAt).toBe(state.serverTime);
   });
 
-  it('projects long offline production without writing on ordinary reads', async () => {
+  it('does not generate passive wood or rewrite its dormant cursor after a long absence', async () => {
     await db.updateTable('villageResourceFlows').set({
       remainder: 0, productionUpdatedAt: sql`transaction_timestamp() - interval '10 hours'`,
     }).where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').execute();
-    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.wood).toBe(2600);
+    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).village.wood).toBe(2000);
     const before = await db.selectFrom('villageResourceFlows').selectAll()
       .where('villageId', '=', DEVELOPMENT_IDS.village).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow();
     await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');

@@ -11,6 +11,7 @@ import {MeshBuilder} from '@babylonjs/core/Meshes/meshBuilder';
 import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {TimberThatch} from './timber-thatch';
 import {buildingPlan,HALL_RECIPE,HOUSE_RECIPE,LOG_HOUSE_RECIPE,BEAM_HOUSE_RECIPE,withBuildingAccesses,type BuildingRecipe} from './building-plan';
+import {buildTownHallMarket} from './town-hall-market-factory';
 import {buildBarracks} from './barracks-factory';
 import { buildStonemason } from './stonemason-factory';
 import { CAMPUS_SUBDIVISIONS, MATHEMATICS_CROWN_WIDTH } from './mathematics-factory';
@@ -113,12 +114,20 @@ function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(
     document.getElementById('budget')!.textContent=`Caserne · 2 × 5 cases · cour 2 × 3 · ${vertices.toLocaleString('fr')} sommets · ${meshes.length} meshes · ${(performance.now()-start).toFixed(0)} ms`;
     canvas.dataset.vertices=String(vertices);canvas.dataset.meshes=String(meshes.length);camera.radius=20;camera.target.y=1;return;
   }
+  if(name==='hall-2'){
+    showFootprint(1,2,turn);accessControls.hidden=true;
+    root=new Mesh('workshop-hall-market',scene);root.rotation.y=turn*Math.PI/2;
+    buildTownHallMarket(root,kit,works?'works':'finished');
+    document.getElementById('budget')!.textContent='Hôtel de ville · 2 niveaux · séparation longitudinale : petites pierres et long balcon couvert en bois';
+    camera.radius=11;camera.target.y=1.5;return;
+  }
   camera.radius=11;
-  showFootprint(1,name==='hall'?2:1,turn);
-  let recipe:BuildingRecipe=name==='hall'?HALL_RECIPE:name.startsWith('logs')?{...LOG_HOUSE_RECIPE,levels:name.endsWith('-2')?2:1}:name.startsWith('beams')?{...BEAM_HOUSE_RECIPE,levels:name.endsWith('-2')?2:1}:name==='house'?{...HOUSE_RECIPE,levels:2}:{...HOUSE_RECIPE,modules:[4,4],walls:{courses:3,gateWidth:.7}};
+  const hall=name==='hall';
+  showFootprint(1,hall?2:1,turn);
+  let recipe:BuildingRecipe=hall?HALL_RECIPE:name.startsWith('logs')?{...LOG_HOUSE_RECIPE,levels:name.endsWith('-2')?2:1}:name.startsWith('beams')?{...BEAM_HOUSE_RECIPE,levels:name.endsWith('-2')?2:1}:name==='house'?{...HOUSE_RECIPE,levels:2}:{...HOUSE_RECIPE,modules:[4,4],walls:{courses:3,gateWidth:.7}};
   const face=(choice('access-face')==='default'?recipe.entrance.face:choice('access-face')) as BuildingRecipe['entrance']['face'];
   recipe=withBuildingAccesses(recipe,face,(document.getElementById('access-secondary') as HTMLInputElement).checked&&name!=='wall');
-  const cells=name==='hall'?(turn%2?[{cellX:4,cellY:4},{cellX:5,cellY:4}]:[{cellX:4,cellY:4},{cellX:4,cellY:5}]):[{cellX:4,cellY:4}];
+  const cells=hall?(turn%2?[{cellX:4,cellY:4},{cellX:5,cellY:4}]:[{cellX:4,cellY:4},{cellX:4,cellY:5}]):[{cellX:4,cellY:4}];
   const start=performance.now(),plan=buildingPlan({id:'preview',anchor:cells[0]!,cells,world:{widthCells:32,heightCells:32},recipe,quarterTurns:turn,phase:works?'works':'finished',sourceLevels:name==='house'||name.endsWith('-2')?1:0});
   root=new Mesh('workshop-building',scene);root.position.y=plan.origin.y;root.rotation.y=plan.rotation;kit.build(root,plan);
   const markers=MeshBuilder.CreateLineSystem('building-accesses',{lines:plan.accesses.map(a=>[new Vector3(a.entry.threshold.x,.03,a.entry.threshold.z),new Vector3(a.entry.gate.x,.03,a.entry.gate.z),new Vector3(a.entry.gate.x,.6,a.entry.gate.z)])},scene);markers.color=Color3.FromHexString('#64cbe6');markers.parent=root;markers.isPickable=false;
@@ -127,11 +136,12 @@ function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(
   canvas.dataset.vertices=String(vertices);canvas.dataset.meshes=String(meshes.length);
 }
 for(const id of ['recipe','phase','turn'])document.getElementById(id)!.addEventListener('change',render);
+const hall2Option=document.createElement('option');hall2Option.value='hall-2';hall2Option.textContent='Hôtel de ville · niveau 2 · marché';document.querySelector('#recipe option')!.after(hall2Option);
 const barracksOption=document.createElement('option');barracksOption.value='barracks';barracksOption.textContent='Caserne · cour d’entraînement';document.getElementById('recipe')!.append(barracksOption);
 const stonemasonOption=document.createElement('option');stonemasonOption.value='stonemason';stonemasonOption.textContent='Tailleur de pierres · atelier ouvert';document.getElementById('recipe')!.append(stonemasonOption);
 for(let level=1;level<=3;level++){const option=document.createElement('option');option.value=`university-${level}`;option.textContent=`Université · niveau ${level}`;document.getElementById('recipe')!.append(option);}
 (document.getElementById('recipe') as HTMLSelectElement).value='university-1';
-if(query.get('recipe')==='stonemason')(document.getElementById('recipe') as HTMLSelectElement).value='stonemason';
+if(['stonemason','hall','hall-2'].includes(query.get('recipe')??''))(document.getElementById('recipe') as HTMLSelectElement).value=query.get('recipe')!;
 if(query.get('domain')==='infrastructure') {
   accessControls.hidden=true;
   for(const id of ['phase','roof-colour','stone-colour','frame-colour'])document.getElementById(id)!.closest('p')!.hidden=true;

@@ -203,6 +203,10 @@ describe.sequential('read-only streamed terrain', () => {
     expect(JSON.stringify(data)).not.toMatch(/villageId|ownerAccountId|storedCarrots|productionUpdatedAt/);
   });
   it('returns depleted tombstones without occupancies and leaves all overdue business untouched', async () => {
+    await db.updateTable('villageResources').set({amount:25}).where('worldId','=',DEVELOPMENT_IDS.world)
+      .where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','=','timber').execute();
+    await db.updateTable('villageResources').set({amount:10}).where('worldId','=',DEVELOPMENT_IDS.world)
+      .where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','=','cut-stone').execute();
     const state = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
       DEVELOPMENT_CELLS.dwelling.cellX, DEVELOPMENT_CELLS.dwelling.cellY, 'dwelling', 10000);
     const building = state.cells.find(c => c.building?.type === 'dwelling')!.building!;

@@ -4,6 +4,10 @@ import { createDatabase } from './database/connection.js';
 import { startScheduledTaskWorker } from './jobs/scheduled-tasks.js';
 import { SCIENCE_WAKE_TASK } from './modules/science/service.js';
 import { wakeScience } from './modules/science/worker.js';
+import { COMPLETE_PROCESSING_TASK } from './modules/villages/processing.js';
+import { completeProcessing } from './modules/villages/complete-construction.js';
+import { COMPLETE_MARKET_TASK } from './modules/villages/market.js';
+import { deliverMarket } from './modules/villages/complete-construction.js';
 import { COMPLETE_CONSTRUCTION_TASK, COMPLETE_EXPANSION_TASK, COMPLETE_GARDEN_HARVEST_TASK, COMPLETE_STONE_EXTRACTION_TASK, WAKE_EXTRACTION_WORKSITE_TASK, completeConstruction, completeExpansion, completeGardenHarvest, completeStoneExtraction, wakeExtractionWorksite } from './modules/villages/complete-construction.js';
 
 const config = loadConfig();
@@ -11,7 +15,7 @@ const db = createDatabase(config.databaseUrl);
 const app = await buildApp(config, db);
 const stopWorker = startScheduledTaskWorker(
   db,
-  { [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
+  { [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
   config.scheduledTaskPollIntervalMs,
   (error) => app.log.error(error, 'Scheduled task worker failed'),
 );

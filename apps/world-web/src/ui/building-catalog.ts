@@ -3,8 +3,8 @@ export const BUILDING_PRESENTATIONS: Record<string, { footprint: string; purpose
   dwelling: { footprint: '1 × 1 case', purpose: 'Accueille les habitants et leur offre un couchage.' },
   'town-hall': { footprint: '1 × 2 cases', purpose: 'Cœur administratif du village.' },
   garden: { footprint: 'Zone tracée', purpose: 'Cultive les carottes ; une tournée récolte les parcelles.' },
-  sawmill: { footprint: '1 × 1 case', purpose: 'Produit du bois pour développer le village.' },
+  sawmill: { footprint: '1 × 1 case', purpose: 'Transforme le bois brut en bois d’œuvre avec des habitants.' },
   university: { footprint: '5 × 6 cases', purpose: 'Recherche, formations et découverte du monde.' },
-  stonemason: { footprint: '2 × 2 cases', purpose: 'Atelier décoratif de taille de pierres.' },
+  stonemason: { footprint: '2 × 2 cases', purpose: 'Transforme la pierre brute en pierre taillée avec des habitants.' },
   barracks: { footprint: '2 × 5 cases', purpose: 'Cour d’entraînement et pavillons militaires.' },
 };

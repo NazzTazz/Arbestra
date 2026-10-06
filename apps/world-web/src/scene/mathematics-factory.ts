@@ -12,6 +12,11 @@ export const CAMPUS_SUBDIVISIONS = 8;
 export const CAMPUS_SUBCELL_UNITS = CELL_UNITS / CAMPUS_SUBDIVISIONS;
 export const MATHEMATICS_CROWN_WIDTH = 10;
 
+/** The same glazed crown recipe can be reused by another workshop building. */
+export function mathematicsCrownPlan(phase:'finished'|'works') {
+  return mathematicsPlan('mathematics-central-pavilion',MATHEMATICS_CROWN_WIDTH,1,phase,0,true);
+}
+
 /** Workshop module only: dimensions include masonry joints, not roof overhangs. */
 function mathematicsPlan(id: string, length: number, levels: number, phase: 'finished' | 'works', sourceLevels: number, transverse = false) {
   const cells = Math.ceil((length + 1) / CAMPUS_SUBDIVISIONS);
@@ -164,7 +169,7 @@ export function buildMathematics(root: Mesh, kit: TimberThatch, level: number, p
     glazeWindows(child, plan);
     for (const mesh of child.getChildMeshes()) mesh.isPickable = false;
   }
-  const crown = mathematicsPlan('mathematics-central-pavilion', MATHEMATICS_CROWN_WIDTH, 1, phase, 0, true);
+  const crown = mathematicsCrownPlan(phase);
   const crownRoot = new Mesh(crown.id, kit.scene); crownRoot.parent = body;
   const supportHeight = phase === 'works'
     ? Math.ceil(Math.max(central.sourceLevels * central.recipe.courses * central.recipe.module.height, central.height * .65) / central.recipe.module.height) * central.recipe.module.height

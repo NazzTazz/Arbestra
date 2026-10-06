@@ -1,9 +1,19 @@
 import { expect, it } from 'vitest';
-import { constructionContext, sameUpgradeQuote, type UpgradePreview } from './construction-intent';
+import { constructionContext, sameUpgradeQuote, upgradePreview, type UpgradePreview } from './construction-intent';
 import type { VillageState } from '@arbestra/contracts';
 
 const quote: UpgradePreview = { siteId: 'cell', buildingId: 'house', code: 'dwelling', name: 'Maison',
   level: 1, nextLevel: 2, costs: [{ resourceCode: 'wood', amount: 80 }], durationSeconds: 60, error: null };
+it('quotes the existing log house upgrade against raw wood even with no timber',()=>{
+  const state={cells:[{id:'cell',building:{id:'house',type:'dwelling',level:1,status:'completed',visualLayout:{recipe:'log-house'}}}],
+    village:{wood:300,resources:[{code:'timber',amount:0}]},buildingTypes:[{code:'dwelling',displayName:'Maison',levels:[{
+      level:2,constructionDurationSeconds:120,costs:[{resourceCode:'timber',amount:300}],
+      variantCosts:[{variant:'logs',resourceCode:'wood',amount:300,replacesResourceCode:'timber'}],
+    }]}]} as unknown as VillageState;
+  expect(upgradePreview(state,'cell')).toMatchObject({costs:[{resourceCode:'wood',amount:300}],error:null});
+  state.village.wood=299;
+  expect(upgradePreview(state,'cell')?.error).toBe('Ressources insuffisantes.');
+});
 it('requires the displayed target, level and costs before upgrading', () => {
   expect(sameUpgradeQuote(null, quote)).toBe(false);
   expect(sameUpgradeQuote(quote, { ...quote, buildingId: 'other-house' })).toBe(false);

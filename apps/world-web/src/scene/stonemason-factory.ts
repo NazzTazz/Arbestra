@@ -146,7 +146,7 @@ export function buildStonemason(root: Mesh, kit: TimberThatch, phase: 'finished'
     world: { widthCells: 100, heightCells: 100 }, phase, sourceLevels: 0,
     recipe: { ...HALL_RECIPE, id: 'stonemason-canopy', modules: [14, 8], courses: 16,
       entrance: { ...HALL_RECIPE.entrance, enabled: false }, windows: {},
-      roof: { ...HALL_RECIPE.roof, maxSpan: 4, slope: 25 } } });
+      roof: { ...HALL_RECIPE.roof, maxSpan: 4, slope: 25, frameMaterial:'logs' } } });
   kit.buildRoof(roof, plan);
   for (const mesh of roof.getChildMeshes()) { mesh.isPickable = false; mesh.receiveShadows = true; }
 

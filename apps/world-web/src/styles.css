@@ -590,6 +590,15 @@ button { font: inherit; }
 .infrastructure-feedback label { display: flex; gap: 8px; align-items: center; }
 .infrastructure-feedback small { color: #b3c8de; }
 
-.house-variants { position: fixed; bottom: 230px; left: 270px; display: flex; gap: 6px; z-index: 35; }
-.house-variants button { background: #0b1934d9; color: #dce9f7; border: 1px solid #7998bd; border-radius: 5px; padding: 5px 10px; }
-.house-variants button[aria-pressed="true"] { background: #345d86; }
+.resource-icon--timber { height:.7rem; background:linear-gradient(#ceab72,#ae7e41); border:1px solid #e6c793; border-radius:.08rem; transform:rotate(-20deg); }
+.resource-icon--cut-stone { height:.8rem; background:linear-gradient(#d8d4c6,#9f9c91); border:1px solid #eee8d6; border-radius:.12rem; box-shadow:inset -3px -3px 0 rgb(0 0 0 / 20%); }
+.processing-panel { display:grid; gap:.45rem; padding-block:.5rem; max-width:22rem; }
+.processing-panel p { margin:.15rem 0; }
+.processing-panel label { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+.processing-panel input { width:4rem; }
+.processing-panel progress { width:100%; }
+.market-panel { display:grid; gap:.6rem; padding-block:.6rem; max-width:24rem; }
+.market-panel p,.market-panel h3,.market-panel h4 { margin:.15rem 0; }
+.market-panel label { display:grid; gap:.3rem; }
+.market-panel input,.market-panel select { width:100%; min-height:2rem; }
+.market-panel ul { margin:0; padding-left:1.25rem; }

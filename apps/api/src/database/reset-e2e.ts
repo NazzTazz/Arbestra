@@ -36,6 +36,13 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await transaction.deleteFrom('populationCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('villageAccomplishments').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('populationCohorts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('processingOrders').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('marketExchanges').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('processingCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.updateTable('villages').set({ economyActivatedAt: sql`statement_timestamp()` })
+        .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.updateTable('villageResources').set({ amount: 0 }).where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('resourceCode', 'in', ['timber','cut-stone','rings']).execute();
       await transaction.deleteFrom('sciencePlaces').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('scienceActivities').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('playerScience').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
@@ -82,7 +89,7 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
         buildingId: null, featureId: deposit.featureId, role: 'body', pendingExpansionId: null,
       }))).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
       await transaction.updateTable('villageResourceFlows').set({
-        baseRatePerHour: 60, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
+        baseRatePerHour: 0, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
       }).where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
         .where('resourceCode', '=', 'wood').execute();
       await transaction.insertInto('populationCohorts').values({

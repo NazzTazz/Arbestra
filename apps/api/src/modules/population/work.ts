@@ -4,7 +4,8 @@ import { advanceEnergy, canWorkFor, type EnergyState } from './energy.js';
 import {allocateRestHousing} from './housing.js';
 
 type Cohort = Selectable<PopulationCohortsTable>;
-type Assignment = { harvestId: string; extractionId: null; scienceActivityId?: null }
+type Assignment = { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: string }
+  | { harvestId: string; extractionId: null; scienceActivityId?: null }
   | { harvestId: null; extractionId: string; scienceActivityId?: null }
   | { harvestId: null; extractionId: null; scienceActivityId: string };
 
@@ -13,8 +14,8 @@ export function energyState(cohort: Cohort): EnergyState {
     restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt };
 }
 
-export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'> & { scienceActivityId?: string | null }): boolean {
-  return cohort.harvestId === null && cohort.extractionId === null && !cohort.scienceActivityId;
+export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'> & { scienceActivityId?: string | null; processingLotId?: string | null }): boolean {
+  return cohort.harvestId === null && cohort.extractionId === null && !cohort.scienceActivityId && !cohort.processingLotId;
 }
 
 /** The village lock and chronological reconciliation protect every cursor. */
@@ -89,7 +90,7 @@ export async function releaseWorkers(tx: Transaction<Database>, workers: Cohort[
   for (const cohort of workers) {
     const empty = cohort.energy === 0 && cohort.energyProgress === 0;
     await tx.updateTable('populationCohorts').set({ activity: empty ? 'resting' : 'idle',
-      restingSince: empty ? through : null, harvestId: null, extractionId: null, scienceActivityId: null,restBuildingId:null })
+      restingSince: empty ? through : null, harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: null,restBuildingId:null })
       .where('worldId', '=', cohort.worldId).where('id', '=', cohort.id).execute();
   }
 }

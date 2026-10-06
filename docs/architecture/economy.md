@@ -1,5 +1,21 @@
 # Économie
 
+## Marché Oracle (034)
+
+L’hôtel de ville niveau 2 ouvre le marché : amélioration à 500 bois d’œuvre + 120 pierres taillées, 600 secondes, sans nouvelle emprise. Couchages et services existants restent disponibles pendant cette amélioration. Le troc Oracle livre en 600 secondes, sans habitants, sans annulation après confirmation et sans capacité globale limitée. Catalogue `oracle_market_resources` : bois/pierre bruts valeur 1, bois d’œuvre/pierre taillée 1,5, carotte 0,25. Réception = floor(quantité × valeur offerte × 0,70 / valeur demandée), calcul bigint exact ; devis recalculé serveur, attendu confirmé par le client. Stocks débités au départ, résultats figés et crédités une fois à l’échéance. Demande et reçu sont réunis dans `market_exchanges` avec unicité monde/village/commande ; livraison intercalée dans la réconciliation, worker `market.deliver` acquitte uniquement sa tâche. Aucun code ressource fourni par le client n’est négociable sans inscription au catalogue serveur. Anneaux (`rings`) : stock nul initial, émission et achats militaires futurs. [Spec Marché](../SPEC-MARCHE-ORACLE.md) et handoff précisent preuves et limites du prototype.
+
+## Matières et transformation (031–033)
+
+La maison en troncs consomme exclusivement du bois brut : 25 à la construction, 300 à l’amélioration. La migration 033 substitue `wood` à `timber` dans les coûts de cette variante ; le devis d’amélioration et le débit serveur utilisent la recette persistée, indépendamment du modèle sélectionné pour une nouvelle construction. Madriers et pierre conservent leurs coûts raffinés.
+
+Les stocks distinguent `wood` et `stone` bruts, `timber` (bois d’œuvre) et `cut-stone` (pierre taillée). Une scierie ou un tailleur achevé transforme 25 unités brutes en 20 raffinées par lot, avec 600 000 ms de travail divisées par l’équipe affectée. La scierie admet 1/2/3 habitants selon son niveau ; le tailleur en admet 3. Chaque commande porte 1 à 20 lots, avec une seule commande ouverte par bâtiment ; une amélioration attend sa clôture.
+
+`processing_orders` conserve l’intention, l’état et l’équipe ; `processing_lots` fige recette, intrants débités et échéance du lot engagé. L’affectation utilise `population/work.ts` et `processing_lot_id`, exclusive des autres travaux et du repos. Le devis et les commandes passent par le village verrouillé et la borne de `beginVillageEconomy`. `processing_command_receipts` rend les retries exacts idempotents et refuse un identifiant réutilisé avec un autre payload.
+
+Pause et annulation prennent effet après le lot engagé, sans remboursement de ses intrants. À son échéance, le serveur crédite le résultat une fois, libère l’équipe et admet le lot suivant si matières et habitants aptes suffisent. Sinon la commande attend une reprise explicite, sans réserver les intrants futurs. Les successeurs dus sont réinsérés dans l’ordre commun échéance/ID/type, afin d’entrelacer les ateliers et les autres transitions. La notification `processing.complete` réveille la réconciliation ; le scheduler n’acquitte que sa tâche acquise.
+
+La bascule d’un ancien village est marquée par `economy_activated_at` : après réconciliation historique jusqu’à la borne verrouillée, le bois passif est matérialisé une dernière fois, puis arrêté. Stocks bruts, bâtiments, travaux engagés et restes sont conservés ; les deux stocks raffinés commencent à zéro. Les nouveaux villages sont immédiatement sous les nouvelles règles. Les anciens barèmes de scierie restent en base pour solder l’histoire, mais sont absents du catalogue public de transformation. Coupe et extraction fournissent désormais les matières brutes ; voir la [spec](../SPEC-ECONOMIE-MATIERES-TRANSFORMATION.md).
+
 La réconciliation des bosquets voisins conserve les verrous par UUID, puis classe en une requête les bosquets pleins sans réservation ni retour physique dû, dont l'occupation et la disponibilité sont cohérentes. Ces bosquets ne demandent aucune écriture ni déplacement du curseur de repousse. Tous les autres suivent la matérialisation historique, notamment pour réparer une occupation ou traiter une récolte/repousse.
 
 ## Aménagements immédiats (028)

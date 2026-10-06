@@ -39,6 +39,7 @@ export interface VillagesTable {
   name: string;
   anchorCellX: number;
   anchorCellY: number;
+  economyActivatedAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   createdAt: Generated<Timestamp>;
 }
 
@@ -78,7 +79,7 @@ export interface BuildingTypesTable {
   code: string;
   displayName: string;
   progressionMode: 'vertical' | 'spatial' | 'fixed-footprint';
-  productionMode: 'none' | 'direct' | 'buffered';
+  productionMode: 'none' | 'direct' | 'buffered' | 'processing';
   instanceLimitPerVillage: number | null;
   visualKey: string;
   buildable: boolean;
@@ -234,6 +235,7 @@ export interface PopulationCohortsTable {
   harvestId: string | null;
   extractionId: string | null;
   scienceActivityId: ColumnType<string | null, string | null | undefined, string | null>;
+  processingLotId: ColumnType<string | null, string | null | undefined, string | null>;
   cartographer: ColumnType<boolean, boolean | undefined, boolean>;
   restBuildingId: ColumnType<string|null,string|null|undefined,string|null>;
   createdAt: Generated<Timestamp>;
@@ -379,6 +381,20 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  buildingVariantCosts: {buildingTypeCode:string;level:number;variant:'stone'|'logs'|'beams';resourceCode:string;amount:ColumnType<string,number|string,number|string>;replacesResourceCode:Generated<string|null>};
+  processingRecipes: ProcessingRecipesTable;
+  oracleMarketResources: { resourceCode: string; valueUnits: number };
+  marketExchanges: {
+    id: Generated<string>; worldId: string; villageId: string; commandId: string;
+    request: JSONColumnType<Record<string, unknown>, string, string>;
+    offeredResource: string; requestedResource: string;
+    offeredAmount: ColumnType<string, number | string, number | string>;
+    receivedAmount: ColumnType<string, number | string, number | string>;
+    startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;
+  };
+  processingOrders: ProcessingOrdersTable;
+  processingLots: ProcessingLotsTable;
+  processingCommandReceipts: ProcessingCommandReceiptsTable;
   villageInfrastructure:{worldId:string;villageId:string;plan:JSONColumnType<InfrastructurePlan>};
   infrastructureReceipts:{worldId:string;villageId:string;commandId:string;sessionId:string;request:JSONColumnType<object>;
     beforePlan:JSONColumnType<InfrastructurePlan>;afterPlan:JSONColumnType<InfrastructurePlan>;quote:JSONColumnType<InfrastructureQuote>;undone:Generated<boolean>;createdAt:Generated<Timestamp>};
@@ -447,4 +463,26 @@ export interface Database {
   stoneDeposits: StoneDepositsTable;
   depositExtractions: DepositExtractionsTable;
   sessions: SessionsTable;
+}
+
+export interface ProcessingRecipesTable {
+  buildingTypeCode: string; level: number; version: number;
+  inputResource: string; inputAmount: number; outputResource: string; outputAmount: number;
+  workMs: number; workerCap: number;
+}
+export interface ProcessingOrdersTable {
+  id: Generated<string>; worldId: string; villageId: string; buildingId: string;
+  status: 'running'|'pause-requested'|'cancel-requested'|'paused'|'blocked'|'completed'|'cancelled';
+  blockedReason: 'missing-input'|'missing-workers'|null;
+  requestedLots: number; completedLots: Generated<number>; workerCount: number;
+  workerIds: JSONColumnType<string[], string, string>;
+  createdAt: Timestamp; finishedAt: Timestamp|null;
+}
+export interface ProcessingLotsTable {
+  id: Generated<string>; worldId: string; villageId: string; orderId: string; lotNumber: number;
+  recipeVersion: number; inputResource: string; inputAmount: number; outputResource: string; outputAmount: number;
+  workerCount: number; startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp|null;
+}
+export interface ProcessingCommandReceiptsTable {
+  worldId: string; villageId: string; commandId: string; request: JSONColumnType<Record<string, unknown>, string, string>;
 }

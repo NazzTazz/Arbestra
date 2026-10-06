@@ -3,24 +3,6 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { TimberThatch } from './timber-thatch';
-import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
-import { CELL_UNITS } from './world-space';
-
-export function buildCampusGrass(root: Mesh, kit: TimberThatch) {
-  const material = new StandardMaterial('campus-grass', kit.scene);
-  material.specularColor = Color3.Black();
-  const texture = new DynamicTexture('campus-grass-blades', { width: 128, height: 128 }, kit.scene, true);
-  const context = texture.getContext(); context.fillStyle = '#627b43'; context.fillRect(0, 0, 128, 128);
-  for (let index = 0; index < 1800; index++) {
-    context.fillStyle = index % 3 ? 'rgba(164,184,105,.18)' : 'rgba(37,66,28,.15)';
-    context.fillRect((index * 43 + Math.floor(index / 128) * 19) % 128, (index * 71 + Math.floor(index / 128) * 11) % 128, 1, 1 + index % 3);
-  }
-  texture.uScale = 5; texture.vScale = 6; texture.update(false); material.diffuseTexture = texture;
-  const grass = MeshBuilder.CreateGround('campus-grass-ground', { width: 5 * CELL_UNITS, height: 6 * CELL_UNITS }, kit.scene);
-  grass.position.y = .012; grass.parent = root; grass.material = material;
-  grass.receiveShadows = true; grass.isPickable = false; material.zOffset = -1;
-  root.onDisposeObservable.add(() => { material.dispose(); texture.dispose(); });
-}
 
 /** Campus scenery only: no natural feature, deposit, occupancy or harvesting target. */
 export function buildCampusTrees(root: Mesh, kit: TimberThatch) {
