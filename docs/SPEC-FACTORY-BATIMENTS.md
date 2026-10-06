@@ -1,5 +1,21 @@
 # Factory modulaire des bâtiments
 
+## Tailleur de pierres — maquette du 6 octobre 2026
+
+**Demandé** par Tristan : atelier ouvert sur 2 × 2 cases, mur rectangulaire au fond et charpente habituelle du kit, pignon côté ouvert. Les deux piliers initialement assemblés en blocs 3 × 1 sont remplacés par une seule colonne carrée chacun : un bloc .14 × .14 par assise, hauteur achevée 2.24. Hauteur sous ferme augmentée et pente abaissée. Pierres brutes à gauche, trois postes de taille au centre et blocs finis à droite. L’économie et les qualifications relèvent d’une tranche distincte.
+
+`stonemason-factory.ts` compose une cour poussiéreuse, un mur arrière rectangulaire et deux colonnes de section .14 × .14, avec un seul bloc par assise. Appuis à 2.24 et pente de toit à 25°. `TimberThatch.buildRoof()` reprend la charpente et la couverture existantes sans corps habité, parquet ni plafond. Trois établis avec outils/éclats et deux stocks décoratifs complètent l’atelier. Un brasero animé du système existant se tient près du stock brut, presque sous l’auvent, dans l’état achevé. Pièces fusionnées par matériau : 9 meshes achevés, 5 en travaux. L’état travaux montre une maçonnerie moins haute, la charpente sans couverture et des matériaux en attente. Le sol et les ressources du brasero sont libérés avec l’instance ; les matériaux partagés sont conservés.
+
+Les murs utilisent des blocs de longueur .42 et hauteur .14 (demi-blocs aux joints décalés du mur arrière). Les murs gauche et droit sont remplis, chacun percé d’une arche en pierres de taille : jambages, onze voussoirs en coin et maçonnerie ajustée autour de l’extrados. Le sommet est fermé par un bloc rectangulaire central et un trapèze de chaque côté, sans deux triangles pincés. Ouverture réelle de 1.40, naissance à 1.12 et sommet intérieur à 1.82 ; façade avant ouverte conservée. En travaux, seuls les jambages et les portions de murs en montage sont présents.
+
+Une pile supplémentaire de dix-huit petites pierres en forme de briques (.26 × .10 × .125) occupe le centre de la cour devant l’atelier, en trois assises et deux rangs. La pile de gros blocs finis à droite est tournée ensemble de -35° autour de son centre ; les assises restent assemblées.
+
+Sélection « Tailleur de pierres · atelier ouvert » dans la factory, ou `/factory-preview.html?world=aube&recipe=stonemason`. Les quatre orientations, les deux états et les palettes existantes restent accessibles. Les contrôles d’accès de bâtiments fermés sont masqués pour cette composition ouverte.
+
+**Aspect validé par Tristan**, puis intégré au village comme bâtiment décoratif. Migration additive 030 : type `stonemason`, niveau 1, emprise fixe, aucune production ni coût ; construction ordinaire désactivée dans le catalogue. En DEV avec les ateliers activés, le menu Construire → Production propose « Tailleur de pierres · Décoratif · gratuit ». Aperçu 2 × 2 tournable avec R ; choix de l’emplacement par le joueur. Le serveur vérifie propriétaire, monde, terrain, portée, occupation, infrastructure et passages engagés, puis réserve les quatre cases et enregistre directement un bâtiment achevé. Une seule instance par village ; répétition idempotente. La route refuse la production et les ateliers désactivés. Aucun travail, compétence ou ordonnanceur économique ajouté. Le modèle utilise encore le générateur de la factory ; pas d’asset précalculé dans cette tranche. Les aperçus et miniatures n’activent pas le brasero.
+
+Tristan l’a placé dans Clairière ; rendu observé dans son onglet Chrome et persistance confirmée sur quatre cases. Tests de géométrie, emprise et installation/permissions DEV verts ; détails dans le handoff courant.
+
 ## Assets compilés et premières maisons bois — 5 octobre 2026
 
 Implémenté dans le worktree : la recette reste éditable dans l'atelier ; les modèles de série sont compilés en assets 3D, indépendamment de leurs miniatures PNG. `corepack pnpm factory:bake` (serveur Vite actif sur 5174 ; surcharge `FACTORY_BAKE_URL`) génère le manifeste et les fichiers versionnés par contenu dans `apps/world-web/public/buildings`. Après une modification de géométrie ou de matériau, régénérer et livrer le manifeste avec les assets. Le compilateur utilise Chromium pour les textures Canvas de la factory, sans lancer de suite E2E.
