@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { VillageState } from '@arbestra/contracts';
-import { cellKey, cellsAlongSegment, previewArea, rectangleCells, type Cell } from './construction-selection';
+import { cellKey, cellsAlongSegment, previewArea, rectangleCells, stonemasonRange, type Cell } from './construction-selection';
 
 const world: VillageState['world'] = {
   id: 'world', slug: 'test', name: 'Test', topology: 'torus', widthCells: 2048, heightCells: 1024,
@@ -41,4 +41,13 @@ describe('construction selection', () => {
     expect(invalid.error).not.toBeNull();
     expect(invalid.obstacleCells).toEqual([at(2, 0)]);
   });
+});
+
+it('previews the decorative workshop as four cells around its rotated anchor',()=>{
+  for (let turn=0;turn<4;turn++) {
+    const range=stonemasonRange({cellX:5,cellY:5},turn);
+    const cells=rectangleCells(range,{widthCells:10,heightCells:10},true).cells;
+    expect(cells).toHaveLength(4);
+    expect(cells).toContainEqual({cellX:5,cellY:5});
+  }
 });

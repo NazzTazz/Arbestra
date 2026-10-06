@@ -34,6 +34,8 @@ import * as buildingCommandReceiptsMigration from './migrations/027_building_com
 import * as infrastructureMigration from './migrations/028_infrastructure.js';
 import * as timberHouseRecipesMigration from './migrations/029_timber_house_recipes.js';
 
+import * as stonemasonCatalogMigration from './migrations/030_stonemason_catalog.js';
+
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
     return {
@@ -66,6 +68,7 @@ const migrationProvider: MigrationProvider = {
       '027_building_command_receipts': buildingCommandReceiptsMigration,
       '028_infrastructure': infrastructureMigration,
       '029_timber_house_recipes': timberHouseRecipesMigration,
+      '030_stonemason_catalog': stonemasonCatalogMigration,
     };
   },
 };

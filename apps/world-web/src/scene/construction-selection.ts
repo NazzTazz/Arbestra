@@ -10,6 +10,11 @@ export function campusRange(anchor:Cell,quarterTurns:number):CellRange {
   const a=rotate(-2,-2),b=rotate(2,3);
   return {first:{cellX:anchor.cellX+Math.min(a.x,b.x),cellY:anchor.cellY+Math.min(a.y,b.y)},last:{cellX:anchor.cellX+Math.max(a.x,b.x),cellY:anchor.cellY+Math.max(a.y,b.y)}};
 }
+export function stonemasonRange(anchor:Cell,quarterTurns:number):CellRange {
+  const dx=quarterTurns===1||quarterTurns===0?1:-1,dy=quarterTurns===0||quarterTurns===3?1:-1;
+  return {first:{cellX:anchor.cellX+Math.min(0,dx),cellY:anchor.cellY+Math.min(0,dy)},
+    last:{cellX:anchor.cellX+Math.max(0,dx),cellY:anchor.cellY+Math.max(0,dy)}};
+}
 const normalize = (value: number, size: number): number => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number): number => normalize(value - origin + size / 2, size) - size / 2;
 

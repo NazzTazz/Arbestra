@@ -10,7 +10,7 @@ export interface ConstructionChoice {
   type: string | null;
   buildingId?: string;
 }
-const categoryOf = (code: string) => code === 'dwelling' ? 'Habitat' : code === 'garden' || code === 'sawmill' ? 'Production' : code === 'university' ? 'Savoir' : 'Administration';
+const categoryOf = (code: string) => code === 'dwelling' ? 'Habitat' : code === 'garden' || code === 'sawmill' || code === 'stonemason' ? 'Production' : code === 'university' ? 'Savoir' : 'Administration';
 const resourceNames: Record<string, string> = { wood: 'bois', stone: 'pierre', carrots: 'carottes' };
 const duration = (seconds: number) => seconds < 60 ? `${seconds} s` : `${Math.ceil(seconds / 60)} min`;
 export function CostLine({ costs }: { costs: Array<{ resourceCode: string; amount: number }> }) {
@@ -65,7 +65,7 @@ export function ConstructionPanel({ houseVariant, onHouseVariant, construction, 
           title={`${presentation?.purpose ?? item.displayName} ${presentation?.footprint ?? ''} ${unavailable ? 'Construction indisponible.' : `Travaux : ${duration(initial.constructionDurationSeconds)}.`}`}
           onClick={() => onChoose(item.code)}>
           <strong>{item.displayName}</strong><BuildingThumbnail code={item.code==='dwelling'&&houseVariant!=='stone'?`dwelling-${houseVariant}`:item.code}/>
-          {unavailable ? <em>Non constructible</em> : <CostLine costs={initial.costs}/>}
+          {unavailable ? <em>Non constructible</em> : item.code==='stonemason' ? <em>Décoratif · gratuit</em> : <CostLine costs={initial.costs}/>}
         </button>;
       })}
       {factoryEnabled&&<button className="showroom-model workshop-launcher" type="button" onClick={onWorkshop}><strong>Créer un bâtiment</strong><BuildingThumbnail code="town-hall"/><span className="resource-costs">＋ Atelier Bâtiments</span></button>}

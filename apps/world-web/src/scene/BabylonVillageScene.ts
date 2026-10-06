@@ -1,5 +1,6 @@
 import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
+import { buildStonemason } from './stonemason-factory';
 import { buildSawmill } from './sawmill-factory';
 import { buildPresentation } from './building-presentation';
 import { VillageWorkers } from './village-workers';
@@ -970,7 +971,7 @@ export class BabylonVillageScene {
           : site.building
             ? this.#createBuilding(site)
             : this.#createAvailableSite(site);
-      if(site.building&&site.building.type!=='university'&&!site.building.visualLayout)mesh.rotation.y+=(site.building.quarterTurns??0)*Math.PI/2;
+      if(site.building&&site.building.type!=='university'&&site.building.type!=='stonemason'&&!site.building.visualLayout)mesh.rotation.y+=(site.building.quarterTurns??0)*Math.PI/2;
       cached={signature,mesh};this.#buildingCache.set(key,cached);}
       const mesh=cached.mesh;
       // Rebasing the local frame moves a campus; it does not change its geometry.
@@ -1760,6 +1761,15 @@ export class BabylonVillageScene {
   }
 
   #createBuilding(site: VillageCell): Mesh {
+    if (site.building?.type === 'stonemason') {
+      const body = new BabylonMesh(`stonemason-${site.building.id}`, this.#scene);
+      body.position.copyFrom(this.#universityCentre(site));
+      body.rotation.y = (site.building.quarterTurns ?? 0) * Math.PI / 2;
+      this.#timberThatch ??= new TimberThatch(this.#scene);
+      buildStonemason(body, this.#timberThatch, 'finished');
+      this.#createContactShadow(body, 4.5, 4.5);
+      return this.#registerStructure(body);
+    }
     if (site.building?.type === 'garden') return this.#createGardenPlot(site, false);
     if (site.building?.type === 'sawmill') return this.#createSawmill(site);
     if (site.building?.type === 'town-hall') return this.#createTownHall(site);

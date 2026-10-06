@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
 import {InfrastructureRequestSchema,type InfrastructureRequest,InfrastructurePreviewSchema} from '@arbestra/contracts';
-import {infrastructureCommand,infrastructurePreview} from './infrastructure.js';
+import {factoryCapability,infrastructureCommand,infrastructurePreview} from './infrastructure.js';
 import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
 import {harvestGardenSelection} from './service.js';
 import type { FastifyInstance } from 'fastify';
@@ -17,7 +17,7 @@ import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
-import { clearVillageWoodland, discoverCatEyes, constructBuilding, constructBuildingArea, discoverBuildingSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillageState, harvestGarden, restPopulation, startVillageStoneExtraction, startVillageWorksite, previewVillageWorksite, changeVillageWorksite, upgradeBuilding } from './service.js';
+import { installDecorativeStonemason, clearVillageWoodland, discoverCatEyes, constructBuilding, constructBuildingArea, discoverBuildingSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillageState, harvestGarden, restPopulation, startVillageStoneExtraction, startVillageWorksite, previewVillageWorksite, changeVillageWorksite, upgradeBuilding } from './service.js';
 
 const WorldParametersSchema = Type.Object({ worldSlug: Type.String({ minLength: 1, maxLength: 64 }) });
 const VillageParametersSchema = Type.Object({
@@ -82,6 +82,14 @@ export async function registerVillageRoutes(
       villageId: string;
     };
     const body = request.body as {houseVariant?:'stone'|'logs'|'beams'; quarterTurns?:number; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }>; buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
+    if (body.buildingType === 'stonemason') {
+      if (config.isProduction) throw new HttpError(404, 'DEV_ONLY', 'Decorative installation is development-only.');
+      const current = await getVillageState(db, account.id, worldSlug, villageId);
+      if (!await factoryCapability(db, current.world.id)) throw new HttpError(403, 'FACTORY_DISABLED', 'Enable DEV workshops before placing this decoration.');
+      const anchor = {cellX:body.anchorCellX ?? body.cellX!,cellY:body.anchorCellY ?? body.cellY!};
+      const installed = await installDecorativeStonemason(db, account.id, worldSlug, villageId, anchor, body.quarterTurns);
+      return reply.status(201).send(installed);
+    }
     const state = body.cells ? await constructBuildingArea(
       db,
       account.id,

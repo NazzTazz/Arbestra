@@ -11,7 +11,7 @@ import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
 import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, upgradeBuilding } from './api/client';
-import { campusRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
+import { campusRange, stonemasonRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
 import { WorldModeNavigation, type ActiveWorldMode } from './ui/world-mode';
@@ -311,7 +311,7 @@ export function App() {
   const spatial = definition?.progressionMode === 'spatial';
   const area = useMemo(() => state && selection && context?.action !== 'upgrade' ? previewArea(state, construction?.type === 'university'
     ? campusRange(selection.last,quarterTurns)
-    : selection, spatial || construction?.type === 'university', extensionId) : null, [state, selection, spatial, extensionId, construction?.type, context?.action,quarterTurns]);
+    : construction?.type === 'stonemason' ? stonemasonRange(selection.last,quarterTurns) : selection, spatial || construction?.type === 'university' || construction?.type === 'stonemason', extensionId) : null, [state, selection, spatial, extensionId, construction?.type, context?.action,quarterTurns]);
   const highlightedSiteIds = useMemo(() => {
     if (!state || !construction?.buildingId) return [];
     const active = state.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active');
@@ -450,7 +450,7 @@ export function App() {
     const buildingId = intent.action === 'extend' ? intent.buildingId : undefined;
     const nextArea = previewArea(state, construction.type === 'university'
       ? campusRange(last,quarterTurns)
-      : nextSelection, Boolean(spatial || construction.type === 'university'), buildingId);
+      : construction.type === 'stonemason' ? stonemasonRange(last,quarterTurns) : nextSelection, Boolean(spatial || construction.type === 'university' || construction.type === 'stonemason'), buildingId);
     const currentLevel = buildingId ? state.cells.find(cell => cell.building?.id === buildingId)?.building?.level ?? 1 : 1;
     const currentDefinition = state.buildingTypes.find(item => item.code === construction.type);
     const nextCosts = (currentDefinition?.levels.find(item => item.level === currentLevel)?.costs ?? [])
@@ -465,7 +465,7 @@ export function App() {
     if (!shown || shown.houseVariant !== houseVariant || shown.quarterTurns !== quarterTurns || shown.buildingId !== buildingId || JSON.stringify(shown.cells) !== JSON.stringify(nextArea.cells) || JSON.stringify(shown.costs) !== JSON.stringify(nextCosts)) {
       setError('L’aperçu a changé. Vérifiez l’emprise et le coût, puis cliquez à nouveau.'); setPaletteCollapsed(false); return;
     }
-    const anchor = construction.type === 'university' ? last : spatial ? first : nextArea.cells[0]!;
+    const anchor = construction.type === 'university' || construction.type === 'stonemason' ? last : spatial ? first : nextArea.cells[0]!;
     const command: ConstructionCommand = buildingId
       ? { kind: 'expand', commandId: crypto.randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
         buildingId, cells: nextArea.cells, expectedCosts: nextCosts, success: 'Extension du Jardin lancée' }
@@ -742,7 +742,7 @@ export function App() {
       closePanels(); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
       pushNotification(`Outil ${family === 'wood' ? woodMode === 'clear' ? 'Défrichage' : 'Bois' : 'Pierre'} prêt · glissez dans le monde.`);
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
-    {terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} onHouseVariant={setHouseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
+    {terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} onHouseVariant={setHouseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes.map(item=>item.code==='stonemason'?{...item,buildable:Boolean(state.factoryEnabled&&!state.cells.some(c=>c.building?.type==='stonemason'))}:item)} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
       intentState={constructionIntentState} onRetry={retryConstruction} onClearError={clearConstructionError}
       collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={type => { clearConstructionError(); clearPreview(); setConstruction({ action: 'build', type }); }}
       domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}

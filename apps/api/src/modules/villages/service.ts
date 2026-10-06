@@ -960,6 +960,34 @@ export function getVillageState(
   });
 }
 
+/** Development installation of the approved decorative workshop; no economic command. */
+export async function installDecorativeStonemason(
+  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, anchor: SpatialCell, quarterTurns = 0,
+): Promise<VillageState> {
+  return db.transaction().execute(async tx => {
+    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    const cells = [0, 1].flatMap(dx => [0, 1].map(dy => ({
+      cellX: normalizeCell(anchor.cellX + (quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy), village.widthCells),
+      cellY: normalizeCell(anchor.cellY + (quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx), village.heightCells),
+    })));
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells, [], true);
+    const existing = await tx.selectFrom('buildings').select('id').where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId).where('buildingType', '=', 'stonemason').executeTakeFirst();
+    if (existing) return state(tx, accountId, worldSlug, economy);
+    for (const cell of cells) await assertBuildable(tx, village, cell.cellX, cell.cellY);
+    const ground = await snapshot(tx, village);
+    const heights = cells.map(cell => ground.elevations[normalizeCell(cell.cellY - ground.originCellY, village.heightCells) * SNAPSHOT_SIZE + normalizeCell(cell.cellX - ground.originCellX, village.widthCells)]!);
+    if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
+      throw new HttpError(409, 'UNEVEN_TERRAIN', 'The decorative workshop requires level ground.');
+    const building = await tx.insertInto('buildings').values({ worldId: village.worldId, villageId: village.villageId,
+      buildingType: 'stonemason', level: 1, targetLevel: null, status: 'completed', quarterTurns,
+      constructionStartedAt: null, constructionCompletesAt: null, completedAt: economy.through, visualLayout: null,
+    }).returning('id').executeTakeFirstOrThrow();
+    await reserveSelection(tx, village.worldId, building.id, cells[0]!, cells);
+    return state(tx, accountId, worldSlug, economy);
+  });
+}
+
 export async function commandVillageScience(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: ScienceCommand): Promise<VillageState> {
   return db.transaction().execute(async tx => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
