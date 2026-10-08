@@ -75,8 +75,8 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   // Cache only bounded, deterministic geometry; never retain an economic snapshot.
   const signature=JSON.stringify([world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
     region.originCellX,region.originCellY,region.width,region.height,region.terrainCodes,
-    region.features.map(f=>[f.id,f.type,f.cellX,f.cellY,f.deposit?.state,f.deposit?.blocksCell,f.deposit?.cleared]),
-    state.cells.filter(c=>c.footprint||c.building).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.visualLayout,c.building.accesses,c.building.garden?.plots.map(p=>[p.cellX,p.cellY])]]),state.infrastructure&&[state.infrastructure.roads,state.infrastructure.inheritedRoads,state.infrastructure.inheritedCells,state.infrastructure.equipment.map(e=>[e.id,e.x,e.y])],woodlandTargets]);
+    [...region.features].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>[f.id,f.type,f.cellX,f.cellY,f.deposit?.state,f.deposit?.blocksCell,f.deposit?.cleared]),
+    state.cells.filter(c=>c.footprint||c.building).sort((a,b)=>a.cellX-b.cellX||a.cellY-b.cellY).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.visualLayout,c.building.accesses,c.building.garden?.plots.map(p=>[p.cellX,p.cellY]).sort((a,b)=>a[0]!-b[0]!||a[1]!-b[1]!)]]),state.infrastructure&&[state.infrastructure.roads,state.infrastructure.inheritedRoads,state.infrastructure.inheritedCells,[...state.infrastructure.equipment].sort((a,b)=>a.id.localeCompare(b.id)).map(e=>[e.id,e.x,e.y])],[...woodlandTargets].sort()]);
   const cached=networkCache.get(signature);if(cached){networkCache.delete(signature);networkCache.set(signature,cached);return copyNetwork(cached);}
   const start = { cellX: village.anchorCellX, cellY: village.anchorCellY };
   const blocked = new Set(state.cells.filter((cell) => cell.footprint).map(key));
@@ -168,7 +168,7 @@ function prepareRefinement(state:Pick<VillageState,'world'|'village'|'region'|'c
   return {surface,curbPixels,roadNodes};
 }
 export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>):TravelRoute|null{
-  if(!state.infrastructure||route.cells.length<2)return route;
+  if(!state.infrastructure||!route.cells.length)return route;
   const anchor=state.cells.find(c=>c.cellX===state.village.anchorCellX&&c.cellY===state.village.anchorCellY);
   const hallId=state.village.townHallBuildingId??anchor?.footprint?.buildingId??anchor?.building?.id;
   const hall=state.cells.find(c=>c.building?.id===hallId&&c.building?.type==='town-hall');if(!hall?.building)return route;

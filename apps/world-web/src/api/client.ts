@@ -1,3 +1,4 @@
+import { randomUUID } from '../random-uuid';
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
@@ -25,9 +26,9 @@ export async function previewInfrastructure(slug:string,villageId:string,request
 }
 export function commandInfrastructure(slug:string,villageId:string,request:InfrastructureRequest){return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)});}
 
-export async function previewExploitation(worldSlug: string, villageId: string, order: ExploitationRequest): Promise<ExploitationPreview> {
+export async function previewExploitation(worldSlug: string, villageId: string, order: ExploitationRequest, signal?: AbortSignal): Promise<ExploitationPreview> {
   return parseResponse<ExploitationPreview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/exploitation/preview`, {
-    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(order),
+    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(order), signal: signal ?? null,
   }));
 }
 export function startExploitation(worldSlug: string, villageId: string, order: ExploitationRequest): Promise<TimedVillageState> {
@@ -137,7 +138,7 @@ export function buildBuilding(
   buildingType: BuildingType,
   anchor: { cellX: number; cellY: number },
   cells: Array<{ cellX: number; cellY: number }>,
-  commandId: string = crypto.randomUUID(),
+  commandId: string = randomUUID(),
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<TimedVillageState> {
@@ -148,7 +149,7 @@ export function buildBuilding(
 }
 
 export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>,
-  commandId: string = crypto.randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = []): Promise<TimedVillageState> {
+  commandId: string = randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = []): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) },
@@ -159,7 +160,7 @@ export function upgradeBuilding(
   worldSlug: string,
   villageId: string,
   buildingId: string,
-  commandId: string = crypto.randomUUID(),
+  commandId: string = randomUUID(),
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   expectedLevel?: number,
 ): Promise<TimedVillageState> {
@@ -173,7 +174,7 @@ export function harvestGardenSelection(worldSlug:string,villageId:string,cells:A
   return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/garden-harvests`,
     {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({commandId,cells})});
 }
-export function harvestGarden(worldSlug: string, villageId: string, buildingId: string, cellX: number, cellY: number, commandId: string = crypto.randomUUID()): Promise<TimedVillageState> {
+export function harvestGarden(worldSlug: string, villageId: string, buildingId: string, cellX: number, cellY: number, commandId: string = randomUUID()): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/harvest`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, cellX, cellY }) },

@@ -12,3 +12,10 @@ export * from './path-obstacles.js';
 export * from './processing.js';
 export * from './building-costs.js';
 export * from './market.js';
+
+export * from './world-generator.js';
+export * from './world-climate.js';
+export * from './world-landscape.js';
+
+export { GEOGRAPHY_RECIPE_REVISION as LANDSCAPE_RECIPE_REVISION } from './world-geography.js';
+export * from './world-hydrology.js';

@@ -1,4 +1,5 @@
-import {describe,it,expect} from 'vitest';
+import {describe,it,expect,vi} from 'vitest';
+import * as infrastructureModule from './infrastructure.js';
 import {emptyInfrastructure,infrastructurePlanSurface,infrastructureBorders,infrastructureBlockedPixels,infrastructureBarrierAt,prepareInfrastructureEdit,type RoadStroke} from './infrastructure.js';
 import {automaticBraziers} from './automatic-braziers.js';
 import {buildingAccesses} from './building-access.js';
@@ -9,6 +10,31 @@ const world={widthCells:64,heightCells:64};
 const state=()=>({world,village:{anchorCellX:10,anchorCellY:10},region:{originCellX:0,originCellY:0,width:64,height:64,terrainCodes:Array(4096).fill(1),features:[]},cells:[{cellX:10,cellY:10,footprint:{buildingId:'hall',state:'active'},building:{id:'hall',type:'town-hall',quarterTurns:0}}],travelRoutes:[],infrastructure:emptyInfrastructure()}) as unknown as VillageState;
 const road=(points:RoadStroke['points'],width=4,border=false):RoadStroke=>({id:'r',points,width,border,operation:'paint',material:'stone-1'});
 describe('infrastructure spatial guarantees',()=>{
+  it('connects the real hall door to a garden on the village anchor even when the coarse route has one point',()=>{
+    const s=state();s.cells[0]!.cellX=9;s.village.townHallBuildingId='hall';
+    const route:TravelRoute={id:'garden',kind:'garden',destination:{cellX:10,cellY:10},cells:[{cellX:10,cellY:10}]};
+    const refined=refineTravelRoute(s,route)!;
+    expect(refined.version).toBe(2);
+    expect(refined.cells[0]).toEqual(buildingAccesses(s,'hall')[0]!.position);
+    expect(refined.cells.at(-1)).toEqual(route.destination);
+  });
+  it('reuses the same navigation when database rows arrive in a different order',()=>{
+    const s=state();s.world.id='cache-row-order';
+    s.region.features.push(...[14,15].map((cellX,index)=>({id:`rock-${index}`,type:'stone_outcrop',cellX,cellY:10,deposit:{state:'available',blocksCell:true}} as VillageState['region']['features'][number])));
+    const surface=vi.spyOn(infrastructureModule,'infrastructurePlanSurface');
+    try {
+      const routes=buildTravelNetwork(s);expect(routes.length).toBeGreaterThan(0);
+      surface.mockClear();s.region.features.reverse();s.cells.reverse();
+      expect(buildTravelNetwork(s)).toEqual(routes.map(route=>({...route,destination:{cellX:route.destination.cellX,cellY:route.destination.cellY}})));
+      expect(surface).not.toHaveBeenCalled();
+      s.region.features[0]!.deposit!.remainingAmount=17;
+      s.region.features[0]!.deposit!.reservedAmount=3;
+      s.region.features[0]!.deposit!.revision=42;
+      buildTravelNetwork(s);expect(surface).not.toHaveBeenCalled();
+      s.infrastructure!.roads.push(road([{x:80,y:80},{x:112,y:80}]));
+      buildTravelNetwork(s);expect(surface).toHaveBeenCalled();
+    } finally {surface.mockRestore();}
+  });
   it('uses the authoritative hall identity even when neither anchor nor footprint contains the village anchor',()=>{
     const s=state();s.village.anchorCellX=12;s.village.townHallBuildingId='hall';
     s.cells.unshift({cellX:12,cellY:10,footprint:{buildingId:'neighbor',state:'active'},building:{id:'neighbor',type:'town-hall'}} as VillageState['cells'][number]);

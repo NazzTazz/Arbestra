@@ -22,9 +22,24 @@ export interface WorldsTable {
   generationVersion: Generated<number>;
   generationStatus: Generated<'pending' | 'generating' | 'ready' | 'failed'>;
   generatedAt: Timestamp | null;
+  isOpen: Generated<boolean>;
+  openedAt: ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
   createdAt: Generated<Timestamp>;
 }
 
+export interface WorldGenerationCandidatesTable {
+  worldId:string; commandId:string; ownerAccountId:string;
+  parameters:JSONColumnType<import('@arbestra/contracts').GeneratorParameters,import('@arbestra/contracts').GeneratorParameters>;
+  status:Generated<'pending'|'running'|'ready'|'failed'>;
+  attempt:Generated<number>; revision:Generated<number>; recipeRevision:Generated<number>;
+  heartbeatAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
+  startedAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
+  finishedAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
+  checksum:Generated<string|null>; error:Generated<string|null>; retainedAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
+  durationMs:Generated<number|null>; createdAt:ColumnType<Date,Date|string|undefined,Date|string>;
+  metrics:ColumnType<import('@arbestra/contracts').GeneratedLandscape['metrics']|null,import('@arbestra/contracts').GeneratedLandscape['metrics']|null|undefined,import('@arbestra/contracts').GeneratedLandscape['metrics']|null>;
+  artifact:ColumnType<import('@arbestra/contracts').GeneratedLandscape|null,import('@arbestra/contracts').GeneratedLandscape|null|undefined,import('@arbestra/contracts').GeneratedLandscape|null>;
+}
 export interface WorldMembershipsTable {
   accountId: string;
   worldId: string;
@@ -433,6 +448,7 @@ export interface Database {
   resourceDeposits: StoneDepositsTable & { resourceCode: 'stone' | 'wood'; cleared: boolean; blocksCell: boolean };
   accounts: AccountsTable;
   worlds: WorldsTable;
+  worldGenerationCandidates: WorldGenerationCandidatesTable;
   worldMemberships: WorldMembershipsTable;
   villages: VillagesTable;
   buildings: BuildingsTable;

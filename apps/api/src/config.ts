@@ -8,6 +8,7 @@ try {
 }
 
 export interface AppConfig {
+  readonly worldGeneratorOperatorEmails?: readonly string[];
   readonly databaseUrl: string;
   readonly host: string;
   readonly port: number;
@@ -29,6 +30,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
 
   return {
     databaseUrl,
+    worldGeneratorOperatorEmails:(environment.WORLD_GENERATOR_OPERATOR_EMAILS??'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean),
     host: environment.HOST ?? '127.0.0.1',
     port: Number(environment.PORT ?? 3000),
     isProduction: environment.NODE_ENV === 'production',

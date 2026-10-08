@@ -8,10 +8,23 @@ import type { SessionResponse } from '@arbestra/contracts';
 import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { verifyPassword } from '../../security/passwords.js';
+import { hashPassword, verifyPassword } from '../../security/passwords.js';
 import { createSessionToken, hashSessionToken } from '../../security/sessions.js';
 
 const scrypt = promisify(callbackScrypt);
+
+export async function register(db: Kysely<Database>, config: AppConfig, email: string, password: string) {
+  const normalizedEmail = email.trim().toLowerCase(), passwordHash = await hashPassword(password);
+  return db.transaction().execute(async tx => {
+    const account = await tx.insertInto('accounts').values({ email: normalizedEmail, passwordHash })
+      .onConflict(c => c.column('email').doNothing()).returning(['id', 'email']).executeTakeFirst();
+    if (!account) throw new HttpError(409, 'EMAIL_ALREADY_USED', 'Cette adresse possède déjà un compte.');
+    const token = createSessionToken();
+    await tx.insertInto('sessions').values({ tokenHash: hashSessionToken(token), accountId: account.id,
+      expiresAt: new Date(Date.now() + config.sessionTtlDays * 86_400_000) }).execute();
+    return { token, session: { account, worlds: [] } satisfies SessionResponse };
+  });
+}
 
 export interface AuthenticatedAccount {
   id: string;

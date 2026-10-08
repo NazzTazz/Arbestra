@@ -111,6 +111,7 @@ void main() {
 /** Half-resolution volume integrated against the actual scene depth, then composited at full size. */
 export class TorusFog {
   #weather: WeatherMap | null = null;
+  #disposeResources: (() => void) | null = null;
   #phase = 0;
   readonly #sun = Vector3.Zero();
   constructor(scene: Scene) {
@@ -150,7 +151,9 @@ export class TorusFog {
     const composite = new PostProcess('fog-composite','arbestraFogComposite',[],['originalScene'],.5,camera,
       Texture.BILINEAR_SAMPLINGMODE,scene.getEngine(),false,null,Constants.TEXTURETYPE_HALF_FLOAT);
     composite.onApply = effect => effect.setTextureFromPostProcess('originalScene',original);
+    this.#disposeResources=()=>{composite.dispose(camera);volume.dispose(camera);original.dispose(camera);noise.dispose();scene.disableDepthRenderer(camera);};
   }
+  dispose(): void { this.#disposeResources?.(); this.#disposeResources=null; this.#weather=null; }
   update(phase: number, sun: Vector3, weather: WeatherMap | null): void {
     this.#weather=weather; this.#phase=cyclePhases(phase).torus; this.#sun.copyFrom(sun);
   }

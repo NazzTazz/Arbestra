@@ -30,7 +30,7 @@ export function buildTownHallClock(parent:Mesh,kit:TimberThatch,phase:'finished'
   clock.position.set(-width/2-.06,floor+eave+rise/2,0);
   const face=MeshBuilder.CreateCylinder('market-clock-face',{diameter:.40,height:.035,tessellation:32},kit.scene);face.rotation.z=Math.PI/2;face.material=kit.wood;face.parent=clock;
   const dark=new StandardMaterial('market-clock-dark-wood',kit.scene);dark.diffuseColor=Color3.FromHexString('#2b2118');dark.specularColor=Color3.Black();
-  for(let i=0;i<12;i++){const angle=i*Math.PI/6;
+  for(let i=0;i<(kit.lod===2?0:12);i++){const angle=i*Math.PI/6;
     const tick=MeshBuilder.CreateBox('market-clock-hour-mark',{width:.012,height:.03,depth:.012},kit.scene);
     tick.position.set(-.025,Math.cos(angle)*.163,Math.sin(angle)*.163);tick.rotation.x=angle;tick.material=dark;tick.parent=clock;
   }
@@ -40,7 +40,7 @@ export function buildTownHallClock(parent:Mesh,kit:TimberThatch,phase:'finished'
     hand.position.set(-.03,length/2,0);hand.material=dark;hand.parent=pivot;return pivot;
   });
   let lastSecond=-1;
-  const update=()=>{const now=new Date(),second=Math.floor(now.getTime()/1000);if(second===lastSecond)return;lastSecond=second;
+  const update=()=>{if(!clock.isEnabled())return;const now=new Date(),second=Math.floor(now.getTime()/1000);if(second===lastSecond)return;lastSecond=second;
     const minute=now.getMinutes()+now.getSeconds()/60;
     hands[0]!.rotation.x=(now.getHours()%12+minute/60)*Math.PI/6;
     hands[1]!.rotation.x=minute*Math.PI/30;

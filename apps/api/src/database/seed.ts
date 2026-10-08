@@ -40,7 +40,7 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
 
       await transaction.insertInto('worlds').values({
         id: DEVELOPMENT_IDS.world, slug: 'aube', name: "Monde de l'Aube", topology: 'torus',
-        widthCells: WORLD_WIDTH, heightCells: WORLD_HEIGHT, chunkSize: 32, seed: 1,
+        widthCells: WORLD_WIDTH, heightCells: WORLD_HEIGHT, chunkSize: 32, seed: 1, isOpen:true,
       }).onConflict((conflict) => conflict.column('id').doUpdateSet({
         slug: 'aube', name: "Monde de l'Aube", topology: 'torus',
         widthCells: WORLD_WIDTH, heightCells: WORLD_HEIGHT, chunkSize: 32, seed: 1,

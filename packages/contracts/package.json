@@ -6,10 +6,17 @@
   "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
-    "./cosmology": { "types": "./src/cosmology.ts", "import": "./dist/cosmology.js" },
+    "./cosmology": {
+      "types": "./src/cosmology.ts",
+      "import": "./dist/cosmology.js"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./world-geography": {"types":"./src/world-geography.ts","import":"./dist/world-geography.js"}, "./geography-prototype": {
+      "types": "./src/geography-prototype.ts",
+      "import": "./dist/geography-prototype.js"
     }
   },
   "scripts": {
@@ -17,6 +24,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.41"
+    "@sinclair/typebox": "^0.34.41",
+    "polygon-clipping": "0.15.7"
   }
 }

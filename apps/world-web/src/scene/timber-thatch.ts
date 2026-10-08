@@ -9,6 +9,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import { facePoint, type BuildingPlan } from './building-plan';
 import {timberDoorGeometry} from './timber-door';
 import {timberWallMembers} from './timber-wall';
+import {simplifyMasonry} from './building-lod-geometry';
 
 export function hallWallCourse(row:number,axis:'x'|'z'){
   const halfX=1.245,halfZ=1.135,thickness=.16;
@@ -78,6 +79,10 @@ export class TimberThatch {
   readonly hay:StandardMaterial;
   readonly stone:StandardMaterial;
   stoneProfile:{segments:number;radiusRatio:number}|undefined;
+  /** Used by the offline distant-campus compiler, never switched during rendering. */
+  distantMasonry=false;
+  /** Factory quality, fixed for one build: close / peripheral / distant. */
+  lod: 0 | 1 | 2 = 0;
   constructor(readonly scene:Scene){
     this.wood=this.material('hall-oak','#ded5c8');
     this.boards=this.material('hall-roof-boards','#d7cbb9');
@@ -143,12 +148,15 @@ export class TimberThatch {
     const logFrame=plan?.recipe.roof.frameMaterial==='logs';
     const batches=new Map<StandardMaterial,BuildingGeometry[]>();
     const add=(m:BuildingGeometry,mat:StandardMaterial)=>{
+      if(this.lod>0&&/^(hall-peg|hall-plank-nail)$/.test(m.name))return m;
+      if(this.lod===2&&/^(hall-chevron|hall-lath)$/.test(m.name))return m;
       if(mat===this.stone&&!m.getVerticesData('color'))m.setVerticesData('color',new Array(m.getTotalVertices()*4).fill(1));
       const a=batches.get(mat)??[];a.push(m);batches.set(mat,a);return m;
     };
     const beam=(name:string,a:Vector3,b:Vector3,w:number,h=w,material=this.wood)=>{
       const isFrame=/^hall-(tie|rafter-|king-post|strut|ridge-purlin|purlin|chevron|lath)/.test(name);
-      const m=new BuildingGeometry(name,material===this.stone?stoneBlockGeometry(Vector3.Distance(a,b),w,h):logFrame&&isFrame?timberFrameGeometry(Vector3.Distance(a,b),w,h,true):compactTimberBeamGeometry(Vector3.Distance(a,b),w,h));
+      const length=Vector3.Distance(a,b);
+      const m=new BuildingGeometry(name,material===this.stone||this.lod===2&&!logFrame?stoneBlockGeometry(length,w,h):logFrame&&isFrame&&this.lod>0?BuildingGeometry.cylinder(name,{height:length,diameter:h,tessellation:this.lod===2?6:8}).data:logFrame&&isFrame?timberFrameGeometry(length,w,h,true):compactTimberBeamGeometry(length,w,h));
       m.position=Vector3.Center(a,b);m.rotationQuaternion=new Quaternion();Quaternion.FromUnitVectorsToRef(Vector3.Up(),b.subtract(a).normalize(),m.rotationQuaternion);return add(m,material);
     };
     const v=(x:number,y:number,z:number)=>new Vector3(x,y,z);
@@ -160,11 +168,11 @@ export class TimberThatch {
     // A thin interior deck, with staggered board ends, never extending under the walls.
     const floorWidth=plan?plan.width-2*plan.recipe.module.thickness:2.17;
     const floorDepth=plan?plan.depth-2*plan.recipe.module.thickness:1.95;
-    const boardCount=Math.ceil(floorWidth/.14),floorBoardWidth=floorWidth/boardCount;
+    const boardCount=this.lod===2?1:Math.ceil(floorWidth/.14),floorBoardWidth=floorWidth/boardCount;
     if(!roofOnly)for(let column=0;column<boardCount;column++){
       if(column%8===0)yield;
       let z=-floorDepth/2;
-      while(z<floorDepth/2-.001){const end=Math.min(floorDepth/2,z+(z===-floorDepth/2&&column%2?.35:.7));
+      while(z<floorDepth/2-.001){const end=this.lod===2?floorDepth/2:Math.min(floorDepth/2,z+(z===-floorDepth/2&&column%2?.35:.7));
         const board=BuildingGeometry.box('factory-parquet',{width:floorBoardWidth-.002,height:.035,depth:end-z-.002});
         turnGrain(board);
         board.position.set(-floorWidth/2+(column+.5)*floorBoardWidth,(plan?0:-.76)+.0175,(z+end)/2);add(board,this.wood);z=end;
@@ -181,7 +189,7 @@ export class TimberThatch {
     if(roofOpening){trussZ.push(roofOpening[0],roofOpening[1]);trussZ.sort((a,b)=>a-b);}
     const frameHalf=.153/2,purlinSize=.07,chevronSize=.035,lathSize=.018,plankSize=.038;
     const roofNormalOffset=frameHalf+purlinSize+plankSize;
-    const edge=half+(plan?(plan.recipe.roof.sideOverhang??plan.recipe.roof.overhang):.245)-(plan?roofNormalOffset*Math.sin(angle):0),len=edge/Math.cos(angle),rows=plan?Math.ceil(len/.42):4,step=len/rows;
+    const edge=half+(plan?(plan.recipe.roof.sideOverhang??plan.recipe.roof.overhang):.245)-(plan?roofNormalOffset*Math.sin(angle):0),len=edge/Math.cos(angle),rows=this.lod===2?1:plan?Math.ceil(len/.42):4,step=len/rows;
     const structuralLen=plan?(half+.045)/Math.cos(angle):len,structuralRows=plan?Math.ceil(structuralLen/.42):rows;
     // Recessed secondary timbers share the purlin layer; boards rest directly on it.
     const purlinOffset=frameHalf+purlinSize/2,chevronOffset=frameHalf+purlinSize-chevronSize/2;
@@ -285,12 +293,13 @@ export class TimberThatch {
       const works=plan.phase==='works',limit=works?worksHeight:plan.height;
       let made=0;
       const timber=plan.recipe.wallMaterial==='logs'||plan.recipe.wallMaterial==='beams';
-      for(const stone of timber?timberWallMembers(plan):plan.stones){if(stone.y>limit)continue;
+      const masonry=(this.distantMasonry||this.lod>0)&&!timber?simplifyMasonry(plan.stones.filter(stone=>stone.y<=limit),plan.recipe.module.joint):plan.stones;
+      for(const stone of timber?timberWallMembers(plan):masonry){if(stone.y>limit)continue;
         if(++made%32===0)yield;
         const a=stone.axis==='x'?v(stone.x-stone.length/2,stone.y,stone.z):v(stone.x,stone.y,stone.z-stone.length/2);
         const b=stone.axis==='x'?v(stone.x+stone.length/2,stone.y,stone.z):v(stone.x,stone.y,stone.z+stone.length/2);
         if(plan.recipe.wallMaterial==='logs'){
-          const log=BuildingGeometry.cylinder('factory-log',{height:stone.length,diameter:stone.height,tessellation:10});
+          const log=BuildingGeometry.cylinder('factory-log',{height:stone.length,diameter:stone.height,tessellation:this.lod===2?6:this.lod===1?8:10});
           log.position=Vector3.Center(a,b);log.rotationQuaternion=new Quaternion();
           Quaternion.FromUnitVectorsToRef(Vector3.Up(),b.subtract(a).normalize(),log.rotationQuaternion);
           add(log,this.wood);continue;
@@ -396,7 +405,7 @@ export class TimberThatch {
     door.position.set(0,-.76,-1.10);door.rotation.y=Math.PI;add(door,this.wood);
     }
     // Individually nailed flush boards. Half-board offset on alternating courses.
-    const span=roofHalfZ*2,boardWidth=.245;
+    const span=roofHalfZ*2,boardWidth=this.lod===2?span:.245;
     if(!flatStone&&(!plan||plan.phase!=='works')){
     for(const side of [-1,1]){
       const along=v(side*Math.cos(angle),-Math.sin(angle),0),normal=v(side*Math.sin(angle),Math.cos(angle),0);

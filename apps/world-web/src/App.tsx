@@ -1,3 +1,4 @@
+import { randomUUID } from './random-uuid';
 import { RepresentativePanel } from './ui/RepresentativePanel';
 import { ProcessingPanel } from './ui/ProcessingPanel';
 import { MarketPanel } from './ui/MarketPanel';
@@ -32,11 +33,11 @@ import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
 import { commandScience } from './api/client';
 import { DevDrawer } from './ui/DevDrawer';
-import { configuredExploitation, freezeExploitation, exploitationTargetKeys } from './ui/exploitation-intent';
+import { configuredExploitation, freezeExploitation, exploitationTargetKeys, pendingExploitationCap, directGardenExploitation } from './ui/exploitation-intent';
 
 const VillageScene = lazy(() => import('./scene/VillageScene').then((module) => ({ default: module.VillageScene })));
 const worldSlug = new URLSearchParams(window.location.search).get('world') ?? 'aube';
-const LOBBY_URL = import.meta.env.VITE_LOBBY_URL ?? 'http://localhost:5173';
+const LOBBY_URL = import.meta.env.VITE_LOBBY_URL ?? `${window.location.protocol}//${window.location.hostname}:5173`;
 const populationAnchor = (): ScreenAnchor => ({ x: window.innerWidth / 2, y: window.innerHeight - 220 });
 
 type ConstructionCommand = {
@@ -111,6 +112,7 @@ export function App() {
   const [terrainView, setTerrainView] = useState<TerrainViewMode>('village');
   const [arrivalActive, setArrivalActive] = useState(false);
   const [oracleCat, setOracleCat] = useState(false);
+  const [oracleProvisions, setOracleProvisions] = useState<{ villageKey: string; message: string } | null>(null);
   const catRequest = useRef(false);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const populationIntent = useRef<{ action: 'feed' | 'rest'; count: number; id: string } | null>(null);
@@ -122,7 +124,8 @@ export function App() {
   }, []);
   useEffect(() => () => notificationTimers.current.forEach(window.clearTimeout), []);
   const markOracleProgress = useOracleHint(state ? `${state.world.id}:${state.village.id}` : null,
-    state?.cells.some((cell) => cell.building?.hiddenSuppliesAvailable) ?? false, pendingAction, pushNotification);
+    state?.cells.some((cell) => cell.building?.hiddenSuppliesAvailable) ?? false, pendingAction,
+    message => { if (state) setOracleProvisions({ villageKey: `${state.world.id}:${state.village.id}`, message }); });
 
   const applySnapshot = useCallback((snapshot: TimedVillageState) => {
     const previous = stateRef.current;
@@ -192,12 +195,18 @@ export function App() {
   const [mixedRequest, setMixedRequest] = useState<ExploitationRequest | null>(null);
   const [mixedPreview, setMixedPreview] = useState<ExploitationPreview | null>(null);
   const mixedPreviewCommand = useRef<string | null>(null);
+  const exploitationPreviewFlight = useRef<Promise<void>>(Promise.resolve());
   const [, setMixedUncertain] = useState(false);
   const [exploitationIntentState, setExploitationIntentState] = useState<ExploitationIntentState>('idle');
   const uncertainRequest = useRef<ExploitationRequest | null>(null);
   const recoveredVillage = useRef<string | null>(null);
-  const mixedGesture = useRef<{request: ExploitationRequest; filter: ExploitationSettings['filter']} | null>(null);
+  const mixedGesture = useRef<{request: ExploitationRequest; filter: ExploitationSettings['filter']; deferred: boolean; cells: Cell[]} | null>(null);
+  const exploitationActive = useRef(false);
+  const exploitationQueue = useRef<Array<{request: ExploitationRequest; cells: Cell[]}>>([]);
+  const [queuedExploitationCount, setQueuedExploitationCount] = useState(0);
+  const [queuedExploitationCells, setQueuedExploitationCells] = useState<Cell[]>([]);
   const releasedExploitation = useRef<string | null>(null);
+  const releasedExploitationCap = useRef<number | null>(null);
   const [hoveredBuildingId, setHoveredBuildingId] = useState<string | null>(null);
   const shownUpgrade = useRef<UpgradePreview | null>(null);
   const presentedArea = useRef<{ cells: Cell[]; costs: Array<{ resourceCode: string; amount: number }>; buildingId: string | undefined; quarterTurns:number; houseVariant:string } | null>(null);
@@ -206,8 +215,8 @@ export function App() {
   const acceptedExploitation = useRef(new Set<string>());
   const settingsContext = useRef<string | null>(null);
   const [mixedCells, setMixedCells] = useState<Cell[]>([]);
-  const pendingHarvestCells = mixedCells;
-  const pendingHarvestKeys = useMemo(() => new Set(mixedCells.map(cellKey)), [mixedCells]);
+  const pendingHarvestCells = useMemo(() => [...mixedCells, ...queuedExploitationCells], [mixedCells, queuedExploitationCells]);
+  const pendingHarvestKeys = useMemo(() => new Set(pendingHarvestCells.map(cellKey)), [pendingHarvestCells]);
   useEffect(() => {
     if (!state) return;
     const key = `arbestra:exploitation-settings:${state.world.id}:${state.village.id}`;
@@ -224,24 +233,41 @@ export function App() {
     presentedExploitation.current = mixedRequest && mixedPreview && mixedPreviewCommand.current === mixedRequest.commandId ? { commandId: mixedRequest.commandId, preview: mixedPreview } : null;
     if (mixedRequest && mixedPreview && mixedPreviewCommand.current === mixedRequest.commandId && exploitationIntentState === 'selecting')
       for (const key of exploitationTargetKeys(mixedPreview)) acceptedExploitation.current.add(key);
+    if (mixedRequest && mixedPreview && presentedExploitation.current && releasedExploitation.current === mixedRequest.commandId)
+      finalizeReleasedExploitation(mixedRequest);
   }, [mixedRequest, mixedPreview, exploitationIntentState]);
   useEffect(() => {
     if (['error', 'confirm-clear', 'uncertain'].includes(exploitationIntentState) || constructionIntentState === 'uncertain' || constructionIntentState === 'error') setPaletteCollapsed(false);
   }, [exploitationIntentState, constructionIntentState]);
+  const previewRequest = ['submitting', 'uncertain', 'confirm-clear'].includes(exploitationIntentState)
+    || (mixedRequest && directGardenExploitation(mixedRequest)) ? null : mixedRequest;
   useEffect(() => {
-    if (!mixedRequest || !stateRef.current) { setMixedPreview(null); return; }
+    if (!previewRequest || !stateRef.current) return;
+    const mixedRequest = previewRequest;
     let cancelled = false;
     setMixedPreview(null); mixedPreviewCommand.current = null;
-    const timer = window.setTimeout(() => void previewExploitation(worldSlug, stateRef.current!.village.id, mixedRequest).then(preview => {
-      if (!cancelled) { mixedPreviewCommand.current = mixedRequest.commandId; setMixedPreview(preview); }
-    }).catch(reason => {
-      if (!cancelled) {
-        setError(reason instanceof Error ? reason.message : 'Aperçu indisponible.');
-        if (releasedExploitation.current === mixedRequest.commandId) setExploitationIntentState('error');
-      }
-    }), 90);
+    const villageId = stateRef.current.village.id;
+    const timer = window.setTimeout(() => {
+      const previous = exploitationPreviewFlight.current;
+      exploitationPreviewFlight.current = (async () => {
+        await previous;
+        if (cancelled) return;
+        try {
+          const preview = await previewExploitation(worldSlug, villageId, mixedRequest, AbortSignal.timeout(15_000));
+          if (!cancelled) { mixedPreviewCommand.current = mixedRequest.commandId; setMixedPreview(preview); }
+        } catch (reason) {
+          if (!cancelled) {
+            hoveredExploitation.current = null;
+            setError(reason instanceof Error ? reason.message : 'Aperçu indisponible.');
+            if (releasedExploitation.current === mixedRequest.commandId) { releasedExploitation.current = null; setExploitationIntentState('error'); }
+          }
+        }
+      })();
+    }, 90);
+    // Aborting fetch does not cancel the server transaction: finish the running
+    // preview, discard its result, then calculate only the latest selection.
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [mixedRequest]);
+  }, [previewRequest]);
 
   const refresh = useCallback(async () => {
     if (actionInFlight.current) return;
@@ -376,7 +402,7 @@ export function App() {
   function retryConstruction() {
     const previous = constructionCommand.current;
     if (!previous || actionInFlight.current) return;
-    const command = constructionIntentState === 'uncertain' ? previous : { ...previous, commandId: crypto.randomUUID() };
+    const command = constructionIntentState === 'uncertain' ? previous : { ...previous, commandId: randomUUID() };
     void executeConstruction(command);
   }
 
@@ -387,7 +413,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || actionInFlight.current) return;
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || actionInFlight.current && !(event.key === 'Escape' && exploitationActive.current)) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.closest('input, textarea, select')) return;
       if (event.key.toLowerCase() === 'b') { event.preventDefault(); chooseMode(modeRef.current === 'construction' ? 'exploration' : 'construction'); }
@@ -450,7 +476,7 @@ export function App() {
         setPaletteCollapsed(false); return;
       }
       const quote = shownUpgrade.current!;
-      void executeConstruction({ kind: 'upgrade', commandId: crypto.randomUUID(), worldSlug: state.world.slug,
+      void executeConstruction({ kind: 'upgrade', commandId: randomUUID(), worldSlug: state.world.slug,
         villageId: state.village.id, buildingId: quote.buildingId, expectedCosts: quote.costs,
         expectedLevel: quote.nextLevel, success: `Amélioration de ${quote.name} lancée` });
       return;
@@ -475,14 +501,14 @@ export function App() {
     }
     const anchor = construction.type === 'university' || construction.type === 'stonemason' ? last : spatial ? first : nextArea.cells[0]!;
     const command: ConstructionCommand = buildingId
-      ? { kind: 'expand', commandId: crypto.randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
+      ? { kind: 'expand', commandId: randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
         buildingId, cells: nextArea.cells, expectedCosts: nextCosts, success: 'Extension du Jardin lancée' }
-      : { kind: 'build', commandId: crypto.randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
+      : { kind: 'build', commandId: randomUUID(), worldSlug: state.world.slug, villageId: state.village.id,
         houseVariant, buildingType: construction.type as BuildingType, anchor, cells: nextArea.cells, quarterTurns, expectedCosts: nextCosts, success: 'Construction lancée' };
     void executeConstruction(command);
   }
   function newMixedRequest(): ExploitationRequest {
-    return configuredExploitation(exploitationSettings, stateRef.current?.village.population.total ?? 1, crypto.randomUUID());
+    return configuredExploitation(exploitationSettings, stateRef.current?.village.population.total ?? 1, randomUUID());
   }
   function changeExploitationSettings(settings: ExploitationSettings) {
     setExploitationSettings(settings);
@@ -493,15 +519,17 @@ export function App() {
     if (mixedRequest && exploitationIntentState === 'error') {
       presentedExploitation.current = null;
       setMixedPreview(null);
-      setMixedRequest(configuredExploitation(settings, stateRef.current?.village.population.total ?? 1, crypto.randomUUID(), mixedRequest));
+      setMixedRequest(configuredExploitation(settings, stateRef.current?.village.population.total ?? 1, randomUUID(), mixedRequest));
       setError(null);
     }
   }
   function cancelWorldGesture() {
+    exploitationQueue.current = []; setQueuedExploitationCount(0); setQueuedExploitationCells([]);
     terrainRef.current?.cancelGesture();
     presentedExploitation.current = null; acceptedExploitation.current.clear(); hoveredExploitation.current = null;
     touchOrigin.current = null; setSelection(null); mixedGesture.current = null;
     if (exploitationIntentState !== 'uncertain' && exploitationIntentState !== 'submitting') {
+      exploitationActive.current = false;
       releasedExploitation.current = null; uncertainRequest.current = null; setMixedRequest(null); setMixedPreview(null); setMixedCells([]);
       setExploitationIntentState('idle'); setMixedUncertain(false);
     }
@@ -537,30 +565,47 @@ export function App() {
     if (view === 'village' && mode === 'population') { setShowPopulation(true); setMenuAnchor(populationAnchor()); }
   }
   function collectExploitation(cell: Cell | null, newGesture = false, previewOnly = false) {
-    if (paletteCollapsed || modeRef.current !== 'exploitation' || terrainView !== 'village' || arrivalActive || actionInFlight.current || uncertainRequest.current) return;
+    if (paletteCollapsed || modeRef.current !== 'exploitation' || terrainView !== 'village' || arrivalActive || uncertainRequest.current) return;
+    if (actionInFlight.current && !exploitationActive.current) return;
     if (previewOnly && (mixedGesture.current || exploitationIntentState !== 'idle' || showDev)) return;
     if (!cell) {
+      if (mixedGesture.current?.deferred) {
+        const { request, cells } = mixedGesture.current;
+        if (exploitationTargetKeys(request).length) exploitationQueue.current.push({ request, cells });
+        mixedGesture.current = null; publishExploitationQueue(); drainExploitationQueue(); return;
+      }
       if (!newGesture && mixedGesture.current) {
         const request = mixedGesture.current.request;
         if (request.gardens.length || request.wood.length || request.stone.length) {
+          exploitationActive.current = true;
           setMixedRequest(request); setMixedUncertain(false); setError(null); closePanels();
-          finalizeReleasedExploitation(request);
+          releasedExploitationCap.current = pendingExploitationCap(request);
+          const direct = directGardenExploitation(request);
+          if (direct) void submitExploitation(direct);
+          else if (presentedExploitation.current?.commandId !== request.commandId && releasedExploitationCap.current !== null) {
+            releasedExploitation.current = request.commandId;
+            setExploitationIntentState('verifying');
+          } else finalizeReleasedExploitation(request);
         }
         else { setMixedRequest(null); setMixedPreview(null); setMixedCells([]); setExploitationIntentState('idle'); }
       } else { setMixedCells([]); setExploitationIntentState('idle'); }
       mixedGesture.current = null; return;
     }
-    const warm = newGesture && !previewOnly && hoveredExploitation.current?.key === cellKey(cell)
+    const deferred = !previewOnly && (exploitationActive.current || exploitationQueue.current.length > 0);
+    const warm = !deferred && newGesture && !previewOnly && hoveredExploitation.current?.key === cellKey(cell)
       && hoveredExploitation.current.settings === JSON.stringify(exploitationSettings) ? hoveredExploitation.current.request : null;
     if (newGesture && !previewOnly) {
-      if (!warm) { presentedExploitation.current = null; acceptedExploitation.current.clear(); setMixedRequest(null); setMixedPreview(null); }
-      else if (presentedExploitation.current?.commandId === warm.commandId)
-        for (const key of exploitationTargetKeys(presentedExploitation.current.preview)) acceptedExploitation.current.add(key);
-      releasedExploitation.current = null; setMixedCells([]); setError(null);
-      mixedGesture.current = { request: warm ?? newMixedRequest(), filter: exploitationSettings.filter };
-      setExploitationIntentState('selecting');
+      if (deferred) mixedGesture.current = { request: newMixedRequest(), filter: exploitationSettings.filter, deferred: true, cells: [] };
+      else {
+        if (!warm) { presentedExploitation.current = null; acceptedExploitation.current.clear(); setMixedRequest(null); setMixedPreview(null); }
+        else if (presentedExploitation.current?.commandId === warm.commandId)
+          for (const key of exploitationTargetKeys(presentedExploitation.current.preview)) acceptedExploitation.current.add(key);
+        releasedExploitation.current = null; setMixedCells([]); setError(null);
+        mixedGesture.current = { request: warm ?? newMixedRequest(), filter: exploitationSettings.filter, deferred: false, cells: [] };
+        setExploitationIntentState('selecting');
+      }
     }
-    const gesture = previewOnly ? { request: newMixedRequest(), filter: exploitationSettings.filter } : mixedGesture.current;
+    const gesture = previewOnly ? { request: newMixedRequest(), filter: exploitationSettings.filter, deferred: false, cells: [] as Cell[] } : mixedGesture.current;
     const current = stateRef.current;
     if (!gesture || !current) return;
     let request = gesture.request;
@@ -568,28 +613,58 @@ export function App() {
     const garden = current.cells.flatMap(c => c.building?.garden && !c.building.garden.harvest ? c.building.garden.plots : []).find(p => cellKey(p) === cellKey(cell) && !p.harvest && p.storedCarrots >= 1);
     let changed = false;
     if (garden && (filter === 'all' || filter === 'gardens') && !request.gardens.some(p => cellKey(p) === cellKey(cell))) {
-      request = { ...request, commandId: crypto.randomUUID(), gardens: [...request.gardens, cell] }; changed = true;
+      request = { ...request, commandId: randomUUID(), gardens: [...request.gardens, cell] }; changed = true;
     }
     for (const feature of terrainRef.current?.featuresAt(cell) ?? current.region.features.filter(f => cellKey(f) === cellKey(cell))) {
       const family = feature.deposit?.resourceCode === 'wood' ? 'wood' : feature.deposit?.resourceCode === 'stone' ? 'stone' : null;
       if (family && (filter === 'all' || filter === family) && !request[family].includes(feature.id)) {
-        request = { ...request, commandId: crypto.randomUUID(), [family]: [...request[family], feature.id] }; changed = true;
+        request = { ...request, commandId: randomUUID(), [family]: [...request[family], feature.id] }; changed = true;
       }
     }
-    if (changed) { gesture.request = request; setMixedRequest(request); }
+    if (changed) {
+      gesture.request = request; gesture.cells.push(cell);
+      if (gesture.deferred) { publishExploitationQueue(); return; }
+      setMixedRequest(request);
+    }
+    if (gesture.deferred) return;
     if (previewOnly) { acceptedExploitation.current.clear(); hoveredExploitation.current = { key: cellKey(cell), settings: JSON.stringify(exploitationSettings), request }; setMixedCells([]); if (!changed) { setMixedRequest(null); setMixedPreview(null); } }
     if (garden && request.gardens.some(p => cellKey(p) === cellKey(cell)) || (terrainRef.current?.featuresAt(cell) ?? []).some(f => request.wood.includes(f.id) || request.stone.includes(f.id)))
       setMixedCells(previous => previous.some(p => cellKey(p) === cellKey(cell)) ? previous : [...previous, cell]);
+  }
+  function publishExploitationQueue() {
+    const draft = mixedGesture.current?.deferred ? mixedGesture.current : null;
+    setQueuedExploitationCount(exploitationQueue.current.length + (draft?.cells.length ? 1 : 0));
+    setQueuedExploitationCells([...exploitationQueue.current.flatMap(item => item.cells), ...(draft?.cells ?? [])]);
+  }
+  function drainExploitationQueue() {
+    if (exploitationActive.current || actionInFlight.current || uncertainRequest.current || modeRef.current !== 'exploitation') return;
+    const next = exploitationQueue.current.shift();
+    if (!next) return;
+    exploitationActive.current = true;
+    hoveredExploitation.current = null; presentedExploitation.current = null;
+    acceptedExploitation.current = new Set(exploitationTargetKeys(next.request));
+    releasedExploitationCap.current = pendingExploitationCap(next.request);
+    releasedExploitation.current = releasedExploitationCap.current === null ? null : next.request.commandId;
+    setMixedRequest(next.request); setMixedPreview(null); setMixedCells(next.cells);
+    setExploitationIntentState(releasedExploitation.current ? 'verifying' : 'error');
+    setError(releasedExploitation.current ? null : 'Vérifiez le plafond de ce geste avant de réessayer.');
+    publishExploitationQueue();
+    const direct = directGardenExploitation(next.request);
+    if (direct) { releasedExploitation.current = null; void submitExploitation(direct); }
   }
   async function submitExploitation(request: ExploitationRequest) {
     const current = stateRef.current;
     if (modeRef.current !== 'exploitation' || !current || actionInFlight.current || arrivalActive) return;
     actionInFlight.current = true; setPendingAction(true); setError(null);
+    exploitationActive.current = true;
+    let succeeded = false;
+    hoveredExploitation.current = null;
     setExploitationIntentState('submitting');
     sessionStorage.setItem(pendingExploitationKey(current.village.id), JSON.stringify(request));
     try {
       const snapshot = await startExploitation(worldSlug, current.village.id, request);
       applySnapshot(snapshot); markOracleProgress();
+      succeeded = true;
       sessionStorage.removeItem(pendingExploitationKey(current.village.id));
       uncertainRequest.current = null; releasedExploitation.current = null; setMixedUncertain(false); setMixedRequest(null); setMixedPreview(null); setMixedCells([]);
       setExploitationIntentState('idle');
@@ -606,11 +681,14 @@ export function App() {
         setExploitationIntentState('uncertain');
       }
       pushNotification(message, 'warning');
-    } finally { actionInFlight.current = false; setPendingAction(false); }
+    } finally {
+      actionInFlight.current = false; setPendingAction(false);
+      if (succeeded) { exploitationActive.current = false; drainExploitationQueue(); }
+    }
   }
   function finalizeReleasedExploitation(request: ExploitationRequest) {
     try {
-      const finalized = freezeExploitation(request, presentedExploitation.current, acceptedExploitation.current);
+      const finalized = freezeExploitation(request, presentedExploitation.current, acceptedExploitation.current, releasedExploitationCap.current ?? Infinity);
       releasedExploitation.current = null;
       setMixedRequest(finalized);
       if (finalized.woodMode === 'clear' && finalized.wood.length) { setExploitationIntentState('confirm-clear'); return; }
@@ -624,10 +702,20 @@ export function App() {
   function retryExploitation() {
     if (uncertainRequest.current) { void submitExploitation(uncertainRequest.current); return; }
     if (!mixedRequest) return;
+    const direct = directGardenExploitation(mixedRequest);
+    if (direct) { void submitExploitation({...direct,commandId:randomUUID()}); return; }
+    if (presentedExploitation.current?.commandId !== mixedRequest.commandId) {
+      const request = { ...mixedRequest, commandId: randomUUID() };
+      releasedExploitationCap.current = pendingExploitationCap(request);
+      releasedExploitation.current = releasedExploitationCap.current === null ? null : request.commandId;
+      setMixedRequest(request); setError(null);
+      setExploitationIntentState(releasedExploitation.current ? 'verifying' : 'error');
+      return;
+    }
     // A known refusal creates a fresh identity, using the corrected displayed parameters.
     try {
       const frozen = freezeExploitation(mixedRequest, presentedExploitation.current, acceptedExploitation.current);
-      const request = { ...frozen, commandId: crypto.randomUUID() };
+      const request = { ...frozen, commandId: randomUUID() };
       setMixedRequest(request); setError(null);
       if (request.woodMode === 'clear' && request.wood.length) setExploitationIntentState('confirm-clear');
       else void submitExploitation(request);
@@ -636,12 +724,12 @@ export function App() {
   function removeExploitationTarget(family: 'gardens' | 'wood' | 'stone', key: string) {
     if (!mixedRequest || exploitationIntentState === 'uncertain') return;
     const request: ExploitationRequest = family === 'gardens'
-      ? { ...mixedRequest, commandId: crypto.randomUUID(), gardens: mixedRequest.gardens.filter(cell => `garden:${cell.cellX}:${cell.cellY}` !== key) }
-      : { ...mixedRequest, commandId: crypto.randomUUID(), [family]: mixedRequest[family].filter(id => id !== key) };
+      ? { ...mixedRequest, commandId: randomUUID(), gardens: mixedRequest.gardens.filter(cell => `garden:${cell.cellX}:${cell.cellY}` !== key) }
+      : { ...mixedRequest, commandId: randomUUID(), [family]: mixedRequest[family].filter(id => id !== key) };
     acceptedExploitation.current.delete(key); presentedExploitation.current = null;
     releasedExploitation.current = null; setMixedRequest(request); setMixedPreview(null); setError(null); setExploitationIntentState('error');
   }
-  function runPopulation(action: 'feed' | 'rest') { if (!state || modeRef.current !== 'population' || arrivalActive) return; const intent = populationIntent.current?.action === action && populationIntent.current.count === populationCount ? populationIntent.current : { action, count: populationCount, id: crypto.randomUUID() }; populationIntent.current = intent; void runAction(() => action === 'feed' ? feedPopulation(worldSlug, state.village.id, intent.count, intent.id) : restPopulation(worldSlug, state.village.id, intent.count, intent.id), action === 'feed' ? `${intent.count} habitant(s) ont mangé` : `${intent.count} habitant(s) au repos`).then((ok) => { if (ok) populationIntent.current = null; }); }
+  function runPopulation(action: 'feed' | 'rest') { if (!state || modeRef.current !== 'population' || arrivalActive) return; const intent = populationIntent.current?.action === action && populationIntent.current.count === populationCount ? populationIntent.current : { action, count: populationCount, id: randomUUID() }; populationIntent.current = intent; void runAction(() => action === 'feed' ? feedPopulation(worldSlug, state.village.id, intent.count, intent.id) : restPopulation(worldSlug, state.village.id, intent.count, intent.id), action === 'feed' ? `${intent.count} habitant(s) ont mangé` : `${intent.count} habitant(s) au repos`).then((ok) => { if (ok) populationIntent.current = null; }); }
   async function discoverSupplies(buildingId: string) {
     const currentState = stateRef.current;
     if (actionInFlight.current || !currentState || modeRef.current !== 'exploitation' || arrivalActive) return;
@@ -676,7 +764,7 @@ export function App() {
         setError(currentQuote?.error ?? 'Vérifiez le coût et le prochain niveau affich?s avant de cliquer.'); return;
       }
       const quote = shownUpgrade.current!;
-      void executeConstruction({ kind: 'upgrade', commandId: crypto.randomUUID(), worldSlug: current.world.slug,
+      void executeConstruction({ kind: 'upgrade', commandId: randomUUID(), worldSlug: current.world.slug,
         villageId: current.village.id, buildingId: quote.buildingId, expectedCosts: quote.costs,
         expectedLevel: quote.nextLevel, success: `Amélioration de ${quote.name} lanc?e` });
       return;
@@ -687,7 +775,7 @@ export function App() {
   function commandWorksite(id: string, action: 'pause' | 'resume' | 'stop' | 'set-cap', cap?: number) {
     if (!state || modeRef.current !== 'exploitation') return;
     void runAction(() => changeWorksite(worldSlug, state.village.id, id,
-      { commandId: crypto.randomUUID(), action, ...(cap === undefined ? {} : { workerCap: cap }) }));
+      { commandId: randomUUID(), action, ...(cap === undefined ? {} : { workerCap: cap }) }));
   }
 
   if (loading) return <main className="center-message">Chargement du monde…</main>;
@@ -715,7 +803,7 @@ export function App() {
         if (modeRef.current === 'exploitation') { closePanels(); setSelectedFeatureId(id); setMenuAnchor(anchor); }
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
     <WorldModeBar mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
-    {worldMode === 'exploitation' && terrainView === 'village' && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population}
+    {worldMode === 'exploitation' && terrainView === 'village' && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population} queuedCount={queuedExploitationCount}
       request={mixedRequest} preview={mixedPreview} intentState={exploitationIntentState} error={error} pending={pendingAction || arrivalActive} collapsed={paletteCollapsed}
       onChange={changeExploitationSettings} onToggle={toggleHud}
       onWorksites={() => { closePanels(); setShowWorksites(value => !value); }}
@@ -727,6 +815,12 @@ export function App() {
       <span>Population {state.village.population.total} · Repos {state.village.population.resting} · Disponibles {state.village.population.available} · Affectés {state.village.population.working}</span>
       <button type="button" onClick={() => { closePanels(); setShowPopulation(true); setMenuAnchor({ x: window.innerWidth / 2, y: window.innerHeight - 280 }); }}>Habitants et cohortes</button>
       <button type="button" onClick={() => setShowScience(value => !value)}>Arbre des connaissances</button></div>}
+    {oracleProvisions?.villageKey === `${state.world.id}:${state.village.id}` && !arrivalActive &&
+      <aside className="oracle-provisions-overlay" role="dialog" aria-labelledby="oracle-provisions-title" aria-describedby="oracle-provisions-message">
+        <strong id="oracle-provisions-title">L’Oracle</strong>
+        <p id="oracle-provisions-message">{oracleProvisions.message}</p>
+        <button type="button" onClick={() => setOracleProvisions(null)}>Masquer</button>
+      </aside>}
     {oracleCat && !arrivalActive && <aside className="oracle-cat-visit" role="dialog" aria-label="L'Oracle">
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
@@ -749,7 +843,7 @@ export function App() {
     {selectedBuilding.type==='town-hall'&&state.village.market&&<MarketPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} market={state.village.market} stocks={state.village.resources} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error}
       onCommand={command=>runAction(()=>commandMarket(worldSlug,state.village.id,command))}
       onUpgrade={()=>{const quote=upgradePreview(state,selectedSiteId);if(!quote||quote.error){setError(quote?.error??'Devis indisponible.');return;}
-        void executeConstruction({kind:'upgrade',commandId:crypto.randomUUID(),worldSlug,villageId:state.village.id,buildingId:quote.buildingId,expectedCosts:quote.costs,expectedLevel:quote.nextLevel,success:'Amélioration de l’hôtel de ville lancée'});}}/>}
+        void executeConstruction({kind:'upgrade',commandId:randomUUID(),worldSlug,villageId:state.village.id,buildingId:quote.buildingId,expectedCosts:quote.costs,expectedLevel:quote.nextLevel,success:'Amélioration de l’hôtel de ville lancée'});}}/>}
     {error&&selectedBuilding.type!=='town-hall'?<p className="error">{error}</p>:null}</WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && worldMode === 'construction' ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="population" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {}} onDiscover={() => {}} /></WorldContextMenu> : null}
     {menuAnchor && selectedFeatureId && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} onPrepare={(family, woodMode) => {

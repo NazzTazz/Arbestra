@@ -40,6 +40,9 @@ import * as stoneHouseCostsMigration from './migrations/032_stone_house_costs.js
 import * as logHouseRawWoodMigration from './migrations/033_log_house_raw_wood.js';
 import * as oracleMarketMigration from './migrations/034_oracle_market.js';
 
+import * as worldGeneratorMigration from './migrations/035_world_generator.js';
+import * as worldGeneratorRecipeMigration from './migrations/036_world_generator_recipe.js';
+
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
     return {
@@ -77,6 +80,8 @@ const migrationProvider: MigrationProvider = {
       '032_stone_house_costs': stoneHouseCostsMigration,
       '033_log_house_raw_wood': logHouseRawWoodMigration,
       '034_oracle_market': oracleMarketMigration,
+      '035_world_generator': worldGeneratorMigration,
+      '036_world_generator_recipe': worldGeneratorRecipeMigration,
     };
   },
 };

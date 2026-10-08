@@ -1,3 +1,4 @@
+import { climateAt } from '@arbestra/contracts';
 import { COSMOLOGY, TAU, cyclePhase, illumination } from './cosmology';
 
 const wrap = (x: number, size: number) => ((x % size) + size) % size;
@@ -20,10 +21,11 @@ function noise(u: number, v: number, frequency: number, seed: number): number {
     + (corner(ix, iy + 1) * (1 - fx) + corner(ix + 1, iy + 1) * fx) * fy;
 }
 /** Canonical normalized coordinates; epoch time, never time since the view opened. */
-export function weatherAt(u: number, v: number, serverMs: number, seed: number) {
+export function weatherAt(u: number, v: number, serverMs: number, seed: number, sharedClimate = false) {
   const time = (serverMs - COSMOLOGY.epochMs) / 1000;
   const x = u - time / WEATHER_DRIFT_SECONDS, y = v - time / (WEATHER_DRIFT_SECONDS * 2);
-  const field = .62 * noise(x, y, 8, seed) + .26 * noise(x, y, 16, seed + 1) + .12 * noise(x, y, 32, seed + 2);
+  const transient = .62 * noise(x, y, 8, seed) + .26 * noise(x, y, 16, seed + 1) + .12 * noise(x, y, 32, seed + 2);
+  const field = sharedClimate ? .7 * transient + .3 * climateAt(u, v, seed).humidity : transient;
   const cloud = smooth((field - .28) / .42);
   return { cloud, rain: smooth((cloud - .68) / .3) };
 }

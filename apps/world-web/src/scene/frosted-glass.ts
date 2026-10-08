@@ -8,12 +8,13 @@ import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import type { Scene } from '@babylonjs/core/scene';
 import { facePoint, type BuildingPlan } from './building-plan';
 
-/** Opaque satin glass, lit locally. It never captures or redraws the scene. */
+/** Transparent glass with a light satin veil, lit locally. It never captures or redraws the scene. */
 export class FrostedGlass {
   readonly material: StandardMaterial;
   constructor(scene: Scene) {
     this.material = new StandardMaterial('campus-frosted-glass', scene);
     this.material.diffuseColor = new Color3(.66, .76, .82);
+    this.material.alpha = .22;
     this.material.specularColor = new Color3(.72, .84, .92);
     this.material.specularPower = 64;
     this.material.backFaceCulling = false;

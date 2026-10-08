@@ -1,6 +1,7 @@
 import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
-import { buildStonemason } from './stonemason-factory';
+import { buildStonemason, buildStonemasonFire } from './stonemason-factory';
+import { buildProceduralBuildingLod, buildCachedProceduralBuildingLod } from './building-lod-procedural';
 import { buildSawmill } from './sawmill-factory';
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { buildPresentation } from './building-presentation';
@@ -69,6 +70,7 @@ import { VillageRoads } from './village-roads';
 import { VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
+import { GardenPlots } from './garden-plots';
 
 const TOWN_HALL_DOOR_Z = -1.1;
 import { entranceConnector, planForSite, resolveMurets, transformPoint, type BuildingPlan } from './building-plan';
@@ -132,6 +134,7 @@ export class BabylonVillageScene {
   readonly #windowMaterial: StandardMaterial;
   readonly #soilMaterial: StandardMaterial;
   readonly #gardenTileMaterials: StandardMaterial[];
+  #gardenPlots: GardenPlots | null = null;
   #weather: WeatherMap | null = null;
   readonly #rain: LocalRain;
   #rainIntensity = 0;
@@ -351,7 +354,7 @@ export class BabylonVillageScene {
     if(this.#worldMode==='exploitation' && this.#state){
       const bounds=this.#canvas.getBoundingClientRect();
       const pick=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,
-        mesh=>mesh.isPickable&&typeof mesh.metadata?.siteId==='string');
+        mesh=>mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&typeof mesh.metadata?.siteId==='string');
       const site=this.#state.cells.find(c=>c.id===pick.pickedMesh?.metadata?.siteId);
       const building=site?.building??this.#state.cells.find(c=>c.building?.id===site?.footprint?.buildingId)?.building;
       workshopInspection=!!building&&(building.type==='town-hall'||this.#state.buildingTypes.some(t=>t.code===building.type&&t.productionMode==='processing'));
@@ -383,7 +386,7 @@ export class BabylonVillageScene {
     if (!this.#pointerDown && this.#worldMode === 'construction' && this.#constructionAction === 'upgrade' && this.#mode === 'village') {
       const bounds = this.#canvas.getBoundingClientRect();
       const pick = this.#scene.pick(event.clientX - bounds.left, event.clientY - bounds.top,
-        mesh => mesh.isPickable && typeof mesh.metadata?.siteId === 'string');
+        mesh => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && typeof mesh.metadata?.siteId === 'string');
       this.#onBuildingHover(pick.pickedMesh?.metadata?.siteId ?? null);
     }
     if (this.#pointerDown?.harvest && this.#pointerDown.pointerId === event.pointerId) {
@@ -416,7 +419,7 @@ export class BabylonVillageScene {
   readonly #handlePointerUp = (event: PointerEvent): void => {
     if(this.#infrastructureHandler&&this.#infrastructureDown){event.preventDefault();event.stopImmediatePropagation();const d=this.#infrastructureDown;this.#infrastructureDown=null;
       const bounds=this.#canvas.getBoundingClientRect();
-      const picked=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,mesh=>mesh.isPickable&&typeof mesh.metadata?.equipmentId==='string');
+      const picked=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,mesh=>mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&typeof mesh.metadata?.equipmentId==='string');
       this.#infrastructureHandler({kind:'up',point:this.#infrastructurePoint(event),equipmentId:picked?.pickedMesh?.metadata?.equipmentId,drag:Math.hypot(event.clientX-d.x,event.clientY-d.y)>8});if(this.#canvas.hasPointerCapture(event.pointerId))this.#canvas.releasePointerCapture(event.pointerId);return;}
     if (this.#transition.active) return;
     if (!this.#pointerDown || this.#pointerDown.pointerId !== event.pointerId) return;
@@ -467,7 +470,7 @@ export class BabylonVillageScene {
     const picked = this.#scene.pick(
       event.clientX - bounds.left,
       event.clientY - bounds.top,
-      (mesh) => mesh.isPickable && (typeof mesh.metadata?.siteId === 'string' || typeof mesh.metadata?.featureId === 'string'
+      (mesh) => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && (typeof mesh.metadata?.siteId === 'string' || typeof mesh.metadata?.featureId === 'string'
         || this.#worldMode === 'population' && typeof mesh.metadata?.populationId === 'string'),
     );
     const pickedMetadata = picked.pickedMesh?.metadata;
@@ -514,7 +517,9 @@ export class BabylonVillageScene {
     if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
     if (this.#mode === 'world' && event.deltaY < 0 && this.#torusOverview
       && this.#torusOverview.camera.radius <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.1) this.showRegion();
-    else if (this.#mode !== 'world') this.#clearSelection();
+    // Zooming inside Village must retain the logical building and its outline,
+    // including when its graphical representation changes LOD.
+    else if (this.#mode === 'region' || this.#mode === 'village' && !this.#selectedSiteId) this.#clearSelection();
   };
 
   #endsOnWorldSurface(event: PointerEvent): boolean {
@@ -605,9 +610,13 @@ export class BabylonVillageScene {
     sun.shadowFrustumSize = 46;
     sun.autoCalcShadowZBounds = true;
 
-    this.#siteMaterial = this.#material('available-site', '#647442', 0.42);
-    this.#candidateMaterial = this.#material('extension-candidate', '#9ac866', 0.82, '#1c3510');
-    this.#invalidAreaMaterial = this.#material('invalid-area', '#c1614f', 0.72, '#38140f');
+    this.#siteMaterial = this.#material('available-site', '#647442', 0);
+    this.#candidateMaterial = this.#material('extension-candidate', '#39ff14', 1, '#39ff14');
+    this.#invalidAreaMaterial = this.#material('invalid-area', '#ff2020', 1, '#ff2020');
+    this.#candidateMaterial.disableLighting = true;
+    this.#invalidAreaMaterial.disableLighting = true;
+    this.#candidateMaterial.backFaceCulling = false;
+    this.#invalidAreaMaterial.backFaceCulling = false;
     this.#timberMaterial = this.#material('timber', '#794521');
     this.#lightTimberMaterial = this.#material('light-timber', '#a8672f');
     this.#darkTimberMaterial = this.#material('dark-timber', '#402718');
@@ -1000,11 +1009,11 @@ export class BabylonVillageScene {
       const mesh=cached.mesh;
       // Rebasing the local frame moves a campus; it does not change its geometry.
       if(site.building?.type==='university')mesh.position.copyFrom(this.#universityCentre(site));
-      if(!site.building&&!site.footprint){mesh.isVisible=this.#constructionMode&&site.canBuild;mesh.material=this.#highlightedSiteIds.has(site.id)?this.#candidateMaterial:this.#siteMaterial;}
+      if(!site.building&&!site.footprint){mesh.isVisible=this.#constructionMode&&site.canBuild;mesh.material=this.#siteMaterial;for(const border of mesh.getChildMeshes())border.isVisible=mesh.isVisible;}
       for (const selectable of [mesh, ...mesh.getChildMeshes()]) {
         selectable.metadata = { ...selectable.metadata, siteId: site.id };
         selectable.isPickable = Boolean(site.footprint || this.#constructionMode && site.canBuild)
-          && !selectable.name.startsWith('garden-full-');
+          && !selectable.name.startsWith('garden-full-') && !selectable.name.startsWith('site-border-') && selectable.metadata?.buildingAttachment !== 'glass';
       }
       this.#villageMeshes.push(mesh);
       this.#selectableMeshes.set(site.id, mesh);
@@ -1017,7 +1026,7 @@ export class BabylonVillageScene {
         retained.add(key);const signature=JSON.stringify([state.world.id,placement]);let cached=this.#buildingCache.get(key);
         if(cached?.signature!==signature){cached?.mesh.dispose(false,false);
           const mesh=new BabylonMesh('dev-barracks-preview',this.#scene);
-          this.#timberThatch??=new TimberThatch(this.#scene);buildBarracks(mesh,this.#timberThatch);
+          this.#timberThatch??=new TimberThatch(this.#scene);buildCachedProceduralBuildingLod(mesh,'barracks-finished',root=>buildBarracks(root,this.#timberThatch!),this.#timberThatch);
           for(const child of mesh.getChildMeshes())child.isPickable=false;
           cached={signature,mesh};this.#buildingCache.set(key,cached);
         }
@@ -1047,7 +1056,7 @@ export class BabylonVillageScene {
       const bounds=this.#canvas.getBoundingClientRect();
       const occupied=new Map(this.#state.cells.filter(c=>c.building||c.footprint).map(c=>[c.id,c]));
       const pick=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,mesh=>
-        mesh.isPickable&&occupied.has(mesh.metadata?.siteId));
+        mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&occupied.has(mesh.metadata?.siteId));
       const site=occupied.get(pick.pickedMesh?.metadata?.siteId);
       if(site)return {cellX:site.cellX,cellY:site.cellY};
     }
@@ -1201,10 +1210,9 @@ export class BabylonVillageScene {
     if (signature === this.#lastPreviewSignature) return;
     this.#lastPreviewSignature = signature;
     for (const mesh of this.#previewMeshes.splice(0)) mesh.dispose(false, false);
-    const existing = new Set((preview?.existingCells ?? []).map(cellKey));
     const obstacles = new Set((preview?.obstacleCells ?? []).map(cellKey));
     for (const cell of preview?.cells ?? []) {
-      const mesh = MeshBuilder.CreateBox(`area-preview-${cellKey(cell)}`, { width: TILE_SIZE - 0.06, depth: TILE_SIZE - 0.06, height: 0.025 }, this.#scene);
+      const mesh = this.#createConstructionBorder(`area-preview-${cellKey(cell)}`, TILE_SIZE - 0.06);
       const p = this.#space!.projectFrom(cell, this.#villageAnchor);
       mesh.position.set(
         p.x,
@@ -1212,14 +1220,13 @@ export class BabylonVillageScene {
         p.z,
       );
       mesh.material = obstacles.has(cellKey(cell)) ? this.#invalidAreaMaterial
-        : existing.has(cellKey(cell)) ? this.#selectionMaterial
-          : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
+        : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
       mesh.isPickable = false;
       this.#previewMeshes.push(mesh);
     }
   }
 
-  public updateConstructionGhost(code: string | null, preview: AreaPreview | null, invalid: boolean,quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone'): void {
+  public updateConstructionGhost(code: string | null, preview: AreaPreview | null, _invalid: boolean,quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone'): void {
     if (!code || !preview?.cells.length || !this.#space || this.#mode !== 'village') {
       this.#constructionGhost?.setEnabled(false); return;
     }
@@ -1261,7 +1268,6 @@ export class BabylonVillageScene {
     this.#constructionGhost!.position.set(x, ground + .03, z);
     this.#constructionGhost!.rotation.y=quarterTurns*Math.PI/2;
     this.#constructionGhost!.setEnabled(true);
-    for (const material of this.#ghostMaterials) material.emissiveColor.set(invalid ? .38 : .04, invalid ? .03 : .18, .06);
   }
 
   public updateHarvestPending(cells: Cell[]): void {
@@ -1761,6 +1767,24 @@ export class BabylonVillageScene {
     return value - Math.floor(value);
   }
 
+  #createConstructionBorder(name: string, size: number): Mesh {
+    const outer = size / 2, inner = outer - 0.08;
+    const mesh = new BabylonMesh(name, this.#scene), data = new VertexData();
+    data.positions = [-outer,0,-outer, outer,0,-outer, outer,0,outer, -outer,0,outer,
+      -inner,0,-inner, inner,0,-inner, inner,0,inner, -inner,0,inner];
+    data.indices = [];
+    for (let i = 0; i < 4; i++) {
+      const next = (i + 1) % 4;
+      data.indices.push(i, i + 4, next, next, i + 4, next + 4);
+    }
+    data.normals = [];
+    VertexData.ComputeNormals(data.positions, data.indices, data.normals);
+    data.applyToMesh(mesh);
+    mesh.renderingGroupId = 1;
+    mesh.isPickable = false;
+    return mesh;
+  }
+
   #createAvailableSite(site: VillageCell): Mesh {
     const highlighted = this.#highlightedSiteIds.has(site.id);
     const marker = MeshBuilder.CreateBox(
@@ -1769,15 +1793,17 @@ export class BabylonVillageScene {
       this.#scene,
     );
     marker.position.set(site.x, 0.075, site.z);
-    marker.material = highlighted ? this.#candidateMaterial : this.#siteMaterial;
+    marker.material = this.#siteMaterial;
     // Picking/preview plates belong only to construction. The LOD fade must
     // neither reveal them outside that mode nor replace their base opacity.
     marker.isVisible = this.#constructionMode && site.canBuild;
     marker.metadata = { baseVisibility: highlighted ? 1 : 0.015 };
     if (highlighted) {
-      marker.enableEdgesRendering();
-      marker.edgesColor.set(0.78, 0.95, 0.52, 0.9);
-      marker.edgesWidth = 2;
+      const border = this.#createConstructionBorder(`site-border-${site.id}`, 2.3);
+      border.parent = marker;
+      border.isVisible = marker.isVisible;
+      border.position.y = 0.03;
+      border.material = this.#candidateMaterial;
     } else {
       marker.visibility = 0.015;
     }
@@ -1790,7 +1816,8 @@ export class BabylonVillageScene {
       body.position.copyFrom(this.#universityCentre(site));
       body.rotation.y = (site.building.quarterTurns ?? 0) * Math.PI / 2;
       this.#timberThatch ??= new TimberThatch(this.#scene);
-      buildStonemason(body, this.#timberThatch, 'finished');
+      buildCachedProceduralBuildingLod(body,'stonemason-finished',root=>buildStonemason(root,this.#timberThatch!,'finished',false),this.#timberThatch);
+      buildStonemasonFire(body,this.#timberThatch);
       this.#createContactShadow(body, 4.5, 4.5);
       return this.#registerStructure(body);
     }
@@ -1806,10 +1833,10 @@ export class BabylonVillageScene {
     this.#timberThatch ??= new TimberThatch(this.#scene);
     if((site.building?.targetLevel??site.building?.level??1)>=2){
       body.position.y=0;
-      buildTownHallMarket(body,this.#timberThatch,site.building?.status==='under-construction'?'works':'finished');
+      buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,site.building?.status==='under-construction'?'works':'finished',lod===0?body:null),this.#timberThatch);
       this.#createContactShadow(body,2.32,4.56);return this.#registerStructure(body);
     }
-    this.#timberThatch.build(body);
+    buildProceduralBuildingLod(body,root=>this.#timberThatch!.build(root),this.#timberThatch);
     this.#createContactShadow(body, 2.75, 2.45);
     return this.#registerStructure(body);
   }
@@ -1842,7 +1869,7 @@ export class BabylonVillageScene {
 
   #loadBuildingAsset(body:Mesh,key:string,ready?:()=>void,attempt=0):void {
     body.metadata={...body.metadata,assetState:'loading'};
-    void loadBakedBuilding(body,key).then(()=>{
+    void loadBakedBuilding(body,key,true).then(()=>{
       if(body.isDisposed())return;
       ready?.();body.metadata={...body.metadata,assetState:'ready'};
       for(const mesh of body.getChildMeshes()){
@@ -1865,7 +1892,7 @@ export class BabylonVillageScene {
     body.rotation.y=plan.rotation;
     if(site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2){
       this.#timberThatch??=new TimberThatch(this.#scene);
-      buildTownHallMarket(body,this.#timberThatch,plan.phase);
+      buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,plan.phase,lod===0?body:null),this.#timberThatch);
       this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
       return this.#registerStructure(body);
     }
@@ -1873,14 +1900,18 @@ export class BabylonVillageScene {
     const key=`${code}-${plan.recipe.levels}-${plan.phase}`;
     if(buildingAssets[key]&&plan.recipe.entrance.face===(code==='town-hall'?'-x':'-z')&&!plan.murets.length
       &&(plan.phase!=='works'||plan.sourceLevels===Math.max(0,plan.recipe.levels-1)))this.#loadBuildingAsset(body,key);
-    else {this.#timberThatch??=new TimberThatch(this.#scene);this.#timberThatch.build(body,plan);}
+    else {this.#timberThatch??=new TimberThatch(this.#scene);buildProceduralBuildingLod(body,root=>this.#timberThatch!.build(root,plan),this.#timberThatch);}
     this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
     return this.#registerStructure(body);
   }
 
   #createSawmill(site: VillageCell): Mesh {
     const level = site.building?.level ?? 1;
-    const foundation = buildSawmill(this.#scene, { stone: this.#stoneMaterial, lightTimber: this.#lightTimberMaterial, packedEarth: this.#packedEarthMaterial, sawdust: this.#sawdustMaterial, darkTimber: this.#darkTimberMaterial, timber: this.#timberMaterial, roof: this.#roofMaterial, trunk: this.#trunkMaterial }, site.id, level, site.x, site.z);
+    const foundation = new BabylonMesh(`sawmill-${site.id}`,this.#scene);foundation.position.set(site.x,.09,site.z);
+    buildCachedProceduralBuildingLod(foundation,`sawmill-${level}`,(root,lod)=>{
+      const model=buildSawmill(this.#scene, { stone: this.#stoneMaterial, lightTimber: this.#lightTimberMaterial, packedEarth: this.#packedEarthMaterial, sawdust: this.#sawdustMaterial, darkTimber: this.#darkTimberMaterial, timber: this.#timberMaterial, roof: this.#roofMaterial, trunk: this.#trunkMaterial }, `${site.id}-lod${lod}`, level,0,0,lod);
+      model.parent=root;model.position.y=0;
+    });
     this.#createContactShadow(foundation, level >= 2 ? 3.5 : 2.65, 2.45);
     return this.#registerStructure(foundation);
   }
@@ -1904,26 +1935,11 @@ export class BabylonVillageScene {
   }
 
   #createGardenPlot(site: VillageCell, reserved: boolean): Mesh {
-    const plot = new BabylonMesh(`garden-${site.id}`, this.#scene);
-    const base = VertexData.CreateBox({ width: TILE_SIZE, depth: TILE_SIZE, height: 0.1 });
-    // The crop surface is the sole top face: no almost-coplanar soil cap beneath it.
-    base.indices = Array.from(base.indices!).filter((_, index, indices) =>
-      base.normals![indices[Math.floor(index / 3) * 3]! * 3 + 1]! < 0.5);
-    base.applyToMesh(plot);
+    this.#gardenPlots ??= new GardenPlots(this.#scene, {soil: this.#soilMaterial,
+      tiles: this.#gardenTileMaterials, marker: this.#windowMaterial, stem: this.#leafDarkMaterial});
     const ground = this.#store?.ground(site.cellX, site.cellY)?.height ?? 0;
-    plot.position.set(site.x, ground + 0.11, site.z);
-    plot.material = this.#soilMaterial;
-    const surface = MeshBuilder.CreateGround(`garden-surface-${site.id}`,
-      { width: TILE_SIZE, height: TILE_SIZE }, this.#scene);
-    surface.parent = plot;
-    surface.position.y = 0.05;
-    surface.material = this.#gardenTileMaterials[reserved ? 0 : this.#gardenStages.get(site.id) ?? 1]!;
-    if (!reserved && this.#fullGardenSites.has(site.id)) {
-      const marker = MeshBuilder.CreateCylinder(`garden-full-${site.id}`, { height: 0.12, diameter: 0.62, tessellation: 16 }, this.#scene);
-      marker.parent = plot; marker.position.set(0, 1.05, 0); marker.material = this.#windowMaterial; marker.isPickable = false;
-      const stem = MeshBuilder.CreateCylinder(`garden-full-stem-${site.id}`, { height: 0.34, diameter: 0.08, tessellation: 8 }, this.#scene);
-      stem.parent = plot; stem.position.set(0, 0.83, 0); stem.material = this.#leafDarkMaterial; stem.isPickable = false;
-    }
+    const plot = this.#gardenPlots.create(site.id, site.x, site.z, ground,
+      reserved ? 0 : this.#gardenStages.get(site.id) ?? 1, !reserved && this.#fullGardenSites.has(site.id));
     return this.#registerStructure(plot);
   }
 

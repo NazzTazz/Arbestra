@@ -1,3 +1,486 @@
+# Checkpoint de session — publication du 8 octobre 2026
+
+Commit/push sur `main` explicitement demandés par Tristan. Le commit portant cette entrée regroupe les tranches accumulées depuis `f9fc28d` : optimisations LOD et exploitation, onboarding et modèle de départ, générateur/preview géographique, hydrologie, forêt, géologie, inspection et carte complète, dernière passe berges/affleurements. Les réserves fonctionnelles et artistiques décrites ci-dessous restent valables ; publier ne qualifie pas l'ouverture d'un univers v3.
+
+Vérifications de clôture : `corepack pnpm build` complet réussi (contrats, API, play-web, world-web), `corepack pnpm lint` global réussi, index revu et `git diff --cached --check` propre après trois corrections de blancs. Avertissement Vite connu sur la taille des bundles. Les tests et recettes ciblés sont documentés dans les bilans précédents ; aucune nouvelle suite DB ou navigateur exécutée pour cette seule publication. Aucune migration ni donnée modifiée.
+
+227 fichiers de code/docs/assets de la session inclus. Export brut `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` conservé localement hors index ; secrets/configurations privées et artefacts `test-results` exclus. Distant vérifié : `https://github.com/NazzTazz/Arbestra.git`, branche `main`, alignée avec `origin/main` avant commit. Le hash et la confirmation de push sont donnés dans la réponse de clôture ; `git log -1` identifie ce checkpoint. Les mentions « aucun commit/push » dans les bilans ci-dessous décrivent leur état historique avant cette publication.
+
+Liens de référence demandés : `docs/SPEC-COSMOLOGIE-TORE-SOLEIL-CHAT.md` et `docs/SPEC-UNIVERSITE-SCIENCES-DECOUVERTE.md` (dont Astronomie1). Modèle déterministe partagé : `packages/contracts/src/cosmology.ts`.
+
+---
+
+# Berges et affleurements — passe de rendu du 8 octobre 2026
+
+**Implémenté et vérifié techniquement ; résultat artistique partiel.** Autorisation : « ouep on part là dessus » après proposition berges + affleurements, récifs conservés. Recharger `/world-generator` sur un candidat r9 existant : pas de régénération. Arêtes traversant l'eau raffinées à l'intersection du champ, bord humide progressif, teinte d'eau par profondeur, contraste des facettes rocheuses divisé par trois et variations plus larges. Géographie/hauteurs/récifs/blocs/forêts/plateaux enregistrés inchangés, zéro écriture DB/API, aucune nouvelle recette.
+
+[Compte rendu, poses et mesures](docs/GEOGRAPHIE-MONDE-2026-10-08.md#berges-et-lecture-des-affleurements--8-octobre-passe-de-rendu). Fichiers : `terrain-shore.ts`, `terrain-surface.ts`, `world-geography-mesh.ts`, `PreviewScene.tsx`, tests associés et `tests/browser/world-banks.mjs`. Ancrage des débris partagé avec les nouveaux triangles. 11 tests distincts passés, dont raccords et ancrage r9 ; deux tests maillage repassés après finitions. Typecheck/build world-web et lint ciblé réussis. Recette navigateur finale avant/après sur même fixture seed42/poses/build dev, local/tore/carte, grille/maillage, deux cycles de navigation et égalité des ressources au retour ; zéro exception navigateur. Captures inspectées, rapport `test-results/banks-{before,after}.json`, hors Git. Sessions et entrées temporaires de recette nettoyées.
+
+Coût : tore5draws inchangés,264771→291450sommets résidents (+10,1%),433719→460398indices actifs. Terrain+eau seulement :88080→96973triangles, buffers Float32/Uint32 équivalents10,54→12,80Mo ; pas une mesure VRAM. WebGL2/Intel Iris Plus/ANGLE D3D11,1100×640. CPU variable, pas de mesure GPU ni gain FPS revendiqué. Cas grille ponctuellement2,38FPS, retour60FPS, cause non attribuée. Un essai intermédiaire trop dense, un aplat gris sans facettes et une attente CLI incorrecte ont été corrigés avant la recette finale.
+
+**Ne pas considérer les défauts artistiques clos.** Reste des décrochements dus notamment aux changements de niveau par seuil du champ d'eau r9 ; les grandes formations restent modestes en vue proche. Il faudra une prochaine recette pour les continuités hydrologiques et des formes géologiques dominantes, en conservant les récifs. Ne pas ajouter seulement des triangles. Calibration eau, nuits, qualification hydrologique complète, terraformation et autre seed visuelle restent ouverts. Corpus utilisateur intact.
+
+Git : main, HEAD f9fc28d, nombreux changements antérieurs préservés. Aucun commit/push.
+
+---
+
+# Inspection et carte complète — 8 octobre 2026
+
+**Vue rectangulaire implémentée et vérifiée ; cause du gel React initial non reproduite.** Demande actuelle : fiabilité de l'inspection/indicateurs puis visualisation complète non projetée sur le tore. Recharger `/world-generator`, choisir un candidat existant, cliquer **Carte complète**. Pas besoin de régénérer. Les candidats du corpus d'audit restent intacts : aucune écriture DB, suppression ou création pendant cette tranche.
+
+Livraison : projection plane orthographique du domaine entier avec relief/eau/arbres ; mêmes couches altitude/eau/exposition/humidité et grille de chunks ; clic vers l'inspection locale. Paramètres immuables du candidat visibles, reprise dans le formulaire par bouton explicite, liste distinguée par seed/dimensions/révision, aide ±A dynamique. Habitat sans terre mesurée affiché non applicable ; canopée annoncée non mesurée, aire terrestre explicite. Les métriques historiques et empreintes ne sont pas réécrites.
+
+Fiabilité : artefact associé à ID/révision/checksum, réponse tardive ignorée même si le transport ne respecte pas l'abort. Construction Babylon différée hors du commit React, annulation des tâches obsolètes, ancien canvas masqué immédiatement, état building/ready/error publié après la première frame correspondante. Statistiques associées au même rendu et masquées si ce rendu n'est pas prêt. Exceptions construction/frame signalées. Ce mécanisme réduit les risques identifiés ; il ne prouve pas la cause ou la disparition de l'erreur `Should not already be working` de l'audit. La construction de mesh reste synchrone une fois lancée.
+
+Preuves de cette passe : **9 tests ciblés passés** (projection/identité/habitat3, maillage2, ancrage/affleurements4), typecheck et build world-web final réussis, lint ciblé final réussi. Recette navigateur sur vrai panneau et Babylon en React StrictMode, fixtures HTTP en lecture seule. Carte seed42 inspectée en terrain/altitude/eau/grille, autres couches et wireframe exercés, trois cycles 1×/4×/couche/tore/carte passés. Le premier script a échoué sur une commande de sélection CLI invalide, corrigée. Le passage suivant a achevé ces cycles mais échoué sur une hypothèse de fixture : 100% d'eau demandé en seed123 64×64 donnait99,8683% et six cellules sèches, donc ne devait pas afficher « aucune terre ».
+
+Vérification finale ciblée réussie avec `node --import tsx tests/browser/world-inspection.mjs --race-only` : vraie barrière de réponse B retenue puis libérée après retour sur A, réponse périmée ignorée, clic carte vers local (128,63), retour carte, changement vers une fixture explicitement tout-mer avec ancienne métrique forestière50% (affichage non applicable), puis seed7. Zéro erreur navigateur. Ce n'est pas une preuve d'amélioration de la calibration de l'eau. Rapport `test-results/inspection-race-review.json`, captures `inspection-map-{terrain,altitude,water,grid,sea,seed7}.png`, hors Git. Session de recette fermée, entrées TSX/HTML temporaires supprimées. Les premières captures de couches proviennent du passage antérieur dont le seul échec ultérieur était l'assertion sur la fixture mer.
+
+Fichiers : `WorldGenerator.tsx`, `PreviewScene.tsx`, `preview-inspection.ts`/test, CSS, `tests/browser/world-inspection.mjs`. [Contrats et limites](docs/GEOGRAPHIE-MONDE-2026-10-08.md). Pas de nouvelle dépendance ou révision de recette. Eau/altitude hors cible, berges, contraste des facettes, lisibilité nocturne, qualification hydrologique/torique étendue restent les étapes suivantes de l'audit. Pas de nouveau benchmark CPU/GPU.
+
+Git : main, HEAD f9fc28d ; changements antérieurs préservés, modifications locales non commitées. Aucun commit/push.
+
+---
+
+# Géologie r9 et candidats sans plafond — 8 octobre 2026
+
+**Implémenté ; tests et recette navigateur passés.** Le modèle géologique remplace l'implantation d'amas indépendants : substrat continu et couverture de sol, exposition sur pentes/crêtes/ruptures, fractures sculptées dans le terrain unique, blocs détachés et éboulis issus de formations en amont. Aucune dépendance ajoutée, rendu Babylon existant conservé. [Modèle, fichiers, preuves et limites](docs/GEOGRAPHIE-MONDE-2026-10-08.md). Nouvelle recette r9 : **recharger `/world-generator` puis générer un nouvel aperçu**. Les artefacts r8 et générateurs historiques gardent leur comportement. Pas de stock/excavation/autorisation gameplay livrés. La stratigraphie de base est immuable pour permettre de futures excavations sans déplacer artificiellement le substrat.
+
+Demande supplémentaire exécutée : **12 candidats locaux supprimés**, tous prêts, fermés, inhabités, inventoriés puis supprimés via la fonction métier ; zéro restant après suppression. Aucun monde jouable touché. Plafond de candidats retiré du serveur et du panneau ; ancienne variable `WORLD_GENERATOR_MAX_CANDIDATES` ignorée, même si sa valeur privée 12 existe encore. Limites de taille/temps/mémoire d'une génération conservées. [Recette du plafond](docs/RECETTE-WORLD-GENERATOR-AB-2026-10-07.md).
+
+Preuves : 24 tests distincts ciblés réussis (21 géologie/relief/forêt/maillages, trois intégrations API dans des exécutions filtrées sur arbestra_test). Publication r9 d'abord rouge pour oubli du dispatch, corrigé et repassé ; plafond d'abord rouge puis vert avec 13 candidats et ancienne variable à 1. Nettoyage des fixtures effectué. Builds contracts/world-web, typecheck API final et lint ciblé passés ; panneau final vérifié au navigateur. Aucun reset DB. La suppression des candidats de développement est la seule mutation de données utilisateur, explicitement demandée.
+
+Recette géologique finale : deux seeds, tore/local, grille/maillage, soleil/ombres, couture, cycles de navigation/rotation, mêmes ressources au retour, zéro erreur. Premier essai interrompu au changement de seed pendant les reconstructions, second essai complet réussi. Fixtures pures, aucune création de candidat en base. Panneau réel vérifié avec 13 candidats HTTP simulés : génération active, pas de plafond, zéro erreur. Sessions et entrées temporaires nettoyées. Captures `test-results/geology-r9-*` et `generator-capacity-unlimited.png`, hors Git.
+
+Seed42/7, 256×128 : 7/17 formations inspectables, 9/23 blocs, 31/45 éboulis, 2 347/1 246 arbres. Génération 11,46/8,70 s. Dev/WebGL2/Intel Iris Plus/ANGLE D3D11, canvas1100×640 : tore seed42 5 draws, 433 719 indices actifs, 264 771 sommets résidents ; mêmes compteurs au retour. CPU rendu0,3/0,5 ms médiane/p95 puis0,8/1,7 au retour ; local ombré17draws,4,8/10,8ms. Pas de mesure GPU. Géométrie plus dense que r8, pas de gain de performances revendiqué.
+
+Limites : heuristique géomorphologique, pas de simulation d'érosion/bilan de masse, terrain2,5D sans surplombs. Accès/spawn, gisements économiques, terrassement, grandes tailles restent à qualifier. Cible eau historique31,22%/28,05% pour25%, avertissement conservé. L'incision peut réduire les maxima échantillonnés à +15,81/+15,62 tout en respectant les bornes ±16.
+
+Git : main, HEAD f9fc28d ; nombreuses modifications antérieures conservées. Changements locaux non commités ; aucun commit/push.
+
+---
+
+# r8 — affleurements triangulés repris de l'atelier — 8 octobre 2026
+
+**Demande réalisée et vérifiée.** Les icosphères ont été retirées du rendu r8 au profit de la géométrie `rock-surface.ts` : profils saillants inclinés, union des affleurements, triangulation irrégulière à facettes. Nouveau `world-outcrops.ts`, appui barycentrique sur le sol réellement rendu, pieds enterrés et raccords périodiques. Une seule géométrie regroupée par scène, résolution locale4/globale1. Le profil de l'atelier reste inchangé par défaut.
+
+**Recharger un candidat r8 existant suffit** ; aucun changement du générateur, des sites persistés, des checksums, du relief ±16, de l'eau ou des forêts. Aucun stock économique ni règle métier ajouté. [Détails](docs/GEOGRAPHIE-MONDE-2026-10-08.md).
+
+Vérifications actuelles : 14 tests pertinents passés dans deux exécutions, dont couture avec relief rocheux réel, ancrage aux vrais triangles, déterminisme/réentrée, non-mutation des données et régressions du kit. Build world-web et lint ciblé passés. Recette navigateur `tests/browser/world-relief.mjs --reuse` sur les artefacts r8 seed42/7, local/tore, soleil de jour/ombres, couture et cycles : zéro erreur ; images inspectées. Compteurs retrouvés au retour. Session fermée et entrées temporaires supprimées. Rapports/captures hors Git sous test-results/relief-r8-*.
+
+Coût :5draws normaux inchangés ; seed42 global222993indices actifs,84645sommets résidents (contre68952 avec les icosphères). Plus de géométrie résidente, pas de gain FPS revendiqué. Inspection pierre137280indices/59456sommets ; ombres17draws. Mesures dev/WebGL2/Intel Iris Plus/ANGLE D3D11, canvas1100×640, CPU variable sous build/tests concurrents, GPU absent. Les limites générales r8 restent : eau mal calibrée, monde fermé, gisements exploitables et accès/spawn séparés.
+
+Git : main / f9fc28d ; modifications précédentes conservées, aucun commit/push.
+
+---
+# Relief ±16 et sites de pierre r8 — 8 octobre 2026
+
+**Implémenté et vérifié.** Correction explicite de Tristan : amplitude = bornes négative et positive, défaut −16/+16 unités (écart total32), une unité = ¼ de case. UI propose ±8 à ±16. La moyenne ajuste la distribution des altitudes sans rogner les deux bornes. Recette r8 ; r0–r7 et leurs artefacts gardent leurs conventions. [Compte rendu](docs/GEOGRAPHIE-MONDE-2026-10-08.md).
+
+Pierres : des sites géologiques continus sont persistés dans l'artefact, avec amas de volumes facettés partiellement enterrés. Exclusion eau/pentes excessives, présence aussi à basse altitude, forêt dégagée autour des amas. Un lot Babylon partagé, ancrage identique tore/local, ombres solaires. **Pas encore de stocks exploitables ni de projection d'occupation métier** : les sites de preview préparent les futurs gisements, sans inventer leurs quantités. Aucun candidat ouvert ni changement économique.
+
+Accès : http://localhost:5174/world-generator → nouvel aperçu **r8**, valeur16 par défaut, bouton **Voir un site de pierre**. Légende −16/+16, min/max et écart total séparés. Amplification excessive désactivée sur petits tores pour ne pas inverser le fond marin. API de développement rechargée automatiquement après build contrats (18:43:24), Vite conserve son serveur.
+
+Preuves : test reproduit rouge avant correction (amplitude16 ne donnait que +6,85 au sommet, seed42 128×64), puis vert. Quinze tests ciblés relief/pierre/géographie/forêt/mesher/ancrage passés. Cas API de publication atomique r8 passé avec descripteur relief/pierre et refus d'ouverture/join (1 passé, 5 hors filtre). Builds contracts et world-web finaux réussis, lint ciblé réussi. Recette navigateur réelle `tests/browser/world-relief.mjs` : deux seeds, sommet, pierres, lumière diurne et ombres, couture, cycles de couche/navigation/rotation, ressources retrouvées au retour, zéro erreur. Une première capture solaire était nocturne ; reprise à une phase éclairée et inspection de l'image finale effectuées. Script corrigé pour attendre les métriques de la nouvelle seed. Entrées temporaires supprimées, navigateur de recette fermé, aucune donnée de développement touchée.
+
+Seed42/seed7, 256×128 : min−16/max+16 tous deux ; 53 sites/313 rochers et 38 sites/226 rochers ; 1 922 et 1 018 arbres. Génération complète mesurée environ9–13s sous charge ; la dernière recette a réutilisé ces artefacts (temps de lecture séparé, pas de faux temps de génération). Rapport/captures `test-results/relief-r8-*`, hors Git. Dev/WebGL2/Intel Iris Plus/ANGLE D3D11, canvas1100×640 : 5 draws normaux, 226020 indices actifs, 68952 sommets résidents seed42 ; CPU rendu médiane/p95 0,4/0,6ms puis 0,9/1,6 au retour ; lumière/ombres locales17draws, 2,6/5,5ms. Pas de mesure GPU, aucune comparaison de gain FPS revendiquée.
+
+Limites : cible eau25% obtenue31,22%/28,05%, avertissements conservés ; calibration à améliorer. Bassins et forêts suivent le relief plus fort. Grandes tailles, accès/spawn, marées/cascades et gisements exploitables restent à qualifier/intégrer. La perte/restauration WebGL historique n'est pas forcée par cette recette. Aucun gameplay nouveau ni terraformage.
+
+Git : main, HEAD f9fc28d. Modifications antérieures conservées, tranche non commitée ; aucun commit/push.
+
+---
+# Forêts organiques r7 — 8 octobre 2026
+
+**Demande « adopte la nouvelle répartition » implémentée et vérifiée.** Nouveaux candidats r7 : habitat périodique guidé par humidité/exposition, noyaux + sept cohortes de dispersion, concurrence spatiale/ombre, exclusion eau/pentes fortes, lisières progressives. Positions continues persistées avec tailles/houppiers/nuances variés. Pondération d'aire et métrique locale du tore ; aucun arbre imposé par cellule. Deux lots de thin instances partagés, mêmes arbres en local et sur le tore. Voir [détails et limites](docs/GEOGRAPHIE-MONDE-2026-10-08.md).
+
+Accès : http://localhost:5174/world-generator → **générer un nouvel aperçu r7**. Les artefacts r6 et leur régénération restent inchangés. Aucun monde ouvert, aucune règle d'économie, ressource, occupation ou déplacement modifiée. L'interface distingue habitat boisé et nombre d'arbres. `world-forest.ts` est pur et utilise les outils de bruit/climat existants, sans dépendance nouvelle.
+
+Preuves de cette passe : 5 tests forêt, 4 géographie, 1 ancrage (tailles variées) passés après finitions ; test de bounds natifs passé avant finitions. Suite API 6 cas passée sur r7, puis cas publication atomique repassé avec assertions du descripteur final (1 passé, 5 volontairement ignorés). Un premier filtre composé n'avait sélectionné aucun test : corrigé, aucun résultat vert inféré de ce passage vide. Builds contracts et world-web finaux réussis ; lint ciblé final réussi. Recette navigateur `tests/browser/world-forest.mjs` : composant réel, deux seeds, local/tore/couture, trois cycles couche/navigation/rotation, compteurs retrouvés au retour, aucune erreur. Captures/rapport `test-results/forest-r7-*`, entrées temporaires nettoyées, session navigateur de recette fermée. Aucune donnée de développement touchée.
+
+Seed42 256×128 : 4 088 arbres, 613 071 octets de descripteur forêt JSON, 30,001% habitat ; seed7 : 3 096 arbres, 474 673 octets. WebGL2/Intel Iris Plus/ANGLE D3D11, dev, canvas1100×640 : 4 draws globaux, 363 150 indices actifs et 68 850 sommets résidents pour seed42. CPU rendu médiane/p95 1,6/3,1 ms sous charge puis 0,8/1,5 ms au retour ; pas de mesure GPU. Génération totale variable 6–8 s à 26–31 s sous compilation/tests concurrents ; pas de gain de génération revendiqué. Pas de timeout augmenté. Grandes tailles non qualifiées dans cette passe.
+
+Limites : arbres encore cônes stylisés ; couverture d'habitat != aire des houppiers. La recette navigateur ne force pas la perte/restauration WebGL et ne clôt pas l'incident historique. Relief/eau r6, marées/cascades, spawn, intégration gameplay et terraformage restent hors de cette correction.
+
+Git : main, HEAD f9fc28d. Nombreuses modifications antérieures préservées ; nouveaux fichiers forêt/tests et changements ciblés non commités. Aucun commit/push.
+
+---
+# Géographie globale r6 et recherche forestière — 8 octobre 2026
+
+**Implémenté, validation visuelle incomplète.** Voir [le compte rendu](docs/GEOGRAPHIE-MONDE-2026-10-08.md). Géographie périodique échantillonnable, drainage global, lits fluviaux et lacs, projection du relief et de l'eau sur le tore, inspection locale, grille et maillage indépendants. Arbres instanciés et orientés selon la normale du tore. Les candidats restent fermés ; aucun spawn, gameplay ou terraformage ajouté.
+
+Tristan rejette la répartition actuelle des arbres (quota par cellule et dispersion trop uniforme). Recherche effectuée : recommandation **aptitude écologique + dispersion de graines + compétition**, inspirée d'EcoSys et du Procedural Foliage d'Unreal. Poisson à densité variable est une alternative plus simple, pas une solution suffisante seul pour former des forêts. Tenir compte des distances périodiques et de l'aire réelle du tore. **Proposé, non implémenté** ; aucune dépendance ajoutée pour cette recherche.
+
+Vérifications terminées au cours de la tranche : 8 tests unitaires nouveaux, 6 tests API, 31 tests historiques paysage/hydrologie et 10 tests du prototype antérieur passés dans des exécutions distinctes. Builds contracts, API et world-web passés ; lint ciblé passé. Correction de la réactualisation inutile des rotations des lots d'arbres ; conservation des bounding boxes natives (désactivation expérimentale retirée après régression). Engine réutilisé entre changements de scène.
+
+Dernier rapport navigateur disponible : test-results/worldgeo-production.json du 08/10 à 17:25, seed42, 256×128, build production, Intel Iris Plus / ANGLE D3D11 / WebGL2, canvas1078×558. Vue globale : 4 draws, 619542 indices actifs (passes incluses), 68850 sommets résidents, rendu JS médiane/p95 1,30/2,70 ms ; temps GPU absent. Eau obtenue 28,96% pour 25% demandés : hors tolérance, avertissement affiché. 28 tronçons et 7 lacs. Ces mesures ne prouvent pas la qualité artistique.
+
+**Recette navigateur non verte** : worldgeo-errors.json conserve une erreur Babylon lors de la reconstruction des ressources après perte de contexte (disableAttributeByIndex / active). Une relance sur navigateur neuf a été engagée, mais sa terminaison n'est pas attestée après interruption ; ne pas annoncer cette erreur corrigée. Processus QA précédemment identifiés absents à la reprise ; nettoyage des fixtures de compte/candidats de la base de test non attesté. Rapports et captures restent sous test-results, hors Git.
+
+Restent : répartition forestière crédible, calibration eau/relief, validation visuelle et cycle WebGL, qualification aux grandes tailles, marées/cascades et accès/spawn. Main, HEAD f9fc28d ; nombreuses modifications antérieures conservées, aucun commit/push. Ne pas ouvrir les candidats r6 avant qualification.
+
+---
+# Prototype géographique indépendant — 8 octobre 2026
+
+**Prototype validé, implémenté et recetté ; intégration au monde jouable hors de cette tranche.** Accès : `/geography-preview` sur le port 5174, liens depuis World generator / Kit de terrain. [Réalisation, mesures et limites](docs/PROTOTYPE-GEOGRAPHIE-2026-10-08.md). Deux chunks, modèle géographique pur et périodique, rivière/affluent/lac raccordés et lit creusé, affleurements irréguliers, plateaux avec liaison douce. Grille, triangles, frontières, courant et eau indépendants ; réglages de seed/densité/relief/berges ; picking géographique. Fixture de réseau, pas encore les bassins du monde entier.
+
+Dix tests ciblés verts après finitions, build contrats + world-web et lint ciblé verts. Recette navigateur en production : overlays, lit, roche, seeds 42/7, Standard/Fine, couture du tore, picking et retour après navigation. Seed 42 : 4 848 triangles sol, 0,70 Mio transmis, 6 lots, 27 494 sommets résidents ; compteurs retrouvés après cycles. Dernière génération 421 ms, frames 16,6/17,2 ms médiane/p95 sur Intel Iris Plus / WebGL2, canvas 1112 × 638 ; variabilité sous charge documentée, temps GPU absent. Artefacts sous test-results, exclus de Git.
+
+Décision future validée : terraformer dépense de l'énergie ; excaver produit de la pierre, remblayer en consomme. Coûts/rendements/droits et conséquences hydrologiques restent à spécifier ; aucune économie ou commande de terraformation implémentée. Conserver les plateaux pour les joueurs ; des pentes peuvent créer des passages, seuils à arbitrer. Aucun changement DB, sauvegarde ou gameplay existant. Main/f9fc28d, modifications antérieures conservées, aucun commit/push.
+
+---
+# Géographie et hydrographie — audit — 8 octobre 2026
+
+**Phase 1 seulement : proposition en cadrage, aucune implémentation.** [Audit et prototype proposé](docs/AUDIT-GEOGRAPHIE-HYDROGRAPHIE-2026-10-08.md). Le Village v2, le générateur alpha v3 r5 et l'atelier rocheux sont trois représentations distinctes ; les deux premiers restent géométriquement liés aux cellules. Recommandation à valider : relief échantillonnable + réseau fluvial vectoriel global, projection métier séparée, triangulation locale contrainte. Babylon installé 8.56.2 ; Delaunator/Constrainautor proposés pour qualification, clipping si nécessaire, bruit et shader existants conservés initialement.
+
+Prochaine étape après accord de Tristan : prototype isolé de deux chunks avec rivière creusée, confluence/lac, roche, grille et wireframe indépendants, preuves de raccord torique et mesures. Pas de branchement Village, migration ou modification des déplacements avant validation. Décision complémentaire validée : plateaux pour implanter les joueurs et reliefs adoucis pouvant créer de nouveaux passages. Fin de l'exclusivité des escaliers ; trajets secs conservés. Seuils de pente/largeur utile et règles des cases partiellement inondées ouverts avant intégration ; spec mise à jour, code r5 inchangé. Sources primaires et maintenance des bibliothèques vérifiées ; aucune performance ou recette visuelle nouvelle annoncée. Main/f9fc28d, modifications antérieures conservées, aucun commit/push.
+
+---
+
+# Kit de terrain — roche organique continue — 8 octobre 2026
+
+Nouvelle référence explicite de Tristan : la grille carrée est logique et invisible, pas des pavés/cubes. Ancien rendu pierre remplacé dans l'atelier par une surface triangulée irrégulière, facettes grises, bruit/déplacements en coordonnées mondiales, affleurements asymétriques aux pieds progressifs et sommets inclinés. /terrain-kit ouvre Roche → Affleurements (8 × 6 cases). API géométrique dans scene/rock-surface.ts, périodes toriques optionnelles. Dix tests ciblés, lint et build world-web passés : génération en bloc EXACTEMENT identique à l'assemblage case par case, positions de bord et coutures toriques vérifiées. Recette navigateur affleurements/sol/variantes/rotation, aucune erreur observée. Détails et limites : docs/KIT-TERRAIN-PROTOTYPE.md. Aucun changement métier, occupation ou données ; branchement au village/streamer toujours en D. Main/f9fc28d, aucun commit/push.
+
+---
+
+# Kit de terrain — pavés jointifs et relief discret — 8 octobre 2026
+
+Tristan conserve les coins/arêtes et demande des pavés jointifs, légèrement irréguliers sur leurs surfaces. Retrait périphérique de 0,006 supprimé : limites exactes des cases en contact. Lit continu en retrait de 0,006 ferme les petits jours sous les arrondis. Relief déterministe limité aux intérieurs : ±0,0012 case sur le dessus, ±0,0008 sur les grandes faces latérales ; bords et coins inchangés. Gris neutres, aucune texture. Huit tests ciblés passés, vérification navigateur sol/paroi/angle sans erreur (terrain-joints-*.png). Atelier /terrain-kit, toujours hors village. Main/f9fc28d, aucun commit/push.
+
+---
+
+# Kit de terrain — vrais pavés sur toute la hauteur — 8 octobre 2026
+
+Tristan conserve le pavé unique gris sans texture et demande que ses arrondis soient visibles sur les flancs des dénivelés. Suppression des parois planes rapportées ; chaque pavé est un volume fermé, avec coins courbes sur toute la hauteur, dessous fermé et arêtes hautes/basses légèrement arrondies. Hauteur du bloc haut : du palier bas au dessus canonique. Sept tests ciblés, lint et build passés, vérification navigateur paroi et deux angles sans erreur ; captures terrain-solid-paver-*.png. Atelier /terrain-kit → Roche, pas encore intégré au village. Main/f9fc28d, aucun commit/push.
+
+---
+
+# Kit de terrain — sol pierre simplifié 1 × 1 — 8 octobre 2026
+
+Dernière instruction de Tristan : UN pavé par case, arêtes très légèrement arrondies, aucun texturage, camaïeu de gris. Elle remplace les essais précédents de rocaille et pavage 3 × 3. Module Sol plat ajouté et affiché par défaut dans /terrain-kit. Rayon d'arête 0,005 case, coins 0,012 case, matériaux gris neutres, aucune texture. Six tests ciblés passés, rendu du pavé unique vérifié en navigateur (terrain-single-paver.png). L'intégration au village reste hors de cet atelier. Main/f9fc28d, aucun commit/push.
+
+---
+
+# Kit de terrain — trois pierres de rive arrondies — 8 octobre 2026
+
+Tristan demande trois blocs uniquement côté falaise, plateau plat derrière, formes irrégulières plus arrondies et quelques fissures. Remplacement de la grille 3 × 3 par trois pierres sur les seules cases bordant une rupture interne au module. Angle extérieur : trois pierres réparties autour du coude, sans doubler leur nombre. Plateau intérieur sans pierres. Largeurs variables, contours arrondis à six anneaux, entaille sur une pierre sur trois, fond continu en retrait. Rocaille des escaliers conservée. Atelier /terrain-kit → Roche ; pas d'intégration village ni de changement de données. Sept tests ciblés, lint, build final et vérification navigateur des trois raccords passés. Captures terrain-rim-*.png. Main/f9fc28d, aucun commit/push.
+
+---
+
+# Kit de terrain — blocs juxtaposés — 8 octobre 2026
+
+Correction explicite de Tristan : trois blocs côte à côte par case de bord de dénivelé, pas trois rangées superposées. Une seule hauteur ; faces biseautées en léger relief et joints prolongés sur le dessus (3 × 3 dessus par case haute pour traiter les deux axes et les angles). Fond continu en retrait dans les joints ; toujours un seul mesh partagé par recette. Rocaille des escaliers conservée. Sept tests ciblés, lint, build final et contrôle navigateur des trois raccords passés, dont nombre de blocs, dessus et normales latérales. Captures terrain-blocks-*.png. Atelier /terrain-kit → Roche, intégration village toujours en D. Aucun commit/push, données utilisateur inchangées.
+
+---
+
+# Kit de terrain — mini-falaises fissurées — 8 octobre 2026
+
+Référence visuelle fournie par Tristan : parois continues sous le plateau, et non rochers alignés. Paroi droite et angles repris en peau rocheuse continue avec fractures en retrait et strates irrégulières ; rocaille conservée sur les escaliers. Cadrage rapproché automatique des petits modules. Sept tests ciblés, lint et build final passés ; trois raccords vérifiés en navigateur, variations/rotation/recentrage compris, aucune erreur observée. Accès /terrain-kit → Roche. Détails dans docs/KIT-TERRAIN-PROTOTYPE.md. Toujours un prototype d'atelier, intégration village en D. Main/f9fc28d, aucune donnée modifiée, aucun commit/push.
+
+---
+
+# Kit de terrain — ajout de rocaille — 8 octobre 2026
+
+Demande de Tristan : des rochers également sur les parois. Blocs facettés intégrés aux ruptures droites et aux angles, rochers latéraux et pierres affleurantes sur les escaliers ; passage central de 2,4 cases dégagé. Trois variations déterministes, géométries partagées sans nouveaux meshes par rocher. Accès : /terrain-kit, Matière → Roche. Sept tests ciblés et lint passés, quatre modules vérifiés dans le navigateur de développement. Captures terrain-rock-*.png. Suivi : docs/KIT-TERRAIN-PROTOTYPE.md. Atelier uniquement, intégration village en D. Main/f9fc28d, aucun commit/push.
+
+---
+
+# Kit de terrain — 8 octobre 2026
+
+Prototype demandé par Tristan : paroi, deux angles et escalier naturel ; terre/herbe et roche, trois variations, instances partagées. Atelier accessible sur **/terrain-kit** et depuis le World generator. [Périmètre et reprise](docs/KIT-TERRAIN-PROTOTYPE.md). Escalier 5 × 2 cases, huit marches, montée 0,25 case, profil commun au preview.
+
+Cinq tests ciblés et build world-web passés ; contrôle navigateur des quatre modules et des réglages effectué en développement. Faces inversées détectées visuellement puis corrigées, régression sur les normales. Intégration village/streamer et raccords aux emprises variables restent en D ; pas de changement de génération ou de données. Main/f9fc28d, aucun commit/push, modifications antérieures conservées.
+
+---
+
+# World generator — tracé organique des rivières — 8 octobre 2026
+
+**R5 implémentée et vérifiée : 39 tests ciblés, builds et recette navigateur terminés.** [Bilan r5](docs/RECETTE-WORLD-GENERATOR-HYDROLOGIE-2026-10-08.md). Tristan jugeait les corridors r4 artificiels et a demandé les corrections après discussion des références Red Blob Games.
+
+Nouveaux aperçus r5 : courbes réellement creusées, largeurs progressives5–8 cases, têtes arrondies, contrôle des passages dans les virages et drainage par case (`WaterReach.flowTo`). Les cascades restent larges et alimentées ; les plateaux restent plats. R0/r2/r3/r4 et les artefacts prêts sont conservés. Pas de migration. **Recharger /world-generator, générer un nouvel aperçu, puis Voir une rivière.**
+
+Le routage conserve une direction principale et une recherche bornée ; pas encore de réseau général de confluences ni d'érosion simulée. Les contraintes peuvent réduire le nombre de rivières. Fronts de cascade encore alignés sur la grille. D/E restent à faire, aucun univers v3 ouvert.
+
+Seed42/256×128 publié : 1source,169 cases de rivière hors cap,1chute1 largeur8,eau25,43 %,bois30 %,isolement0. En512×256 :4sources,756cases,2chutes1+3chutes2 largeurs7–8,eau25,71 %,bois30 %,isolement0. Détours maximaux échantillonnés273/137 cases, sans borne universelle. Durées worker1 312/4 316ms et JSON2,07/8,30Mo ; pas de comparaison de performance contrôlée.
+
+39 tests distincts verts en lots courts (hydrologie16,relief15,marches2,API6). La première passe groupée avait39 assertions vertes mais un timeout RPC Vitest ; elle a été reprise sans changer les timeouts. Logs : `meander-check-geometry.log`, `meander-check-drainage.log`, `meander-check-rest.log`. Builds contracts/world-web et lint ciblé. Premier parcours navigateur production : génération, rivière/cascades, marées, soleil/atmosphère, cycles/caméra, aucune erreur. Dernière retouche : marge sèche dans le cadrage des petites rivières et capture orientée selon l'aval.
+
+Dernière recette du build final terminée sans erreur : rivière recentrée avec marge sèche dans la fenêtre locale, tête arrondie, cascade observée depuis son aval calculé. Captures : `hydro-meander-river-complete.png`, `hydro-meander-spring.png`, `hydro-meander-fall-2-orbit-terrain.png`. Les deux candidats et le compte QA ont été supprimés, les services QA arrêtés et les sessions navigateur fermées. Identifiants de fixture retirés. Worker du jeu PID25872 conservé. Main/f9fc28d, worktree antérieur conservé ; aucun commit/push.
+
+---
+
+# World generator — correction des rivières/cascades — 8 octobre 2026
+
+**Correction r4 implémentée et vérifiée.** Tristan demande des ouvertures et cascades de **5 à 8 cases**. La r3 creusait une seule case ; le test de régression l'a reproduit avant correction. [Bilan et captures r4](docs/RECETTE-WORLD-GENERATOR-HYDROLOGIE-2026-10-08.md).
+
+Les nouveaux aperçus utilisent r4 : sections réellement creusées de largeur5–8, fronts de chute regroupés par paires amont/aval (`Waterfall.lanes`), nappe et écume sur toute la largeur. Le bouton d'inspection centre le front. La tirette des chenaux maritimes reste distincte. R0/r2/r3 restent reproductibles, aucun artefact prêt modifié, aucune migration supplémentaire. **Recharger /world-generator puis générer un nouvel aperçu.**
+
+Limite explicite : corridors rectilignes de8–64 cases, pas encore de méandres. Les tracés qui détruisent les berges ou la continuité sèche sont refusés. Marée±0,25, chutes1/2, paliers et accès préservés. D/E restent à faire, aucun univers v3 ouvert.
+
+Seed42 : en256×128, 4sources /883 cases creusées /6chutes1 de largeur5–6 ; en512×256, 16sources /1 802cases /8chutes1 +9chutes2 de largeur5–8. Eau25,63/25,12 %, bois30 %, aucune zone isolée. Les durées worker12 267/25 530ms ont été relevées sous charge locale, sans conclusion de performance comparative. JSON2,09/8,32Mo.
+
+36 tests ciblés passés (hydrologie13, relief15, marches2, API6), builds contracts/API/world-web, lint ciblé et diff check. Navigateur production WebGL2 Intel Iris Plus : génération, fronts larges, chute8×2 vue depuis l'aval dans le terrain, marées, chenal, éclairage/atmosphère, cycles global/local, caméra conservée ; aucune erreur navigateur/shader. Capture : `test-results/hydro-wide-fall-2-orbit-terrain.png`. Les artefacts QA sont ignorés.
+
+Deux candidats et compte QA supprimés, services QA arrêtés, sessions navigateur fermées. Worker du jeu PID25872 conservé. Main/f9fc28d, modifications antérieures préservées ; aucun commit/push.
+
+---
+
+# World generator — tranche C hydrologie — 8 octobre 2026
+
+**Première recette C implémentée et vérifiée.** [Bilan, captures et limites](docs/RECETTE-WORLD-GENERATOR-HYDROLOGIE-2026-10-08.md). Tristan a apprécié le relief A/B et demandé C ; il a validé la marée exploratoire ±0,25, les chutes1/2 et le rejet des tracés nécessitant plus. D (spawn/streamer) et E (ouverture) restent à faire ; aucun univers v3 ouvert.
+
+Nouveaux aperçus **v3 r3** : bassins, chenaux à largeur réelle, rivières/perchées, drainage sans boucle, sorties secondaires descendantes, cascades persistées, enveloppe haute et courants solaires partagés. R0/r2 restent disponibles et leurs artefacts prêts sont conservés. Aucune migration supplémentaire. Recharger /world-generator puis générer un nouvel aperçu ; Couche → Eau et réseaux, Voir une cascade (parcours des chutes), phase numérique et zoom +/−.
+
+Seed42/512×256 final : 5 sources, 292 cellules de rivière, 1 chenal largeur4, 10 fronts de chute1 +3 de chute2 ; eau25,18 %, bois30,00 %, zéro zone isolée. Génération worker13 989 ms, artefact JSON8,32 Mo. En256×128 : 4 sources, 10+1 fronts, pas de chenal admissible (signalé). **Limite avant ouverture : détour échantillonné435 cases** sur256 ; continuité prouvée mais pas de maximum global de trajet garanti.
+
+34 tests ciblés distincts validés (relief15, hydrologie11, marches2, API6) ; publication API finale rejouée seule avec succès après correction d'une dépendance du test au cas précédent. Builds contracts/API/world-web, lint ciblé et diff check. Navigateur production Chromium/WebGL2 Intel Iris Plus : chutes1/2, marées, chenal, soleil/ombres, atmosphère, changement de candidat et cycles global/local ; zéro erreur navigateur/shader, cadrage conservé. Capture oblique terrain de chute2 dans le bilan. Aucun gain GPU revendiqué.
+
+Deux aperçus et compte QA finaux nettoyés, services QA arrêtés, aucun navigateur de recette restant ; worker du jeu PID25872 conservé. Aucun monde utilisateur modifié. Main/f9fc28d, worktree antérieur préservé, aucun commit/push.
+
+---
+
+# World generator A/B — corrections du 8 octobre 2026
+
+Demande courante : **implémenter les corrections de la contre-recette**. Recette v3 r2 : mosaïque périodique de plateaux irréguliers, frontières à la case, accès localisés, couvert végétal préservant la connexité, compteur d'isolement par terre. Aperçu à la case, palette d'altitude et légende, conservation du cadrage, zoom explicite. [Bilan, preuves et limites](docs/RECETTE-WORLD-GENERATOR-CORRECTIONS-2026-10-08.md).
+
+Seed42/512×256 : 6 → 188 plateaux, plus grand plateau 62 336 → 3 179 cases ; 88,18 % des ruptures hors grille8. Neuf combinaisons seed/taille validées techniquement. Les détours restent parfois longs (jusqu'à213 cases dans l'échantillon), sans borne globale promise. Les candidats v3 restent fermés ; C/D/E restent à faire. Appréciation finale du paysage à Tristan.
+
+Migration036 additive appliquée sur test puis développement : huit artefacts/checksums utilisateur inchangés. Révision r2 pour les nouveaux candidats seulement ; **générer un nouvel aperçu** pour voir la nouvelle géographie. Signature complète des nouvelles recettes v2 vérifiée à la copie et avant ouverture, compatibilité historique conservée.
+
+24 tests ciblés distincts validés, builds et lint ciblé ; recette navigateur production WebGL2 sur Intel Iris Plus, couches/effets/cycles, zero erreur. Détails et limites de mesure dans le bilan. Main/f9fc28d, worktree antérieur préservé, aucun commit/push.
+
+Zoom rapproché par boutons vérifié sur quatre poses, cadrage conservé ; molette automatisée non validée. Dix candidats et compte QA nettoyés, services QA arrêtés, aucun navigateur de recette restant. Dernier cas API copie/ouverture repassé après nettoyage ; worker local du jeu conservé.
+
+---
+
+# Contre-recette World generator A/B — 8 octobre 2026
+
+**B non acceptée visuellement, reprise avant C.** [Rapport et preuves](docs/CONTRE-RECETTE-WORLD-GENERATOR-AB-2026-10-08.md). Demande actuelle : revue, pas implémentation. Besoin explicite : relief plus granulaire et aspect « craquelé » ; mosaïque de plateaux irréguliers proposée, sens exact à confirmer.
+
+Preuves nouvelles : inspection du dernier candidat existant seed1/512×256 (a6476a95…), 100 % des ruptures sur grille8, plus grand plateau 62 400 cases ; cinq recettes mesurées, faux zéro d’isolement reproduit sur deux terres. 6 tests purs + 6 API passés ; navigateur développement WebGL2 sans erreur, captures altitude ×1/×4 et locale. Ne pas transformer ces tests verts en validation de la géographie. A : garanties API vérifiées ; copie complète et inspection ont des réserves.
+
+Reprise proposée : géographie périodique à plusieurs échelles, contours locaux à la case, réseau d’accès moins systématique, compteur par terre, preview préservant détails/caméra, révision de recette. Détails et critères dans le rapport. Script reproductible : scripts/audit-world-generator.mjs. Aucun monde utilisateur modifié, session temporaire nettoyée ; tests sur arbestra_test sans reset. Main/f9fc28d, worktree antérieur conservé, aucun commit/push.
+
+---
+
+# World generator - bouton de generation, 7 octobre 2026
+
+Cause observee : six candidats sauvegardes, limite locale de six ; le refus HTTP 409 etait affiche loin du bouton. Aucun calcul ni worker bloque. Correction : compteur de places et message de capacite/error pres du bouton, generation desactivee lorsque plein ; suppression toujours explicite. Configuration privee `.env.dev` : `WORLD_GENERATOR_MAX_CANDIDATES=12`, API watch rechargee. Verification locale HTTP 200 : six candidats conserves / douze places. Aucun candidat utilisateur supprime ou modifie.
+
+Preuves actuelles : six integrations API passees (capacite, conservation, rejeu idempotent, hausse du plafond), build production world-web et lint cible passes. Navigateur production Chromium : plafond de deux sur arbestra_test, deux apercus prets, bouton desactive et avertissement visible, suppression explicite du second, nouvel apercu pret ; zero erreur navigateur. Script `tests/browser/generator-capacity.mjs`, capture `test-results/generator-capacity-full.png`, trace `generator-capacity-browser.json`. Services temporaires et propres fixtures nettoyes ; services du jeu conserves. Defaut versionne toujours six, plafond local douze. Main/f9fc28d, modifications non commitees ; aucun commit/push, travaux anterieurs preserves.
+
+---
+
+# World generator — marches larges et peu profondes, 7 octobre 2026
+
+Correction demandée par Tristan : volées **2 cases de long × 4 cases de large**, huit girons de **¼ case** (largeur/profondeur 16:1), dénivelé inchangé ≤1 unité = ¼ de case. Le maximum validé de largeur reste 5 ; 4 est la recette courante, car 5 enfermait des coins sur les plateaux 8×8 lorsque deux escaliers se rejoignaient autour d’une rupture.
+
+Rendu : contremarches descendantes déplacées au bord de sortie du giron, raccords aux deux plateaux et parois latérales, emprises partielles au bord de l’inspection. Génération/graphe : toutes les voies de l’emprise sont dégagées et franchissables ; circulation latérale interne possible, entrée par un côté extérieur bloquée ; détours courts bornés calculés dans chaque plateau autour des côtés d’escalier. Les modèles sauvegardés gardent leur largeur ; **générer un nouvel aperçu** pour les volées de 4 cases. Le rendu corrigé des contremarches s’applique aussi aux anciennes largeurs.
+
+Preuves : largeur ancienne 1 constatée en test rouge ; **6 tests purs + 5 intégrations API passés**, contrats/world-web build et lint ciblé verts. Navigateur production Chromium/WebGL2 : quatre poses X/Y montantes/descendantes, couches, fog/ombres et retours de vues, zéro erreur finale. Seed42/256×128 : 190 escaliers, 1 terre/1 composante/0 zone isolée, bois25,04 %, génération1 366 ms. Captures `test-results/stair-{0,1}-{up,down}.png`, JSON `stair-browser.json` ; script reproductible enrichi dans `tests/browser/world-generator.mjs`. Un seul candidat/compte de recette dans arbestra_test, supprimés avec les services temporaires ; services du jeu et worker local PID25872 conservés. Aucun candidat existant modifié, aucune migration de cette passe.
+
+Fichiers : contracts world-generator/world-landscape et tests ; preview/stair-profile et tests ; script navigateur. [Bilan mis à jour](docs/RECETTE-WORLD-GENERATOR-AB-2026-10-07.md). Main/f9fc28d, changements non commités, travaux antérieurs conservés ; aucun commit/push.
+
+---
+
+# World generator — activation locale, 7 octobre 2026
+
+À la demande explicite de Tristan, accès configuré dans `.env.dev` pour **start@arbestra.world**, migration **035 appliquée à 127.0.0.1/arbestra** (034 était la dernière), API watch redémarrée pour charger le réglage, worker local démarré en arrière-plan (PID 25872 à cette activation). Les frontends existants sont conservés.
+
+Accès : **http://localhost:5174/world-generator** ; depuis le LAN, **http://192.168.1.4:5174/world-generator** si cette IPv4 est encore celle du PC. Connexion avec le compte start habituel.
+
+Vérification : endpoint opérateur HTTP **200** avec une session de contrôle temporaire du compte start, supprimée ensuite ; route web **200** ; worker encore actif et sans erreur de démarrage. Univers existant toujours ouvert, **1 monde / 2 villages / 69 bâtiments** avant et après. Aucun reset/seed, aucun nouveau candidat créé, aucune ressource modifiée. `.env.dev` reste ignoré par Git. Production reste à configurer/migrer ; les candidats v3 restent fermés. Aucune nouvelle campagne de tests applicatifs requise pour cette activation ; preuves A/B ci-dessous. Aucun commit/push.
+
+---
+
+# World generator alpha — tranches A/B, 7 octobre 2026
+
+**Implémentées et vérifiées techniquement**, première recette exploratoire. [Bilan détaillé, commandes et mesures](docs/RECETTE-WORLD-GENERATOR-AB-2026-10-07.md) ; [spec à jour](docs/SPEC-WORLD-GENERATOR-ALPHA.md).
+
+A : migration 035 additive (ready/ouvert), accès opérateur en production, candidats persistants/idempotents, worker dédié avec exclusion PostgreSQL et child borné, suivi durable, publication atomique/checksum, reprise après interruption, conservation/ouverture explicite v2. Copie de recette v2 vérifiée avant un vrai spawn, source vierge conservée. B : panneau six paramètres (canaux désactivés jusqu’à C), plateaux signés 8×8, escaliers naturels 2×1/dénivelé ≤1, 1 unité = ¼ largeur de case, graphe partagé avec entrées latérales refusées et détours dégagés, climat/exposition périodiques, végétation, preview tore/local sans fumée par défaut, couches de diagnostic et ombres solaires.
+
+**Preuves de cette passe** : 17 tests / 4 fichiers passés (22:30:25, 51,16 s), builds contracts/API/world-web et lint ciblé réussis. Tests du véritable child, exclusion d’un second exécuteur, timeout réel avec aucune sortie partielle puis reprise ; onboarding connexe. Navigateur Chromium sur build production, WebGL2/Babylon 8.56.2/ANGLE Intel Iris Plus : marches, couches, fumée on/off, ombres, retours de vues/candidats, conservation et ouverture v3 interdite ; zéro erreur finale, viewport mobile sans débordement. Seed42/256×128 : génération 1 591 ms, eau24,88 %, amplitude7, bois24,36 %, 190 escaliers, 1 terre/1 composante/0 zone isolée. Tore neutre : 2 draws, rendu JS médiane/p95 1,30/3,30 ms ; détails et limites dans le bilan. Pas de temps GPU mesuré ni de gain Village annoncé.
+
+**Activation restante** : migration appliquée seulement à **127.0.0.1/arbestra_test**, sans reset. Développement/production restent à migrer avec `corepack pnpm db:migrate` ; configurer `WORLD_GENERATOR_OPERATOR_EMAILS`, redémarrer. Route `/world-generator` ; root dev démarre le worker, production utilise `generator:start`. Aucune configuration privée changée, aucun univers de développement modifié/ouvert. Serveurs et comptes/candidats temporaires de recette nettoyés. Captures/JSON dans `test-results`, scripts reproductibles dans `tests/browser`.
+
+**Reprise C par Astra**, contre-recette A/B avant hydrologie. Recette plateaux/corridors et écarts aux cibles à affiner avec Tristan. V3 reste fermé : eau à 0 provisoire, pas encore de rivières/canaux/cascades/marées (C), ni features économiques et spawn aménageur/révisions du streamer (D). Checksum du preview couvre terrain/climat/bois/graphe, pas les stocks des dépôts ; élargir la provenance avant E. Le gameplay ouvert garde v2 ; aucun outil de terraformation. A/B ne livrent pas C/D/E.
+
+Git : **main / f9fc28d**, worktree antérieur conservé, ajouts et modifications A/B non commités ; aucun commit/push. Vérifications applicatives globales non exécutées ; les résultats ci-dessus sont ceux de cette passe.
+
+---
+
+# World generator alpha — escaliers naturels, 7 octobre 2026
+
+[Spec actualisée](docs/SPEC-WORLD-GENERATOR-ALPHA.md), documentation uniquement. **Décision de Tristan remplaçant les pentes proposées précédemment** : terrain en plats et ruptures, sans pente ni rampe ; détours vers des escaliers naturels dans des zones délimitées. Chaque escalier mesure au plus **2 cases dans le sens de la montée, 5 cases transversalement et 1 unité de dénivelé total**. Pour un écart supérieur : plusieurs escaliers séparés par de vrais paliers plats. Continuité sur chaque terre et trajets toujours secs conservés ; aucune terraformation joueur en alpha.
+
+La spec décrit les emprises orientées, accès bas/haut, franchissement dans les deux sens uniquement par les passages, données partagées serveur/client, raccords toriques et tests des bornes. Les clauses sur les rampes ont été remplacées dans décisions, génération, tranches et vérifications ; les rapides sont décrits par de petits seuils. Restent à recetter le dessin des petites marches, les paliers et détours, sans modifier les maxima validés.
+
+Vérification documentaire des liens, cohérence et whitespace ; aucun test applicatif, code ni donnée modifiés. Main/f9fc28d ; modifications de cette passe limitées à la spec et au handoff, travaux précédents conservés, aucun commit/push.
+
+---
+
+# World generator alpha — corrections de spec, 7 octobre 2026
+
+[Spec corrigée](docs/SPEC-WORLD-GENERATOR-ALPHA.md), **non implémentée, en cadrage pour les valeurs métier restantes**. Cette passe répond à la revue ci-dessous ; elle remplace ses réserves techniques par des exigences dans la cible, sans prétendre les avoir réalisées.
+
+**Décisions confirmées par Tristan** : aucune terraformation joueur en alpha (élever/baisser/modifier le relief est futur) ; aménagement serveur au spawn distinct ; pentes naturelles et passages doux vers chaque zone jouable d’une même terre, falaises/cascades contournables, aucune liaison à pied obligatoire entre îles ; trajets toujours secs aux plus hautes eaux, berges temporaires hors trajet.
+
+Corrections : processus de génération isolé, concurrence bornée et suivi durable/reprise avec publication atomique ; graphe de franchissement partagé contrôlé après hydrologie et obstacles ; overrides de spawn et révisions des chunks/halos propagées au streamer, caches de routes et overview ; recette sur copie isolée de l’artefact sauvegardé, checksum vérifié avant spawn et source vierge de tests conservée pour ouverture. Tranches A–E et critères de preuve ajustés.
+
+**Encore proposés** : pente maximale (essai 0,25 unité par cellule), détour acceptable et marges à recetter ; amplitude numérique des marées, paramètres écologiques ; garanties/chiffres et droits sur les ressources au spawn. Continuité terrestre et trajets secs ne sont plus des arbitrages ouverts. Aucun nouvel outil, pont, nage ou mécanisme de terrassement autorisé par cette spec.
+
+Vérification : relecture documentaire, références locales et whitespace contrôlés ; aucun test applicatif, changement de code, génération ou mutation DB. Base main/f9fc28d ; spec et handoff seuls modifiés pendant cette passe, travaux antérieurs conservés, aucun commit/push.
+
+---
+
+# Revue World generator alpha — 7 octobre 2026
+
+Relecture de [la spec](docs/SPEC-WORLD-GENERATOR-ALPHA.md) confrontée au checkout `main` / `f9fc28d`. **Revue uniquement : spec inchangée, aucune implémentation ni mutation des données.** La séparation candidat/monde ouvert, le résultat persisté et les tranches sont cohérents ; les réserves suivantes restent à traiter avant les tranches concernées.
+
+- **P1 — actualisation géographique, tranche D** : la section 11 suppose une invalidation/versionnement réutilisable. Or [terrain-store.ts](apps/world-web/src/scene/terrain-store.ts) conserve les anciennes elevations/terrainCodes lors des rafraîchissements (ligne 129). Le déclencheur global actuel vient de science.geographyRevision, pas des mutations du terrain. Spécifier la révision des chunks modifiés et de leurs halos, sa propagation aux clients, le rechargement du sol et l'invalidation des trajets/agrégats. Preuve attendue : un client déjà présent voit un nivellement de spawn sans reconnexion.
+- **P1 — déplacement et relief/eau, tranches B–D** : préciser les transitions de hauteur franchissables à pied et le traitement des berges inondables. [travel-paths.ts](packages/contracts/src/travel-paths.ts) utilise terrainCodes pour le sol accessible et n'intègre pas les elevations dans la signature du cache. Les sections 6/11 ne définissent pas encore ces règles. Proposition alpha à arbitrer : masque de marche stable aux plus hautes eaux, sans pathfinding temporel ; seuils de pente/rupture et construction partagés serveur/client.
+- **P1 — exécution du générateur, tranche A** : la commande serveur bornée (section 5) ne précise pas son isolement CPU, sa concurrence ni la reprise après interruption. [generation.ts](apps/api/src/modules/worlds/generation.ts) effectue des boucles synchrones dans une transaction ; generating y est transactionnel et une erreur laisse pending. Ne pas brancher directement ce calcul sur le processus HTTP du jeu. Spécifier un exécuteur isolé, un état de tentative observable et durable, une publication atomique et la reprise des tentatives interrompues, sans queue économique générale.
+- **P2 — recette avant ouverture, tranche E** : la section 13 demande un parcours joueur sur le monde exact alors que join est interdit avant ouverture et que preview n'a pas de commandes métier. Définir un parcours de recette privé ou une copie de test de l'artefact exact, avec contrôle du checksum et séparation des données d'essai. Cette possibilité n'est pas une autorisation acquise.
+
+Preuves : lecture du code et des contrats, pas d'essai d'exécution ni de mesure de performance. Aucun test applicatif nécessaire pour cette revue documentaire. Seul ce préambule de handoff est ajouté ; worktree antérieur conservé, aucun commit/push.
+
+---
+
+# World generator / preview alpha — spécification, 7 octobre 2026
+
+**Spécification rédigée, aucune implémentation effectuée.** [World generator et World preview](docs/SPEC-WORLD-GENERATOR-ALPHA.md). Base : `main` / `f9fc28d`, worktree antérieur conservé.
+
+Direction validée : paysage naturel puis clairière aménagée au spawn ; plateaux **−8/+8**, eau moyenne **0**, plateau de base **+1**, marées modérées ; examen du tore sans fumée avant ouverture explicite. Six tirettes (aire d’eau, amplitude, altitude moyenne, largeur des canaux, densité d’arbres, influence solaire), seed, résultats demandés/obtenus, génération explicite et monde retenu persisté. Cascades de 1/2 unités intégrées à la cible.
+
+**Encore proposés** : ±0,25 de marée, domaines/tolérances/profils du panneau, courbe écologique d’exposition, quantités/distances et autorisation de compléter/dégager les ressources au spawn ; cascade bloquante pour les futurs bateaux. Bateaux/ports et effets économiques de météo hors livraison initiale.
+
+Écarts vérifiés dans le code : ready tient lieu d’ouverture dans l’onboarding ; humidité du générateur et météo de présentation séparées ; tore lisse coloré par altitude ; eau régionale à hauteur fixe ; absence d’accès opérateur prod. La spec distingue génération/ouverture, fond/surface d’eau, unités physiques/amplification visuelle, climat durable/météo, drainage/courant de marée. Preview sur le candidat exact, sans progression/quête, droits serveur ; aucun monde habité régénéré.
+
+Tranches : A candidat fermé/preview prod sur v2 ; B relief/climat/paramètres v3 sans clairières préaménagées ; C hydrologie/cascades ; D spawn transactionnel après arbitrages ; E recette et ouverture alpha. A techniquement cadrée ; B–D restent en cadrage pour les choix métier/recette identifiés. Tests futurs définis, **non exécutés** dans cette passe documentaire.
+
+**Vérification documentaire** : liens locaux contrôlés, statuts cible/existant relus, diff sans erreur de whitespace. Aucun test applicatif, migration, génération, mutation DB ni ouverture d’univers. Fichiers de cette passe : spec, index d’architecture, note prospective génération v2 et présent handoff. Changements non commités/non poussés ; modifications antérieures et export utilisateur conservés.
+
+---
+
+# Onboarding joueur — 7 octobre 2026
+
+**Première tranche implémentée et vérifiée** : inscription → choix d’un monde ouvert → noms du personnage et du village → implantation atomique → vrai rendu Village. [Spec et contrats](docs/SPEC-ONBOARDING-JOUEUR.md). Base relue : `main`, dernier commit `f9fc28d` ; les travaux locaux antérieurs ont été conservés.
+
+**Décisions validées par Tristan** : modèle conçu sur `start@arbestra.world`, Jardin ajouté puis exporté une fois ses travaux achevés. Recette figée : mairie niveau 1, trois maisons en troncs, Jardin niveau 1 sur **trois parcelles**, 35 gestes de chaussée et 15 équipements d’éclairage, orientations et suppressions de braseros incluses. Départ : **15 habitants, 2 000 bois brut, 50 carottes, zéro autre ressource, coffre intact de 2 000 carottes, chaque parcelle au tiers de sa capacité**. Aucun stock 999999, historique, mission, accomplissement ou UUID du concepteur copié.
+
+API : création compte/session atomique, mot de passe scrypt et cookie existant ; liste authentifiée des mondes prêts ; commande de premier village par compte/monde. Verrou compte pour reprise idempotente, clairière `FOR UPDATE SKIP LOCKED`, membership avant insertion du nouveau village (clé étrangère), village avant verrou spatial exclusif, borne serveur après acquisition. Validation terrain/occupations/emprises avant attribution ; candidats incompatibles annulés par savepoint. Pas de retrait de gisement, pas de village partiellement créé. Toutes les variantes de coordonnées et d’éclairage sont canonicalisées sur le tore avec nouveaux IDs.
+
+**Preuves exécutées** :
+- Contrats compilés ; builds API/lobby verts, typecheck API final et lint ciblé verts. Aucune nouvelle migration.
+- Intégration initiale : **5/5 verts** après correction de l’ordre membership/village. Campagne élargie : 8 cas (6 PostgreSQL + 2 purs), **7 verts et 1 erreur de fixture** : un gisement avait le rôle `anchor` au lieu de `body`. Fixture corrigée conformément à la contrainte existante ; cas de collision/isolation relancé seul, **1/1 vert**, les 5 autres volontairement non rejoués. Couverture : hash/session/doublon e-mail, état initial et coffre unique, refus sans traces, gisement conservé et autre compte refusé, rollback attesté après 5 bâtiments/6 stocks/1 attribution, concurrence avec deux attentes advisory PostgreSQL observées, surfaces/éclairage/identités à la couture du tore.
+- Navigateur : `node --import tsx tests/browser/onboarding.mjs`, **processus terminé avec succès**, Chrome/D3D11, desktop 1440 × 900 et **format mobile émulé** 393 × 851. Inscription avec confirmation erronée puis correcte, recharge avant création, choix/noms, redirection, maisons précompilées et mairie de factory prêtes, **19 instances natives** présentes, Jardin/chaussées/lumières visibles, stocks HUD conformes, retry même UUID, déconnexion/reconnexion même village. **Zéro erreur de page** sur les deux parcours. La disponibilité de la mairie synchrone est vérifiée sans exiger le marqueur propre au chargement des assets.
+- Captures inspectées : `test-results/onboarding-desktop-lobby.png`, `onboarding-desktop-village.png`, `onboarding-mobile-lobby.png`, `onboarding-mobile-village.png` ; résultats `onboarding-browser.json`. Artefacts ignorés par Git.
+- Développement : route d’inscription présente sur l’API locale (payload vide volontairement rejeté 400, aucun compte créé). Lecture seule des 20 premières clairières libres d’Aube : 12 emprises du modèle sans occupation ; sondage de collision, pas une campagne de terrain ni une nouvelle attribution.
+
+**Données et limites** : export modèle en lecture seule sur `arbestra` ; essais uniquement sur `arbestra_test`, sans reset. Mondes/comptes de fixtures supprimés, seuls les serveurs de test créés sur 3100/5273/5274 arrêtés ; services de développement conservés. Tests physiques portable/Marie distincts de l’émulation. Premier village seulement ; TRY, mails, validation d’adresse et récupération de mot de passe hors tranche. Inscription limitée à 5 tentatives/IP/15 min dans le processus ; en proxy DEV, les appareils partagent son IP. État source et stocks de conception intacts.
+
+Fichiers : `packages/contracts/src/auth.ts`, auth et branchement `apps/api/src/app.ts`, nouveau module `apps/api/src/modules/onboarding/`, lobby `apps/play-web/src/{App.tsx,api/client.ts,styles.css}`, export `scripts/export-starter-village.mjs`, test navigateur, spec, README et références génération/index. Réexport explicite après changement du modèle : `node --import tsx scripts/export-starter-village.mjs`, puis relire la recette.
+
+**Git réel** : `main` / `f9fc28d`, changements locaux non commités et non poussés, index vide. Les modifications API/Exploitation/LOD/LAN/Construction/Oracle antérieures et l’export utilisateur `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` sont conservés.
+
+---
+
+# Ajustements visuels Construction / Oracle — 7 octobre 2026
+
+Demandes de Tristan : emprise de construction sans coloration de la case, uniquement bordure vert fluo / rouge lumineux ; indice de l'Oracle sur les provisions plus grand en overlay avec bouton **Masquer**. Implémentation dans `BabylonVillageScene.ts` (cadre à centre vide, matériaux non éclairés et double face, passe des repères pour éviter leur masquage, plaques de picking transparentes, ghost sans teinte de validité), `App.tsx` et `styles.css` (overlay sans fermeture automatique, adapté au mobile et isolé au village). Déclencheur Oracle inchangé, pas de modification des autorisations ou règles de construction. Specs HUD et coffre mises à jour. Les dix tests sélection/Oracle sont verts, lint ciblé vert. Vérification finale Chrome sur le village réel de Départ : survol libre vert, obstacle rouge, terrain sans remplissage, retour Vue libre nettoyant les repères, overlay toujours visible après cinq secondes et fermé par Masquer, largeur mobile 390 px sans débordement, zéro erreur de page. Captures `test-results/construction-border-{valid,obstacle}.png`, `oracle-provisions-{overlay,mobile}.png` ignorées ; aucune commande de construction envoyée par les essais. Typecheck final vert ; modifications locales non commitées.
+
+À sa demande pendant cette tranche, **tous les stocks de Départ/start@arbestra.world ont été fixés à 999999** en transaction, propriétaire/village/cible locale vérifiés : `wood`, `timber`, `stone`, `cut-stone`, `carrot`, `rings`. Contrôle des six lignes après écriture. Fournitures de conception, pas une valeur de spawn validée. Le village est déjà en cours d'aménagement par Tristan ; sa description initiale ci-dessous est historique, pas son état présent.
+
+---
+
+# Compte de conception du village initial — 7 octobre 2026
+
+À la demande de Tristan, compte **start@arbestra.world** créé dans la base locale de développement `arbestra`, membre d'Aube sous le nom **Architecte**, propriétaire du village **Départ** (`750e805a-d9d6-4a7b-8a8e-83cc73c32461`), ancre canonique **20,20**. Clairière libre attribuée en transaction avec verrou de ligne ; monde déjà `ready`, aucune régénération ni modification du village de Pionnier. Compte `903fec2c-b92f-480f-b440-dc14afae5333`, mairie `4ebc4e5e-81bc-4d9d-902d-d6d8526acce3`.
+
+Base de travail : seule mairie niveau 1 achevée sur deux cellules, recette actuelle avec entrée +x, coffre non ouvert (2 000 carottes), 15 habitants disponibles, stocks du seed de prototype (2 000 bois / 50 carottes / 0 pierre). Ateliers déjà activés sur Aube, réglage mondial conservé. Ces valeurs servent à la conception ; elles ne valident pas le contenu initial de chaque futur joueur. Tristan veut dessiner ce village comme référence pour le spawn ; **aucune copie automatique, inscription publique ou commande générique de spawn n'est implémentée**. Quand le dessin sera arrêté, extraire une recette relative à l'ancre et définir séparément les stocks, habitants et états initiaux, sans recopier les UUID/commandes/missions du village de conception. Identifiants de connexion transmis dans la conversation, pas conservés ici.
+
+Création ponctuelle via script ignoré dans `test-results`, cible locale contrôlée, aucune migration ni seed global. Contrôle DB : propriétaire, ancre et attribution de clairière cohérents. Vérification navigateur Chrome via l'adresse LAN : connexion du nouveau compte, ouverture de son vrai village, terrain chargé, une mairie, 15 habitants, ateliers disponibles, zéro erreur de page ; commandes métier bloquées après connexion. Capture ignorée `test-results/start-village.png`. `git diff --check` vert ; seule la passation suivie a été modifiée pour cette demande, aucun commit/push.
+
+---
+
+# LOD généralisé en Village — 7 octobre 2026
+
+**Implémenté et vérifié**, après accord de Tristan pour trois niveaux et des réglages réservés au DEV. Proche / périphérie / lointain, seuils **45 / 28 pixels de rendu par mètre de recette**, modifiables à chaud dans **DEV → LOD des bâtiments**, sauvegardés localement et réinitialisables. Projection/focale/viewport/résolution, taille locale, échelle, inclinaison, orthographique et recentrage pris en compte. Bascule coordonnée sous le même parent, pas de fondu ni génération au seuil.
+
+Campus 1–3, maisons pierre/troncs/madriers 1–2, mairie 1 : **40 variantes précompilées** `-lod1/-lod2`, géométrie proche originale inchangée. Scieries 1–3, tailleur et caserne DEV : templates statiques partagés par scène. Mairie 2 animée et implantations particulières : trois hiérarchies préparées lors de la création/reconstruction et réutilisées au zoom ; horloge/reflets masqués inactifs, braseros et feu du tailleur communs. Jardins, anciens modèles et chantiers déjà minimaux ne sont pas triplés. Aucun changement d'économie, ressources, trajets, autorisations ou dépendance Babylon.
+
+**Gain établi sur le vrai village instancié**, référence = build de la précédente tranche campus, pas le commit public. Gestion : **340 → 271 draws (−20,3 %)**, **2 132 973 → 771 546 indices soumis (−63,8 %)**. Dézoom Village : **424 → 386 draws (−9,0 %)**, **2 010 171 → 787 092 indices (−60,8 %)**. Très proche : **114 draws / 611 304 indices inchangés**. Mesures reproduites en production Chrome/WebGL2/Iris Plus D3D11, mêmes snapshot, caméra, résolution 1200 × 750 et lumière. Cadence variable : gestion finale 105,4 → 47,2 ms de frame moyenne, dézoom 73,0 → 64,1 ; fenêtre très proche dégradée malgré géométrie identique. **Pas de facteur FPS garanti**, objectif global 45 FPS/P95 ≤ 40 ms encore non atteint.
+
+Compromis : buffers géométriques de scène **+13 126 868 octets**, matériaux 120 → 187, textures 28 → 30 ; compteurs de sommets logiques en hausse puisqu'ils incluent les variantes retenues. Les 40 variantes totalisent 11 123 746 octets gzip / 33 935 920 octets de buffers si toutes sont chargées. Caches par recette bornés et libérés avec la scène ; mairie encore procédurale à la reconstruction. Navigation → modèles prêts 22,0 → 24,1 s, fenêtre incluant imports/API/assets, pas un coût isolé de génération.
+
+**Preuves** : build final/typecheck et lint ciblé verts. Campagne de scène : 42 fichiers / 166 tests couverts ; une erreur de fixture (mairie sur une case) corrigée, fichier relancé 3/3, contrôleur relancé 3/3 après le cas d'échelle ; les 41 autres fichiers étaient verts. Production : campus + les trois matériaux de maisons + mairie/scieries/tailleur, trois paliers, picking et sélection, cycles de zoom, suppression/recréation sans croissance des ressources contrôlées, rebase, Région/Village, états/niveaux/orientations du campus, nuit/vitrage. DEV : réglages persistants/reset et caserne aux trois niveaux. Zéro erreur de page sur les passes finales. Hashes/tailles et géométries des 60 assets du manifeste contrôlés.
+
+[Rapport, métriques CPU/GPU et captures](docs/AUDIT-RENDU-3D-2026-10-07.md#lod-de-toutes-les-familles-en-village) ; [spec section 7](docs/SPEC-OPTIMISATION-RENDU-BATIMENTS.md#7-généralisation-à-trois-niveaux-en-village--7-octobre-2026). Reproduction : `tests/browser/village-lod-profile.mjs`, `village-lod.mjs` (option `--families-only`), `village-lod-controls.mjs`, serveur de build `village-lod-server.mjs`. Données/captures/JSON dans `test-results/lod-general-*`, ignorés. Les serveurs de comparaison 5188/5189 ont été arrêtés ; services de développement existants conservés.
+
+**État Git** : `main`, dernier commit `f9fc28d`, changements locaux non commitées/non poussées ; aucune autorisation de commit/push demandée ni inférée. Les modifications API/Exploitation, jardins, vitrage antérieures et l'export utilisateur restent présents.
+
+**Accès réseau local réalisé ensuite** : les Vite de développement écoutent en IPv4 sur 5173/5174 (mode e2e toujours localhost), liens lobby/monde fondés sur l'hôte visité, variables VITE explicites prioritaires. Adresse Wi-Fi actuelle : **http://192.168.1.4:5173**, monde **http://192.168.1.4:5174/?world=aube**. API toujours sur 127.0.0.1:3000 derrière les proxys. Aucun changement de box/pare-feu : `netsh` confirme une règle TCP Node.js existante autorisée sur le profil Public actif, pour le bon exécutable. La lecture PowerShell CIM du pare-feu refusait l'accès, y compris hors sandbox ; contournement en lecture par `netsh`, pas de refus d'approbation.
+
+Correction nécessaire au LAN HTTP : helper `random-uuid.ts` utilisant le natif ou un UUID v4 via `crypto.getRandomValues`, appliqué aux commandes/UI (HTTP distant n'expose pas `crypto.randomUUID`). Tests ciblés UUID/client/extraction/file jardins **10/10 verts**, typecheck des deux frontends et lint applicatif ciblé verts. Navigateur Chrome via l'IP : connexion, session API 200, canvas Village et retour au lobby après suppression des cookies, zéro erreur de page ; commandes de jeu bloquées par le harness après connexion. Script `tests/browser/lan-access.mjs`, preuves ignorées `test-results/lan-access.json` et `lan-village.png`. Vérification réalisée depuis le PC serveur via son IP, **accès depuis portable/Marie encore à confirmer sur ces appareils**. Serveurs existants rechargés et laissés actifs, aucun reset/seed ni commande métier. Instructions dans README ; paramètres LOD locaux à chaque navigateur/origine. Changements non commités.
+
+---
+
+# LOD du campus en Village — 7 octobre 2026
+
+**Première tranche implémentée et vérifiée**, demandée explicitement par Tristan après les optimisations d'Exploitation. Babylon courant confirmé en 8.56.2 ; aucune migration de moteur. Deux variantes instanciées coordonnées par campus, niveaux 1–3 / achevé-travaux. Détail et miniatures existants inchangés ; distant précompilé avec joints de pierre réunis sans fermer les baies et lots fusionnés localement par matériau. Critère unique : diamètre projeté de la sphère du campus < **320 pixels de rendu** ; matrice caméra/focale/viewport, échelle et repère local pris en compte. Pas de fondu, pas d'hystérésis ajoutée sans oscillation. Monuments communs, même UUID/parent/ancrage/sélection. Le LOD natif par mesh a été écarté pour cette hiérarchie de 39 pièces aux volumes distincts ; pas de nouvelle infrastructure générale.
+
+**Gain reproductible au dézoom restant en Village** : scène **455 → 424 draws (−6,8 %)** ; **2 148 519 → 2 010 171 indices soumis (−6,4 %)** ; actifs 817 → 772 (inclut les nœuds vides). Campus niveau 3 seul : 188 268 → 96 036 sommets, 39 → 8 lots, monuments exclus. Poses proche/gestion : 158/340 draws et 993 255/2 132 973 indices, strictement identiques avant/après. Référence sur le checkout courant avec travaux antérieurs, production Chrome WebGL2 / Iris Plus D3D11, viewport 1440 × 900 et rendu 1200 × 750, données/caméra/soleil figés ; aucune suite/build pendant les fenêtres de performance. Première capture automatisée bridée 5 FPS écartée. [Rapport complet, protocole, tableaux CPU/GPU et captures](docs/AUDIT-RENDU-3D-2026-10-07.md#lod-du-campus-dans-la-vue-village).
+
+Cadence distante observée : moyenne/P95 185,5/223,5 → 152,5/205,0 ms dans la première paire ; 140,7/214,1 → 58,7/81,0 ms dans la répétition. Variabilité forte, y compris dégradation des poses détaillées dans la deuxième paire malgré leurs draws/indices identiques : **aucun facteur FPS garanti, objectif global 45 FPS / P95 ≤ 40 ms non atteint**. Gain établi sur les quantités dessinées. Surcoût : +4 497 400 octets de buffers géométriques retenus pour le niveau 3 distant, +722 848 octets gzip ; maximum des six variantes 15 956 088 octets de buffers, hors JS/textures/pilote. Les sommets logiques augmentent puisque les deux représentations restent résidentes ; ne pas les confondre avec les indices dessinés.
+
+Preuves terminées : **42 fichiers / 164 tests de scène verts**, build world-web (typecheck inclus), lint ciblé, vérification du diff. Picking personnalisé d'une variante désactivée reproduit rouge puis corrigé (`isEnabled`/`isVisible`) ; perte du contour à la molette reproduite au navigateur puis corrigée pour la sélection bâtiment en Village. Vitrage reste non pickable après actualisation. NullEngine : six recettes/gabarits/verre, identité/instances, projection, rotation/rebase, cache, chargement tardif après suppression, échec optionnel conservant le détail, libération. Chrome production : sélection/panneau conservés, vraie molette, zoom continu et quatre cycles, sortie/retour avec rebase, Région → Village, chantier/niveau/orientation par snapshots interceptés, suppression/recréation et trois cycles supplémentaires, nuit/braseros/verre .22, zéro capture et zéro erreur de page. Sources/instances réelles du Village, pas seulement atelier. Un observateur LOD et ressources stables après cycles ; deux téléchargements au zoom initial, six au total pour les trois couples de recettes rencontrés, aucun aux recréations. Les ajustements du harness (lecture de buffers, suivi du rebase, ouverture du solaire) précèdent la recette finale verte.
+
+Fichiers : `building-lod.ts`, `building-lod-geometry.ts`, tests associés ; assets/loader/bake/manifeste, six `.abmesh.gz` distants, `timber-thatch.ts`, `BabylonVillageScene.ts`, compilateur et trois scripts `tests/browser/village-lod*.mjs`. `node scripts/bake-buildings.mjs university --lod` régénère seulement les distants ; compilation normale de l'université = les deux variantes. [Spec](docs/SPEC-OPTIMISATION-RENDU-BATIMENTS.md#6-lod-du-campus-en-village--tranche-du-7-octobre) et catalogue actualisés. Builds, fixture et mesures `test-results/lod-*` ignorés, conservés pour reprise. Pas de mutation métier, reset, migration ou dépendance Babylon modifiée. Pas de recette mobile/autre GPU, ni optimisation des autres familles ; coût froid CPU/VRAM totale non isolés.
+
+Branche `main`, modifications non commitées/non poussées. Navigateurs de recette et deux previews temporaires fermés ; services de développement conservés. Travaux préexistants d'Exploitation, jardins, scieries et vitrage préservés, ainsi que l'export utilisateur `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md`. La cible précédente de départ de mission sous 1 000 ms reste au statut indiqué ci-dessous ; cette tranche graphique ne la revalide pas.
+
+# Exploitation : départ direct, cache géométrique et SQL groupé — 7 octobre 2026
+
+**Critère validé par Tristan : moins de 1 000 ms entre relâchement et départ.** La première correction qui attendait l'aperçu était insuffisante : contre-recette à plusieurs secondes, geste suivant perdu, puis `signal timed out`. Les jardins seuls passent maintenant directement par la commande au relâchement, sans aperçu serveur au survol ni double aller-retour. La borne Auto de 1 habitant est affichée ; sélection complète, plafond manuel, paramètres et identité sont figés. Le serveur conserve toutes les vérifications et l'admission réelle avant succès.
+
+Les gestes rapprochés restent distincts, dans une file FIFO visible. Succès : geste suivant ; refus/incertitude : pause ; Échap pendant l'envoi ou changement de mode : suppression des gestes non envoyés. La file empêche la perte de saisie, ne remplace pas le budget de latence. Bois/pierre/mixte conservent leur aperçu : un appel en cours puis seulement la dernière révision utile ; abandonner un fetch ne suspend pas la transaction serveur. Aucun aperçu nouveau pendant envoi/incertitude/confirmation de défrichage. Borne figée, exclusion des cibles déjà admises et retry idempotent conservés.
+
+Profil initial : aperçu réel 6,4–7,7 s ; 202 requêtes et jusqu'à 5,9 s dans `buildTravelNetwork`. Le cache existait mais l'ordre instable des lignes SQL changeait sa clé. Clé désormais canonique pour géométrie/obstacles, indépendante des stocks/énergie/missions. Voirie et modifications physiques (dont défrichage/épuisement d'obstacle) invalident ; borne 8 entrées / 50 000 points conservée. Projections de parcelles, lecture des usages des ordres et mises à jour des cohortes regroupées, mêmes borne/verrous/reste numérique. Un trajet Jardin réduit à l'ancre rejoint désormais la vraie porte de l'hôtel : défaut d'accès découvert par les tests métier. GET et commandes partagent le sérialiseur du même schéma de réponse, pour éviter sa recompilation tardive par endpoint ; dépendance directe `fast-json-stringify` 7.0.1 déjà présente transitivement.
+
+Mesures sur village local : aperçu chaud 284–559 ms / 115 requêtes ; commande réelle de quatre parcelles 1,4–1,9 s avant regroupement des cohortes, puis 633 / 565 / 514 ms. Transactions de départ annulées après vérification de la mobilisation réelle et absence du reçu après rollback. HTTP avant partage des sérialiseurs : premier départ 1,6–1,8 s, suivants 435–650 ms ; profil attribuant environ 1 s à la sérialisation/compilation. Après partage, 10 départs HTTP isolés : **492–744 ms, premier compris**, cache géométrique préparé par le GET initial. Scripts/profils dans `test-results/`, ignorés. Essais de désactivation de l'optimisation AJV et de représentation différente des unions retirés : gain non démontré, contrats JSON inchangés.
+
+**Critère complet non atteint dans la scène chargée.** Swipe réel de quatre parcelles : émission après 2,4–14,3 ms, réponse 2,64–4,09 s avec relais Playwright (mobilisation vérifiée, rollback), puis 5,38 s dans un essai HTTP direct sans interception CDP (réception chronométrée, sans assertion supplémentaire de mobilisation dans ce dernier harness). Machine partagée, rendu actif et serveur/DB locaux ; aucune autre suite de tests pendant ces fenêtres. Le profil du swipe avec relais montre 242 requêtes, somme de leurs durées 1,13 s (inclut attente de connexion), environ 172 ms de planification de tournée et 234 ms dans l'assemblage du snapshot ; pas de reconstruction du réseau de routes. Le relais ajoutait lui-même du délai, mais sa suppression ne démontre pas le seuil. Reste à réduire/mesurer le parcours complet sous charge réelle, notamment le snapshot complet construit pour la préparation puis reconstruit pour la réponse. Le cache froid de géométrie reste coûteux. Ne pas présenter le HTTP isolé ni la file de gestes comme validation du budget interactif.
+
+Preuves terminées : contrats/navigation, intention et modes 3 fichiers / 26 tests verts ; exploitation/hébergement 2 fichiers / 18 tests PostgreSQL verts, dont équivalence projection groupée/scalaires et conservation des données ; économie, population, revue jardins, tournées, géométrie et sérialiseur 7 fichiers / 56 tests verts. Total 100 tests distincts dans ces campagnes ciblées. Régressions cache et connexion de l'ancre observées rouges ; cache testé contre ordre des lignes, variations de stocks/réservations et modification de voirie. Chrome `node tests/browser/exploitation-preview.mjs` : quatre parcelles, zéro aperçu, deux gestes supplémentaires distincts/FIFO, Échap pendant envoi, refus 409 suspendant la file et changement de mode ; zéro erreur de page. POST métier interceptés, stocks adaptés uniquement dans le navigateur. Le parcours a révélé puis validé le correctif Échap ignoré pendant l'envoi. Build contracts, typechecks API/world-web, lint ciblé et `git diff --check` terminés avec succès. Une erreur de typage du compiler et un import inutilisé ont été corrigés avant les validations finales ; lint lancé directement par Node après échec de résolution du shim pnpm.
+
+Base de tests vérifiée : `127.0.0.1/arbestra_test`, suites séquentielles. Aucun reset/migration du développement, aucune mission de benchmark persistée. Navigateurs et serveurs temporaires fermés. Pas de recette mobile ni mesure swipe → affichage avec commande persistée. Branche main, modifications locales non commitées/non poussées ; travaux précédents et export utilisateur préservés. Statut : correctifs fonctionnels et cache validés ; performance interactive sous 1 000 ms **non validée/non atteinte dans la recette chargée**.
+
+# Optimisations ciblées des jardins et scieries — 7 octobre 2026
+
+Implémentation autorisée par Tristan après le profil. Jardins : sources partagées par géométrie/stade, instances natives avec parents et picking individuels. Scieries : pièces statiques regroupées par matériau à l'intérieur de chaque bâtiment. Aucun changement de silhouette, résolution, matériau ni du voile transparent accepté ; aucune modification métier. [Rapport et preuves](docs/AUDIT-RENDU-3D-2026-10-07.md#optimisations-ciblées-implémentées-après-le-profil), [spec](docs/SPEC-OPTIMISATION-RENDU-BATIMENTS.md).
+
+Gain mesuré sur Chrome matériel Iris Plus / D3D11, production 1200 × 750 : jardins 68 → 4 draws ; trois scieries 120 → 27 ; total 417 → 260, retrouvé à 418 → 261 dans la répétition. Soit 157 dessins / environ 38 % en moins ; actifs 691 → 613. Cadence variable : répétition avant 75.9 / 95.2 / 100.5 ms par frame, après 51.0 / 67.9 / 101.9 ms. Gain structurel démontré ; gain de FPS non garanti, objectif global 45 FPS / P95 ≤ 40 ms non atteint. Aucun test/build concurrent aux fenêtres de performance ; machine partagée non contrôlée.
+
+Preuves terminées : 40 fichiers / 158 tests de scène verts, build world-web (typecheck inclus) et lint ciblé verts ; géométrie/UV des scieries comparés à la version antérieure aux trois niveaux (écart position maximal 4.77e-7). Chromium production : jour/nuit réels via aperçu solaire, fenêtres .22 et zéro capture ; picking jardin/scierie, rotation/zoom et Village → Région → Village, zéro erreur de page et aucune commande gameplay. Captures examinées. Premiers essais de contrôle isolé et assertion de typage corrigés avant validations finales, détails dans le rapport. Pas de nouvelle validation mobile ou de campagne économique nécessaire.
+
+Ancien build conservé dans test-results/ pour comparaison ; artefacts ignorés. Navigateurs de mesure et previews temporaires fermés. Branche main, modifications non commitées/non poussées ; corrections précédentes du verre et export de session utilisateur préservés. Aucune migration ni reset.
+
+# Profil des bas FPS — 7 octobre 2026
+
+Étude demandée après acceptation du voile transparent. [Rapport courant](docs/AUDIT-RENDU-3D-2026-10-07.md) : Chrome Iris Plus / D3D11, build production actuel, même pose, rendu 1200 × 750 / plafond 45. Normales production 15.4–18.0 FPS, 417 draws, 691 actifs ; GPU écoulé 39.8–47.3 ms. Profils CPU : rendu opaque, évaluation des objets et préparation/liaison des matériaux dominants. Verre opaque sans gain net démontré ; conserver la transparence. Résolution divisée par quatre : 20.9 FPS, insuffisant. Masquage des éléments de parcelles en développement : environ 125 draws ; boucle sans rendu : 3.8 ms.
+
+Proposé : isoler les lots opaques, réduire soumissions/préparations statiques et étudier les invalidations de matériaux/lumières avant les particules ou la qualité adaptative. Aucune optimisation implémentée. Trois séries navigateur terminées avec succès, profils CPU et chronométrage GPU asynchrone ; captures examinées, zéro pageerror. Première tentative GPU corrigée après extension Babylon absente. Build world-web réussi (gros chunks). Série initiale très variable et interruption terrain visible ; détails/limites dans le rapport. Pas de test applicatif, mutation métier, migration ni reset. Navigateurs de mesure fermés et preview temporaire arrêtée.
+
+Branche main ; correction des fenêtres et export utilisateur préexistants préservés. Rapport et handoff non commitées/non poussés.
+
+# Fenêtres transparentes à léger voile — 7 octobre 2026
+
+À la demande de Tristan, le verre partagé auparavant opaque retrouve une transparence alpha .22 avec teinte bleutée, spéculaire et reflet statique existants. Aucune capture de scène ajoutée. Révision du cache des miniatures incrémentée ; géométrie inchangée. Spec de rendu mise à jour.
+
+Validation : régression de transparence constatée rouge avant correction, puis 3 fichiers / 12 tests ciblés verts (verre, instances/picking, cache miniatures). Typecheck world-web et lint des fichiers modifiés terminés avec succès. Chromium dans la factory isolée : hôtel 2 et université 3, achevé/travaux, alpha .22 et zéro capture/probe, aucune erreur ; capture hôtel achevé examinée. Contrôle via Playwright après échec initial du lancement agent-browser. Pas de nouvelle mesure de performance ni de validation visuelle dans le village ; appréciation finale du voile par Tristan restante. Artefacts dans test-results, ignorés.
+
+Branche main, modifications non commitées/non poussées. Export de session utilisateur préservé. Aucune mutation métier ni migration.
+
 # Rendu allégé, entrée directe et fenêtres corrigées — 6 octobre 2026
 
 Demandes courantes : sauvegarder puis optimiser le rendu ; retirer l'introduction automatique ; corriger les fenêtres devenues noires mates. Sauvegarde cumulée relue, commit `d0596a4` poussé sur `main` et égalité avec `origin/main` vérifiée avant les optimisations. Export de session utilisateur conservé hors commit.

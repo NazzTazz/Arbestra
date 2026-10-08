@@ -7,12 +7,14 @@ import {TimberThatch} from './timber-thatch';
 import {buildUniversity} from './university-factory';
 import {buildingPlan,HOUSE_RECIPE,LOG_HOUSE_RECIPE,BEAM_HOUSE_RECIPE,HALL_RECIPE} from './building-plan';
 import {encodeBuildingAsset} from './building-asset-format';
+import {batchDistantBuilding} from './building-lod-geometry';
 
 /** Offline compiler entry point. Never imported by the player application. */
-export function bakeBuilding(code:string,level:number,phase:'finished'|'works') {
+export function bakeBuilding(code:string,level:number,phase:'finished'|'works',lod:0|1|2=0) {
   const canvas=document.createElement('canvas'),engine=new Engine(canvas),scene=new Scene(engine);
   try {
     const kit=new TimberThatch(scene),root=new Mesh('building-asset',scene);
+    kit.lod=lod;
     if(code==='university')buildUniversity(root,kit,level,phase,Math.max(0,level-1),{mathematics:false,astronomy:false});
     else {
       const base=code==='town-hall'?HALL_RECIPE:code==='dwelling-logs'?LOG_HOUSE_RECIPE:code==='dwelling-beams'?BEAM_HOUSE_RECIPE:HOUSE_RECIPE;
@@ -23,6 +25,7 @@ export function bakeBuilding(code:string,level:number,phase:'finished'|'works') 
     }
     // The runtime scene owns the shared satin material; only pane geometry is baked.
     for(const mesh of root.getChildMeshes())if(mesh.metadata?.buildingAttachment==='glass')mesh.material=null;
+    if(lod)batchDistantBuilding(root);
     const bytes=encodeBuildingAsset(SceneSerializer.SerializeMesh(root,false,true));
     const parts:string[]=[];
     for(let i=0;i<bytes.length;i+=16384)parts.push(String.fromCharCode(...bytes.subarray(i,i+16384)));

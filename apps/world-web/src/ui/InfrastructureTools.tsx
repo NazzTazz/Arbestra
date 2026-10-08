@@ -1,3 +1,4 @@
+import { randomUUID } from '../random-uuid';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,type RefObject} from 'react';
 import {prepareInfrastructureEdit,emptyInfrastructure,infrastructureSurface,wrappedDistance,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
 import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageState} from '../api/client';
@@ -10,7 +11,7 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   const [family,setFamily]=useState('Voirie'),[material,setMaterial]=useState<RoadMaterial>('earth'),[width,setWidth]=useState(4),[border,setBorder]=useState(false),[remove,setRemove]=useState(false),[invert,setInvert]=useState(false),[turn,setTurn]=useState(0);
   const [anchor,setAnchor]=useState<SubPoint|null>(null),[point,setPoint]=useState<SubPoint|null>(null),[item,setItem]=useState<Item|null>(null),[armed,setArmed]=useState(false);
   const [busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[serverValid,setServerValid]=useState(true),[uncertain,setUncertain]=useState<InfrastructureRequest|null>(null);
-  const session=useRef<string>(crypto.randomUUID()),stack=useRef<Array<{id:string;anchor:SubPoint}>>([]),down=useRef<SubPoint|null>(null),latest=useRef({state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy});
+  const session=useRef<string>(randomUUID()),stack=useRef<Array<{id:string;anchor:SubPoint}>>([]),down=useRef<SubPoint|null>(null),latest=useRef({state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy});
   const generation=useRef(0),presented=useRef<{operation:string;revision:number;quote:InfrastructureQuote}|null>(null);
   const previewInFlight=useRef(false);
   latest.current={state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy};
@@ -38,7 +39,7 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   useEffect(()=>{scene.current?.infrastructurePreview(active?op:null,!serverValid||insufficient,prepared?.next);},[active,opKey,serverValid,insufficient,scene,prepared]);
   useEffect(()=>{
     if(!active||!op||busy)return;let cancelled=false;setServerValid(true);
-    const request:InfrastructureRequest={commandId:crypto.randomUUID(),sessionId:session.current,revision:plan.revision,operation:op};
+    const request:InfrastructureRequest={commandId:randomUUID(),sessionId:session.current,revision:plan.revision,operation:op};
     let timer:ReturnType<typeof setTimeout>;
     const run=()=>{
       if(cancelled)return;
@@ -59,7 +60,7 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
       if(!shown||shown.operation!==JSON.stringify(next)||shown.revision!==current.revision){setPoint(next.kind==='road'?next.stroke.points.at(-1)!:next.kind==='place'||next.kind==='move'?next.position:null);setError('Vérifiez l’aperçu actualisé avant de valider.');return;}
       expected=shown.quote;
     }else if(next.kind!=='undo')try{expected=prepareInfrastructureEdit(c.state,next,'preview').quote;}catch(reason){setError((reason as Error).message);return;}
-    const request=requestOverride??{commandId:crypto.randomUUID(),sessionId:session.current,revision:current.revision,operation:next,...(expected?{expected}:{})};
+    const request=requestOverride??{commandId:randomUUID(),sessionId:session.current,revision:current.revision,operation:next,...(expected?{expected}:{})};
     const sentGeneration=generation.current;
     setBusy(true);latest.current.busy=true;setError(null);try{sessionStorage.setItem(pendingKey,JSON.stringify(request));}catch{/* memory retains the identity */}
     try{const result=await commandInfrastructure(c.state.world.slug,c.state.village.id,request);onSnapshot(result);clearPending();setUncertain(null);
@@ -76,7 +77,7 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   }
   const handler=useRef<(e:InfrastructureGesture)=>void>(()=>{});
   handler.current=e=>{
-    if(e.kind==='cancel'){generation.current++;stack.current=[];session.current=crypto.randomUUID();down.current=null;setAnchor(null);setItem(null);setPoint(null);setArmed(false);scene.current?.infrastructurePreview(null);return;}
+    if(e.kind==='cancel'){generation.current++;stack.current=[];session.current=randomUUID();down.current=null;setAnchor(null);setItem(null);setPoint(null);setArmed(false);scene.current?.infrastructurePreview(null);return;}
     if(latest.current.busy||uncertain)return;const c=latest.current;
     if(e.kind==='hover'){setPoint(previous=>previous?.x===e.point?.x&&previous?.y===e.point?.y?previous:e.point);return;}
     if(e.kind==='down'){down.current=e.point;if(!c.anchor&&c.family!=='Éclairage'){setAnchor(e.point);setPoint(e.point);}return;}

@@ -1,5 +1,18 @@
 import type { TerrainViewMode } from '../scene/BabylonVillageScene';
 import type { VillageState } from '@arbestra/contracts';
+import { useState } from 'react';
+import { DEFAULT_BUILDING_LOD, getBuildingLodSettings, setBuildingLodSettings } from '../scene/building-lod-settings';
+
+function BuildingLodControls() {
+  const [settings, update] = useState(getBuildingLodSettings);
+  const change = (value: typeof settings) => { if (setBuildingLodSettings(value)) update(value); };
+  return <section><strong>LOD des bâtiments</strong>
+    <small>Pixels de rendu par mètre. Augmenter un seuil avance la simplification. Réglages sauvegardés sur cet appareil.</small>
+    <label>Proche → périphérie : {settings.near}<input aria-label="Seuil LOD proche" type="range" min={settings.far + 1} max="200" step="1" value={settings.near} onChange={event => change({ ...settings, near: +event.target.value })}/></label>
+    <label>Périphérie → lointain : {settings.far}<input aria-label="Seuil LOD lointain" type="range" min="5" max={settings.near - 1} step="1" value={settings.far} onChange={event => change({ ...settings, far: +event.target.value })}/></label>
+    <button type="button" onClick={() => change({ ...DEFAULT_BUILDING_LOD })}>Rétablir les seuils LOD</button>
+  </section>;
+}
 
 export function DevDrawer({ noclip, onNoclip, open, view, state, showTravelPaths, selectedRouteId, cosmology,
   onOpen, onTravelPaths, onRoute, onCosmology, onReset, onFactory }: {
@@ -35,6 +48,7 @@ export function DevDrawer({ noclip, onNoclip, open, view, state, showTravelPaths
       <section><strong>Métriques courantes</strong><span>Vue : {view}</span><span>Terrain local : {state.region.width} × {state.region.height}</span>
         <span>Repères : {state.region.features.length} · routes : {state.travelRoutes.length}</span></section>
       <div id="dev-cosmology-slot"/>
+      <BuildingLodControls/>
       <button type="button" onClick={onReset}>Rétablir les réglages joueur</button>
       <small>Les contrôles de temps, trajectoire solaire et courbure apparaissent dans le laboratoire cosmologique.</small>
     </div>}

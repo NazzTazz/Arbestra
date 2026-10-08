@@ -29,7 +29,7 @@ import {
 } from './complete-construction.js';
 import {
   materializeVillageResource,
-  projectGardenPlot,
+  projectGardenPlots,
   projectVillageResource,
 } from './economy.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
@@ -528,7 +528,7 @@ export async function state(
       };
     }),
   );
-  const [cohorts, housingRows, harvestRows, extractionRows, gardenPlotRows] = await Promise.all([
+  const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots] = await Promise.all([
     reconcileRestHousing(tx,village.worldId,village.villageId,at),
     tx.selectFrom('buildings').select(['id','buildingType', 'level']).where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where(eb=>eb.or([eb('status','=','completed'),eb.and([
@@ -537,8 +537,7 @@ export async function state(
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
     tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
-    tx.selectFrom('gardenPlots').select(['buildingId', 'cellX', 'cellY'])
-      .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
+    projectGardenPlots(tx, village.worldId, village.villageId, at),
   ]);
   const projectedCohorts = cohorts.map((cohort) => ({
     ...cohort,
@@ -569,8 +568,6 @@ export async function state(
       .filter((cohort) => displayedEnergy(cohort.energy) === energy)
       .reduce((total, cohort) => total + cohort.memberCount, 0)),
   };
-  const projectedPlots = await Promise.all(gardenPlotRows.map((plot) =>
-    projectGardenPlot(tx, village.worldId, plot.cellX, plot.cellY, at)));
   const harvestByPlot = new Map(harvestRows.filter((item) => item.plotCellX !== null)
     .flatMap(item=>(item.stops.length?item.stops:[{cellX:item.plotCellX!,cellY:item.plotCellY!}])
       .map(plot=>[worldCellKey(plot.cellX,plot.cellY),item] as const)));

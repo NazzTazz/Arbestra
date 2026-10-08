@@ -1,3 +1,4 @@
+import { randomUUID } from '../random-uuid';
 import { useEffect, useState } from 'react';
 import { MARKET_MAX_AMOUNT, type Building, type MarketCommand, type MarketPreview, type MarketState, type VillageState } from '@arbestra/contracts';
 import { previewMarket } from '../api/client';
@@ -50,7 +51,7 @@ export function MarketPanel({slug,villageId,building,market,stocks,serverNow,rev
       {!validAmount&&<p>Choisissez une quantité entière positive.</p>}
       {quoteError&&<p role="alert">{quoteError}</p>}
       <small>Débit immédiat à la confirmation. Échange définitif, sans habitant mobilisé.</small>
-      <button type="button" disabled={pending||!!retry||!validAmount||!preview?.valid} onClick={()=>void send({commandId:crypto.randomUUID(),offeredResource,requestedResource,amount:n,expectedReceivedAmount:preview!.receivedAmount})}>Confirmer le troc</button>
+      <button type="button" disabled={pending||!!retry||!validAmount||!preview?.valid} onClick={()=>void send({commandId:randomUUID(),offeredResource,requestedResource,amount:n,expectedReceivedAmount:preview!.receivedAmount})}>Confirmer le troc</button>
       {retry&&!pending&&<><p>Vérifiez la même commande avant de recommencer si son résultat est incertain.</p>
         <button type="button" onClick={()=>void send(retry)}>Vérifier le même échange</button>
         <button type="button" onClick={()=>setRetry(null)}>Modifier la demande</button></>}

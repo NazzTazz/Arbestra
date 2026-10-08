@@ -1,4 +1,4 @@
-import type { LoginRequest, SessionResponse } from '@arbestra/contracts';
+import type { LoginRequest, SessionResponse, RegisterRequest, AvailableWorlds, JoinWorldRequest, JoinWorldResponse } from '@arbestra/contracts';
 
 export class ApiError extends Error {
   public constructor(message: string, public readonly status: number) {
@@ -33,4 +33,15 @@ export async function login(credentials: LoginRequest): Promise<SessionResponse>
 export async function logout(): Promise<void> {
   const response = await fetch('/api/auth/session', { method: 'DELETE', credentials: 'same-origin' });
   if (!response.ok) throw new ApiError('Impossible de fermer la session.', response.status);
+}
+
+export async function register(credentials: RegisterRequest): Promise<SessionResponse> {
+  return parseResponse<SessionResponse>(await fetch('/api/auth/register', {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(credentials)}));
+}
+export async function getWorlds(): Promise<AvailableWorlds> {
+  return parseResponse<AvailableWorlds>(await fetch('/api/worlds',{credentials:'same-origin'}));
+}
+export async function joinWorld(slug: string, request: JoinWorldRequest): Promise<JoinWorldResponse> {
+  return parseResponse<JoinWorldResponse>(await fetch(`/api/worlds/${encodeURIComponent(slug)}/join`,
+    {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(request)}));
 }

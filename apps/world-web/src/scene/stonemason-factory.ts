@@ -23,7 +23,7 @@ export function buildStonemason(root: Mesh, kit: TimberThatch, phase: 'finished'
     piece.position.set(...position); return add(piece, material);
   };
   const stone = (name: string, x: number, y: number, z: number, width: number, height: number, depth: number, shade = 1) => {
-    const piece = new BuildingGeometry(name, timberBeamGeometry(height, width, depth, true, 2));
+    const piece = kit.lod ? BuildingGeometry.box(name, {height,width,depth}) : new BuildingGeometry(name, timberBeamGeometry(height, width, depth, true, 2));
     piece.position.set(x, y, z); return add(piece, kit.stone, shade);
   };
   const rawStone = (x: number, y: number, z: number, radius: number, seed: number) => {
@@ -191,11 +191,16 @@ export function buildStonemason(root: Mesh, kit: TimberThatch, phase: 'finished'
     mesh.parent = root; mesh.isPickable = false; mesh.receiveShadows = true;
   }
   if (!works && previewFires) {
+    buildStonemasonFire(root,kit);
+  }
+  return root;
+}
+
+/** One live fire for the logical workshop, shared by its graphical variants. */
+export function buildStonemasonFire(root: Mesh, kit: TimberThatch) {
     const braziers = new VillageBraziers(kit.scene);
     const point = Vector3.TransformCoordinates(new Vector3(-1.18, .02, -.45), root.computeWorldMatrix(true));
     braziers.updatePoints([{ x: point.x, y: point.y, z: point.z, seed: .4 }], root);
-    const observer = kit.scene.onBeforeRenderObservable.add(() => braziers.animate(performance.now(), true, 1));
+    const observer = kit.scene.onBeforeRenderObservable.add(() => braziers.animate(performance.now(), true, root.isEnabled()?1:0));
     root.onDisposeObservable.addOnce(() => { kit.scene.onBeforeRenderObservable.remove(observer); braziers.dispose(); });
-  }
-  return root;
 }

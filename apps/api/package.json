@@ -12,13 +12,16 @@
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:test": "tsx src/database/migrate-test.ts",
     "db:seed": "tsx src/database/seed.ts",
-    "db:reset-e2e": "tsx src/database/reset-e2e.ts"
+    "db:reset-e2e": "tsx src/database/reset-e2e.ts",
+    "generator:dev": "node --import tsx src/world-generator-worker.ts",
+    "generator:start": "node dist/world-generator-worker.js"
   },
   "dependencies": {
     "@arbestra/contracts": "workspace:*",
     "@fastify/cookie": "^11.0.2",
     "@fastify/type-provider-typebox": "^5.2.0",
     "@sinclair/typebox": "^0.34.41",
+    "fast-json-stringify": "7.0.1",
     "fastify": "^5.6.0",
     "kysely": "^0.28.5",
     "pg": "^8.16.3"

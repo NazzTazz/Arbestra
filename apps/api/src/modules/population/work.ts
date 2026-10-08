@@ -1,4 +1,4 @@
-import type { Selectable, Transaction } from 'kysely';
+import { sql, type Selectable, type Transaction } from 'kysely';
 import type { Database, PopulationCohortsTable } from '../../database/schema.js';
 import { advanceEnergy, canWorkFor, type EnergyState } from './energy.js';
 import {allocateRestHousing} from './housing.js';
@@ -27,9 +27,21 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
     const values = { energy: energy.energy, energyProgress: energy.progress, activity: energy.activity,
       restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt,
       restBuildingId:energy.activity==='resting'&&withoutAssignment(cohort)?cohort.restBuildingId:null };
-    await tx.updateTable('populationCohorts').set(values).where('worldId', '=', worldId).where('id', '=', cohort.id).execute();
     Object.assign(cohort, values);
   }
+  // All rows were locked in canonical order above. Persist the same per-cohort
+  // projections together instead of one round trip per inhabitant group.
+  if (cohorts.length) await sql`
+    update population_cohorts c set energy=v.energy, energy_progress=v.energy_progress, activity=v.activity,
+      resting_since=v.resting_since, food_used_since_rest=v.food_used_since_rest,
+      energy_updated_at=v.energy_updated_at, rest_building_id=v.rest_building_id
+    from jsonb_to_recordset(${JSON.stringify(cohorts.map(c=>({id:c.id,energy:c.energy,energy_progress:c.energyProgress,
+      activity:c.activity,resting_since:c.restingSince,food_used_since_rest:c.foodUsedSinceRest,
+      energy_updated_at:c.energyUpdatedAt,rest_building_id:c.restBuildingId})))}::jsonb)
+      as v(id uuid,energy integer,energy_progress integer,activity text,resting_since timestamptz,
+        food_used_since_rest integer,energy_updated_at timestamptz,rest_building_id uuid)
+    where c.world_id=${worldId} and c.village_id=${villageId} and c.id=v.id
+  `.execute(tx);
   return allocateRestHousing(tx,worldId,villageId,cohorts);
 }
 

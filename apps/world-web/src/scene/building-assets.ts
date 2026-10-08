@@ -8,6 +8,7 @@ import type {Scene} from '@babylonjs/core/scene';
 import type {AssetContainer} from '@babylonjs/core/assetContainer';
 import {attachFrostedGlass} from './frosted-glass';
 import manifestJson from './building-assets-manifest.json';
+import {coordinateBuildingLod} from './building-lod';
 
 export const buildingAssets:Record<string,{url:string;bytes:number;thumbnail?:string}>=manifestJson;
 const scenes=new WeakMap<Scene,Map<string,Promise<AssetContainer>>>();
@@ -34,9 +35,9 @@ export function instantiateBakedBuilding(container:AssetContainer,parent:Mesh){
 }
 
 /** One download/geometry allocation per recipe per scene. Instances share geometry/materials. */
-export async function loadBakedBuilding(parent:Mesh,key:string):Promise<void> {
+async function bakedContainer(scene:Scene,key:string):Promise<AssetContainer> {
   const asset=buildingAssets[key];if(!asset)throw new Error(`Missing building asset: ${key}`);
-  const scene=parent.getScene();let cache=scenes.get(scene);
+  let cache=scenes.get(scene);
   if(!cache){cache=new Map();scenes.set(scene,cache);scene.onDisposeObservable.addOnce(()=>{for(const promise of cache!.values())void promise.then(c=>c.dispose(),()=>{});cache!.clear();});}
   let promise=cache.get(key);
   if(!promise){
@@ -56,6 +57,27 @@ export async function loadBakedBuilding(parent:Mesh,key:string):Promise<void> {
     })();
     cache.set(key,promise);void promise.catch(()=>cache!.delete(key));
   }
-  const container=await promise;if(parent.isDisposed()||scene.isDisposed)return;
-  instantiateBakedBuilding(container,parent);
+  return promise;
+}
+
+export async function loadBakedBuilding(parent:Mesh,key:string,withLod=false):Promise<void> {
+  const scene=parent.getScene();
+  const container=await bakedContainer(scene,key);if(parent.isDisposed()||scene.isDisposed)return;
+  const detailed=instantiateBakedBuilding(container,parent);
+  // The detailed model becomes usable immediately. A failed/delayed optional variant
+  // neither blocks the building nor causes the detailed model to be instantiated twice.
+  if(withLod&&buildingAssets[`${key}-lod1`]){
+    parent.metadata={...parent.metadata,lodAssetState:'loading'};
+    const keys=[`${key}-lod1`,`${key}-lod2`].filter(variant=>buildingAssets[variant]);
+    void Promise.all(keys.map(variant=>bakedContainer(scene,variant))).then(containers=>{
+      if(parent.isDisposed()||scene.isDisposed)return;
+      const variants=containers.map(coarse=>instantiateBakedBuilding(coarse,parent));
+      coordinateBuildingLod(parent,detailed.rootNodes,variants.at(-1)!.rootNodes,variants.length===2?variants[0]!.rootNodes:undefined);
+      parent.metadata={...parent.metadata,lodAssetState:'ready'};
+    }).catch(error=>{
+      if(parent.isDisposed()||scene.isDisposed)return;
+      parent.metadata={...parent.metadata,lodAssetState:'error'};
+      console.warn('Distant building asset unavailable; keeping detailed model',key,error);
+    });
+  }
 }

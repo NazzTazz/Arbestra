@@ -236,6 +236,10 @@ button { font: inherit; }
 .village-arrival-title span { font: 400 clamp(.8rem, 1.6vw, 1.1rem) 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif; letter-spacing: .18em; font-variant: small-caps; }
 .village-arrival > button { position: absolute; bottom: 2rem; right: 2rem; opacity: .45; background: transparent; border: 0; color: #ece6da; }
 .oracle-cat-visit { position: absolute; z-index: 80; bottom: 5rem; left: 50%; transform: translateX(-50%); width: min(26rem, 88vw); padding: 1.2rem; background: #172526ed; color: #efeeda; border: 1px solid #9ca894; border-radius: .6rem; }
+.oracle-provisions-overlay { position: absolute; z-index: 81; top: 50%; left: 50%; transform: translate(-50%, -50%); box-sizing: border-box; width: min(38rem, calc(100vw - 2rem)); max-height: calc(100dvh - 3rem); overflow-y: auto; padding: clamp(1.3rem, 3vw, 2.2rem); background: #102027f5; color: #fff5de; border: 2px solid #d8b950; border-radius: .8rem; box-shadow: 0 1rem 4rem #0009; }
+.oracle-provisions-overlay strong { display: block; color: #efce74; font-size: 1.3rem; }
+.oracle-provisions-overlay p { margin: 1rem 0 1.5rem; font-size: clamp(1.15rem, 2vw, 1.5rem); line-height: 1.55; }
+.oracle-provisions-overlay button { padding: .65rem 1.3rem; font: inherit; font-size: 1rem; color: #fff5de; background: #243c48; border: 1px solid #d8b950; border-radius: .35rem; cursor: pointer; }
 .worksite-access { position: absolute; left: 16px; bottom: 132px; z-index: 30; }
 .worksite-panel, .wood-selection-panel { position: absolute; left: 16px; bottom: 176px; z-index: 31; width: min(330px, calc(100vw - 32px)); max-height: 48vh; overflow: auto; padding: 14px; border: 1px solid #a3b8a0; border-radius: 8px; background: rgba(20, 37, 31, .96); color: #f5f6e9; box-shadow: 0 12px 30px #0008; }
 .wood-selection-panel { left: auto; right: 16px; bottom: 96px; }

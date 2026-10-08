@@ -5,6 +5,7 @@ import { Quaternion } from '@babylonjs/core/Maths/math.vector';
 import { facePoint, type BuildingPlan } from './building-plan';
 import { TimberThatch, timberBeamGeometry } from './timber-thatch';
 import { attachFrostedGlass } from './frosted-glass';
+import { BuildingGeometry } from './building-geometry';
 
 type Point={x:number;z:number};
 const RADIUS=.70;
@@ -19,7 +20,7 @@ function clip(points:Point[],distance:(p:Point)=>number):Point[]{
 function block(root:Mesh,kit:TimberThatch,x:number,z:number,bottom:number,length:number,height:number,thickness:number,angle=0,shade=1){
   if(length<.006||thickness<.006)return;
   const mesh=new Mesh('market-rounded-stone',kit.scene);
-  timberBeamGeometry(length,height,thickness,true,kit.stoneProfile?.segments??1,.1,kit.stoneProfile?.radiusRatio??.04).applyToMesh(mesh);
+  (kit.lod?BuildingGeometry.box('rounded-wall-block',{height:length,width:height,depth:thickness}).data:timberBeamGeometry(length,height,thickness,true,kit.stoneProfile?.segments??1,.1,kit.stoneProfile?.radiusRatio??.04)).applyToMesh(mesh);
   mesh.position.set(x,bottom+height/2,z);
   mesh.rotationQuaternion=Quaternion.RotationYawPitchRoll(angle,0,-Math.PI/2);
   mesh.setVerticesData('color',Array.from({length:mesh.getTotalVertices()},()=>[shade,shade,shade,1]).flat());
@@ -29,7 +30,7 @@ function block(root:Mesh,kit:TimberThatch,x:number,z:number,bottom:number,length
 function trimmedBlock(root:Mesh,kit:TimberThatch,polygon:Point[],bottom:number,height:number,shade:number,softEdges=false){
   polygon=polygon.filter((p,i)=>{const a=polygon[(i+polygon.length-1)%polygon.length]!;return Math.hypot(p.x-a.x,p.z-a.z)>1e-7;});
   if(polygon.length<3)return;
-  const bevel=softEdges?Math.min(height*.12,...polygon.map((p,i)=>{const next=polygon[(i+1)%polygon.length]!;return Math.hypot(next.x-p.x,next.z-p.z)/6;})):0;
+  const bevel=softEdges&&!kit.lod?Math.min(height*.12,...polygon.map((p,i)=>{const next=polygon[(i+1)%polygon.length]!;return Math.hypot(next.x-p.x,next.z-p.z)/6;})):0;
   if(bevel){
     polygon=polygon.flatMap((p,i)=>{
       const previous=polygon[(i+polygon.length-1)%polygon.length]!,next=polygon[(i+1)%polygon.length]!;

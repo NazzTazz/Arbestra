@@ -3,13 +3,15 @@ import { Vector3, Quaternion } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TimberThatch, timberBeamGeometry } from './timber-thatch';
+import { BuildingGeometry } from './building-geometry';
 
 /** Three factory half-trusses supporting an open, dark wooden slat canopy. */
 export function buildMarketRoof(root:Mesh,kit:TimberThatch,eave:number,finished:boolean) {
   const outer=-1.20,inner=-.38,low=eave-.12,high=eave;
   const frame:Mesh[]=[],slats:Mesh[]=[];
   const beam=(name:string,p:Vector3,q:Vector3,width:number,height:number,parts=frame)=>{
-    const mesh=new Mesh(name,kit.scene);timberBeamGeometry(Vector3.Distance(p,q),width,height,false,3,.02).applyToMesh(mesh);
+    const mesh=new Mesh(name,kit.scene);
+    (kit.lod?BuildingGeometry.box(name,{height:Vector3.Distance(p,q),width,depth:height}).data:timberBeamGeometry(Vector3.Distance(p,q),width,height,false,3,.02)).applyToMesh(mesh);
     mesh.position=Vector3.Center(p,q);mesh.rotationQuaternion=new Quaternion();
     Quaternion.FromUnitVectorsToRef(Vector3.Up(),q.subtract(p).normalize(),mesh.rotationQuaternion);parts.push(mesh);
   };

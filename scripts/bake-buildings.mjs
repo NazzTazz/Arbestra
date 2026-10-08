@@ -8,11 +8,12 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 
 // Asset compilation, not an E2E suite. Uses the real factory's canvas textures.
-const selected=new Set(process.argv.slice(2));
+const distant=process.argv.includes('--lod');
+const selected=new Set(process.argv.slice(2).filter(arg=>arg!=='--lod'));
 const recipes=[['university',3],['dwelling',2],['dwelling-logs',2],['dwelling-beams',2],['town-hall',1]];
 for(const code of selected)if(!recipes.some(([recipe])=>recipe===code))throw new Error(`Unknown building recipe: ${code}`);
 const browser=await chromium.launch({headless:true,args:process.platform==='win32'?['--use-angle=d3d11']:[]});
-const manifest=selected.size?JSON.parse(await readFile(new URL('../apps/world-web/src/scene/building-assets-manifest.json',import.meta.url),'utf8')):{};
+const manifest=selected.size||distant?JSON.parse(await readFile(new URL('../apps/world-web/src/scene/building-assets-manifest.json',import.meta.url),'utf8')):{};
 const directory=new URL('../apps/world-web/public/buildings/',import.meta.url);
 await mkdir(directory,{recursive:true});
 try {
@@ -21,18 +22,18 @@ try {
   await page.goto(new URL('/__factory_bake__',process.env.FACTORY_BAKE_URL??'http://localhost:5174/').href);
   for(const [code,levels] of recipes) {
     if(selected.size&&!selected.has(code))continue;
-    for(let level=1;level<=levels;level++)for(const phase of ['finished','works']) {
-      const source=await page.evaluate(async ({code,level,phase})=>{
+    for(let level=1;level<=levels;level++)for(const phase of ['finished','works'])for(const variant of distant?[1,2]:[0,1,2]) {
+      const source=await page.evaluate(async ({code,level,phase,lod})=>{
         const {bakeBuilding}=await import('/src/scene/building-bake.ts');
-        return bakeBuilding(code,level,phase);
-      },{code,level,phase});
+        return bakeBuilding(code,level,phase,lod);
+      },{code,level,phase,lod:variant});
       const bytes=gzipSync(Buffer.from(source,'base64'),{level:9});
       const hash=createHash('sha256').update(bytes).digest('hex').slice(0,16);
-      const key=`${code}-${level}-${phase}`,file=`${key}-${hash}.abmesh.gz`;
+      const key=`${code}-${level}-${phase}${variant?`-lod${variant}`:''}`,file=`${key}-${hash}.abmesh.gz`;
       await writeFile(new URL(file,directory),bytes);
       manifest[key]={url:`/buildings/${file}`,bytes:bytes.length};
       console.log(key,bytes.length);
-      if(phase==='finished') {
+      if(phase==='finished'&&!variant) {
         const png=await page.evaluate(async ({code,level})=>{
           const {renderBuildingThumbnail}=await import('/src/scene/building-thumbnail-renderer.ts');
           return renderBuildingThumbnail(code,level);
@@ -45,5 +46,5 @@ try {
   }
   await writeFile(new URL('../apps/world-web/src/scene/building-assets-manifest.json',import.meta.url),JSON.stringify(manifest,null,2)+'\n');
   const used=new Set(Object.values(manifest).flatMap(asset=>[asset.url,asset.thumbnail].filter(Boolean).map(url=>url.split('/').at(-1))));
-  for(const file of await readdir(directory))if(/^(university|dwelling(?:-logs|-beams)?|town-hall)-[1-3]-(?:finished-|works-)?[a-f0-9]{16}\.(?:(?:babylon|abmesh)\.gz|png)$/.test(file)&&!used.has(file))await unlink(new URL(file,directory));
+  for(const file of await readdir(directory))if(/^(university|dwelling(?:-logs|-beams)?|town-hall)-[1-3]-(?:(?:finished|works)-(?:lod[12]-)?)?[a-f0-9]{16}\.(?:(?:babylon|abmesh)\.gz|png)$/.test(file)&&!used.has(file))await unlink(new URL(file,directory));
 } finally {await browser.close();}

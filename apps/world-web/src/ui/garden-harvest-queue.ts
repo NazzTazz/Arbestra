@@ -1,3 +1,4 @@
+import { randomUUID } from '../random-uuid';
 import { ApiError, type TimedVillageState } from '../api/client';
 import type { Cell } from '../scene/construction-selection';
 
@@ -19,7 +20,7 @@ export class GardenHarvestQueue {
   enqueue(target:HarvestTarget,newGesture:boolean){
     if(newGesture){this.cancelGesture();this.gesture++;}
     if(this.has(target)){this.retry();return;}
-    if(!this.draft)this.draft={...target,targets:[],gesture:this.gesture,commandId:crypto.randomUUID(),status:'selecting'};
+    if(!this.draft)this.draft={...target,targets:[],gesture:this.gesture,commandId:randomUUID(),status:'selecting'};
     if(this.draft.worldSlug!==target.worldSlug||this.draft.villageId!==target.villageId)return;
     if(this.draft.targets.length>=100)return;
     this.draft.targets.push({...target});this.changed();

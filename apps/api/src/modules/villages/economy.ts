@@ -281,6 +281,22 @@ export async function projectGardenPlot(
   return projectedPlot(row, delta, effectiveThrough);
 }
 
+/** Same numeric projection and bound as projectGardenPlot, in one snapshot query. */
+export async function projectGardenPlots(transaction: Transaction<Database>, worldId: string, villageId: string, through: Date): Promise<ProjectedGardenPlot[]> {
+  const { rows } = await sql<{buildingId:string;cellX:number;cellY:number;amount:string;capacity:string;productionPerHour:string;productionUpdatedAt:Date}>`
+    select g.building_id, g.cell_x, g.cell_y,
+      least(coalesce(p.capacity,0), g.stored_amount + floor(g.remainder + p.rate_per_hour *
+        extract(epoch from (greatest(${through}::timestamptz,g.production_updated_at)-g.production_updated_at))/3600)) as amount,
+      coalesce(p.capacity,0) as capacity, p.rate_per_hour as production_per_hour,
+      greatest(${through}::timestamptz,g.production_updated_at) as production_updated_at
+    from garden_plots g join buildings b on b.world_id=g.world_id and b.id=g.building_id
+    join building_level_production p on p.building_type_code=b.building_type and p.level=b.level and p.resource_code='carrot'
+    where g.world_id=${worldId} and g.village_id=${villageId}
+    order by g.cell_x,g.cell_y
+  `.execute(transaction);
+  return rows.map(row=>({...row,resourceCode:'carrot',amount:Number(row.amount),capacity:Number(row.capacity),productionPerHour:Number(row.productionPerHour)}));
+}
+
 export async function materializeGardenPlot(
   transaction: Transaction<Database>, worldId: string, cellX: number, cellY: number, through: Date,
 ): Promise<ProjectedGardenPlot> {

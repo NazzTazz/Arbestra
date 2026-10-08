@@ -1,3 +1,4 @@
+import { randomUUID } from '../random-uuid';
 import { useEffect, useState } from 'react';
 import type { Building, ProcessingCommand, ProcessingOrder, ProcessingPreview, ProcessingRecipe } from '@arbestra/contracts';
 import { previewProcessing } from '../api/client';
@@ -41,8 +42,8 @@ export function ProcessingPanel({ slug,villageId,building,recipe,orders,serverNo
     {busy && order?.currentLot && <>
       <p>{order.workerCount} habitant{order.workerCount>1?'s':''} au travail · {order.currentLot.inputAmount} {names[order.currentLot.inputResource]} engagées · {order.currentLot.outputAmount} {names[order.currentLot.outputResource]} à recevoir dans {Math.ceil(remainingMs/1000)} s.</p>
       <progress aria-label="Avancement du lot" max={1} value={Math.min(1,Math.max(0,(serverNow-Date.parse(order.currentLot.startedAt))/(Date.parse(order.currentLot.completesAt)-Date.parse(order.currentLot.startedAt))))}/>
-      <div><button type="button" disabled={pending||!!retry||order.status!=='running'} onClick={()=>void send({commandId:crypto.randomUUID(),action:'pause',orderId:order.id})}>Pause après ce lot</button>
-      <button type="button" disabled={pending||!!retry||order.status==='cancel-requested'} onClick={()=>void send({commandId:crypto.randomUUID(),action:'cancel',orderId:order.id})}>Annuler après ce lot</button></div>
+      <div><button type="button" disabled={pending||!!retry||order.status!=='running'} onClick={()=>void send({commandId:randomUUID(),action:'pause',orderId:order.id})}>Pause après ce lot</button>
+      <button type="button" disabled={pending||!!retry||order.status==='cancel-requested'} onClick={()=>void send({commandId:randomUUID(),action:'cancel',orderId:order.id})}>Annuler après ce lot</button></div>
     </>}
     {!busy && building.status==='completed' && <>
       {!order && <label>Lots <input aria-label="Nombre de lots" type="number" min={1} max={20} value={lots} disabled={pending||!!retry} onChange={e=>setLots(Math.max(1,Math.min(20,Math.floor(Number(e.target.value)||1))))}/></label>}
@@ -51,9 +52,9 @@ export function ProcessingPanel({ slug,villageId,building,recipe,orders,serverNo
       <small>Prochain débit : {recipe.inputAmount} {names[recipe.inputResource]}. Les lots suivants ne sont pas réservés.</small>
       {preview?.message && <p role="status">{preview.message}</p>}{previewError && <p className="error">{previewError}</p>}
       <button type="button" disabled={pending||!!retry||!preview?.valid} onClick={()=>void send(order
-        ? {commandId:crypto.randomUUID(),action:'resume',orderId:order.id,workerCount:workers}
-        : {commandId:crypto.randomUUID(),action:'start',buildingId:building.id,lots,workerCount:workers})}>{order?'Reprendre':'Fabriquer'}</button>
-      {order && <button type="button" disabled={pending||!!retry} onClick={()=>void send({commandId:crypto.randomUUID(),action:'cancel',orderId:order.id})}>Annuler les lots restants</button>}
+        ? {commandId:randomUUID(),action:'resume',orderId:order.id,workerCount:workers}
+        : {commandId:randomUUID(),action:'start',buildingId:building.id,lots,workerCount:workers})}>{order?'Reprendre':'Fabriquer'}</button>
+      {order && <button type="button" disabled={pending||!!retry} onClick={()=>void send({commandId:randomUUID(),action:'cancel',orderId:order.id})}>Annuler les lots restants</button>}
     </>}
     {retry && !pending && <div><p>Commande à vérifier ou corriger.</p><button type="button" onClick={()=>void send(retry)}>Vérifier la même commande</button><button type="button" onClick={()=>{setRetry(null);}}>Modifier la demande</button></div>}
     {error && <p className="error" role="alert">{error}</p>}

@@ -56,6 +56,7 @@ export function buildTownHallStorefront(parent:Mesh,kit:TimberThatch,plan:Buildi
   }
   const curve=new Mesh('market-storefront-curved',kit.scene),data=new VertexData();Object.assign(data,{positions,normals,indices,uvs});data.applyToMesh(curve);curve.parent=root;curve.material=material;curve.isPickable=false;
   const observer=kit.scene.onBeforeRenderObservable.add(()=>{
+    if(!root.isEnabled())return;
     const daylight=kit.scene.lights.filter(l=>['DirectionalLight','HemisphericLight'].includes(l.getClassName())).reduce((sum,l)=>sum+l.intensity,0);
     reflection.level=1.5*Math.min(1,Math.max(.03,daylight));
   });

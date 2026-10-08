@@ -179,6 +179,10 @@ La preview locale réagit immédiatement à la géométrie et aux données connu
 
 Une estimation incomplète affiche « Calcul… » ou « estimation », pas un faux zéro ni une durée certaine. Le relâchement peut attendre automatiquement une vérification identique à l'intention figée, **sans demander une seconde validation ordinaire**. Si aucune borne d'effectif ou aucun coût exploitable n'a pu être montré, ne pas engager une quantité nouvelle à l'aveugle : signaler l'indisponibilité de l'aperçu et laisser recommencer une fois prêt.
 
+Correctif du 7 octobre, après contre-recette : **cible validée par Tristan : départ en moins de 1 000 ms après le relâchement**, hors délais voulus par le gameplay. Pour les jardins seuls, le HUD présente la borne structurelle de 1 habitant en Auto et la disponibilité vérifiée au départ. Le relâchement envoie directement une commande portant toutes les parcelles et les paramètres figés ; le serveur vérifie sélection, accès, énergie et disponibilité dans cette même transaction. Aucun aperçu serveur au survol ou pendant un geste exclusivement Jardin. Le plafond manuel reste celui choisi. Aucun crédit anticipé ni raccourcissement des trajets ou travaux.
+
+Les gestes suivants restent distincts et sont conservés dans leur ordre pendant une réponse en cours ; cette protection contre la perte de saisie ne remplace pas la cible de latence. Un refus ou une réponse incertaine suspend la file. Échap annule les gestes non envoyés, y compris pendant un envoi ; changer de mode vide aussi la file. Une commande déjà envoyée conserve son identité et sa résolution. Pour bois/pierre/mixte, l'aperçu reste nécessaire : au plus un appel en cours, puis uniquement la dernière révision encore utile ; la borne présentée ne peut augmenter au départ. Auto sans borne présentée reste refusé. Aucun nouvel aperçu pendant envoi, incertitude ou confirmation de défrichage. Preuves et limites dans le handoff courant.
+
 La vérification différée ne peut ajouter des cibles, changer d'intention, augmenter le plafond affiché ou accepter un coût supérieur à celui présenté. Une modification substantielle rend l'intention à corriger. Une durée estimée ou une mobilisation initiale moindre que le plafond n'est pas, à elle seule, une nouvelle intention.
 
 ## Exploitation opérationnelle
@@ -414,7 +418,7 @@ Ordre de réalisation conseillé : shell et grammaire commune, Construction comm
 | EXP10 | Fenêtre expire pendant une tournée Jardin ou un retour | Tournée engagée entière/lots honorés ; aucun nouveau départ hors fenêtre ; retour estimé distinct de la fin des départs. |
 | CON01 | Choisir un bâtiment dans la palette | Miniature cohérente, coût catalogue et emprise affichés avant le geste ; pas de fenêtre catalogue obligatoire. |
 | CON02 | Placer une Université et un Jardin surfacique | Ghost 5 × 6 pour l'une, zone/coût dynamiques pour l'autre ; release valide suffit, pas de confirmation HUD. |
-| CON03 | Emprise avec collision, hors périmètre ou stock insuffisant | Raison précise ; aucune pose partielle, dépense ou déplacement automatique du bâtiment. |
+| CON03 | Emprise avec collision, hors périmètre ou stock insuffisant | Raison précise ; aucune pose partielle, dépense ou déplacement automatique du bâtiment. Emprise sans remplissage coloré, bordure vert fluo si possible ou rouge lumineux si refusée ; teintes du ghost conservées. |
 | CON04 | Préparer Améliorer puis cliquer ; préparer Étendre puis désigner/tracer | Commandes existantes exécutables avec la grammaire commune ; pas de formulaire après le geste final. |
 | CON05 | Examiner caserne et variantes d'atelier | Aucun objet non constructible proposé avec un faux prix ; aucune orientation/variante non persistée présentée comme achetable. |
 | NET01 | Réponses de preview inversées après changement de sélection/village | Ancienne réponse ignorée ; aucun changement de nouvelles cibles ou paramètres. |

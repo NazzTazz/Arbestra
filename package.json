@@ -9,7 +9,7 @@
   "scripts": {
     "factory:bake": "node scripts/bake-buildings.mjs",
     "build": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --filter @arbestra/api build && corepack pnpm --filter @arbestra/play-web build && corepack pnpm --filter @arbestra/world-web build",
-    "dev": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --parallel --filter @arbestra/api --filter @arbestra/play-web --filter @arbestra/world-web dev",
+    "dev": "corepack pnpm --filter @arbestra/contracts build && corepack pnpm --parallel --filter @arbestra/api --filter @arbestra/play-web --filter @arbestra/world-web run \"/^(dev|generator:dev)$/\"",
     "db:migrate": "corepack pnpm --filter @arbestra/api db:migrate",
     "db:migrate:test": "corepack pnpm --filter @arbestra/api db:migrate:test",
     "db:seed": "corepack pnpm --filter @arbestra/api db:seed",

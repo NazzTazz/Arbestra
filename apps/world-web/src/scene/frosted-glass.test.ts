@@ -16,7 +16,9 @@ it('renders frosted panes without capturing the scene and shares their material 
     expect(scene.customRenderTargets).toHaveLength(0);
     expect(scene.textures.filter(t=>t.isRenderTarget)).toHaveLength(0);
     expect(first.material).toBe(second.material);
-    expect(first.material!.needAlphaBlending()).toBeFalsy();
+    expect(first.material!.needAlphaBlending()).toBeTruthy();
+    expect(first.material!.alpha).toBeGreaterThan(0);
+    expect(first.material!.alpha).toBeLessThan(.3);
     first.dispose(false,false);
     expect(scene.materials).toContain(second.material);
     expect(second.material!.getScene()).toBe(scene);

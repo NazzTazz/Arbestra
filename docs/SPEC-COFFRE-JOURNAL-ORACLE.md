@@ -47,9 +47,11 @@ La célébration n'est pas un écran bloquant. Vérifier navigation clavier, aff
 
 ## Indice de l'Oracle — arbitrage validé le 7 septembre
 
-Tristan valide le déclencheur proposé : après 90 secondes dans l'onglet visible, si le coffre reste fermé et qu'aucune action de gameplay n'a réussi, afficher un indice discret une seule fois par session. Le temps caché ne compte pas. Explorer la carte et ouvrir les panneaux ne coupent pas le délai. Une commande refusée n'annule pas l'aide ; une commande en cours diffère son affichage jusqu'au résultat.
+Tristan valide le déclencheur proposé : après 90 secondes dans l'onglet visible, si le coffre reste fermé et qu'aucune action de gameplay n'a réussi, afficher un indice une seule fois par session. Le temps caché ne compte pas. Explorer la carte et ouvrir les panneaux ne coupent pas le délai. Une commande refusée n'annule pas l'aide ; une commande en cours diffère son affichage jusqu'au résultat.
 
-Texte validé : « L’ancien chef avait caché des provisions dans l’Hôtel de ville. Une mesure remarquablement efficace, puisque personne ne les a retrouvées. » L'indice n'ouvre aucun panneau. Les 90 secondes restent un réglage de POC à ajuster en jouant.
+Texte validé : « L’ancien chef avait caché des provisions dans l’Hôtel de ville. Une mesure remarquablement efficace, puisque personne ne les a retrouvées. » Les 90 secondes restent un réglage de POC à ajuster en jouant.
+
+**Présentation révisée à la demande de Tristan le 7 octobre 2026** : overlay centré, texte agrandi et bouton **Masquer**. Aucun délai de fermeture automatique ; le message reste visible sur la page jusqu'à son masquage. Seule la carte intercepte les clics, sans fond modal couvrant le jeu. Affichage adapté au mobile et isolé au village concerné ; aucun panneau de bâtiment ouvert automatiquement. Le déclencheur et la suppression de répétition par session restent inchangés ; recharger la page conserve cette suppression, pas l'overlay ouvert.
 
 Implémentation bornée : session d'onglet via `sessionStorage`, isolée par monde et village ; temps et annulation conservés après F5. Si le stockage est indisponible, repli en mémoire pour la page courante. Aucune autorité économique ni état de quête ne dépend de ce cache.
 

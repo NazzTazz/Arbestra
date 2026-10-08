@@ -4,7 +4,7 @@ import { BuildingThumbnailCache } from './building-thumbnail-cache';
 
 // Bump whenever presentation recipes, materials/textures, camera or resolution change.
 // This includes the factories used by buildPresentation and public/tiles/garden-4.png.
-const THUMBNAIL_REVISION = 'factory-7-light-masonry-satin-glass-png-384x240';
+const THUMBNAIL_REVISION = 'factory-8-transparent-satin-glass-png-384x240';
 
 // Keep this module free of Babylon imports: a persistent hit needs only the pixels.
 const cache = new BuildingThumbnailCache(THUMBNAIL_REVISION, async (code, level) => {

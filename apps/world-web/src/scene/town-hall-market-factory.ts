@@ -11,7 +11,7 @@ import { prepareRoundedCorner,finishRoundedCorner } from './town-hall-rounded-co
 import { buildTownHallStorefront } from './town-hall-storefront';
 
 /** Workshop proposal: a long covered wooden balcony beside a small-stone room. */
-export function buildTownHallMarket(root:Mesh,kit:TimberThatch,phase:'finished'|'works') {
+export function buildTownHallMarket(root:Mesh,kit:TimberThatch,phase:'finished'|'works',fireOwner:Mesh|null=root) {
   const originalProfile=kit.stoneProfile;kit.stoneProfile={segments:3,radiusRatio:.12};
   try{
   const input={id:'hall-market',anchor:{cellX:0,cellY:0},cells:[{cellX:0,cellY:0},{cellX:0,cellY:1}],world:{widthCells:32,heightCells:32}};
@@ -70,20 +70,20 @@ export function buildTownHallMarket(root:Mesh,kit:TimberThatch,phase:'finished'|
         for(const z of [front,-front])box('hall-market-balcony-end',balconyCentre,z,balconyWidth,.055,.055,h);
       }
     }
-    const boards=Math.ceil(-front*2/.14);
+    const boards=kit.lod===2?1:Math.ceil(-front*2/.14);
     for(let i=0;i<boards;i++)box('hall-market-balcony-floor',balconyCentre,front+(i+.5)*(-front*2/boards),balconyWidth-.02,.035,-front*2/boards-.003,.0175);
     const rails=Mesh.MergeMeshes(parts,true,true);
     if(rails){rails.parent=root;rails.material=kit.wood;rails.receiveShadows=true;}
   }
-  if(phase==='finished'){
+  if(phase==='finished'&&fireOwner){
     const braziers=new VillageBraziers(kit.scene);
     const points=niches.map((niche,index)=>{
       const p=Vector3.TransformCoordinates(new Vector3(-.99,lower.base+niche.bottom+.03,(niche.left+niche.right)/2),root.computeWorldMatrix(true));
       return {x:p.x,y:p.y,z:p.z,seed:.3+index*.4};
     });
-    braziers.updatePoints(points,root);
-    const observer=kit.scene.onBeforeRenderObservable.add(()=>braziers.animate(performance.now(),true,1));
-    root.onDisposeObservable.addOnce(()=>{kit.scene.onBeforeRenderObservable.remove(observer);braziers.dispose();});
+    braziers.updatePoints(points,fireOwner);
+    const observer=kit.scene.onBeforeRenderObservable.add(()=>braziers.animate(performance.now(),true,fireOwner.isEnabled()?1:0));
+    fireOwner.onDisposeObservable.addOnce(()=>{kit.scene.onBeforeRenderObservable.remove(observer);braziers.dispose();});
   }
   for(const mesh of root.getChildMeshes()){
     mesh.isPickable=false;

@@ -37,3 +37,13 @@ button { background: #a8d38f; color: #132019; font-weight: 750; }
 .world-card span { color: #bdc9bf; }
 .quiet-button { color: #dce6dd; background: transparent; border: 1px solid #526258; }
 .error { color: #ffb4a9; }
+
+.auth-tabs { display: flex; gap: .6rem; margin-bottom: 1.5rem; }
+.auth-tabs > button { flex: 1; }
+button:disabled { cursor: wait; opacity: .55; }
+.world-card[aria-pressed="true"] { border-color: #b6e59d; box-shadow: 0 0 0 2px #b6e59d44; }
+button.world-card { text-align: left; }
+h2 { margin: .5rem 0 0; font-size: 1.2rem; }
+.onboarding-intro { margin: 0; color: #c8d2c9; line-height: 1.5; }
+.join-form { padding-top: .5rem; }
+small { color: #bdc9bf; line-height: 1.4; }

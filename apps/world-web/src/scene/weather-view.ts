@@ -12,14 +12,15 @@ import { groundWetness, weatherAt, weatherSeed } from './weather';
 export class WeatherMap {
   readonly texture: DynamicTexture;
   readonly seed: number;
+  readonly sharedClimate: boolean;
   seconds = 0;
   #due = -Infinity;
   #wetDue = -Infinity;
   #job: Generator<void> | null = null;
   readonly #pixels = new ImageData(128, 64);
   readonly #wet = new Float32Array(16 * 8);
-  constructor(scene: Scene, worldId: string) {
-    this.seed = weatherSeed(worldId);
+  constructor(scene: Scene, worldId: string, generatorSeed?: number) {
+    this.seed = generatorSeed ?? weatherSeed(worldId); this.sharedClimate=generatorSeed!==undefined;
     this.texture = new DynamicTexture('shared-weather-field', { width: 128, height: 64 }, scene, false, Texture.BILINEAR_SAMPLINGMODE);
     this.texture.wrapU = this.texture.wrapV = Texture.WRAP_ADDRESSMODE;
     this.texture.getContext().clearRect(0, 0, 128, 64); this.texture.update(false);
@@ -43,7 +44,7 @@ export class WeatherMap {
       }
     }
     for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) {
-      const u = (x + .5) / 128, v = (y + .5) / 64, weather = weatherAt(u, v, serverMs, this.seed);
+      const u = (x + .5) / 128, v = (y + .5) / 64, weather = weatherAt(u, v, serverMs, this.seed, this.sharedClimate);
       const gx = u * 16, gy = v * 8, ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy;
       const wet = (a: number, b: number) => this.#wet[(b % 8) * 16 + a % 16]!;
       const moisture = (wet(ix, iy) * (1 - fx) + wet(ix + 1, iy) * fx) * (1 - fy)

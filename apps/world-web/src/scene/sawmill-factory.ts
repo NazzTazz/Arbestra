@@ -1,14 +1,14 @@
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import type { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { Scene } from '@babylonjs/core/scene';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 
 export interface SawmillMaterials { stone: StandardMaterial; lightTimber: StandardMaterial; packedEarth: StandardMaterial; sawdust: StandardMaterial; darkTimber: StandardMaterial; timber: StandardMaterial; roof: StandardMaterial; trunk: StandardMaterial }
 
 /** Shared geometry for village, catalogue and placement. */
-export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: string, level: number, x = 0, z = 0): Mesh {
+export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: string, level: number, x = 0, z = 0, lod: 0 | 1 | 2 = 0): Mesh {
+    const sides=(original:number)=>lod===2?4:lod===1?6:original;
     const foundation = MeshBuilder.CreateBox(`sawmill-${id}`, { width: 2.28, depth: 2.02, height: 0.16 }, scene);
-    foundation.position.set(x, 0.09, z);
     foundation.material = materials.stone;
 
     const box = (name: string, width: number, height: number, depth: number, x: number, y: number, z: number, material: StandardMaterial): Mesh => {
@@ -20,7 +20,7 @@ export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: stri
       return mesh;
     };
     const log = (name: string, x: number, y: number, z: number, length: number, radius = 0.11, alongZ = true): Mesh => {
-      const mesh = MeshBuilder.CreateCylinder(`${name}-${id}`, { height: length, diameter: radius * 2, tessellation: 8 }, scene);
+      const mesh = MeshBuilder.CreateCylinder(`${name}-${id}`, { height: length, diameter: radius * 2, tessellation: sides(8) }, scene);
       mesh.parent = foundation;
       mesh.position.set(x, y, z);
       mesh.rotation.x = alongZ ? Math.PI / 2 : 0;
@@ -31,7 +31,7 @@ export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: stri
     };
     const frame=(name:string,width:number,height:number,depth:number,x:number,y:number,z:number)=>{
       if(level>1)return box(name,width,height,depth,x,y,z,materials.darkTimber);
-      const piece=MeshBuilder.CreateCylinder(`${name}-${id}`,{height:Math.max(width,height,depth),diameter:Math.min(width,height,depth),tessellation:10},scene);
+      const piece=MeshBuilder.CreateCylinder(`${name}-${id}`,{height:Math.max(width,height,depth),diameter:Math.min(width,height,depth),tessellation:sides(10)},scene);
       piece.parent=foundation;piece.position.set(x,y,z);piece.material=materials.darkTimber;piece.isPickable=false;
       if(width>height&&width>depth)piece.rotation.z=Math.PI/2;
       else if(depth>height)piece.rotation.x=Math.PI/2;
@@ -118,5 +118,22 @@ export function buildSawmill(scene: Scene, materials: SawmillMaterials, id: stri
       stone.isPickable = false;
     }
 
+    // All workshop pieces are static. Bake their local transforms into one mesh per
+    // material, while retaining the foundation as the individual building/picking root.
+    const batches = new Map<StandardMaterial, Mesh[]>();
+    for (const part of foundation.getChildMeshes()) {
+      if (!(part instanceof Mesh)) continue;
+      const material = part.material as StandardMaterial;
+      const batch = batches.get(material) ?? [];
+      batch.push(part); batches.set(material, batch);
+    }
+    for (const [material, parts] of batches) {
+      if (parts.length < 2) continue;
+      const merged = Mesh.MergeMeshes(parts, true, true);
+      if (!merged) throw new Error('Sawmill geometry merge failed');
+      merged.name = `sawmill-batch-${material.name}-${id}`;
+      merged.parent = foundation; merged.isPickable = false;
+    }
+    foundation.position.set(x, 0.09, z);
     return foundation;
 }
