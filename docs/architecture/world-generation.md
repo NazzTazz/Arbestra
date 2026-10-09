@@ -10,6 +10,10 @@ Complément r7 : les nouveaux candidats ajoutent un descripteur forestier décor
 
 Complément r8 : `amplitude` représente désormais les bornes symétriques ±A (défaut ±16), distinguées par la révision de recette. Le descripteur géographique porte les paramètres de cette normalisation ; des `stoneSites` décoratifs sont persistés dans le même artefact, sans stock ni occupation économique. Les anciens artefacts et la génération v2 restent inchangés.
 
+Complément r10 : `world-circulation.ts` consomme les fonctions du contrat cosmologique et persiste une copie de ses paramètres dans le descripteur géographique. Un proxy de pluie intégré sur 24 phases pondère l'accumulation du drainage global ; le relief ne varie pas avec l'heure d'inspection. `solarTransport` pilote les nuages du preview et `solarCurrent` fournit le champ tangent diagnostique. Dans un lit fluvial, la direction aval prime et le soleil module une vitesse toujours positive. Modèle stylisé, sans simulation gravitationnelle ni conservation des débits. `lakeSurface` et les profils transversaux continus remplacent les seuils visuels r9 pour les nouveaux candidats uniquement. Les contrats métier des univers ouverts ne changent pas. Voir le [bilan r10](../GEOGRAPHIE-MONDE-2026-10-08.md#circulation-solaire-et-berges-r10).
+
+Complément r11 : `world-oceans.ts` fournit l'ossature périodique des deux bassins et `geography.oceans` ses paramètres/plateaux. `geography.connections` contient une inspection échantillonnée mer/terre et un masque d'affichage ; **ce n'est pas le graphe de déplacement autoritaire**. Le masque n'influence pas la forme du relief. Les candidats v3 restent fermés et les anciennes recettes utilisent leurs branches historiques. Voir le [contrat r11](../GEOGRAPHIE-MONDE-2026-10-08.md#deux-océans-et-continuité-terrestre-r11).
+
 ## But
 
 La création d’un monde exécute une génération déterministe une seule fois. Son résultat persiste dans PostgreSQL et reste identique après déploiement, redémarrage ou évolution d’un futur générateur.

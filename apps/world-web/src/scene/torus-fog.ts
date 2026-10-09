@@ -141,7 +141,8 @@ export class TorusFog {
       effect.setVector3('forward',camera.getForwardRay().direction); effect.setVector3('sun',this.#sun);
       effect.setFloat2('clock',this.#weather?.seconds ?? 0,this.#phase);
       const seconds=this.#weather?.seconds ?? 0;
-      effect.setFloat3('wind',((seconds*10/WEATHER_DRIFT_SECONDS)%1)*TAU,
+      if(this.#weather?.circulation)effect.setFloat3('wind',0,0,0);
+      else effect.setFloat3('wind',((seconds*10/WEATHER_DRIFT_SECONDS)%1)*TAU,
         (seconds/WEATHER_DRIFT_SECONDS)%1,(seconds/(WEATHER_DRIFT_SECONDS*2))%1);
       effect.setFloat('ready',this.#weather ? 1 : 0);
       effect.setTexture('sceneDepth',depth.getDepthMap()); effect.setTexture('noiseVolume',noise);

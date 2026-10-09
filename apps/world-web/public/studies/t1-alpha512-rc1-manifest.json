@@ -1,0 +1,19 @@
+{
+  "id": "t1-alpha512-rc1",
+  "source": "t1-alpha512.json",
+  "width": 512,
+  "height": 256,
+  "chunkSize": 32,
+  "layoutScale": 2,
+  "previewWaterLevel": 0,
+  "sha256": "de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4",
+  "status": "Candidate validée par Tristan pour la sortie alpha du week-end",
+  "stonePolicy": "chunk-geology-first-v1",
+  "approvedOn": "2026-10-09",
+  "approvalScope": "Géographie et représentation du monde ; intégration serveur et ouverture non validées par cette décision",
+  "coverageArtifact": "t1-alpha512-rc1-coverage.json",
+  "coverageSha256": "9e26c98dac0eeccedc662a1db143426dcb5242cd1ddc25d11f7d9d8851a417f0",
+  "sourceGitHead": "7218549",
+  "sourceGitDirty": true,
+  "geometryNote": "Les données sont figées ; le relief échantillonné et le rendu dépendent aussi du code procédural courant, encore non commité."
+}

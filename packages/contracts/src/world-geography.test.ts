@@ -12,7 +12,7 @@ describe('global independent geography',()=>{
   }
  });
  it('drains without cycles and river profiles descend through shared confluences',()=>{
-  const g=createWorldGeography(42,256,128,p);expect(g.rivers.length).toBeGreaterThan(0);expect(g.lakes.length).toBeGreaterThan(0);
+  const g=createWorldGeography(42,256,128,p,10);expect(g.rivers.length).toBeGreaterThan(0);expect(g.lakes.length).toBeGreaterThan(0);
   for(let i=0;i<g.parent.length;i++){let j=i,count=0;while(g.parent[j]!>=0){const next=g.parent[j]!;expect(g.filled[next]!).toBeLessThanOrEqual(g.filled[j]!);j=next;if(++count>g.parent.length)throw Error('drainage cycle');}}
   for(const river of g.rivers){for(let i=1;i<river.points.length;i++)expect(river.points[i]![2]).toBeLessThanOrEqual(river.points[i-1]![2]+1e-12);
    if(river.downstream!==null){const end=river.points.at(-1)!,start=g.rivers[river.downstream]!.points[0]!;expect(((end[0]-start[0])%g.width+g.width)%g.width).toBe(0);expect(end[2]).toBe(start[2]);}

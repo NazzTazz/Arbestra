@@ -1,4 +1,4 @@
-import { climateAt } from '@arbestra/contracts';
+import { solarTransport, type SolarCirculation, climateAt } from '@arbestra/contracts';
 import { COSMOLOGY, TAU, cyclePhase, illumination } from './cosmology';
 
 const wrap = (x: number, size: number) => ((x % size) + size) % size;
@@ -21,19 +21,20 @@ function noise(u: number, v: number, frequency: number, seed: number): number {
     + (corner(ix, iy + 1) * (1 - fx) + corner(ix + 1, iy + 1) * fx) * fy;
 }
 /** Canonical normalized coordinates; epoch time, never time since the view opened. */
-export function weatherAt(u: number, v: number, serverMs: number, seed: number, sharedClimate = false) {
+export function weatherAt(u: number, v: number, serverMs: number, seed: number, sharedClimate = false, circulation?: SolarCirculation) {
   const time = (serverMs - COSMOLOGY.epochMs) / 1000;
-  const x = u - time / WEATHER_DRIFT_SECONDS, y = v - time / (WEATHER_DRIFT_SECONDS * 2);
+  const phase=circulation?(serverMs-circulation.epochMs)/(circulation.periodMs*circulation.torusTurns)*TAU:0;
+  const [x,y]=circulation?solarTransport(u,v,phase,circulation):[u-time/WEATHER_DRIFT_SECONDS,v-time/(WEATHER_DRIFT_SECONDS*2)];
   const transient = .62 * noise(x, y, 8, seed) + .26 * noise(x, y, 16, seed + 1) + .12 * noise(x, y, 32, seed + 2);
   const field = sharedClimate ? .7 * transient + .3 * climateAt(u, v, seed).humidity : transient;
   const cloud = smooth((field - .28) / .42);
   return { cloud, rain: smooth((cloud - .68) / .3) };
 }
 /** Bounded visual rain memory, recomputed identically after reload. No persisted/economic state. */
-export function groundWetness(u: number, v: number, serverMs: number, seed: number): number {
+export function groundWetness(u: number, v: number, serverMs: number, seed: number, circulation?:SolarCirculation): number {
   let wet = 0;
   for (let i = 20; i >= 0; i--) {
-    const time = serverMs - i * 60_000, weather = weatherAt(u, v, time, seed);
+    const time = serverMs - i * 60_000, weather = weatherAt(u, v, time, seed,!!circulation,circulation);
     const sunlight = illumination(u * TAU, v * TAU + Math.PI, cyclePhase(time)).direct;
     wet = Math.max(0, Math.min(1, wet + weather.rain * .3 - .025 - sunlight * (1 - weather.cloud) * .13));
   }

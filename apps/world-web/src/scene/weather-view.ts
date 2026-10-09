@@ -1,3 +1,4 @@
+import type {SolarCirculation} from '@arbestra/contracts';
 import { MaterialPluginBase } from '@babylonjs/core/Materials/materialPluginBase';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
@@ -14,18 +15,22 @@ export class WeatherMap {
   readonly seed: number;
   readonly sharedClimate: boolean;
   seconds = 0;
+  paintedAt: number | null = null;
   #due = -Infinity;
+  #lastTime = -Infinity;
   #wetDue = -Infinity;
   #job: Generator<void> | null = null;
   readonly #pixels = new ImageData(128, 64);
   readonly #wet = new Float32Array(16 * 8);
-  constructor(scene: Scene, worldId: string, generatorSeed?: number) {
+  constructor(scene: Scene, worldId: string, generatorSeed?: number, readonly circulation?:SolarCirculation) {
     this.seed = generatorSeed ?? weatherSeed(worldId); this.sharedClimate=generatorSeed!==undefined;
     this.texture = new DynamicTexture('shared-weather-field', { width: 128, height: 64 }, scene, false, Texture.BILINEAR_SAMPLINGMODE);
     this.texture.wrapU = this.texture.wrapV = Texture.WRAP_ADDRESSMODE;
     this.texture.getContext().clearRect(0, 0, 128, 64); this.texture.update(false);
   }
   update(serverMs: number): void {
+    if(this.circulation&&serverMs<this.#lastTime){this.#due=-Infinity;this.#wetDue=-Infinity;this.#job=null;}
+    this.#lastTime=serverMs;
     this.seconds = ((serverMs - COSMOLOGY.epochMs) / 1000 % 14400 + 14400) % 14400;
     if (!this.#job && serverMs >= this.#due) {
       this.#due = serverMs + 2000; this.#job = this.#paint(serverMs);
@@ -39,12 +44,12 @@ export class WeatherMap {
     if (serverMs >= this.#wetDue) {
       this.#wetDue = serverMs + 30_000;
       for (let y = 0; y < 8; y++) for (let x = 0; x < 16; x++) {
-        this.#wet[y * 16 + x] = groundWetness(x / 16, y / 8, serverMs, this.seed);
+        this.#wet[y * 16 + x] = groundWetness(x / 16, y / 8, serverMs, this.seed,this.circulation);
         yield;
       }
     }
     for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) {
-      const u = (x + .5) / 128, v = (y + .5) / 64, weather = weatherAt(u, v, serverMs, this.seed, this.sharedClimate);
+      const u = (x + .5) / 128, v = (y + .5) / 64, weather = weatherAt(u, v, serverMs, this.seed, this.sharedClimate,this.circulation);
       const gx = u * 16, gy = v * 8, ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy;
       const wet = (a: number, b: number) => this.#wet[(b % 8) * 16 + a % 16]!;
       const moisture = (wet(ix, iy) * (1 - fx) + wet(ix + 1, iy) * fx) * (1 - fy)
@@ -56,7 +61,7 @@ export class WeatherMap {
       this.#pixels.data[i + 3] = 255;
       if (x % 16 === 15) yield;
     }
-    this.texture.getContext().putImageData(this.#pixels, 0, 0); this.texture.update(false);
+    this.texture.getContext().putImageData(this.#pixels, 0, 0); this.texture.update(false);this.paintedAt=serverMs;
   }
   dispose(): void { this.#job = null; this.texture.dispose(); }
 }

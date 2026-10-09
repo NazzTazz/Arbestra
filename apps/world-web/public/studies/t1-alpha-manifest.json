@@ -1,0 +1,9 @@
+{
+  "id": "t1-alpha",
+  "approved": "2026-10-09",
+  "source": "t1.json",
+  "sha256": "3b718b97e644ad3024f43dfc1cecca95b95fb3c5f7cafe97203a21f6435d75af",
+  "previewWaterLevel": 0,
+  "status": "Reference artistique alpha validee par Tristan, aucun univers ouvert",
+  "note": "Artefact sec conserve exactement ; eau appliquee apres geologie par la preview. Ne pas ecraser."
+}

@@ -1,0 +1,13 @@
+{
+  "id": "t1-alpha512",
+  "source": "t1-alpha.json",
+  "width": 512,
+  "height": 256,
+  "chunkSize": 32,
+  "layoutScale": 2,
+  "previewWaterLevel": 0,
+  "sha256": "de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4",
+  "status": "Version approuvée comme candidate alpha le 2026-10-09 ; copie de référence t1-alpha512-rc1",
+  "stonePolicy": "chunk-geology-first-v1",
+  "approvedCandidate": "t1-alpha512-rc1"
+}

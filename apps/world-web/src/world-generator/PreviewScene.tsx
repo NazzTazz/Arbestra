@@ -1,3 +1,5 @@
+import {createStudyCoordinates} from './study-coordinates';
+import {createGeographicFlowView} from './geographic-flow-view';
 import {flatPreviewPoint,renderIdentity,type PreviewView} from './preview-inspection';
 import {Camera} from '@babylonjs/core/Cameras/camera';
 import { buildWorldOutcrops } from './world-outcrops';
@@ -10,6 +12,7 @@ import '@babylonjs/core/Culling/ray';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import { Scene } from '@babylonjs/core/scene';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
+import {DirectionalLight} from '@babylonjs/core/Lights/directionalLight';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
@@ -35,7 +38,7 @@ import { altitudeColor } from './altitude-color';
 export type PreviewLayer='terrain'|'altitude'|'exposure'|'humidity'|'accessibility'|'water';
 export interface PreviewStats {renderKey?:string;fps:number;median:number;p95:number;draws:number;meshes:number;indices:number;residentVertices:number;materials:number;textures:number;backend:string;fogPasses:number}
 export interface PreviewRenderState {key:string;status:'building'|'ready'|'error';message?:string}
-interface Props {flat?:boolean;candidateKey?:string;onRenderState?:(state:PreviewRenderState)=>void;grid?:boolean;wireframe?:boolean;data:GeneratedLandscape;local:boolean;center:{x:number;y:number};layer:PreviewLayer;fog:boolean;solar:boolean;exaggeration:number;cycleDegrees:number;
+interface Props {chunks?:boolean;coordinates?:boolean;flat?:boolean;candidateKey?:string;onRenderState?:(state:PreviewRenderState)=>void;grid?:boolean;wireframe?:boolean;data:GeneratedLandscape;local:boolean;center:{x:number;y:number};layer:PreviewLayer;fog:boolean;solar:boolean;exaggeration:number;cycleDegrees:number;
  onPick:(x:number,y:number)=>void;onStats:(stats:PreviewStats)=>void}
 export function PreviewScene(props:Props){
   const canvas=useRef<HTMLCanvasElement>(null),callbacks=useRef(props);callbacks.current=props;
@@ -43,7 +46,7 @@ export function PreviewScene(props:Props){
   const zoom=(factor:number)=>{const camera=activeCamera.current;if(camera)camera.radius=Math.max(camera.lowerRadiusLimit??0,Math.min(camera.upperRadiusLimit??Infinity,camera.radius*factor));};
   const poses=useRef(new Map<PreviewView,{alpha:number;beta:number;radius:number;target:Vector3;groundHeight:number}>());
   const view:PreviewView=props.local?'local':props.flat?'map':'torus';
-  const identity=renderIdentity({candidate:props.candidateKey??`${props.data.seed}:${props.data.recipeRevision}`,view,layer:props.layer,x:props.center.x,y:props.center.y,fog:props.fog,solar:props.solar,exaggeration:props.exaggeration,grid:!!props.grid,wireframe:!!props.wireframe});
+  const identity=renderIdentity({candidate:props.candidateKey??`${props.data.seed}:${props.data.recipeRevision}`,view,layer:props.layer,x:props.center.x,y:props.center.y,fog:props.fog,solar:props.solar,exaggeration:props.exaggeration,grid:!!props.grid,wireframe:!!props.wireframe})+(props.coordinates?'|coordinates':'');
   const desired=useRef(identity);desired.current=identity;
   const [rendered,setRendered]=useState<PreviewRenderState|null>(null);
   const current=rendered?.key===identity?rendered:null;
@@ -69,6 +72,7 @@ export function PreviewScene(props:Props){
     const saved=poses.current.get(view);
     if(saved){camera.alpha=saved.alpha;camera.beta=saved.beta;camera.radius=saved.radius;camera.setTarget(saved.target.add(new Vector3(0,groundHeight-saved.groundHeight,0)));}
     const neutral=new HemisphericLight('inspection-light',new Vector3(.3,1,.4),scene);neutral.intensity=solar&&!flat?0:1.15;neutral.groundColor=new Color3(.4,.4,.4);
+    if(data.geography?.study){neutral.intensity=.65;const reliefLight=new DirectionalLight('study-relief-light',new Vector3(-.7,-1,.4),scene);reliefLight.intensity=.95;}
     const sun=new PointLight('preview-sun',Vector3.FromArray([...sunPosition(0)]),scene);sun.intensity=solar&&!flat?2.2:0;
     const material=new StandardMaterial('preview-shared-ground',scene);material.diffuseColor=Color3.White();material.specularColor=Color3.Black();material.backFaceCulling=false;
     if(layer!=='terrain'){material.disableLighting=true;material.emissiveColor=Color3.White();}
@@ -176,6 +180,8 @@ export function PreviewScene(props:Props){
       const chunks=MeshBuilder.CreateLineSystem('chunk-borders',{lines:borders},scene);chunks.color=new Color3(1,.5,.12);chunks.isPickable=false;
     }
     const hydrology=data.hydrology&&(layer==='terrain'||layer==='water')?createHydrologyView(scene,data,local,center,point):null;
+    const flowView=data.geography?.circulation&&layer==='water'?createGeographicFlowView(scene,data,local,center,point):null;
+    const coordinates=(props.coordinates||props.chunks||data.geography?.study)&&data.geography?createStudyCoordinates(scene,data,local,center,point,!!props.coordinates):null;
     const water=make('candidate-water',waterPositions,waterIndices,waterMaterial,waterColors.length?waterColors:undefined);water.isPickable=false;
     scene.onPointerObservable.add(info=>{
       if(desired.current!==identity||info.type!==PointerEventTypes.POINTERPICK||info.pickInfo?.pickedMesh!==ground)return;
@@ -229,7 +235,7 @@ export function PreviewScene(props:Props){
     }
     const shadows=solar&&!flat?new ShadowGenerator(512,sun):null;
     if(shadows){shadows.addShadowCaster(ground);for(const stone of stoneMeshes)shadows.addShadowCaster(stone);ground.receiveShadows=true;shadows.bias=.002;shadows.normalBias=.01;}
-    const weather=fog&&torus?new WeatherMap(scene,String(data.seed),data.seed):null;
+    const weather=fog&&torus?new WeatherMap(scene,String(data.seed),data.seed,data.geography?.circulation):null;
     const fogVolume=weather?new TorusFog(scene):null;
     const instrument=new SceneInstrumentation(scene);instrument.captureFrameTime=true;
     const samples:number[]=[];let lastRotation=NaN;let nextStats=performance.now()+2000;
@@ -240,8 +246,12 @@ export function PreviewScene(props:Props){
       const phase=callbacks.current.cycleDegrees/360*Math.PI*2,rotation=cyclePhases(phase).torus,p=sunPosition(cyclePhases(phase).sun);
       if(torus){if(rotation!==lastRotation){ground.rotation.y=-rotation;water.rotation.y=-rotation;for(const trees of torusTrees)trees.rotation.y=-rotation;lastRotation=rotation;}sun.position.copyFromFloats(...p);}
       else if(solar&&!flat){const light=illumination(center.x/w*Math.PI*2,center.y/h*Math.PI*2+Math.PI,phase);sun.position.set(light.localDirection[0]*50,light.localDirection[1]*50,light.localDirection[2]*50);sun.intensity=light.lit?2.2:0;}
+      coordinates?.update(callbacks.current.center);if(coordinates)for(const mesh of coordinates.meshes){mesh.setEnabled(!!(callbacks.current.coordinates||callbacks.current.chunks));mesh.rotation.y=torus?-rotation:0;}
+      flowView?.update(phase);if(flowView)flowView.mesh.rotation.y=torus?-rotation:0;
+      element.dataset.flowCount=String(flowView?.count??0);element.dataset.flowPhase=String(phase);
       hydrology?.update(phase,performance.now()/1000,camera.radius,solar);
       weather?.update(COSMOLOGY.epochMs+callbacks.current.cycleDegrees/360*combinedPeriod());fogVolume?.update(phase,sun.position,weather);scene.render();
+      element.dataset.weatherTime=String(weather?.paintedAt??'');
       element.dataset.renderPhase=String(callbacks.current.cycleDegrees);
       if(firstFrame){firstFrame=false;publish('ready');}
       samples.push(instrument.frameTimeCounter.current);if(samples.length>120)samples.shift();
@@ -255,7 +265,7 @@ export function PreviewScene(props:Props){
     const renderFrame=()=>{try{render();}catch(error){engine.stopRenderLoop(renderFrame);publish('error',error instanceof Error?error.message:String(error));}};
     engine.runRenderLoop(renderFrame);
     const resize=()=>engine.resize();window.addEventListener('resize',resize);
-    cleanup=()=>{activeCamera.current=null;poses.current.set(view,{alpha:camera.alpha,beta:camera.beta,radius:camera.radius,target:camera.target.clone(),groundHeight});window.removeEventListener('resize',resize);engine.stopRenderLoop(renderFrame);hydrology?.dispose();fogVolume?.dispose();weather?.dispose();shadows?.dispose();instrument.dispose();scene.dispose();};
+    cleanup=()=>{activeCamera.current=null;poses.current.set(view,{alpha:camera.alpha,beta:camera.beta,radius:camera.radius,target:camera.target.clone(),groundHeight});window.removeEventListener('resize',resize);engine.stopRenderLoop(renderFrame);flowView?.dispose();hydrology?.dispose();fogVolume?.dispose();weather?.dispose();shadows?.dispose();instrument.dispose();scene.dispose();};
     }catch(error){engineRef.current?.stopRenderLoop();failedScene?.dispose();publish('error',error instanceof Error?error.message:String(error));}
     },0);
     return()=>{disposed=true;window.clearTimeout(pending);cleanup?.();};

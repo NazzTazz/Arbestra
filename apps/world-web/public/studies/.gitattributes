@@ -1,0 +1,3 @@
+# Preserve exact bytes of approved data and coverage reports.
+*.json -text
+*-manifest.json text eol=lf

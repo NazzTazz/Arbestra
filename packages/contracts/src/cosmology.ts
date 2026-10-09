@@ -14,8 +14,8 @@ export function combinedPeriod(rotationPeriodMs: number = COSMOLOGY.periodMs): n
   return rotationPeriodMs * COSMOLOGY.torusTurns;
 }
 /** Common epoch, independent motions: three torus turns and two solar eights. */
-export function cyclePhases(phase: number) {
-  return { torus: phase * COSMOLOGY.torusTurns, sun: phase * COSMOLOGY.solarTurns };
+export function cyclePhases(phase: number, motion: {torusTurns:number;solarTurns:number} = COSMOLOGY) {
+  return { torus: phase * motion.torusTurns, sun: phase * motion.solarTurns };
 }
 export function cyclePhase(serverMs: number, periodMs: number = combinedPeriod()): number {
   return ((serverMs - COSMOLOGY.epochMs) % periodMs + periodMs) % periodMs / periodMs * TAU;
@@ -57,10 +57,10 @@ export function solarPhase(phase: number, orbit: SolarOrbit = SOLAR_ORBIT): numb
   const part = (distance - table[low]!) / (table[high]! - table[low]!);
   return (low + part) / ARC_SEGMENTS * TAU;
 }
-export function torusFrame(u: number, v: number, phase = 0): { point: Point3; normal: Point3; east: Point3; north: Point3 } {
+export function torusFrame(u: number, v: number, phase = 0, geometry: {majorRadius:number;tubeRadius:number} = COSMOLOGY): { point: Point3; normal: Point3; east: Point3; north: Point3 } {
   const a = u + phase, c = Math.cos(a), s = Math.sin(a), cv = Math.cos(v), sv = Math.sin(v);
-  const radius = COSMOLOGY.majorRadius + COSMOLOGY.tubeRadius * cv;
-  return { point: [radius * c, COSMOLOGY.tubeRadius * sv, radius * s],
+  const radius = geometry.majorRadius + geometry.tubeRadius * cv;
+  return { point: [radius * c, geometry.tubeRadius * sv, radius * s],
     normal: [cv * c, sv, cv * s], east: [-s, 0, c], north: [-sv * c, cv, -sv * s] };
 }
 export function torusImplicit([x, y, z]: Point3): number {

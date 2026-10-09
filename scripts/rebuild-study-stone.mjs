@@ -1,0 +1,18 @@
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import process from 'node:process';
+import {generateChunkStoneCoverage} from '../packages/contracts/src/terrain-study-chunk-stone.ts';
+import {forestDistanceSquared} from '../packages/contracts/src/world-forest.ts';
+const path='apps/world-web/public/studies/t1-alpha512',raw=await readFile(path+'.json','utf8'),data=JSON.parse(raw);
+await mkdir('test-results',{recursive:true});
+await writeFile('test-results/t1-alpha512-before-chunk-stone.json',raw,{flag:'wx'}).catch(e=>{if(e.code!=='EEXIST')throw e;});
+const result=generateChunkStoneCoverage(data.geography);
+process.stdout.write(JSON.stringify(result.report)+'\n');
+if(result.report.uncovered)throw Error('Chunk stone coverage incomplete; artefact left unchanged');
+data.stoneSites=result.sites;
+const rocks=result.sites.flatMap(s=>s.rocks);
+data.forest.trees=data.forest.trees.filter(t=>rocks.every(r=>forestDistanceSquared(t.x,t.y,r.x,r.y,data.width,data.height)>=Math.pow(Math.max(r.width,r.depth)*.8,2)));
+const updated=JSON.stringify(data),manifest=JSON.parse(await readFile(path+'-manifest.json','utf8'));
+manifest.sha256=createHash('sha256').update(updated).digest('hex');manifest.stonePolicy=result.report.policy;
+await writeFile(path+'.json',updated);await writeFile(path+'-coverage.json',JSON.stringify(result.report,null,2)+'\n');await writeFile(path+'-manifest.json',JSON.stringify(manifest,null,2)+'\n');
+process.stdout.write(JSON.stringify({beforeSites:JSON.parse(raw).stoneSites.length,sites:data.stoneSites.length,trees:data.forest.trees.length})+'\n');

@@ -1,3 +1,185 @@
+# Archivage Git de la candidate alpha — 9 octobre 2026
+
+Commit/push demandé par Tristan. Périmètre : travaux géographiques r10/r11, témoin T1 et sculptures validées, preview/chunks, pierre par chunk, artefacts et candidate 512 × 256 RC1, tests et documentation associés. Le code procédural est versionné avec la copie RC1 pour permettre la reprise de cette référence. Les mentions « non commité » ci-dessous décrivent les étapes historiques.
+
+Contrôles de clôture : identité SHA256 de RC1 et de la variante approuvée vérifiée ; diff sans erreurs d'espacement. Les tests/builds et recettes navigateur consignés dans les sections précédentes ne sont pas annoncés comme de nouvelles exécutions. Transcript brut `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` conservé hors commit. Aucun changement DB ni ouverture d'univers. Branche visée : `main`, distant `origin` (NazzTazz/Arbestra) ; résultat du push à vérifier après création du commit.
+
+---
+
+# Alpha 512 × 256 — candidate validée pour le week-end — 9 octobre 2026
+
+Tristan : « je valide l'alpha 512/256 comme étant candidate pour le monde qui sort ce weekend ». Décision enregistrée pour la version actuelle, après réduction des compléments de pierre : 16 × 8 chunks, 15 029 arbres, 28 groupes / 177 rochers ; eau de preview au niveau 0.
+
+Copie exacte distincte `apps/world-web/public/studies/t1-alpha512-rc1.json`, manifeste et rapport de couverture associés. SHA256 : `de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4`. Les scripts existants continuent de cibler la variante `t1-alpha512.json`, jamais RC1. Ne pas remplacer RC1 lors d'une prochaine génération. Le JSON est figé ; le rendu et l'échantillonnage dépendent également du code procédural courant non commité : cette copie n'est pas à elle seule une archive exécutable de release.
+
+Preview actuelle inchangée : `http://localhost:5174/terrain-study?world=t1-alpha512&view=torus&water=1&chunks=1&coordinates=0` (route de la variante de travail, identique à RC1 à cette date ; aucun alias UI RC1 ajouté). Validation de candidate géographique, pas une ouverture d'univers ni une validation de l'intégration métier. Projection serveur, accès et placement des villages restent à qualifier avant ouverture.
+
+Vérification de cette passe : copie binaire et SHA256 identiques, rapport copié sans changement, manifeste cohérent. Aucun rendu ni code applicatif modifié ; pas de nouvelle campagne navigateur. Git main / 7218549, modifications antérieures conservées, aucun commit/push et aucune écriture DB.
+
+---
+
+# Alpha 512 — pierre géologique prioritaire par chunk — 9 octobre 2026
+
+Demande de Tristan : trop de massifs posés ; priorité à la pierre géologique, compléments seulement si nécessaire, partage possible entre 2/4 chunks et quelques liaisons. Confirmation reçue : terres habitables seulement, pas de besoin en pleine mer ; pierre dans le chunk, sans accès fictif par une autre rive/falaise.
+
+Implémenté dans `terrain-study-chunk-stone.ts` et branché au générateur `--alpha512`. Aperçu d'accès au pas 2 sur terres sèches douces, composantes toriques, besoin distinct par chunk/composante ; exposition géologique d'abord, affinage 0,25 autour des nervures fines. Sélection de groupes partagés, retrait des redondances, petits blocs sur berges étroites et liaison courbe sèche entre quelques groupes. Réutilise géométries et matériaux rocheux existants. [Détails et limites](docs/TERRAIN-TEMOIN-T1.md#pierre-par-chunk-géologie-prioritaire).
+
+Artefact mis à jour par `scripts/rebuild-study-stone.mjs` : **28 groupes / 177 rochers contre 122 / 723**, −77 % de groupes. 111 chunks terrestres, 21 composantes, 131 besoins dont 52 servis par géologie, zéro manque, 27 groupes partagés et une liaison. 15 029 arbres conservés ; 213 retirés des nouvelles emprises. Relief/eau et données métier inchangés par comparaison JSON ; alpha 256 intacte par SHA256. Avant conservé dans `test-results/t1-alpha512-before-chunk-stone.json` (hors Git). Pas de replantation dans les petits trous laissés par les anciens groupes. Ne pas confondre cet accès géographique approché avec un pathfinding serveur ou un stock économique.
+
+9 tests ciblés réussis (13,86 s), incluant l'artefact 512 réel et les cas aux coutures. Build contrats et lint finaux réussis. Captures tore/carte examinées (répartition réduite) ; premier parcours interrompu après la capture carte par un élément DOM introuvable. Recette locale `--stone-local` réussie sans exception : massif partagé à (192,0), liaison courbe près de (485,9;58), captures examinées. WebGL2 / Intel Iris Plus D3D11. `git diff --check` propre. Les premières tentatives ont refusé l'écriture avec 3, puis 2, puis 1 accès manquant ; diagnostic d'un affleurement sous-échantillonné et affinage avant succès. Aucun dépôt ajouté pour masquer ce manque géologique.
+
+Mesure read-only demandée ensuite : village dev Clairière, 117 cases de bâtiments/jardins ; chaussées touchant 50 autres cases (32,184 cases de surface effective), 167 cases touchées au total. Rectangle 21×15 = 315 cases, soit 30,76 % d’un chunk de 1024 cases ; 162 cases touchées dans le chunk (34,0), 5 dans (33,0). Emprise des seuls bâtiments : 19×15. Aucun changement DB.
+
+Lien inchangé : `http://localhost:5174/terrain-study?world=t1-alpha512&view=torus&water=1&chunks=1&coordinates=0`. Git main / 7218549, travail antérieur conservé ; aucun commit/push ni écriture DB.
+
+---
+
+# Alpha 512×256 et grille de chunks — 9 octobre 2026
+
+Demande : chunks serveur sans coordonnées sur le tore, puis version alpha 512×256. Référence approuvée `t1-alpha.json` 256×128 intacte. Variante distincte `t1-alpha512.json`, à comparer visuellement avant remplacement. Génération `node --import tsx scripts/build-terrain-study.mjs --alpha512` : lecture de la référence, sculpture horizontale ×2, mêmes altitudes de sculpture, géologie/forêt/pierre recalculées. Pentes globalement plus douces ; incisions fines éventuellement différentes. [Description](docs/TERRAIN-TEMOIN-T1.md#chunks-serveur-et-agrandissement-512--256).
+
+Grille 32×32 : 16×8 chunks pour la nouvelle variante. Case dédiée dans la preview, sans étiquettes/atlas/marqueur par défaut ; lignes au-dessus du relief et de l'eau, sur tore/carte/local. Repères de coordonnées indépendants, atlas ajusté aux 128 labels éventuels. Navigation et raccourcis adaptés aux dimensions ; changement de version conserve le lieu relatif.
+
+Réponse à la question intermédiaire de Tristan, vérifiée par SELECT en base : dev `aube` = 2048×1024 cases, chunks 32, soit 64×32 chunks (2048). Aucun changement du monde dev ni ouverture d'univers.
+
+Build contrats, typecheck client et lint ciblé réussis. 12 tests terrain réussis (32,16 s), dont invariant des hauteurs sculptées après ×2 et périodicité. Génération 512 terminée : 15 242 arbres, 122 groupes / 723 rochers ; 4 973 points de plaine couverts (rayon 24, maximum 23,935). Test mesh chunks NullEngine réussi (27,87 s) : positions multiples de 32, 17+9 lignes, au-dessus de l’eau, sans labels/texture/marqueur. Référence alpha originale inchangée par SHA256. Recette finale `terrain-study.mjs --large` réussie sans exception : tore, carte, masquage de grille sans reconstruction (identité de rendu conservée), réactivation et coordonnées −1/257 ramenées à 511/1. Captures examinées. Correction ciblée : visibilité des chunks pilotée sur le mesh existant, sans rebuild du terrain ; typecheck et lint repassés. Changement de vue globale encore lent : une attente CDP reprise avant succès, à profiler séparément. WebGL2 / Intel Iris Plus D3D11. `git diff --check` propre. Lien : http://localhost:5174/terrain-study?world=t1-alpha512&view=torus&water=1&chunks=1&coordinates=0 . Git main / 7218549, changements précédents conservés ; aucun commit/push.
+
+---
+
+# Monde alpha validé — mise en eau de T1 — 9 octobre 2026
+
+Tristan valide explicitement cette version pour le monde alpha, y compris les rides en « griffures de chat ». Référence artistique figée : `apps/world-web/public/studies/t1-alpha.json`, copie exacte de la variante approuvée, SHA256 `3b718b97e644ad3024f43dfc1cecca95b95fb3c5f7cafe97203a21f6435d75af`. Manifeste associé : eau de prévisualisation au niveau 0. Le script de génération continue à écrire uniquement `t1.json`, jamais cette référence. Aucun univers ouvert et aucune écriture DB.
+
+Lien : `http://localhost:5174/terrain-study?world=t1-alpha&water=1&view=map`. Entrée « Monde alpha validé » ajoutée à la preview. Eau activée par défaut pour alpha/variante, masquable par case ; URL conserve le choix. La base précédente reste sèche par défaut. Artefacts historiques inchangés.
+
+Implémentation : `study.waterLevel` optionnel, appliqué après géologie dans `sampleWorldGeography`, pour conserver exactement le substrat et les incisions. Mesh d'eau et raffinement de berges existants réutilisés ; aucune simulation hydrodynamique, marée ou navigation. JSON alpha conserve les données sèches exactes ; son manifeste et la preview définissent la mise en eau. [Détails](docs/TERRAIN-TEMOIN-T1.md#mise-en-eau-visuelle-au-niveau-zéro).
+
+Validation : 16 tests ciblés réussis (3 fichiers, 67,19 s), incluant hauteur inchangée sec/mouillé, eau à zéro dans le mesh, sommet C2 sec, empreinte alpha et préservation de la base. Build contrats, typecheck client et lint ciblé réussis. Premier parcours navigateur : captures tore/carte/C2 et bascule eau réalisées, puis timeout de connexion CLI lors du dernier passage altitude ; ne pas compter ce parcours comme entièrement réussi. Recette courte `--alpha --water` réussie sans exception : tore, carte, C2, eau masquée puis rétablie et identité alpha dans tous les liens. Captures examinées ; WebGL2 / Intel Iris Plus D3D11. `git diff --check` propre.
+
+Git main / 7218549, changements précédents conservés ; pas de commit/push. Référence alpha sauvegardée sur disque, non commitée à ce stade.
+
+---
+
+# T1 — base figée, plateaux, pierre et mer H–C — 9 octobre 2026
+
+Base précédente sauvegardée dans `apps/world-web/public/studies/t1-base.json`, SHA256 `02b9b3b749a45797524c35bd824d891889cc69e2fcd12cd90eda3cd616fb3493`. Le générateur ne l'écrase pas. Variante `t1.json` : plateaux bas +0,5 à +3 par régions irrégulières périodiques, protection des sculptures précédentes, groupes de pierre dans les plaines éloignées des massifs. [Détails et limites](docs/TERRAIN-TEMOIN-T1.md#base-sauvegardée-plateaux-bas-pierre-et-mer-occidentale).
+
+Dernière demande intégrée : bassin H3/A3 étendu sur H3/A3/B3/C3 et H2/A2/B2/C2 jusqu'à A1, raccord au bassin H1–B1, rives irrégulières, fond −3. Tristan confirme de conserver les sommets émergents : chaîne C2 désormais en avancée rocheuse, point (70,45) à +5,76. Toujours sec ; pas de mise en eau ou de navigation simulée. Montée F4–F3 et massif +12 conservés.
+
+Artefact : 3 555 arbres, 29 groupes / 174 rochers. Couverture géographique : 1 053 points de plaine éligibles échantillonnés au pas 4, zéro manque au rayon 24, maximum 22,771. Ce n'est pas une garantie de trajet pédestre ou de ressources métier ; vérifier au placement du village. Arbres et groupes de pierre exclus des futurs fonds marins ; aucun changement DB.
+
+Vérification : 14 tests ciblés réussis (3 fichiers, 47,33 s), incluant empreinte et ancrage de la base, périodicité, plateaux, protection des reliefs, extension maritime, couverture pierre et meshes/arbres. Lint ciblé et build contrats réussis. Parcours navigateur `terrain-study.mjs --variation` réussi sans exception ; captures carte altitude, péninsule C2, plateaux et rochers examinées, aller-retour base/variante vérifié. Plateaux discrets en matériau herbe uniforme, plus lisibles en altitude. WebGL2 / Intel Iris Plus D3D11 ; aucun benchmark revendiqué. Build client final réussi (TypeScript + Vite ; avertissement de taille des gros chunks). `git diff --check` propre.
+
+Accès : `http://localhost:5174/terrain-study?world=t1&view=map&layer=altitude` ; base `http://localhost:5174/terrain-study?world=t1-base`. Captures hors Git dans `test-results/study-*`. Git `main`, HEAD `7218549`, modifications antérieures conservées ; aucun commit/push. Transcript brut non suivi conservé.
+
+---
+
+# T1 — montée F4–F3 vers le plateau — 9 octobre 2026
+
+Demande : créer une pente entre F3/F4 menant au coude intérieur du plateau massif. Implémentation `study.ramp` : de (174,112,+1) à (174,87,+12), 25 cases, profil adouci aux extrémités, bande centrale de 10 cases et épaules de 4 cases. Raccourci « Montée F4–F3 (174,100) ». Autres falaises et réseau de sillons conservés. [Détails](docs/TERRAIN-TEMOIN-T1.md#montée-f4f3-vers-le-coude-intérieur).
+
+Première régression a révélé une variation locale de 1,22 unité/case liée aux incisions rocheuses sur le bord du passage de 6 cases ; élargissement à 10 corrigé. Sept tests contrats réussis, dont contrôle du relief géologique final sur trois lignes d'une bande de 4 cases : variation <1 unité/case, montée sans rupture, raccords +1/+12 et absence d'eau. La pente ne vaut pas qualification du pathfinding : masque métier et occupations inchangés.
+
+Artefact précédent conservé dans `test-results/study-t1-before-ramp.json`. Artefact régénéré : 5 519 arbres, aucune eau, extrema inchangés. Build contrats et lint ciblé réussis ; 9 tests au total réussis (7 contrats + 2 mesh/arbres). Parcours navigateur `terrain-study.mjs --ramp` réussi sans exception, capture locale examinée : passage herbeux entre les épaules rocheuses, repère (174,100) à +6,17. `git diff --check` propre. Accès : `http://localhost:5174/terrain-study?world=t1&view=local&x=174&y=100`. Git `main`, HEAD `7218549`, modifications antérieures préservées ; aucun commit/push ni écriture en base.
+
+---
+
+# T1 — courbes +60 % et massif E3–F3 renforcé — 9 octobre 2026
+
+Demande : élargir les bras dans les arrondis vers l'extérieur de 60 %, rendre le massif plus imposant avec replats hauts et montées abruptes. Tristan confirme la chaîne B dans le coude E3/F3 et le plafond +12. [Description](docs/TERRAIN-TEMOIN-T1.md#courbes-élargies-et-massif-e3f3).
+
+Implémenté : largeur totale +60 % aux virages marqués, entièrement côté extérieur (rayon extérieur 2,2r / intérieur r), transition progressive, portions droites conservées. `outerBendWidening` optionnel ; index spatial élargi. Massif étendu vers E3, rayons jusqu'à 11, profil de montée sur 45 % extérieurs, replats à +12 ; chaîne A préservée. Raccourci « Massif E3–F3 (155,89) ». Basins et parcours G1/G2 conservés, toujours secs. Artefact régénéré : 5 521 arbres, maximum +12, minimum −7,026. Copie précédente : `test-results/study-t1-before-wider-bends.json` hors Git.
+
+Validation finale : build contrats, lint ciblé et 8 tests contrats/mesh/arbres réussis (16,61 s). Parcours navigateur `terrain-study.mjs --basins` réussi sans exception ; captures massif local, carte terrain/altitude et trois bras examinées. Plateau E3 lu à +12, flancs abrupts, courbes extérieures élargies et bras distincts. `git diff --check` propre. Assertion historique de bord du creux C adaptée à son côté ouest, car son côté est est désormais atteint par le coude élargi.
+
+Accès : `http://localhost:5174/terrain-study?world=t1&view=local&x=155&y=89`. Git `main`, HEAD `7218549`, modifications antérieures préservées, aucun commit/push ni écriture en base.
+
+---
+
+# T1 — tracé révisé G1/G2 → bassin H1–A1–B1 — 9 octobre 2026
+
+Dernière demande : après F1, alimenter les trois rides G1/G2, les réunir en une sortie unique vers un bassin H1–A1–B1. Remplace la fin du tracé précédent ; bassin F2–F4 retiré, bassin H3/A3 conservé. Deux bassins à −3 toujours secs, sillon principal −4 ; les rides plus profondes restent à −6 environ. Aucune simulation d'irrigation. [Détails](docs/TERRAIN-TEMOIN-T1.md#tracé-révisé-par-g1g2-vers-h1a1b1).
+
+Implémenté : entrée commune (198,40), trois bras étroits autour de (213,31), réunion (228,20), bassin final (16,16) rayons 43×14. Nouveau raccourci « Trois bras G1–G2 », bassin H1–B1 et plaine déplacée (80,10). Artefact reconstruit : 5 716 arbres. Route : `http://localhost:5174/terrain-study?world=t1&view=map&layer=altitude`. Aucun changement métier ni base.
+
+Validation du tracé final : build contrats, lint ciblé et 6 tests contrats/mesh/arbres réussis en série après fermeture du navigateur (26,57 s, aucune erreur). Parcours navigateur `terrain-study.mjs --basins` réussi sans exception ; carte terrain/altitude, bassins, trois bras, E4/F1 et tore. Captures examinées, branches distinctes visibles en altitude ; bleu = altitude négative, pas eau. `git diff --check` propre. Typecheck client de la passe précédente réussi ; pas de nouveau build client complet pour cette révision de données et de libellés.
+
+Git : `main`, HEAD `7218549`, travaux antérieurs préservés, aucun commit/push. Ancien artefact dans `test-results/study-t1-before-south-route.json` hors Git.
+
+---
+
+# T1 — bassins A3/H3 et F2–F4, sillon périodique — 9 octobre 2026
+
+Demande : bassin −3 à cheval A3/H3 ; sillon −4 H3/G3/F3 près F2/E3, arrondi E4 puis F1 près G1, seconde cuvette F2–F3–F4. Tristan confirme deux bassins à −3 encore secs et autorise l'entame de la chaîne B en F3. [Tracé et dimensions](docs/TERRAIN-TEMOIN-T1.md#deux-bassins-secs-et-sillon--9-octobre).
+
+Implémenté dans `terrain-study-basins.ts` et descripteur T1 : deux ellipses à fonds adoucis, trajet déroulé lissé, index des segments périodique. Nouveau relief sculpté en altitude absolue ; aucune eau ni règle de navigation. Anciennes rides et chaîne A conservées, chaîne B entamée. Artefact reconstruit : 5 818 arbres, maximum +12, minimum −7,026 issu des rides précédentes. Ancien artefact dans `test-results/study-t1-before-basins.json` hors Git.
+
+Preview : `http://localhost:5174/terrain-study?world=t1&view=map`. Nouveaux raccourcis bassins, coude E4 et passage F1. Bassin H/A3 (0,80), bassin F2–F4 (183,83). Les bords gauche/droit et haut/bas de la carte sont raccordés sur le tore. Aucun monde utilisateur modifié, aucun univers ouvert.
+
+Git : `main`, HEAD `7218549`, travaux précédents préservés ; non commité/non poussé.
+
+---
+
+# T1 — creux vers −6 et rides étroites — 9 octobre 2026
+
+Demande réalisée : conserver les sommets +12, remplacer les cuvettes C/D par trois sillons étroits et sinueux chacune. Profil principal −6, rides secondaires moins profondes ; géologie existante conservée, repère C −6,049 et minimum final échantillonné −7,026. Deux montagnes inchangées. Forêt réévaluée : 5 930 arbres, aucune eau. [Détails](docs/TERRAIN-TEMOIN-T1.md#ajustement-des-creux--9-octobre).
+
+Accès : `http://localhost:5174/terrain-study?world=t1&view=local&x=120&y=80`. Même monde/coordonnées ; ancien artefact conservé hors Git dans `test-results/study-t1-before-rides.json`. Fichiers : `terrain-study.ts`, test associé et artefact JSON ; aucune donnée métier modifiée.
+
+Build contrats, lint ciblé et 5 tests contrats/mesh/arbres réussis. Parcours navigateur complet réussi sans exception (tore/carte/local, liens, coordonnées et picking), capture du creux C examinée. Git : `main`, HEAD `7218549`, modifications de session antérieures préservées ; aucun commit/push.
+
+---
+
+# Monde témoin T1 — 9 octobre 2026
+
+**Implémenté ; parcours visuel vérifié, appréciation artistique à poursuivre avec Tristan.** Demande : repartir d'un tore plat sans eau, forêt cohérente, deux petites chaînes et des creux ; disposer d'un lien direct et de coordonnées pour discuter des corrections locales. [Description et repères](docs/TERRAIN-TEMOIN-T1.md).
+
+Accès direct : `http://localhost:5174/terrain-study?world=t1`. Route publique de preview en lecture seule, artefact fixe livré dans `public/studies/t1.json`, sans compte ni base. 256×128, secteurs A–H / 1–4 ; clic au sol, saisie X/Y, croix orange, lien conservant position/vue/couche/repères. Carte à plat, tore et inspection locale. Chaîne A (70,45), B (171,81), creux C (120,80), D (213,31), plaine (24,24). Sol de base +1 unité ; sommets proches de +12 ; creux secs même sous zéro ; 5 994 arbres issus du modèle forestier existant.
+
+Implémentation : champ localisé `terrain-study.ts`, branche optionnelle `geography.study`, script de reconstruction `scripts/build-terrain-study.mjs`, route `TerrainStudy.tsx`, repères `study-coordinates.ts`. Réutilise PreviewScene, maillage et forêt existants. Éclairage de diagnostic propre au témoin. Recette générale r11 et candidats conservés. Aucun gameplay, spawn, déplacement, terraformation ou changement de données utilisateur.
+
+Preuves : quatre tests ciblés contrats/mesh/arbres réussis ; build contrats, typecheck et build de production client réussis ; lint ciblé et `git diff --check` propres. Avertissement Vite connu sur les bundles volumineux. Parcours navigateur réel `tests/browser/terrain-study.mjs` terminé avec succès : tore/carte/local, deux chaînes, creux, altitude, coordonnées périodiques (−1,129)→(255,1), réouverture du lien, picking et masquage des repères ; aucune exception. Captures examinées après correction de l'atlas des étiquettes et de la croix sous les crêtes. WebGL2, ANGLE Intel Iris Plus / D3D11, canvas 1390×680. Captures et rapport `test-results/study-*` hors Git. Pas de gain de performance revendiqué.
+
+Limites : témoin artistique fixe, pas univers jouable ; deux chaînes et deux dépressions volontairement localisées, sans hydrographie. Pas d'outil de sculpture ; les coordonnées servent à désigner les futures modifications. Le lien ne conserve pas l'orbite manuelle. Conserver ce témoin pour comparer les prochaines passes.
+
+Git : `main`, HEAD `7218549` ; T1 et travaux antérieurs r10/r11 non commités/non poussés. Export brut de conversation préservé hors index. Aucun commit/push demandé pour cette tranche.
+
+---
+
+# Deux océans et terres reliées r11 — 8 octobre 2026
+
+**Tranche exploratoire implémentée et vérifiée ; à apprécier artistiquement.** Autorisation : « on tente d'implémenter ça ? » après accord sur deux océans reliés, boucle maritime et colonisation à pied des terres principales. [Contrat et preuves r11](docs/GEOGRAPHIE-MONDE-2026-10-08.md#deux-océans-et-continuité-terrestre-r11).
+
+Accès : recharger `/world-generator` et générer un nouveau candidat **v3 r11 — deux océans et terres reliées**. Carte complète + couche Continuité terrestre ; boutons intérieur/extérieur, détroit (alterne deux positions), plateau relié. Gabarit maritime réglable via Largeur des canaux. Candidats anciens conservés ; univers v3 fermés.
+
+`world-oceans.ts` : deux lobes sur une boucle maritime non séparante, côte périodique et deux resserrements. Plateaux intégrés au champ avant drainage. Contrôle du relief final : corridor marin de largeur demandée, profondeur minimale à basse mer ; terre sèche à haute mer avec empreinte 3×3, liens cardinaux et pas de hauteur ≤1 unité ; propositions 5×5 planes sur la même composante. Vert=terre principale, bleu=eau/frange humide, brun=hors réseau proposé. **Masque de diagnostic, pas autorisation de déplacement** : aucune modification du pathfinding, des occupations, du spawn ou de l'économie. Les incompatibilités de paramètres sont signalées, jamais converties en accès fictif.
+
+Seeds 42/7, 256×128, 25 % d'eau, ±16, moyenne 1, largeur 4, forêt 30 %, soleil 50 % : 25,63 % / 24,51 % d'eau, boucle marine contrôlée dans les deux cas ; 19 677 / 19 886 centres dans la terre principale, 3/7 sites plats reliés. Quatre composantes locales dans chaque cas, seules les plus grandes fournissent les sites. Pas de lac identifié sur ces deux seeds ; 4/7 tronçons fluviaux. Les sources abruptes restent à corriger, ce n'est pas résolu par deux océans.
+
+Recette navigateur passée : vrai WorldGenerator/PreviewScene StrictMode, fixtures HTTP en lecture seule, tore/carte/continuité/plateaux/détroits/intérieur/extérieur/retour/seed7 ; zéro exception, mêmes ressources au retour. Captures examinées et rapport `test-results/oceans-review.json` hors Git, script `tests/browser/world-oceans.mjs`, session/entrées temporaires nettoyées. Légende précisée textuellement après les captures. Première régression seed7 reproduite rouge puis verte : halo d'embouchure relevant légèrement l'océan, corrigé par atténuation côtière. 14 tests unitaires ciblés et 1 test API atomique verts (5 autres tests API filtrés). Raccords de meshes/chunks/tore et invariant de géométrie entre couches vérifiés. Persistance r11, champs océans/masque et refus de join testés. Build complet réussi, puis contrats et build client de finition réussis ; lint ciblé final et `git diff --check` propres. Avertissement Vite connu sur les bundles volumineux.
+
+Limites : inspection échantillonnée, gabarits exploratoires et obstacles métier non inclus ; dimensions maximales non qualifiées ; côtes encore régulières, sources, lacs et variété géographique à améliorer. Pas de marées animées, cascades, navires, terraformation ou ouverture d'univers. Aucune écriture en base de développement. Base de test vérifiée : `127.0.0.1/arbestra_test`.
+
+Git : `main`, HEAD `7218549`, r10 précédente et r11 locales non commitées/non poussées. Export brut de conversation antérieur préservé hors index.
+
+---
+
+# Circulation solaire et berges r10 — 8 octobre 2026
+
+**Implémenté et vérifié techniquement ; qualité artistique des berges encore partielle.** Demande actuelle : consommer la cosmologie pour la circulation de l'eau et de l'atmosphère, influencer la génération déterministe et corriger les berges. Autorisation « allons y ». [Contrat, captures, mesures et limites](docs/GEOGRAPHIE-MONDE-2026-10-08.md#circulation-solaire-et-berges-r10).
+
+Accès : recharger `/world-generator`, générer un **nouveau candidat v3 r10 — circulation solaire et berges**. La couche « Eau et réseaux » affiche les courants selon le curseur solaire ; les nuages utilisent le même transport. Les anciens candidats restent en r9 et ne sont pas réécrits. Aucun candidat créé/supprimé en développement, aucune migration, aucun univers ouvert.
+
+Modèle : `world-circulation.ts` réutilise les fonctions de `cosmology.ts`, paramètres persistés. Proxy de ruissellement sur cycle complet pondérant le drainage ; courant solaire tangent et aval fluvial toujours positif. Modèle stylisé, sans simulation gravitationnelle ou conservation de débit. Profils de berge continus, niveaux lacustres interpolés avec halo, faibles côtes non rabattues à zéro, plateaux intérieurs conservés. Diagnostic Babylon en un lot de lignes, sans action métier. Les récifs et roches de la recette précédente restent présents.
+
+Preuves : 29 tests unitaires ciblés + 1 test API atomique réussis ; API uniquement sur `127.0.0.1/arbestra_test` vérifié. Premier passage maillage en concurrence avec navigateur : timeout ; relance isolée réussie sans augmenter les délais. Deux passages navigateur finaux r9/r10 sur fixtures, vrai PreviewScene/StrictMode, local/tore/carte/grille/maillage, deux cycles de navigation, courants et cycle météo avec retour arrière ; zéro exception et compteurs de ressources identiques au retour. Captures examinées, scripts `tests/browser/world-solar-banks.mjs`, rapports `test-results/solar-banks-{before,after}.json` hors Git. Artefact r9 complet reproduit à l'identique ; artefact r10 identique avant/après optimisation du calcul de ruissellement. Lint ciblé final réussi. Build complet réussi (contrats, API, play-web, world-web) ; avertissement Vite connu sur les gros bundles. `git diff --check` propre.
+
+Limites : berges encore anguleuses/uniformes localement ; contacts de lacs à niveaux différents et réseau complet à qualifier. Seed 42 : eau 27,51 % pour 25 % demandés, avertissement conservé. Seed 7 : 25,92 %. Pas de marées/cascades/terraformation ni gameplay v3. Génération 256×128 observée 41,8 s sous charge, grandes dimensions non qualifiées. Pas de gain FPS/GPU revendiqué. Tore 5 draws, 291 672 sommets résidents ; temps CPU variables. Sessions navigateur et entrées temporaires nettoyées.
+
+Git : branche `main`, HEAD de départ `7218549`, changements de cette tranche non commités et non poussés. Export brut de conversation antérieur conservé hors index. Le commit/push demandé précédemment correspond au checkpoint ci-dessous, pas à cette nouvelle tranche.
+
+---
+
 # Checkpoint de session — publication du 8 octobre 2026
 
 Commit/push sur `main` explicitement demandés par Tristan. Le commit portant cette entrée regroupe les tranches accumulées depuis `f9fc28d` : optimisations LOD et exploitation, onboarding et modèle de départ, générateur/preview géographique, hydrologie, forêt, géologie, inspection et carte complète, dernière passe berges/affleurements. Les réserves fonctionnelles et artistiques décrites ci-dessous restent valables ; publier ne qualifie pas l'ouverture d'un univers v3.

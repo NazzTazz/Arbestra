@@ -1,3 +1,89 @@
+## Deux océans et continuité terrestre r11
+
+Tranche exploratoire autorisée après accord sur deux océans reliés et rappel de l'accès terrestre à la colonisation. Nouvelle recette r11, artefacts r10 et antérieurs inchangés. `/world-generator` : générer un nouveau candidat ; **Carte complète**, couche **Continuité terrestre**, boutons **Océan intérieur**, **Océan extérieur**, **Voir un détroit** (alterne les deux), **Plateau relié** (parcourt les sites inspectés).
+
+### Géographie et contraintes
+
+`world-oceans.ts` définit deux lobes sur un chenal périodique qui fait un tour longitudinal du tore et passe de l'intérieur vers l'extérieur puis revient. Son complément peut former une terre continue. La phase de seed, un champ périodique de déplacement et des variations du relief donnent des contours indépendants des cellules. La largeur demandée élargit les resserrements relativement aux bassins, avec un plafond morphologique préservant les deux lobes ; c'est aussi le gabarit du contrôle, et non une garantie aveugle pour toutes les combinaisons de paramètres. La calibration existante ajuste l'aire en eau et la distribution des altitudes.
+
+Des plateaux plats de rayon 5 cases avec raccord progressif sur 6 cases supplémentaires sont préparés dans le champ géographique, avant le drainage. Les emprises proches de l'eau sont refusées. Leur altitude est choisie d'après le voisinage sec ; ils ne sont pas des ponts. Le relief, les forêts et les formations rocheuses continuent à dériver du même modèle. Les routes et villages ne sont pas créés.
+
+Le courant marin diagnostique suit la tangente de cette boucle, avec une modulation solaire positive ; les courants fluviaux conservent l'aval. Le halo des niveaux fluviaux/lacustres est atténué dans les 0,1 case de hauteur de la bordure marine pour ne pas relever l'océan. La justification des sources fluviales reste une tranche distincte : r11 ne résout pas encore les naissances abruptes des petites rivières.
+
+### Inspection, pas autorisation métier
+
+`geography.connections` persiste le résultat de contrôles sur le relief final, après géologie :
+
+- Circuit maritime échantillonné tous les 0,5 case longitudinalement et transversalement au gabarit demandé. Eau au niveau marin, profondeur utile minimale de 0,125 case à marée basse (−0,25 unité, soit −0,0625 case). Seuil exploratoire de preview, pas un tirant d'eau validé de bateau.
+- Terre sèche au-dessus de +0,25 unité de marée et des eaux intérieures ; empreinte sèche 3×3, connexions cardinales uniquement, variation entre centres voisins au plus 1 unité de hauteur. Ce seuil de contrôle ne change pas les règles du pathfinder existant.
+- Plus grande composante terrestre conservée comme masque diagnostique. Sites proposés : voisinages 5×5 de cette composante avec écart au centre ≤0,025 case ; sites espacés d'au moins 12 cases. Les petites composantes et pentes trop fortes restent exclues.
+
+Vert : terre principale contrôlée ; bleu : eau ou frange insuffisamment sèche ; brun : terre hors de la composante proposée. Il s'agit d'un contrôle échantillonné, sans preuve analytique de chaque point entre échantillons, ni prise en compte des futures occupations, des bâtiments ou des obstacles économiques. La couche est distincte de `walkable`, qui reste partout à zéro pour ces candidats fermés. Pas de nouvelle règle de colonisation implicite.
+
+Les réglages extrêmes (zéro eau, tout eau, gabarit trop large, relief nul) peuvent rendre les objectifs incompatibles. Le candidat reste inspectable avec avertissement ; il n'est pas déclaré qualifié. Pas d'ouverture d'univers, de migration, de suppression ou de création de candidat de développement pendant la recette.
+
+### Résultats et reprise
+
+Paramètres finaux communs : 256×128, eau25%, amplitude±16, moyenne1, largeur4, forêt30%, soleil50%. Tests sur la géographie réelle, sans modifier les candidats utilisateur.
+
+| Seed | Eau finale | Boucle au gabarit de 4 cases | Profondeur minimale à marée basse (cases) | Terre principale (centres praticables selon le contrôle) | Sites plats reliés |
+|---|---:|---|---:|---:|---:|
+| 42 | 25,63 % | oui | 2,146 | 19 677 | 3 |
+| 7 | 24,51 % | oui | 1,925 | 19 886 | 7 |
+
+Quatre composantes satisfont les critères locaux dans chaque cas ; seule la plus grande fournit les sites. Les autres ne sont pas forcément des îles : une pente peut les isoler selon le seuil d'inspection. Ces deux recettes n'ont pas de lac intérieur identifié ; elles conservent respectivement 4 et 7 tronçons fluviaux. La distribution de lacs, les sources et la diversité des côtes ne sont pas qualifiées par cette passe.
+
+Recette navigateur finale réussie avec `node --import tsx tests/browser/world-oceans.mjs` : vrai panneau WorldGenerator + PreviewScene en React StrictMode, réponses HTTP issues de fixtures locales et toute mutation HTTP interdite. Tore, carte, masque terrestre, plateau en diagnostic puis terrain, les deux détroits, intérieur/extérieur, retour tore, seed7 en carte. Zéro exception. Captures `test-results/oceans-*.png`, rapport `oceans-review.json`, hors Git ; entrées TSX/HTML et session nettoyées. La légende textuelle a été précisée après les captures (vert/bleu/brun et distinction haute/basse mer), sans changement de rendu.
+
+WebGL2 / Intel Iris Plus / ANGLE D3D11, viewport1600×1100, canvas1238×558, build dev, amplification1, éclairage de diagnostic. Seed42 en tore :5draws,542928indices actifs,265980sommets résidents,5matériaux,0texture. Au retour après toutes les vues : mêmes compteurs. Temps JS médian/p95 observé1,8/3,4ms puis0,7/1,5ms ; pas de gain de performance revendiqué ni mesure GPU. Le masque terrestre persiste une valeur par cellule (32768 ici), en plus des paramètres/plateaux du modèle ; aucune reconstruction par frame.
+
+Le test de la seed7 a d'abord échoué : support fluvial légèrement au-dessus du niveau marin sur un bord du corridor. Reproduction observée puis correction de l'atténuation côtière ; les 11 tests de modèles ciblés (océans4, géographie4, berges3) passent. Le test de drainage/lacs historique est maintenant explicitement r10, car la r11 n'impose pas un lac à cette seed ; la r11 vérifie séparément ses profils fluviaux descendants.
+
+Clôture technique : 14 tests unitaires distincts passés (océans5, géographie4, berges3, maillage2), plus 1 test API atomique avec assertions des nouveaux champs persistés (les 5 autres tests du fichier API filtrés). Base vérifiée `127.0.0.1/arbestra_test`, fixtures nettoyées ; aucune donnée de développement modifiée. Build complet réussi, puis reconstruction finale des contrats après plafonnement du rapport de largeur des détroits. Build client de finition et lint ciblé final réussis ; `git diff --check` propre. Avertissement Vite connu sur la taille des bundles. La géométrie des deux fixtures de largeur 4 n'est pas affectée par ce plafond, qui concerne les demandes plus larges. État Git : main, base 7218549, r10 et r11 locales non commitées/non poussées.
+
+## Circulation solaire et berges r10
+
+Tranche autorisée par « allons y » après la demande de consommer `cosmology.ts` et de corriger également les berges. Nouvelle recette pour les candidats fermés uniquement. Recharger `/world-generator`, choisir **v3 r10 — circulation solaire et berges**, générer un nouvel aperçu. Les artefacts r9 restent visibles et inchangés ; il faut régénérer pour obtenir la nouvelle géographie.
+
+### Contrat et représentation
+
+`world-circulation.ts` réutilise `torusFrame`, `cyclePhases` et `sunPosition`. La copie des paramètres cosmologiques est persistée dans `geography.circulation`, version 1. Transport périodique stylisé : trois tours autour de l'anneau et deux autour du tube par cycle complet, déformés par la projection tangentielle du soleil. Ce choix donne le roulement demandé ; ce n'est pas une loi de gravitation déduite des masses. Le ruissellement est un proxy de disponibilité d'humidité moyenné sur 24 phases fixes. Il pondère l'accumulation du réseau global ; aucune date courante ne participe à la génération. Les noyaux de relief restent le bruit déterministe et les plateaux existants : la cosmologie influence ici les lits/réseaux, pas une nouvelle tectonique.
+
+Les nuages du preview consomment ce même transport. La couche **Eau et réseaux** montre un lot de flèches Babylon natif, actualisé seulement au changement de phase. En mer et dans les lacs, champ tangent solaire ; dans une rivière, direction locale aval conservée, vitesse modulée avec une borne strictement positive. Les flèches sont un diagnostic, sans débit physique ni autorisation de navigation. Retour arrière du curseur : une peinture météo obsolète est annulée et recalculée.
+
+Les berges changent dans le modèle géographique, avant le mesh : profil transversal continu du lit aux terres, largeur modulée par un bruit périodique de basse fréquence, support d'eau prolongé puis atténué hors du lit. Les niveaux lacustres sont prolongés sur un halo de trois échantillons du réseau d'analyse puis interpolés, au lieu du seuil humide qui rabattait brutalement l'eau à zéro. Les faibles altitudes côtières ne sont plus quantifiées à zéro ; la transition vers les plateaux intérieurs reste progressive. La frange sombre humide est resserrée pour ne pas teinter toute une terrasse sèche. Le raffinement de contour et l'ancrage des débris de la passe précédente restent utilisés.
+
+### Limites de cette tranche
+
+Le halo lacustre est une approximation continue, pas une résolution exacte des polygones de bassins ; les contacts de lacs à niveaux différents et tous les exutoires ne sont pas qualifiés. Pas de conservation de masse, d'érosion, de marées, de cascades ou de terraformation. Aucune ouverture d'univers, migration ou modification des données de développement. Les univers jouables gardent leur météo et leurs règles existantes.
+
+À paramètres identiques (seed 42, 256×128, eau 25 %, ±16, moyenne 1, forêt 30 %, soleil 50 %), l'eau finale passe de 31,22 % en r9 à 27,51 % en r10 : encore hors tolérance de 1 point, avertissement conservé. Seed 7 : 25,92 %. Une nouvelle recette change aussi les positions d'eau et de végétation ; les captures aux mêmes coordonnées comparent la génération complète, pas seulement un shader de berge. Les captures finales conservent des contours localement anguleux et des rives uniformes : la correction de continuité est acquise sur les tests, pas la qualité artistique finale. Celle-ci reste à apprécier sur d'autres seeds et zooms.
+
+### Vérification du rendu
+
+`tests/browser/world-solar-banks.mjs --before`, puis `--reuse` : deux passages finaux réussis en build dev, vrais React StrictMode/Babylon, fixtures locales en lecture seule. Seed 42, domaine 256×128, viewport 1440×1000, rendu 1100×640, amplification 1, éclairage de diagnostic fixe. Poses locales : rivière (159,5 ; 56,5), roche (103,68 ; 1,36), lac (136 ; 0), couture (0 ; 64), caméra alpha −π/2, beta 0,78, rayon 23. Tore et carte complète également capturés. Les paramètres et poses sont encodés dans le script.
+
+| Pose | Draws r9 → r10 | Indices actifs r9 → r10 | Sommets résidents r9 → r10 | Temps JS médian/p95 r9 → r10 (ms) |
+|---|---:|---:|---:|---:|
+| Rivière | 2 → 4 | 156 093 → 164 844 | 156 149 → 162 788 | 0,3/0,5 → 0,7/1,1 |
+| Lac | 5 → 5 | 196 290 → 204 987 | 133 646 → 129 275 | 1,5/2,8 → 1,0/2,3 |
+| Tore | 5 → 5 | 460 398 → 513 108 | 291 450 → 291 672 | 1,7/4,0 → 0,6/1,1 |
+| Carte | 5 → 5 | 460 398 → 513 108 | 291 450 → 291 672 | 0,9/2,5 → 0,6/1,0 |
+
+WebGL2, Intel Iris Plus / ANGLE D3D11. Compteurs Babylon, temps JS variables, GPU non mesuré : aucun gain de performance revendiqué. Les populations visibles ont changé avec la recette. Deux cycles de navigation et l'aller-retour vers les flèches retrouvent exactement les mêmes draws/meshes/indices/sommets/matériaux/textures. Seed 7, nuages aux phases 90° puis 0° après retour complet : peinture terminée à la bonne date vérifiée, 13 draws, trois passes de brouillard, trois textures, zéro exception navigateur. Captures `test-results/solar-banks-{before,after}-*.png` et rapports JSON hors Git ; sessions fermées et entrées temporaires supprimées.
+
+Les courants ajoutent un lot de lignes dans la seule couche Eau et réseaux. Le descripteur r10 conserve un tableau `lakeSurface` de largeur×hauteur/16 valeurs (2 048 pour 256×128, soit 16 Kio de valeurs double hors surcoût JS/JSON) et la petite copie des constantes cosmologiques. Le champ de ruissellement est calculé une fois puis copié pour chaque tentative de calibration ; il n'est pas recalculé par frame.
+
+### Régressions et reproductibilité
+
+Build complet réussi (contrats/API/play-web/world-web), lint ciblé final réussi, contrôle des blancs propre. Avertissement Vite connu sur les bundles supérieurs à 500 Ko. Branche `main`, base `7218549`, tranche non commitée/non poussée.
+
+29 tests unitaires ciblés réussis : circulation 2, berges 3, géographie 4, cosmologie 11, météo 3, maillage 2, couleurs 4. Le premier passage conjoint maillage/navigateur a dépassé le délai de 60 secondes et produit un timeout RPC Vitest ; relance isolée : deux tests maillage réussis en 47 secondes au total, sans modifier les délais. Les 23 autres tests de modèles ont également été repassés avec succès, sans erreur globale.
+
+Test API `publishes atomically` réussi sur la cible vérifiée `127.0.0.1/arbestra_test` : r10 persistée avec circulation/niveaux lacustres, candidat fermé, refus d'entrée joueur. Les cinq autres cas du fichier étaient filtrés, pas rejoués. Aucune base de développement touchée.
+
+Comparaison JSON complète de la seed 42 : génération r9 identique à l'artefact de référence antérieur ; r10 identique à son artefact obtenu avant mise en cache du ruissellement. Temps observés 68,1 s et 41,8 s respectivement, pendant d'autres vérifications de build/tests : ce n'est pas un benchmark isolé. L'essai r10 initial avait pris 79 s sous une autre charge. Dimensions maximales non qualifiées ; ne pas extrapoler ces chiffres à 512×256. Les scripts et sorties temporaires de cette comparaison sont dans `test-results/solar-generation-check.*`, hors Git.
+
 ## Géologie r9 — substrat et formations intégrées (8 octobre)
 
 Nouvelle recette de génération, sans réécriture des artefacts r8. Pour la voir : recharger `/world-generator`, **générer un nouvel aperçu r9**, puis « Voir un site de pierre ». Les univers jouables restent sur leur génération actuelle et les candidats v3 restent fermés.

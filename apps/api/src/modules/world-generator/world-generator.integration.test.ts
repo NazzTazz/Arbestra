@@ -38,7 +38,7 @@ describe('closed world generator',()=>{
     expect((await app.inject({method:'GET',url:'/api/admin/world-generator'})).statusCode).toBe(401);
     expect((await app.inject({method:'GET',url:'/api/admin/world-generator',headers:headers(ordinaryId)})).statusCode).toBe(403);
     const {candidate,command}=await create();
-    expect(candidate.recipeRevision).toBe(9);
+    expect(candidate.recipeRevision).toBe(11);
     const again=await createCandidate(db,config,accountId,command);expect(again.id).toBe(candidate.id);
     await expect(createCandidate(db,config,accountId,{...command,seed:18})).rejects.toMatchObject({code:'COMMAND_CONFLICT'});
     expect((await app.inject({method:'POST',url:'/api/admin/world-generator',headers:headers(accountId),payload:{...input(),width:512,height:512}})).statusCode).toBe(400);
@@ -65,7 +65,7 @@ describe('closed world generator',()=>{
     while((await listCandidates(db)).some(c=>c.status==='pending'&&worlds.includes(c.id)))await runGenerationOnce(db,config);
     const current=(await listCandidates(db)).find(c=>c.id===candidate.id)!;
     expect(current.status,current.error??undefined).toBe('ready');const artifact=await candidateArtifact(db,candidate.id);
-    expect(artifact.geography?.relief?.halfRange).toBe(2);expect(Array.isArray(artifact.stoneSites)).toBe(true);expect(artifact.forest?.version).toBe(1);expect(Array.isArray(artifact.forest?.trees)).toBe(true);expect(artifact.recipeRevision).toBe(9);expect(artifact.geography?.geology?.version).toBe(1);expect(artifact.geography?.version).toBe(1);expect(artifact.geography?.parent).toHaveLength(256);expect(Array.isArray(artifact.geography?.rivers)).toBe(true);
+    expect(artifact.geography?.relief?.halfRange).toBe(2);expect(Array.isArray(artifact.stoneSites)).toBe(true);expect(artifact.forest?.version).toBe(1);expect(Array.isArray(artifact.forest?.trees)).toBe(true);expect(artifact.recipeRevision).toBe(11);expect(artifact.geography?.oceans?.version).toBe(1);expect(artifact.geography?.connections?.version).toBe(1);expect(artifact.geography?.connections?.mainLand).toHaveLength(4096);expect(artifact.geography?.geology?.version).toBe(1);expect(artifact.geography?.circulation?.version).toBe(1);expect(artifact.geography?.lakeSurface).toHaveLength(256);expect(artifact.geography?.version).toBe(1);expect(artifact.geography?.parent).toHaveLength(256);expect(Array.isArray(artifact.geography?.rivers)).toBe(true);
     expect(artifactChecksum(artifact)).toBe(current.checksum);
     expect(await db.selectFrom('worldChunks').select('worldId').where('worldId','=',candidate.id).execute()).toHaveLength(4);
     expect(await db.selectFrom('worldClearings').select('id').where('worldId','=',candidate.id).execute()).toHaveLength(0);

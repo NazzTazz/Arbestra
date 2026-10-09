@@ -19,3 +19,9 @@ export * from './world-landscape.js';
 
 export { GEOGRAPHY_RECIPE_REVISION as LANDSCAPE_RECIPE_REVISION } from './world-geography.js';
 export * from './world-hydrology.js';
+
+export * from './world-circulation.js';
+
+export * from './world-oceans.js';
+
+export * from './terrain-study.js';

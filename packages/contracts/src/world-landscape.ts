@@ -48,7 +48,7 @@ export function landscapeMetrics(data:Omit<GeneratedLandscape,'metrics'>):Genera
 /** Exploratory v3: periodic flat terraces, compact explicit stairs, no reserved spawn clearing. */
 export function generateLandscape(seed:number,w:number,h:number,p:GeneratorParameters,recipeRevision=5):GeneratedLandscape {
   if(w<64||h<64||w%32||h%32||w*h>262144)throw new Error('Invalid bounded landscape dimensions');
-  if(recipeRevision===6||recipeRevision===7||recipeRevision===8||recipeRevision===9)return generateGeographicLandscape(seed,w,h,p,recipeRevision);
+  if(recipeRevision===6||recipeRevision===7||recipeRevision===8||recipeRevision===9||recipeRevision===10||recipeRevision===11)return generateGeographicLandscape(seed,w,h,p,recipeRevision);
   if(recipeRevision===3||recipeRevision===4||recipeRevision===5){
     let target=p.waterPercent,best:GeneratedLandscape|undefined,bestError=Infinity;
     for(let attempt=0;attempt<3;attempt++){

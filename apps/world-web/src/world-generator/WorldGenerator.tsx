@@ -1,7 +1,7 @@
 import {candidateIdentity,forestHabitatLabel,renderIdentity} from './preview-inspection';
 import { DEFAULT_GEOGRAPHY_PARAMETERS } from '@arbestra/contracts/world-geography';
 import { useEffect, useRef, useState } from 'react';
-import { waterLevel, type GeneratedLandscape, type GeneratorParameters, type WorldCandidate } from '@arbestra/contracts';
+import { oceanCenter, waterLevel, type GeneratedLandscape, type GeneratorParameters, type WorldCandidate } from '@arbestra/contracts';
 import { randomUUID } from '../random-uuid';
 import { PreviewScene, type PreviewLayer, type PreviewStats, type PreviewRenderState } from './PreviewScene';
 import './world-generator.css';
@@ -22,6 +22,8 @@ const labels:Record<keyof GeneratorParameters,string>={
   channelWidth:'Largeur des canaux',treePercent:'Couverture boisée (%)',solarInfluence:'Influence solaire (%)',
 };
 const warnings:Record<string,string>={
+  'Ocean loop fails the requested width/depth inspection.':'Boucle maritime non qualifiée pour cette largeur et profondeur.',
+  'Fewer than two connected dry plateau sites: colonisation layout not qualified.':'Moins de deux plateaux secs reliés : implantation à pied non qualifiée.',
   'Geographic preview only: traversal, spawn, tides and waterfalls are not certified for this recipe.':'Aperçu géographique : accès et spawn non qualifiés. Marées et cascades restent à réintégrer. Le monde reste fermé.',
   'No feasible maritime channel at requested width.':'Aucun chenal compatible avec cette largeur et les accès terrestres.',
   'No descending river fits the relief and dry access constraints.':'Aucune rivière descendante compatible avec le relief et les accès secs.',
@@ -125,19 +127,19 @@ export function WorldGenerator(){
       <label>Nom<input value={name} maxLength={80} onChange={e=>{setName(e.target.value);command.current=null;}}/></label>
       <label>Seed<input type="number" min={0} max={2147483647} value={seed} onChange={e=>{setSeed(Number(e.target.value));command.current=null;}}/></label>
       <label>Recette<select value={version} onChange={e=>{setVersion(Number(e.target.value) as 2|3);command.current=null;}}>
-        <option value={3}>v3 r9 — substrat et formations rocheuses</option><option value={2}>v2 — recette actuelle</option></select></label>
+        <option value={3}>v3 r11 — deux océans et terres reliées</option><option value={2}>v2 — recette actuelle</option></select></label>
       <div className="generator-dimensions">{[['Largeur',width,setWidth],['Hauteur',height,setHeight]].map(([label,value,set])=>
         <label key={String(label)}>{String(label)}<select value={Number(value)} onChange={e=>{(set as typeof setWidth)(Number(e.target.value));command.current=null;}}>
           {[64,128,256,512].map(n=><option key={n}>{n}</option>)}</select></label>)}</div>
       <p>{width*height} cases / {limits.maxCells} maximum.</p>
       {(Object.keys(labels) as Array<keyof GeneratorParameters>).map(key=><label key={key}>
         {labels[key]} : <strong>{parameters[key]}</strong>
-        <input aria-label={labels[key]} type="range" disabled={version===2||key==='channelWidth'} min={key==='amplitude'?8:key==='meanElevation'?-8:key==='channelWidth'?1:0}
+        <input aria-label={labels[key]} type="range" disabled={version===2} min={key==='amplitude'?8:key==='meanElevation'?-8:key==='channelWidth'?1:0}
           max={key==='amplitude'?16:key==='meanElevation'?8:key==='channelWidth'?32:100} step={key==='meanElevation'?.25:1} value={parameters[key]}
           onChange={e=>{setParameters(p=>({...p,[key]:Number(e.target.value)}));command.current=null;}}/>
 
       </label>)}
-      <p className="generator-note">1 unité de hauteur = ¼ de case. Relief ±{parameters.amplitude} = −{parameters.amplitude/4} à +{parameters.amplitude/4} cases autour du niveau marin 0. La moyenne ajuste les formes sans réduire ces bornes. Géographie r9 : pas encore de marées, cascades ni terraformation. Largeur des chenaux réservée à une prochaine recette.</p>
+      <p className="generator-note">1 unité de hauteur = ¼ de case. Relief ±{parameters.amplitude} = −{parameters.amplitude/4} à +{parameters.amplitude/4} cases autour du niveau marin 0. La moyenne ajuste les formes sans réduire ces bornes. Géographie r11 : deux bassins océaniques reliés, continuité terrestre inspectable. Flèches de courant dans « Eau et réseaux », pilotées par le cycle solaire. Pas encore de marées, cascades ni terraformation. La largeur des canaux élargit les détroits et fixe le gabarit du contrôle maritime ; un avertissement signale un passage insuffisant.</p>
       <p className="generator-note" role="status">{candidates.length} aperçus sauvegardés.</p>
       <button disabled={busy||width*height>limits.maxCells||!name.trim()} onClick={()=>void generate()}>Générer l’aperçu</button>
       {error&&<p role="alert" className="generator-error">{error}</p>}
@@ -165,11 +167,22 @@ export function WorldGenerator(){
         })}>Supprimer ce candidat fermé</button>
       </div>}
     </aside><section className="generator-preview">
+      {data?.geography?.connections&&<p className="generator-note" data-ocean-inspection>
+        Boucle maritime : {data.geography.connections.marineLoop?'continue':'non qualifiée'} · gabarit {data.geography.connections.corridorWidth} cases ·
+        {data.geography.connections.plateaus.length} plateaux secs reliés · {data.geography.connections.mainLandCells} cases dans la terre principale.
+        Terres contrôlées à marée haute (+0,25 unité), profondeur marine à marée basse. Sans autorisation de déplacement. Les îles et terrains hors réseau restent exclus des sites proposés.
+      </p>}
       <div className="generator-toolbar">
         <button onClick={()=>{setLocal(false);setFlat(false);}} aria-pressed={!local&&!flat}>Tore</button>
         <button onClick={()=>{setLocal(false);setFlat(true);}} aria-pressed={!local&&flat}>Carte complète</button>
         <button onClick={()=>setLocal(true)} aria-pressed={local}>Inspection locale</button>
                 <button disabled={!data?.stoneSites?.length} onClick={()=>{const sites=data!.stoneSites!,site=sites[stoneIndex%sites.length]!;setCenter({x:site.x,y:site.y});setLocal(true);setLayer('terrain');setStoneIndex(stoneIndex+1);}}>Voir un site de pierre</button>
+        {data?.geography?.oceans&&<>
+          <button onClick={()=>{const o=data.geography!.oceans!,u=o.phase;setCenter({x:u*data.width,y:oceanCenter(o,u)*data.height});setLocal(true);setLayer('water');}}>Océan intérieur</button>
+          <button onClick={()=>{const o=data.geography!.oceans!,u=(o.phase+.5)%1;setCenter({x:u*data.width,y:oceanCenter(o,u)*data.height});setLocal(true);setLayer('water');}}>Océan extérieur</button>
+          <button onClick={()=>{const o=data.geography!.oceans!,u=(o.phase+(riverIndex%2?.75:.25))%1;setCenter({x:u*data.width,y:oceanCenter(o,u)*data.height});setRiverIndex(riverIndex+1);setLocal(true);setLayer('water');}}>Voir un détroit</button>
+          <button disabled={!data.geography.connections?.plateaus.length} onClick={()=>{const ps=data.geography!.connections!.plateaus,p=ps[stoneIndex%ps.length]!;setCenter(p);setStoneIndex(stoneIndex+1);setLocal(true);setLayer('accessibility');}}>Plateau relié</button>
+        </>}
         <button onClick={chooseStair} disabled={!data?.stairs.length}>Voir un escalier</button>
                 <button onClick={inspectRiver} disabled={!data?.hydrology?.metrics.sources&&!data?.geography?.rivers.length}>Voir une rivière</button>
                 <button onClick={()=>{const falls=data?.hydrology?.waterfalls;const f=falls?.[fallIndex%(falls.length||1)];if(f){const cell=f.lanes?.[Math.floor(f.width/2)]?.cell??f.cell;setCenter({x:cell%data!.width,y:Math.floor(cell/data!.width)});setLocal(true);setLayer('water');setFallIndex(fallIndex+1);}}} disabled={!data?.hydrology?.waterfalls.length}>Voir une cascade</button>
@@ -178,7 +191,7 @@ export function WorldGenerator(){
         <label>Couche<select aria-label="Couche" value={layer} onChange={e=>setLayer(e.target.value as PreviewLayer)}>
           <option value="terrain">Terrain et arbres</option><option value="altitude">Altitude −16 / +16</option>
           <option value="water">Eau et réseaux</option><option value="exposure">Exposition solaire moyenne</option><option value="humidity">Humidité climatique</option>
-          <option value="accessibility" disabled={!!data?.geography}>Zones accessibles</option></select></label>
+          <option value="accessibility" disabled={!!data?.geography&&!data.geography.connections}>Continuité terrestre</option></select></label>
         <label><input aria-label="Éclairage solaire" type="checkbox" checked={solar} disabled={view==='map'} onChange={e=>setSolar(e.target.checked)}/>Éclairage solaire</label>
         <label><input aria-label="Atmosphère" type="checkbox" checked={fog} disabled={view!=='torus'} onChange={e=>setFog(e.target.checked)}/>Atmosphère</label>
         <label>Amplification globale<select aria-label="Amplification globale" value={effectiveAmplification} onChange={e=>setExaggeration(Number(e.target.value))} disabled={local}>
@@ -193,7 +206,7 @@ export function WorldGenerator(){
       {view==='map'&&<p className="generator-note">Carte rectangulaire complète · vue orthographique · éclairage neutre. Les bords opposés se rejoignent dans le monde. Les aires mesurées restent celles du tore, pas de ce rectangle. Grille : limites des chunks. Cliquer sur la carte ouvre l'inspection locale.</p>}
       {data?<PreviewScene candidateKey={selectedKey} flat={flat} grid={grid} wireframe={wireframe} data={data} local={local} center={center} layer={layer} fog={fog&&view==='torus'} solar={solar&&view!=='map'} exaggeration={local?1:effectiveAmplification} cycleDegrees={cycleDegrees}
         onPick={(x,y)=>{setCenter({x,y});if(view==='map')setLocal(true);}} onStats={setStats} onRenderState={setRenderState}/>:<div className="generator-empty">{selectedCandidate?.status==='ready'?'Chargement du candidat sélectionné…':'Choisis un candidat prêt pour l’inspecter.'}</div>}
-      <p className="generator-note">Glisser : tourner · molette : zoom · clic : coordonnées. Inspection locale : échelle physique 1×. Altitude : bleu bas, rouge haut ; exposition : tons chauds ; humidité : bleu-vert ; accès : gris = obstacle/eau, couleur = composante.</p>
+      <p className="generator-note">Glisser : tourner · molette : zoom · clic : coordonnées. Inspection locale : échelle physique 1×. Altitude : bleu bas, rouge haut ; exposition : tons chauds ; humidité : bleu-vert ; {data?.geography?.connections?'continuité : vert = terre principale, bleu = eau/frange humide, brun = hors réseau proposé.':'accès : gris = obstacle/eau, couleur = composante.'}</p>
       {data&&<div className="generator-metrics"><h2>Résultat mesuré</h2><p className="generator-note">Mesures enregistrées du candidat, pondérées par l’aire du tore. Habitat forestier et nombre d’arbres sont distincts ; la couverture de canopée n’est pas mesurée.</p><dl>
         <dt>Eau demandée / obtenue (aire du tore)</dt><dd>{selectedCandidate?.parameters.waterPercent}% / {data.metrics.waterPercent.toFixed(2)}%</dd>
         <dt>Terres mesurées (aire du tore)</dt><dd>{Math.max(0,100-data.metrics.waterPercent).toFixed(4)}%</dd>

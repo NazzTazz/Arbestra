@@ -1,5 +1,13 @@
 # World generator et World preview — alpha
 
+Priorité du 9 octobre : validation artistique sur le [monde témoin T1](TERRAIN-TEMOIN-T1.md), tore sec/plat avec deux petites chaînes et des creux, forêt existante et coordonnées partageables. Route directe `/terrain-study?world=t1`. Cette passe n'est pas une nouvelle recette générale ni une ouverture d'univers. Les tranches ci-dessous restent conservées.
+
+
+Décision r11 : **deux bassins océaniques reliés et une terre principale permettant la colonisation à pied**. Première tranche dans les candidats fermés : deux lobes sur une même boucle maritime non séparante, deux resserrements, plateaux et inspection conjointe mer/terre. Les bassins intérieur/extérieur ne sont pas deux ceintures complètes autour du tore : cette disposition couperait les continuités terrestres avec des détroits transversaux. Les sites proposés sont exclusivement dans la même composante sèche à marée haute. Les autres terres restent hors sites proposés ; aucune autorisation de déplacement ou de spawn n'est ajoutée. [Recette r11](GEOGRAPHIE-MONDE-2026-10-08.md#deux-océans-et-continuité-terrestre-r11).
+
+
+Complément r10 (8 octobre) : circulation solaire partagée avec `cosmology.ts`, ruissellement déterministe moyenné sur le cycle et correction géométrique des berges. Les courants marins/lacustres et le transport des nuages utilisent le même champ ; les rivières restent orientées vers leur aval. Nouvelle recette réservée aux candidats fermés, anciens artefacts conservés. [Contrat et vérification r10](GEOGRAPHIE-MONDE-2026-10-08.md#circulation-solaire-et-berges-r10).
+
 Complément du 8 octobre : [géographie globale et tore 3D r6](GEOGRAPHIE-MONDE-2026-10-08.md). Tristan demande cet aperçu avant tout spawn : relief/eau en volumes réels, arbres orientés sur le tore et inspection locale du même descripteur. Les candidats restent fermés ; la validation hydrologique historique de r5 ne vaut pas validation automatique de r6.
 
 Date : 7 octobre 2026. Base relue : `main`, dernier commit `f9fc28d`, avec changements locaux antérieurs.

@@ -40,7 +40,7 @@ export function buildWorldGeometry(data:GeneratedLandscape,local:boolean,center:
     if(layer==='water')return [.26,.29,.22,1];
     if(layer==='exposure'){const e=data.exposure[cell]!;return [e*2.5,.25+e,.13,1];}
     if(layer==='humidity'){const h=data.humidity[cell]!;return [.12,h,.3+h*.6,1];}
-    if(layer==='accessibility')return [.35,.35,.35,1];
+    if(layer==='accessibility')return g.connections?(g.connections.mainLand[cell]?[.28,.65,.25,1]:v.z<Math.max(v.surface,.0625)?[.08,.28,.48,1]:[.5,.32,.22,1]):[.35,.35,.35,1];
     if(g.geology)return terrainSurfaceColor(g,v);
     const wet=v.z<v.surface,shore=Math.abs(v.z-v.surface)<.055;
     if(wet||shore)return [.42,.40,.30,1];

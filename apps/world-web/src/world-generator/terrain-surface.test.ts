@@ -21,3 +21,8 @@ it('distinguishes shallow water from the bed of the channel without transparency
  expect(bank[3]).toBe(1);expect(deep[3]).toBe(1);
  for(let depth=0;depth<=1;depth+=.001){const a=terrainWaterColor(depth),b=terrainWaterColor(depth+.001);expect(Math.max(...a.map((v,i)=>Math.abs(v-b[i]!)))).toBeLessThan(.004);}
 });
+
+it('does not paint an entire dry lake terrace as a wet bank in r10',()=>{
+ const color=terrainSurfaceColor({...world,circulation:{version:1}},{...vertex,z:1.035,surface:1,slope:.5});
+ expect(color[1]!-color[0]!).toBeGreaterThan(.10);
+});
