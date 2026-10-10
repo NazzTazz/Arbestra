@@ -1,3 +1,15 @@
+# Mesure du pipeline de construction — 10 octobre 2026
+
+Demande suivante de Tristan : mesurer la construction lente. **Diagnostic uniquement, aucune correction produit.** Base `9a6e68ede99c8bd44e9e055d80bf92130ce47d16`. [Rapport et limites](docs/PROFIL-CONSTRUCTION-RC1-2026-10-10.md).
+
+Sur Bressuire, les horodatages persistés montrent **22,73 s pour le tailleur et 17,48 s pour une scierie avant la borne économique prise après verrous** (une autre scierie : 41 ms). Ce temps inclut le début de commande/autorité et les attentes, pas seulement un verrou identifié. Le vrai App peut accumuler les GET village à 500 ms sans garde de lecture en vol : **8 lectures simultanées reproduites**, API/scène simulées, aucune mutation réelle. Recommandation prioritaire : regrouper les rafraîchissements et n'en conserver qu'un en vol ; **non implémenté**.
+
+Fixture isolée déjà chargée, chemin exact HUD `constructBuildingArea`, maison d'une case : passage stabilisé **1 365 ms**, dont validation 162 ms, écritures 32 ms, snapshot final 1 084 ms. Deux POST Fastify réels : **1 251 / 1 129 ms**, HTTP 201 ; pas une mesure TCP/navigateur. Les premiers passages ont aussi atteint 27,7 / 10,8 s, principalement comptés dans les lectures forestières du terrain malgré cache immuable chaud. Un EXPLAIN chaud ultérieur sur Bressuire exécute cette jointure en 8,89 ms : source exacte des pointes non établie, ne pas proposer un index à l'aveugle. Terrain reconstruit deux fois par commande ; réutilisation du contexte proposée.
+
+Deux mondes jetables nettoyés, commandes instrumentées annulées par sentinelle puis POST réels sur fixtures, Bressuire seulement lu. Recette navigateur de polling terminée, **délai clic → premier pixel non mesuré**. Aucun build/lint/test applicatif requis pour ce diagnostic documentaire. Services 3102/5278 et parent de fixture à préserver comme ci-dessous ; transcript non suivi conservé. Aucun préchauffage anticipé implémenté.
+
+---
+
 # Corrections showroom et profil des lectures village — 10 octobre 2026
 
 Suite demandée par Tristan après la contre-recette de **cf24eaecf23854118bd816144fa0231bf1d0bb41**, main. **Implémenté et vérifié, validation produit distincte.** Les ressources connues hors champ restent candidates au recadrage ; Exploiter affiche le filtre de récolte réellement actif après un passage par Artisanat. [Rapport, profils et limites](docs/CONTRE-RECETTE-SHOWROOM-EXPLOITATION-2026-10-10.md#corrections-et-profilage-après-la-contre-recette).
