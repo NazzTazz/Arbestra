@@ -343,8 +343,12 @@ export async function scienceCommand(tx: Transaction<Database>, economy: Village
   }
 }
 
-export async function scienceSnapshot(tx: Transaction<Database>, economy: VillageEconomy): Promise<ScienceState> {
-  const { accountId, science } = await lockScience(tx, economy), levels = await levelsFor(tx, economy.worldId, accountId);
+export async function scienceSnapshot(tx: Transaction<Database>, economy: VillageEconomy, readOnly = false): Promise<ScienceState> {
+  const owner = readOnly ? await context(tx, economy) : null;
+  const { accountId, science } = owner ? { accountId: owner.ownerAccountId,
+    science: await tx.selectFrom('playerScience').selectAll().where('worldId','=',economy.worldId)
+      .where('accountId','=',owner.ownerAccountId).executeTakeFirstOrThrow() } : await lockScience(tx, economy);
+  const levels = await levelsFor(tx, economy.worldId, accountId);
   const facts = await evidence(tx, economy.worldId, accountId);
   const programs = await tx.selectFrom('sciencePrograms').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId).execute();
   const activities = await tx.selectFrom('scienceActivities').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId)

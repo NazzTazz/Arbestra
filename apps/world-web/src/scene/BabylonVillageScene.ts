@@ -136,6 +136,7 @@ export class BabylonVillageScene {
   #ghostOwnMaterials: Set<import('@babylonjs/core/Materials/material').Material> = new Set();
 
   #buildingCache = new Map<string,{signature:string;mesh:Mesh}>();
+  #buildingGenerationCount = 0;
   #factoryGenerationCount=0;
   readonly #stoneMaterial: StandardMaterial;
   readonly #pebbleMaterial: StandardMaterial;
@@ -1012,7 +1013,7 @@ export class BabylonVillageScene {
       const signature=JSON.stringify([state.world.id,site.building?.type==='university'?[site.cellX,site.cellY]:[site.x,site.z],site.building?.type,site.building?.status,site.building?.level,site.building?.targetLevel,site.building?.visualLayout,site.building?.quarterTurns,footprint,plans.get(key)?.murets,site.footprint?.state,this.#gardenStages.get(site.id),this.#fullGardenSites.has(site.id),site.building?.type==='university'?[state.science?.levels.mathematics,state.science?.levels.astronomy]:null,!site.building&&!site.footprint?[site.canBuild,this.#highlightedSiteIds.has(site.id)]:null]);
       retained.add(key);
       let cached=this.#buildingCache.get(key);
-      if(cached?.signature!==signature){cached?.mesh.dispose(false,false);
+      if(cached?.signature!==signature){this.#buildingGenerationCount++;cached?.mesh.dispose(false,false);
       const mesh = site.building?.type === 'university' ? this.#createUniversity(site) : site.building?.visualLayout ? this.#createFactoryBuilding(site,plans.get(key)!)
         : site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2?this.#createTownHall(site)
         : site.building?.status === 'under-construction'
@@ -1055,6 +1056,8 @@ export class BabylonVillageScene {
     for(const [key,cached] of this.#buildingCache)if(!retained.has(key)){cached.mesh.dispose(false,false);this.#buildingCache.delete(key);}
     this.#canvas.dataset.factoryBuildingCount=String(plans.size);
     this.#canvas.dataset.factoryGenerationCount=String(this.#factoryGenerationCount);
+    this.#canvas.dataset.buildingGenerationCount=String(this.#buildingGenerationCount);
+    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.buildingMeshIds=JSON.stringify(Object.fromEntries([...this.#buildingCache].map(([key,value])=>[key,value.mesh.uniqueId])));
     if(import.meta.env.DEV)this.#canvas.dataset.factoryBuildMs=String(Math.round(performance.now()-generationStarted));
     this.#applySelection();
   }

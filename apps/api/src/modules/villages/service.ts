@@ -1,6 +1,7 @@
 import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
 import {readRc1Source} from '../worlds/rc1-source.js';
+import {villageSyncRevision} from './sync-revision.js';
 import {naturalFeaturesQuery} from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -411,7 +412,9 @@ export async function state(
   worldSlug: string,
   existingEconomy?: VillageEconomy,
   admit = true,
+  readOnly = false,
 ): Promise<VillageState> {
+  if(readOnly&&!existingEconomy)throw Error('Read-only projection requires an explicit clock/context');
   const village = await ownedVillage(tx, accountId, worldSlug, existingEconomy?.villageId);
   // Prepare immutable geography before the economy lock. snapshot() revalidates
   // its identity and reads current local edits after the lock is acquired.
@@ -421,13 +424,14 @@ export async function state(
     throw new Error('Village economy context does not match the requested village');
   // This second pass uses the same bound and only matters for a zero-duration
   // transition created by the command before its snapshot is assembled.
-  await reconcileVillageEconomy(tx, economy);
-  if (admit) {
+  if (!readOnly) await reconcileVillageEconomy(tx, economy);
+  if (admit && !readOnly) {
     await admitExploitationGardens(tx, economy);
     await admitWorksites(tx, economy, village, featureId => stoneTravelPath(tx, village, featureId));
     await admitScience(tx, economy);
   }
   const at = economy.through;
+  const syncBefore = await villageSyncRevision(tx, village.worldId);
   const [
     ground,
     resourcesRows,
@@ -508,7 +512,8 @@ export async function state(
     }),
   );
   const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots] = await Promise.all([
-    reconcileRestHousing(tx,village.worldId,village.villageId,at),
+    readOnly ? tx.selectFrom('populationCohorts').selectAll().where('worldId','=',village.worldId)
+      .where('villageId','=',village.villageId).orderBy('id').execute() : reconcileRestHousing(tx,village.worldId,village.villageId,at),
     tx.selectFrom('buildings').select(['id','buildingType', 'level']).where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where(eb=>eb.or([eb('status','=','completed'),eb.and([
         eb('buildingType','=','town-hall'),eb('targetLevel','is not',null)])])).execute(),
@@ -609,7 +614,7 @@ export async function state(
     throw new Error('Village resource seed is incomplete');
   const townHallBuildingId=occupancyRows.find(row=>row.buildingType==='town-hall')?.buildingId;
   const villageState: VillageState = {
-    science: await scienceSnapshot(tx, economy),
+    science: await scienceSnapshot(tx, economy, readOnly),
     serverTime: at.toISOString(),
     world: {
       id: village.worldId,
@@ -771,6 +776,10 @@ export async function state(
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',
       destination: { cellX: extraction.cellX, cellY: extraction.cellY }, cells: extraction.path });
   }
+  const syncAfter = await villageSyncRevision(tx, village.worldId);
+  // A concurrent world commit can invalidate READ COMMITTED assembly. The
+  // HTTP adapter replaces such a snapshot after commit with a coherent reader.
+  if (syncBefore.others === syncAfter.others) villageState.syncRevision = syncAfter.revision;
   return villageState;
 }
 

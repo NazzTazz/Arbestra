@@ -12,6 +12,7 @@ import { registerAuthRoutes } from './modules/auth/routes.js';
 import { registerVillageRoutes } from './modules/villages/routes.js';
 import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
 import {registerFactorySettings} from './modules/villages/factory-settings.js';
+import {registerVillageSync} from './modules/villages/sync.js';
 
 export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise<FastifyInstance> {
   const app = Fastify({ logger: config.isProduction, schemaController: { compilersFactory: {
@@ -47,6 +48,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));
+  await registerVillageSync(app, db, config);
   await registerAuthRoutes(app, db, config);
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);

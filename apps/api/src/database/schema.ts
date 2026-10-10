@@ -396,6 +396,7 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  villageSyncChanges: { worldId: string; transactionId: ColumnType<string, string, string> };
   harvestSubmissions:{worldId:string;villageId:string;commandId:string;accountId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt|null,string|null,string|null>;createdAt:Generated<Timestamp>};
   harvestIntents: {worldId:string;villageId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt>;orderId:string|null;createdAt:Timestamp};
   villageStarterInstallations: {worldId:string;villageId:string;accountId:string;commandId:string;

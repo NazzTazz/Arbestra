@@ -2,7 +2,7 @@ import {randomUUID} from '../random-uuid';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import type {StarterInstallation,StarterKit,SpawnMap,SpawnPoint,TerrainResponse,VillageState,SpawnPoseRequest,StarterPoseRequest} from '@arbestra/contracts';
 import {App} from '../App';
-import {poseStarterElement} from '@arbestra/contracts';
+import {poseStarterElement,latestVillageSnapshot} from '@arbestra/contracts';
 import {previewCells} from '../scene/construction-selection';
 import type {Cell} from '../scene/construction-selection';
 import {preparationState} from './preparation-state';
@@ -31,7 +31,7 @@ export function SpawnPlacement(){
   void (async()=>{const [start,m]=await Promise.all([read<{kit:StarterKit;installation:StarterInstallation|null}>(base+'/starter'),read<SpawnMap>(base+'/spawn-map')]);if(!live)return;
    const c=start.installation?.anchor??initial.current;setCenter(c);setPoint(c);latestPoint.current=c;setKit(start.installation?.kit??start.kit);setInstallation(start.installation);setMap(m);if(start.installation){setManual(true);setKey(start.installation.remaining[0]??'');}
    const chunks:string[]=[];const x0=Math.floor((c.x-16)/32),y0=Math.floor((c.y-16)/32);for(let y=0;y<2;y++)for(let x=0;x<2;x++)chunks.push(((x0+x+16)%16)+','+((y0+y+8)%8));
-   const [ground,state]=await Promise.all([read<TerrainResponse>(base+'/starter/terrain?chunks='+encodeURIComponent(chunks.join(';'))),start.installation?read<VillageState>(base+'/village?villageId='+start.installation.villageId):Promise.resolve(null)]);if(live){setTerrain(ground);setVillage(previous=>!previous||state&&state.serverTime>=previous.serverTime?state:previous);setReady(true);}
+   const [ground,state]=await Promise.all([read<TerrainResponse>(base+'/starter/terrain?chunks='+encodeURIComponent(chunks.join(';'))),start.installation?read<VillageState>(base+'/village?villageId='+start.installation.villageId):Promise.resolve(null)]);if(live){setTerrain(ground);setVillage(previous=>latestVillageSnapshot(previous,state));setReady(true);}
   })().catch(e=>{if(live){setError((e as Error).message);if((e as {status?:number}).status===401)setNeedsLogin(true);}});return()=>{live=false;};
  },[base,reload]);
  const elements=kit?.elements.filter(e=>installation?e.key===key:manual?e.type==='town-hall':true)??[];
@@ -54,7 +54,7 @@ export function SpawnPlacement(){
    else {if(!playerName.trim()||!villageName.trim()){setError('Indiquez votre nom et celui du village.');return;}request.current={url:base+'/starter',body:{commandId:randomUUID(),artifactChecksum:map.artifactChecksum,kitVersion:kit.version,point:latestPoint.current,quarterTurns:turns,mode:manual?'manual':'grouped',playerName:playerName.trim(),villageName:villageName.trim()}};}
   }
   busy.current=true;setPending(true);setError('');
-  try{const result=await read<StarterInstallation>(request.current.url,request.current.body);const state=await read<VillageState>(base+'/village?villageId='+result.villageId);setVillage(previous=>!previous||state.serverTime>=previous.serverTime?state:previous);request.current=null;setInstallation(result);setKey(result.remaining[0]!);setManual(true);setReload(n=>n+1);}
+  try{const result=await read<StarterInstallation>(request.current.url,request.current.body);const state=await read<VillageState>(base+'/village?villageId='+result.villageId);setVillage(previous=>latestVillageSnapshot(previous,state));request.current=null;setInstallation(result);setKey(result.remaining[0]!);setManual(true);setReload(n=>n+1);}
   catch(e){if((e as {definitive?:boolean}).definitive)request.current=null;setError((e as Error).message+(request.current?' — résultat incertain, réessayez la même pose.':''));}
   finally{busy.current=false;setPending(false);}
  };
@@ -71,7 +71,7 @@ export function SpawnPlacement(){
  </form></main>;
  if(!ready||!displayState||!kit)return <main className="center-message">{error||'Préparation du terrain…'}</main>;
  const choices=installation?kit.elements.filter(e=>installation.remaining.includes(e.key)).map(e=>({key:e.key,label:label(e.type),code:e.type==='dwelling'?'dwelling-logs':e.type})).concat([{key:'',label:'Autres constructions',code:'dwelling'}]):[{key:'grouped',label:'Village initial',code:'town-hall'},{key:'manual',label:'Hôtel de ville',code:'town-hall'}];
- return <App starter={{state:displayState,onSnapshot:state=>setVillage(previous=>!previous||state.serverTime>=previous.serverTime?state:previous),beforeTownHall:!installation,active:!installation||installation.remaining.length>0&&!!key,pending,uncertain:!!request.current&&!pending,error:error||null,
+ return <App starter={{state:displayState,onSnapshot:state=>setVillage(previous=>latestVillageSnapshot(previous,state)),beforeTownHall:!installation,active:!installation||installation.remaining.length>0&&!!key,pending,uncertain:!!request.current&&!pending,error:error||null,
   ghost:{elements,point,quarterTurns:turns,relativeToHall:!installation,...(installation?{referenceHeight:installation.referenceHeight}:{})},preview,choices,selected:installation?key:manual?'manual':'grouped',
   onChoose:choice=>{if(busy.current||request.current)return;if(installation)setKey(choice);else setManual(choice==='manual');},onGesture:gesture,onManual:chooseManual,onRotate:rotate,onRetry:()=>void pose(),
   names:!installation&&<section className="starter-names" aria-label="Noms du village"><label>Votre nom<input maxLength={40} value={playerName} disabled={pending||!!request.current} onChange={e=>setPlayerName(e.target.value)}/></label><label>Nom du village<input maxLength={60} value={villageName} disabled={pending||!!request.current} onChange={e=>setVillageName(e.target.value)}/></label><a aria-disabled={pending} onClick={e=>{if(pending||request.current)e.preventDefault();}} href={'/spawn-map?world='+encodeURIComponent(slug)}>Revenir à la carte</a></section>

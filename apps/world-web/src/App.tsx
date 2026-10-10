@@ -1,4 +1,6 @@
 import {useHarvestTool} from './ui/use-harvest-tool';
+import { latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
+import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
 import {HarvestFeedbackLayer} from './ui/HarvestFeedback';
 import {ExploitationShowroom,type ExploitationCategory} from './ui/ExploitationShowroom';
 import {nearestExploitationTarget,type ExploitationChoice} from './ui/exploitation-navigation';
@@ -74,7 +76,11 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const beforeTownHall=starter?.beforeTownHall??false;
   const starterActive=Boolean(starter?.active);
   const [state, setState] = useState<VillageState | null>(starter?.state??null);
-  const stateRef = useRef<VillageState | null>(null);
+  const stateRef = useRef<VillageState | null>(starter?.state??null);
+  const synchronization = useRef<VillageSynchronization | null>(null);
+  const refreshFlight = useRef<Promise<void> | null>(null);
+  const initialFlight = useRef<Promise<TimedVillageState> | null>(null);
+  const offsetRef = useRef(0);
   const [loading, setLoading] = useState(!starter);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +144,13 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const starterRef=useRef(starter);starterRef.current=starter;
   const applySnapshot = useCallback((snapshot: TimedVillageState) => {
     const previous = stateRef.current;
-    if (previous && snapshot.state.serverTime < previous.serverTime) return;
+    if (snapshot.requestGeneration !== undefined && snapshot.requestGeneration !== villageRequestGeneration()) return;
+    if (previous && (previous.world.id !== snapshot.state.world.id || previous.village.id !== snapshot.state.village.id)) return;
+    if (previous?.syncRevision !== undefined) {
+      if (snapshot.state.syncRevision === undefined) { synchronization.current?.reconnect(); return; }
+    }
+    if (previous && latestVillageSnapshot(previous,snapshot.state)===previous) return;
+    snapshot = { ...snapshot, state: reconcileVillageSnapshot(previous, snapshot.state) };
     if (previous) {
       if (previous.science && snapshot.state.science) {
         const before = previous.science, after = snapshot.state.science;
@@ -178,6 +190,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     setState(snapshot.state);
     starterRef.current?.onSnapshot(snapshot.state);
     setServerOffsetMs(snapshot.serverOffsetMs);
+    offsetRef.current = snapshot.serverOffsetMs;
   }, [pushNotification]);
 
   const discoverEyes = useCallback(async () => {
@@ -192,7 +205,17 @@ export function App({starter}:{starter?:StarterController} = {}) {
     finally { catRequest.current = false; }
   }, [applySnapshot]);
 
-  useEffect(()=>{if(starter&&(!stateRef.current||starter.state.serverTime>=stateRef.current.serverTime)){stateRef.current=starter.state;setState(starter.state);setLoading(false);}},[starter?.state]);
+  useEffect(()=>{
+    if(!starter)return;
+    if(starter.beforeTownHall){stateRef.current=starter.state;setState(starter.state);}
+    else {
+      if(stateRef.current?.village.id!==starter.state.village.id||stateRef.current.world.id!==starter.state.world.id){
+        synchronization.current?.close();synchronization.current=null;stateRef.current=null;
+      }
+      applySnapshot({state:starter.state,serverOffsetMs:offsetRef.current});
+    }
+    setLoading(false);
+  },[starter?.state,starter?.beforeTownHall,applySnapshot]);
 
   const [worldMode, setWorldMode] = useState<ActiveWorldMode>(starter?'construction':'exploration');
   const [paletteCollapsed, setPaletteCollapsed] = useState(!starter);
@@ -298,14 +321,21 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   const refresh = useCallback(async () => {
     if(beforeTownHall)return;
+    if (synchronization.current) { synchronization.current.reconnect(); return; }
     if (actionInFlight.current) return;
-    try { applySnapshot(await getVillage(worldSlug, stateRef.current?.village.id)); } catch { /* Background refresh is best effort. */ }
+    if (refreshFlight.current) return refreshFlight.current;
+    refreshFlight.current = (async () => {
+      try { applySnapshot(await getVillage(worldSlug, stateRef.current?.village.id)); } catch { /* Background refresh is best effort. */ }
+    })().finally(() => { refreshFlight.current = null; });
+    return refreshFlight.current;
   }, [applySnapshot,beforeTownHall]);
 
-  useEffect(() => { if(starter) return; void getVillage(worldSlug).then(applySnapshot).catch((reason) => {
+  useEffect(() => { if(starter) return; let cancelled=false; initialFlight.current??=getVillage(worldSlug);
+    void initialFlight.current.then(snapshot=>{if(!cancelled)applySnapshot(snapshot);}).catch((reason) => {
+    if(cancelled)return;
     if (reason instanceof ApiError && reason.status === 401) setNeedsLogin(true);
     else setError(reason instanceof Error ? reason.message : 'Chargement impossible.');
-  }).finally(() => setLoading(false)); }, [applySnapshot]);
+  }).finally(() => {if(!cancelled)setLoading(false);}); return()=>{cancelled=true;}; }, [applySnapshot]);
   useEffect(() => {
     if (!state || recoveredVillage.current === state.village.id) return;
     recoveredVillage.current = state.village.id;
@@ -324,18 +354,15 @@ export function App({starter}:{starter?:StarterController} = {}) {
   }, [state?.village.id, pushNotification]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1_000); return () => window.clearInterval(timer); }, []);
 
-  const hasFastTransition = state?.cells.some((cell) => cell.building?.status === 'under-construction' || cell.building?.garden?.expansion
-    || cell.building?.garden?.harvest || cell.building?.garden?.plots.some((plot) => plot.harvest)) ?? false;
-  const hasGarden = state?.cells.some((cell) => Boolean(cell.building?.garden)) ?? false;
-  const hasExtraction = (state?.village.extractions.length ?? 0) > 0 || (state?.village.worksites.some(site => site.status === 'running') ?? false)
-    || (state?.village.processingOrders?.some(order=>!!order.currentLot) ?? false);
-  const hasRestingPopulation = (state?.village.population.resting ?? 0) > 0;
-  const hasMarketDelivery = state?.village.market?.exchanges.some(exchange=>!exchange.completedAt) ?? false;
   useEffect(() => {
-    if (!hasFastTransition && !hasExtraction && !hasMarketDelivery && !hasRestingPopulation && !selectedFeatureId && !hasGarden && !state?.science?.universities.length) return;
-    const timer = window.setInterval(() => void refresh(), hasFastTransition ? 500 : hasExtraction || hasMarketDelivery || selectedFeatureId ? 2_000 : 10_000);
-    return () => window.clearInterval(timer);
-  }, [hasFastTransition, hasExtraction, hasMarketDelivery, hasRestingPopulation, selectedFeatureId, hasGarden, state?.science?.universities.length, refresh]);
+    if (beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
+    const stream = new VillageSynchronization(state.world.slug, state.world.id, state.village.id, {
+      current: () => stateRef.current, accept: applySnapshot, offset: () => offsetRef.current,
+      onExpired: () => setNeedsLogin(true),
+    });
+    synchronization.current = stream;
+    return () => { stream.close(); if(synchronization.current===stream)synchronization.current=null; };
+  }, [state?.world.id,state?.village.id,beforeTownHall,applySnapshot]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const loadDeposit = useCallback(async (featureId: string) => {

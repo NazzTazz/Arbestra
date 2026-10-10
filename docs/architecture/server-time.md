@@ -14,9 +14,9 @@ Les handlers retrouvent le village par une lecture non verrouillante du sujet, p
 
 Depuis la migration 009, l'index unique partiel des tâches pending exclut `building.complete`. Une ancienne notification de construction peut donc coexister avec celle d'une amélioration ultérieure, sans qu'une commande tenant le village attende une ancienne tâche détenue par un worker. L'unicité reste en place pour les autres types. L'état métier, pas la présence d'une notification, décide de l'échéance applicable.
 
-Une lecture réconcilie les chantiers dont l’échéance est passée avant de produire le snapshot. Le worker accélère donc la matérialisation sans créer une fenêtre de vérité fausse. Le snapshot fournit `serverTime` ; le navigateur estime un offset pour compteurs et animations seulement.
+Une lecture HTTP économique réconcilie les chantiers dont l’échéance est passée avant de produire le snapshot. Le worker accélère donc la matérialisation sans créer une fenêtre de vérité fausse. Le snapshot fournit `serverTime` ; le navigateur estime un offset pour compteurs et animations seulement.
 
-Pas de tick de ressource, de workflow générique, de queue externe ni de notification temps réel dans cette fondation.
+La [synchronisation du village](./village-synchronization.md) ajoute un flux SSE sans tick de ressource, workflow générique ou queue externe. Sa projection cohérente en lecture seule ne réconcilie pas et n'acquiert pas de verrou économique. Le contrôle périodique détecte les échéances et transitions d'activité ; si nécessaire, il réutilise la lecture économique et ses verrous avant de transmettre l'état validé. Une notification perdue après commit est détectée par la révision durable du monde, même sans événement suivant.
 
 
 ## Échéances d’extraction

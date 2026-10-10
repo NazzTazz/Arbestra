@@ -1,4 +1,5 @@
 import * as harvestSubmissionsMigration from './migrations/040_harvest_submissions.js';
+import * as villageSyncMigration from './migrations/041_village_sync.js';
 import * as harvestIntentsMigration from './migrations/039_harvest_intents.js';
 import * as spawnInstallationMigration from './migrations/038_spawn_installation.js';
 import { fileURLToPath } from 'node:url';
@@ -90,6 +91,7 @@ const migrationProvider: MigrationProvider = {
       '038_spawn_installation': spawnInstallationMigration,
       '039_harvest_intents': harvestIntentsMigration,
       '040_harvest_submissions': harvestSubmissionsMigration,
+      '041_village_sync': villageSyncMigration,
     };
   },
 };

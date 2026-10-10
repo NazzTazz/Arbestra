@@ -6,6 +6,7 @@ export async function sendHarvestIntent(slug:string,villageId:string,intent:Harv
   return parseResponse(await fetch('/api/worlds/'+encodeURIComponent(slug)+'/villages/'+encodeURIComponent(villageId)+'/harvest-intents',{signal:AbortSignal.timeout(15000),method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(intent)}));
 }
 import { randomUUID } from '../random-uuid';
+import { villageRequestGeneration } from './village-sync';
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
@@ -61,22 +62,24 @@ export async function previewWorksite(worldSlug: string, villageId: string, orde
 
 export async function startWorksite(worldSlug: string, villageId: string, order: StartExtractionWorksiteRequest): Promise<TimedVillageState & { worksite: ExtractionWorksite }> {
   const requestedAt = Date.now();
+  const requestGeneration = villageRequestGeneration();
   const response = await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/worksites`, {
     method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(order),
   });
   const receivedAt = Date.now(), result = await parseResponse<{ villageState: VillageState; worksite: ExtractionWorksite }>(response);
-  return { state: result.villageState, worksite: result.worksite,
+  return { state: result.villageState, worksite: result.worksite, requestGeneration,
     serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 
 export async function changeWorksite(worldSlug: string, villageId: string, worksiteId: string,
   order: ChangeExtractionWorksiteRequest): Promise<TimedVillageState & { worksite: ExtractionWorksite }> {
   const requestedAt = Date.now();
+  const requestGeneration = villageRequestGeneration();
   const response = await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/worksites/${encodeURIComponent(worksiteId)}`, {
     method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(order),
   });
   const receivedAt = Date.now(), result = await parseResponse<{ villageState: VillageState; worksite: ExtractionWorksite }>(response);
-  return { state: result.villageState, worksite: result.worksite,
+  return { state: result.villageState, worksite: result.worksite, requestGeneration,
     serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 
@@ -97,13 +100,15 @@ async function parseResponse<T>(response: Response): Promise<T> {
 export interface TimedVillageState {
   state: VillageState;
   serverOffsetMs: number;
+  requestGeneration?: number;
 }
 
 async function villageRequest(request: Promise<Response>, requestedAt: number): Promise<TimedVillageState> {
+  const requestGeneration = villageRequestGeneration();
   const response = await request;
   const receivedAt = Date.now();
   const state = await parseResponse<VillageState>(response);
-  return { state, serverOffsetMs: Date.parse(state.serverTime) - ((requestedAt + receivedAt) / 2) };
+  return { state, serverOffsetMs: Date.parse(state.serverTime) - ((requestedAt + receivedAt) / 2), requestGeneration };
 }
 
 function requestState(path: string, init?: RequestInit): Promise<TimedVillageState> {
@@ -227,30 +232,33 @@ export async function getStoneDepositDetails(worldSlug: string, villageId: strin
 
 export async function startStoneExtraction(
   worldSlug: string, villageId: string, featureId: string, workerCount: number, commandId: string,
-): Promise<ExtractionResponse & { serverOffsetMs: number }> {
+): Promise<ExtractionResponse & { serverOffsetMs: number; requestGeneration: number }> {
   const requestedAt = Date.now();
+  const requestGeneration = villageRequestGeneration();
   const response = await fetch(
     '/api/worlds/' + encodeURIComponent(worldSlug) + '/villages/' + encodeURIComponent(villageId) + '/features/' + encodeURIComponent(featureId) + '/extractions',
     { credentials: 'same-origin', method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, workerCount }) },
   );
   const receivedAt = Date.now();
   const result = await parseResponse<ExtractionResponse>(response);
-  return { ...result, serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2 };
+  return { ...result, requestGeneration, serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 
 export async function clearWoodland(worldSlug: string, villageId: string, featureId: string): Promise<TimedVillageState> {
   const requestedAt = Date.now();
+  const requestGeneration = villageRequestGeneration();
   const response = await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/features/${encodeURIComponent(featureId)}/clear`,
     { credentials: 'same-origin', method: 'POST' });
   const receivedAt = Date.now(), state = await parseResponse<VillageState>(response);
-  return { state, serverOffsetMs: Date.parse(state.serverTime) - (requestedAt + receivedAt) / 2 };
+  return { state, requestGeneration, serverOffsetMs: Date.parse(state.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 
 export async function discoverCatEyes(worldSlug: string, villageId: string): Promise<TimedVillageState & { newlyCompleted: boolean }> {
   const requestedAt = Date.now();
+  const requestGeneration = villageRequestGeneration();
   const response = await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/discover-cat-eyes`, { method: 'POST', credentials: 'same-origin' });
   const receivedAt = Date.now(), result = await parseResponse<CatDiscoveryResponse>(response);
-  return { state: result.villageState, newlyCompleted: result.newlyCompleted,
+  return { state: result.villageState, newlyCompleted: result.newlyCompleted, requestGeneration,
     serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 export async function setFactoryEnabled(worldSlug:string,enabled:boolean,villageId?:string):Promise<TimedVillageState>{

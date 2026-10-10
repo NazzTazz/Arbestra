@@ -1,0 +1,24 @@
+{
+  "syncRevision": 1,
+  "serverTime": "2026-10-10T18:00:00.000Z",
+  "world": { "id": "11111111-1111-4111-8111-111111111111", "slug": "sync-test", "name": "Sync", "topology": "torus", "widthCells": 512, "heightCells": 256, "chunkSize": 32, "seed": "4109", "generationVersion": 3 },
+  "village": {
+    "id": "22222222-2222-4222-8222-222222222222", "name": "Sync", "anchorCellX": 64, "anchorCellY": 64,
+    "resources": [{ "code": "wood", "displayName": "Bois", "iconKey": "wood", "amount": 100, "productionPerHour": 0, "productionUpdatedAt": "2026-10-10T18:00:00.000Z" }],
+    "wood": 100, "carrots": 2000, "woodProductionPerHour": 0, "woodProductionUpdatedAt": "2026-10-10T18:00:00.000Z",
+    "population": { "total": 15, "housingCapacity": 50, "available": 15, "working": 0, "resting": 0, "energyCounts": [0,0,0,0,0,0,0,0,0,0,15] },
+    "accomplishments": [], "extractions": [], "worksites": []
+  },
+  "buildingTypes": [], "travelRoutes": [],
+  "region": { "originCellX": 64, "originCellY": 64, "width": 2, "height": 2, "terrainCodes": [1,1,1,1], "elevations": [0,0,0,0], "features": [] },
+  "cells": [
+    { "id": "64:64", "cellX": 64, "cellY": 64, "x": 0, "z": 0, "canBuild": false,
+      "footprint": { "buildingId": "33333333-3333-4333-8333-333333333333", "buildingType": "town-hall", "role": "anchor", "state": "active" },
+      "building": { "id": "33333333-3333-4333-8333-333333333333", "type": "town-hall", "level": 1, "targetLevel": null, "status": "completed", "constructionStartedAt": null, "constructionCompletesAt": null, "completedAt": "2026-10-10T18:00:00.000Z", "hiddenSuppliesAvailable": false, "garden": null }
+    },
+    { "id": "65:64", "cellX": 65, "cellY": 64, "x": 2.5, "z": 0, "canBuild": false,
+      "footprint": { "buildingId": "44444444-4444-4444-8444-444444444444", "buildingType": "dwelling", "role": "anchor", "state": "reserved" },
+      "building": { "id": "44444444-4444-4444-8444-444444444444", "type": "dwelling", "level": 1, "targetLevel": null, "status": "under-construction", "constructionStartedAt": "2026-10-10T18:00:00.000Z", "constructionCompletesAt": "2026-10-10T18:00:05.000Z", "completedAt": null, "hiddenSuppliesAvailable": false, "garden": null }
+    }
+  ]
+}

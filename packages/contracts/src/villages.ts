@@ -209,6 +209,7 @@ export const VillageAccomplishmentSchema = Type.Object({
 export type VillageAccomplishment = Static<typeof VillageAccomplishmentSchema>;
 
 export const VillageStateSchema = Type.Object({
+  syncRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   infrastructure:Type.Optional(InfrastructurePlanSchema),
   factoryEnabled:Type.Optional(Type.Boolean()),
   science: Type.Optional(ScienceStateSchema),
