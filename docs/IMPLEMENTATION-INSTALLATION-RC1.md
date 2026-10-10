@@ -1,3 +1,7 @@
+## Reconnexion à l'installation — correction du 10 octobre 2026
+
+Sur un 401 des lectures préparatoires, `/spawn` propose désormais une connexion sur la même API, puis relit l'installation et le village autorisés sans changer l'URL ni déclencher de pose. Erreur de mot de passe affichée dans le formulaire. Régression `tests/browser/spawn-session.mjs` rouge avant correction, deux scénarios verts ensuite (401 au starter et au terrain, reconnexion/rechargement, aucune pose). Recette réelle sur le client compilé : Bressuire repris après connexion puis après rechargement ; aucune commande économique envoyée. Cette correction client ne résout pas les limites de coût/stabilité alpha décrites ci-dessous.
+
 ## Récolte par intention — complément du 10 octobre 2026
 
 Décision et contrat courant : [spec HUD](SPEC-GUI-HUD-MODES.md). Le balayage transmet les cibles seules à une réception durable ; le worker existant valide et agrège dans les chantiers automatiques. Retour bref au-dessus des ressources, stocks crédités uniquement au retour. Les anciennes contraintes Auto de confirmation visuelle ne gouvernent plus ce parcours.

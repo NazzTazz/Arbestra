@@ -15,6 +15,24 @@
   padding: .7rem 1rem; background: var(--hud-main); color: #edf4ff;
   border: 1px solid var(--hud-border); border-radius: .4rem;
 }
+.spawn-login {
+  display: grid; gap: 1rem; width: min(24rem, 100%); padding: 1.5rem;
+  text-align: left; color: #f4eedf; background: var(--hud-main);
+  border: 1px solid var(--hud-border); border-radius: .5rem;
+  max-height: 100%; overflow: auto;
+}
+.spawn-login h1 { margin: 0; font-size: 1.25rem; }
+.spawn-login p { margin: 0; }
+.spawn-login label { display: grid; gap: .4rem; }
+.spawn-login input, .spawn-login button {
+  width: 100%; min-height: 44px; padding: .6rem; font: inherit;
+  color: #f4eedf; background: #172639;
+  border: 1px solid var(--hud-border); border-radius: .3rem;
+}
+.spawn-login button { cursor: pointer; }
+.spawn-login :disabled { opacity: .6; cursor: wait; }
+.spawn-login :focus-visible { outline: 2px solid #fff3a6; outline-offset: 2px; }
+.spawn-login [role="alert"] { color: #ffbaa2; }
 @media(max-width:600px) {
   .starter-names { top: 12px; right: 12px; padding: 8px; }
 }

@@ -1,3 +1,15 @@
+# Reconnexion à Bressuire — 10 octobre 2026
+
+Reprise sur 4fb0da48724483c6d05fd74e294e051866f1883d, main. Tristan signale « Session invalide ou expirée » sur 5278. Défaut reproduit avant correction : SpawnPlacement affichait le 401 sans proposer de connexion. Le navigateur de l'agent est distinct de celui de Tristan ; sa connexion précédente n'authentifiait pas Tristan. L'origine exacte du cookie refusé chez Tristan n'a pas été observée.
+
+Correction bornée : formulaire sur un 401 des lectures préparatoires, endpoint existant /api/auth/login sur la même origine/API, attente et erreurs explicites. Après succès, relecture autorisée du starter, terrain et village existant ; URL et paramètres conservés, aucune pose automatique. Permissions serveur et sémantique de retry des poses conservées ; aucun identifiant de fixture codé dans le produit.
+
+Preuves achevées : tests/browser/spawn-session.mjs rouge avant correction, puis deux scénarios verts (401 au starter / au terrain, mauvais mot de passe puis succès, rechargement, URL/village conservés, zéro POST d'installation et zéro erreur JS). App et worker substitués, API contrôlée : cette régression ne certifie pas le rendu ni les droits serveur. Recette indépendante sur client compilé 5278 et API réelle 3102 : formulaire, connexion du propriétaire de fixture, reprise de Bressuire et rechargement authentifié. Captures spawn-login.png et spawn-session-restored.png relues ; aucun ordre de construction/récolte envoyé ni erreur JS relevée. Typecheck world-web, build Vite client et lint ciblé terminés code 0. Aucune suite DB, migration ou réinitialisation pour cette correction client.
+
+Démo conservée à http://localhost:5278/spawn?world=rc1-receipt-0ea92d24-c5c8-418b-8292-2781d0413536. Compte jetable propriétaire : 7db52978-4662-472b-b52a-98fe8195e264@spawn-browser.test, credentials de installation-browser-fixture.mjs. **NE PAS fermer la session 48641 ni ses enfants API 3101/frontend 5275** : ils possèdent le nettoyage du monde utilisateur. API 3102/session 17792 et frontend 5278/session 10937 restent ouverts. Client recompilé dans test-results/harvest-world-dist, anciennes démos préservées. Vite de vérification 5279 et navigateur spawn-session fermés à la clôture. Commit/push toujours autorisés ; référence donnée au bilan, transcript utilisateur hors commit. Aucun changement géographique ni ouverture publique ; limites alpha de coût/stabilité ci-dessous toujours ouvertes.
+
+---
+
 # Récolte par balayage — 10 octobre 2026 — candidate de contre-recette
 
 HEAD de reprise : 4f4457e76384f4c098bd41a9ceb458de467c066c, main ; commit/push toujours autorisés. La demande courante de Tristan remplace la contrainte de pré-estimation Auto : **clic gauche maintenu + balayage**, pas le simple survol ; cibles envoyées sans formulaire, équipes et regroupement côté serveur, bref +quantité coloré au-dessus des ressources.

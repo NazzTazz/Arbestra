@@ -7,7 +7,7 @@ import {previewCells} from '../scene/construction-selection';
 import type {Cell} from '../scene/construction-selection';
 import {preparationState} from './preparation-state';
 import './placement.css';
-async function read<T>(url:string,body?:unknown):Promise<T>{const response=await fetch(url,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{});const value=await response.json();if(!response.ok)throw Object.assign(Error(value.message??'Le serveur est indisponible.'),{definitive:response.status<500});return value as T;}
+async function read<T>(url:string,body?:unknown):Promise<T>{const response=await fetch(url,body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{credentials:'same-origin'});const value=await response.json();if(!response.ok)throw Object.assign(Error(value.message??'Le serveur est indisponible.'),{status:response.status,definitive:response.status<500});return value as T;}
 const label=(type:string)=>type==='town-hall'?'Hôtel de ville':type==='garden'?'Jardin':'Maison en troncs';
 export function SpawnPlacement(){
  const params=new URLSearchParams(location.search),slug=params.get('world')??'',base=`/api/worlds/${encodeURIComponent(slug)}`;
@@ -15,6 +15,15 @@ export function SpawnPlacement(){
  const [center,setCenter]=useState(initial.current),[point,setPoint]=useState(initial.current),[turns,setTurns]=useState(Number(params.get('turns'))%4||0),[manual,setManual]=useState(false);
  const [kit,setKit]=useState<StarterKit|null>(null),[installation,setInstallation]=useState<StarterInstallation|null>(null),[terrain,setTerrain]=useState<TerrainResponse|null>(null),[map,setMap]=useState<SpawnMap|null>(null),[village,setVillage]=useState<VillageState|null>(null);
  const [key,setKey]=useState(''),[playerName,setPlayerName]=useState(params.get('playerName')??''),[villageName,setVillageName]=useState(params.get('villageName')??''),[error,setError]=useState(''),[pending,setPending]=useState(false),[ready,setReady]=useState(false),[reload,setReload]=useState(0);
+ const [needsLogin,setNeedsLogin]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[loginPending,setLoginPending]=useState(false);
+ const loginInFlight=useRef(false);
+ const reconnect=async()=>{
+  if(loginInFlight.current)return;
+  loginInFlight.current=true;setLoginPending(true);setError('');
+  try{await read('/api/auth/login',{email,password});setPassword('');setReady(false);setNeedsLogin(false);setReload(n=>n+1);}
+  catch(e){setError((e as Error).message);}
+  finally{loginInFlight.current=false;setLoginPending(false);}
+ };
  const [diagnostic,setDiagnostic]=useState<{key:string;valid:boolean;referenceHeight:number}|null>(null),[workerReady,setWorkerReady]=useState(0);
  const worker=useRef<Worker|null>(null),diagnosticSequence=useRef(0),diagnosticKey=useRef('');
  const request=useRef<{url:string;body:SpawnPoseRequest|StarterPoseRequest}|null>(null),busy=useRef(false),latestPoint=useRef(point);
@@ -23,7 +32,7 @@ export function SpawnPlacement(){
    const c=start.installation?.anchor??initial.current;setCenter(c);setPoint(c);latestPoint.current=c;setKit(start.installation?.kit??start.kit);setInstallation(start.installation);setMap(m);if(start.installation){setManual(true);setKey(start.installation.remaining[0]??'');}
    const chunks:string[]=[];const x0=Math.floor((c.x-16)/32),y0=Math.floor((c.y-16)/32);for(let y=0;y<2;y++)for(let x=0;x<2;x++)chunks.push(((x0+x+16)%16)+','+((y0+y+8)%8));
    const [ground,state]=await Promise.all([read<TerrainResponse>(base+'/starter/terrain?chunks='+encodeURIComponent(chunks.join(';'))),start.installation?read<VillageState>(base+'/village?villageId='+start.installation.villageId):Promise.resolve(null)]);if(live){setTerrain(ground);setVillage(previous=>!previous||state&&state.serverTime>=previous.serverTime?state:previous);setReady(true);}
-  })().catch(e=>{if(live)setError((e as Error).message);});return()=>{live=false;};
+  })().catch(e=>{if(live){setError((e as Error).message);if((e as {status?:number}).status===401)setNeedsLogin(true);}});return()=>{live=false;};
  },[base,reload]);
  const elements=kit?.elements.filter(e=>installation?e.key===key:manual?e.type==='town-hall':true)??[];
  const geometryKey=JSON.stringify([point,turns,elements,installation?.referenceHeight,village?.serverTime]);
@@ -54,7 +63,13 @@ export function SpawnPlacement(){
  const cells=elements.flatMap(e=>poseStarterElement(e,point,turns,!installation).cells);
  const preview=previewCells(cells,c=>valid===true&&!village?.cells.some(v=>v.cellX===c.cellX&&v.cellY===c.cellY&&(v.building||v.footprint)),valid===null?'Vérification du terrain…':undefined);
  const gesture=(cell:Cell,commit:boolean)=>{const same=cell.cellX===point.x&&cell.cellY===point.y;hover({x:cell.cellX,y:cell.cellY});if(commit&&same)void pose();};
- if(!displayState||!kit)return <main className="center-message">{error||'Préparation du terrain…'}</main>;
+ if(needsLogin)return <main className="center-message"><form className="spawn-login" onSubmit={e=>{e.preventDefault();void reconnect();}}>
+  <h1>Reprendre votre village</h1><p>Reconnectez-vous pour entrer dans ce monde.</p>
+  <label>Adresse e-mail<input type="email" name="email" autoComplete="username" required value={email} disabled={loginPending} onChange={e=>setEmail(e.target.value)}/></label>
+  <label>Mot de passe<input type="password" name="password" autoComplete="current-password" required value={password} disabled={loginPending} onChange={e=>setPassword(e.target.value)}/></label>
+  {error&&<p role="alert">{error}</p>}<button type="submit" disabled={loginPending}>{loginPending?'Connexion…':'Se connecter'}</button>
+ </form></main>;
+ if(!ready||!displayState||!kit)return <main className="center-message">{error||'Préparation du terrain…'}</main>;
  const choices=installation?kit.elements.filter(e=>installation.remaining.includes(e.key)).map(e=>({key:e.key,label:label(e.type),code:e.type==='dwelling'?'dwelling-logs':e.type})).concat([{key:'',label:'Autres constructions',code:'dwelling'}]):[{key:'grouped',label:'Village initial',code:'town-hall'},{key:'manual',label:'Hôtel de ville',code:'town-hall'}];
  return <App starter={{state:displayState,onSnapshot:state=>setVillage(previous=>!previous||state.serverTime>=previous.serverTime?state:previous),beforeTownHall:!installation,active:!installation||installation.remaining.length>0&&!!key,pending,uncertain:!!request.current&&!pending,error:error||null,
   ghost:{elements,point,quarterTurns:turns,relativeToHall:!installation,...(installation?{referenceHeight:installation.referenceHeight}:{})},preview,choices,selected:installation?key:manual?'manual':'grouped',
