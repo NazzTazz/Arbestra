@@ -185,7 +185,7 @@ export function buildingPlan(input:PlanInput):BuildingPlan {
   return {id:input.id,recipe:r,phase:input.phase??'finished',sourceLevels:input.sourceLevels??0,origin,rotation,width,depth,height,base,footprint:{width:fw,depth:fd},fill:[width/available[0]!,depth/available[1]!],openings,stones,entry:accesses.find(a=>a.principal)?.entry??entry,accesses,murets,bounds:{halfX:width/2+sideOverhang,halfZ:depth/2+endOverhang}};
 }
 
-export function recipeFor(building:Building):{recipe:BuildingRecipe;phase:'finished'|'works';sourceLevels:number}|null {
+export function recipeFor(building:Pick<Building,'visualLayout'|'status'|'targetLevel'|'level'>):{recipe:BuildingRecipe;phase:'finished'|'works';sourceLevels:number}|null {
   const layout=building.visualLayout;if(!layout)return null;
   const base=layout.recipe==='town-hall'?HALL_RECIPE:layout.recipe==='log-house'?LOG_HOUSE_RECIPE:layout.recipe==='beam-house'?BEAM_HOUSE_RECIPE:HOUSE_RECIPE;
   const level=building.status==='under-construction'?(building.targetLevel??building.level):building.level;

@@ -1,3 +1,4 @@
+import {fixedBuildingFootprint} from '@arbestra/contracts';
 import type { VillageState } from '@arbestra/contracts';
 
 export interface Cell { cellX: number; cellY: number }
@@ -5,16 +6,12 @@ export interface CellRange { first: Cell; last: Cell }
 export interface AreaPreview { cells: Cell[]; count: number; error: string | null; newCells?: Cell[]; existingCells?: Cell[]; obstacleCells?: Cell[] }
 export const MAX_SELECTION_CELLS = 100;
 export const cellKey = (cell: Cell): string => `${cell.cellX}:${cell.cellY}`;
-export function campusRange(anchor:Cell,quarterTurns:number):CellRange {
-  const rotate=(x:number,y:number)=>quarterTurns===0?{x,y}:quarterTurns===1?{x:y,y:-x}:quarterTurns===2?{x:-x,y:-y}:{x:-y,y:x};
-  const a=rotate(-2,-2),b=rotate(2,3);
-  return {first:{cellX:anchor.cellX+Math.min(a.x,b.x),cellY:anchor.cellY+Math.min(a.y,b.y)},last:{cellX:anchor.cellX+Math.max(a.x,b.x),cellY:anchor.cellY+Math.max(a.y,b.y)}};
+function fixedRange(type:'university'|'stonemason',anchor:Cell,turns:number):CellRange {
+ const cells=fixedBuildingFootprint(type,anchor,turns),xs=cells.map(c=>c.cellX),ys=cells.map(c=>c.cellY);
+ return {first:{cellX:Math.min(...xs),cellY:Math.min(...ys)},last:{cellX:Math.max(...xs),cellY:Math.max(...ys)}};
 }
-export function stonemasonRange(anchor:Cell,quarterTurns:number):CellRange {
-  const dx=quarterTurns===1||quarterTurns===0?1:-1,dy=quarterTurns===0||quarterTurns===3?1:-1;
-  return {first:{cellX:anchor.cellX+Math.min(0,dx),cellY:anchor.cellY+Math.min(0,dy)},
-    last:{cellX:anchor.cellX+Math.max(0,dx),cellY:anchor.cellY+Math.max(0,dy)}};
-}
+export const campusRange=(anchor:Cell,turns:number)=>fixedRange('university',anchor,turns);
+export const stonemasonRange=(anchor:Cell,turns:number)=>fixedRange('stonemason',anchor,turns);
 const normalize = (value: number, size: number): number => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number): number => normalize(value - origin + size / 2, size) - size / 2;
 

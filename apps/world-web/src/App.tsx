@@ -131,6 +131,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     state?.cells.some((cell) => cell.building?.hiddenSuppliesAvailable) ?? false, pendingAction,
     message => { if (state) setOracleProvisions({ villageKey: `${state.world.id}:${state.village.id}`, message }); });
 
+  const starterRef=useRef(starter);starterRef.current=starter;
   const applySnapshot = useCallback((snapshot: TimedVillageState) => {
     const previous = stateRef.current;
     if (previous && snapshot.state.serverTime < previous.serverTime) return;
@@ -171,6 +172,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     }
     stateRef.current = snapshot.state;
     setState(snapshot.state);
+    starterRef.current?.onSnapshot(snapshot.state);
     setServerOffsetMs(snapshot.serverOffsetMs);
   }, [pushNotification]);
 
@@ -186,7 +188,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     finally { catRequest.current = false; }
   }, [applySnapshot]);
 
-  useEffect(()=>{if(starter){stateRef.current=starter.state;setState(starter.state);setLoading(false);}},[starter?.state]);
+  useEffect(()=>{if(starter&&(!stateRef.current||starter.state.serverTime>=stateRef.current.serverTime)){stateRef.current=starter.state;setState(starter.state);setLoading(false);}},[starter?.state]);
 
   const [worldMode, setWorldMode] = useState<ActiveWorldMode>(starter?'construction':'exploration');
   const [paletteCollapsed, setPaletteCollapsed] = useState(!starter);

@@ -53,7 +53,7 @@ export async function spawnSnapshot(tx:Kysely<Database>,slug:string,privateState
     const world = await tx.selectFrom('worlds').selectAll().where('slug', '=', slug).where('isOpen', '=', true).where('generationStatus', '=', 'ready').executeTakeFirst();
     if (!world) throw new HttpError(404, 'WORLD_NOT_AVAILABLE', 'Monde indisponible.');
     const candidate = await tx.selectFrom('worldGenerationCandidates').select(['status', 'checksum', sql<string>`artifact::text`.as('artifactText')]).where('worldId', '=', world.id).executeTakeFirst();
-    if (world.generationVersion !== 3 || world.widthCells !== 512 || world.heightCells !== 256 || !candidate?.artifactText
+    if (world.generationVersion !== 3 || world.widthCells !== 512 || world.heightCells !== 256 || world.chunkSize !== 32 || !candidate?.artifactText
       || candidate.status !== 'ready' || candidate.checksum !== RC1_CANONICAL_CHECKSUM)
       throw new HttpError(409, 'SPAWN_MAP_NOT_READY', 'Cette carte d’arrivée n’est pas disponible.');
     const resourceState=await readRc1Resources(tx,world.id);

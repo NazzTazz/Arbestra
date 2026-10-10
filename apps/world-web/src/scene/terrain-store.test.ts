@@ -25,6 +25,14 @@ function harness() {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('reads continuous RC1 slopes without snapping the cursor to a cell centre',async()=>{
+    const h=harness();h.demand();h.advance(100);
+    const c={...chunk(),rc1:{stride:65,heights:Array.from({length:65**2},(_,i)=>(i%65)/2*.2+1),water:Array(65**2).fill(0),terraces:[{cellX:2,cellY:1,height:1.5}]}};
+    await h.settle(0,c);
+    expect(h.store.ground(1.25,1)?.height).toBeCloseTo(3.375);
+    expect(h.store.ground(1.49,1)?.height).toBeCloseTo(3.495);
+    expect(h.store.ground(1.51,1)?.height).toBeCloseTo(3.75);
+  });
   it('replaces RC1 terraces on a live updates response while keeping the immutable substrate',async()=>{
     const h=harness();h.demand();h.advance(100);const first={...chunk(),rc1:{stride:65,heights:Array(65**2).fill(.25),water:Array(65**2).fill(0),terraces:[]}};
     await h.settle(0,first);expect(h.store.ground(1,1)?.height).toBe(.625);h.store.changed.clear();h.advance(6000);

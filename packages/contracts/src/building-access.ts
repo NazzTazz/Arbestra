@@ -1,3 +1,4 @@
+import {rotateSpawnPoint} from './spawn-map.js';
 import type {VillageState} from './villages.js';
 import type {TravelCell} from './travel-paths.js';
 import {wrapCoordinate,wrappedDistance} from './infrastructure.js';
@@ -18,7 +19,7 @@ export function buildingAccesses(state:BuildingAccessState,buildingId:string):Bu
   const cx=(Math.min(...xs)+Math.max(...xs))/2,cy=(Math.min(...ys)+Math.max(...ys))/2;
   const halfX=(Math.max(...xs)-Math.min(...xs)+1)/2,halfY=(Math.max(...ys)-Math.min(...ys)+1)/2;
   const turn=b.quarterTurns??b.visualLayout?.quarterTurns??0;
-  const rotate=(x:number,y:number)=>turn===0?{x,y}:turn===1?{x:y,y:-x}:turn===2?{x:-x,y:-y}:{x:-y,y:x};
+  const rotate=(x:number,y:number)=>rotateSpawnPoint({x,y},turn);
   const at=(x:number,y:number):TravelCell=>({cellX:wrapCoordinate(anchor.cellX+cx+x,state.world.widthCells),cellY:wrapCoordinate(anchor.cellY+cy+y,state.world.heightCells)});
   const definitions=b.accesses?.length?b.accesses:(()=>{
     const face=b.visualLayout?.entranceFace??'-z';

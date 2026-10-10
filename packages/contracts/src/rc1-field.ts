@@ -8,10 +8,10 @@ export function editedRc1Field(data:GeneratedLandscape,base:ReturnType<typeof cr
  for(const [i,t] of (data.forest?.trees??[]).entries())if(!removed.has(i)){
   const key=Math.floor(t.x)+':'+Math.floor(t.y),bucket=trees.get(key)??[];bucket.push(t);trees.set(key,bucket);
  }
- const sample=(x:number,y:number)=>{const value=base.sample(x,y),height=terraceHeight(terraces,x,y);return height===undefined?value:{...value,elevation:height};};
+ const sample=(x:number,y:number)=>{const value=base.sample(x,y),height=terraceHeight(terraces,x,y,{widthCells:data.width,heightCells:data.height});return height===undefined?value:{...value,elevation:height};};
  const intersectsTree=(s:SpawnSurface)=>{
   for(let y=Math.floor(s.y-s.halfHeight);y<=Math.floor(s.y+s.halfHeight);y++)for(let x=Math.floor(s.x-s.halfWidth);x<=Math.floor(s.x+s.halfWidth);x++)
-   if(trees.get(((x%512+512)%512)+':'+((y%256+256)%256))?.some(t=>Math.abs(spawnDelta(t.x,s.x,512))<=s.halfWidth&&Math.abs(spawnDelta(t.y,s.y,256))<=s.halfHeight))return true;
+   if(trees.get(((x%data.width+data.width)%data.width)+':'+((y%data.height+data.height)%data.height))?.some(t=>Math.abs(spawnDelta(t.x,s.x,data.width))<=s.halfWidth&&Math.abs(spawnDelta(t.y,s.y,data.height))<=s.halfHeight))return true;
   return false;
  };
  const surfaceReason=(s:SpawnSurface,reference:number|null,resolution:number):'water'|'rock'|'relief'|null=>{

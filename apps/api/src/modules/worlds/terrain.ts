@@ -24,7 +24,7 @@ export async function getTerrain(db: Kysely<Database>, accountId: string, slug: 
   return readTerrain(db, accountId, slug, raw, true, preview);
 }
 
-export async function getPreparationTerrain(db:Kysely<Database>,accountId:string,slug:string,raw:string):Promise<TerrainResponse>{return readTerrain(db,accountId,slug,raw,true,true,true);}
+export async function getPreparationTerrain(db:Kysely<Database>,accountId:string,slug:string,raw:string):Promise<TerrainResponse>{return readTerrain(db,accountId,slug,raw,true,false,true);}
 
 export async function getTerrainUpdates(db: Kysely<Database>, accountId: string, slug: string, raw: string, preview = false): Promise<TerrainUpdatesResponse> {
   const data = await readTerrain(db, accountId, slug, raw, false, preview);
@@ -43,7 +43,7 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
     if (!world) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.');
     const { id: worldId, chunkSize: size, widthCells: width, heightCells: height } = world;
     const knowledge = await knownGeography(tx, worldId, accountId, width, height);
-    const known = (p: { cellX: number; cellY: number }) => preview || knowledge.known(p);
+    const known = (p: { cellX: number; cellY: number }) => !preparation && (preview || knowledge.known(p));
     if (world.generationStatus !== 'ready' || width % size || height % size) throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain indisponible.');
     const wanted = [...new Map(requested.map((c) => {
       const chunkX = normalizeCell(c.chunkX, width / size), chunkY = normalizeCell(c.chunkY, height / size);

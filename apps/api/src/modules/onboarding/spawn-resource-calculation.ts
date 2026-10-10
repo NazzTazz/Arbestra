@@ -1,26 +1,21 @@
-import { buildingAccesses, buildSpawnAccessNetwork, createSpawnSurfaceIndex, createSpawnTerrainField,
-  createSpawnTerrainInspector, planSpawnCleaning, planSpawnResources, rotateSpawnPoint, SPAWN_ACCESS_REVISION, spawnDelta, spawnSurfacesAt,
+import { canWalkSpawnSegment, type SpawnAccessField, buildingAccesses, buildSpawnAccessNetwork, createSpawnSurfaceIndex, createSpawnTerrainField,
+  createSpawnTerrainInspector, planSpawnCleaning, planSpawnResources, poseStarterElement, SPAWN_ACCESS_REVISION, spawnDelta, spawnSurfacesAt,
   type SpawnInspectionRequest, type SpawnResourcePreflight, type SpawnPoint, type SpawnSurface,
   type SpawnAccessRoute, type SpawnResourceCandidate, type SpawnResourcePlan } from '@arbestra/contracts';
 import type { SpawnMap } from '@arbestra/contracts';
 import type { SpawnSnapshot } from './spawn-compute-protocol.js';
+import { STARTER_KIT } from './starter-kit.js';
 import { STARTER_VILLAGE } from './starter-village.js';
 
-export function starterTownHallExits(point: SpawnPoint, turns: number): SpawnPoint[][] {
-  const hall = STARTER_VILLAGE.buildings.find(b => b.type === 'town-hall')!;
-  const accesses = buildingAccesses({ world: { widthCells: 512, heightCells: 256 }, cells: hall.cells.map(c => ({
-    cellX: (c.x + 512) % 512, cellY: (c.y + 256) % 256, footprint: { buildingId: 'starter-hall' },
-    building: c.role === 'anchor' ? { ...hall, id: 'starter-hall' } : null,
-  })) }, 'starter-hall');
-  // The frozen hall spans (0,0)/(0,1), with its real +X entrance.
-  // Reuse recipe-derived door/outside, then rotate the whole kit consistently.
-  return accesses.map(access => {
-    const outside = { x: spawnDelta(access.outside.cellX, 0, 512), y: spawnDelta(access.outside.cellY, 0, 256) };
-    const bend = access.normal.x ? { x: 0, y: outside.y } : { x: outside.x, y: 0 };
-    return [{ x: 0, y: 0 }, bend, outside].map(p => {
-      const rotated = rotateSpawnPoint(p, turns); return { x: (rotated.x + point.x + 512) % 512, y: (rotated.y + point.y + 256) % 256 };
-    });
-  });
+export function starterTownHallAccesses(point: SpawnPoint, turns: number) {
+  const hall = poseStarterElement(STARTER_KIT.elements.find(b=>b.type==='town-hall')!,point,turns);
+  const accesses = buildingAccesses({world:{widthCells:512,heightCells:256},cells:hall.cells.map(c=>({...c,
+    footprint:{buildingId:'starter-hall'},building:c.role==='anchor'?{...hall,id:'starter-hall'}:null}))},'starter-hall');
+  return accesses;
+}
+export function starterTownHallExits(point:SpawnPoint,turns:number,passage?:SpawnAccessField):SpawnPoint[][] {
+  return starterTownHallAccesses(point,turns).filter(a=>!passage||canWalkSpawnSegment(passage,{x:a.position.cellX,y:a.position.cellY},{x:a.outside.cellX,y:a.outside.cellY})).map(access=>[point,access.normal.x?{x:point.x,y:access.outside.cellY}:{x:access.outside.cellX,y:point.y},
+    {x:access.outside.cellX,y:access.outside.cellY}]);
 }
 export function computeSpawnResources(map: SpawnMap, input: SpawnInspectionRequest, spatial: SpawnSnapshot['spatial'], immutable: ReturnType<typeof createSpawnTerrainField>): SpawnResourcePreflight {
     const protectedSurfaces = spatial.protectedSurfaces;

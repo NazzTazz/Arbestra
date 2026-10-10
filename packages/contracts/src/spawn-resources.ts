@@ -1,3 +1,4 @@
+import {withinDepositRange} from './deposit-range.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { createSpawnSurfaceIndex, spawnDelta, spawnSurfacesOverlap, SpawnTerrainResultSchema, type SpawnPoint, type SpawnSurface } from './spawn-map.js';
 
@@ -111,7 +112,7 @@ export function planSpawnResources(input: SpawnResourcePlanningInput): SpawnReso
   ];
   const eligible = slots.map(slot => candidates.filter(c => (!c.kinds || c.kinds.includes(slot.kind === 'wood' ? 'wood' : 'stone')) && (slot.kind === 'wood' ? c.distance < 15
     : slot.kind === 'stone-large' ? c.distance > 20 && c.distance <= 40
-      : c.distance <= 20 && referenceSurfaces.every(s => spawnSurfaceGap(c.surface, s, width, height) + EPSILON >= 10))));
+      : c.distance <= 20 && withinDepositRange(posedSurfaces.map(s=>({cellX:s.x,cellY:s.y})),{cellX:c.surface.x,cellY:c.surface.y},{widthCells:width,heightCells:height}) && referenceSurfaces.every(s => spawnSurfaceGap(c.surface, s, width, height) + EPSILON >= 10))));
   const maxVisited = input.maxVisited ?? 10_000;
   if (!Number.isSafeInteger(maxVisited) || maxVisited < 0) throw Error('Invalid spawn search budget');
   let visited = 0, interrupted = false;

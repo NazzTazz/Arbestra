@@ -1,3 +1,4 @@
+import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -58,7 +59,6 @@ import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contrac
 
 const CELL_SIZE = 2.5;
 const SNAPSHOT_SIZE = 64;
-const BUILD_RADIUS = 5;
 export interface OwnedVillage {
   worldId: string;
   worldSlug: string;
@@ -173,6 +173,7 @@ async function catalog(
 }
 
 interface Snapshot {
+  rc1?: Awaited<ReturnType<typeof readRc1Ground>>;
   originCellX: number;
   originCellY: number;
   terrainCodes: number[];
@@ -194,7 +195,7 @@ async function snapshot(
   if(village.generationVersion===3){
     const ground=await readRc1Ground(tx,village.worldId),terrainCodes:number[]=[],elevations:number[]=[];
     for(let y=0;y<SNAPSHOT_SIZE;y++)for(let x=0;x<SNAPSHOT_SIZE;x++){const c=ground.cell(originCellX+x,originCellY+y);terrainCodes.push(c.code);elevations.push(c.elevation);}
-    return {originCellX,originCellY,terrainCodes,elevations,terrainAt(x,y){const dx=normalizeCell(x-originCellX,village.widthCells),dy=normalizeCell(y-originCellY,village.heightCells);return dx<SNAPSHOT_SIZE&&dy<SNAPSHOT_SIZE?terrainCodes[dy*SNAPSHOT_SIZE+dx]:undefined;}};
+    return {rc1:ground,originCellX,originCellY,terrainCodes,elevations,terrainAt(x,y){const dx=normalizeCell(x-originCellX,village.widthCells),dy=normalizeCell(y-originCellY,village.heightCells);return dx<SNAPSHOT_SIZE&&dy<SNAPSHOT_SIZE?terrainCodes[dy*SNAPSHOT_SIZE+dx]:undefined;}};
   }
   const wanted = new Map<string, { chunkX: number; chunkY: number }>();
   for (let y = 0; y < SNAPSHOT_SIZE; y += 1)
@@ -332,7 +333,7 @@ export async function refineVillagePath(tx:Transaction<Database>,village:Pick<Ow
       features:features.map(f=>({...f,type:f.featureTypeCode,deposit:{blocksCell:f.blocksCell,cleared:f.cleared,state:Number(f.remainingAmount)===0?'depleted':'available'}}))},
     cells:rows.map(r=>({cellX:r.cellX,cellY:r.cellY,footprint:{buildingId:r.id},building:r.role==='anchor'?{id:r.id,type:r.buildingType,visualLayout:r.visualLayout,quarterTurns:r.visualLayout?.quarterTurns??r.quarterTurns}:null})),
     infrastructure:await readNavigationInfrastructure(tx,village)} as unknown as Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>;
-  const rc1=village.generationVersion===3?await readRc1Ground(tx,village.worldId):null;
+  const rc1=ground.rc1;
   const route=refineTravelRoute(context,{id,kind:'stone',cells:path,destination:path.at(-1)!},new Set(),undefined,rc1?.navigation);
   if(!route)throw new HttpError(409,'DESTINATION_UNREACHABLE','Aucun accès praticable depuis le village.');return route.cells;
 }
@@ -788,6 +789,7 @@ export async function state(
             !row &&
             !featureCells.has(key) &&
             ground.terrainAt(cellX, cellY) === TERRAIN.grassland &&
+            (!ground.rc1 || !ground.rc1.field.surfaceReason({x:cellX,y:cellY,halfWidth:.5,halfHeight:.5},null,.125) && !ground.rc1.field.intersectsTree({x:cellX,y:cellY,halfWidth:.5,halfHeight:.5})) &&
             !protectedCell(cellX, cellY, protectedRows, village),
         };
       })
@@ -795,7 +797,7 @@ export async function state(
   };
   villageState.infrastructure=await readInfrastructure(tx,village.worldId,village.villageId);
   villageState.factoryEnabled=await factoryCapability(tx,village.worldId);
-  villageState.travelRoutes = buildTravelNetwork({...villageState,infrastructure:await readNavigationInfrastructure(tx,village,villageState.infrastructure)},[],village.generationVersion===3?(await readRc1Ground(tx,village.worldId)).navigation:undefined);
+  villageState.travelRoutes = buildTravelNetwork({...villageState,infrastructure:await readNavigationInfrastructure(tx,village,villageState.infrastructure)},[],ground.rc1?.navigation);
   // Reuse committed mission paths; do not search routes to every woodland in the snapshot.
   for (const extraction of villageState.village.extractions) if (extraction.resourceCode === 'wood' && extraction.path.length) {
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',
@@ -886,53 +888,30 @@ export async function debit(
       .execute();
   }
 }
-async function assertBuildable(
-  tx: Transaction<Database>,
-  village: OwnedVillage,
-  cellX: number,
-  cellY: number,
-) {
-  await assertNoInfrastructure(tx,village.worldId,[{cellX,cellY}],village);
-  const ground = await snapshot(tx, village);
-  if (ground.terrainAt(cellX, cellY) !== TERRAIN.grassland)
-    throw new HttpError(
-      409,
-      'TERRAIN_NOT_BUILDABLE',
-      'Ce terrain ne peut pas accueillir de bâtiment.',
-    );
-  if (
-    await tx
-      .selectFrom('worldCellOccupancies')
-      .select('role')
-      .where('worldId', '=', village.worldId)
-      .where('cellX', '=', cellX)
-      .where('cellY', '=', cellY)
-      .executeTakeFirst()
-  )
-    throw new HttpError(409, 'CELL_OCCUPIED', 'Cette case est déjà occupée.');
-  if (
-    protectedCell(cellX, cellY, await clearings(tx, village.worldId), village)
-  )
-    throw new HttpError(
-      409,
-      'CLEARING_PROTECTED',
-      'Cette clairière est protégée.',
-    );
-  const footprints = await tx
-    .selectFrom('worldCellOccupancies')
-    .innerJoin('buildings', 'buildings.id', 'worldCellOccupancies.buildingId')
-    .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY', 'worldCellOccupancies.pendingExpansionId'])
-    .where('worldCellOccupancies.worldId', '=', village.worldId)
-    .where('buildings.villageId', '=', village.villageId)
-    .where(eb=>eb.or([eb('buildings.status','=','completed'),eb.and([
-      eb('buildings.buildingType','=','town-hall'),eb('buildings.targetLevel','is not',null)])]))
-    .execute();
-  if (!candidates(footprints.filter((footprint) => footprint.pendingExpansionId === null), village).has(worldCellKey(cellX, cellY)))
-    throw new HttpError(
-      409,
-      'OUTSIDE_VILLAGE_REACH',
-      'Cette case est trop éloignée de votre village.',
-    );
+async function assertBuildable(tx:Transaction<Database>,village:OwnedVillage,cellX:number,cellY:number){
+  return assertBuildableCells(tx,village,[{cellX,cellY}]);
+}
+/** One command context for the whole footprint, after the village/spatial locks. */
+async function assertBuildableCells(tx:Transaction<Database>,village:OwnedVillage,cells:readonly SpatialCell[]){
+  if(!cells.length)return;
+  await assertNoInfrastructure(tx,village.worldId,cells,village);
+  const ground=await snapshot(tx,village),protectedRows=await clearings(tx,village.worldId);
+  const occupied=await tx.selectFrom('worldCellOccupancies').select(['cellX','cellY']).where('worldId','=',village.worldId)
+    .where(eb=>eb.or(cells.map(c=>eb.and([eb('cellX','=',c.cellX),eb('cellY','=',c.cellY)])))).execute();
+  const occupiedKeys=new Set(occupied.map(c=>worldCellKey(c.cellX,c.cellY)));
+  const footprints=await tx.selectFrom('worldCellOccupancies').innerJoin('buildings',j=>j.onRef('buildings.id','=','worldCellOccupancies.buildingId').onRef('buildings.worldId','=','worldCellOccupancies.worldId'))
+    .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY','worldCellOccupancies.pendingExpansionId'])
+    .where('worldCellOccupancies.worldId','=',village.worldId).where('buildings.villageId','=',village.villageId)
+    .where(eb=>eb.or([eb('buildings.status','=','completed'),eb.and([eb('buildings.buildingType','=','town-hall'),eb('buildings.targetLevel','is not',null)])])).execute();
+  const sources=footprints.filter(c=>c.pendingExpansionId===null);
+  for(const {cellX,cellY} of cells){
+    const surface={x:cellX,y:cellY,halfWidth:.5,halfHeight:.5};
+    if(ground.terrainAt(cellX,cellY)!==TERRAIN.grassland || ground.rc1&&(ground.rc1.field.surfaceReason(surface,null,.125)||ground.rc1.field.intersectsTree(surface)))
+      throw new HttpError(409,'TERRAIN_NOT_BUILDABLE','Cette emprise rencontre un obstacle naturel.');
+    if(occupiedKeys.has(worldCellKey(cellX,cellY)))throw new HttpError(409,'CELL_OCCUPIED','Cette case est déjà occupée.');
+    if(protectedCell(cellX,cellY,protectedRows,village))throw new HttpError(409,'CLEARING_PROTECTED','Cette clairière est protégée.');
+    if(!withinBuildReach({cellX,cellY},sources,village))throw new HttpError(409,'OUTSIDE_VILLAGE_REACH','Cette case est trop éloignée de votre village.');
+  }
 }
 async function reserve(
   tx: Transaction<Database>,
@@ -1060,10 +1039,7 @@ export async function configureTownHallFactory(db:Kysely<Database>,accountId:str
     return preview;
   });}catch(error){if(error===previewRollback)return preview;throw error;}
 }
-function universityCampusCells(anchor: SpatialCell,quarterTurns=0): SpatialCell[] {
-  return Array.from({ length: 30 }, (_, index) => {const x=index%5-2,y=Math.floor(index/5)-2;
-    return {cellX:anchor.cellX+(quarterTurns===0?x:quarterTurns===1?y:quarterTurns===2?-x:-y),cellY:anchor.cellY+(quarterTurns===0?y:quarterTurns===1?-x:quarterTurns===2?-y:x)};});
-}
+const universityCampusCells=(anchor:SpatialCell,quarterTurns=0)=>fixedBuildingFootprint('university',anchor,quarterTurns);
 
 /** Conservative adaptation of existing campuses; village/business locks are already held. */
 async function ensureUniversityCampus(tx: Transaction<Database>, village: OwnedVillage, buildingId: string, anchor: SpatialCell) {
@@ -1080,7 +1056,7 @@ async function ensureUniversityCampus(tx: Transaction<Database>, village: OwnedV
   const heights = cells.map(c => ground.elevations[normalizeCell(c.cellY - ground.originCellY, village.heightCells) * SNAPSHOT_SIZE + normalizeCell(c.cellX - ground.originCellX, village.widthCells)]!);
   if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
     throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
-  for (const cell of added) await assertBuildable(tx, village, cell.cellX, cell.cellY);
+  await assertBuildableCells(tx,village,added);
   await reserveSelection(tx, village.worldId, buildingId, anchor, added, null, false);
 }
 
@@ -1153,8 +1129,7 @@ export async function constructBuilding(
   quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<VillageState> {
   if (buildingType === 'university' || buildingType === 'stonemason') {
-    const cells = buildingType === 'university' ? universityCampusCells({ cellX, cellY }) : [0,1].flatMap(dx => [0,1].map(dy => ({ cellX: cellX+dx, cellY: cellY+dy })));
-    return constructBuildingArea(db, accountId, worldSlug, villageId, buildingType, { cellX, cellY }, cells.map(c=>{const dx=c.cellX-cellX,dy=c.cellY-cellY;return {cellX:cellX+(quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy),cellY:cellY+(quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx)};}), durationOverride, commandId, expectedCosts,quarterTurns,houseVariant);
+    return constructBuildingArea(db,accountId,worldSlug,villageId,buildingType,{cellX,cellY},fixedBuildingFootprint(buildingType,{cellX,cellY},quarterTurns),durationOverride,commandId,expectedCosts,quarterTurns,houseVariant);
   }
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
@@ -1265,7 +1240,7 @@ export async function constructBuildingArea(
     const item = await definition(tx, buildingType, 1, houseVariant);
     if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
     if (item.code === 'university') {
-      const expected = new Set(universityCampusCells(anchor).map(c => { const dx=c.cellX-anchor.cellX,dy=c.cellY-anchor.cellY; const x=quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy;const y=quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx;return worldCellKey(normalizeCell(anchor.cellX+x,village.widthCells),normalizeCell(anchor.cellY+y,village.heightCells)); }));
+      const expected=new Set(fixedBuildingFootprint('university',anchor,quarterTurns,village).map(c=>worldCellKey(c.cellX,c.cellY)));
       if (selection.cells.length !== 30 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
         throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'L’Université occupe 5 × 6 cases autour de son ancre.');
       const ground = await snapshot(tx, village);
@@ -1273,9 +1248,7 @@ export async function constructBuildingArea(
       if (heights.some(h => !Number.isFinite(h)) || Math.max(...heights) - Math.min(...heights) > 1)
         throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
     } else if (item.code === 'stonemason') {
-      const expected = new Set([0,1].flatMap(dx => [0,1].map(dy => worldCellKey(
-        normalizeCell(anchor.cellX + (quarterTurns===0?dx:quarterTurns===1?dy:quarterTurns===2?-dx:-dy),village.widthCells),
-        normalizeCell(anchor.cellY + (quarterTurns===0?dy:quarterTurns===1?-dx:quarterTurns===2?-dy:dx),village.heightCells)))));
+      const expected=new Set(fixedBuildingFootprint('stonemason',anchor,quarterTurns,village).map(c=>worldCellKey(c.cellX,c.cellY)));
       if (selection.cells.length !== 4 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX,c.cellY))))
         throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Le tailleur occupe 2 × 2 cases.');
       const ground = await snapshot(tx, village);
@@ -1291,7 +1264,7 @@ export async function constructBuildingArea(
         .where('buildingType', '=', buildingType).executeTakeFirstOrThrow();
       if (count.count >= item.instanceLimitPerVillage) throw new HttpError(409, 'BUILDING_LIMIT_REACHED', 'Limite atteinte pour ce bâtiment.');
     }
-    for (const cell of selection.cells) await assertBuildable(tx, village, cell.cellX, cell.cellY);
+    await assertBuildableCells(tx,village,selection.cells);
     const actualCosts = scaledCosts(item.costs, item.code === 'garden' ? selection.cells.length : 1);
     assertAcceptedCosts(actualCosts, expectedCosts);
     await debit(tx, village.worldId, village.villageId, actualCosts, at);
@@ -1366,7 +1339,7 @@ export async function expandGarden(
     const newCells: SpatialCell[] = [];
     for (const cell of selection.cells) {
       const occupied = occupiedAt.get(worldCellKey(cell.cellX, cell.cellY));
-      if (!occupied) { await assertBuildable(tx, village, cell.cellX, cell.cellY); newCells.push(cell); continue; }
+      if (!occupied) { newCells.push(cell); continue; }
       if (occupied.pendingExpansionId !== null || occupied.buildingType !== 'garden' || occupied.villageId !== village.villageId
         || occupied.status !== 'completed')
         throw new HttpError(409, 'CELL_OCCUPIED', 'Une case de la sélection est occupée ou encore en chantier.');
@@ -1375,6 +1348,7 @@ export async function expandGarden(
       toroidalManhattan(active.cellX, active.cellY, cell.cellX, cell.cellY, village.widthCells, village.heightCells) <= 1,
     ))) throw new HttpError(409, 'INVALID_BUILDING_EXTENSION', 'L’extension doit toucher le jardin actif.');
     if (newCells.length === 0) return state(tx, accountId, worldSlug, economy);
+    await assertBuildableCells(tx,village,newCells);
     const item = await definition(tx, 'garden', 1);
     const actualCosts = scaledCosts(item.costs, newCells.length);
     assertAcceptedCosts(actualCosts, expectedCosts);

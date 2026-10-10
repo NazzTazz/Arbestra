@@ -1,7 +1,7 @@
 ﻿import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {sql,type Kysely,type Transaction} from 'kysely';
-import {emptyInfrastructure,poseStarterElement,type StarterElement,type StarterInstallation,type SpawnPoseRequest,type StarterPoseRequest} from '@arbestra/contracts';
+import {withinBuildReach,emptyInfrastructure,poseStarterElement,type StarterElement,type StarterInstallation,type SpawnPoseRequest,type StarterPoseRequest} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
 import {HttpError} from '../../errors.js';
 import {beginVillageEconomy} from '../villages/reconcile-economy.js';
@@ -77,7 +77,7 @@ export async function installVillage(db:Kysely<Database>,compute:Pick<SpawnCompu
 export async function poseRemainingStarter(db:Kysely<Database>,compute:Pick<SpawnCompute,'run'>,accountId:string,slug:string,villageId:string,input:StarterPoseRequest):Promise<StarterInstallation>{
  return db.transaction().execute(async tx=>{
   await sql`set local lock_timeout='5s'`.execute(tx);
-  const village=await tx.selectFrom('villages').innerJoin('worlds','worlds.id','villages.worldId').select(['villages.worldId','villages.id']).where('worlds.slug','=',slug).where('villages.id','=',villageId).where('villages.ownerAccountId','=',accountId).executeTakeFirst();
+  const village=await tx.selectFrom('villages').innerJoin('worlds','worlds.id','villages.worldId').select(['villages.worldId','villages.id','worlds.widthCells','worlds.heightCells']).where('worlds.slug','=',slug).where('villages.id','=',villageId).where('villages.ownerAccountId','=',accountId).executeTakeFirst();
   if(!village)throw new HttpError(404,'VILLAGE_NOT_FOUND','Village introuvable.');
   const economy=await beginVillageEconomy(tx,village.worldId,villageId,undefined,[],[],true);
   const row=await tx.selectFrom('villageStarterInstallations').selectAll().where('worldId','=',village.worldId).where('villageId','=',villageId).executeTakeFirstOrThrow();
@@ -90,8 +90,7 @@ export async function poseRemainingStarter(db:Kysely<Database>,compute:Pick<Spaw
   if(!plan.valid)fail('SPAWN_BLOCKED','Cette emprise est incompatible avec le terrain ou déjà occupée.');
   const placed=poseStarterElement(element,input.point,input.quarterTurns,false);
   const existing=await tx.selectFrom('worldCellOccupancies').innerJoin('buildings',j=>j.onRef('buildings.id','=','worldCellOccupancies.buildingId').onRef('buildings.worldId','=','worldCellOccupancies.worldId')).select(['cellX','cellY']).where('buildings.worldId','=',village.worldId).where('buildings.villageId','=',villageId).where('status','=','completed').execute();
-  const delta=(a:number,b:number,size:number)=>Math.min(Math.abs(a-b),size-Math.abs(a-b));
-  if(!placed.cells.every(c=>existing.some(e=>Math.max(delta(c.cellX,e.cellX,512),delta(c.cellY,e.cellY,256))<=5)))fail('OUTSIDE_BUILD_REACH','Posez cet élément à proximité du village.');
+  if(!placed.cells.every(c=>withinBuildReach(c,existing,village)))fail('OUTSIDE_BUILD_REACH','Posez cet élément à proximité du village.');
   await removeSpawnTrees(tx,village.worldId,plan.cleaning.removedTreeIndices,placed.cells,economy.through);
   await flatten(tx,village.worldId,villageId,placed.cells,row.referenceHeight);
   const buildingId=await insertElement(tx,village.worldId,villageId,placed,economy.through);

@@ -1,3 +1,6 @@
+import {Texture} from '@babylonjs/core/Materials/Textures/texture';
+import {clonePreviewMaterial} from './building-assets';
+import {buildingPlan,recipeFor} from './building-plan';
 import {it,expect,vi} from 'vitest';
 import {NullEngine} from '@babylonjs/core/Engines/nullEngine';
 import {Scene} from '@babylonjs/core/scene';
@@ -8,7 +11,7 @@ import {InstancedMesh} from '@babylonjs/core/Meshes/instancedMesh';
 import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {Ray} from '@babylonjs/core/Culling/ray';
 import {Vector3} from '@babylonjs/core/Maths/math.vector';
-import {instantiateBakedBuilding,loadBakedBuilding} from './building-assets';
+import {bakedPlanKey,instantiateBakedBuilding,loadBakedBuilding} from './building-assets';
 import {SceneLoader} from '@babylonjs/core/Loading/sceneLoader';
 import {encodeBuildingAsset} from './building-asset-format';
 
@@ -95,8 +98,24 @@ it('allows a translucent construction clone without changing existing building i
  const built=new Mesh('built',scene),preview=new Mesh('preview',scene);instantiateBakedBuilding(container,built);instantiateBakedBuilding(container,preview,true);
  const solid=built.getChildMeshes().find(m=>m.getTotalVertices())!,ghost=preview.getChildMeshes().find(m=>m.getTotalVertices())!;
  expect(solid).toBeInstanceOf(InstancedMesh);expect(ghost).not.toBeInstanceOf(InstancedMesh);
- const ghostMaterial=wall.material.clone('ghost')!;ghostMaterial.alpha=.58;ghost.material=ghostMaterial;
+ const ghostMaterial=clonePreviewMaterial(wall.material as StandardMaterial);ghostMaterial.alpha=.58;ghost.material=ghostMaterial;
  expect(solid.material?.alpha).toBe(1);expect((ghost as Mesh).geometry).toBe(wall.geometry);
  preview.dispose(false,false);expect(solid.isDisposed()).toBe(false);
  }finally{scene.dispose();container.dispose();engine.dispose();}
+});
+
+it('uses the same recipe compatibility for the starter ghost and the confirmed hall',()=>{
+ for(const face of ['+x','-x'] as const){const resolved=recipeFor({visualLayout:{recipe:'town-hall',version:1,quarterTurns:0,entranceFace:face,offset:[0,0]},level:1,targetLevel:null,status:'completed'})!;
+ const plan=buildingPlan({id:'hall',anchor:{cellX:0,cellY:0},cells:[{cellX:0,cellY:0},{cellX:0,cellY:1}],world:{widthCells:512,heightCells:256},...resolved});
+ expect(bakedPlanKey(plan)).toBe(face==='+x'?null:'town-hall-1-finished');expect(plan.entry.normal.x).toBe(face==='+x'?1:-1);}
+});
+
+it('shares ready source textures while keeping preview material changes private',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine);
+ try{const source=new StandardMaterial('dynamic-recipe',scene),texture=new Texture(null,scene),copy=new Texture(null,scene);source.diffuseTexture=texture;
+ const cloned=vi.spyOn(texture,'clone').mockReturnValue(copy),disposed=vi.spyOn(texture,'dispose'),copyDisposed=vi.spyOn(copy,'dispose');
+ const preview=clonePreviewMaterial(source);
+ expect(cloned).toHaveBeenCalled();expect(preview.diffuseTexture).toBe(texture);expect(copyDisposed).toHaveBeenCalledOnce();expect(disposed).not.toHaveBeenCalled();
+ expect(source.alpha).toBe(1);expect(preview.alpha).toBe(.58);preview.dispose(false,false);expect(disposed).not.toHaveBeenCalled();
+ }finally{scene.dispose();engine.dispose();}
 });

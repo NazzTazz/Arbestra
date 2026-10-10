@@ -153,10 +153,11 @@ export class TerrainStore {
   }
   ground(x: number, y: number): { code: number; height: number } | null {
     const { widthCells: w, heightCells: h, chunkSize: s } = this.world;
+    const continuousX=x, continuousY=y;
     x = normalize(Math.round(x), w); y = normalize(Math.round(y), h);
     const chunk = this.entries.get(this.key(x, y))?.chunk;
     let code: number | undefined, elevation: number | undefined;
-    if(chunk?.rc1){const height=rc1Height(chunk,x,y)!;const i=(y-chunk.originCellY+1)*(s+2)+x-chunk.originCellX+1;return {height,code:chunk.terrainCodes[i]??1};}
+    if(chunk?.rc1){const height=rc1Height(chunk,x+(continuousX-Math.round(continuousX)),y+(continuousY-Math.round(continuousY)))!;const i=(y-chunk.originCellY+1)*(s+2)+x-chunk.originCellX+1;return {height,code:chunk.terrainCodes[i]??1};}
     if (chunk) { const index = (y - chunk.originCellY + 1) * (s + 2) + x - chunk.originCellX + 1; code = chunk.terrainCodes[index]; elevation = chunk.elevations[index]; }
     else { const r = this.#snapshot.region, lx = normalize(x - r.originCellX, w), ly = normalize(y - r.originCellY, h);
       if (lx < r.width && ly < r.height) { code = r.terrainCodes[ly * r.width + lx]; elevation = r.elevations[ly * r.width + lx]; } }

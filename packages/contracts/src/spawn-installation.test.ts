@@ -4,7 +4,7 @@ const hall:StarterElement={key:'hall',type:'town-hall',level:1,quarterTurns:0,vi
 describe('persistent starter placement geometry',()=>{
  it('rotates the hall footprint and entrance together across a seam without changing the recipe',()=>{
   const before=JSON.stringify(hall),p=poseStarterElement(hall,{x:0,y:255},1);
-  expect(p.cells).toEqual([{cellX:0,cellY:255,role:'anchor'},{cellX:511,cellY:255,role:'extension'}]);
+  expect(p.cells).toEqual([{cellX:0,cellY:255,role:'anchor'},{cellX:1,cellY:255,role:'extension'}]);
   expect(p.quarterTurns).toBe(1);expect(p.visualLayout?.quarterTurns).toBe(1);expect(JSON.stringify(hall)).toBe(before);
  });
  it('allows an individual element to leave the initial reference plan',()=>{

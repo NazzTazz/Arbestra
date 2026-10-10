@@ -1,3 +1,6 @@
+import {rc1Height} from './rc1-terrain';
+import {Ray} from '@babylonjs/core/Culling/ray';
+import {Vector3} from '@babylonjs/core/Maths/math.vector';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -57,5 +60,13 @@ it('lights RC1 ground from above and preserves terrace heights in the streamed s
  const ground=buildTerrainUnit(scene,chunk,0,0,new WorldSpace(512,256,{cellX:0,cellY:0}),material,material)[0]!;
  expect(ground.getVerticesData('normal')!.filter((_,i)=>i%3===1).every(y=>y>.99)).toBe(true);
  expect(ground.getVerticesData('position')!.filter((_,i)=>i%3===1).every(y=>Math.abs(y-.625)<1e-6)).toBe(true);
+ }finally{scene.dispose();engine.dispose();}
+});
+
+it('continuous RC1 heights and picking agree with rendered slope and terrace triangles at the world corner',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),material=new StandardMaterial('test',scene);
+ try{const chunk:TerrainChunk={chunkX:15,chunkY:7,originCellX:480,originCellY:224,terrainCodes:Array(34**2).fill(1),elevations:Array(34**2).fill(25),features:[],occupiedCells:[],rc1:{stride:65,heights:Array.from({length:65**2},(_,i)=>1+(i%65)*.04+Math.floor(i/65)*.02),water:Array(65**2).fill(-1),terraces:[{cellX:511,cellY:255,height:4}]}};
+ const space=new WorldSpace(512,256,{cellX:511,cellY:255});const meshes=buildTerrainUnit(scene,chunk,28,28,space,material,material);for(const m of meshes)m.computeWorldMatrix(true);
+ for(const [x,y]of [[510.25,254.2],[510.49,255],[510.51,255],[511.49,255.49]]){const point=space.project({cellX:x!,cellY:y!});const hit=scene.pickWithRay(new Ray(new Vector3(point.x,30,point.z),new Vector3(0,-1,0)),m=>m.name==='rc1-ground-unit');expect(hit?.hit).toBe(true);expect(hit!.pickedPoint!.y).toBeCloseTo(rc1Height(chunk,x!,y!)!,5);}
  }finally{scene.dispose();engine.dispose();}
 });

@@ -34,3 +34,7 @@ export * from './spawn-installation.js';
 export * from './rc1-runtime.js';
 
 export * from './rc1-field.js';
+
+export * from './building-footprint.js';
+
+export * from './deposit-range.js';

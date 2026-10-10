@@ -1,3 +1,4 @@
+import {withinDepositRange} from '@arbestra/contracts';
 import { sql, type Transaction } from 'kysely';
 import type { DepositDetails, Extraction, StoneDeposit } from '@arbestra/contracts';
 import type { TravelCell } from '@arbestra/contracts';
@@ -34,7 +35,7 @@ async function isWithinVillageRange(tx: Transaction<Database>, village: Extracti
     .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
     .where('worldCellOccupancies.worldId', '=', village.worldId).where('buildings.villageId', '=', village.villageId)
     .where('buildings.status', '=', 'completed').where('worldCellOccupancies.pendingExpansionId', 'is', null).execute();
-  return cells.some((cell) => toroidalChebyshev(cell.cellX, cell.cellY, cellX, cellY, village.widthCells, village.heightCells) <= 8)
+  return withinDepositRange(cells,{cellX,cellY},village)
     || await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, { cellX, cellY });
 }
 

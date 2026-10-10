@@ -85,7 +85,7 @@ describe('RC1 terrain diagnostic substrate', () => {
   it('intersects the rotated rock surface through a torus seam; rotation follows actual surfaces', () => {
     const data = flat(); data.stoneSites = [{ id: 1, x: 511.8, y: 10, rocks: [{ x: 511.8, y: 10, elevation: .75, width: .4, depth: 2, height: 1, rotation: Math.PI / 4, shade: 1 }] }];
     expect(createSpawnTerrainInspector(data)({ x: 0, y: 10 }, footprint, 0, [], false).reasons).toContain('rock');
-    expect(spawnSurfacesAt([{ x: -4, y: 2, halfWidth: .25, halfHeight: .5 }], { x: 100, y: 50 }, 1)).toEqual([{ x: 98, y: 46, halfWidth: .5, halfHeight: .25 }]);
+    expect(spawnSurfacesAt([{ x: -4, y: 2, halfWidth: .25, halfHeight: .5 }], { x: 100, y: 50 }, 1)).toEqual([{ x: 102, y: 54, halfWidth: .5, halfHeight: .25 }]);
   });
   it('does not under-size the outcrop profile on the inner torus relative to its rendered support', () => {
     const data = flat(); data.stoneSites = [{ id: 1, x: 100, y: 0, rocks: [{ x: 100, y: 0, elevation: .75, width: 2, depth: 1, height: 1, rotation: 0, shade: 1 }] }];

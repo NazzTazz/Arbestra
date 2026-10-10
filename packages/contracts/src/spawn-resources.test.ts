@@ -9,7 +9,7 @@ function candidate(x: number, y: number, path: Array<{ x: number; y: number }>, 
 }
 const sites = [
   candidate(11, 0, [{ x: 10.4375, y: 0 }]),
-  candidate(0, 20.5625, [{ x: 0, y: 20 }]),
+  candidate(0, 16, [{ x: 2.28125, y: 0 },{ x: 2.28125, y: 15.4375 },{ x: 0, y: 15.4375 }]),
   candidate(-21.5625, 0, [{ x: -21, y: 0 }]),
   candidate(0, -40.5625, [{ x: 0, y: -40 }]),
   candidate(4, 4, [{ x: 0, y: 4 }, { x: 3.4375, y: 4 }], 'wood'),
@@ -75,7 +75,7 @@ describe('RC1 read-only resource packing', () => {
     // Its route is >15, so use a nearby wood access crossing the trap instead.
     const shortWood = candidate(11, 3, [{ x: 0, y: 1.2 }, { x: 11, y: 1.2 }, { x: 11, y: 2.4375 }], 'wood');
     expect(spawnPathLength(routedWood.access.path, 512, 256)).toBeGreaterThan(15);
-    const safeMini = candidate(0, 19.5625, [{ x: 0, y: 19 }]);
+    const safeMini = candidate(0, 15, [{ x: 0, y: 14.4375 }]);
     const result = planSpawnResources(input({ candidates: [trap, sites[0]!, safeMini, sites[2]!, sites[3]!, shortWood, sites[5]!], maxVisited: 100 }));
     expect(result.status).toBe('planned'); expect(result.supplements.some(c => c.surface.x === trap.surface.x)).toBe(false);
   });

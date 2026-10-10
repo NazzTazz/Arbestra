@@ -5,6 +5,8 @@
 Mise à jour : 10 octobre 2026. Base relue : `main`, commit `06837b9`.
 Statut : **arbitrages produit consolidés le 10 octobre 2026 — arrivée jouable en cours**. Parcours, qualification, terrassement, voisinage, démarrage économique, présentation climatique et dotations définis ci-dessous. Les conventions d'implémentation complètent les décisions produit sans introduire de mécanique supplémentaire. Ce statut qualifie la cible, pas une livraison jouable : aucun monde opérationnel n'est ouvert. L'état réellement réalisé et ses limites sont dans [le suivi atlas](IMPLEMENTATION-ATLAS-RC1.md).
 
+**Portée d’exploitation validée le 10 octobre 2026 : 16 cases** depuis une cellule d’emprise de bâtiment terminé (distance de Chebyshev torique historique), pour le bois et la pierre, avec trajet praticable obligatoire. Cette règle commune remplace 8 cases ; aucune exemption propre aux ressources du starter. Les gros gisements éloignés peuvent demander de développer le village vers eux. Le rayon du disque de diagnostic reste 8 cases.
+
 ## 1. Résultat joueur et périmètre
 
 Dans cette spec, « centre-ville » désigne l'hôtel de ville du starter-kit (`town-hall`). Sa pose réussie est le fait générateur de l'installation du village et du démarrage de son économie.

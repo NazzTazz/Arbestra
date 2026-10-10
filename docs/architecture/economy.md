@@ -1,5 +1,7 @@
 # Économie
 
+Décision du 10 octobre 2026 : portée commune bois/pierre portée à **16 cases** depuis les cellules de bâtiments terminés (Chebyshev torique), sans exemption starter ; accès RC1 sec et praticable requis. Le planificateur des mini-gisements et les détails/commandes utilisent `withinDepositRange`. [Preuves et limites RC1](../IMPLEMENTATION-INSTALLATION-RC1.md).
+
 ## Marché Oracle (034)
 
 L’hôtel de ville niveau 2 ouvre le marché : amélioration à 500 bois d’œuvre + 120 pierres taillées, 600 secondes, sans nouvelle emprise. Couchages et services existants restent disponibles pendant cette amélioration. Le troc Oracle livre en 600 secondes, sans habitants, sans annulation après confirmation et sans capacité globale limitée. Catalogue `oracle_market_resources` : bois/pierre bruts valeur 1, bois d’œuvre/pierre taillée 1,5, carotte 0,25. Réception = floor(quantité × valeur offerte × 0,70 / valeur demandée), calcul bigint exact ; devis recalculé serveur, attendu confirmé par le client. Stocks débités au départ, résultats figés et crédités une fois à l’échéance. Demande et reçu sont réunis dans `market_exchanges` avec unicité monde/village/commande ; livraison intercalée dans la réconciliation, worker `market.deliver` acquitte uniquement sa tâche. Aucun code ressource fourni par le client n’est négociable sans inscription au catalogue serveur. Anneaux (`rings`) : stock nul initial, émission et achats militaires futurs. [Spec Marché](../SPEC-MARCHE-ORACLE.md) et handoff précisent preuves et limites du prototype.

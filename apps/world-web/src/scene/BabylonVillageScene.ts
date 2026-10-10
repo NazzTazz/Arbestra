@@ -11,7 +11,7 @@ import { VillageWorkers } from './village-workers';
 import { TimberThatch } from './timber-thatch';
 import {barracksPreviewPlacement,buildBarracks} from './barracks-factory';
 import { buildUniversityMonuments } from './university-factory';
-import { loadBakedBuilding, buildingAssets } from './building-assets';
+import { clonePreviewMaterial, bakedPlanKey, loadBakedBuilding, buildingAssets } from './building-assets';
 import {buildInfrastructurePresentation} from './infrastructure-factory';
 import {InfrastructureRenderer,type InfrastructureGesture} from './infrastructure-renderer';
 import {selectEquipment} from './equipment-selection';
@@ -75,7 +75,7 @@ import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
 
 const TOWN_HALL_DOOR_Z = -1.1;
-import { entranceConnector, planForSite, resolveMurets, transformPoint, type BuildingPlan } from './building-plan';
+import { buildingPlan, recipeFor, entranceConnector, planForSite, resolveMurets, transformPoint, type BuildingPlan } from './building-plan';
 const TILE_SIZE = 2.5;
 
 export type TerrainStatus = 'loading' | 'retry' | null;
@@ -126,6 +126,8 @@ export class BabylonVillageScene {
   #timberThatch: TimberThatch | null = null;
   #preparing = false;
   #starterGhost: StarterGhost | null = null;
+  #ghostRequest: Parameters<BabylonVillageScene['updateConstructionGhost']> | null = null;
+  #areaRequest: Parameters<BabylonVillageScene['updateAreaSelection']> | null = null;
   #starterManual: (()=>void) | null = null;
   #constructionGhost: Mesh | null = null;
   #constructionGhostCode: string | null = null;
@@ -1077,8 +1079,8 @@ export class BabylonVillageScene {
     const bounds = this.#canvas.getBoundingClientRect();
     const ray = this.#scene.createPickingRay(event.clientX - bounds.left, event.clientY - bounds.top, Matrix.Identity(), this.#camera);
     if (Math.abs(ray.direction.y) < 0.00001) return null;
-    let distance = (0.075 - ray.origin.y) / ray.direction.y;
-    if(this.#state?.world.generationVersion===3&&this.#space&&this.#store)for(let i=0;i<6;i++){const c=this.#space.inverse(ray.origin.x+ray.direction.x*distance,ray.origin.z+ray.direction.z*distance),ground=this.#store.ground(c.cellX,c.cellY);if(!ground)return null;const next=(ground.height-ray.origin.y)/ray.direction.y;if(Math.abs(next-distance)<.002)break;distance=next;}
+    const distance = (0.075 - ray.origin.y) / ray.direction.y;
+    if(this.#state?.world.generationVersion===3){const hit=this.#scene.pickWithRay(ray,mesh=>mesh.name==='rc1-ground-unit'&&mesh.isEnabled());return hit?.pickedPoint?this.#space?.inverse(hit.pickedPoint.x,hit.pickedPoint.z)??null:null;}
     if (distance < 0) return null;
     return this.#space?.inverse(ray.origin.x + ray.direction.x * distance, ray.origin.z + ray.direction.z * distance) ?? null;
   }
@@ -1214,6 +1216,7 @@ export class BabylonVillageScene {
   }
 
   public updateAreaSelection(enabled: boolean, preview: AreaPreview | null, invalid: boolean): void {
+    this.#areaRequest=[enabled,preview,invalid];
     this.#selectingArea = enabled;
     if(!this.#space)return;
     const signature = JSON.stringify([preview, invalid]);
@@ -1239,6 +1242,7 @@ export class BabylonVillageScene {
   public setPreparation(value:boolean){this.#preparing=value;}
   public setStarterGhost(value:StarterGhost|null,onManual:(()=>void)|null){this.#starterGhost=value;this.#starterManual=onManual;}
   public updateConstructionGhost(code: string | null, preview: AreaPreview | null, _invalid: boolean,quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone'): void {
+    this.#ghostRequest=[code,preview,_invalid,quarterTurns,houseVariant];
     if (!code || !preview?.cells.length || !this.#space || this.#mode !== 'village') {
       this.#constructionGhost?.setEnabled(false); return;
     }
@@ -1268,7 +1272,7 @@ export class BabylonVillageScene {
           if(!(mesh.material instanceof StandardMaterial))continue;
           const source=mesh.material;
           let material=clones.get(source);
-          if(!material){material=source.clone(`ghost-${source.name}`);material.alpha=.58;material.transparencyMode=StandardMaterial.MATERIAL_ALPHABLEND;material.backFaceCulling=true;clones.set(source,material);}
+          if(!material){material=clonePreviewMaterial(source);clones.set(source,material);}
           mesh.material=material;
         }
         this.#ghostMaterials=[...clones.values()];
@@ -1283,8 +1287,13 @@ export class BabylonVillageScene {
           if(element.type==='garden'){
             const patch=MeshBuilder.CreateGround('starter-garden',{width:TILE_SIZE*.92,height:TILE_SIZE*.92},this.#scene);patch.parent=child;patch.position.y=.04;patch.material=this.#material('starter-garden-soil','#776343');this.#ghostOwnMaterials.add(patch.material);return Promise.resolve();
           }
-          const variant=element.visualLayout?.recipe==='log-house'?'dwelling-logs':element.visualLayout?.recipe==='beam-house'?'dwelling-beams':element.type;
-          return loadBakedBuilding(child,variant+'-'+element.level+'-finished',false,true);
+          const resolved=recipeFor({...posed,status:'completed',targetLevel:null});
+          if(!resolved)return Promise.resolve();
+          const plan=buildingPlan({id:element.key,anchor:posed.cells.find(c=>c.role==='anchor')!,cells:posed.cells,world:this.#state!.world,...resolved,quarterTurns:posed.quarterTurns,offset:posed.visualLayout?.offset??[0,0]});
+          const key=bakedPlanKey(plan);
+          if(key)return loadBakedBuilding(child,key,false,true);
+          this.#timberThatch??=new TimberThatch(this.#scene);this.#timberThatch.build(child,plan);
+          return Promise.resolve();
         });
         void Promise.all(loads).then(style).catch(error=>console.error('Starter preview failed',error));
       } else if(baked)void loadBakedBuilding(root,assetKey,false,true).then(style).catch(error=>console.error('Building preview failed',error));else style();
@@ -1296,10 +1305,10 @@ export class BabylonVillageScene {
     const anchor=starter?this.#space.projectFrom({cellX:starter.point.x,cellY:starter.point.y},this.#villageAnchor):null;
     const starterHeight=starter?.referenceHeight===undefined?this.#store?.ground(starter?.point.x??0,starter?.point.y??0)?.height:starter.referenceHeight*TILE_SIZE;
     this.#constructionGhost!.position.set(anchor?.x??x, (starter?starterHeight??ground:ground) + .03, anchor?.z??z);
-    this.#constructionGhost!.rotation.y=(starter?-starter.quarterTurns:quarterTurns)*Math.PI/2;
-    if(starter)for(const child of this.#constructionGhost!.getChildren())if(child instanceof BabylonMesh&&typeof child.metadata?.starterBaseTurns==='number')child.rotation.y=(child.metadata.starterBaseTurns+2*starter.quarterTurns)*Math.PI/2;
+    this.#constructionGhost!.rotation.y=(starter?starter.quarterTurns:quarterTurns)*Math.PI/2;
+    if(starter)for(const child of this.#constructionGhost!.getChildren())if(child instanceof BabylonMesh&&typeof child.metadata?.starterBaseTurns==='number')child.rotation.y=(child.metadata.starterBaseTurns)*Math.PI/2;
     this.#constructionGhost!.setEnabled(true);
-    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.constructionGhost=JSON.stringify({point:starter?.point,turns:starter?.quarterTurns,models:this.#constructionGhost!.getChildMeshes().filter(m=>m.getTotalVertices()>4).length});
+    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.constructionGhost=JSON.stringify({point:starter?.point,turns:starter?.quarterTurns,position:this.#constructionGhost!.position.asArray(),models:this.#constructionGhost!.getChildMeshes().filter(m=>m.getTotalVertices()>4).length});
   }
 
   public updateHarvestPending(cells: Cell[]): void {
@@ -1939,10 +1948,8 @@ export class BabylonVillageScene {
       this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
       return this.#registerStructure(body);
     }
-    const code=plan.recipe.id==='town-hall'?'town-hall':plan.recipe.id==='log-house'?'dwelling-logs':plan.recipe.id==='beam-house'?'dwelling-beams':'dwelling';
-    const key=`${code}-${plan.recipe.levels}-${plan.phase}`;
-    if(buildingAssets[key]&&plan.recipe.entrance.face===(code==='town-hall'?'-x':'-z')&&!plan.murets.length
-      &&(plan.phase!=='works'||plan.sourceLevels===Math.max(0,plan.recipe.levels-1)))this.#loadBuildingAsset(body,key);
+    const key=bakedPlanKey(plan);
+    if(key)this.#loadBuildingAsset(body,key);
     else {this.#timberThatch??=new TimberThatch(this.#scene);buildProceduralBuildingLod(body,root=>this.#timberThatch!.build(root,plan),this.#timberThatch);}
     this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
     return this.#registerStructure(body);
@@ -2449,6 +2456,9 @@ export class BabylonVillageScene {
     if (this.#projectionVersion !== this.#renderer.version) {
       this.#projectionVersion = this.#renderer.version;
       this.#workers.reproject();
+      // Streaming and origin changes can arrive after the pointer stopped moving.
+      if(this.#ghostRequest)this.updateConstructionGhost(...this.#ghostRequest);
+      if(this.#areaRequest){this.#lastPreviewSignature='';this.updateAreaSelection(...this.#areaRequest);}
       this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
     }
     this.#streamMs.push(performance.now() - started); if (this.#streamMs.length > 3600) this.#streamMs.shift();

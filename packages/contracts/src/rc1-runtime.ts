@@ -10,3 +10,5 @@ export const Rc1FeatureGeometrySchema=Type.Object({
  rocks:Type.Array(Type.Object({x:Type.Number(),y:Type.Number(),elevation:Type.Number(),width:Type.Number(),depth:Type.Number(),height:Type.Number(),rotation:Type.Number()})),
 });
 export type Rc1FeatureGeometry=Static<typeof Rc1FeatureGeometrySchema>;
+
+export const RC1_WORLD = Object.freeze({widthCells:512,heightCells:256,chunkSize:32,altitudeCellRatio:.25});

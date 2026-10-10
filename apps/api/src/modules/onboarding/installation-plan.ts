@@ -1,5 +1,5 @@
 import {projectRc1Chunks,type Rc1ChunkProjection} from './rc1-chunks.js';
-import {createSpawnTerrainInspector,createSpawnSurfaceIndex,buildSpawnAccessNetwork,canWalkSpawnSegment,planSpawnResources,planSpawnCleaning,spawnSurfacesAt,spawnDelta,starterElementSurfaces,type SpawnAccessRoute,type SpawnPoseRequest,type SpawnResourceSupplement,type SpawnCleaningPlan,type SpawnTerrainResult,type SpawnNaturalResource,type SpawnMap} from '@arbestra/contracts';
+import {createSpawnTerrainInspector,createSpawnSurfaceIndex,buildSpawnAccessNetwork,canWalkSpawnSegment,planSpawnResources,planSpawnCleaning,spawnSurfacesAt,spawnDelta,starterElementSurfaces,poseStarterElement,type SpawnAccessRoute,type SpawnPoseRequest,type SpawnResourceSupplement,type SpawnCleaningPlan,type SpawnTerrainResult,type SpawnNaturalResource,type SpawnMap} from '@arbestra/contracts';
 import {STARTER_KIT} from './starter-kit.js';
 import {starterTownHallExits} from './spawn-resource-calculation.js';
 import {rc1ResourceGroups,editedRc1Field,type Rc1ResourceState} from './rc1-field.js';
@@ -16,6 +16,8 @@ export function planInstallation(map:SpawnMap,input:SpawnPoseRequest,spatial:Spa
  if(!terrain.terrainCompatible)return {...result,status:'terrain-blocked',supplements:[]};
  const reference=spawnSurfacesAt(map.surfaces,input.point,input.quarterTurns),posed=spawnSurfacesAt(actual,input.point,input.quarterTurns);
  const blocked=createSpawnSurfaceIndex([...spatial.walkBlockedSurfaces,...posed],512,256),under=createSpawnSurfaceIndex(posed,512,256),exclude=createSpawnSurfaceIndex([...reference,...spatial.protectedSurfaces],512,256);
+ const hallCells=poseStarterElement(STARTER_KIT.elements.find(e=>e.type==='town-hall')!,input.point,input.quarterTurns).cells;
+ const hall=createSpawnSurfaceIndex(hallCells.map(c=>({x:c.cellX,y:c.cellY,halfWidth:.5,halfHeight:.5})),512,256);
  const samples=new Map<string,ReturnType<typeof sample>>();
  function sample(x:number,y:number):{elevation:number;dry:boolean;blocked:boolean}{const v=field.sample(x,y),s={x,y,halfWidth:0,halfHeight:0};return{elevation:under(s)?terrain.referenceHeight:v.elevation,dry:v.elevation>Math.max(0,v.surface)+1e-6,blocked:blocked(s)||field.intersectsRock(s)};}
  const walking={width:512,height:256,sample:(x:number,y:number)=>{const k=`${x}:${y}`,old=samples.get(k);if(old)return old;const v=sample(x,y);samples.set(k,v);return v;}};
@@ -44,7 +46,7 @@ export function planInstallation(map:SpawnMap,input:SpawnPoseRequest,spatial:Spa
   stoneKnown=natural.some(r=>r.kind==='stone'&&r.access&&r.remainingAmount>r.reservedAmount&&!r.cleared);return plan;
  };
  let early:ReturnType<typeof planSpawnResources>|undefined;
- const network=buildSpawnAccessNetwork(walking,starterTownHallExits(input.point,input.quarterTurns),40.5625,6000,walkRoutes=>{
+ const network=buildSpawnAccessNetwork(walking,starterTownHallExits(input.point,input.quarterTurns,{...walking,sample:(x,y)=>{const s=walking.sample(x,y);return {...s,blocked:s.blocked&&!hall({x,y,halfWidth:0,halfHeight:0})};}}),40.5625,6000,walkRoutes=>{
   if(walkRoutes.length%512||walkRoutes.at(-1)!.length<=20)return false;
   if(potentialStone&&!walkRoutes.some(r=>resourceStates.some(g=>g.kind==='stone'&&!g.cleared&&g.remainingAmount>g.reservedAmount&&g.cellX===r.point.x&&g.cellY===r.point.y)))return false;
   const candidatePlan=evaluate(walkRoutes,false);

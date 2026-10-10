@@ -49,7 +49,7 @@ export function spawnDistance(a: SpawnPoint, b: SpawnPoint, width: number, heigh
   return Math.hypot(spawnDelta(a.x, b.x, width), spawnDelta(a.y, b.y, height));
 }
 export function rotateSpawnPoint(p: SpawnPoint, turns: number): SpawnPoint {
-  switch (wrapClimate(turns, 4)) { case 1: return { x: -p.y, y: p.x }; case 2: return { x: -p.x, y: -p.y }; case 3: return { x: p.y, y: -p.x }; default: return p; }
+  switch (wrapClimate(turns, 4)) { case 1: return { x: p.y, y: -p.x }; case 2: return { x: -p.x, y: -p.y }; case 3: return { x: -p.y, y: p.x }; default: return p; }
 }
 export function spawnSurfacesAt(surfaces: readonly SpawnSurface[], point: SpawnPoint, turns: number): SpawnSurface[] {
   return surfaces.map(s => ({ ...rotateSpawnPoint(s, turns), x: rotateSpawnPoint(s, turns).x + point.x,

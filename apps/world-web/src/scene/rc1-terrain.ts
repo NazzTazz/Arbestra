@@ -1,4 +1,4 @@
-﻿import type {TerrainChunk} from '@arbestra/contracts';
+﻿import {RC1_WORLD,type TerrainChunk} from '@arbestra/contracts';
 import {Mesh} from '@babylonjs/core/Meshes/mesh';
 import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
 import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
@@ -8,7 +8,8 @@ import type {WorldSpace} from './world-space';
 import {TERRAIN_STREAMING} from './terrain-settings';
 export function rc1Height(chunk:Pick<TerrainChunk,'originCellX'|'originCellY'|'rc1'>,x:number,y:number):number|null{
  const p=chunk.rc1;if(!p)return null;
- const cellX=((Math.round(x)%512)+512)%512,cellY=((Math.round(y)%256)+256)%256;
+ const {widthCells:w,heightCells:h}=RC1_WORLD;
+ const cellX=((Math.round(x)%w)+w)%w,cellY=((Math.round(y)%h)+h)%h;
  const terrace=p.terraces.find(t=>t.cellX===cellX&&t.cellY===cellY);if(terrace)return terrace.height*2.5;
  const a=(x-chunk.originCellX+.5)*2,b=(y-chunk.originCellY+.5)*2,ix=Math.max(0,Math.min(p.stride-2,Math.floor(a))),iy=Math.max(0,Math.min(p.stride-2,Math.floor(b))),u=a-ix,v=b-iy;
  const at=(dx:number,dy:number)=>p.heights[(iy+dy)*p.stride+ix+dx]!;

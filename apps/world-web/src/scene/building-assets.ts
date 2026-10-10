@@ -1,3 +1,5 @@
+import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
+import type {BuildingPlan} from './building-plan';
 import '@babylonjs/core/Loading/Plugins/babylonFileLoader';
 import {SceneLoader} from '@babylonjs/core/Loading/sceneLoader';
 import {Mesh} from '@babylonjs/core/Meshes/mesh';
@@ -80,4 +82,22 @@ export async function loadBakedBuilding(parent:Mesh,key:string,withLod=false,clo
       console.warn('Distant building asset unavailable; keeping detailed model',key,error);
     });
   }
+}
+
+/** Both previews and confirmed buildings must match the baked recipe, not just its type. */
+export function bakedPlanKey(plan:BuildingPlan):string|null {
+ const code=plan.recipe.id==='town-hall'?'town-hall':plan.recipe.id==='log-house'?'dwelling-logs':plan.recipe.id==='beam-house'?'dwelling-beams':'dwelling';
+ const key=code+'-'+plan.recipe.levels+'-'+plan.phase;
+ return buildingAssets[key]&&plan.recipe.entrance.face===(code==='town-hall'?'-x':'-z')&&!plan.murets.length
+  &&(plan.phase!=='works'||plan.sourceLevels===Math.max(0,plan.recipe.levels-1))?key:null;
+}
+
+/** A preview owns transparency, while immutable textures stay shared with the recipe. */
+export function clonePreviewMaterial(source:StandardMaterial):StandardMaterial {
+ const material=source.clone('ghost-'+source.name);
+ for(const slot of ['diffuseTexture','ambientTexture','opacityTexture','reflectionTexture','emissiveTexture','specularTexture','bumpTexture','lightmapTexture','refractionTexture'] as const){
+  const clone=material[slot];if(clone&&clone!==source[slot])clone.dispose();material[slot]=source[slot];
+ }
+ material.alpha=.58;material.transparencyMode=StandardMaterial.MATERIAL_ALPHABLEND;material.backFaceCulling=true;
+ return material;
 }

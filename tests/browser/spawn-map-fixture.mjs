@@ -53,6 +53,8 @@ try {
   for (const child of children) child.kill();
   await Promise.all(children.map(child => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise(resolve => child.once('exit', resolve))));
   await db.deleteFrom('populationCohorts').where('worldId', '=', worldId).execute();
+  await db.deleteFrom('woodlandDeposits').where('worldId', '=', worldId).execute();
+  await db.deleteFrom('stoneDeposits').where('worldId', '=', worldId).execute();
   await db.deleteFrom('worlds').where('id', '=', worldId).execute();
   await db.deleteFrom('accounts').where('id', 'in', [accountId, neighborId]).execute();
   await db.destroy();

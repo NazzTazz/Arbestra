@@ -1,3 +1,4 @@
+import {readRc1Ground} from '../worlds/rc1-ground.js';
 import {isDeepStrictEqual} from 'node:util';
 import {sql,type Kysely,type Transaction} from 'kysely';
 import {buildTravelNetwork,prepareInfrastructureEdit,automaticBraziers,pathIntersectsBox,buildingAccesses,emptyInfrastructure,infrastructurePlanSurface,infrastructureSidewalkSurface,subCellKey,wrappedDistance,
@@ -90,6 +91,7 @@ async function validateTransition(tx:Transaction<Database>,snapshot:VillageState
   const world=snapshot.world,a=infrastructurePlanSurface(before,world),b=infrastructurePlanSurface(next,world),changed=[...b].filter(([key,p])=>!isDeepStrictEqual(p,a.get(key))&&(p.manual||a.get(key)?.manual)).map(([,p])=>p);
   const oldSidewalk=infrastructureSidewalkSurface(a,world),sidewalk=[...infrastructureSidewalkSurface(b,world)].filter(([key])=>!oldSidewalk.has(key)).map(([,p])=>({x:(p.x+.5)/2,y:(p.y+.5)/2}));
   const moved=next.equipment.filter(e=>!isDeepStrictEqual(e,before.equipment.find(old=>old.id===e.id)));
+  const ground=world.generationVersion===3?await readRc1Ground(tx,world.id):null;
   const paths=moved.length?[...activePaths(snapshot),...await worldActivePaths(tx,world.id)]:[];
   for(const p of sidewalk)assertInfrastructurePosition(snapshot,p);
   for(const e of moved)if(paths.some(path=>pathIntersectsBox(path,{cellX:e.x/8,cellY:e.y/8},.15,.15,world)))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore ce passage.');
@@ -98,11 +100,14 @@ async function validateTransition(tx:Transaction<Database>,snapshot:VillageState
     .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY']).where('worldCellOccupancies.worldId','=',world.id).where('buildings.villageId','!=',snapshot.village.id).execute();
   const cells=new Set(foreignCells.map(p=>`${p.cellX}:${p.cellY}`));
   const points=[...changed.map(p=>({x:(p.x+.5)/2,y:(p.y+.5)/2})),...sidewalk,...moved];
+  const newSurfaces=[...changed.filter(p=>p.manual&&p.material!=='none').map(p=>({x:(p.x+.5)/2,y:(p.y+.5)/2})),...sidewalk,...moved];
+  if(ground)for(const p of newSurfaces){const half=moved.includes(p as typeof moved[number])?.125:1/32,surface={x:p.x/8,y:p.y/8,halfWidth:half,halfHeight:half};
+    if(ground.field.surfaceReason(surface,null,.0625)||ground.field.intersectsTree(surface))throw new HttpError(409,'INCOMPATIBLE_TERRAIN','Cet aménagement rencontre un obstacle naturel.');}
   for(const p of points)if(cells.has(`${Math.floor((p.x+4)/8)%world.widthCells}:${Math.floor((p.y+4)/8)%world.heightCells}`))throw new HttpError(409,'FOREIGN_INFRASTRUCTURE','Cet emplacement appartient à un autre village.');
   for(const {plan}of foreign){const occupied=infrastructurePlanSurface(plan,world),foreignSidewalk=infrastructureSidewalkSurface(occupied,world);for(const p of points)if(occupied.get(`${Math.floor(p.x*2)}:${Math.floor(p.y*2)}`)?.manual||foreignSidewalk.has(`${Math.floor(p.x*2)}:${Math.floor(p.y*2)}`)||plan.equipment.some(e=>Math.abs(wrappedDistance(e.x,p.x,world.widthCells*8))<2&&Math.abs(wrappedDistance(e.y,p.y,world.heightCells*8))<2))throw new HttpError(409,'FOREIGN_INFRASTRUCTURE','Un aménagement d’un autre village occupe cet emplacement.');}
   if(moved.length){
     const navigation=await readNavigationInfrastructure(tx,{worldId:world.id,villageId:snapshot.village.id,anchorCellX:snapshot.village.anchorCellX,anchorCellY:snapshot.village.anchorCellY,...world},next);
-    const reachable=new Set(buildTravelNetwork({...snapshot,infrastructure:navigation}).filter(r=>r.kind==='building').map(r=>r.id));
+    const reachable=new Set(buildTravelNetwork({...snapshot,infrastructure:navigation},[],ground?.navigation).filter(r=>r.kind==='building').map(r=>r.id));
     if(snapshot.travelRoutes.some(r=>r.kind==='building'&&!reachable.has(r.id)))throw new HttpError(409,'ACCESS_BLOCKED','Cet obstacle rendrait l’accès d’un bâtiment impraticable.');
   }
 }

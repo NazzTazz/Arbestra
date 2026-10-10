@@ -1,6 +1,69 @@
 ﻿# Installation RC1 — candidate de contre-recette
 
-État au 10 octobre 2026 : **implémentée / à valider**, avant ouverture d’un monde réel. Cette tranche prolonge l’[atlas](IMPLEMENTATION-ATLAS-RC1.md) et la [spec](SPEC-CARTE-SPAWN-RC1.md#7-parcours-suivant--starter-kit-et-terrassement). Elle comprend aussi le travail atlas et le starter compact auparavant non committés depuis `06837b9`.
+État au 10 octobre 2026 : **consolidation implémentée / intégrée, bloquée pour validation produit alpha** par la stabilité sous verrou décrite ci-dessous. Base installation/atlas `8903402`. Cette tranche prolonge l’[atlas](IMPLEMENTATION-ATLAS-RC1.md) et la [spec](SPEC-CARTE-SPAWN-RC1.md#7-parcours-suivant--starter-kit-et-terrassement). Les sections historiques restent séparées des preuves actuelles.
+
+## Consolidation alpha — candidate issue de la base 8903402
+
+Décision produit du 10 octobre : RC1 512 × 256 retenu pour le parcours alpha, ouverture visée le 11 au soir sous validation explicite. La consolidation couvre atlas, installation, construction et première exploitation bois/pierre. Les preuves précédentes restent historiques.
+
+| Capacité | Existant et consommateurs | Raccord nécessaire |
+| --- | --- | --- |
+| Terrain | createSpawnTerrainField, editedRc1Field ; workers, readRc1Ground, chunks | Champ fin commun aux autorisations ordinaires ; identité et dimensions vérifiées |
+| Emprises | poseStarterElement, spawnSurfacesAt, sélections de construction | Convention de rotation commune et contexte dimensionnel ; mêmes cellules pour pose et aperçu |
+| Occupations / portée | worldCellOccupancies, candidates, assertBuildable, assertNoInfrastructure | Préparer les lectures une fois par emprise ; revalidation transactionnelle conservée |
+| Portes | buildingAccesses, starterTownHallExits, recettes visuelles | Calculer les accès depuis le bâtiment déjà transformé ; recette compatible pour le fantôme |
+| Navigation | buildTravelNetwork, refineTravelRoute, canWalkSpawnSegment | Départ/approche identiques au diagnostic ; terrain fin et dimensions dans les adaptateurs économiques |
+| Rendu | TerrainStore, rc1Height, terrain-unit, BabylonVillageScene | Hauteur continue distincte de l’index ; terrasses et mises à jour multi-client |
+| Visibilité | readTerrain, knownGeography, atlas public | Politique préparatoire distincte de preview ; aucune quantité/réservation/occupation étrangère dynamique |
+| État courant | App.applySnapshot, SpawnPlacement | Diagnostic alimenté par le dernier snapshot accepté, réponses anciennes refusées |
+
+
+## Preuves de consolidation du 10 octobre (base auditée : 8903402)
+
+Les assertions précédentes sur la pose ne valaient pas validation de la cohérence spatiale. Reproductions réellement rouges avant correction : six orientations d’accès à 90°/270°, interpolation du relief arrondie, construction payante réussie contre la roche en (194,251), avec débit de bois. Les corrections ont ensuite passé leurs régressions. Aucun changement du JSON approuvé : SHA256 fichier `de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4` ; checksum canonique conservé séparément.
+
+Capacités effectivement raccordées :
+
+- `transformFootprint` : `poseStarterElement` et `fixedBuildingFootprint`. Ce dernier sert les sélections client Université/tailleur et les commandes/contrôles serveur correspondants. `rotateSpawnPoint` porte également la convention de `buildingAccesses` ; le planificateur de dotation pose maintenant la vraie définition du HDV avant d’en lire les portes.
+- `withinBuildReach` : pose restante du kit et contrôle d’emprise payante ; sources éligibles chargées par chaque politique. `withinDepositRange` : détails/commande d’exploitation et admissibilité des mini-gisements de dotation. **16 cases** validées par Tristan, distance de Chebyshev depuis les cellules terminées ; aucune exemption starter. Le parcours reste obligatoire et les gros gisements peuvent demander une extension du village.
+- `assertBuildableCells` prépare terrain fin, occupations, protections et emprises terminées une fois pour la surface contrôlée. Ses consommateurs sont pose ordinaire simple, surface/composition, extension de Jardin et agrandissement du campus. Les frais et délais ordinaires restent appliqués. Le terrain détaillé participe aussi à `canBuild` et aux transitions d’infrastructure ; supprimer un aménagement n’exige pas de rendre son ancien sol constructible.
+- `readRc1Ground` conserve le substrat vérifié, relit les modifications locales et fournit le terrain de navigation aux trajets de village, à l’exploitation et au contrôle d’accès d’infrastructure. Samples et segments sont mémorisés dans le contexte de calcul ; la projection entière n’autorise aucune emprise fine. Une marche à la sortie d’une terrasse reste bloquante pour le piéton.
+- `recipeFor` / `bakedPlanKey` : bâtiment confirmé et fantôme. Le HDV à porte +X utilise sa recette réelle. `clonePreviewMaterial` conserve les textures sources en lecture seule : cloner une texture dynamique Babylon créait une texture vide et rendait le HDV fantôme invisible. Régression et capture navigateur après correction. Les aperçus se reprojettent lorsque le terrain streamé arrive.
+- Hauteur continue séparée de l’indexation dans `TerrainStore` ; picking RC1 sur les triangles réellement rendus. Synchronisation du dernier snapshot accepté entre App et le diagnostic du kit, avec refus des réponses plus anciennes. Helper UUID existant réutilisé.
+
+Lecture d’arrivée : compte authentifié, monde RC1 ouvert/prêt, géographie et modifications locales publiques ; dépôts sérialisés à null, occupations dynamiques vides. Le privilège de preview opérateur n’est plus utilisé. La recette HTTP avec un autre compte contrôle les champs effectivement sérialisés.
+
+Recette navigateur achevée sur copie jetable, API compilée et frontend e2e : atlas → choix (140,20) → Construire, fantôme complet visible, rotation R, HDV manuel, Population/Exploitation déverrouillés ; maison ordinaire (142,20) à 25 bois ; retour au kit avec case occupée rouge ; Jardin (138,19) gratuit ; rechargement avec trois éléments restants et 1 975 bois. Le parcours de pose a réellement utilisé HTTP sur 192.168.1.4, `isSecureContext=false` et `crypto.randomUUID===undefined`. Un second client a vu passer les terrasses de [] aux deux cellules du HDV, sans occupation privée exposée. Captures relues, aucune erreur JS applicative relevée. Navigateurs, proxy LAN et fixture dédiés fermés/nettoyés ; la démo antérieure est conservée.
+
+La boucle économique est prouvée par les commandes serveur réelles sur monde isolé : installation, construction payante, départ bois/pierre, réservations/cohortes et trajets, puis réconciliation à la borne de retour des deux missions. Résultat : +100 bois et +100 pierre, missions terminées. Le temps est avancé dans la fixture ; ce n’est pas une attente chronométrée de dix minutes dans le navigateur.
+
+Mesures locales (Windows, PostgreSQL test partagé, démo antérieure conservée) : première copie non projetée 10 288 ms ; installation suivante 18 645 ms ; workers 7 294 / 6 174 ms. Concurrent ciblant le même site : attente du verrou spatial observée dans PostgreSQL, puis refus après revalidation, durée totale 12 707 ms. Cette durée comprend attente et traitement, ce n’est pas une mesure pure du verrou. En présence de compilation et de deux clients graphiques : 7 998 / 42 395 ms, workers 2 086 / 14 419 ms, opération concurrente 48 095 ms. Ne pas comparer ces séries comme un benchmark avant/après. La projection immuable n’explique pas à elle seule le coût : la seconde installation est plus lente. Aucun déplacement aveugle de la projection ou relâchement des verrous n’est livré.
+
+Le scénario contre la roche, étendu à la construction composée et à l’équipement, a dépassé 120 s avant mémorisation des segments. Il passe ensuite en 55 145 ms (durée du scénario entier). La reprise manuelle a rencontré à plusieurs reprises le lock_timeout de cinq secondes sur le village, puis passe seule en 98 925 ms sous compilation concurrente. L’observation PostgreSQL de cette dernière exécution montre une transaction attendant la ligne village détenue pendant les lectures spatiales ; elle n’attribue pas rétrospectivement les deux échecs à un processus précis. Le délai de verrou configuré n’a pas été augmenté pour faire passer la preuve. Ces résultats ne démontrent pas une latence acceptable ni l’absence de refus intermittent.
+
+### Matrice de preuve de cette consolidation
+
+| Frontière | Preuve réellement exécutée | Portée / réserve |
+| --- | --- | --- |
+| Roche (194,251) après HDV (189,246) | Commandes simple, surface et équipement refusées ; stocks, occupations, bâtiments, notifications et reçus inchangés | Cas canonique sur l’artefact signé |
+| Rotations / coutures | 12 cas portes HDV aux quatre tours, X/Y/coin ; tests trajet cardinal, emprises et portée aux coutures | Pas quatre installations navigateur complètes aux coutures |
+| Terrasse / navigation | Lèvre admissible au terrassement mais refusée entre porte et nœud extérieur ; obstacles intermédiaires dans les segments | Kit et piéton conservent deux politiques distinctes |
+| Picking | Hauteur continue et rayons contre triangles sur pente et terrasse ; recette visuelle de pose | Pas campagne exhaustive de toutes les inclinaisons de caméra |
+| État / reprise | Navigateur HDV → maison payante → refus rouge sur occupation → élément gratuit → rechargement | Réponses anciennes filtrées par borne serveur ; pas de réseau artificiellement réordonné en navigateur |
+| Aperçu devenu périmé | Deux installations visent le même point ; barrière, attente PostgreSQL, seconde revalidation refusée sans village résiduel | Occupation changée dans le monde, pas simple lancement de deux promesses |
+| Terrain multi-client | Second client relit les deux terrasses HDV après pose | Lecture réellement observée ; pas deux caméras animées comparées pixel par pixel |
+| Arrivée / LAN | HTTP préparatoire d’un autre compte : aucun stock/réservation/occupation ; pose en HTTP LAN sans crypto.randomUUID | Géographie et terrasses publiques conservées |
+| Économie | Commandes bois et mini-pierre, réservation, retour et crédits +100 / +100 | Horloge de retour avancée dans la transaction de test |
+
+Build racine et lint racine terminés code 0. Les six suites finales géométrie/navigation/portée totalisent 61 tests verts ; les suites rendu, UUID, terrain, sélection et dotation ont également passé dans des processus distincts. Ne pas additionner leurs passages répétés. Dernière campagne DB : **8 passent / 1 échoue**, 210,85 s ; reprise du kit encore refusée par lock_timeout village. Contre-exemple roche étendu : 27 480 ms. Première installation 7 345 ms, suivante 22 101 ms, workers 2 412 / 5 023 ms ; opération concurrente 16 628 ms au total. Ce dernier passage ne remplace pas un échec par un ancien résultat vert. Pas de suite globale réinitialisant la base partagée.
+
+### Verdict et suite bornée
+
+**Candidate implémentée et intégrée, bloquée pour la validation produit alpha par des points identifiés.** Le parcours nominal est démontré ; la robustesse et la latence sous contention ne sont pas établies. Priorité avant feu vert : profiler séparément lecture spatiale, planification et snapshot sous verrou sur une fixture avec worker de la même candidate, reproduire l’attente village → pose restante, puis réduire la durée de rétention sans déplacer la borne économique ni supprimer la revalidation dynamique. Les essais à 5 s en échec restent une réserve, même après un passage vert. Cette réserve est technique et ne demande aucun changement de règle de jeu.
+
+Améliorations différables par rapport au premier bois/pierre : fidélité des volumes rocheux, excavation visuelle des infrastructures et navigation scientifique/lointaine. Le premier parcours économique utilise le champ RC1 ; cette livraison ne certifie pas tous les appelants historiques ni tous les autres parcours du jeu. La suite complète DB avec reset n’a pas été lancée pour préserver la démo existante. Aucune ouverture publique, migration de développement ou opération prod/staging.
+
+Les sections suivantes décrivent la candidate précédente et ses preuves historiques.
 
 ## Parcours et réemploi
 
