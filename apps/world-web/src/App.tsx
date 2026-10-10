@@ -228,13 +228,14 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const settingsContext = useRef<string | null>(null);
   const [mixedCells, setMixedCells] = useState<Cell[]>([]);
   const [exploitationCategory,setExploitationCategory]=useState<ExploitationCategory>('exploit');
-  const [exploitationChoice,setExploitationChoice]=useState<ExploitationChoice>('gardens');
+  const [artisanChoice,setArtisanChoice]=useState<'sawmill'|'stonemason'|null>(null);
   const harvest=useHarvestTool({state,scene:terrainRef,slug:worldSlug,
     enabled:worldMode==='exploitation'&&exploitationCategory==='exploit'&&!paletteCollapsed&&terrainView==='village'&&!arrivalActive&&!showDev&&!uncertainRequest.current,
     onAccepted:()=>markOracleProgress()});
   const chooseExploitation=(choice:ExploitationChoice)=>{
-    cancelWorldGesture();closePanels();setExploitationChoice(choice);
+    cancelWorldGesture();closePanels();
     if(choice==='gardens'||choice==='wood'||choice==='stone')harvest.setFilter(choice);
+    else setArtisanChoice(choice);
     const current=stateRef.current;if(!current)return;
     const target=nearestExploitationTarget(current,choice,terrainRef.current?.viewCenter()??{cellX:current.village.anchorCellX,cellY:current.village.anchorCellY},terrainRef.current?.naturalFeatures()??current.region.features);
     if(target)terrainRef.current?.focusCell(target);
@@ -841,7 +842,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
     <WorldModeBar beforeTownHall={beforeTownHall} mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
     <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef}/>
-    {worldMode==='exploitation'&&terrainView==='village'&&!paletteCollapsed&&!uncertainRequest.current&&<ExploitationShowroom category={exploitationCategory} selected={exploitationChoice} networkError={harvest.networkError}
+    {worldMode==='exploitation'&&terrainView==='village'&&!paletteCollapsed&&!uncertainRequest.current&&<ExploitationShowroom category={exploitationCategory} selected={exploitationCategory==='exploit'?harvest.filter:artisanChoice} networkError={harvest.networkError}
       onCategory={category=>{cancelWorldGesture();closePanels();setExploitationCategory(category);}} onChoose={chooseExploitation} onWorksites={()=>{closePanels();setShowWorksites(value=>!value);}}/>}
     {worldMode === 'exploitation' && terrainView === 'village' && uncertainRequest.current && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population} queuedCount={queuedExploitationCount}
       request={mixedRequest} preview={mixedPreview} intentState={exploitationIntentState} error={error} pending={pendingAction || arrivalActive} collapsed={paletteCollapsed}

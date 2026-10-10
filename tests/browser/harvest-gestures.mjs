@@ -60,5 +60,17 @@ try{
  await expect(page.getByRole('button',{name:'Scierie',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Tailleur de pierre',exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Bois brut',exact:true})).toHaveCount(0);
  await wood.click();expect(commands).toHaveLength(4);
- expect(errors).toEqual([]);console.log(JSON.stringify({hoverCommands:0,gestures:3,idempotentRecovery:true,previewRequests:0,forwardedMutations:0,errors}));
+ // Returning from craft must show the resource filter that will execute.
+ await page.getByRole('button',{name:'Exploiter',exact:true}).click();
+ await page.getByRole('button',{name:'Bois brut',exact:true}).click();
+ await page.getByRole('button',{name:'Artisanat',exact:true}).click();
+ await page.getByRole('button',{name:'Scierie',exact:true}).click();
+ await page.getByRole('button',{name:'Exploiter',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Bois brut',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.locator('.exploitation-showroom button[aria-pressed=true]')).toHaveCount(1);
+ await wood.click();await expect.poll(()=>commands.length).toBe(5);
+ expect(commands[4].body.wood).toEqual([targets[0].id]);await ack(commands[4],targets[0]);
+ await page.getByRole('button',{name:'Artisanat',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Scierie',exact:true})).toHaveAttribute('aria-pressed','true');
+ expect(errors).toEqual([]);console.log(JSON.stringify({hoverCommands:0,gestures:4,categorySelection:true,idempotentRecovery:true,previewRequests:0,forwardedMutations:0,errors}));
  }catch(error){console.log('UI_ERRORS',errors);console.log('BODY',await page.locator('body').innerText());throw error;}finally{await browser.close();}

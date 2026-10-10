@@ -5,7 +5,7 @@ import {randomUUID} from '../random-uuid';
 import type {Cell} from '../scene/construction-selection';
 import type {TerrainHandle} from '../scene/VillageScene';
 import {cellKey} from '../scene/construction-selection';
-export type HarvestFilter='all'|'gardens'|'wood'|'stone';
+export type HarvestFilter='gardens'|'wood'|'stone';
 type Draft={intent:HarvestIntent;cells:Cell[];submitted?:boolean};
 export type HarvestFeedback=Cell&{id:string;text:string;resource:'carrot'|'wood'|'stone'|'error';at:number};
 const reasons:Record<string,string>={'already-assigned':'Déjà prévu','out-of-range':'Hors de portée',protected:'Protégé',interior:'Inaccessible',unreachable:'Sans chemin',depleted:'Épuisé',empty:'Vide','not-found':'Indisponible','building-incomplete':'En construction'};
@@ -78,10 +78,10 @@ export function useHarvestTool({state,scene,enabled,slug,onAccepted}:{state:Vill
     const selected=current.current.filter;
     const garden=village.cells.some(c=>c.building?.status==='completed'&&c.building.garden?.plots.some(p=>cellKey(p)===cellKey(cell)));
     let changed=false;
-    if(garden&&(selected==='all'||selected==='gardens')&&item.intent.gardens.length<100&&!item.intent.gardens.some(p=>cellKey(p)===cellKey(cell))){item.intent.gardens.push(cell);changed=true;}
+    if(garden&&selected==='gardens'&&item.intent.gardens.length<100&&!item.intent.gardens.some(p=>cellKey(p)===cellKey(cell))){item.intent.gardens.push(cell);changed=true;}
     for(const feature of scene.current?.featuresAt(cell)??village.region.features.filter(f=>cellKey(f)===cellKey(cell))){
       const family=feature.deposit?.resourceCode;
-      if((family==='wood'||family==='stone')&&(selected==='all'||selected===family)&&item.intent[family].length<64&&!item.intent[family].includes(feature.id)){
+      if((family==='wood'||family==='stone')&&selected===family&&item.intent[family].length<64&&!item.intent[family].includes(feature.id)){
         item.intent[family].push(feature.id);changed=true;
       }
     }

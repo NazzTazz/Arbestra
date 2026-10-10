@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainResponse, TerrainUpdatesResponse, VillageState } from '@arbestra/contracts';
 import { TerrainStore, type TerrainFetch } from './terrain-store';
 import { terrainDemand } from './world-space';
+import {nearestExploitationTarget} from '../ui/exploitation-navigation';
 
 const world = { id: 'world', generationVersion: 2, widthCells: 2048, heightCells: 1024, chunkSize: 32 };
 const deposit = (revision: number, remainingAmount = 100): StoneDeposit => ({ featureId: 'stone', resourceCode: 'stone', cellX: 1, cellY: 1,
@@ -25,6 +26,21 @@ function harness() {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('finds the nearest known resource outside the rendered demand and respects current depletion',async()=>{
+    const near={...feature(deposit(1)),cellX:130,cellY:0,deposit:{...deposit(1),cellX:130,cellY:0}};
+    const far={...feature(deposit(1)),id:'far',cellX:10,cellY:0,deposit:{...deposit(1),featureId:'far',cellX:10,cellY:0}};
+    const initial=state();initial.world={...initial.world,widthCells:512,heightCells:256};initial.region.features=[far];
+    let now=0;const c={...chunk(4),features:[near]};
+    const store=new TerrainStore(initial,async()=>({world:initial.world,chunks:[c]}),()=>now);stores.push(store);
+    const demand={key:'4:0',chunkX:4,chunkY:0,visible:true,distance:0};
+    store.demandChunks([demand]);now=100;store.tick();await new Promise(r=>setTimeout(r,0));
+    const nearest=()=>nearestExploitationTarget(initial,'stone',{cellX:100,cellY:0},store.naturalFeatures());
+    expect(nearest()).toEqual({cellX:130,cellY:0});
+    store.demandChunks([{...demand,visible:false}]);expect(nearest()).toEqual({cellX:130,cellY:0});
+    store.demandChunks([]);expect(nearest()).toEqual({cellX:130,cellY:0});
+    store.deposit({...near.deposit,revision:2,remainingAmount:0,availableAmount:0,state:'depleted'});
+    expect(nearest()).toEqual({cellX:10,cellY:0});
+  });
   it('reads continuous RC1 slopes without snapping the cursor to a cell centre',async()=>{
     const h=harness();h.demand();h.advance(100);
     const c={...chunk(),rc1:{stride:65,heights:Array.from({length:65**2},(_,i)=>(i%65)/2*.2+1),water:Array(65**2).fill(0),terraces:[{cellX:2,cellY:1,height:1.5}]}};

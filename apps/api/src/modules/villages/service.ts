@@ -1,5 +1,6 @@
 import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
+import {readRc1Source} from '../worlds/rc1-source.js';
 import {naturalFeaturesQuery} from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -412,6 +413,9 @@ export async function state(
   admit = true,
 ): Promise<VillageState> {
   const village = await ownedVillage(tx, accountId, worldSlug, existingEconomy?.villageId);
+  // Prepare immutable geography before the economy lock. snapshot() revalidates
+  // its identity and reads current local edits after the lock is acquired.
+  if (!existingEconomy && village.generationVersion === 3) await readRc1Source(tx, village.worldId);
   const economy = existingEconomy ?? await beginVillageEconomy(tx, village.worldId, village.villageId);
   if (economy.worldId !== village.worldId || economy.villageId !== village.villageId)
     throw new Error('Village economy context does not match the requested village');

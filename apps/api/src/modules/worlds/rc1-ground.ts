@@ -1,21 +1,12 @@
-﻿import {sql,type Kysely} from 'kysely';
-import {RC1_WORLD,createSpawnTerrainField,type GeneratedLandscape,type Rc1Ground,type Rc1FeatureGeometry,type SpawnTerrace} from '@arbestra/contracts';
+﻿import {type Kysely} from 'kysely';
+import {type GeneratedLandscape,type Rc1Ground,type Rc1FeatureGeometry,type SpawnTerrace} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
-import {HttpError} from '../../errors.js';
-import {artifactChecksum} from '../world-generator/artifact.js';
-import {RC1_CANONICAL_CHECKSUM} from '../onboarding/spawn-compute-protocol.js';
+import {readRc1Source} from './rc1-source.js';
 import {editedRc1Field} from '../onboarding/rc1-field.js';
-let cached:{json:string;data:GeneratedLandscape;field:ReturnType<typeof createSpawnTerrainField>}|undefined;
 const patches=new Map<string,Omit<Rc1Ground,'terraces'>>();
 export async function readRc1Ground(db:Kysely<Database>,worldId:string){
- const world=await db.selectFrom('worlds').select(['widthCells','heightCells','chunkSize','seed']).where('id','=',worldId).executeTakeFirstOrThrow();
- if(world.widthCells!==RC1_WORLD.widthCells||world.heightCells!==RC1_WORLD.heightCells||world.chunkSize!==RC1_WORLD.chunkSize)throw new HttpError(409,'WORLD_NOT_READY','Dimensions RC1 incohérentes.');
- const row=await db.selectFrom('worldGenerationCandidates').select(['checksum',sql<string>`artifact::text`.as('json')]).where('worldId','=',worldId).executeTakeFirst();
- if(!row||row.checksum!==RC1_CANONICAL_CHECKSUM)throw new HttpError(409,'WORLD_NOT_READY','Géographie RC1 indisponible.');
- if(cached?.json!==row.json){const data=JSON.parse(row.json) as GeneratedLandscape;if(artifactChecksum(data)!==RC1_CANONICAL_CHECKSUM)throw new HttpError(409,'WORLD_NOT_READY','Géographie RC1 invalide.');cached={json:row.json,data,field:createSpawnTerrainField(data)};patches.clear();}
+ const source=await readRc1Source(db,worldId),{world}=source;
  const terraces=await db.selectFrom('worldSpawnTerraces').select(['cellX','cellY','height']).where('worldId','=',worldId).execute();
- const source=cached;
- if(Number(world.seed)!==source.data.seed)throw new HttpError(409,'WORLD_NOT_READY','Identité RC1 incohérente.');
  const resourceEdits=await db.selectFrom('worldRc1Resources').leftJoin('woodlandDeposits',j=>j.onRef('woodlandDeposits.worldId','=','worldRc1Resources.worldId').onRef('woodlandDeposits.featureId','=','worldRc1Resources.featureId')).select(['treeIndices','removedIndices','cleared','remainingAmount','initialAmount']).where('worldRc1Resources.worldId','=',worldId).execute();
  const removed=resourceEdits.flatMap(r=>r.cleared||r.remainingAmount!==null&&Number(r.remainingAmount)<=Number(r.initialAmount)*.1?r.treeIndices:r.removedIndices);
  const field=editedRc1Field(source.data,source.field,terraces,removed);

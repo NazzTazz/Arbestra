@@ -1,3 +1,29 @@
+# Corrections showroom et profil des lectures village — 10 octobre 2026
+
+Suite demandée par Tristan après la contre-recette de **cf24eaecf23854118bd816144fa0231bf1d0bb41**, main. **Implémenté et vérifié, validation produit distincte.** Les ressources connues hors champ restent candidates au recadrage ; Exploiter affiche le filtre de récolte réellement actif après un passage par Artisanat. [Rapport, profils et limites](docs/CONTRE-RECETTE-SHOWROOM-EXPLOITATION-2026-10-10.md#corrections-et-profilage-après-la-contre-recette).
+
+Source de lenteur établie : transfert répété de **10 074 655 octets** d'artefact par `readRc1Ground`, plus signature/création du champ à froid sous verrou village. `readRc1Source` cache uniquement la géographie signée, vérifie à chaque lecture dimensions/seed et identité PostgreSQL `xmin + ctid` par base/monde (32 mondes maximum). Toute nouvelle version relit et vérifie le contenu. Terrasses, retraits d'arbres et stocks restent frais. `state()` prépare la source avant le verrou s'il n'a pas déjà de contexte économique, puis le snapshot revalide et lit les modifications après verrou ; borne et ordre métier inchangés.
+
+Mesures HTTP sur Bressuire, village + 16 chunks simultanés : ancien serveur **5 485 / 4 919 ms** ; première lecture après redémarrage sous charge **6 573 / 5 989 ms** ; à chaud après campagne **1 124 / 524 ms**, puis **694 / 506 ms**. Préparation un chunk **115 ms**, 41 éléments, zéro dépôt privé/occupation. Profils internes avant/après détaillés dans le rapport ; charge non constante, ne pas attribuer toute la différence au correctif. **Latence à froid, projection initiale et forte concurrence restent à qualifier avant levée générale du blocage alpha.**
+
+Preuves actuelles : **35 tests client, 3 nouveaux tests SQL de cache, 3 tests d'installation existants verts** (kit atomique, refus roche sans effets, retours bois/pierre). Deux régressions client rouges avant correction puis vertes ; recette navigateur contrôlée et navigateur réel 5278 verts, sans nouvel ordre économique dans Bressuire. Build API, build world-web vers le dossier isolé, typechecks API/world-web et lint final verts. Pas de campagne DB globale ni de reset ; fixtures isolées nettoyées. Aucune migration ni modification de la géographie approuvée.
+
+Démo actualisée : http://localhost:5278/spawn?world=rc1-receipt-0ea92d24-c5c8-418b-8292-2781d0413536 ; client compilé `test-results/harvest-world-dist`, API indépendante 3102 **session 18378, PID 10216**. Front 5278 session 10937/PID 54092 conservé. **Toujours préserver le parent de fixture session 48641/PID 8212 et ses enfants 3101/PID 22268, 5275/PID 44552** : leur fermeture nettoie le monde utilisateur. Navigateur de recette fermé ; scripts/captures ignorés, transcript utilisateur non suivi conservé. Commit/push autorisés, référence exacte au bilan.
+
+Question suivante de Tristan : préchauffer l'API à l'entrée en Exploitation. Réponse : possible, mais le premier GET village charge déjà ce cache ; un ping tardif serait généralement redondant. Préparation plus tôt depuis l'atlas ou au démarrage serveur pour RC1 **proposée seulement**, non implémentée et sans décision produit nouvelle.
+
+---
+
+# Contre-recette de cf24eae — 10 octobre 2026
+
+Revue demandée par Tristan, sans correction produit. Candidate : **cf24eaecf23854118bd816144fa0231bf1d0bb41**, main. [Rapport détaillé](docs/CONTRE-RECETTE-SHOWROOM-EXPLOITATION-2026-10-10.md). **À corriger avant acceptation** : (P2) un bosquet connu en cache mais hors champ est ignoré par le choix du plus proche ; (P2) Bois brut → Artisanat → Scierie → Exploiter conserve le filtre bois actif mais aucune miniature sélectionnée. Les deux écarts sont reproduits, le second avec une demande de récolte interceptée dans une API simulée. Aucune correction implémentée dans cette revue.
+
+Contrats compilés, 34 tests client et 1 test SQL isolé verts ; recette harvest-gestures rejouée verte. Navigateur réel : showroom, cinq miniatures, recadrage pierre et retour de catégorie ; aucune erreur JS relevée, aucun ordre économique envoyé dans Bressuire. Lecture préparatoire réelle sur un chunk : 41 éléments, zéro quantité privée et zéro occupation. Recette avec agent-browser ; scripts/captures ignorés dans test-results/. La campagne d'installation et les builds applicatifs n'ont pas été rejoués ; voir les limites exactes du rapport.
+
+**Blocage alpha de latence toujours présent, préexistant au commit** : nouvelle lecture village 11 832 ms, 16 chunks 3 974 ms en parallèle ; préparation un chunk 8 974 ms dans une requête distincte. Charge variable, aucun gain durable établi. Services utilisateur et parent de fixture à préserver selon la section suivante. Seuls le rapport et ce relais changent ; transcript utilisateur conservé, aucun code produit modifié.
+
+---
+
 # Showroom Exploitation et lectures spatiales — 10 octobre 2026
 
 Base : 230855dda39d32a8c5f288131aebefb320c016ab, main. Tristan précise que seul **Exploitation** change, en reprenant le showroom de Constructions. Implémenté / intégré, finition visuelle à valider produit ; **blocage alpha de latence toujours ouvert**. Commit/push autorisés ; ce paragraphe appartient à la candidate livrée, référence exacte au bilan.
