@@ -1,3 +1,10 @@
+export async function readHarvestReceipts(slug:string,villageId:string,ids:string[]):Promise<HarvestReceipt[]>{
+ return parseResponse(await fetch('/api/worlds/'+encodeURIComponent(slug)+'/villages/'+encodeURIComponent(villageId)+'/harvest-intents?ids='+encodeURIComponent(ids.join(',')),{signal:AbortSignal.timeout(10000),credentials:'same-origin'}));
+}
+import type {HarvestIntent,HarvestReceipt} from '@arbestra/contracts';
+export async function sendHarvestIntent(slug:string,villageId:string,intent:HarvestIntent):Promise<HarvestReceipt>{
+  return parseResponse(await fetch('/api/worlds/'+encodeURIComponent(slug)+'/villages/'+encodeURIComponent(villageId)+'/harvest-intents',{signal:AbortSignal.timeout(15000),method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(intent)}));
+}
 import { randomUUID } from '../random-uuid';
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';

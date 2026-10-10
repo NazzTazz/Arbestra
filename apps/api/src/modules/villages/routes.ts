@@ -1,3 +1,5 @@
+import {HarvestIntentSchema,HarvestReceiptSchema,type HarvestIntent} from '@arbestra/contracts';
+import {receiveHarvestIntent,readHarvestReceipts} from './harvest-submissions.js';
 import { Type } from '@sinclair/typebox';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
@@ -39,6 +41,19 @@ export async function registerVillageRoutes(
   db: Kysely<Database>,
   config: AppConfig,
 ): Promise<void> {
+  app.get('/api/worlds/:worldSlug/villages/:villageId/harvest-intents',{
+    schema:{params:VillageParametersSchema,querystring:Type.Object({ids:Type.String({maxLength:2400})}),response:{200:Type.Array(HarvestReceiptSchema)}},
+  },async request=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    return readHarvestReceipts(db,account.id,worldSlug,villageId,(request.query as {ids:string}).ids.split(','));
+  });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/harvest-intents', {
+    schema:{params:VillageParametersSchema,body:HarvestIntentSchema,response:{200:HarvestReceiptSchema}},
+  },async request=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);
+    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    return receiveHarvestIntent(db,account.id,worldSlug,villageId,request.body as HarvestIntent);
+  });
   app.post('/api/worlds/:worldSlug/villages/:villageId/market/preview', {
     schema: { params: VillageParametersSchema, body: MarketRequestSchema, response: { 200: MarketPreviewSchema } },
   }, async request => {

@@ -1667,7 +1667,7 @@ function canonicalExploitation(request: ExploitationRequest, village: OwnedVilla
     wood: request.wood.map(id => id.toLowerCase()), stone: request.stone.map(id => id.toLowerCase()) };
 }
 
-async function prepareExploitation(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
+export async function prepareExploitation(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
   accountId: string, request: ExploitationRequest) {
   // Snapshot without admissions: preview never sends idle people to work.
   const snapshot = await state(tx, accountId, village.worldSlug, economy, false);
@@ -1838,7 +1838,7 @@ export async function startVillageWorksite(db: Kysely<Database>, accountId: stri
   });
 }
 
-async function prepareWorksiteSelection(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
+export async function prepareWorksiteSelection(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
   request: StartExtractionWorksiteRequest): Promise<ExtractionWorksiteSelection> {
   const included: ExtractionWorksiteSelection['included'] = [], excluded: ExtractionWorksiteSelection['excluded'] = [];
   const seen = new Set<string>();

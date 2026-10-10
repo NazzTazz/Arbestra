@@ -1,3 +1,6 @@
+import {receiveHarvestIntent,readHarvestReceipts,processHarvestSubmission} from '../villages/harvest-submissions.js';
+import {acceptHarvestIntent} from '../villages/harvest-intents.js';
+import {wakeExtractionWorksite} from '../villages/complete-construction.js';
 import {createSpawnTerrainField} from '@arbestra/contracts';
 import {infrastructurePreview,infrastructureCommand} from '../villages/infrastructure.js';
 import {buildApp} from '../../app.js';
@@ -70,6 +73,66 @@ describe('effective RC1 installation on isolated worlds',()=>{
   expect((await db.selectFrom('villageInfrastructure').select('plan').where('worldId','=',f.id).executeTakeFirstOrThrow()).plan.equipment).toEqual([]);
   expect(await read()).toEqual(before);
  },120000);
+
+ it('accepts harvest gestures without preview, aggregates server missions and credits only their return',async()=>{
+  const f=await fixture(),installed=await installVillage(db,compute,accountId,f.slug,f.input);
+  const resources=await db.selectFrom('worldRc1Resources').innerJoin('worldFeatures',j=>j.onRef('worldFeatures.id','=','worldRc1Resources.featureId').onRef('worldFeatures.worldId','=','worldRc1Resources.worldId')).leftJoin('stoneDeposits',j=>j.onRef('stoneDeposits.featureId','=','worldRc1Resources.featureId').onRef('stoneDeposits.worldId','=','worldRc1Resources.worldId')).select(['worldRc1Resources.featureId','featureTypeCode','initialAmount']).where('worldRc1Resources.worldId','=',f.id).where('sourceKey','like','starter:%').execute();
+  const wood=resources.find(r=>r.featureTypeCode==='woodland')!,stones=resources.filter(r=>r.featureTypeCode==='stone_outcrop'&&Number(r.initialAmount)===150);
+  expect(wood).toBeDefined();expect(stones).toHaveLength(2);
+  const command={commandId:randomUUID(),gardens:[],wood:[wood.featureId],stone:[stones[0]!.featureId]};
+  let locked!:()=>void,release!:()=>void;
+  const acquired=new Promise<void>(resolve=>{locked=resolve;}),released=new Promise<void>(resolve=>{release=resolve;});
+  const blocker=db.transaction().execute(async tx=>{await tx.selectFrom('villages').select('id').where('worldId','=',f.id).where('id','=',installed.villageId).forUpdate().execute();locked();await released;});
+  await acquired;
+  let timeout:ReturnType<typeof setTimeout>|undefined;
+  const intakeAt=performance.now(),intake=receiveHarvestIntent(db,accountId,f.slug,installed.villageId,command);
+  try{const receipt=await Promise.race([intake,new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new Error('intake blocked behind village lock')),5000);})]);expect(receipt.pending).toBe(true);
+    console.info('HARVEST_INTAKE_WHILE_VILLAGE_LOCKED_MS',Math.round(performance.now()-intakeAt));
+  }finally{if(timeout)clearTimeout(timeout);release();await blocker;await intake;}
+  const rollback=new Error('harvest proof completed; rollback only this transaction');
+  await expect(db.transaction().execute(async tx=>{
+   const local={transaction:()=>({execute:<T>(run:(transaction:typeof tx)=>Promise<T>)=>run(tx)})} as unknown as typeof db;
+   const receiveAt=performance.now();
+   expect(await receiveHarvestIntent(local,accountId,f.slug,installed.villageId,command)).toMatchObject({pending:true});
+   console.info('HARVEST_INTAKE_MS',Math.round(performance.now()-receiveAt));
+   expect(await receiveHarvestIntent(local,accountId,f.slug,installed.villageId,command)).toMatchObject({pending:true});
+   const inbox=await tx.selectFrom('scheduledTasks').selectAll().where('worldId','=',f.id).where('taskType','=','harvest.intent').execute();expect(inbox).toHaveLength(1);
+   await expect(receiveHarvestIntent(local,accountId,f.slug,installed.villageId,{...command,stone:[]})).rejects.toMatchObject({code:'COMMAND_ID_CONFLICT'});
+   await expect(receiveHarvestIntent(local,randomUUID(),f.slug,installed.villageId,command)).rejects.toMatchObject({code:'VILLAGE_NOT_FOUND'});
+   await processHarvestSubmission(tx,inbox[0]!);
+   expect((await readHarvestReceipts(local,accountId,f.slug,installed.villageId,[command.commandId]))[0]?.accepted).toHaveLength(2);
+   const at=performance.now(),first=await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,command);
+   const firstMs=Math.round(performance.now()-at);
+   expect(first.refused).toEqual([]);expect(first.accepted.map(a=>a.resource).sort()).toEqual(['stone','wood']);
+   expect(first.accepted.find(a=>a.resource==='stone')?.amount).toBe(150);
+   expect(await tx.selectFrom('depositExtractions').select('id').where('worldId','=',f.id).execute()).toHaveLength(0);
+   const at2=performance.now(),second=await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,{...command,commandId:randomUUID(),wood:[],stone:[stones[1]!.featureId]});
+   console.info('HARVEST_RECEIPT_TIMINGS',JSON.stringify({firstMs,followingMs:Math.round(performance.now()-at2),transaction:'isolated outer transaction; no final snapshot'}));
+   expect(second.accepted).toHaveLength(1);
+   expect(await tx.selectFrom('exploitationOrders').select('id').where('worldId','=',f.id).execute()).toHaveLength(1);
+   expect(await tx.selectFrom('extractionWorksites').select('id').where('worldId','=',f.id).execute()).toHaveLength(2);
+   expect(await tx.selectFrom('extractionWorksiteTargets').select('featureId').where('worldId','=',f.id).execute()).toHaveLength(3);
+   expect(await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,command)).toEqual(first);
+   await expect(acceptHarvestIntent(local,accountId,f.slug,installed.villageId,{...command,stone:[]})).rejects.toMatchObject({code:'COMMAND_ID_CONFLICT'});
+   const duplicate=await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,{...command,commandId:randomUUID()});
+   expect(duplicate.accepted).toEqual([]);expect(duplicate.refused.every(r=>r.reason==='already-assigned')).toBe(true);
+   const rejected=await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,{...command,commandId:randomUUID(),wood:[],stone:[randomUUID()]});
+   expect(rejected.accepted).toEqual([]);expect(rejected.refused[0]?.reason).toBe('not-found');
+   const stock=()=>tx.selectFrom('villageResources').select(['resourceCode','amount']).where('worldId','=',f.id).execute();
+   const before=await stock();expect(Number(before.find(s=>s.resourceCode==='stone')!.amount)).toBe(0);
+   const task=await tx.selectFrom('scheduledTasks').selectAll().where('worldId','=',f.id).where('taskType','=','deposit.worksite.wake').executeTakeFirstOrThrow();
+   await wakeExtractionWorksite(tx,task);
+   const lots=await tx.selectFrom('depositExtractions').selectAll().where('worldId','=',f.id).execute();
+   expect(lots).toHaveLength(2);expect(lots.reduce((n,l)=>n+l.workerCount,0)).toBeLessThanOrEqual(15);expect(lots.every(l=>l.workerCount>0&&(l.pathCells?.length??0)>1)).toBe(true);
+   expect(await stock()).toEqual(before);
+   const economy=await beginVillageEconomy(tx,f.id,installed.villageId,undefined,[],lots.map(l=>l.featureId));
+   await reconcileVillageEconomy(tx,{...economy,through:new Date(Math.max(...lots.map(l=>l.completesAt.getTime()))+1)});
+   const after=await stock();expect(Number(after.find(s=>s.resourceCode==='wood')!.amount)).toBe(Number(before.find(s=>s.resourceCode==='wood')!.amount)+100);
+   expect(Number(after.find(s=>s.resourceCode==='stone')!.amount)).toBe(100);
+   throw rollback;
+  })).rejects.toBe(rollback);
+  expect(await db.selectFrom('harvestIntents').select('commandId').where('worldId','=',f.id).execute()).toEqual([]);
+ },180000);
  it('delivers the first wood and stone lots through the real RC1 extraction commands',async()=>{
   const f=await fixture(),installed=await installVillage(db,compute,accountId,f.slug,f.input);
   const resources=await db.selectFrom('worldRc1Resources').innerJoin('worldFeatures',j=>j.onRef('worldFeatures.id','=','worldRc1Resources.featureId').onRef('worldFeatures.worldId','=','worldRc1Resources.worldId')).leftJoin('stoneDeposits',j=>j.onRef('stoneDeposits.featureId','=','worldRc1Resources.featureId').onRef('stoneDeposits.worldId','=','worldRc1Resources.worldId')).select(['worldRc1Resources.featureId','featureTypeCode','initialAmount']).where('worldRc1Resources.worldId','=',f.id).where('sourceKey','like','starter:%').execute();

@@ -1,3 +1,5 @@
+import * as harvestSubmissionsMigration from './migrations/040_harvest_submissions.js';
+import * as harvestIntentsMigration from './migrations/039_harvest_intents.js';
 import * as spawnInstallationMigration from './migrations/038_spawn_installation.js';
 import { fileURLToPath } from 'node:url';
 
@@ -86,6 +88,8 @@ const migrationProvider: MigrationProvider = {
       '036_world_generator_recipe': worldGeneratorRecipeMigration,
       '037_spawn_atlas': spawnAtlasMigration,
       '038_spawn_installation': spawnInstallationMigration,
+      '039_harvest_intents': harvestIntentsMigration,
+      '040_harvest_submissions': harvestSubmissionsMigration,
     };
   },
 };

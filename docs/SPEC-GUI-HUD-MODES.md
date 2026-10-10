@@ -1,3 +1,19 @@
+# Récolte par intention — décision du 10 octobre 2026
+
+Cette décision de Tristan remplace, pour le parcours courant de récolte, les prescriptions historiques ci-dessous imposant une estimation Auto affichée avant envoi.
+
+- En mode Exploitation, clic gauche maintenu + balayage désigne les ressources. Le simple survol et les mouvements de caméra ne sélectionnent rien. Le relâchement transmet le geste sans formulaire ni confirmation d'effectif.
+- Le client transmet uniquement les cibles et une identité idempotente. Le serveur reçoit durablement les demandes, les valide puis les regroupe dans les chantiers automatiques compatibles. Il choisit les équipes avec les règles d'énergie, de portée et de trajets existantes. Les lots déjà engagés conservent leur équipe et leur échéance.
+- La réception de la demande ne doit pas attendre le verrou économique du village. Le worker existant traite les demandes ; une demande encore à traiter reste signalée discrètement sur le terrain. Les demandes reçues et leurs résultats survivent à la reconnexion. Une retransmission conserve la même identité.
+- Après validation, un bref « +quantité » flotte au-dessus de la ressource : vert pour les Jardins, marron clair pour le bois, gris clair pour la pierre, contour noir de 1 px. Cette quantité désigne l'objectif confié à la récolte, jamais un crédit immédiat. Les stocks augmentent au retour des habitants.
+- Un refus apparaît brièvement au-dessus de la cible, sans long récapitulatif dans le HUD. Les autres cibles admissibles peuvent être retenues. Un doublon déjà prévu ne crée pas de deuxième mission.
+- Le HUD courant conserve les filtres Tout/Jardins/Bois/Pierre et un accès aux chantiers. Les plafonds, cohortes et durées ne sont plus demandés pour ce geste. Le balayage coupe le bois avec repousse ; il ne défriche pas définitivement.
+- Échap annule le balayage non envoyé. Les intentions déjà reçues restent suivies ; les commandes de chantier existantes permettent d'arrêter le travail. Un ancien ordre envoyé dont le résultat était incertain conserve son chemin de vérification idempotent.
+
+**Statut : direction produit validée ; implémentation et preuves suivies dans SESSION-HANDOFF.md.** La vitesse de réception et celle de validation/départ doivent être mesurées séparément.
+
+---
+
 # HUD principal et grammaire des actions dans le monde
 
 **Prototype Marché du 6 octobre :** clic ordinaire sur l’hôtel de ville en Exploitation ouvre sa fiche et le marché. Au niveau 1, bouton d’amélioration avec coût 500 bois d’œuvre + 120 pierres taillées ; au niveau 2 achevé, choix des ressources et de la quantité, devis Oracle serveur, confirmation et suivi des livraisons. Les cinq ressources sont issues du catalogue négociable. Solde des Anneaux affiché à zéro, usages monétaires futurs. Formulaire provisoire explicitement demandé ; présentation et UX finales restent à Tristan. [Spec Marché](SPEC-MARCHE-ORACLE.md).
@@ -182,6 +198,8 @@ Une estimation incomplète affiche « Calcul… » ou « estimation », pas un f
 Correctif du 7 octobre, après contre-recette : **cible validée par Tristan : départ en moins de 1 000 ms après le relâchement**, hors délais voulus par le gameplay. Pour les jardins seuls, le HUD présente la borne structurelle de 1 habitant en Auto et la disponibilité vérifiée au départ. Le relâchement envoie directement une commande portant toutes les parcelles et les paramètres figés ; le serveur vérifie sélection, accès, énergie et disponibilité dans cette même transaction. Aucun aperçu serveur au survol ou pendant un geste exclusivement Jardin. Le plafond manuel reste celui choisi. Aucun crédit anticipé ni raccourcissement des trajets ou travaux.
 
 Les gestes suivants restent distincts et sont conservés dans leur ordre pendant une réponse en cours ; cette protection contre la perte de saisie ne remplace pas la cible de latence. Un refus ou une réponse incertaine suspend la file. Échap annule les gestes non envoyés, y compris pendant un envoi ; changer de mode vide aussi la file. Une commande déjà envoyée conserve son identité et sa résolution. Pour bois/pierre/mixte, l'aperçu reste nécessaire : au plus un appel en cours, puis uniquement la dernière révision encore utile ; la borne présentée ne peut augmenter au départ. Auto sans borne présentée reste refusé. Aucun nouvel aperçu pendant envoi, incertitude ou confirmation de défrichage. Preuves et limites dans le handoff courant.
+
+Correctif du 10 octobre (RC1) : après un relâchement Auto sans effectif présenté, la palette conserve la sélection dans « Estimation en cours » et désactive Réessayer. À réception du résultat, elle affiche « Estimation prête », le plafond calculé et Réessayer. Aucun ordre ne part à cette réception ; Réessayer fige la borne désormais affichée. Un échec de calcul reste une erreur explicite avec possibilité de relancer. La file reste suspendue jusqu’à la reprise ou l’annulation. Cette distinction remplace le message périmé « Aperçu encore en cours » qui subsistait après réception.
 
 La vérification différée ne peut ajouter des cibles, changer d'intention, augmenter le plafond affiché ou accepter un coût supérieur à celui présenté. Une modification substantielle rend l'intention à corriger. Une durée estimée ou une mobilisation initiale moindre que le plafond n'est pas, à elle seule, une nouvelle intention.
 

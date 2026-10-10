@@ -1,3 +1,4 @@
+import {HARVEST_SUBMISSION_TASK,processHarvestSubmission} from './modules/villages/harvest-submissions.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDatabase } from './database/connection.js';
@@ -15,7 +16,7 @@ const db = createDatabase(config.databaseUrl);
 const app = await buildApp(config, db);
 const stopWorker = startScheduledTaskWorker(
   db,
-  { [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
+  { [HARVEST_SUBMISSION_TASK]:processHarvestSubmission, [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
   config.scheduledTaskPollIntervalMs,
   (error) => app.log.error(error, 'Scheduled task worker failed'),
 );

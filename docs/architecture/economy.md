@@ -34,6 +34,14 @@ Le réseau géométrique est mis en cache en mémoire (8 entrées / 50 000 point
 
 Les deux ateliers sont isolés de l'économie : réglage DEV authentifié par monde, accès direct vérifié et révocation, aucun rôle administrateur ni publication de recettes. Voir la [spec Infrastructure](../SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md) et le handoff pour les preuves actuelles.
 
+## Réception des intentions de récolte (039–040)
+
+Le HUD transmet les cibles seules au relâchement d'un balayage. La réception vérifie le propriétaire puis écrit harvest_submissions et sa notification harvest.intent sans prendre le verrou économique du village. La boîte est liée au monde et au compte ; le worker revalide le village à l'exécution. Aucun stock ni habitant n'est réservé à la réception.
+
+Le worker existant utilise beginVillageEconomy et les validations de sélection partagées, conserve le reçu idempotent dans harvest_intents et rattache les cibles aux chantiers automatiques compatibles (64 cibles en attente au plus). Les ordres manuels, pausés ou arrêtés ne sont pas modifiés. Les admissions, équipes, trajets et crédits au retour restent ceux de l'exploitation existante. Un refus métier est persisté après rollback ; une erreur technique laisse le scheduler reprogrammer sa propre notification.
+
+Le client suit les reçus sans aperçu bloquant et conserve les identifiants pendant une coupure. Le +quantité signifie objectif retenu, pas crédit livré. L'ancien endpoint reste disponible pour vérifier un ordre historique au résultat incertain. Réception rapide et coût de validation RC1 demeurent distincts ; mesures dans SESSION-HANDOFF.md.
+
 ## Ordres d'exploitation mixtes (026)
 
 `exploitation_orders` coordonne une tournée Jardin et jusqu'à deux chantiers, bois/pierre. Chaque enfant conserve ses missions, réservations, notifications et crédits au retour. L'ordre porte le plafond simultané commun, la fenêtre réelle depuis confirmation, la cohorte initiale et les réglages détaillés facultatifs. Les références sont liées au même monde/village ; aucune autorité ne vient du viewport.

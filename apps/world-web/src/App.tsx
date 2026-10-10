@@ -1,3 +1,5 @@
+import {useHarvestTool} from './ui/use-harvest-tool';
+import {HarvestFeedbackLayer} from './ui/HarvestFeedback';
 import type {StarterController} from './spawn-map/starter-controller';
 import {StarterResume} from './spawn-map/StarterResume';
 import { randomUUID } from './random-uuid';
@@ -223,7 +225,10 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const acceptedExploitation = useRef(new Set<string>());
   const settingsContext = useRef<string | null>(null);
   const [mixedCells, setMixedCells] = useState<Cell[]>([]);
-  const pendingHarvestCells = useMemo(() => [...mixedCells, ...queuedExploitationCells], [mixedCells, queuedExploitationCells]);
+  const harvest=useHarvestTool({state,scene:terrainRef,slug:worldSlug,
+    enabled:worldMode==='exploitation'&&!paletteCollapsed&&terrainView==='village'&&!arrivalActive&&!showDev&&!uncertainRequest.current,
+    onAccepted:()=>markOracleProgress()});
+  const pendingHarvestCells = useMemo(() => [...harvest.pendingCells, ...mixedCells, ...queuedExploitationCells], [harvest.pendingCells, mixedCells, queuedExploitationCells]);
   const pendingHarvestKeys = useMemo(() => new Set(pendingHarvestCells.map(cellKey)), [pendingHarvestCells]);
   useEffect(() => {
     if (!state) return;
@@ -245,7 +250,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       finalizeReleasedExploitation(mixedRequest);
   }, [mixedRequest, mixedPreview, exploitationIntentState]);
   useEffect(() => {
-    if (['error', 'confirm-clear', 'uncertain'].includes(exploitationIntentState) || constructionIntentState === 'uncertain' || constructionIntentState === 'error') setPaletteCollapsed(false);
+    if (['error', 'preview-required', 'confirm-clear', 'uncertain'].includes(exploitationIntentState) || constructionIntentState === 'uncertain' || constructionIntentState === 'error') setPaletteCollapsed(false);
   }, [exploitationIntentState, constructionIntentState]);
   const previewRequest = ['submitting', 'uncertain', 'confirm-clear'].includes(exploitationIntentState)
     || (mixedRequest && directGardenExploitation(mixedRequest)) ? null : mixedRequest;
@@ -268,6 +273,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
             hoveredExploitation.current = null;
             setError(reason instanceof Error ? reason.message : 'Aperçu indisponible.');
             if (releasedExploitation.current === mixedRequest.commandId) { releasedExploitation.current = null; setExploitationIntentState('error'); }
+            else setExploitationIntentState(current => current === 'preview-required' ? 'error' : current);
           }
         }
       })();
@@ -431,7 +437,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       if (event.key === 'Escape') {
         event.preventDefault();
         if (exploitationIntentState === 'uncertain' || constructionIntentState === 'uncertain') { setPaletteCollapsed(true); return; }
-        if (mixedRequest || selection || mixedGesture.current) { cancelWorldGesture(); return; }
+        if (harvest.hasDraft() || mixedRequest || selection || mixedGesture.current) { cancelWorldGesture(); return; }
         if (representativeId || selectedSiteId || selectedFeatureId || showPopulation || showJournal || showScience || showWorksites || showGardens) { closePanels(); setShowScience(false); setShowWorksites(false); return; }
         if (modeRef.current === 'construction' && construction?.type) { clearPreview(); setConstruction({ action: construction.action, type: construction.action === 'extend' ? 'garden' : null }); return; }
         setPaletteCollapsed(true);
@@ -526,7 +532,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       terrainRef.current?.cancelGesture(); hoveredExploitation.current = null;
       presentedExploitation.current = null; setMixedRequest(null); setMixedPreview(null); setMixedCells([]);
     }
-    if (mixedRequest && exploitationIntentState === 'error') {
+    if (mixedRequest && ['error', 'preview-required'].includes(exploitationIntentState)) {
       presentedExploitation.current = null;
       setMixedPreview(null);
       setMixedRequest(configuredExploitation(settings, stateRef.current?.village.population.total ?? 1, randomUUID(), mixedRequest));
@@ -534,6 +540,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     }
   }
   function cancelWorldGesture() {
+    harvest.cancel();
     exploitationQueue.current = []; setQueuedExploitationCount(0); setQueuedExploitationCells([]);
     terrainRef.current?.cancelGesture();
     presentedExploitation.current = null; acceptedExploitation.current.clear(); hoveredExploitation.current = null;
@@ -657,8 +664,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
     releasedExploitationCap.current = pendingExploitationCap(next.request);
     releasedExploitation.current = releasedExploitationCap.current === null ? null : next.request.commandId;
     setMixedRequest(next.request); setMixedPreview(null); setMixedCells(next.cells);
-    setExploitationIntentState(releasedExploitation.current ? 'verifying' : 'error');
-    setError(releasedExploitation.current ? null : 'Vérifiez le plafond de ce geste avant de réessayer.');
+    setExploitationIntentState(releasedExploitation.current ? 'verifying' : 'preview-required');
+    setError(null);
     publishExploitationQueue();
     const direct = directGardenExploitation(next.request);
     if (direct) { releasedExploitation.current = null; void submitExploitation(direct); }
@@ -698,6 +705,12 @@ export function App({starter}:{starter?:StarterController} = {}) {
     }
   }
   function finalizeReleasedExploitation(request: ExploitationRequest) {
+    // Auto without a displayed bound requires a new gesture after the estimate.
+    // Keep that policy, but distinguish waiting for an estimate from a refusal.
+    if (presentedExploitation.current?.commandId !== request.commandId) {
+      releasedExploitation.current = null;
+      setError(null); setExploitationIntentState('preview-required'); return;
+    }
     try {
       const finalized = freezeExploitation(request, presentedExploitation.current, acceptedExploitation.current, releasedExploitationCap.current ?? Infinity);
       releasedExploitation.current = null;
@@ -720,7 +733,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       releasedExploitationCap.current = pendingExploitationCap(request);
       releasedExploitation.current = releasedExploitationCap.current === null ? null : request.commandId;
       setMixedRequest(request); setError(null);
-      setExploitationIntentState(releasedExploitation.current ? 'verifying' : 'error');
+      setExploitationIntentState(releasedExploitation.current ? 'verifying' : 'preview-required');
       return;
     }
     // A known refusal creates a fresh identity, using the corrected displayed parameters.
@@ -802,7 +815,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={starterActive?worldMode==='construction'&&!paletteCollapsed&&!starter!.pending:!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
         && (construction?.action !== 'extend' || Boolean(construction.buildingId)) && !pendingAction && terrainView === 'village'}
       preview={!paletteCollapsed && worldMode === 'construction' ? starterActive?starter!.preview:area : null} previewInvalid={starterActive?Boolean(starter!.preview.error):Boolean(selectionError)} onAreaGesture={starterActive?(_first,last,commit)=>starter!.onGesture(last,commit):handleAreaGesture}
-      onGardenHarvest={collectExploitation} onWorldGestureCancelled={cancelWorldGesture} onSiteSelected={(id, anchor, inspect) => {
+      onGardenHarvest={(cell,fresh,previewOnly)=>uncertainRequest.current?collectExploitation(cell,fresh,previewOnly):harvest.collect(cell,fresh,previewOnly)} onWorldGestureCancelled={cancelWorldGesture} onSiteSelected={(id, anchor, inspect) => {
         if(modeRef.current==='population'&&id.startsWith('representative:')){
           closePanels();setPopulationFocus(null);const personId=id.slice(15);
           terrainRef.current?.selectRepresentative(personId);setRepresentativeId(personId);
@@ -815,7 +828,13 @@ export function App({starter}:{starter?:StarterController} = {}) {
         if (modeRef.current === 'exploitation') { closePanels(); setSelectedFeatureId(id); setMenuAnchor(anchor); }
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
     <WorldModeBar beforeTownHall={beforeTownHall} mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
-    {worldMode === 'exploitation' && terrainView === 'village' && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population} queuedCount={queuedExploitationCount}
+    <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef}/>
+    {worldMode==='exploitation'&&terrainView==='village'&&!paletteCollapsed&&!uncertainRequest.current&&<div className="mode-toolbar harvest-toolbar" aria-label="Récolte">
+      {(['all','gardens','wood','stone'] as const).map(filter=><button type="button" key={filter} aria-pressed={harvest.filter===filter} onClick={()=>harvest.setFilter(filter)}>{({all:'Tout',gardens:'Jardins',wood:'Bois',stone:'Pierre'})[filter]}</button>)}
+      <button type="button" onClick={()=>{closePanels();setShowWorksites(value=>!value);}}>Chantiers</button>
+      <small>{harvest.networkError?'Connexion interrompue · demandes conservées':'Clic gauche + glisser pour récolter · Maj + clic pour inspecter'}</small>
+    </div>}
+    {worldMode === 'exploitation' && terrainView === 'village' && uncertainRequest.current && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population} queuedCount={queuedExploitationCount}
       request={mixedRequest} preview={mixedPreview} intentState={exploitationIntentState} error={error} pending={pendingAction || arrivalActive} collapsed={paletteCollapsed}
       onChange={changeExploitationSettings} onToggle={toggleHud}
       onWorksites={() => { closePanels(); setShowWorksites(value => !value); }}
@@ -850,7 +869,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && worldMode === 'exploitation' && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={state.village.processingOrders??[]} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={command=>runAction(()=>commandProcessing(worldSlug,state.village.id,command))}/></WorldContextMenu>}
     {menuAnchor && selectedBuilding && worldMode === 'exploitation' && !state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode={worldMode} building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {
-      closePanels(); setExploitationSettings(current => ({ ...current, filter: 'gardens' })); pushNotification('Outil Jardins prêt · glissez sur les parcelles à récolter.');
+      closePanels(); harvest.setFilter('gardens'); setExploitationSettings(current => ({ ...current, filter: 'gardens' })); pushNotification('Outil Jardins prêt · glissez sur les parcelles à récolter.');
     }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />
     {selectedBuilding.type==='town-hall'&&state.village.market&&<MarketPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} market={state.village.market} stocks={state.village.resources} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error}
       onCommand={command=>runAction(()=>commandMarket(worldSlug,state.village.id,command))}
@@ -859,7 +878,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     {error&&selectedBuilding.type!=='town-hall'?<p className="error">{error}</p>:null}</WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && worldMode === 'construction' ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="population" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {}} onDiscover={() => {}} /></WorldContextMenu> : null}
     {menuAnchor && selectedFeatureId && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} onPrepare={(family, woodMode) => {
-      closePanels(); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
+      closePanels(); harvest.setFilter(family); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
       pushNotification(`Outil ${family === 'wood' ? woodMode === 'clear' ? 'Défrichage' : 'Bois' : 'Pierre'} prêt · glissez dans le monde.`);
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {starterActive&&worldMode==='construction'&&<div hidden={paletteCollapsed}><ConstructionPanel starter={{choices:starter!.choices,selected:starter!.selected,onChoose:starter!.onChoose}} houseVariant="logs" construction={{action:'build',type:starter!.selected}} definitions={[]} area={starter!.preview} costs={[]} error={starter!.error??starter!.preview.error} pending={starter!.pending} gardenWorkerNeed={null} upgrade={null} intentState={starter!.uncertain?'uncertain':starter!.pending?'submitting':'idle'} collapsed={paletteCollapsed} onToggle={()=>setPaletteCollapsed(v=>!v)} onChoose={()=>{}} onDomainChange={()=>{}} domain="buildings" infrastructure={null} factoryEnabled={false} onWorkshop={()=>{}} onRetry={starter!.onRetry} onClearError={()=>{}}/>{starter!.names}</div>}

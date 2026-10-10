@@ -1,3 +1,9 @@
+## Récolte par intention — complément du 10 octobre 2026
+
+Décision et contrat courant : [spec HUD](SPEC-GUI-HUD-MODES.md). Le balayage transmet les cibles seules à une réception durable ; le worker existant valide et agrège dans les chantiers automatiques. Retour bref au-dessus des ressources, stocks crédités uniquement au retour. Les anciennes contraintes Auto de confirmation visuelle ne gouvernent plus ce parcours.
+
+Preuve RC1 ciblée achevée dans installation.integration.test.ts : réception pendant verrou concurrent village tenu (199 ms), worker, regroupement, idempotence/droits/refus et retour bois/pierre réel. Le calcul d'admission reste coûteux (cible supplémentaire 7 089 ms au dernier passage) ; la réception rapide n'est pas une preuve de résolution du blocage global de coût sous verrou. Voir la tête de SESSION-HANDOFF.md pour les logs, la portée des recettes navigateur et les processus à préserver.
+
 ﻿# Installation RC1 — candidate de contre-recette
 
 État au 10 octobre 2026 : **consolidation implémentée / intégrée, bloquée pour validation produit alpha** par la stabilité sous verrou décrite ci-dessous. Base installation/atlas `8903402`. Cette tranche prolonge l’[atlas](IMPLEMENTATION-ATLAS-RC1.md) et la [spec](SPEC-CARTE-SPAWN-RC1.md#7-parcours-suivant--starter-kit-et-terrassement). Les sections historiques restent séparées des preuves actuelles.
