@@ -1,3 +1,13 @@
+# Démo 5278 actualisée — 11 octobre 2026
+
+À la demande explicite de Tristan, la démo existante sert maintenant la candidate de synchronisation `d982f3db29cc2d2e5cf49fa7a4107268e1f49d4e`. URL inchangée : http://localhost:5278/spawn?world=rc1-receipt-0ea92d24-c5c8-418b-8292-2781d0413536. API 3102 relancée depuis le build courant, avec son worker : **session 18165 / PID 49648**. Front 5278 : **session 12953 / PID 13196**, preview via `test-results/harvest-vite.mjs`, désormais dirigée vers `test-results/village-sync-dist`. Ancien build conservé sur disque ; aucune recompilation ou modification de code métier dans cette opération.
+
+Base vérifiée : `127.0.0.1/arbestra_test`, migration 041 déjà installée, donc aucune migration supplémentaire ni reset. Bressuire existant conservé (14 lignes bâtiment en lecture SQL avant la mise à jour). **Toujours préserver parent fixture session 48641/PID 8212 et enfants 3101/PID 22268, 5275/PID 44552** ; leurs processus ont été vérifiés après relance. Les instructions de préservation des anciens PID 3102/5278 ci-dessous sont remplacées par cette section.
+
+Recette navigateur réelle sur 5278 avec instrumentation des EventSource réellement ouverts par App : un abonnement village `revision=905`, snapshot R906 (13 bâtiments dans le snapshot/rendu), trame R906→907, contrôle R907, trame R907→908 ; **un seul GET village**, rendu Babylon chargé, aucune erreur JS relevée. Connexion uniquement, aucun ordre de construction/récolte envoyé par l'agent. Navigateur dédié fermé ; API et frontend de démo restent ouverts. Scripts de lancement/observation sous test-results ignorés. Validation produit distincte ; LAN et proxy production non recettés dans cette mise à jour.
+
+---
+
 # Synchronisation village — 11 octobre 2026
 
 Demande courante : copie locale, trames autoritaires, SSE et convergence malgré les courses de jonction/reprise et la perte de publication. Base relue `adda2ed0367c6d99bcc98cb60b118c49e26a68a6`, `main`. **Implémentée / intégrée / vérifiée techniquement, prête pour validation produit de cette tranche ; ouverture alpha non validée.** Candidate : commit contenant cette section, hash exact au bilan. Commit/push autorisés. [Contrat](docs/architecture/village-synchronization.md) et [preuves/mesures/limites](docs/CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md).
