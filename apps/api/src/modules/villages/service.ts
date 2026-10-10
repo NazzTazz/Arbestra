@@ -1,5 +1,6 @@
 import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
+import {naturalFeaturesQuery} from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
@@ -374,48 +375,11 @@ async function featuresInSnapshot(
   village: OwnedVillage,
   ground: Snapshot,
 ) {
-  let query = tx
-    .with(cte=>cte('projectedDeposits').materialized(),eb=>eb.selectFrom('resourceDeposits').selectAll().where('worldId','=',village.worldId)).with('featureLocations', eb => eb.selectFrom('worldCellOccupancies')
-      .select(['worldId', 'featureId', 'cellX', 'cellY']).where('featureId', 'is not', null)
-      .where(sql<boolean>`not exists(select 1 from projected_deposits rd where rd.world_id=world_cell_occupancies.world_id and rd.feature_id=world_cell_occupancies.feature_id)`)
-      .union(eb.selectFrom('projectedDeposits').select(['worldId', 'featureId', 'cellX', 'cellY'])))
-    .selectFrom('featureLocations')
-    .innerJoin('worldFeatures', join => join.onRef('worldFeatures.worldId', '=', 'featureLocations.worldId')
-      .onRef('worldFeatures.id', '=', 'featureLocations.featureId'))
-    .leftJoin('projectedDeposits as resourceDeposits', (join) => join
-      .onRef('resourceDeposits.featureId', '=', 'worldFeatures.id')
-      .onRef('resourceDeposits.worldId', '=', 'worldFeatures.worldId'))
-    .select([
-      'worldFeatures.id',
-      'worldFeatures.featureTypeCode',
-      'worldFeatures.variantSeed',
-      'worldFeatures.state as featureState',
-      sql<number>`feature_locations.cell_x`.as('cellX'),
-      sql<number>`feature_locations.cell_y`.as('cellY'),
-      'resourceDeposits.initialAmount', 'resourceDeposits.remainingAmount', 'resourceDeposits.reservedAmount',
-      'resourceDeposits.revision', 'resourceDeposits.updatedAt', 'resourceDeposits.resourceCode', 'resourceDeposits.cleared', 'resourceDeposits.blocksCell',
-    ])
-    .where('worldFeatures.worldId', '=', village.worldId);
-
   const endX = ground.originCellX + SNAPSHOT_SIZE;
-  query =
-    endX <= village.widthCells
-      ? query
-          .where(sql<boolean>`feature_locations.cell_x >= ${ground.originCellX}`)
-          .where(sql<boolean>`feature_locations.cell_x < ${endX}`)
-      : query.where(sql<boolean>`(feature_locations.cell_x >= ${ground.originCellX}
-        or feature_locations.cell_x < ${endX - village.widthCells})`);
-
   const endY = ground.originCellY + SNAPSHOT_SIZE;
-  query =
-    endY <= village.heightCells
-      ? query
-          .where(sql<boolean>`feature_locations.cell_y >= ${ground.originCellY}`)
-          .where(sql<boolean>`feature_locations.cell_y < ${endY}`)
-      : query.where(sql<boolean>`(feature_locations.cell_y >= ${ground.originCellY}
-        or feature_locations.cell_y < ${endY - village.heightCells})`);
-
-  return query.execute();
+  const xs=endX<=village.widthCells?[[ground.originCellX,endX]]:[[ground.originCellX,village.widthCells],[0,endX-village.widthCells]];
+  const ys=endY<=village.heightCells?[[ground.originCellY,endY]]:[[ground.originCellY,village.heightCells],[0,endY-village.heightCells]];
+  return naturalFeaturesQuery(tx,village.worldId,xs.flatMap(([minX,maxX])=>ys.map(([minY,maxY])=>({minX:minX!,maxX:maxX!,minY:minY!,maxY:maxY!})))).execute();
 }
 function protectedCell(
   cellX: number,

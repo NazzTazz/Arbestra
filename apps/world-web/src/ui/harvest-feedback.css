@@ -1,5 +1,8 @@
 ﻿.harvest-feedback{position:fixed;inset:0;pointer-events:none;z-index:30}
 .harvest-feedback span{position:absolute;transform:translateX(-50%);font-size:20px;font-weight:800;white-space:nowrap;-webkit-text-stroke:1px #000;paint-order:stroke fill;text-shadow:0 1px 1px #000}
 .harvest-feedback--carrot{color:#99e37b}.harvest-feedback--wood{color:#dfb681}.harvest-feedback--stone{color:#e0e3e6}.harvest-feedback--error{color:#ffd59c;font-size:14px!important}
-.harvest-toolbar{display:flex;gap:6px;align-items:center}.harvest-toolbar small{font-size:12px}
-.mode-toolbar.harvest-toolbar{min-height:0;width:max-content;max-width:calc(100vw - 170px);padding:8px 10px;gap:6px;border-radius:8px 8px 0 0}.harvest-toolbar small{flex-basis:100%}@media(max-width:700px){.mode-toolbar.harvest-toolbar{max-width:calc(100vw - 116px)}}
+.exploitation-showroom { left:158px; }
+.exploitation-showroom .showroom-model { flex-basis:190px; grid-template-columns:170px; }
+.exploitation-categories .exploitation-worksites { margin-left:auto; }
+@media(max-width:900px){.exploitation-showroom{left:140px}}
+@media(max-width:700px){.exploitation-showroom{left:110px}}

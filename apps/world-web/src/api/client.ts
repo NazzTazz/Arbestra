@@ -110,6 +110,9 @@ function requestState(path: string, init?: RequestInit): Promise<TimedVillageSta
   const requestedAt = Date.now();
   return villageRequest(fetch(path, { credentials: 'same-origin', ...init }), requestedAt);
 }
+function requestConstructionState(path:string,init:RequestInit):Promise<TimedVillageState>{
+  return requestState(path,{...init,signal:AbortSignal.timeout(15_000)});
+}
 
 export function getVillage(worldSlug: string, villageId?: string): Promise<TimedVillageState> {
   return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/village${villageId ? `?villageId=${encodeURIComponent(villageId)}` : ''}`);
@@ -149,7 +152,7 @@ export function buildBuilding(
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
 ): Promise<TimedVillageState> {
-  return requestState(
+  return requestConstructionState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, quarterTurns, houseVariant, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
   );
@@ -157,7 +160,7 @@ export function buildBuilding(
 
 export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>,
   commandId: string = randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = []): Promise<TimedVillageState> {
-  return requestState(
+  return requestConstructionState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) },
   );
@@ -171,7 +174,7 @@ export function upgradeBuilding(
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   expectedLevel?: number,
 ): Promise<TimedVillageState> {
-  return requestState(
+  return requestConstructionState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/upgrade`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, expectedLevel }) },
   );

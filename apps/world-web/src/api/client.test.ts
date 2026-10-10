@@ -1,8 +1,23 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { discoverOrRefreshSupplies, harvestGarden } from './client';
 import { getStoneDepositDetails, startStoneExtraction } from './client';
+import {buildBuilding} from './client';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('bounds construction waiting and retransmits the same id after an uncertain timeout',async()=>{
+ const controller=new AbortController(),deadline=vi.spyOn(AbortSignal,'timeout').mockReturnValue(controller.signal);
+ const fetchMock=vi.fn().mockImplementationOnce((_url,init:RequestInit)=>new Promise((_resolve,reject)=>init.signal!.addEventListener('abort',()=>reject(init.signal!.reason))));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const pending=buildBuilding('rc1','village','university',{cellX:1,cellY:2},[],'same-command');
+  controller.abort(new DOMException('Response deadline','TimeoutError'));
+  await expect(pending).rejects.toMatchObject({name:'TimeoutError'});expect(deadline).toHaveBeenCalledWith(15000);
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({serverTime:'2026-10-10T20:00:00Z'})));
+  await buildBuilding('rc1','village','university',{cellX:1,cellY:2},[],'same-command');
+  expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
+ }finally{deadline.mockRestore();}
+});
 
 it('refreshes the village after another tab claimed the supplies, without repeating the claim', async () => {
   const snapshot = { serverTime: '2026-09-06T18:00:00Z', village: { carrots: 2050 } };

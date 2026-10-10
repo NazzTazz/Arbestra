@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {rc1ResourceGroups} from '../onboarding/rc1-field.js';
 import {readRc1Ground,rc1FeatureGeometry} from './rc1-ground.js';
+import {naturalFeaturesQuery} from './natural-features.js';
 import { sql, type Kysely } from 'kysely';
 import type { TerrainResponse, TerrainUpdatesResponse } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
@@ -69,26 +70,12 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
         eb('cellY', '>=', c.chunkY * size), eb('cellY', '<', (c.chunkY + 1) * size),
       ])))).execute();
     // The deposit retains its canonical coordinates after its occupancy disappears.
-    const x = sql<number>`feature_locations.cell_x`;
-    const y = sql<number>`feature_locations.cell_y`;
-    const features = await tx.with(cte=>cte('projectedDeposits').materialized(),eb=>eb.selectFrom('resourceDeposits').selectAll().where('worldId','=',worldId)).with('featureLocations', eb => eb.selectFrom('worldCellOccupancies')
-      .select(['worldId', 'featureId', 'cellX', 'cellY']).where('featureId', 'is not', null)
-      .where(sql<boolean>`not exists(select 1 from projected_deposits rd where rd.world_id=world_cell_occupancies.world_id and rd.feature_id=world_cell_occupancies.feature_id)`)
-      .union(eb.selectFrom('projectedDeposits').select(['worldId', 'featureId', 'cellX', 'cellY'])))
-      .selectFrom('featureLocations')
-      .innerJoin('worldFeatures', join => join.onRef('worldFeatures.worldId', '=', 'featureLocations.worldId')
-        .onRef('worldFeatures.id', '=', 'featureLocations.featureId'))
-      .leftJoin('projectedDeposits as resourceDeposits', (join) => join.onRef('resourceDeposits.worldId', '=', 'worldFeatures.worldId').onRef('resourceDeposits.featureId', '=', 'worldFeatures.id'))
-      .select(['worldFeatures.id', 'worldFeatures.featureTypeCode', 'worldFeatures.variantSeed', x.as('cellX'), y.as('cellY'),
-        'resourceDeposits.initialAmount', 'resourceDeposits.remainingAmount', 'resourceDeposits.reservedAmount', 'resourceDeposits.revision', 'resourceDeposits.updatedAt', 'resourceDeposits.resourceCode', 'resourceDeposits.cleared', 'resourceDeposits.blocksCell'])
-      .where('worldFeatures.worldId', '=', worldId).where((eb) => eb.or(wanted.map((c) => eb.and([
-        eb(x, '>=', c.chunkX * size), eb(x, '<', (c.chunkX + 1) * size), eb(y, '>=', c.chunkY * size), eb(y, '<', (c.chunkY + 1) * size),
-      ])))).execute();
+    const features = await naturalFeaturesQuery(tx,worldId,wanted.map(c=>({minX:c.chunkX*size,maxX:(c.chunkX+1)*size,minY:c.chunkY*size,maxY:(c.chunkY+1)*size}))).execute();
     if(preparation&&rc1&&!features.length){
       for(const g of rc1ResourceGroups(rc1.data,rc1.field)){
         if(!wanted.some(c=>Math.floor(g.cellX/size)===c.chunkX&&Math.floor(g.cellY/size)===c.chunkY))continue;
         const hash=createHash('sha256').update(worldId+':'+g.sourceKey).digest('hex'),id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-4'+hash.slice(13,16)+'-a'+hash.slice(17,20)+'-'+hash.slice(20,32);
-        features.push({id,featureTypeCode:g.kind==='wood'?'woodland':'stone_outcrop',variantSeed:3,cellX:g.cellX,cellY:g.cellY,initialAmount:null,remainingAmount:null,reservedAmount:null,revision:null,updatedAt:null,resourceCode:null,cleared:null,blocksCell:null});
+        features.push({id,featureTypeCode:g.kind==='wood'?'woodland':'stone_outcrop',featureState:'available',variantSeed:3,cellX:g.cellX,cellY:g.cellY,initialAmount:null,remainingAmount:null,reservedAmount:null,revision:null,updatedAt:null,resourceCode:null,cleared:null,blocksCell:null});
       }
     }
     const geometry=rc1?await rc1FeatureGeometry(tx,worldId,rc1.data,[...new Set(features.map(f=>f.id))]):new Map();

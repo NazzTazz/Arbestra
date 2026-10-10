@@ -2,6 +2,7 @@ import type {StarterGhost} from '../spawn-map/starter-controller';
 import {poseStarterElement, spawnDelta} from '@arbestra/contracts';
 import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
+import {cameraFocusAt} from './camera-focus';
 import { buildStonemason, buildStonemasonFire } from './stonemason-factory';
 import { buildProceduralBuildingLod, buildCachedProceduralBuildingLod } from './building-lod-procedural';
 import { buildSawmill } from './sawmill-factory';
@@ -314,6 +315,7 @@ export class BabylonVillageScene {
   #constructionAction: 'build' | 'upgrade' | 'extend' | null = null;
   readonly #navigationKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
+      this.#cameraFocus=null;
       const owned = Boolean(this.#pointerDown?.harvest || this.#pointerDown?.mouseArea);
       this.#handlePointerCancel();
       if (owned) { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -321,6 +323,7 @@ export class BabylonVillageScene {
     }
     if (event.code !== 'Space' || (event.target as HTMLElement | null)?.closest('input, textarea, select, button')) return;
     this.#spaceNavigation = true;
+    this.#cameraFocus=null;
     if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
   };
   readonly #navigationKeyUp = (event: KeyboardEvent): void => { if (event.code === 'Space') this.#spaceNavigation = false; };
@@ -331,6 +334,7 @@ export class BabylonVillageScene {
   #lastVisualSignature = '';
   #serverOffsetMs = 0;
   #lastFrameAt = 0;
+  #cameraFocus:{from:Cell;to:Cell;at:number;duration:number;radius:number;height:number}|null=null;
   #lastCameraRadius: number | null = null;
   #initialCameraFramed = false;
   #e2eCells: Array<{ id: string; x: number; z: number }> = [];
@@ -339,6 +343,7 @@ export class BabylonVillageScene {
   #worldHeightUnits = 1024 * TILE_SIZE;
 
   readonly #handlePointerDown = (event: PointerEvent): void => {
+    this.#cameraFocus=null;
     if(event.button===2&&this.#starterManual&&this.#worldMode==='construction'){event.preventDefault();event.stopImmediatePropagation();this.#starterManual();return;}
     if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation&&(event.button===0||event.button===2)){
       event.preventDefault();event.stopImmediatePropagation();
@@ -520,6 +525,7 @@ export class BabylonVillageScene {
     this.#constructionAction = action; this.#onBuildingHover = onHover;
   }
   readonly #handleWheel = (event: WheelEvent): void => {
+    this.#cameraFocus=null;
     if(this.#inhabitantCamera.active)return;
     if(this.#flyover) return;
     if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
@@ -784,6 +790,7 @@ export class BabylonVillageScene {
         <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.03) this.showRegion();
       this.#updateArrival(now);
       if (this.#mode !== 'world') {
+        this.#updateCameraFocus(now);
         this.#wrapCamera();
         if (!this.#arrival && !this.#inhabitantCamera.active) this.#updateCameraProfile();
         this.#updateViewMode();
@@ -902,6 +909,7 @@ export class BabylonVillageScene {
     }
     this.#villageAnchor = { cellX: state.village.anchorCellX, cellY: state.village.anchorCellY };
     if (!this.#space || this.#store?.world.id !== state.world.id || this.#store.world.generationVersion !== state.world.generationVersion) {
+      this.#cameraFocus=null;
       this.#renderer?.dispose(); this.#store?.dispose();
       this.#endFlyover();
       this.#overviewAbort?.abort(); this.#overviewAbort = new AbortController();
@@ -2265,6 +2273,7 @@ export class BabylonVillageScene {
   #worldTarget: TravelCell | null = null;
   #setMode(mode: TerrainViewMode): void {
     if (this.#mode === mode) return;
+    this.#cameraFocus=null;
     this.#pointerDown = null;
     if (mode === 'village' && this.#mode !== 'village') this.#arrivalPending = true;
     else if (mode !== 'village') this.skipArrival();
@@ -2344,6 +2353,7 @@ export class BabylonVillageScene {
     else { this.#camera.radius = Math.min(260, (this.#camera.upperRadiusLimit ?? 680) * .65); this.#setMode('region'); }
   }
   public showVillage(): void {
+    this.#cameraFocus=null;
     this.#inhabitantCamera.stop();this.selectRepresentative(null);
     if(this.#flyover && !this.#flyover.landing) return;
     if (this.#transition.active) { this.#pendingView = 'village'; return; }
@@ -2362,6 +2372,23 @@ export class BabylonVillageScene {
       this.#torusOverview.camera.alpha += horizontal * 0.13;
       this.#torusOverview.camera.beta = Math.max(0.08, Math.min(Math.PI - 0.08, this.#torusOverview.camera.beta + vertical * 0.13));
     }
+  }
+  public viewCenter():Cell|null {return this.#space?.inverse(this.#camera.target.x,this.#camera.target.z)??null;}
+  public naturalFeatures(){return this.#store?.naturalFeatures()??this.#state?.region.features??[];}
+  public focusCell(cell:Cell):void {
+    const from=this.viewCenter();if(!from||this.#mode!=='village'||this.#arrival||this.#flyover||this.#transition.active)return;
+    this.cancelGesture();this.#inhabitantCamera.stop();this.selectRepresentative(null);
+    this.#camera.inertialPanningX=0;this.#camera.inertialPanningY=0;this.#camera.inertialRadiusOffset=0;this.#camera.inertialAlphaOffset=0;this.#camera.inertialBetaOffset=0;
+    this.#cameraFocus={from,to:cell,at:performance.now(),duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:650,radius:this.#camera.radius,height:this.#camera.target.y};
+  }
+  #updateCameraFocus(now:number):void {
+    const focus=this.#cameraFocus;if(!focus||!this.#space)return;
+    const progress=focus.duration?(now-focus.at)/focus.duration:1;
+    const target=cameraFocusAt(focus.from,focus.to,this.#space.width,this.#space.height,progress),p=this.#space.project(target);
+    const height=Math.max(.45,(this.#store?.ground(focus.to.cellX,focus.to.cellY)?.height??0)+.35);
+    this.#camera.target.set(p.x,focus.height+(height-focus.height)*target.eased,p.z);
+    this.#camera.radius=focus.radius+(42-focus.radius)*target.eased;
+    if(progress>=1)this.#cameraFocus=null;
   }
   public selectWorldCenter(): void {
     if(this.#flyover) return;

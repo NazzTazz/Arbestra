@@ -1,3 +1,11 @@
+## Showroom et coût des lectures — complément du 10 octobre 2026
+
+Le HUD Exploitation reprend désormais le showroom de Constructions, avec Exploiter / Artisanat et cinq miniatures ; clic de recadrage sans commande économique. Décision courante dans la [spec HUD](SPEC-GUI-HUD-MODES.md). Recette navigateur contrôlée et recette visuelle réelle effectuées ; détails et limites dans la tête du relais.
+
+`naturalFeaturesQuery` est utilisé par le snapshot village et le terrain : filtre monde/fenêtre avant projection des stocks, coordonnées canoniques du dépôt prioritaires sur une occupation résiduelle. Régression PostgreSQL isolée verte, dont comptage des dépôts effectivement projetés. La commande de construction possède un délai client de 15 s ; une réponse incertaine conserve le même UUID de vérification.
+
+**Latence/stabilité alpha non résolues.** Lecture village encore à 43 253 ms sous charge ; le test ciblé de mesures première/seconde installation et lecture publique a dépassé 180 s. Les deux autres cas exécutés (pose atomique et refus roche sans effets) sont verts. Aucun nouveau résultat de confidentialité ou de performance installation ne peut être attribué au cas interrompu. Voir SESSION-HANDOFF.md pour conditions et mesures SQL partielles.
+
 ## Reconnexion à l'installation — correction du 10 octobre 2026
 
 Sur un 401 des lectures préparatoires, `/spawn` propose désormais une connexion sur la même API, puis relit l'installation et le village autorisés sans changer l'URL ni déclencher de pose. Erreur de mot de passe affichée dans le formulaire. Régression `tests/browser/spawn-session.mjs` rouge avant correction, deux scénarios verts ensuite (401 au starter et au terrain, reconnexion/rechargement, aucune pose). Recette réelle sur le client compilé : Bressuire repris après connexion puis après rechargement ; aucune commande économique envoyée. Cette correction client ne résout pas les limites de coût/stabilité alpha décrites ci-dessous.

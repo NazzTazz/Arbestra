@@ -1,5 +1,7 @@
 import {useHarvestTool} from './ui/use-harvest-tool';
 import {HarvestFeedbackLayer} from './ui/HarvestFeedback';
+import {ExploitationShowroom,type ExploitationCategory} from './ui/ExploitationShowroom';
+import {nearestExploitationTarget,type ExploitationChoice} from './ui/exploitation-navigation';
 import type {StarterController} from './spawn-map/starter-controller';
 import {StarterResume} from './spawn-map/StarterResume';
 import { randomUUID } from './random-uuid';
@@ -225,9 +227,19 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const acceptedExploitation = useRef(new Set<string>());
   const settingsContext = useRef<string | null>(null);
   const [mixedCells, setMixedCells] = useState<Cell[]>([]);
+  const [exploitationCategory,setExploitationCategory]=useState<ExploitationCategory>('exploit');
+  const [exploitationChoice,setExploitationChoice]=useState<ExploitationChoice>('gardens');
   const harvest=useHarvestTool({state,scene:terrainRef,slug:worldSlug,
-    enabled:worldMode==='exploitation'&&!paletteCollapsed&&terrainView==='village'&&!arrivalActive&&!showDev&&!uncertainRequest.current,
+    enabled:worldMode==='exploitation'&&exploitationCategory==='exploit'&&!paletteCollapsed&&terrainView==='village'&&!arrivalActive&&!showDev&&!uncertainRequest.current,
     onAccepted:()=>markOracleProgress()});
+  const chooseExploitation=(choice:ExploitationChoice)=>{
+    cancelWorldGesture();closePanels();setExploitationChoice(choice);
+    if(choice==='gardens'||choice==='wood'||choice==='stone')harvest.setFilter(choice);
+    const current=stateRef.current;if(!current)return;
+    const target=nearestExploitationTarget(current,choice,terrainRef.current?.viewCenter()??{cellX:current.village.anchorCellX,cellY:current.village.anchorCellY},terrainRef.current?.naturalFeatures()??current.region.features);
+    if(target)terrainRef.current?.focusCell(target);
+    else pushNotification(choice==='sawmill'?'Aucune scierie repérée.':choice==='stonemason'?'Aucun tailleur de pierre repéré.':choice==='gardens'?'Aucun jardin repéré.':choice==='wood'?'Aucun bosquet repéré.':'Aucun gisement de pierre repéré.');
+  };
   const pendingHarvestCells = useMemo(() => [...harvest.pendingCells, ...mixedCells, ...queuedExploitationCells], [harvest.pendingCells, mixedCells, queuedExploitationCells]);
   const pendingHarvestKeys = useMemo(() => new Set(pendingHarvestCells.map(cellKey)), [pendingHarvestCells]);
   useEffect(() => {
@@ -405,7 +417,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       sessionStorage.removeItem(pendingConstructionKey(command.villageId)); constructionCommand.current = null;
       setConstructionIntentState('idle'); pushNotification(command.success);
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : 'Commande de construction impossible.';
+      const message = reason instanceof Error&&reason.name==='TimeoutError'?'Réponse trop longue. Vérifiez la même commande.':reason instanceof Error ? reason.message : 'Commande de construction impossible.';
       setError(message); pushNotification(message, 'warning');
       if (reason instanceof ApiError && reason.status < 500) {
         sessionStorage.removeItem(pendingConstructionKey(command.villageId));
@@ -829,11 +841,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
     <WorldModeBar beforeTownHall={beforeTownHall} mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
     <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef}/>
-    {worldMode==='exploitation'&&terrainView==='village'&&!paletteCollapsed&&!uncertainRequest.current&&<div className="mode-toolbar harvest-toolbar" aria-label="Récolte">
-      {(['all','gardens','wood','stone'] as const).map(filter=><button type="button" key={filter} aria-pressed={harvest.filter===filter} onClick={()=>harvest.setFilter(filter)}>{({all:'Tout',gardens:'Jardins',wood:'Bois',stone:'Pierre'})[filter]}</button>)}
-      <button type="button" onClick={()=>{closePanels();setShowWorksites(value=>!value);}}>Chantiers</button>
-      <small>{harvest.networkError?'Connexion interrompue · demandes conservées':'Clic gauche + glisser pour récolter · Maj + clic pour inspecter'}</small>
-    </div>}
+    {worldMode==='exploitation'&&terrainView==='village'&&!paletteCollapsed&&!uncertainRequest.current&&<ExploitationShowroom category={exploitationCategory} selected={exploitationChoice} networkError={harvest.networkError}
+      onCategory={category=>{cancelWorldGesture();closePanels();setExploitationCategory(category);}} onChoose={chooseExploitation} onWorksites={()=>{closePanels();setShowWorksites(value=>!value);}}/>}
     {worldMode === 'exploitation' && terrainView === 'village' && uncertainRequest.current && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population} queuedCount={queuedExploitationCount}
       request={mixedRequest} preview={mixedPreview} intentState={exploitationIntentState} error={error} pending={pendingAction || arrivalActive} collapsed={paletteCollapsed}
       onChange={changeExploitationSettings} onToggle={toggleHud}

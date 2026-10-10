@@ -12,6 +12,8 @@ import { buildSawmill } from './sawmill-factory';
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { brazierBlocks } from './village-braziers';
 import {buildInfrastructurePresentation} from './infrastructure-factory';
+import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
+import {createRockSurface,rockOutcropElevation} from './rock-surface';
 
 /** Uses the same generators as the village. The result is centred on its footprint. */
 export function buildPresentation(kit: TimberThatch, code: string, level = 1): Mesh {
@@ -50,6 +52,16 @@ export function buildPresentation(kit: TimberThatch, code: string, level = 1): M
       darkTimber: material('dark-timber', '#402718'), roof: material('roof', '#5d3226'),
       trunk: material('trunk', '#523620'), packedEarth: material('earth', '#4f5839'), sawdust: material('sawdust', '#806b3d') }, root.name, level);
     sawmill.parent = root;
+  } else if (code === 'woodland') {
+    const leaves=new StandardMaterial('preview-grove-leaves',kit.scene);leaves.diffuseColor=Color3.FromHexString('#365425');leaves.specularColor=Color3.Black();
+    for(const [x,z,size] of [[-.8,.5,1],[.7,.4,.85],[0,-.6,1.1]]){
+      const trunk=MeshBuilder.CreateCylinder('preview-grove-trunk',{height:1,diameter:.22,tessellation:6},kit.scene);trunk.parent=root;trunk.position.set(x!,size!*.5,z!);trunk.scaling.setAll(size!);trunk.material=kit.wood;
+      for(const [y,diameter] of [[1.3,1.3],[1.9,.9]]){const crown=MeshBuilder.CreateCylinder('preview-grove-crown',{height:1.35,diameterBottom:diameter!,diameterTop:0,tessellation:6},kit.scene);crown.parent=root;crown.position.set(x!,y!*size!,z!);crown.scaling.setAll(size!);crown.material=leaves;}
+    }
+  } else if (code === 'stone_outcrop') {
+    const rock=new Mesh('preview-deposit',kit.scene),data=new VertexData();
+    Object.assign(data,createRockSurface({x:-2,z:-2,width:4,depth:4,seed:42,elevation:(x,z)=>rockOutcropElevation(x,z,42,{x:0,z:0,radiusX:1.5,radiusZ:1.25,height:1,angle:.2,scaleX:1},512,256)}));
+    data.applyToMesh(rock);rock.material=kit.stone;rock.parent=root;
   } else if (code === 'garden') {
     const surface = MeshBuilder.CreateGround('preview-garden', { width: 2.5, height: 2.5 }, kit.scene);
     surface.parent = root; surface.position.y = .16;

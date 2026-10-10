@@ -151,6 +151,11 @@ export class TerrainStore {
     for (const k of this.#own) { const [cellX, cellY] = k.split(':').map(Number); if (this.key(cellX!, cellY!) === key) occupied.set(k, { cellX: cellX!, cellY: cellY! }); }
     return { ...chunk, features: [...features.values()].map((f) => ({ ...f, deposit: this.revisions.get(f.id) ?? f.deposit })), occupiedCells: [...occupied.values()] };
   }
+  naturalFeatures():NaturalFeature[]{
+    const features=new Map(this.#snapshot.region.features.map(f=>[f.id,f]));
+    for(const d of this.#demand.filter(d=>d.visible))for(const f of this.chunk(d.key)?.features??[])features.set(f.id,f);
+    return [...features.values()].map(f=>({...f,deposit:this.revisions.get(f.id)??f.deposit}));
+  }
   ground(x: number, y: number): { code: number; height: number } | null {
     const { widthCells: w, heightCells: h, chunkSize: s } = this.world;
     const continuousX=x, continuousY=y;
