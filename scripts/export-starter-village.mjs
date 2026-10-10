@@ -31,6 +31,6 @@ try {
     infrastructure.equipment.forEach((e,i)=>e.id='equipment-'+i);
     return {version:1,buildings,infrastructure};
   });
-  await writeFile('apps/api/src/modules/onboarding/starter-village.ts', "import type { StarterVillageTemplate } from './starter-layout.js';\n\n// Frozen layout designed by Tristan on start@arbestra.world; no gameplay balances or IDs.\nexport const STARTER_VILLAGE = "+JSON.stringify(template,null,2)+" satisfies StarterVillageTemplate;\n");
+  await writeFile('apps/api/src/modules/onboarding/starter-village.ts', "import type { StarterVillageTemplate } from './starter-layout.js';\n\n// Frozen layout designed by Tristan on start@arbestra.world; no gameplay balances or IDs.\nexport const STARTER_VILLAGE: StarterVillageTemplate = "+JSON.stringify(template,null,2)+";\n");
   console.log(JSON.stringify({buildings:template.buildings.map(b=>({type:b.type,cells:b.cells})),roads:template.infrastructure.roads.length,equipment:template.infrastructure.equipment.length}));
 } finally {await db.destroy();}

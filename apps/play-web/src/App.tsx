@@ -35,6 +35,7 @@ export function App() {
     event.preventDefault();if(pending||!chosen)return;setPending(true);setError(null);
     const form=new FormData(event.currentTarget);
     try {
+      if(worlds?.find(w=>w.slug===chosen)?.spawnMode==='atlas'){const url=new URL(worldUrl(chosen));url.pathname='/spawn-map';url.searchParams.set('playerName',String(form.get('playerName')).trim());url.searchParams.set('villageName',String(form.get('villageName')).trim());window.location.assign(url.href);return;}
       const result=await joinWorld(chosen,{playerName:String(form.get('playerName')).trim(),villageName:String(form.get('villageName')).trim()});
       window.location.assign(worldUrl(chosen,result.villageId));
     }catch(reason){setError(reason instanceof Error?reason.message:'Impossible de créer le village.');setPending(false);}

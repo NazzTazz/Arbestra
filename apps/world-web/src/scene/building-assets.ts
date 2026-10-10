@@ -14,7 +14,7 @@ export const buildingAssets:Record<string,{url:string;bytes:number;thumbnail?:st
 const scenes=new WeakMap<Scene,Map<string,Promise<AssetContainer>>>();
 
 /** Native instances retain individual transforms, culling and picking, sharing each material draw. */
-export function instantiateBakedBuilding(container:AssetContainer,parent:Mesh){
+export function instantiateBakedBuilding(container:AssetContainer,parent:Mesh,cloneMeshes=false){
   for(const source of container.meshes){
     source.receiveShadows=true;
     if(source.metadata?.buildingAttachment==='glass'&&source instanceof Mesh)attachFrostedGlass(source);
@@ -24,7 +24,7 @@ export function instantiateBakedBuilding(container:AssetContainer,parent:Mesh){
       if(!parent.getScene().meshes.includes(source))parent.getScene().addMesh(source);
     }
   }
-  const model=container.instantiateModelsToScene(name=>`${parent.name}-${name}`,false,{doNotInstantiate:false});
+  const model=container.instantiateModelsToScene(name=>`${parent.name}-${name}`,false,{doNotInstantiate:cloneMeshes});
   for(const node of model.rootNodes){node.parent=parent;for(const mesh of node.getChildMeshes()){
     const source=mesh instanceof InstancedMesh?mesh.sourceMesh:mesh;
     mesh.metadata={...source.metadata,...parent.metadata};
@@ -60,10 +60,10 @@ async function bakedContainer(scene:Scene,key:string):Promise<AssetContainer> {
   return promise;
 }
 
-export async function loadBakedBuilding(parent:Mesh,key:string,withLod=false):Promise<void> {
+export async function loadBakedBuilding(parent:Mesh,key:string,withLod=false,cloneMeshes=false):Promise<void> {
   const scene=parent.getScene();
   const container=await bakedContainer(scene,key);if(parent.isDisposed()||scene.isDisposed)return;
-  const detailed=instantiateBakedBuilding(container,parent);
+  const detailed=instantiateBakedBuilding(container,parent,cloneMeshes);
   // The detailed model becomes usable immediately. A failed/delayed optional variant
   // neither blocks the building nor causes the detailed model to be instantiated twice.
   if(withLod&&buildingAssets[`${key}-lod1`]){

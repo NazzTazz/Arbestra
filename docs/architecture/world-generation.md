@@ -1,6 +1,14 @@
 # Génération d’un monde
 
+État courant du 10 octobre : [installation RC1, vue village et dossier de contre-recette](../IMPLEMENTATION-INSTALLATION-RC1.md). Les mentions de pose non raccordée ci-dessous décrivent la tranche atlas antérieure. La candidate reste à valider avant ouverture publique.
+
 Statut : **spécification autoritaire implémentée — génération v2**.
+
+RC1 : [prédiagnostic interne de spawn](../IMPLEMENTATION-CARTE-SPAWN-RC1.md) en cours. Les accès au champ immuable, protections privées et calcul de dotation sont raccordés en lecture seule sur copie de test ; aucune projection économique naturelle ni installation persistante n’est acquise. La règle RC1 de pente piétonne (¼ de case verticale par case parcourue) reste séparée de `canTraverseLandscape()` historique. Le garde d’ouverture v3 reste conservé.
+
+Le prédiagnostic RC1 lit un snapshot repeatable-read par monde puis libère la transaction avant le calcul dans un worker CPU de l'application Fastify. Ce worker est distinct du scheduler et du générateur : aucune connexion DB, au plus quatre demandes admises, calcul actif inclus. Son cache immuable exige l'égalité du texte JSONB effectivement lu et validé ; voisins et protections viennent de chaque nouveau snapshot. Voir les [corrections de réactivité](../CORRECTIONS-CARTE-SPAWN-RC1-2026-10-09.md).
+
+L'[atlas d'accueil](../IMPLEMENTATION-ATLAS-RC1.md) sépare désormais les métadonnées de présentation (`spawn-atlas`) du champ géographique détaillé (`spawn-map`). Le fond SVG est préparé depuis les octets RC1 signés ; il n'autorise aucune pose. Le diagnostic ne construit plus de maillage Babylon. Migration additive 037 : textes par monde éditables par les opérateurs existants et contour de territoire par village. Le propriétaire trace un contour simple contenant son HDV, rayon maximal 30, sans chevauchement ; éditions sérialisées sous le verrou spatial du monde après verrou du village. Les contrôles de terrain/dotation relisent ces territoires. Cercle de diagnostic 8 et bande de terrassement ±2 niveaux ; pente piétonne inchangée. Le plan de nettoyage est calculé sans mutation ; son application transactionnelle au spawn reste à réaliser.
 
 Le [World generator alpha](../SPEC-WORLD-GENERATOR-ALPHA.md) a ses **tranches A/B implémentées** : candidats fermés, exécuteur isolé, preview opérateur et relief/climat v3 exploratoires. Hydrologie et spawn aménageur restent C/D ; v3 ne peut pas être ouvert. Le gameplay des univers ouverts conserve le générateur v2 ci-dessous. Voir [la recette A/B](../RECETTE-WORLD-GENERATOR-AB-2026-10-07.md).
 

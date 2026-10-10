@@ -1,3 +1,5 @@
+import {canWalkSpawnSegment,type SpawnAccessField} from './spawn-access.js';
+export type TravelGround=SpawnAccessField & {revision:string};
 import type { VillageState } from './villages.js';
 import {buildingAccesses} from './building-access.js';
 import {infrastructurePlanSurface,infrastructureBlockedPixels,infrastructureBarrierAt,pixelKey} from './infrastructure.js';
@@ -69,11 +71,11 @@ class StepQueue {
 }
 
 /** Deterministic cardinal route, with a bounded preference for shared tracks. */
-export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village' | 'region' | 'cells'|'infrastructure'>, woodlandTargets: readonly string[] = []): TravelRoute[] {
+export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village' | 'region' | 'cells'|'infrastructure'>, woodlandTargets: readonly string[] = [], ground?:TravelGround): TravelRoute[] {
   const { world, village, region } = state;
   // Snapshots change economic amounts without changing this spatial problem.
   // Cache only bounded, deterministic geometry; never retain an economic snapshot.
-  const signature=JSON.stringify([world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
+  const signature=JSON.stringify([ground?.revision,world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
     region.originCellX,region.originCellY,region.width,region.height,region.terrainCodes,
     [...region.features].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>[f.id,f.type,f.cellX,f.cellY,f.deposit?.state,f.deposit?.blocksCell,f.deposit?.cleared]),
     state.cells.filter(c=>c.footprint||c.building).sort((a,b)=>a.cellX-b.cellX||a.cellY-b.cellY).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.visualLayout,c.building.accesses,c.building.garden?.plots.map(p=>[p.cellX,p.cellY]).sort((a,b)=>a[0]!-b[0]!||a[1]!-b[1]!)]]),state.infrastructure&&[state.infrastructure.roads,state.infrastructure.inheritedRoads,state.infrastructure.inheritedCells,[...state.infrastructure.equipment].sort((a,b)=>a.id.localeCompare(b.id)).map(e=>[e.id,e.x,e.y])],[...woodlandTargets].sort()]);
@@ -124,6 +126,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
         const cell = { cellX: wrap(current.cell.cellX + dx!, world.widthCells),
           cellY: wrap(current.cell.cellY + dy!, world.heightCells) };
         if ((!inside(cell) && key(cell) !== key(goal.destination)) || blocked.has(key(cell)) && key(cell) !== key(goal.destination)) continue;
+        if(ground&&!canWalkSpawnSegment(ground,{x:current.cell.cellX,y:current.cell.cellY},{x:cell.cellX,y:cell.cellY}))continue;
         const edge = [key(current.cell), key(cell)].sort().join('|');
         const cost = current.cost + (shared.has(edge) ? 0.7 : 1) + (current.direction >= 0 && current.direction !== direction ? 0.05 : 0);
         const stateKey = `${key(cell)}:${direction}`;
@@ -144,7 +147,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   const guide=new Set<string>();
   for(const route of routes)for(const p of route.cells)guide.add(key(p));
   const refinement=state.infrastructure?prepareRefinement(state):undefined;
-  const result=state.infrastructure?routes.flatMap(route=>{const refined=refineTravelRoute(state,route,guide,refinement);return refined?[refined]:[];}):routes;
+  const result=state.infrastructure?routes.flatMap(route=>{const refined=refineTravelRoute(state,route,guide,refinement,ground);return refined?[refined]:[];}):routes;
   if(result.reduce((n,r)=>n+r.cells.length,0)<=50_000){networkCache.set(signature,copyNetwork(result));
     while(networkCache.size>8||[...networkCache.values()].reduce((n,list)=>n+list.reduce((m,r)=>m+r.cells.length,0),0)>50_000)networkCache.delete(networkCache.keys().next().value!);}
   return result;
@@ -167,7 +170,7 @@ function prepareRefinement(state:Pick<VillageState,'world'|'village'|'region'|'c
   const roadNodes=[...surface.values()].filter(p=>p.manual&&p.x%2===0&&p.y%2===0).map(p=>({cellX:p.x/2,cellY:p.y/2}));
   return {surface,curbPixels,roadNodes};
 }
-export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>):TravelRoute|null{
+export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround):TravelRoute|null{
   if(!state.infrastructure||!route.cells.length)return route;
   const anchor=state.cells.find(c=>c.cellX===state.village.anchorCellX&&c.cellY===state.village.anchorCellY);
   const hallId=state.village.townHallBuildingId??anchor?.footprint?.buildingId??anchor?.building?.id;
@@ -208,7 +211,7 @@ export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'reg
     const dx=delta(access.outside.cellX,access.position.cellX,world.widthCells),dy=delta(access.outside.cellY,access.position.cellY,world.heightCells);
     const steps=Math.max(1,Math.ceil((Math.abs(dx)+Math.abs(dy))*32));
     for(let i=0;i<=steps;i++)if(!land({cellX:wrap(access.position.cellX+dx*i/steps,world.widthCells),cellY:wrap(access.position.cellY+dy*i/steps,world.heightCells)},buildingId))return false;
-    return true;
+    return !ground||canWalkSpawnSegment(ground,{x:access.position.cellX,y:access.position.cellY},{x:access.outside.cellX,y:access.outside.cellY});
   };
   for(const start of starts)for(const end of ends.length?ends:[null]){
     if(!accessClear(start,hall.building.id)||end&&!accessClear(end,route.id))continue;
@@ -254,6 +257,7 @@ export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'reg
           for(let i=1;i<=n;i++){
             const node={cellX:wrap(previous.cellX+Math.sign(dx)*i,w),cellY:wrap(previous.cellY+Math.sign(dy)*i,h)},p={cellX:node.cellX/8,cellY:node.cellY/8};
             if(!local(p)||!land(p)||curbPixels.size&&infrastructureBarrierAt(curbPixels,{cellX:wrap(node.cellX-Math.sign(dx)/2,w)/8,cellY:wrap(node.cellY-Math.sign(dy)/2,h)/8},world)){valid=false;break;}
+            if(ground&&!canWalkSpawnSegment(ground,{x:wrap(node.cellX-Math.sign(dx),w)/8,y:wrap(node.cellY-Math.sign(dy),h)/8},{x:p.cellX,y:p.cellY})){valid=false;break;}
             const manual=surface.get(pixelKey(wrap(node.cellX*2,world.widthCells*16),wrap(node.cellY*2,world.heightCells*16)))?.manual;
             const guided=guide.has(`${wrap(Math.round(p.cellX),world.widthCells)}:${wrap(Math.round(p.cellY),world.heightCells)}`);
             cost+=(manual||guided)? .7 : 1;steps++;

@@ -1,3 +1,5 @@
+import type {StarterController} from './spawn-map/starter-controller';
+import {StarterResume} from './spawn-map/StarterResume';
 import { randomUUID } from './random-uuid';
 import { RepresentativePanel } from './ui/RepresentativePanel';
 import { ProcessingPanel } from './ui/ProcessingPanel';
@@ -64,10 +66,12 @@ function gardenReady(garden: Garden, serverNow: number): number {
     + plot.productionPerHour * Math.max(0, serverNow - Date.parse(plot.productionUpdatedAt)) / 3_600_000)), 0);
 }
 
-export function App() {
-  const [state, setState] = useState<VillageState | null>(null);
+export function App({starter}:{starter?:StarterController} = {}) {
+  const beforeTownHall=starter?.beforeTownHall??false;
+  const starterActive=Boolean(starter?.active);
+  const [state, setState] = useState<VillageState | null>(starter?.state??null);
   const stateRef = useRef<VillageState | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!starter);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -86,7 +90,7 @@ export function App() {
   const [showJournal, setShowJournal] = useState(false);
   const [showScience, setShowScience] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ScreenAnchor | null>(null);
-  const [construction, setConstruction] = useState<ConstructionChoice | null>(null);
+  const [construction, setConstruction] = useState<ConstructionChoice | null>(starter?{action:'build',type:null}:null);
   const [constructionDomain,setConstructionDomain]=useState<'buildings'|'infrastructure'>('buildings');
   const [quarterTurns,setQuarterTurns]=useState(0);
   const [houseVariant,setHouseVariant]=useState<'stone'|'logs'|'beams'>('logs');
@@ -182,8 +186,10 @@ export function App() {
     finally { catRequest.current = false; }
   }, [applySnapshot]);
 
-  const [worldMode, setWorldMode] = useState<ActiveWorldMode>('exploration');
-  const [paletteCollapsed, setPaletteCollapsed] = useState(true);
+  useEffect(()=>{if(starter){stateRef.current=starter.state;setState(starter.state);setLoading(false);}},[starter?.state]);
+
+  const [worldMode, setWorldMode] = useState<ActiveWorldMode>(starter?'construction':'exploration');
+  const [paletteCollapsed, setPaletteCollapsed] = useState(!starter);
   const modeNavigation = useRef(new WorldModeNavigation());
   const modeRef = useRef(worldMode); modeRef.current = worldMode;
   const [exploitationSettings, setExploitationSettings] = useState<ExploitationSettings>(() => {
@@ -270,11 +276,12 @@ export function App() {
   }, [previewRequest]);
 
   const refresh = useCallback(async () => {
+    if(beforeTownHall)return;
     if (actionInFlight.current) return;
     try { applySnapshot(await getVillage(worldSlug, stateRef.current?.village.id)); } catch { /* Background refresh is best effort. */ }
-  }, [applySnapshot]);
+  }, [applySnapshot,beforeTownHall]);
 
-  useEffect(() => { void getVillage(worldSlug).then(applySnapshot).catch((reason) => {
+  useEffect(() => { if(starter) return; void getVillage(worldSlug).then(applySnapshot).catch((reason) => {
     if (reason instanceof ApiError && reason.status === 401) setNeedsLogin(true);
     else setError(reason instanceof Error ? reason.message : 'Chargement impossible.');
   }).finally(() => setLoading(false)); }, [applySnapshot]);
@@ -416,6 +423,7 @@ export function App() {
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || actionInFlight.current && !(event.key === 'Escape' && exploitationActive.current)) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.closest('input, textarea, select')) return;
+      if(starterActive&&modeRef.current==='construction'){if(event.key.toLowerCase()==='r'){starter?.onRotate();event.preventDefault();return;}if(event.key==='Escape'){starter?.onManual();event.preventDefault();return;}}
       if (event.key.toLowerCase() === 'b') { event.preventDefault(); chooseMode(modeRef.current === 'construction' ? 'exploration' : 'construction'); }
       if (event.key.toLowerCase()==='r'&&!event.repeat&&modeRef.current==='construction'&&constructionDomain==='buildings'&&construction?.type&&!paletteCollapsed&&!workshop) { event.preventDefault();setQuarterTurns(t=>(t+1)%4);return; }
       if (event.key === 'Escape') {
@@ -545,6 +553,7 @@ export function App() {
     setPaletteCollapsed(value=>!value);
   }
   function chooseMode(mode: ActiveWorldMode, toggleActive = false) {
+    if(beforeTownHall && (mode==='population'||mode==='exploitation'))return;
     if(toggleActive && mode===modeRef.current){toggleHud();return;}
     if (mode !== 'exploitation') setExploitationSettings(current => ({ ...current, woodMode: 'cut' }));
     cancelDraft(); closePanels(); setShowScience(false); setShowWorksites(false); setPopulationFocus(null); setPopulationFilter('all');
@@ -782,14 +791,15 @@ export function App() {
   if (needsLogin) return <main className="center-message"><a href={LOBBY_URL}>Se connecter pour entrer dans ce monde</a></main>;
   if (!state) return <main className="center-message" role="alert">{error ?? 'Village indisponible.'}</main>;
   return <main className="game-shell">
-    <Suspense fallback={<div className="center-message">L'oracle se rhabille...</div>}><VillageScene worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
+    {!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
+    <Suspense fallback={<div className="center-message">L'oracle se rhabille...</div>}><VillageScene preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
       pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : []} highlightedSiteIds={highlightedSiteIds}
       constructionMode={!paletteCollapsed && !workshop && worldMode === 'construction' && constructionDomain==='buildings' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
-      cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
-      constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
+      cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={starterActive?'starter':construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
+      constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={starterActive?worldMode==='construction'&&!paletteCollapsed&&!starter!.pending:!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
         && (construction?.action !== 'extend' || Boolean(construction.buildingId)) && !pendingAction && terrainView === 'village'}
-      preview={!paletteCollapsed && worldMode === 'construction' ? area : null} previewInvalid={Boolean(selectionError)} onAreaGesture={handleAreaGesture}
+      preview={!paletteCollapsed && worldMode === 'construction' ? starterActive?starter!.preview:area : null} previewInvalid={starterActive?Boolean(starter!.preview.error):Boolean(selectionError)} onAreaGesture={starterActive?(_first,last,commit)=>starter!.onGesture(last,commit):handleAreaGesture}
       onGardenHarvest={collectExploitation} onWorldGestureCancelled={cancelWorldGesture} onSiteSelected={(id, anchor, inspect) => {
         if(modeRef.current==='population'&&id.startsWith('representative:')){
           closePanels();setPopulationFocus(null);const personId=id.slice(15);
@@ -802,7 +812,7 @@ export function App() {
       }} onFeatureSelected={(id, anchor) => {
         if (modeRef.current === 'exploitation') { closePanels(); setSelectedFeatureId(id); setMenuAnchor(anchor); }
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
-    <WorldModeBar mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
+    <WorldModeBar beforeTownHall={beforeTownHall} mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
     {worldMode === 'exploitation' && terrainView === 'village' && <div hidden={paletteCollapsed}><ExploitationPalette settings={exploitationSettings} population={state.village.population} queuedCount={queuedExploitationCount}
       request={mixedRequest} preview={mixedPreview} intentState={exploitationIntentState} error={error} pending={pendingAction || arrivalActive} collapsed={paletteCollapsed}
       onChange={changeExploitationSettings} onToggle={toggleHud}
@@ -825,7 +835,7 @@ export function App() {
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
-    <Hud devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
     {showScience && worldMode === 'population' && terrainView === 'village' && state.science && <SciencePanel target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (modeRef.current !== 'population' || arrivalActive) return; void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
@@ -850,7 +860,9 @@ export function App() {
       closePanels(); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
       pushNotification(`Outil ${family === 'wood' ? woodMode === 'clear' ? 'Défrichage' : 'Bois' : 'Pierre'} prêt · glissez dans le monde.`);
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
-    {terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
+    {starterActive&&worldMode==='construction'&&<div hidden={paletteCollapsed}><ConstructionPanel starter={{choices:starter!.choices,selected:starter!.selected,onChoose:starter!.onChoose}} houseVariant="logs" construction={{action:'build',type:starter!.selected}} definitions={[]} area={starter!.preview} costs={[]} error={starter!.error??starter!.preview.error} pending={starter!.pending} gardenWorkerNeed={null} upgrade={null} intentState={starter!.uncertain?'uncertain':starter!.pending?'submitting':'idle'} collapsed={paletteCollapsed} onToggle={()=>setPaletteCollapsed(v=>!v)} onChoose={()=>{}} onDomainChange={()=>{}} domain="buildings" infrastructure={null} factoryEnabled={false} onWorkshop={()=>{}} onRetry={starter!.onRetry} onClearError={()=>{}}/>{starter!.names}</div>}
+    {starter&&!starterActive&&starter.choices.some(c=>c.key)&&worldMode==='construction'&&<button className="starter-resume" onClick={()=>{starter.onChoose(starter.choices.find(c=>c.key)!.key);setPaletteCollapsed(false);}}>Kit initial restant</button>}
+    {!starterActive && terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
       intentState={constructionIntentState} onRetry={retryConstruction} onClearError={clearConstructionError}
       collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={(type,variant) => { clearConstructionError(); clearPreview(); if(variant)setHouseVariant(variant);setConstruction({ action: 'build', type }); }}
       domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}

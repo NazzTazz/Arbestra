@@ -239,17 +239,17 @@ export function geographicWaterCurrent(g:WorldGeography,x:number,y:number,phase:
  return [solar[0]/speed/scaleX,solar[1]/speed];
 }
 const geologySamplers=new WeakMap<WorldGeography,ReturnType<typeof createGeologySampler>>();
-export function sampleWorldGeology(g:WorldGeography,x:number,y:number){
+export function sampleWorldGeology(g:WorldGeography,x:number,y:number,topographicSample?:WorldGeoSample){
  let sampler=geologySamplers.get(g);
  if(!sampler){sampler=createGeologySampler(g,(x,y)=>sampleWorldTopography(g,x,y));geologySamplers.set(g,sampler);}
- return sampler(x,y);
+ return sampler(x,y,topographicSample);
 }
 export function sampleWorldGeography(g:WorldGeography,x:number,y:number):WorldGeoSample{
  const s=sampleWorldTopography(g,x,y);
  // T1 water is applied after geology: flooding the preview must not resculpt its bed.
  const surface=g.study?.waterLevel??s.surface;
  if(!g.geology)return {...s,surface,depth:Math.max(0,surface-s.elevation)};
- const geology=sampleWorldGeology(g,x,y);
+ const geology=sampleWorldGeology(g,x,y,s);
  return {...s,surface,elevation:geology.elevation,depth:Math.max(0,surface-geology.elevation),rock:geology.exposure,geology};
 }
 export function generateGeographicLandscape(seed:number,width:number,height:number,p:GeneratorParameters,recipeRevision=GEOGRAPHY_RECIPE_REVISION):GeneratedLandscape{

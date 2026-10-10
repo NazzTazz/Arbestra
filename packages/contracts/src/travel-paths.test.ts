@@ -4,6 +4,12 @@ import type { VillageState } from './villages.js';
 import { buildTravelNetwork, travelDuration } from './travel-paths.js';
 
 describe('travel network', () => {
+  it('uses the RC1 sampled slope and does not reuse a route across changed terrain',()=>{
+    const state={world:{id:'rc1',widthCells:9,heightCells:9},village:{anchorCellX:2,anchorCellY:4},region:{originCellX:0,originCellY:0,width:9,height:9,terrainCodes:Array(81).fill(1),features:[]},cells:[{cellX:4,cellY:4,building:{id:'house',type:'dwelling'}}]} as unknown as Pick<VillageState,'world'|'village'|'region'|'cells'>;
+    const flat={width:9,height:9,revision:'flat',sample:()=>({elevation:1,dry:true,blocked:false})};expect(buildTravelNetwork(state,[],flat)).toHaveLength(1);
+    const cliff={...flat,revision:'cliff',sample:(x:number)=>({elevation:x>=3?2:1,dry:true,blocked:false})};expect(buildTravelNetwork(state,[],cliff)).toEqual([]);
+    const flooded={...flat,revision:'subcell-water',sample:(x:number)=>({elevation:1,dry:Math.abs(x-2.5)>.08&&Math.abs(x-8.5)>.08,blocked:false})};expect(buildTravelNetwork(state,[],flooded)).toEqual([]);
+  });
   it('counts physical length on long territorial legs and wrapped fine segments', () => {
     const world={widthCells:2048,heightCells:1024};
     expect(travelDuration([{cellX:0,cellY:5},{cellX:150,cellY:5}],world)).toBe(150_000);

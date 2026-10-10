@@ -58,19 +58,19 @@ describe('player onboarding',()=>{
   });
   it('creates the complete translated layout, initial economy and single-use chest, then reuses the same village on retry',async()=>{
     const id=await account(), created=await joinWorld(db,id,slug,input);
-    const village=await db.selectFrom('villages').selectAll().where('id','=',created.villageId).executeTakeFirstOrThrow();
+
     const buildings=await db.selectFrom('buildings').selectAll().where('worldId','=',worldId).where('villageId','=',created.villageId).execute();
     expect(buildings).toHaveLength(STARTER_VILLAGE.buildings.length);
     expect(buildings.every(b=>b.status==='completed'&&b.targetLevel===null)).toBe(true);
     expect(buildings.filter(b=>b.buildingType==='dwelling').every(b=>b.visualLayout?.recipe==='log-house')).toBe(true);
-    expect(await db.selectFrom('gardenPlots').select('storedAmount').where('worldId','=',worldId).execute()).toHaveLength(3);
+    expect(await db.selectFrom('gardenPlots').select('storedAmount').where('worldId','=',worldId).execute()).toHaveLength(2);
     const capacity=await db.selectFrom('buildingLevelProduction').select('capacity').where('buildingTypeCode','=','garden').where('level','=',1).executeTakeFirstOrThrow();
     const plots=await db.selectFrom('gardenPlots').select('storedAmount').where('worldId','=',worldId).execute();
     expect(plots.every(p=>Number(p.storedAmount)===Math.floor(Number(capacity.capacity)/3))).toBe(true);
     expect((await db.selectFrom('populationCohorts').select('memberCount').where('worldId','=',worldId).execute()).map(c=>c.memberCount)).toEqual([15]);
     const plan=(await db.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).executeTakeFirstOrThrow()).plan;
     expect(plan.revision).toBe(0);expect(plan.stoneReserve).toBe(0);expect(plan.equipment).toHaveLength(STARTER_VILLAGE.infrastructure.equipment.length);
-    expect(plan.roads[0]!.points[0]!.x).toBe(STARTER_VILLAGE.infrastructure.roads[0]!.points[0]!.x+village.anchorCellX*8);
+    expect(plan.roads).toEqual([]); expect(plan.equipment).toEqual([]);
     const stocks=await db.selectFrom('villageResources').select(['resourceCode','amount']).where('worldId','=',worldId).execute();
     expect(Object.fromEntries(stocks.map(r=>[r.resourceCode,Number(r.amount)]))).toMatchObject({wood:2000,carrot:50,stone:0,timber:0,'cut-stone':0,rings:0});
     expect(await joinWorld(db,id,slug,{playerName:'Changed',villageName:'Changed'})).toEqual(created);
@@ -93,7 +93,7 @@ describe('player onboarding',()=>{
   });
   it('skips an occupied clearing without deleting its feature or changing its protection',async()=>{
     const first=await db.selectFrom('worldClearings').selectAll().where('worldId','=',worldId).orderBy('id').executeTakeFirstOrThrow();
-    const featureId=randomUUID(),cellX=first.centerCellX-4,cellY=first.centerCellY;
+    const featureId=randomUUID(),cellX=first.centerCellX,cellY=first.centerCellY;
     await db.insertInto('worldFeatures').values({id:featureId,worldId,featureTypeCode:'woodland',state:'available',variantSeed:1}).execute();
     await db.insertInto('worldCellOccupancies').values({worldId,cellX,cellY,featureId,buildingId:null,pendingExpansionId:null,role:'body'}).execute();
     const owner=await account(),created=await joinWorld(db,owner,slug,input);

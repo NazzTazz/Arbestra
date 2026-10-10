@@ -1,3 +1,4 @@
+import * as spawnInstallationMigration from './migrations/038_spawn_installation.js';
 import { fileURLToPath } from 'node:url';
 
 import { Migrator, type MigrationProvider } from 'kysely';
@@ -42,6 +43,7 @@ import * as oracleMarketMigration from './migrations/034_oracle_market.js';
 
 import * as worldGeneratorMigration from './migrations/035_world_generator.js';
 import * as worldGeneratorRecipeMigration from './migrations/036_world_generator_recipe.js';
+import * as spawnAtlasMigration from './migrations/037_spawn_atlas.js';
 
 const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -82,6 +84,8 @@ const migrationProvider: MigrationProvider = {
       '034_oracle_market': oracleMarketMigration,
       '035_world_generator': worldGeneratorMigration,
       '036_world_generator_recipe': worldGeneratorRecipeMigration,
+      '037_spawn_atlas': spawnAtlasMigration,
+      '038_spawn_installation': spawnInstallationMigration,
     };
   },
 };

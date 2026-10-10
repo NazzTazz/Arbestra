@@ -37,7 +37,7 @@ export function terrainStudyElevation(g:WorldGeography,x:number,y:number):number
   if(!layout){layout={...g,width:g.width/scale,height:g.height/scale,study:{...g.study,layoutScale:1}};layouts.set(g,layout);}
   return terrainStudyElevation(layout,x/scale,y/scale);
  }
- const s=g.study!;x=wrapClimate(x,g.width);y=wrapClimate(y,g.height);let ridge=0,clearance=Infinity;
+ const s=g.study!;x=wrapClimate(x,g.width);y=wrapClimate(y,g.height);let ridge=0,clearance=Infinity,facets:number|undefined;
  for(const chain of s.chains)for(let i=1;i<chain.points.length;i++){
   const a=chain.points[i-1]!,b=chain.points[i]!,dx=delta(b[0],a[0],g.width),dy=delta(b[1],a[1],g.height);
   const px=delta(x,a[0],g.width),py=delta(y,a[1],g.height),t=Math.max(0,Math.min(1,(px*dx+py*dy)/(dx*dx+dy*dy)));
@@ -45,7 +45,10 @@ export function terrainStudyElevation(g:WorldGeography,x:number,y:number):number
   if(s.plateaus)clearance=Math.min(clearance,distance-radius);
   const tEdge=Math.max(0,Math.min(1,(1-distance/radius)/(chain.highPlateau?.flank??1)));
   const profile=chain.highPlateau?tEdge*tEdge*(3-2*tEdge):Math.pow(Math.max(0,1-(distance/radius)**2),1.6);
-  const facets=.8+.2*periodicClimateNoise(x/g.width,y/g.height,49,g.seed+127);
+  // The same immutable facet noise applies to every segment at this point.
+  // Zero-profile segments cannot contribute relief; keep their clearance above.
+  if(profile<=0)continue;
+  facets??=.8+.2*periodicClimateNoise(x/g.width,y/g.height,49,g.seed+127);
   const height=(a[2]+(b[2]-a[2])*t)*profile*facets;
   ridge=Math.max(ridge,chain.highPlateau?Math.min(chain.highPlateau.ceiling-s.base,height):height);
  }

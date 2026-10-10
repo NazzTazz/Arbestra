@@ -7,13 +7,13 @@ import { placeStarterVillage } from './starter-layout.js';
 import { STARTER_VILLAGE } from './starter-village.js';
 
 export async function availableWorlds(db: Kysely<Database>, accountId: string): Promise<AvailableWorlds> {
-  const worlds = await db.selectFrom('worlds').select(['id','slug','name'])
+  const worlds = await db.selectFrom('worlds').select(['id','slug','name','generationVersion'])
     .where('generationStatus','=','ready').where('isOpen','=',true).orderBy('name').execute();
   return Promise.all(worlds.map(async world => {
     const joined = Boolean(await db.selectFrom('villages').select('id').where('worldId','=',world.id).where('ownerAccountId','=',accountId).executeTakeFirst());
     const free = Boolean(await db.selectFrom('worldClearings').select('id').where('worldId','=',world.id)
       .where('status','=','protected').where('claimedVillageId','is',null).executeTakeFirst());
-    return {slug:world.slug,name:world.name,joined,canJoin:!joined && free};
+    return {slug:world.slug,name:world.name,spawnMode:world.generationVersion===3?'atlas' as const:'automatic' as const,joined,canJoin:!joined && (world.generationVersion===3||free)};
   }));
 }
 
@@ -42,10 +42,11 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
   return db.transaction().execute(async tx => {
     await sql`set local lock_timeout = '5s'`.execute(tx);
     await tx.selectFrom('accounts').select('id').where('id','=',accountId).forUpdate().executeTakeFirstOrThrow();
-    const world = await tx.selectFrom('worlds').select(['id','widthCells','heightCells','generationStatus','isOpen']).where('slug','=',slug).executeTakeFirst();
+    const world = await tx.selectFrom('worlds').select(['id','widthCells','heightCells','generationStatus','isOpen','generationVersion']).where('slug','=',slug).executeTakeFirst();
     if (!world || world.generationStatus!=='ready' || !world.isOpen) throw new HttpError(409,'WORLD_NOT_READY','Ce monde n’est pas encore ouvert.');
     const existing = await tx.selectFrom('villages').select('id').where('worldId','=',world.id).where('ownerAccountId','=',accountId).orderBy('id').executeTakeFirst();
     if (existing) return { villageId: existing.id };
+    if(world.generationVersion===3)throw new HttpError(409,'CHOOSE_ON_ATLAS','Choisissez votre emplacement sur la carte du monde.');
     const rejected: string[] = [];
     for (let count=0; count<600; count++) {
       const clearing = await tx.selectFrom('worldClearings').selectAll().where('worldId','=',world.id)

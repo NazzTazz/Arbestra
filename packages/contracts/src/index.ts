@@ -25,3 +25,12 @@ export * from './world-circulation.js';
 export * from './world-oceans.js';
 
 export * from './terrain-study.js';
+export * from './spawn-map.js';
+export * from './spawn-resources.js';
+export * from './spawn-access.js';
+export * from './spawn-atlas.js';
+export * from './spawn-installation.js';
+
+export * from './rc1-runtime.js';
+
+export * from './rc1-field.js';

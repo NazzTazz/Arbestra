@@ -50,3 +50,12 @@ describe('bounded terrain geometry', () => {
     } finally { scene.dispose(); engine.dispose(); }
   });
 });
+
+it('lights RC1 ground from above and preserves terrace heights in the streamed scene',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),material=new StandardMaterial('test',scene);
+ try{const chunk:TerrainChunk={chunkX:0,chunkY:0,originCellX:0,originCellY:0,terrainCodes:Array(34**2).fill(1),elevations:Array(34**2).fill(25),features:[],occupiedCells:[],rc1:{stride:65,heights:Array(65**2).fill(.25),water:Array(65**2).fill(-1),terraces:[]}};
+ const ground=buildTerrainUnit(scene,chunk,0,0,new WorldSpace(512,256,{cellX:0,cellY:0}),material,material)[0]!;
+ expect(ground.getVerticesData('normal')!.filter((_,i)=>i%3===1).every(y=>y>.99)).toBe(true);
+ expect(ground.getVerticesData('position')!.filter((_,i)=>i%3===1).every(y=>Math.abs(y-.625)<1e-6)).toBe(true);
+ }finally{scene.dispose();engine.dispose();}
+});

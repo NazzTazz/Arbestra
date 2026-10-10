@@ -17,8 +17,9 @@ const duration = (seconds: number) => seconds < 60 ? `${seconds} s` : `${Math.ce
 export function CostLine({ costs }: { costs: Array<{ resourceCode: string; amount: number }> }) {
   return <span className="resource-costs">{costs.map(cost => <span key={cost.resourceCode}><i aria-hidden="true">{cost.resourceCode === 'wood' ? '▰' : cost.resourceCode === 'stone' ? '◆' : '●'}</i>{cost.amount.toLocaleString('fr-FR')} <small>{resourceNames[cost.resourceCode] ?? cost.resourceCode}</small></span>)}</span>;
 }
-export function ConstructionPanel({ houseVariant, construction, definitions, area, costs, error, pending, gardenWorkerNeed, upgrade,
+export function ConstructionPanel({ starter, houseVariant, construction, definitions, area, costs, error, pending, gardenWorkerNeed, upgrade,
   intentState, collapsed, onToggle, onChoose, onDomainChange, onRetry, onClearError, domain, infrastructure, factoryEnabled, onWorkshop }: {
+  starter?: {choices:Array<{key:string;label:string;code:string}>;selected:string;onChoose:(key:string)=>void};
   houseVariant:'stone'|'logs'|'beams';
   construction: ConstructionChoice; definitions: BuildingTypeDefinition[];
   area: AreaPreview | null; costs: Array<{ resourceCode: string; amount: number }>;
@@ -38,6 +39,16 @@ export function ConstructionPanel({ houseVariant, construction, definitions, are
     : pending ? 'Commande en cours…' : problem ?? (upgrade ? `${upgrade.name} · ${upgrade.level} → ${upgrade.nextLevel}`
     : area ? `${construction.action === 'extend' ? 'Extension' : 'Construction'} · ${area.count} case${area.count > 1 ? 's' : ''}` : '');
   const shownCosts = upgrade ? upgrade.costs : area ? costs : constructionCosts(level,houseVariant);
+  if (starter) return <>
+    <section className="construction-showroom" aria-label="Installation initiale">
+      {starter.choices.map(choice => <button className="showroom-model" type="button" key={choice.key} disabled={locked} aria-pressed={starter.selected===choice.key} onClick={()=>starter.onChoose(choice.key)}>
+        <strong>{choice.label}</strong><BuildingThumbnail code={choice.code}/><span className="resource-costs">Kit de départ</span>
+      </button>)}
+    </section>
+    <aside className="construction-feedback" aria-label="Action de construction"><strong>{starter.choices.find(c=>c.key===starter.selected)?.label}</strong><p>Clic gauche : poser · R : tourner · Clic droit / Échap : manuel</p>
+      {status&&<p role="status">{status}</p>}{intentState==='uncertain'&&<button disabled={pending} onClick={onRetry}>Vérifier la même pose</button>}
+    </aside>
+  </>;
   return <>
     <section className={`command-palette construction-palette${collapsed ? ' is-collapsed' : ''}`} aria-label="Palette de construction">
       <div className="construction-families" role="group" aria-label="Domaines de construction">

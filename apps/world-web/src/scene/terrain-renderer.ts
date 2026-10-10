@@ -132,7 +132,7 @@ export class TerrainRenderer {
         const [cellX, cellY] = key.split(':').map(Number);
         return inside({cellX:cellX!, cellY:cellY!});
       }));
-      add(`ground:${x}:${y}`, JSON.stringify([this.#infrastructureRevision,[...roads].sort(([a], [b]) => a.localeCompare(b))]), true, inside(focus) ? -2 : 0, cx, cy,
+      add(`ground:${x}:${y}`, JSON.stringify([chunk.rc1?.terraces,this.#infrastructureRevision,[...roads].sort(([a], [b]) => a.localeCompare(b))]), true, inside(focus) ? -2 : 0, cx, cy,
         () => buildTerrainUnit(this.scene, chunk, x, y, this.space, this.groundMaterial, this.waterMaterial, roads,this.#infrastructure));
       add(`decor:${x}:${y}`, signature, false, 2, cx, cy, () => this.decor(chunk, x, y));
     }

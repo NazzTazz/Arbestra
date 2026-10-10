@@ -1,7 +1,9 @@
+import {Rc1GroundSchema} from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { NaturalFeatureSchema } from './villages.js';
 
 export const TerrainUpdatesChunkSchema = Type.Object({
+  rc1: Type.Optional(Rc1GroundSchema),
   chunkX: Type.Integer({ minimum: 0 }), chunkY: Type.Integer({ minimum: 0 }),
   originCellX: Type.Integer({ minimum: 0 }), originCellY: Type.Integer({ minimum: 0 }),
   features: Type.Array(NaturalFeatureSchema),

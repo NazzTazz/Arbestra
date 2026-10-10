@@ -6,14 +6,19 @@ import { HttpError } from '../../errors.js';
  * occupied deposits without physical returns have nothing to reconcile. */
 export async function materializeWoodlands(tx:Transaction<Database>,worldId:string,ids:string[],through:Date) {
   if(!ids.length)return;
-  const settled=await tx.selectFrom('woodlandDeposits as w').select('w.featureId')
-    .where('w.worldId','=',worldId).where('w.featureId','in',ids)
-    .where('w.cleared','=',false).whereRef('w.remainingAmount','=','w.initialAmount')
-    .where('w.reservedAmount','=','0')
-    .where(sql<boolean>`exists(select 1 from world_cell_occupancies o where o.world_id=w.world_id and o.cell_x=w.cell_x and o.cell_y=w.cell_y and o.feature_id=w.feature_id and o.building_id is null)`)
-    .where(sql<boolean>`exists(select 1 from world_features f where f.world_id=w.world_id and f.id=w.feature_id and f.state='available')`)
-    .where(sql<boolean>`not exists(select 1 from deposit_extractions e where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood' and e.wood_debited_at is null and e.completes_at<=${through})`).execute();
-  const skip=new Set(settled.map(w=>w.featureId));
+  const full=await tx.selectFrom('woodlandDeposits').select(['featureId','cellX','cellY'])
+    .where('worldId','=',worldId).where('featureId','in',ids).where('cleared','=',false)
+    .whereRef('remainingAmount','=','initialAmount').where('reservedAmount','=','0').execute();
+  // Read each world-scoped relation once. Correlated EXISTS became quadratic on
+  // RC1's natural aggregates; these sets express the same settled predicate.
+  const occupancies=await tx.selectFrom('worldCellOccupancies').select(['featureId','cellX','cellY'])
+    .where('worldId','=',worldId).where('featureId','in',ids).where('buildingId','is',null).execute();
+  const available=await tx.selectFrom('worldFeatures').select('id').where('worldId','=',worldId)
+    .where('id','in',ids).where('state','=','available').execute();
+  const due=await tx.selectFrom('depositExtractions').select('featureId').where('worldId','=',worldId)
+    .where('featureId','in',ids).where('resourceCode','=','wood').where('woodDebitedAt','is',null).where('completesAt','<=',through).execute();
+  const occupied=new Set(occupancies.map(o=>o.featureId+':'+o.cellX+':'+o.cellY)),active=new Set(available.map(f=>f.id)),pending=new Set(due.map(e=>e.featureId));
+  const skip=new Set(full.filter(w=>occupied.has(w.featureId+':'+w.cellX+':'+w.cellY)&&active.has(w.featureId)&&!pending.has(w.featureId)).map(w=>w.featureId));
   for(const id of ids)if(!skip.has(id))await materializeWoodland(tx,worldId,id,through);
 }
 

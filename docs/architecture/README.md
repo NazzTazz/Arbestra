@@ -1,5 +1,9 @@
 # Architecture autoritaire
 
+État courant du 10 octobre : [installation RC1, vue village et dossier de contre-recette](../IMPLEMENTATION-INSTALLATION-RC1.md). Les mentions de pose non raccordée ci-dessous décrivent la tranche atlas antérieure. La candidate reste à valider avant ouverture publique.
+
+La [carte de spawn RC1](../SPEC-CARTE-SPAWN-RC1.md) utilise maintenant un [atlas léger, cercle de 8 cases et territoires](../IMPLEMENTATION-ATLAS-RC1.md), au-dessus du [prédiagnostic interne](../IMPLEMENTATION-CARTE-SPAWN-RC1.md) sur copie de test. Il n’autorise aucune installation ; certification du sol/accès, projection économique naturelle, préparation et pose transactionnelle restent à réaliser. Les informations opérationnelles des voisins restent côté serveur. Le garde d’ouverture v3 est conservé.
+
 La [première tranche d'optimisation du rendu](../SPEC-OPTIMISATION-RENDU-BATIMENTS.md) retire la capture du dépoli, réduit la géométrie droite du kit et instancie les recettes répétées. Le village s'ouvre directement, sans survol automatique. Le [rapport mesuré](../AUDIT-RENDU-3D-2026-10-06.md) distingue ces corrections des objectifs de fluidité/budgets encore non atteints.
 
 Le [marché Oracle](../SPEC-MARCHE-ORACLE.md) est implémenté dans le worktree avec un prototype accessible depuis l’hôtel de ville en Exploitation. La migration 034 ajoute son niveau 2 et les Anneaux à zéro ; les livraisons de troc sont intégrées à l’économie autoritaire. L’apparence niveau 2 validée en factory est intégrée au village ; l’UX commerciale reste un prototype. Commerce joueur, émission monétaire et armée restent futurs. Preuves et statut de recette dans le handoff courant.

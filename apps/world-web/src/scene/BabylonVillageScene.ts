@@ -1,3 +1,5 @@
+import type {StarterGhost} from '../spawn-map/starter-controller';
+import {poseStarterElement, spawnDelta} from '@arbestra/contracts';
 import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
 import { buildStonemason, buildStonemasonFire } from './stonemason-factory';
@@ -122,6 +124,9 @@ export class BabylonVillageScene {
   readonly #darkTimberMaterial: StandardMaterial;
   readonly #roofMaterial: StandardMaterial;
   #timberThatch: TimberThatch | null = null;
+  #preparing = false;
+  #starterGhost: StarterGhost | null = null;
+  #starterManual: (()=>void) | null = null;
   #constructionGhost: Mesh | null = null;
   #constructionGhostCode: string | null = null;
   #ghostMaterials: StandardMaterial[] = [];
@@ -332,6 +337,7 @@ export class BabylonVillageScene {
   #worldHeightUnits = 1024 * TILE_SIZE;
 
   readonly #handlePointerDown = (event: PointerEvent): void => {
+    if(event.button===2&&this.#starterManual&&this.#worldMode==='construction'){event.preventDefault();event.stopImmediatePropagation();this.#starterManual();return;}
     if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation&&(event.button===0||event.button===2)){
       event.preventDefault();event.stopImmediatePropagation();
       if(event.button===2)this.#infrastructureHandler({kind:'right',point:this.#infrastructurePoint(event)});
@@ -903,7 +909,9 @@ export class BabylonVillageScene {
       this.#overviewLoading = this.#vegetationLoading = false; this.#vegetationDue = 0; this.#requestedWorld = this.#worldFromWheel = false;
       this.#setMode('village');
       this.#space = new WorldSpace(state.world.widthCells, state.world.heightCells, this.#villageAnchor);
-      this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) => updatesOnly
+      this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) => this.#preparing
+        ? fetch('/api/worlds/'+encodeURIComponent(state.world.slug)+'/starter/terrain?chunks='+encodeURIComponent(chunks.map(c=>c.chunkX+','+c.chunkY).join(';')), {signal}).then(async r=>{if(!r.ok)throw Error('Terrain indisponible');return r.json();})
+        : updatesOnly
         ? getTerrainUpdates(state.world.slug, chunks, signal) : getTerrain(state.world.slug, chunks, signal));
       this.#weather?.dispose(); this.#weather = new WeatherMap(this.#scene, state.world.id);
       this.#weather.update(Date.now() + this.#cosmologyServerOffsetMs);
@@ -1069,7 +1077,8 @@ export class BabylonVillageScene {
     const bounds = this.#canvas.getBoundingClientRect();
     const ray = this.#scene.createPickingRay(event.clientX - bounds.left, event.clientY - bounds.top, Matrix.Identity(), this.#camera);
     if (Math.abs(ray.direction.y) < 0.00001) return null;
-    const distance = (0.075 - ray.origin.y) / ray.direction.y;
+    let distance = (0.075 - ray.origin.y) / ray.direction.y;
+    if(this.#state?.world.generationVersion===3&&this.#space&&this.#store)for(let i=0;i<6;i++){const c=this.#space.inverse(ray.origin.x+ray.direction.x*distance,ray.origin.z+ray.direction.z*distance),ground=this.#store.ground(c.cellX,c.cellY);if(!ground)return null;const next=(ground.height-ray.origin.y)/ray.direction.y;if(Math.abs(next-distance)<.002)break;distance=next;}
     if (distance < 0) return null;
     return this.#space?.inverse(ray.origin.x + ray.direction.x * distance, ray.origin.z + ray.direction.z * distance) ?? null;
   }
@@ -1206,6 +1215,7 @@ export class BabylonVillageScene {
 
   public updateAreaSelection(enabled: boolean, preview: AreaPreview | null, invalid: boolean): void {
     this.#selectingArea = enabled;
+    if(!this.#space)return;
     const signature = JSON.stringify([preview, invalid]);
     if (signature === this.#lastPreviewSignature) return;
     this.#lastPreviewSignature = signature;
@@ -1226,10 +1236,14 @@ export class BabylonVillageScene {
     }
   }
 
+  public setPreparation(value:boolean){this.#preparing=value;}
+  public setStarterGhost(value:StarterGhost|null,onManual:(()=>void)|null){this.#starterGhost=value;this.#starterManual=onManual;}
   public updateConstructionGhost(code: string | null, preview: AreaPreview | null, _invalid: boolean,quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone'): void {
     if (!code || !preview?.cells.length || !this.#space || this.#mode !== 'village') {
       this.#constructionGhost?.setEnabled(false); return;
     }
+    const starter=this.#starterGhost;
+    if(starter) code='starter:'+JSON.stringify([starter.elements,starter.relativeToHall]);
     // Gardens are already a crop-surface footprint, including arbitrary spatial extensions.
     if (code === 'garden') { this.#constructionGhost?.setEnabled(false); return; }
     if(code==='dwelling'&&houseVariant!=='stone')code=`dwelling-${houseVariant}`;
@@ -1239,7 +1253,7 @@ export class BabylonVillageScene {
       for (const m of this.#ghostOwnMaterials) m.dispose(false, true);
       this.#ghostMaterials = []; this.#ghostOwnMaterials.clear();
       const assetKey=`${code}-1-finished`;
-      const baked=Boolean(buildingAssets[assetKey]);
+      const baked=Boolean(starter || buildingAssets[assetKey]);
       const previous = new Set(this.#scene.materials);
       if(baked)this.#constructionGhost=new BabylonMesh(`ghost-${code}`,this.#scene);
       else {this.#timberThatch??=new TimberThatch(this.#scene);this.#constructionGhost=buildPresentation(this.#timberThatch,code);}
@@ -1259,15 +1273,33 @@ export class BabylonVillageScene {
         }
         this.#ghostMaterials=[...clones.values()];
       };
-      if(baked)void loadBakedBuilding(root,assetKey).then(style).catch(error=>console.error('Building preview failed',error));else style();
+      if(starter){
+        const loads=starter.elements.map(element=>{
+          const posed=poseStarterElement(element,{x:256,y:128},0,starter.relativeToHall);
+          const xs=posed.cells.map(c=>spawnDelta(c.cellX,256,512)), ys=posed.cells.map(c=>spawnDelta(c.cellY,128,256));
+          const child=new BabylonMesh('starter-'+element.key,this.#scene);child.parent=root;
+          child.position.set((Math.min(...xs)+Math.max(...xs))/2*TILE_SIZE,0,(Math.min(...ys)+Math.max(...ys))/2*TILE_SIZE);
+          child.rotation.y=posed.quarterTurns*Math.PI/2;child.metadata={starterBaseTurns:posed.quarterTurns};
+          if(element.type==='garden'){
+            const patch=MeshBuilder.CreateGround('starter-garden',{width:TILE_SIZE*.92,height:TILE_SIZE*.92},this.#scene);patch.parent=child;patch.position.y=.04;patch.material=this.#material('starter-garden-soil','#776343');this.#ghostOwnMaterials.add(patch.material);return Promise.resolve();
+          }
+          const variant=element.visualLayout?.recipe==='log-house'?'dwelling-logs':element.visualLayout?.recipe==='beam-house'?'dwelling-beams':element.type;
+          return loadBakedBuilding(child,variant+'-'+element.level+'-finished',false,true);
+        });
+        void Promise.all(loads).then(style).catch(error=>console.error('Starter preview failed',error));
+      } else if(baked)void loadBakedBuilding(root,assetKey,false,true).then(style).catch(error=>console.error('Building preview failed',error));else style();
     }
     const positions = preview.cells.map(cell => this.#space!.projectFrom(cell, this.#villageAnchor));
     const x = (Math.min(...positions.map(p => p.x)) + Math.max(...positions.map(p => p.x))) / 2;
     const z = (Math.min(...positions.map(p => p.z)) + Math.max(...positions.map(p => p.z))) / 2;
     const ground = Math.max(...preview.cells.map(cell => this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0));
-    this.#constructionGhost!.position.set(x, ground + .03, z);
-    this.#constructionGhost!.rotation.y=quarterTurns*Math.PI/2;
+    const anchor=starter?this.#space.projectFrom({cellX:starter.point.x,cellY:starter.point.y},this.#villageAnchor):null;
+    const starterHeight=starter?.referenceHeight===undefined?this.#store?.ground(starter?.point.x??0,starter?.point.y??0)?.height:starter.referenceHeight*TILE_SIZE;
+    this.#constructionGhost!.position.set(anchor?.x??x, (starter?starterHeight??ground:ground) + .03, anchor?.z??z);
+    this.#constructionGhost!.rotation.y=(starter?-starter.quarterTurns:quarterTurns)*Math.PI/2;
+    if(starter)for(const child of this.#constructionGhost!.getChildren())if(child instanceof BabylonMesh&&typeof child.metadata?.starterBaseTurns==='number')child.rotation.y=(child.metadata.starterBaseTurns+2*starter.quarterTurns)*Math.PI/2;
     this.#constructionGhost!.setEnabled(true);
+    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.constructionGhost=JSON.stringify({point:starter?.point,turns:starter?.quarterTurns,models:this.#constructionGhost!.getChildMeshes().filter(m=>m.getTotalVertices()>4).length});
   }
 
   public updateHarvestPending(cells: Cell[]): void {
@@ -1392,7 +1424,13 @@ export class BabylonVillageScene {
       const ground = this.#store!.ground(feature.cellX, feature.cellY); if (!ground) continue;
       const size = this.#store!.world.chunkSize;
       const p = this.#space!.projectFrom(feature, { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size });
-      const seed = Math.abs(feature.variantSeed), count = 2 + seed % 3;
+      if(feature.rc1?.trees.length){
+        const stock=feature.deposit?Math.max(.2,feature.deposit.remainingAmount/feature.deposit.initialAmount):1;
+        for(const tree of feature.rc1.trees){const at=this.#space!.projectFrom({cellX:tree.x,cellY:tree.y},{cellX:Math.floor(feature.cellX/size)*size,cellY:Math.floor(feature.cellY/size)*size});
+          const transform=Matrix.Compose(new Vector3(tree.crown*tree.size*stock,tree.size*stock,tree.crown*tree.size*stock),Quaternion.Identity(),new Vector3(at.x,tree.elevation*2.5,at.z));transforms.push(...transform.toArray());instanceFeatureIds.push(feature.id);}
+        continue;
+      }
+      const seed = Math.abs(feature.variantSeed), count = feature.rc1?3:2 + seed % 3;
       for (let tree = 0; tree < count; tree++) {
         const angle = (tree + this.#hash(seed, 401)) / count * Math.PI * 2;
         const radius = 0.42 + this.#hash(seed, tree + 419) * 0.48;
@@ -1421,6 +1459,10 @@ export class BabylonVillageScene {
     if (!ground) return [];
     const { x, z } = this.#space!.project(feature);
     const seed = Math.abs(feature.variantSeed), scenery: Mesh[] = [];
+    if(feature.rc1?.rocks.length){
+      if(feature.deposit?.state==='depleted')return [];
+      for(const rock of feature.rc1.rocks){const p=this.#space!.project({cellX:rock.x,cellY:rock.y}),mesh=MeshBuilder.CreateBox('rc1-rock',{width:rock.width*2.5,depth:rock.depth*2.5,height:rock.height*2.5},this.#scene);mesh.position.set(p.x,(rock.elevation+rock.height*.5)*2.5,p.z);mesh.rotation.y=rock.rotation;mesh.material=this.#pebbleMaterial;mesh.metadata={featureId:feature.id,cellX:feature.cellX,cellY:feature.cellY};mesh.isPickable=true;scenery.push(mesh);}return scenery;
+    }
     if (feature.deposit && feature.deposit.state !== 'depleted') {
       const scale = (0.95 + this.#hash(seed, 443) * 0.38)
         * (0.55 + 0.45 * feature.deposit.remainingAmount / feature.deposit.initialAmount);
@@ -1434,6 +1476,7 @@ export class BabylonVillageScene {
   }
 
   #buildDecor(chunk: TerrainChunk, offsetX: number, offsetY: number): Mesh[] {
+    if(chunk.rc1)return [];
     const size = this.#store!.world.chunkSize, stride = size + 2;
     const origin = this.#space!.project({ cellX: chunk.originCellX, cellY: chunk.originCellY });
     const parts: SceneryPart[] = [];
@@ -2024,7 +2067,7 @@ export class BabylonVillageScene {
     for (const mesh of this.#resourceMarkers.values()) { mesh.position.x -= shift.x; mesh.position.z -= shift.z; }
     this.#resourceOverlayAt = 0;
     for (const mesh of [...this.#villageMeshes, ...this.#previewMeshes, ...this.#pendingHarvestMeshes,
-      this.#selectionMarker, this.#buildableGrid, this.#buildableArea].filter((m): m is Mesh => m !== null)) {
+      this.#selectionMarker, this.#constructionGhost, this.#buildableGrid, this.#buildableArea].filter((m): m is Mesh => m !== null)) {
       mesh.position.x -= villageShift.x; mesh.position.z -= villageShift.z; mesh.computeWorldMatrix(true);
     }
     for (const cell of this.#e2eCells) { cell.x -= villageShift.x; cell.z -= villageShift.z; }

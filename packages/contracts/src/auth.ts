@@ -18,7 +18,7 @@ export const JoinWorldRequestSchema = Type.Object({
 }, { additionalProperties: false });
 export type JoinWorldRequest = Static<typeof JoinWorldRequestSchema>;
 export const AvailableWorldsSchema = Type.Array(Type.Object({
-  slug: Type.String(), name: Type.String(), joined: Type.Boolean(), canJoin: Type.Boolean(),
+  slug: Type.String(), name: Type.String(), spawnMode: Type.Optional(Type.Union([Type.Literal('atlas'),Type.Literal('automatic')])), joined: Type.Boolean(), canJoin: Type.Boolean(),
 }));
 export type AvailableWorlds = Static<typeof AvailableWorldsSchema>;
 export const JoinWorldResponseSchema = Type.Object({ villageId: Type.String({ format: 'uuid' }) });

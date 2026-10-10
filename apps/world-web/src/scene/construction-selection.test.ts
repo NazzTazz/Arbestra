@@ -1,3 +1,4 @@
+import {previewCells} from './construction-selection';
 import { describe, expect, it } from 'vitest';
 import type { VillageState } from '@arbestra/contracts';
 import { cellKey, cellsAlongSegment, previewArea, rectangleCells, stonemasonRange, type Cell } from './construction-selection';
@@ -50,4 +51,11 @@ it('previews the decorative workshop as four cells around its rotated anchor',()
     expect(cells).toHaveLength(4);
     expect(cells).toContainEqual({cellX:5,cellY:5});
   }
+});
+
+it('compound preview checks only actual surfaces and identifies the blocking cell',()=>{
+ const cells=[{cellX:511,cellY:0},{cellX:0,cellY:0},{cellX:0,cellY:2}];
+ expect(previewCells(cells,c=>c.cellY!==2).obstacleCells).toEqual([{cellX:0,cellY:2}]);
+ expect(previewCells(cells,()=>true).error).toBeNull();
+ expect(previewCells(cells,()=>true,'En attente').error).toBe('En attente');
 });

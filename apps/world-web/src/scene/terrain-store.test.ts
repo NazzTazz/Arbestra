@@ -25,6 +25,13 @@ function harness() {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('replaces RC1 terraces on a live updates response while keeping the immutable substrate',async()=>{
+    const h=harness();h.demand();h.advance(100);const first={...chunk(),rc1:{stride:65,heights:Array(65**2).fill(.25),water:Array(65**2).fill(0),terraces:[]}};
+    await h.settle(0,first);expect(h.store.ground(1,1)?.height).toBe(.625);h.store.changed.clear();h.advance(6000);
+    const patch={chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[],occupiedCells:[],rc1:{...first.rc1,terraces:[{cellX:1,cellY:1,height:.5}]}};
+    h.requests[1]!.resolve({world,chunks:[patch]});await new Promise(r=>setTimeout(r,0));
+    expect(h.store.ground(1,1)?.height).toBe(1.25);expect(h.store.ground(2,1)?.height).toBe(.625);expect(h.store.changed.has('0:0')).toBe(true);
+  });
   it('requests newly authorized ground after a returned map instead of retaining an unknown cached chunk', async () => {
     const h = harness(); h.demand(); h.advance(100);
     await h.settle(0, { ...chunk(), terrainCodes: new Array(34 ** 2).fill(0) });

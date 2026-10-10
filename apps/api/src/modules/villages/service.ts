@@ -1,3 +1,4 @@
+import {readRc1Ground} from '../worlds/rc1-ground.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
@@ -190,6 +191,11 @@ async function snapshot(
       village.anchorCellY - SNAPSHOT_SIZE / 2,
       village.heightCells,
     );
+  if(village.generationVersion===3){
+    const ground=await readRc1Ground(tx,village.worldId),terrainCodes:number[]=[],elevations:number[]=[];
+    for(let y=0;y<SNAPSHOT_SIZE;y++)for(let x=0;x<SNAPSHOT_SIZE;x++){const c=ground.cell(originCellX+x,originCellY+y);terrainCodes.push(c.code);elevations.push(c.elevation);}
+    return {originCellX,originCellY,terrainCodes,elevations,terrainAt(x,y){const dx=normalizeCell(x-originCellX,village.widthCells),dy=normalizeCell(y-originCellY,village.heightCells);return dx<SNAPSHOT_SIZE&&dy<SNAPSHOT_SIZE?terrainCodes[dy*SNAPSHOT_SIZE+dx]:undefined;}};
+  }
   const wanted = new Map<string, { chunkX: number; chunkY: number }>();
   for (let y = 0; y < SNAPSHOT_SIZE; y += 1)
     for (let x = 0; x < SNAPSHOT_SIZE; x += 1) {
@@ -295,8 +301,10 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
     tx.selectFrom('worldCellOccupancies').select(['cellX', 'cellY'])
       .where('worldId', '=', village.worldId).where('cellX', 'in', xs).where('cellY', 'in', ys).execute(),
   ]);
+  const rc1=village.generationVersion===3?await readRc1Ground(tx,village.worldId):null;
   const byChunk = new Map(chunks.map((chunk) => [`${chunk.chunkX}:${chunk.chunkY}`, chunk]));
   const terrainCodes = ys.flatMap((y) => xs.map((x) => {
+    if(rc1)return rc1.cell(x,y).code;
     const chunk = byChunk.get(`${Math.floor(x / village.chunkSize)}:${Math.floor(y / village.chunkSize)}`);
     if (!chunk) throw new HttpError(409, 'WORLD_NOT_READY', 'Le terrain de ce monde est en préparation.');
     return chunk.terrainCodes[(y % village.chunkSize) * village.chunkSize + (x % village.chunkSize)]!;
@@ -309,7 +317,7 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
         type: deposit.resourceCode === 'wood' ? 'woodland' : 'stone_outcrop', deposit: { state: 'available' } }] },
     cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
   } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
-  const path=buildTravelNetwork(routeState, [featureId]).find((route) => route.id === featureId)?.cells;
+  const path=buildTravelNetwork(routeState, [featureId],rc1?.navigation).find((route) => route.id === featureId)?.cells;
   return path?refineVillagePath(tx,village,path,featureId):undefined;
 }
 
@@ -324,7 +332,8 @@ export async function refineVillagePath(tx:Transaction<Database>,village:Pick<Ow
       features:features.map(f=>({...f,type:f.featureTypeCode,deposit:{blocksCell:f.blocksCell,cleared:f.cleared,state:Number(f.remainingAmount)===0?'depleted':'available'}}))},
     cells:rows.map(r=>({cellX:r.cellX,cellY:r.cellY,footprint:{buildingId:r.id},building:r.role==='anchor'?{id:r.id,type:r.buildingType,visualLayout:r.visualLayout,quarterTurns:r.visualLayout?.quarterTurns??r.quarterTurns}:null})),
     infrastructure:await readNavigationInfrastructure(tx,village)} as unknown as Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>;
-  const route=refineTravelRoute(context,{id,kind:'stone',cells:path,destination:path.at(-1)!});
+  const rc1=village.generationVersion===3?await readRc1Ground(tx,village.worldId):null;
+  const route=refineTravelRoute(context,{id,kind:'stone',cells:path,destination:path.at(-1)!},new Set(),undefined,rc1?.navigation);
   if(!route)throw new HttpError(409,'DESTINATION_UNREACHABLE','Aucun accès praticable depuis le village.');return route.cells;
 }
 
@@ -365,13 +374,14 @@ async function featuresInSnapshot(
   ground: Snapshot,
 ) {
   let query = tx
-    .with('featureLocations', eb => eb.selectFrom('worldCellOccupancies')
+    .with(cte=>cte('projectedDeposits').materialized(),eb=>eb.selectFrom('resourceDeposits').selectAll().where('worldId','=',village.worldId)).with('featureLocations', eb => eb.selectFrom('worldCellOccupancies')
       .select(['worldId', 'featureId', 'cellX', 'cellY']).where('featureId', 'is not', null)
-      .union(eb.selectFrom('resourceDeposits').select(['worldId', 'featureId', 'cellX', 'cellY'])))
+      .where(sql<boolean>`not exists(select 1 from projected_deposits rd where rd.world_id=world_cell_occupancies.world_id and rd.feature_id=world_cell_occupancies.feature_id)`)
+      .union(eb.selectFrom('projectedDeposits').select(['worldId', 'featureId', 'cellX', 'cellY'])))
     .selectFrom('featureLocations')
     .innerJoin('worldFeatures', join => join.onRef('worldFeatures.worldId', '=', 'featureLocations.worldId')
       .onRef('worldFeatures.id', '=', 'featureLocations.featureId'))
-    .leftJoin('resourceDeposits', (join) => join
+    .leftJoin('projectedDeposits as resourceDeposits', (join) => join
       .onRef('resourceDeposits.featureId', '=', 'worldFeatures.id')
       .onRef('resourceDeposits.worldId', '=', 'worldFeatures.worldId'))
     .select([
@@ -785,7 +795,7 @@ export async function state(
   };
   villageState.infrastructure=await readInfrastructure(tx,village.worldId,village.villageId);
   villageState.factoryEnabled=await factoryCapability(tx,village.worldId);
-  villageState.travelRoutes = buildTravelNetwork({...villageState,infrastructure:await readNavigationInfrastructure(tx,village,villageState.infrastructure)});
+  villageState.travelRoutes = buildTravelNetwork({...villageState,infrastructure:await readNavigationInfrastructure(tx,village,villageState.infrastructure)},[],village.generationVersion===3?(await readRc1Ground(tx,village.worldId)).navigation:undefined);
   // Reuse committed mission paths; do not search routes to every woodland in the snapshot.
   for (const extraction of villageState.village.extractions) if (extraction.resourceCode === 'wood' && extraction.path.length) {
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',

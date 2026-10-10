@@ -74,7 +74,11 @@ export function previewArea(state: VillageState, range: CellRange, spatial: bool
       return { ...result, error: 'La zone doit partager un côté avec le Jardin actif.' };
     return result;
   }
-  if (preview.cells.some((cell) => !free.has(cellKey(cell))))
-    return { ...preview, error: 'Une case est occupée, hors de portée ou non constructible.' };
-  return preview;
+  return previewCells(preview.cells,cell=>free.has(cellKey(cell)));
+}
+
+/** Shared preview for rectangular buildings and compound starter footprints. */
+export function previewCells(cells:Cell[],canBuild:(cell:Cell)=>boolean,pendingReason?:string):AreaPreview {
+ const obstacleCells=cells.filter(cell=>!canBuild(cell));
+ return {cells,count:cells.length,obstacleCells,error:pendingReason??(obstacleCells.length?'Une case est occupée, hors de portée ou non constructible.':null)};
 }

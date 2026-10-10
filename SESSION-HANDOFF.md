@@ -1,3 +1,267 @@
+# Installation RC1 — vue village / candidate de contre-recette — 10 octobre 2026
+
+Demande courante : pose effective du starter, puis **commit et push explicitement demandés pour contre-recette externe et audit d’architecture**. Tristan a réaffirmé le réemploi de la vue village : HUD Construire avec seulement Village initial / Hôtel de ville avant HDV ; Population et Exploitation après sa pose effective, groupée ou manuelle. La scène Babylon de pose indépendante a été supprimée ; raccord à App, VillageScene, gestes/bordures de construction et assets précalculés. Kit groupé conservé en cache, transparence propre aux aperçus. [État détaillé, contre-recette et limites](docs/IMPLEMENTATION-INSTALLATION-RC1.md).
+
+Backend ajouté : migration 038 (test uniquement), transactions initiale et restante, idempotence/inventaire, terrassement et retrait d’arbres, projection naturelle et compléments. Barème explicite : **2 000 pierres par formation naturelle stoneSite**, pas par rocher décoratif. Première lecture village raccordée au terrain RC1 ; source approuvée conservée. Les trois anciennes fixtures abandonnées de cette implémentation et la fixture manuelle courante ont été nettoyées par leurs seuls IDs, absence vérifiée. L’ancienne démo atlas 3100/5274 n’a pas été arrêtée ni réinitialisée.
+
+Preuves achevées à ce point : **41 tests distincts passent dans plusieurs processus terminés**, pas dans une campagne unique : 6 installation DB (5 au dernier passage complet, puis concurrence seule après correction de la borne d’attente), 14 terrain-store, 4 travel-paths, 3 spawn-installation, 6 construction-selection, 3 terrain-unit, 4 building-assets, 1 WorldModeBar. Les tentatives précédentes en échec sont conservées dans les sorties locales : chunks manquants, hypothèse erronée de cinq sites logiques au lieu de quatre (jardins contigus), timeout, borne de verrou cinq secondes, vérification d’orientation des normales, nullabilité du test de clones. Ne pas compter ces passages comme verts. La régression du matériau confirme que le fantôme partage la géométrie sans changer l’alpha d’un bâtiment existant.
+
+Recette navigateur manuelle achevée sur API compilée + frontend de recette : rotation R, clic droit, HDV placé à (140,23), HUD déverrouillé, reconnexion avec quatre éléments restants, deux maisons et deux jardins posés dans Construire. Kit consommé, stocks 2 000 bois / 50 carottes et population 15 conservés, quatre sites logiques finaux. Captures relues ; pas de nouvelle erreur JS applicative relevée. Cette preuve ne couvre pas encore une campagne complète tactile, multi-client ou tous les chemins économiques RC1.
+
+Build racine et lint racine terminés avec succès. Recette groupée sur API et frontend compilés également achevée : pose à (140,20), inventaire restant vide relu via API, quatre sites logiques affichés, stocks 2 000 bois / 50 carottes, population 15 / capacité 40 ; ouverture effective des panneaux Population et Exploitation. Captures relues et aucune erreur JS applicative relevée. Fixture groupée et ses deux comptes nettoyés, absence vérifiée, navigateur fermé. Statut produit : **implémentée / à valider**, pas ouverture prod. Limites connues : coût première projection/lectures, palette/volumes rocheux simplifiés, excavation visuelle des routes/infrastructures RC1 non raccordée et appelants historiques de navigation/relevés à auditer. Aucun reset global, aucune migration de développement ou ouverture publique. SHA256 source vérifié : de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4.
+
+Git : candidate regroupée sur main pour commit/push autorisés, depuis 06837b9 (base de la comparaison externe). Le commit portant cet état inclut atlas, starter compact, pose et leurs docs ; transcript local non suivi préservé et artefacts test-results exclus. Le hash publié est donné dans le bilan de clôture. Les sections suivantes sont historiques.
+
+---
+
+# Starter compact exporté et recetté — 10 octobre 2026
+
+Tristan a terminé et validé sa reconstruction de Départ. Export en lecture seule depuis le même compte/village local : **un HDV sur deux cellules, deux maisons en troncs et deux Jardins d’une cellule**, niveaux 1 et orientations conservés ; aucune voirie ni équipement ajouté. La recette figée `apps/api/src/modules/onboarding/starter-village.ts` est mise à jour, sans copier stocks, tâches ni historique du concepteur. Stocks initiaux et 15 habitants de spawn inchangés.
+
+Emprise réelle : **6 surfaces**, rectangle **3 × 4 cases** (X −2,5 à +0,5 ; Y −1,5 à +2,5), rayon des coins ≈3,54 autour de l’ancre. Ancien kit : 4 235 surfaces, rectangle 17,3125 × 5,875, rayon ≈12,05. Le diagnostic pur au point de recette RC1 (140,20) passe dans les quatre orientations. Aucun autre emplacement recherché, aucune géographie ou tolérance changée. L’exporteur déclare explicitement `StarterVillageTemplate` pour éviter l’inférence `never[]` des listes vides, détectée au build avec ce kit.
+
+Preuves actuelles : **27 tests passent**, tous processus terminés (21 traduction/terrain/atlas/terrasses, 6 onboarding DB). Les fixtures de traduction gardent des routes/éclairages explicites pour conserver cette couverture malgré le kit vide ; collision testée sur la cellule HDV et dotation sur deux jardins. Build contrats et API, lint des quatre fichiers concernés passent. Recette complète `spawn-atlas.mjs` sur une copie locale pour ports 3101/5275, API compilée au nouveau modèle : desktop/mobile, rotations, prédiagnostic terrain/dotation, zoom/couture, titres et territoires passent, zéro erreur JS ; captures sélection/mobile relues. Lecture navigateur indépendante confirme **6 surfaces servies**. Mesures de cette recette : chargement 5 116 ms, mouvements 47–84 ms (outillage et deux frames inclus), prédiagnostic 3 111 ms ; aucune comparaison de performance contrôlée revendiquée.
+
+Fixture isolée `f90eac88-ead3-434f-b6b7-cb2604b2e448` nettoyée et processus terminé code 0 (terminal 40364) ; navigateur `compact-starter` fermé. L’ancienne démo 3100/5274 n’a pas été redémarrée et peut encore servir l’ancien export : ne pas la prendre comme preuve du nouveau kit. Sa session navigateur était vide au contrôle et a été refermée. Sauvegarde du précédent export et résultats sous `test-results/`, ignorés. Aucune écriture du village de conception pendant cet export. Spec onboarding et suivi atlas mis à jour ; travail non committé, aucun push. Arrivée RC1 persistante toujours à implémenter.
+
+---
+# Départ vidé pour un starter compact — 10 octobre 2026
+
+À la demande de Tristan et après son choix explicite de conserver uniquement l'HDV et les stocks, le village de conception **Départ** (`750e805a-d9d6-4a7b-8a8e-83cc73c32461`, compte `start@arbestra.world`, monde Aube `20000000-0000-4000-8000-000000000001`, ancre 20,20) a été vidé sur la seule base locale `127.0.0.1/arbestra`. Trois maisons et le Jardin de trois parcelles supprimés avec leurs occupations/dépendances ; 35 tracés et 15 équipements retirés ; historique d'aménagement et reçus des bâtiments retirés nettoyés. HDV niveau 1 et ses deux cellules inchangés, 15 habitants inactifs et six stocks conservés exactement (bois 999845, pierre 999958, autres 999999). Plan Infrastructure vide, révision 80 ; réserve de matière conservée. Aucun changement de terrain, gisement, notification du scheduler ou autre village par cette opération.
+
+Preuves : identification propriétaire/monde et inspection SQL, aperçu du script terminé, transaction bornée avec verrou village puis verrou spatial mondial, sauvegarde ciblée préalable et contrôles de conservation avant commit. Sauvegarde ignorée par Git : `test-results/depart-before-compact-1791630563932.json`. Scripts de maintenance locaux sous `test-results/`, non destinés au produit. Aucun reset global, migration, export du starter ni commit/push. Le modèle figé `starter-village.ts` reste inchangé : **Tristan reconstruit le kit plus compact**, puis export explicite et nouvelle recette des emprises nécessaires.
+
+Retour produit précédent : principe de l'atlas validé ; harmonisation graphique et panneau d'inspection moins verbeux à reprendre ensuite. Les preuves atlas ci-dessous restent celles de la tranche précédente ; aucun nouveau test applicatif annoncé pour ce vidage de données.
+
+---
+# Atlas RC1 — tranche carte recettée, arrivée jouable en cours — 10 octobre 2026
+
+Demande courante : implémenter l'atlas stylisé avec choix libre par cercle de 8 cases, courbe solaire conservée. Arbitrages explicites de Tristan : nettoyage des seules emprises du starter-kit à ±2 niveaux, arbres retirés sans bois, eau/rochers préservés ; territoires bloquants, un par village, contenant son HDV, rayon maximal 30, sans chevauchement. Distance HDV historique >50 conservée. [Spec consolidée](docs/SPEC-CARTE-SPAWN-RC1.md), [état réel atlas](docs/IMPLEMENTATION-ATLAS-RC1.md).
+
+Réalisé dans le worktree : fond SVG dérivé de la géographie signée, route `SpawnAtlas.tsx`, couche de fond composée indépendamment de l'overlay pour éviter son repaint au mouvement ; 4 235 emprises regroupées en tracé réutilisé aux coutures, diagnostics en worker sans maillage Babylon, métadonnées légères séparées du champ complet ; titre/slogan par monde éditables par opérateur ; dessin/édition/effacement des territoires par le propriétaire, validation serveur et lecture dans les diagnostics ; plan de nettoyage en lecture seule. Migration additive 037 appliquée et testée uniquement sur `127.0.0.1/arbestra_test`. Aucun spawn jouable ni terrassement persistant : la transaction HDV, projection naturelle et préparation restent à raccorder, bouton de choix encore désactivé.
+
+Preuves finales : **50 tests distincts passent** dans une exécution terminée ; typecheck/lint racine, build racine puis builds World et lint ciblé après finition passent. Recette Chrome sur API/frontend compilés terminée avec code 0 : survol, sélection indépendante, courbe/extrema, rotation, contrôle terrain/dotation, clavier, glisser/zoom sans sélection, alignement fond/picking <0,25 pixel, coutures, textes persistants, droits, dessin/sauvegarde/effacement de territoire et tactile 390×844 sans débordement. Captures relues, zéro erreur JS. Le défaut DELETE a été détecté avant correction puis le même parcours passe. Les tentatives en échec et leurs causes sont consignées dans le suivi, sans être comptées comme vertes.
+
+Mesures finales locales : **4 295 ms** jusqu'au fond et deux frames, cercle **64–140 ms** sur dix mouvements avec sélection active, prédiagnostic dotation **2 886 ms**, 78 nœuds d'overlay. Les mouvements mesurent aussi les échanges Playwright ; aucune prétention de percentile ou budget garanti. Le premier atlas restait lent (fond SVG repeint à chaque mouvement) ; comparaison visible/masqué puis séparation des couches ont vérifié la correction. Voir le suivi pour les valeurs avant/après. Arrivée persistante toujours non livrée.
+
+**Démo laissée pour inspection :** fixture compilée, terminal `99170`, monde `f3ed85ee-9f9f-46a0-88a2-30bd45398369`, URL `http://localhost:5274/spawn-map?world=rc1-receipt-f3ed85ee-9f9f-46a0-88a2-30bd45398369`, API 3100. Session navigateur visible `atlas-demo`, compte entrant jetable authentifié. Commande `node --import tsx tests/browser/spawn-map-fixture.mjs --built`. Une entrée `\r` sur stdin TTY nettoie seulement son monde et ses deux comptes ; fermer ensuite la session `atlas-demo`. Ne pas réinitialiser la DB pendant la démo. Anciennes fixtures `68396`, `12772`, `28580` clôturées avec code 0 ; navigateurs `atlas-rc1` et `spawn-demo-1cf895a62926` fermés. Aucune ouverture ni migration d'un monde de développement.
+
+Git : `main` / `06837b9`, changements préexistants préservés, aucun commit/push autorisé ou effectué. La revue automatique a refusé la suppression de `SpawnMap.tsx` et `spawn-map.css`, travail antérieur non committé : fichiers conservés, nouvelle route indépendante. Source RC1 SHA256 toujours `de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4`. Vérification SQL finale : zéro des trois anciens mondes de fixture et des cinq anciens comptes connus ; un seul monde courant parmi les IDs contrôlés, la démo laissée active. Liens locaux des trois docs produit concernés vérifiés. Les sections suivantes sont historiques.
+
+---
+
+# Direction atlas validée — titre et slogan éditables — 9 octobre 2026
+
+Après inspection de la démo, Tristan juge l'accueil trop lent et peu satisfaisant visuellement. Nouvelle direction : carte d'atlas stylisée et exploration d'un choix entre trois propositions de spawn. La [référence visuelle et son cadrage](docs/CADRAGE-CARTE-ATLAS-RC1.md) sont enregistrés dans le dépôt. Tristan valide l'image et exige un **titre et un slogan dynamiques et éditables**, rendus séparément du fond. Les inscriptions actuelles de l'image sont illustratives ; le fond de production doit être sans texte intégré. L'emplacement de l'édition et sa portée restent à définir. Aucun code atlas livré, aucune nouvelle position de spawn validée. Le JSON RC1 reste la source géographique. Les corrections de réactivité ci-dessous décrivent l'implémentation précédente, pas le nouvel écran cible.
+
+---
+
+# Corrections Astra — réactivité carte de spawn RC1 — 9 octobre 2026
+
+**Démo relancée à la demande de Tristan après la clôture des tests :** carte chargée et compte de recette connecté dans une fenêtre visible `agent-browser`, session `spawn-demo-1cf895a62926`. URL locale `http://localhost:5274/spawn-map?world=rc1-receipt-92d1782c-312a-49e6-a263-41c4a39859ee`. Fixture volontairement laissée active pour inspection, session terminal `68396` (TTY) ; une entrée sur son stdin déclenche le nettoyage de son seul monde et de ses comptes. Fermer ensuite la session navigateur dédiée. Ne pas réinitialiser la base de test pendant cette démonstration. Aucune ouverture du candidat source ou écriture de développement. La mention de fermeture ci-dessous décrit la recette précédente.
+
+À la demande de Tristan, la première tranche de la revue est implémentée et vérifiée. [Bilan, preuves et limites](docs/CORRECTIONS-CARTE-SPAWN-RC1-2026-10-09.md). Le disque neutre suit le point sans attendre le diagnostic ; résultats périmés filtrés, sélection prioritaire, mesures séparées par canal et jusqu'au rendu. L'overlay à plat ne rééchantillonne plus le terrain sur le thread UI.
+
+Le snapshot DB repeatable-read est terminé avant calcul dans un worker CPU borné de l'application Fastify, sans connexion DB. Cache de géographie validé par le texte JSONB effectivement relu ; occupations/voisins toujours frais par monde. Index de surfaces/rochers/arbres, extrema immuables et samples de passage réutilisés. Même résultat de dotation que la revue sur trois appels ; aucun changement de géographie, pente, terrassement, choix du point ou orientation.
+
+Preuves actuelles : **44 tests distincts passent**, types/lint/build racine réussis, worker compilé vérifié sans TSX. Régression API échouée avant correction (gel de 18,2 s) puis verte ; régression visuelle rétrospective détecte le disque conditionné au diagnostic, source restaurée. Comparaison de 6 928 collisions rocheuses sans écart. Recette navigateur complète passée : mouvement continu, sélection, rotation, coin, navigation et tactile, zéro erreur JS ; captures relues. SHA256 source conservé.
+
+Mesures : retard maximal du timer API 128–238 ms sur trois appels ; contrôle 17,3 s au démarrage froid puis 3,9 s au troisième appel (second instrumenté : 8,8 s). Recette navigateur : disque neutre rendu en 111–163 ms sur dix mouvements, chargement 37,3 s, premier contrôle 16,5 s. **Chargement et résultats froids restent lents**, sans revendication de budget UX atteint. Prochaine tranche recommandée : maillage dérivé réutilisable de la géographie approuvée. L'arrivée jouable, la projection économique naturelle et la pose HDV restent à réaliser ; bouton de choix toujours désactivé.
+
+Git : `main` / `06837b9`, tout le travail demeure non committé ; modifications préexistantes et transcript conservés. Aucun commit/push ni écriture de développement. Fixtures/processeurs de recette fermés, nettoyage SQL vérifié. Les sections suivantes sont historiques.
+
+---
+
+# Revue Astra — causes de lenteur reproduites — 9 octobre 2026
+
+À la demande de Tristan, Astra a examiné le code et reproduit les coûts sur une copie de test isolée. [Revue, mesures et première tranche proposée](docs/REVIEW-ASTRA-2026-10-09-SPAWN-RC1.md). **Revue seulement : aucune correction applicative réalisée.** Le joueur choisit toujours son point/orientation ; les trois contrôles du projet (140,20), orientation 0, trouvent la même dotation complète.
+
+Constats actuels : appels métier réels en 8,9–11,5 s, avec timer du même processus bloqué 7,9–10,4 s ; les lectures instrumentées totalisent 0,5–1,1 s. Profil CPU : qualification du réseau et de ses candidats, sampling, indices de surfaces, checksum et filtrage des emprises. Le seul placement combinatoire n'explique pas la lenteur. Côté UI, le code efface le disque au mouvement puis attend 120 ms de pause avant calcul. Chargement mesuré séparément en Node : maillage 31,7 s, copie 3,3 s, presque 9 millions d'entrées numériques. Ces mesures ne sont pas une nouvelle recette HTTP/navigateur ni des percentiles.
+
+Prochaine tranche recommandée : disque immédiatement mobile, mesures par canal et réduction ciblée des recalculs ; isoler le calcul pur pour protéger la boucle serveur si nécessaire. Traiter ensuite le maillage dérivé réutilisable. Le détail distingue les faits, les inférences et les hypothèses restantes ; conserver la géographie et les règles approuvées.
+
+Preuves de cette revue : build contrats passé ; deux scripts de diagnostic locaux terminés avec code 0, aucune campagne parallèle lancée par Astra ; fixture nettoyée et absence du monde/compte vérifiée par SQL. Artefacts sous `test-results/`, ignorés. Git `main` / `06837b9`, travail de Sol conservé non committé, aucune migration/écriture de développement, aucun commit/push. Arrivée jouable toujours en cours. Les sections suivantes sont l'historique.
+
+---
+
+# Passation à Astra — lenteurs carte de spawn RC1 — 9 octobre 2026
+
+À la demande de Tristan, Sol prépare le [handoff de performance pour Astra](docs/HANDOFF-ASTRA-2026-10-09-SPAWN-RC1-LENTEURS.md) : mesures de chargement/disque/contrôle serveur, profil CPU isolé, optimisations déjà vérifiées, hypothèses non prouvées, chemins réels, reproduction et première tranche recommandée. Le joueur choisit l'emplacement et l'orientation ; aucune recherche automatique d'ancre de village à ajouter. La lenteur concerne notamment la qualification des trajets/candidats pour les compléments de ressources autour de son projet.
+
+Statut inchangé : arrivée jouable en cours, fluidité non acquise. Contrôle terrain/dotation mesuré autour de 44 s dans une recette complète passée, mais un essai ultérieur dépasse encore 60 s. Dernière navigation seule passée : rendu 25 039 ms, géométrie worker 8 616,7 ms, diagnostic rapporté 579,1 ms ; ce diagnostic partagé ne mesure pas souris → image. Mesures non contrôlées à froid/à chaud ; ne pas annoncer un gain global à partir des micro-mesures. Aucun profilage ni test applicatif nouveau dans cette passation documentaire.
+
+Git relu : `main` / `06837b9`, implémentation et docs toujours non committées, transcript utilisateur intact. Aucun commit/push, aucune nouvelle modification du code, aucun serveur/fixture lancé pour cette passation. Les preuves et limites de l'implémentation restent dans la section suivante et le suivi lié.
+
+---
+
+# Carte de spawn RC1 — contrôle du projet choisi par le joueur — 9 octobre 2026
+
+Correction produit de Tristan : **c'est le joueur qui trouve l'emplacement et choisit l'orientation du kit.** Le disque de rayon 30 révèle les contraintes ; aucune recherche automatique d'ancre ou d'orientation du village dans ce disque. La [spec](docs/SPEC-CARTE-SPAWN-RC1.md) est corrigée dans son corps et ses critères de recette. Le code contrôlait déjà le point/orientation demandés ; aucune recherche d'autre implantation du village n'a été ajoutée. Le placement automatique concerne seulement les compléments pierre/bois validés, autour du projet choisi. La bande de terrassement reste ±1 niveau ; Tristan évoque une augmentation éventuelle, sans nouveau seuil fixé.
+
+Poursuite autorisée dans le worktree : occupations, équipements, voirie, missions et bois réservé protégés dans des lectures repeatable-read par monde ; informations opérationnelles privées côté serveur. Accès piétons RC1 au seuil validé de ¼ de case verticale par case horizontale, contrôlé entre les points. Planificateur de dotation complète 4 300 pierres et, si nécessaire, 3 000 bois ; contrôle serveur interne `resource-check`, sans écriture. Projection naturelle encore absente : le prédiagnostic teste conservativement les deux bosquets et ne fabrique aucun avertissement de pauvreté depuis le décor. [État détaillé et limites](docs/IMPLEMENTATION-CARTE-SPAWN-RC1.md).
+
+Corrections de finition : contacts entre bords d'emprises permis, points occupés toujours bloqués ; découpage des lignes/du marqueur aux coutures, dont le coin ; stabilité du diagnostic lorsque le point ne change pas. Réutilisation de calculs immuables topographie/géologie, 512 samples géographiques complets identiques avant/après. Source RC1 SHA256 octets inchangé `de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4`.
+
+Preuves de la reprise : 37 cas ciblés et 22 connexes ont passé ; après la dernière optimisation des collisions immuables, les 31 tests terrain/dotation/accès/coutures repassent. Comparaison rocheuse avant/après identique sur 6 928 surfaces. Types et lint racine passent ; build racine puis bundle World passés avant la finition de navigation, dont types/lint et recette Vite ont été revérifiés. Les recherches de dotation interrompues restent distinctes d'une impossibilité. Recette complète Chrome passée (terrain/dotation, coin, tactile, sans erreur JavaScript), puis finition de navigation validée séparément avec `--navigation-only` : angles/rayon au glissement, angles au zoom, retour global, coin et tactile. Reproduction isolée du défaut de caméra avant correction documentée. Dernière navigation : rendu 25 039 ms, préparation géographique 8 616,7 ms, diagnostic 579,1 ms. **Fluidité non acquise** : contrôle de dotation mesuré à 44 280 ms lors de la recette complète, mais un essai ultérieur dépasse à nouveau 60 s. Ne pas compter la recette de navigation seule comme revalidation de ce contrôle.
+
+**Spec complète toujours en cours, arrivée jouable non livrée.** « Choisir cet emplacement » reste désactivé : projection naturelle, certification géométrique, préparation locale/kit transparent, pose HDV, kit et terrassement persistants, dotation atomique et concurrence restent à raccorder. Aucun monde opérationnel ouvert, aucune migration ni écriture de développement. Git `main` / `06837b9`, changements non committés ; aucun commit/push demandé ou effectué. Transcript non suivi intact. Les sections suivantes restent l'historique.
+
+Clôture de cette reprise : navigateur et serveurs de fixture arrêtés ; dernier `finally` terminé avec code 0. Lectures SQL ciblées confirmant zéro monde de recette, cohorte et compte entrant pour les trois copies successives utilisées dans cette passe. Ancien processus stdin resté ouvert arrêté après vérification de son nettoyage ; la fixture libère désormais stdin à la clôture. Source RC1 et `git diff --check` revérifiés, liens locaux des références affectées contrôlés. Captures et comparaisons restent dans `test-results/`, ignoré par Git.
+
+---
+
+# Carte de spawn RC1 — socle terrain interne, implémentation en cours — 9 octobre 2026
+
+Sol a commencé l’implémentation autorisée de la [spec figée](docs/SPEC-CARTE-SPAWN-RC1.md). **La spec complète et sa première tranche ne sont pas encore livrées.** [État réel, limites et suite bornée](docs/IMPLEMENTATION-CARTE-SPAWN-RC1.md). Aucun monde opérationnel ouvert, aucune migration nouvelle ni modification de la base de développement.
+
+Réalisé dans le worktree : contrats de carte/contrôle du terrain ; champ RC1 et distances toriques partagés ; emprises du starter figé (bâtiments, voirie, équipements), rotation et référence HDV ; carte à plat depuis l’artefact signé, disque/rouge/croisillons/selection ; survol nom/population sans fond, clavier/tactile ; panneau figé, luminosité sur 24 h et quatre mentions d’instrumentation ; lectures HTTP authentifiées sans village préalable et sans mutation métier. Le bouton de recette recontrôle terrain/voisinage ; « Choisir cet emplacement » reste désactivé et explique le raccord manquant. `readiness: 'terrain-only'` ne vaut aucune permission de spawn.
+
+La source reste `apps/world-web/public/studies/t1-alpha512-rc1.json`, SHA256 octets `de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4`. Signature canonique JSON indépendante `5e80042349e495c504900531c189bac1912795f65e739aee09f95bdcf452a9f0`. Le serveur exige ready/open pour une copie et refuse le candidat fermé, ainsi que tout autre artefact. Le garde d’ouverture v3 du World generator n’est pas contourné. La recette a uniquement seedé une copie nouvelle dans `127.0.0.1/arbestra_test`, ouverte localement pour tester l’accès ordinaire avant adhésion.
+
+Maillage et diagnostic passent par un worker. Optimisation algébriquement équivalente du bruit de facettes T1, comparée exactement au sampler de `06837b9` sur 512 points ; dix hauteurs avant correction sont désormais une régression. Les rochers utilisent une enveloppe conservatrice correspondant à leur rayon `.75`, leur support maximal `1.28`, leur rotation et la métrique du tore ; pas leur seule largeur brute/2. La projection finie au 1/8 pour les emprises et 1/2 pour le disque reste à certifier/raffiner avant autorité de pose.
+
+Preuves de cette passe : 12 tests ciblés contrats/API passent après auto-revue (bande, seuil 50, coutures, détail sous-cellulaire, disque distinct des emprises, roches, extrema, identité, accès fermé, isolation, voisin apparu et absence d’écritures) ; les 12 tests connexes T1/variation ont passé après optimisation. Typecheck/lint passent ; build racine passé et bundle World recetté après finition. Recette réelle Chrome/Playwright sans mock de terrain/API : desktop puis contexte tactile séparé, survol, sélection A/survol B, confirmation, glisser sans sélectionner, focus/clavier, courbe et descriptions, disque rendu, panneau mobile réellement défilable ; zéro erreur JavaScript. Captures dans `test-results/spawn-map-{global,selected,mobile}.png`, ignorées par Git. Scripts reproductibles dans `tests/browser/spawn-map-fixture.mjs` et `tests/browser/spawn-map.mjs`. Une nouvelle mesure donne 33 079 ms jusqu’au rendu, 17 154,9 ms de préparation géographique et 3 121,8 ms pour le diagnostic ; la précédente donnait 24 788/12 081,5/3 844,1 ms. **La fluidité attendue n’est pas acquise.**
+
+Suite : qualifier les accès piétons v3 et les ressources naturelles réellement exploitables, occupations/passages préservés, pauvreté non bloquante et placement de toute la dotation. Compléter la qualification autoritaire et accélérer le survol ; ensuite préparation/kit transparent, pose HDV groupée/manuelle, économie des seuls éléments posés, kit persistant, corrections locales du sol et dotations atomiques, concurrence/rollback/reprise et autre client. Garder les décisions produit figées ; ne pas prendre ce socle pour une arrivée jouable.
+
+Git : `main` / `06837b9`, changements non committés. Spec/handoff déjà modifiés avant cette passe préservés ; transcript `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` non suivi, intact. Aucun commit/push demandé ni effectué. Les sections suivantes restent l’historique.
+
+Clôture de recette : serveurs et navigateur dédiés arrêtés ; le `finally` de la fixture a terminé avec code 0. Lecture SQL ciblée confirmant l’absence du monde de recette, de ses cohortes et du compte entrant. Source RC1 inchangée ; liens documentaires locaux et `git diff --check` vérifiés.
+
+---
+
+# Spec carte de spawn RC1 figée — 9 octobre 2026
+
+Tristan valide les deux derniers arbitrages proposés : bande ±1 suffisante pour les emprises, sans seuil supplémentaire de pente (accès piétons contrôlés séparément) ; « Zone pauvre en ressources » si bois exploitable absent à trajet <15 OU pierre naturelle exploitable absente à trajet ≤40, avant dotation. [Spec consolidée](docs/SPEC-CARTE-SPAWN-RC1.md), statut **prête à implémenter — arbitrages produit figés**. Les anciens points ouverts de gameplay sont remplacés dans le corps du document, pas seulement complétés par un addendum.
+
+Conventions d'implémentation consolidées à partir de l'audit : sélection distincte du survol, navigation sans clic accidentel, indicateurs non limités à la couleur, clavier/tactile, états asynchrones, accès pré-adhésion séparé des droits Village/opérateur, scène conservée au survol. Projection naturelle et règles d'accès restent des travaux techniques à qualifier avant recette jouable, sans nouvelle mécanique ni ouverture. La carte seule reste une tranche interne ; le parcours joueur rejoint la préparation puis la pose de l'hôtel de ville.
+
+Preuves de cette passe : relecture documentaire, vérification de cohérence et liens locaux ; aucun test applicatif/navigateur exécuté. Aucun code/DB modifié. Git `main` / `06837b9`, spec encore non suivie et handoff modifié, transcript non suivi conservé ; aucun commit/push. Les sections suivantes sont l'historique des arbitrages, leurs anciens statuts ne remplacent pas la spec consolidée.
+
+---
+
+# Arbitrage carte de spawn : référence du kit manuel — 9 octobre 2026
+
+Tristan valide l'emprise du kit complet dans son orientation au passage en manuel, ancrée sur la position finale de l'hôtel de ville, comme référence de placement des compléments. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : marges depuis les emprises de tous les éléments du modèle, exclusion des compléments de ces emprises, translation recalculée si l'hôtel de ville est déplacé avant pose. Aucun terrain réservé ; les poses individuelles ultérieures valident leurs emprises réelles sans déplacer ou recréer la dotation.
+
+Critère de recette ajouté (orientation, translation, coutures, absence de réservation/double dotation). Documentation uniquement ; aucun code/DB modifié, aucun commit/push, modifications préexistantes conservées. Les précisions restantes de qualification demeurent explicitement listées dans la spec.
+
+---
+
+# Arbitrage carte de spawn : dotation impossible — 9 octobre 2026
+
+Tristan valide : si les compléments ne tiennent pas aux distances prévues, signaler le manque de place et laisser déplacer le projet, sans perte du kit ni modification du terrain. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : pauvreté naturelle non bloquante distinguée de l'impossibilité d'aménager la dotation, contrôle dès le diagnostic puis sous verrous à la pose, aucune réduction silencieuse de dotation/extension de portée et rollback complet si nécessaire. Critères de recette ajoutés.
+
+Reste à préciser la référence géométrique du kit en manuel et les modalités complémentaires de qualification listées dans la spec ; ne pas annoncer toute la spec figée. Documentation uniquement ; aucun code/DB modifié, aucun commit/push, modifications préexistantes conservées.
+
+---
+
+# Arbitrage carte de spawn : barème et portées fixés — 9 octobre 2026
+
+Tristan valide 150 pierres par mini-gisement et gros gisements à plus de 20 et jusqu'à 40 cases de trajet depuis l'hôtel de ville. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md), mentions à confirmer retirées et critères de recette alignés. Dotation pierre totale : 2 × 150 + 2 × 2 000 = 4 300 ; bois conditionnel : 2 × 1 500 = 3 000. Mini-gisements : séparation d'au moins 10 cases du bord du kit et trajet ≤20 ; gros : 20 < trajet ≤40 ; bosquets : trajet <15.
+
+Le barème est fixé, sans prétendre résoudre le cas d'absence de place sûre pour tous les compléments ou la référence du kit manuel encore non posé. Documentation uniquement ; aucun code/DB modifié, aucun commit/push, fichiers préexistants conservés.
+
+---
+
+# Arbitrage carte de spawn : barème pierre et bosquets — 9 octobre 2026
+
+Tristan demande deux mini-gisements proches, deux gros gisements de 2 000 pierres chacun plus loin ; bois uniquement si nécessaire, deux bosquets de trois arbres, 500 bois par arbre représenté donc 1 500 par bosquet (3 000 au total). [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : quatre gisements au spawn, stocks économiques agrégés pour les bosquets, pas de crédit direct ni de duplication au retry. La proposition de 300 bois pour le complément est remplacée.
+
+Stock des mini-gisements : proposition antérieure de 150 chacun conservée comme à confirmer, pas attribuée à cette réponse ciblée. Distance des gros « plus loin » encore à chiffrer ; 20 cases maximum concerne les mini-gisements. Code v2 à 300 bois/bosquet distingué de la nouvelle cible, aucune règle de réapprovisionnement rétroactif inventée. Documentation seulement, aucun code/DB modifié, aucun commit/push ; modifications préexistantes conservées.
+
+---
+
+# Arbitrage carte de spawn : distances des compléments — 9 octobre 2026
+
+Tristan valide les distances proposées : pierre à au moins 10 cases du bord des emprises du starter-kit, avec trajet piéton depuis l'hôtel de ville de 20 cases maximum ; bois à moins de 15 cases de trajet depuis l'hôtel de ville. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md), règles et tests de bornes/coutures/détours alignés. Séparation géométrique et longueur d'accès piéton distinguées.
+
+Lecture du code existant pour préparer le barème : un bosquet v2 reçoit 300 bois dans `worlds/generation.ts` ; ce n'est pas un stock par arbre visuel. Les recettes de transformation existantes consomment 25 brutes pour 20 raffinées ; le tailleur initial coûte 50 bois et 25 pierres brutes (migration 031). Aucun nouveau barème approuvé par la validation des distances. Quantités et cas limites de placement restent ouverts. Documentation uniquement, aucun code/DB modifié, aucun commit/push ; modifications préexistantes conservées.
+
+---
+
+# Arbitrage carte de spawn : pauvreté et compléments de ressources — 9 octobre 2026
+
+Tristan valide « Zone pauvre en ressources » non bloquant. Au spawn effectif, mini-gisements de pierre à au moins 10 cases du starter / hôtel de ville ; en l'absence d'arbre exploitable accessible à moins de 15 cases, ajout de quelques arbres exploitables à portée pour développer la cité vers les ressources. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : retrait de la garantie de ressources naturelles comme critère bloquant, ajouts locaux distincts de RC1, vrais dépôts économiques et atomicité/idempotence avec l'installation. Condition bois évaluée après dégagement des emprises ; aucun ajout à l'inspection ou au retry.
+
+Restent à borner : nombres/stocks, référence et maximum de distance pierre, métrique bois, critère complet de pauvreté et absence de place sûre pour un complément. Le placement pierre au spawn n'est pas rendu conditionnel sans décision utilisateur. Documentation seulement ; état **en cadrage**, aucun code/DB modifié, aucun commit/push. Modifications préexistantes conservées.
+
+---
+
+# Arbitrage carte de spawn : hôtel de ville déclencheur — 9 octobre 2026
+
+Tristan confirme que l'hôtel de ville est le fait générateur de l'installation. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : « centre-ville » = `town-hall`, création du village et activation économique à sa pose réussie, habitants/stocks/coffre initiaux une seule fois, seuls les éléments posés fonctionnent. Le kit manuel restant est conservé jusqu'à sa pose et l'économie démarre sans attendre sa complétude. Dotation initiale du Jardin conservée lors de sa pose, sans production rétroactive avant celle-ci ; retry/reconnexion ne réinitialisent rien.
+
+Mise à jour documentaire des règles et critères de recette transactionnels ; aucune implémentation ni validation applicative. Conditions complémentaires de qualification encore en cadrage. Git `main` / `06837b9`, fichiers préexistants conservés, aucun commit/push ni écriture DB.
+
+---
+
+# Arbitrage carte de spawn : courbe solaire et instrumentation — 9 octobre 2026
+
+Tristan valide : courbe de luminosité sur 24 h, soleil dessiné au premier sommet et lune au premier creux ; humidité, température, vent et précipitations « En attente d'instrumentation ». Informations descriptives, sans condition d'admissibilité. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : ancienne proposition d'indice d'humidité/« Indisponible » retirée, contrat du panneau et critères de recette alignés.
+
+Lecture réelle de `packages/contracts/src/cosmology.ts` et `world-climate.ts` : cycle combiné 24 h et `illumination().direct` disponibles ; moyenne d'exposition insuffisante pour une courbe. Conventions documentées : cycle stable 0–24 h, luminosité relative 0–1 commune aux lieux, graphe lié au point inspecté, extrema/plateaux traités sans inventer une courbe. Aucun rendu ou test applicatif exécuté ; documentation uniquement. Conditions complémentaires d'implantation encore en cadrage ; aucun code/DB modifié, aucun commit/push, modifications préexistantes conservées.
+
+---
+
+# Arbitrage carte de spawn : voisins et engagement — 9 octobre 2026
+
+Tristan valide les quatre points proposés : distance torique strictement >50 cases entre centres-villes ; « Choisir » ouvre la préparation avec retour libre à la carte ; pose du centre-ville = création et engagement, centre-ville en premier en manuel et kit restant conservé après déconnexion ; aucune réservation pendant la préparation, recontrôle serveur à la pose et projet déplaçable sans perte du kit après conflit.
+
+[Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : parcours, règles serveur, concurrence/retry et critères de recette alignés. La tranche carte seule est une étape interne ; la livraison joueur doit rejoindre la préparation. Climat et conditions complémentaires restent en cadrage, aucune validation globale implicite. Documentation uniquement, vérification documentaire ; aucun code/DB modifié, aucun commit/push. Modifications préexistantes conservées.
+
+---
+
+# Arbitrage carte de spawn : terrassement et obstacles — 9 octobre 2026
+
+Tristan valide les quatre règles proposées : référence = altitude du terrain au centre-ville ; terrassement gratuit de ±1 niveau (¼ de case par niveau) sous les seules emprises posées ; retrait gratuit des arbres sous emprise sans gain de bois ; pose interdite sur roches/eau, à contourner sans suppression. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md), y compris règles serveur, parcours manuel et critères de recette. Référence commune conservée pour éviter une dérive du terrassement au fil des poses.
+
+Statut **en cadrage** : distance mesurée entre voisins, engagement de l'installation et contrat climatique restent à arbitrer, ainsi que les conditions complémentaires d'accès/implantation. Cette validation ciblée n'approuve pas le reste du tableau de propositions antérieur. Documentation uniquement ; aucun code/DB modifié, aucun commit/push, fichiers préexistants conservés.
+
+---
+
+# Arbitrage carte de spawn : disque de diagnostic — 9 octobre 2026
+
+Tristan valide explicitement le **disque de diagnostic**. [Spec actualisée](docs/SPEC-CARTE-SPAWN-RC1.md) : rayon 30, contraintes locales visibles, eau/roches/relief incompatible admis dans le disque si une implantation valide peut y tenir. L'exigence d'un disque entier plat et libre est remplacée ; le disque n'est ni une réserve territoriale ni une emprise à terrasser. Les autres propositions ne sont pas validées par cette réponse ciblée : référence/seuils de relief, défrichement, distance entre centres, moment d'engagement et contrat climatique restent à arbitrer. Statut **en cadrage** conservé.
+
+Documentation uniquement, aucune implémentation ni écriture DB. Modifications préexistantes conservées ; aucun commit/push.
+
+---
+
+# Audit UX et implémentation de la carte de spawn — 9 octobre 2026
+
+Audit demandé sur `docs/SPEC-CARTE-SPAWN-RC1.md`. Verdict : intention cohérente, spec **en cadrage**, pas prête à implémenter intégralement. Constats prioritaires : promesse « zéro rouge » incomplète (autres refus visibles seulement après clic), succès de « Choisir » sans suite dans la tranche, accès avant village absent du pipeline courant (`availableWorlds` dépend des clairières et `readTerrain` exige village/membership), règle globale de planéité non calculable tant que référence/unité/seuils restent ouverts. Rayon 30 et distance entre centres >50 peuvent produire des disques chevauchants ; ce n'est pas une règle de territoire réservé. Exiger le disque entier sec/hors obstacles pourrait aussi exclure côtes et forêts : mesurer l'effet sur RC1 avant de figer ces choix.
+
+Recommandations à intégrer après arbitrage : indicateur d'admissibilité complet dès le survol, sélection figée distincte du centre survolé, états explicites de chargement/diagnostic/refus/validation, navigation pan/zoom séparée du clic et priorité du picking villages/sol, alternatives à la couleur et accès clavier/tactile. La carte de recette ne doit pas annoncer une installation réussie avant que la suite soit livrée. Climat : `climateAt().humidity` est un indice procédural, pas une hygrométrie physique certifiée ; `buildExposureField` fournit une moyenne et `weatherAt` des intensités visuelles de nuages/pluie, pas directement les statistiques promises.
+
+Implémentation recommandée : contrat d'accès pré-adhésion minimal sans assouplir les endpoints village/admin, évaluation partagée versionnée, calcul statique géographique séparé des occupations dynamiques, overlay indépendant de l'identité de rendu, diagnostics bornés et réponses périmées rejetées. La preview préserve déjà la scène lors d'un déplacement du centre en vue carte ; garder cette propriété. Ajouter des preuves de rejouabilité des diagnostics, non-reconstruction au survol, glisser sans sélection, sélection A/survol B, retour après refus/conflit et impossibilité d'accéder au jeu sans village.
+
+Preuves : relecture spec/code et références officielles W3C WCAG (couleur, survol/focus, clavier) et Babylon (optimisation/picking). Aucun parcours navigateur ni benchmark ; conclusions UX à éprouver sur prototype. Spec inchangée : recommandations non converties en décisions produit. Handoff seul modifié par cette passe ; fichiers préexistants conservés, aucune écriture DB, aucun commit/push.
+
+---
+
+# Spec carte de spawn RC1 — 9 octobre 2026
+
+Demande : consigner le parcours discuté dans un document Markdown. [Spec carte d'arrivée et choix d'emplacement](docs/SPEC-CARTE-SPAWN-RC1.md), statut **en cadrage** : carte à plat, survol nom/population sans cartouche/toast, disque de rayon 30 avec arêtes incompatibles rouges, voisin à plus de 50 cases, panneau climatique au clic et confirmation serveur. La bande d'altitude globale ±1 avec contrôle local des ruptures reste proposée ; altitude de référence, seuils/unités, mesure de distance aux voisins, obstacles et accès ressources restent à préciser.
+
+Première tranche bornée au choix qualifié, sans réservation, création de village, terrassement ni ouverture. Suite conservée dans la spec : starter-kit transparent, clic gauche pose l'ensemble, clic droit/Échap passent en manuel, R tourne de 90° par pression ; terrassement gratuit limité aux emprises posées, tolérance ±1 niveau. Aucune valeur climatique inventée. Cette note remplace la proposition de parcours automatique de l'étude précédente pour la direction produit, pas ses constats de code.
+
+Documentation uniquement : aucune implémentation, écriture DB ou recette applicative. Base `main` / `06837b9`. Modification préalable de ce handoff et transcript non suivi conservés ; spec ajoutée et handoff actualisé, aucun commit/push.
+
+---
+
+# Étude d'intégration RC1 en monde jouable — 9 octobre 2026
+
+Demande courante : identifier l'écart entre la preview alpha 512 × 256 approuvée au commit `06837b9` et l'arrivée d'un joueur dans son village, puis proposer une première tranche bornée. Étude seulement ; aucune implémentation ni ouverture autorisée par cette passe.
+
+Lecture du code et inspection de RC1 : empreinte SHA256 conforme à `de165c395c26eb70572a4370d9a537661e9eaf78b477e1694cfda283418702a4`, 15 029 arbres et 28 groupes de pierre. `terrainCodes` et `walkable` sont entièrement à zéro ; le JSON n'embarque pas `study.waterLevel`, ajouté à 0 par la preview. `writeV3Chunks` ne persiste que les tableaux de compatibilité, pas le champ géographique ni les ressources. Le streamer et le rendu Village consomment encore le terrain historique (échelle 0,025, eau à −0,75). `joinWorld` exige des clairières protégées libres et vérifie le sol de code 1 ; l'ouverture opérateur refuse v3. Inscription, lobby, modèle de départ et initialisation atomique existent déjà.
+
+Proposition, non validée : première tranche de projection fidèle de RC1 sur copie de test fermée, avec identité/provenance, eau statique à 0, lecture géographique en jeu et qualification des règles de marche/constructibilité. Produire un relevé d'emplacements compatibles avec l'emprise complète du modèle et les accès bois/pierre existants, sans réservation, défrichement, nivellement, nouveaux stocks ni ouverture. Ensuite seulement : projection économique et spawn transactionnel borné, recette de comptes ordinaires sur copie isolée, puis ouverture explicite. Seuils de pente/planéité, stocks des ressources naturelles et éventuel dégagement local restent à trancher ; les chiffres de couverture de preview ne les valident pas.
+
+Preuves actuelles : lecture documentaire/code et inspection JSON/hash uniquement ; aucun test applicatif ni parcours navigateur exécuté. Aucune écriture DB. Git initial/final avant cette note : `main` / `06837b9`, seul transcript brut non suivi, conservé. Cette note est la seule modification de la passe ; aucun commit/push.
+
+---
+
 # Archivage Git de la candidate alpha — 9 octobre 2026
 
 Commit/push demandé par Tristan. Périmètre : travaux géographiques r10/r11, témoin T1 et sculptures validées, preview/chunks, pierre par chunk, artefacts et candidate 512 × 256 RC1, tests et documentation associés. Le code procédural est versionné avec la copie RC1 pour permettre la reprise de cette référence. Les mentions « non commité » ci-dessous décrivent les étapes historiques.

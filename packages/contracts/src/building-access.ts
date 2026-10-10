@@ -2,8 +2,15 @@ import type {VillageState} from './villages.js';
 import type {TravelCell} from './travel-paths.js';
 import {wrapCoordinate,wrappedDistance} from './infrastructure.js';
 export interface BuildingAccess {id:string;position:TravelCell;outside:TravelCell;normal:{x:number;y:number};width:number;principal:boolean}
+export interface BuildingAccessState {
+  world: Pick<VillageState['world'], 'widthCells' | 'heightCells'>;
+  cells: ReadonlyArray<Pick<VillageState['cells'][number], 'cellX' | 'cellY'> & {
+    building: Pick<NonNullable<VillageState['cells'][number]['building']>, 'id' | 'type' | 'quarterTurns' | 'visualLayout' | 'accesses'> | null;
+    footprint: { buildingId: string } | null;
+  }>;
+}
 /** Recipe offsets are in cells, relative to the unrotated footprint centre. */
-export function buildingAccesses(state:Pick<VillageState,'world'|'cells'>,buildingId:string):BuildingAccess[]{
+export function buildingAccesses(state:BuildingAccessState,buildingId:string):BuildingAccess[]{
   const anchor=state.cells.find(c=>c.building?.id===buildingId);if(!anchor?.building)return [];
   const b=anchor.building,cells=state.cells.filter(c=>c.footprint?.buildingId===buildingId);
   const xs=(cells.length?cells:[anchor]).map(c=>wrappedDistance(c.cellX,anchor.cellX,state.world.widthCells));

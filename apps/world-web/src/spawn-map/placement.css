@@ -1,0 +1,20 @@
+﻿.starter-names {
+  position: absolute; top: 90px; right: 20px; z-index: 20;
+  display: grid; gap: 8px; padding: 14px;
+  background: var(--hud-main); color: #edf4ff;
+  border: 1px solid var(--hud-border); border-radius: 8px;
+}
+.starter-names label { display: grid; gap: 4px; }
+.starter-names a { color: #bcd6ff; }
+.starter-names input {
+  max-width: 210px; padding: 5px; background: #172639; color: #edf4ff;
+  border: 1px solid var(--hud-border);
+}
+.starter-resume {
+  position: fixed; top: 16px; right: 16px; z-index: 40;
+  padding: .7rem 1rem; background: var(--hud-main); color: #edf4ff;
+  border: 1px solid var(--hud-border); border-radius: .4rem;
+}
+@media(max-width:600px) {
+  .starter-names { top: 12px; right: 12px; padding: 8px; }
+}

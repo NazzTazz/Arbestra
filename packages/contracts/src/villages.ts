@@ -1,3 +1,4 @@
+import {Rc1FeatureGeometrySchema} from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { ScienceStateSchema } from './science.js';
 import { ExploitationOrderSchema } from './exploitation.js';
@@ -118,6 +119,7 @@ export const StoneDepositSchema = Type.Object({
 export type StoneDeposit = Static<typeof StoneDepositSchema>;
 
 export const NaturalFeatureSchema = Type.Object({
+  rc1: Type.Optional(Rc1FeatureGeometrySchema),
   id: Type.String({ format: 'uuid' }), type: Type.String(), cellX: Type.Integer({ minimum: 0 }),
   cellY: Type.Integer({ minimum: 0 }), variantSeed: Type.Integer(),
   deposit: Type.Union([StoneDepositSchema, Type.Null()]),

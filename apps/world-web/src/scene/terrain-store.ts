@@ -1,3 +1,4 @@
+import {rc1Height} from './rc1-terrain';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainResponse, TerrainUpdatesChunk, TerrainUpdatesResponse, VillageState } from '@arbestra/contracts';
 import { normalize, type ChunkDemand } from './world-space';
 import { TERRAIN_STREAMING as SETTINGS } from './terrain-settings';
@@ -124,7 +125,7 @@ export class TerrainStore {
             e.freshAt = -Infinity; continue;
           }
           for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
-          const signature = JSON.stringify([chunk.features, chunk.occupiedCells]);
+          const signature = JSON.stringify([chunk.features, chunk.occupiedCells,chunk.rc1?.terraces]);
           if (!e.chunk || signature !== e.mutableSignature) this.changed.add(ticket.key);
           if (e.chunk) e.chunk = { ...chunk, terrainCodes: e.chunk.terrainCodes, elevations: e.chunk.elevations };
           else if (fullChunk) e.chunk = fullChunk;
@@ -155,6 +156,7 @@ export class TerrainStore {
     x = normalize(Math.round(x), w); y = normalize(Math.round(y), h);
     const chunk = this.entries.get(this.key(x, y))?.chunk;
     let code: number | undefined, elevation: number | undefined;
+    if(chunk?.rc1){const height=rc1Height(chunk,x,y)!;const i=(y-chunk.originCellY+1)*(s+2)+x-chunk.originCellX+1;return {height,code:chunk.terrainCodes[i]??1};}
     if (chunk) { const index = (y - chunk.originCellY + 1) * (s + 2) + x - chunk.originCellX + 1; code = chunk.terrainCodes[index]; elevation = chunk.elevations[index]; }
     else { const r = this.#snapshot.region, lx = normalize(x - r.originCellX, w), ly = normalize(y - r.originCellY, h);
       if (lx < r.width && ly < r.height) { code = r.terrainCodes[ly * r.width + lx]; elevation = r.elevations[ly * r.width + lx]; } }

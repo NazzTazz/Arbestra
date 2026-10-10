@@ -88,3 +88,15 @@ it('keeps the detailed building usable when its optional distant asset fails',as
     expect(instances[0]!.metadata.siteId).toBe('campus');
   }finally{scene.dispose();engine.dispose();vi.restoreAllMocks();vi.unstubAllGlobals();}
 });
+
+it('allows a translucent construction clone without changing existing building instances',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),container=new AssetContainer(scene);
+ try{const source=new Mesh('asset',scene),wall=MeshBuilder.CreateBox('wall',{},scene);wall.parent=source;wall.material=new StandardMaterial('wood',scene);container.meshes.push(source,wall);container.removeAllFromScene();
+ const built=new Mesh('built',scene),preview=new Mesh('preview',scene);instantiateBakedBuilding(container,built);instantiateBakedBuilding(container,preview,true);
+ const solid=built.getChildMeshes().find(m=>m.getTotalVertices())!,ghost=preview.getChildMeshes().find(m=>m.getTotalVertices())!;
+ expect(solid).toBeInstanceOf(InstancedMesh);expect(ghost).not.toBeInstanceOf(InstancedMesh);
+ const ghostMaterial=wall.material.clone('ghost')!;ghostMaterial.alpha=.58;ghost.material=ghostMaterial;
+ expect(solid.material?.alpha).toBe(1);expect((ghost as Mesh).geometry).toBe(wall.geometry);
+ preview.dispose(false,false);expect(solid.isDisposed()).toBe(false);
+ }finally{scene.dispose();container.dispose();engine.dispose();}
+});

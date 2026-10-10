@@ -396,6 +396,15 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  villageStarterInstallations: {worldId:string;villageId:string;accountId:string;commandId:string;
+    request:JSONColumnType<import('@arbestra/contracts').SpawnPoseRequest>;
+    kit:JSONColumnType<import('@arbestra/contracts').StarterKit>;remaining:JSONColumnType<string[]>;
+    anchorX:number;anchorY:number;quarterTurns:number;referenceHeight:number;createdAt:Generated<Timestamp>};
+  starterPoseReceipts:{worldId:string;villageId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').StarterPoseRequest>;buildingId:string};
+  worldSpawnTerraces:{worldId:string;villageId:string;cellX:number;cellY:number;height:number};
+  worldRc1Resources:{worldId:string;featureId:string;sourceKey:string;treeIndices:JSONColumnType<number[]>;removedIndices:JSONColumnType<number[]>};
+  worldAtlasPresentations: { worldId: string; title: string; slogan: string };
+  villageSpawnTerritories: { worldId: string; villageId: string; points: JSONColumnType<import('@arbestra/contracts').SpawnPoint[]> };
   buildingVariantCosts: {buildingTypeCode:string;level:number;variant:'stone'|'logs'|'beams';resourceCode:string;amount:ColumnType<string,number|string,number|string>;replacesResourceCode:Generated<string|null>};
   processingRecipes: ProcessingRecipesTable;
   oracleMarketResources: { resourceCode: string; valueUnits: number };

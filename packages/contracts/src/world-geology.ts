@@ -14,21 +14,27 @@ const smooth=(v:number)=>{v=clamp(v);return v*v*(3-2*v);};
  */
 export function createGeologySampler(g:Pick<WorldGeography,'width'|'height'|'seed'>,topography:(x:number,y:number)=>WorldGeoSample){
  const {width:w,height:h,seed}=g,step=2,cache=new Map<number,{dx:number;dy:number;ridge:number;bend:number}>();
+ const heights=new Map<number,number>();
+ const latticeHeight=(ix:number,iy:number)=>{
+  ix=wrapClimate(ix,w/step);iy=wrapClimate(iy,h/step);const key=iy*(w/step)+ix;
+  const old=heights.get(key);if(old!==undefined)return old;
+  const height=topography(ix*step,iy*step).elevation;heights.set(key,height);return height;
+ };
  const node=(ix:number,iy:number)=>{
   ix=wrapClimate(ix,w/step);iy=wrapClimate(iy,h/step);const key=iy*(w/step)+ix,old=cache.get(key);if(old)return old;
-  const x=ix*step,y=iy*step,sx=(2.4+Math.cos(y/h*Math.PI*2+Math.PI))*h/w;
-  const z=topography(x,y).elevation,left=topography(x-step,y).elevation,right=topography(x+step,y).elevation;
-  const up=topography(x,y-step).elevation,down=topography(x,y+step).elevation;
+  const y=iy*step,sx=(2.4+Math.cos(y/h*Math.PI*2+Math.PI))*h/w;
+  const z=latticeHeight(ix,iy),left=latticeHeight(ix-1,iy),right=latticeHeight(ix+1,iy);
+  const up=latticeHeight(ix,iy-1),down=latticeHeight(ix,iy+1);
   const xx=(2*z-left-right)/(step*sx),yy=(2*z-up-down)/step;
   const value={dx:(right-left)/(2*step*sx),dy:(down-up)/(2*step),ridge:Math.max(0,xx,yy),bend:Math.max(Math.abs(xx),Math.abs(yy))};
   cache.set(key,value);return value;
  };
- return (x:number,y:number):WorldGeologySample=>{
+ return (x:number,y:number,topographicSample?:WorldGeoSample):WorldGeologySample=>{
   x=wrapClimate(x,w);y=wrapClimate(y,h);const ix=Math.floor(x/step),iy=Math.floor(y/step),fx=x/step-ix,fy=y/step-iy;
   const a=node(ix,iy),b=node(ix+1,iy),c=node(ix,iy+1),d=node(ix+1,iy+1);
   const mix=(key:keyof typeof a)=>(a[key]*(1-fx)+b[key]*fx)*(1-fy)+(c[key]*(1-fx)+d[key]*fx)*fy;
   const dx=mix('dx'),dy=mix('dy'),slope=Math.hypot(dx,dy),ridge=mix('ridge'),breakOfSlope=mix('bend');
-  const s=topography(x,y),province=periodicClimateNoise(x/w,y/h,7,seed+9187);
+  const s=topographicSample??topography(x,y),province=periodicClimateNoise(x/w,y/h,7,seed+9187);
   // Soil accumulates on gentle interiors, thins on steep faces and convex shoulders.
   const soilDepth=Math.max(0,.24+province*.22-slope*1.15-ridge*.95-breakOfSlope*.25);
   const dry=smooth((s.elevation-s.surface)/.18),exposure=(1-smooth(soilDepth/.13))*dry;

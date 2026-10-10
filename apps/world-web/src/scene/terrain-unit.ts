@@ -1,3 +1,4 @@
+import {buildRc1TerrainUnit} from './rc1-terrain';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Mesh as BabylonMesh, type Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
@@ -18,6 +19,7 @@ export function hash(x: number, z: number): number {
 export function buildTerrainUnit(scene: Scene, chunk: TerrainChunk, offsetX: number, offsetY: number,
   space: WorldSpace, material: StandardMaterial, waterMaterial: StandardMaterial,
   roads: ReadonlyMap<string, number> = new Map(), infrastructure:ReadonlyMap<string,RoadPixel>=new Map()): Mesh[] {
+  if(chunk.rc1)return buildRc1TerrainUnit(scene,chunk,offsetX,offsetY,space,waterMaterial);
   const size = Math.sqrt(chunk.terrainCodes.length) - 2, stride = size + 2;
   const origin = space.project({ cellX: chunk.originCellX, cellY: chunk.originCellY });
   const result: Mesh[] = [];
