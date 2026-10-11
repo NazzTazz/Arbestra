@@ -1,3 +1,13 @@
+# Porte de l’HDV niveau 2 alignée sur le kit — 11 octobre 2026
+
+Base 8f8c54d142038959bfcd29ecf051e82cbe048cda, main. Tristan valide le léger relevé de la terre battue (+0,015) et signale une porte HDV sans chemin. Lecture réelle Bressuire R3164 : HDV niveau 2, quarterTurns=1, visualLayout.entranceFace=+x ; accès principal et départs des trajets sont au nord. Le modèle procédural du marché conservait sa porte canonique -x, donc au sud après rotation du bâtiment.
+
+Correction de rendu seule : BabylonVillageScene transmet au générateur du marché le retournement requis par la recette +x. Chaque racine LOD est retournée de 180° avant génération et calcul des effets en coordonnées mondiales, sans changer l’emprise, les accès ni les routes serveur. Atelier et HDV historiques gardent l’orientation canonique. HDV niveau 1 inchangé. Démo 5278 HMR, validation visuelle finale du raccord par Tristan ; pas de navigateur agent ni commande économique. Terre battue : validée produit et conservée.
+
+Preuve ciblée terminée : régression constatée rouge (-1,12 au lieu de +1,12), puis verte après correction : un test NullEngine sur le générateur réel, seuil et normale de la porte concordants avec le plan aux quatre rotations, plus entrée canonique conservée. Lint ciblé des trois fichiers de code terminé vert. Aucun test DB/global ni redémarrage API. Services et protections de fixture ci-dessous préservés. Transcript utilisateur non suivi exclu.
+
+---
+
 # Terre légèrement surélevée — 11 octobre 2026
 
 Base 45cb40e746c6eadd53d8039c87991e41ab477056. Tristan demande de relever très légèrement les chemins de terre pour évoquer la terre compactée. InfrastructureRenderer partagé place la surface earth à terrain +0,015 au lieu de +0,002 ; épaisseur 0,025 conservée, base partiellement enfouie. Autres profils et aperçu générique conservés. Rendu seul, suivi du terrain inchangé, aucune mutation persistante ni redémarrage API. Démo 5278 HMR ; validation visuelle par Tristan. Contrôle unique ciblé du mesh terre : niveau du sommet et base sous le sol, exécution terminée verte : 1 test passé, 3 ignorés. Pas de navigateur/build/campagne supplémentaires. Services et protections de fixture du relais ci-dessous préservés.

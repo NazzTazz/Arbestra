@@ -1964,7 +1964,7 @@ export class BabylonVillageScene {
     body.rotation.y=plan.rotation;
     if(site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2){
       this.#timberThatch??=new TimberThatch(this.#scene);
-      buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,plan.phase,lod===0?body:null),this.#timberThatch);
+      buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,plan.phase,lod===0?body:null,plan.recipe.entrance.face==='+x'),this.#timberThatch);
       this.#createContactShadow(body,plan.width+.08,plan.depth+.08,plan.base);
       return this.#registerStructure(body);
     }

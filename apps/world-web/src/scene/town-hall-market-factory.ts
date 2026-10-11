@@ -11,7 +11,10 @@ import { prepareRoundedCorner,finishRoundedCorner } from './town-hall-rounded-co
 import { buildTownHallStorefront } from './town-hall-storefront';
 
 /** Workshop proposal: a long covered wooden balcony beside a small-stone room. */
-export function buildTownHallMarket(root:Mesh,kit:TimberThatch,phase:'finished'|'works',fireOwner:Mesh|null=root) {
+export function buildTownHallMarket(root:Mesh,kit:TimberThatch,phase:'finished'|'works',fireOwner:Mesh|null=root,oppositeEntrance=false) {
+  // Canonical market entrance is -X. RC1 starter halls use +X; turn the
+  // whole rectangular model before world-space effects (including braziers).
+  if(oppositeEntrance)root.rotation.y+=Math.PI;
   const originalProfile=kit.stoneProfile;kit.stoneProfile={segments:3,radiusRatio:.12};
   try{
   const input={id:'hall-market',anchor:{cellX:0,cellY:0},cells:[{cellX:0,cellY:0},{cellX:0,cellY:1}],world:{widthCells:32,heightCells:32}};
