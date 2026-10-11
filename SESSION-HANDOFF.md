@@ -1,3 +1,9 @@
+# Chemins de terre sans trottoirs — 11 octobre 2026
+
+Base a84392ed87407f2061ecf29196e4fb0f41c2ba7e. Tristan valide visuellement les onglets corrigés, puis demande de passer aux chemins de terre sans trottoir. Profil automatique partagé : earth, border=false, largeur 4 subdivisions conservée. Rendu et nouvelles captures d'édition utilisent AUTOMATIC_ROAD_STYLE ; plans manuels persistés conservés. Le test renderer du pavage approuvé est conservé via InfrastructureRenderer avec une fixture Pierre 1 explicite ; le profil automatique terre a son contrôle ciblé. Compilation contrats terminée verte ; deux tests renderer ciblés terminés verts (terre sans trottoirs et conservation du pavage approuvé), deux cas ignorés. Démo 5278 HMR conservée ; API 3102 relancée en session 40969, remplace session 75155/PID 32464 ; fixture parente préservée. Aucun navigateur agent, validation visuelle par Tristan sur 5278. La piste surfaces texturées reste différée ; aucun changement des stocks ou des trajets.
+
+---
+
 # Attribution des pierres aux branches du trottoir — 11 octobre 2026
 
 Base 7c4038d8fe76ebfb9e165a0b03a09750bfee8a58. Nouveau retour visuel utilisateur : le raccord reste faux malgré le coin complété. Cause distincte : sidewalkPaving() utilisait l'appartenance du coin rentrant pour les coins sortants. Les coupes restaient à 45°, mais les pierres étaient attribuées à la branche opposée. La précédente régression encodait elle-même cette mauvaise attribution ; son succès ne prouvait donc pas un bon raccord.

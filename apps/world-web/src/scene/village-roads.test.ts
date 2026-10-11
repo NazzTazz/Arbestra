@@ -1,10 +1,11 @@
 import { expect, it } from 'vitest';
 import type { TravelRoute } from '@arbestra/contracts';
 import { roadEdges,VillageRoads } from './village-roads';
-import {automaticRoadStrokes,infrastructureSurface} from '@arbestra/contracts';
+import {automaticRoadStrokes,infrastructureSurface,emptyInfrastructure} from '@arbestra/contracts';
 import {NullEngine} from '@babylonjs/core/Engines/nullEngine';
 import {Scene} from '@babylonjs/core/scene';
 import {WorldSpace} from './world-space';
+import {InfrastructureRenderer} from './infrastructure-renderer';
 import { pavedProfiles, roadTileBorders, roadTileRects } from './road-profile';
 
 it('shares excavation across the toric seam and closes every grass-facing edge of bends and junctions', () => {
@@ -40,14 +41,14 @@ it('classifies shared building and resource edges without changing route kinds o
   expect(JSON.stringify(routes)).toBe(before);
 });
 
-it('renders every automatic branch as Pierre 1, four subdivisions wide, with the existing sidewalks',()=>{
+it('keeps the approved raised stone sidewalks and correctly oriented top faces',()=>{
  const routes:TravelRoute[]=[{id:'wood',kind:'wood',cells:[{cellX:10,cellY:10},{cellX:11,cellY:10}],destination:{cellX:11,cellY:10}}],world={widthCells:512,heightCells:256};
- const before=JSON.stringify(routes),roads=automaticRoadStrokes(routes,world);
+ const before=JSON.stringify(routes),roads=automaticRoadStrokes(routes,world).map(r=>({...r,material:'stone-1' as const,border:true}));
  expect(roads.every(r=>r.width===4&&r.material==='stone-1'&&r.border)).toBe(true);
  const surface=infrastructureSurface(roads,world);expect([...surface.values()].filter(p=>p.x===168)).toHaveLength(8); // 8 sixteenths = 4 subdivisions.
- const engine=new NullEngine(),scene=new Scene(engine),renderer=new VillageRoads(scene);
- try {renderer.update('first',routes,new WorldSpace(512,256,{cellX:10,cellY:10}),()=>({code:1,height:0}),true);
-  const pavement=scene.meshes.find(m=>m.name==='village-road-paved')!,curbs=scene.meshes.find(m=>m.name==='village-road-curbs')!;
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);
+ try {renderer.update({...emptyInfrastructure(),roads},new WorldSpace(512,256,{cellX:10,cellY:10}),()=>0,false,0,undefined,false,[],{followTerrain:true});
+  const pavement=scene.meshes.find(m=>m.name==='infrastructure-stone-1')!,curbs=scene.meshes.find(m=>m.name==='infrastructure-border')!;
   expect(pavement.material!.name).toBe('infrastructure-stone-1');expect(curbs.material!.name).toBe('infrastructure-border');
   const z=pavement.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...z)-Math.min(...z)).toBeCloseTo(1.25-.008);
   const edges=curbs.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...edges)-Math.min(...edges)).toBeGreaterThan(2.45);expect(Math.max(...edges)-Math.min(...edges)).toBeLessThanOrEqual(2.5);
@@ -59,6 +60,19 @@ it('renders every automatic branch as Pierre 1, four subdivisions wide, with the
   const topNormals=Array.from(positions).flatMap((y,i)=>i%3===1&&Math.abs(y-.064)<1e-6&&Math.abs(normals[i]!)>.5?[normals[i]!]:[]);
   expect(topNormals.length).toBeGreaterThan(0);expect(topNormals.every(y=>y>.99)).toBe(true);
   expect(curbs.getVerticesData('uv')).toHaveLength(positions.length/3*2);
+  expect(JSON.stringify(routes)).toBe(before);
+ }finally{renderer.dispose();scene.dispose();engine.dispose();}
+});
+
+it('renders automatic earth paths four subdivisions wide without sidewalks',()=>{
+ const routes:TravelRoute[]=[{id:'wood',kind:'wood',cells:[{cellX:10,cellY:10},{cellX:11,cellY:10}],destination:{cellX:11,cellY:10}}],world={widthCells:512,heightCells:256};
+ const before=JSON.stringify(routes),roads=automaticRoadStrokes(routes,world);
+ expect(roads.every(r=>r.width===4&&r.material==='earth'&&!r.border)).toBe(true);
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new VillageRoads(scene);
+ try{renderer.update('earth',routes,new WorldSpace(512,256,{cellX:10,cellY:10}),()=>({code:1,height:0}),true);
+  const road=scene.meshes.find(m=>m.material?.name==='infrastructure-earth')!;expect(road).toBeDefined();
+  expect(scene.meshes.some(m=>m.material?.name==='infrastructure-border')).toBe(false);
+  const z=road.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...z)-Math.min(...z)).toBeCloseTo(1.25);
   expect(JSON.stringify(routes)).toBe(before);
  }finally{renderer.dispose();scene.dispose();engine.dispose();}
 });

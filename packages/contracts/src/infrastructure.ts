@@ -100,7 +100,7 @@ export function infrastructurePlanSurface(plan:InfrastructurePlan,world:{widthCe
   return infrastructureSurface(plan.roads,world,base);
 }
 /** Shared presentation recipe for every automatic route, including resource branches. */
-export const AUTOMATIC_ROAD_STYLE=Object.freeze({width:4,material:'stone-1' as const,border:true,operation:'paint' as const});
+export const AUTOMATIC_ROAD_STYLE=Object.freeze({width:4,material:'earth' as const,border:false,operation:'paint' as const});
 export function automaticRoadStrokes(routes:readonly VillageState['travelRoutes'][number][],world:{widthCells:number;heightCells:number},allowedCells?:ReadonlySet<string>):RoadStroke[]{
  const nodes=new Map<string,{x:number;y:number;arms:Set<number>}>();
  for(const route of routes){const points=coarseTravelPath(route.cells,world);
