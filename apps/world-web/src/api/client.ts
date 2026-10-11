@@ -7,6 +7,7 @@ export async function sendHarvestIntent(slug:string,villageId:string,intent:Harv
 }
 import { randomUUID } from '../random-uuid';
 import { villageRequestGeneration } from './village-sync';
+import { villageCommandResponseIsValid, type VillageFrame, type VillageSyncBase } from '@arbestra/contracts';
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
@@ -103,6 +104,9 @@ export interface TimedVillageState {
   requestGeneration?: number;
 }
 
+export interface TimedVillageFrame { frame: VillageFrame; serverOffsetMs: number; requestGeneration?: number }
+export type TimedVillageUpdate = TimedVillageState | TimedVillageFrame;
+
 async function villageRequest(request: Promise<Response>, requestedAt: number): Promise<TimedVillageState> {
   const requestGeneration = villageRequestGeneration();
   const response = await request;
@@ -115,8 +119,21 @@ function requestState(path: string, init?: RequestInit): Promise<TimedVillageSta
   const requestedAt = Date.now();
   return villageRequest(fetch(path, { credentials: 'same-origin', ...init }), requestedAt);
 }
-function requestConstructionState(path:string,init:RequestInit):Promise<TimedVillageState>{
-  return requestState(path,{...init,signal:AbortSignal.timeout(15_000)});
+async function requestConstructionState(path: string, init: RequestInit, base?: VillageSyncBase): Promise<TimedVillageUpdate> {
+  const requestedAt = Date.now(), requestGeneration = villageRequestGeneration();
+  const headers = { ...init.headers, 'x-village-sync': '1', ...(base ? {
+    'x-village-revision': String(base.revision), 'x-village-server-time': base.serverTime,
+  } : {}) };
+  const response = await fetch(path, { credentials: 'same-origin', ...init, headers, signal: AbortSignal.timeout(15_000) });
+  const receivedAt = Date.now(), data = await parseResponse<unknown>(response);
+  if (villageCommandResponseIsValid(data)) {
+    const timed = { requestGeneration, serverOffsetMs: Date.parse(data.serverTime) - (requestedAt + receivedAt) / 2 };
+    return data.kind === 'frame' ? { ...timed, frame: data.frame } : { ...timed, state: data.state };
+  }
+  if (data && typeof data === 'object' && 'kind' in data) throw Error('Réponse de synchronisation invalide.');
+  // Existing servers and saved clients retain the full-snapshot contract.
+  const state = data as VillageState;
+  return { state, requestGeneration, serverOffsetMs: Date.parse(state.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 
 export function getVillage(worldSlug: string, villageId?: string): Promise<TimedVillageState> {
@@ -156,18 +173,20 @@ export function buildBuilding(
   commandId: string = randomUUID(),
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
-): Promise<TimedVillageState> {
+  syncBase?: VillageSyncBase,
+): Promise<TimedVillageUpdate> {
   return requestConstructionState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, quarterTurns, houseVariant, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, quarterTurns, houseVariant, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) }, syncBase,
   );
 }
 
 export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>,
-  commandId: string = randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = []): Promise<TimedVillageState> {
+  commandId: string = randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = [], syncBase?: VillageSyncBase,
+): Promise<TimedVillageUpdate> {
   return requestConstructionState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) }, syncBase,
   );
 }
 
@@ -178,10 +197,11 @@ export function upgradeBuilding(
   commandId: string = randomUUID(),
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   expectedLevel?: number,
-): Promise<TimedVillageState> {
+  syncBase?: VillageSyncBase,
+): Promise<TimedVillageUpdate> {
   return requestConstructionState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/upgrade`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, expectedLevel }) },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, expectedLevel }) }, syncBase,
   );
 }
 

@@ -1,5 +1,5 @@
 import {useHarvestTool} from './ui/use-harvest-tool';
-import { latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
+import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
 import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
 import {HarvestFeedbackLayer} from './ui/HarvestFeedback';
 import {ExploitationShowroom,type ExploitationCategory} from './ui/ExploitationShowroom';
@@ -24,7 +24,7 @@ import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbest
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
-import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, upgradeBuilding } from './api/client';
+import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, type TimedVillageUpdate, upgradeBuilding } from './api/client';
 import { campusRange, stonemasonRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
@@ -142,9 +142,18 @@ export function App({starter}:{starter?:StarterController} = {}) {
     message => { if (state) setOracleProvisions({ villageKey: `${state.world.id}:${state.village.id}`, message }); });
 
   const starterRef=useRef(starter);starterRef.current=starter;
-  const applySnapshot = useCallback((snapshot: TimedVillageState) => {
+  const applySnapshot = useCallback((update: TimedVillageUpdate) => {
     const previous = stateRef.current;
-    if (snapshot.requestGeneration !== undefined && snapshot.requestGeneration !== villageRequestGeneration()) return;
+    if (update.requestGeneration !== undefined && update.requestGeneration !== villageRequestGeneration()) return;
+    let snapshot: TimedVillageState;
+    if ('frame' in update) {
+      if (!previous) { synchronization.current?.reconnect(); return; }
+      const result = applyVillageFrame(previous, update.frame);
+      if (result.kind === 'resync') { synchronization.current?.reconnect(); return; }
+      if (result.kind !== 'applied') return;
+      snapshot = { state: result.state, serverOffsetMs: update.serverOffsetMs,
+        ...(update.requestGeneration !== undefined ? { requestGeneration: update.requestGeneration } : {}) };
+    } else snapshot = update;
     if (previous && (previous.world.id !== snapshot.state.world.id || previous.village.id !== snapshot.state.village.id)) return;
     if (previous?.syncRevision !== undefined) {
       if (snapshot.state.syncRevision === undefined) { synchronization.current?.reconnect(); return; }
@@ -422,7 +431,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   function closePanels() { terrainRef.current?.selectRepresentative(null); setRepresentativeId(null);setRepresentative(null);setRepresentativeView('village'); depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setShowGardens(false); setMenuAnchor(null); }
   function clearPreview() { terrainRef.current?.cancelGesture(); setHoveredBuildingId(null); shownUpgrade.current = null; presentedArea.current = null; touchOrigin.current = null; setSelection(null); setError(null); }
   function exitConstruction() { setConstruction(null); clearPreview(); }
-  async function runAction(action: () => Promise<TimedVillageState>, success?: string, exit = false): Promise<boolean> {
+  async function runAction(action: () => Promise<TimedVillageUpdate>, success?: string, exit = false): Promise<boolean> {
     if (actionInFlight.current) return false;
     actionInFlight.current = true; setPendingAction(true); setError(null);
     try { applySnapshot(await action()); markOracleProgress(); if (exit) exitConstruction(); if (success) pushNotification(success); return true; }
@@ -436,11 +445,14 @@ export function App({starter}:{starter?:StarterController} = {}) {
     actionInFlight.current = true; setPendingAction(true); setError(null); setConstructionIntentState('submitting');
     sessionStorage.setItem(pendingConstructionKey(command.villageId), JSON.stringify(command));
     try {
+      const current = stateRef.current;
+      const syncBase = current?.village.id === command.villageId && current.world.slug === command.worldSlug && current.syncRevision !== undefined
+        ? { revision: current.syncRevision, serverTime: current.serverTime } : undefined;
       const snapshot = command.kind === 'build'
-        ? await buildBuilding(command.worldSlug, command.villageId, command.buildingType, command.anchor, command.cells, command.commandId, command.expectedCosts,command.quarterTurns,command.houseVariant)
+        ? await buildBuilding(command.worldSlug, command.villageId, command.buildingType, command.anchor, command.cells, command.commandId, command.expectedCosts,command.quarterTurns,command.houseVariant,syncBase)
         : command.kind === 'expand'
-          ? await expandGarden(command.worldSlug, command.villageId, command.buildingId, command.cells, command.commandId, command.expectedCosts)
-          : await upgradeBuilding(command.worldSlug, command.villageId, command.buildingId, command.commandId, command.expectedCosts, command.expectedLevel);
+          ? await expandGarden(command.worldSlug, command.villageId, command.buildingId, command.cells, command.commandId, command.expectedCosts, syncBase)
+          : await upgradeBuilding(command.worldSlug, command.villageId, command.buildingId, command.commandId, command.expectedCosts, command.expectedLevel, syncBase);
       applySnapshot(snapshot); markOracleProgress(); clearPreview();
       sessionStorage.removeItem(pendingConstructionKey(command.villageId)); constructionCommand.current = null;
       setConstructionIntentState('idle'); pushNotification(command.success);

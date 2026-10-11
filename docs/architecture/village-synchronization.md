@@ -2,6 +2,8 @@
 
 11 octobre 2026 — implémentée et intégrée ; validation produit distincte. Base relue : `adda2ed0367c6d99bcc98cb60b118c49e26a68a6`. Les preuves et limites sont dans la [contre-recette](../CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md).
 
+Extension HTTP construction du 11 octobre, base `06a460e31ab5b1ed3817b3bf98a67ac297ab821d` : [preuves et mesures](../IMPLEMENTATION-CONSTRUCTION-INCREMENTALE-2026-10-11.md).
+
 ## Chemins réutilisés
 
 Les commandes HTTP et leurs UUID idempotents restent en place. `App → VillageScene → BabylonVillageScene` conserve sa durée de vie et son cache de bâtiments. `state()` reste l'assembleur de `VillageState` ; la science dispose maintenant d'une lecture sans acquisition de verrou métier ni initialisation. La réconciliation économique normale, les handlers et l'ordre des verrous restent les capacités autoritaires existantes.
@@ -43,6 +45,22 @@ Les chemins dangereux sont refusés. Une application échouée ne modifie aucune
 
 `VillageSynchronization` invalide immédiatement la génération de l'ancien abonnement lors d'une reprise ou fermeture. Les callbacks déjà en attente sont ignorés. Les requêtes village HTTP capturent cette génération à l'envoi ; App ignore une réponse d'une ancienne génération ou d'un autre contexte. Une erreur de protocole reconnecte après 100 ms ; une erreur de transport après 2 s. Un flux silencieux pendant 30 s est remplacé. Ces délais sont des temporisations client, pas des délais SQL garantis.
 
+## Réponses HTTP de construction
+
+Construction simple/composée, extension de jardin et amélioration acceptent maintenant `x-village-sync: 1`. Le client transmet aussi `x-village-revision` et `x-village-server-time`, qui identifient **la projection exacte** qu'il possède. Le JSON de commande et son UUID idempotent ne changent pas : une retransmission peut actualiser ces en-têtes sans changer l'intention enregistrée.
+
+Le contrat partagé `VillageCommandResponse` contient `commandId` lorsqu'il a été fourni, `commandTime`, `serverTime` et soit `kind: frame` / `frame`, soit `kind: snapshot` / `state`. La trame emploie le même `villageFrame()` et le même `applyVillageFrame()` que SSE. App applique donc HTTP et SSE par les règles existantes : doublon ignoré, trou/chevauchement inexploitable repris, ancienne génération neutralisée, références et meshes inchangés conservés.
+
+La commande termine toutes ses écritures avant le commit : `finalizeVillageEconomy()` partage la réconciliation au même H et les admissions Jardin/chantiers/science avec `state()` ; le placement des habitants au repos est conservé. `constructionResult(..., 'commit')` rend uniquement les identités, H et UUID. La projection complète de réponse se fait **après commit**, par `readVillageProjection()`, en REPEATABLE READ READ ONLY, sans conserver le verrou du village. Elle couvre également les autres transitions reconciliées et les changements concurrents visibles dans cette vue ; ce n'est pas un diff artisanal limité au nouveau bâtiment. Les contrôles de construction et les autres lectures métier restent sous leurs verrous habituels.
+
+`commandTime` est la borne H économique de la transaction de commande, après acquisition du village. `serverTime` est celle de la projection de transport, prise après commit. La projection peut déjà représenter une mutation concurrente plus récente ; elle ne modifie pas rétroactivement la borne ni les effets de la commande. Les clients sans l'en-tête conservent la réponse historique `VillageState`, assemblée dans la transaction de commande et vérifiée par le hook existant.
+
+`VillageSyncProjections` est partagé entre le hook HTTP, SSE et les trois réponses de construction. Il conserve des **bases de transport**, par compte/monde/village et couple révision/heure exacts : huit projections par contexte, 32 contextes, 16 Mio de taille JSON estimée au total. Cette borne porte sur la taille sérialisée, pas sur le heap JavaScript. Aucune base mémorisée n'autorise une commande ou ne remplace la revalidation des données dynamiques. Des heures différentes à même révision peuvent donner des projections différentes : la révision seule ne suffit pas au diff.
+
+Si la base est absente, évincée, d'une autre heure ou si la révision n'a pas avancé, la réponse contient un nouveau snapshot cohérent. Un redémarrage ou une autre instance API peut donc provoquer ce repli ; le cache n'est pas un journal durable. Les lectures en vol sont partagées par compte/slug/village. Après commit, la réponse lit la révision autoritaire puis exige une projection au moins aussi récente : une lecture partagée ayant commencé avant le commit est remplacée, puis un résultat encore trop ancien est refusé. SSE continue son contrôle durable et son contrat de reprise indépendamment de ce cache.
+
+La suppression du snapshot **dans la transaction de commande** réduit la durée de rétention du verrou ; elle ne supprime pas la projection serveur complète après commit. Son optimisation supplémentaire exige des mesures et une autre tranche. Pose du kit, infrastructures, population, exploitation, transformation et science gardent leurs réponses HTTP actuelles.
+
 ## Notification perdue et échéances
 
 La disponibilité du flux ne dépend pas d'une publication éphémère après commit. Toutes les **2 secondes après le contrôle précédent**, chaque abonnement revalide session/propriété, vérifie les échéances et lit la révision autoritaire. Si un worker a validé puis s'est arrêté sans publier, son marqueur reste visible : une nouvelle projection et sa trame sont envoyées même sans autre modification. Une révision inchangée produit une petite trame `revision`, qui détecte aussi un écart silencieux de la copie cliente. Les lectures en vol d'un même compte/monde/village sont partagées ; aucun snapshot dynamique ancien n'est mis en cache.
@@ -57,6 +75,6 @@ Les branches inchangées de React sont conservées. Babylon conserve son instanc
 
 Le flux utilise les cookies existants et `ownedVillage()`, recontrôlés périodiquement. Il ne donne aucun privilège de preview. La fermeture de session produit `expired` ; arrêt serveur et déconnexion ferment les timers. Les en-têtes SSE interdisent le cache et demandent la désactivation du buffering ; un buffer d'écriture excessif provoque une reconnexion. Le reverse proxy de production reste à recetter.
 
-Les commandes HTTP renvoient encore leur snapshot complet, et les projections serveur peuvent rester coûteuses sur RC1. Cette tranche réduit le transfert répétitif et les lectures HTTP concurrentes du client ; elle ne revendique pas une suppression de toute latence de construction. Le streaming terrain autour de la caméra conserve son propre mécanisme. L'application de la migration au développement/production et la recette LAN/staging/production restent distinctes des preuves locales.
+Les commandes HTTP hors construction renvoient encore leur snapshot complet. La construction utilise maintenant les trames ou un snapshot de repli décrits ci-dessus ; les projections serveur peuvent rester coûteuses sur RC1. Cette tranche réduit le transfert répétitif et les lectures HTTP concurrentes du client ; elle ne revendique pas une suppression de toute latence de construction. Le streaming terrain autour de la caméra conserve son propre mécanisme. L'application de la migration au développement/production et la recette LAN/staging/production restent distinctes des preuves locales.
 
 Références du mécanisme : [isolation PostgreSQL](https://www.postgresql.org/docs/current/transaction-iso.html), [format et reprise SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events).

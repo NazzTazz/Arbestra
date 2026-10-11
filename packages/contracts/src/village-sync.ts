@@ -19,6 +19,19 @@ export const VillageFrameSchema = Type.Object({
   ])),
 });
 export type VillageFrame = Static<typeof VillageFrameSchema>;
+export const VillageSyncBaseSchema = Type.Object({
+  revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  serverTime: Type.String({ format: 'date-time' }),
+});
+export type VillageSyncBase = Static<typeof VillageSyncBaseSchema>;
+const commandMetadata = { commandId: Type.Optional(Type.String({ format: 'uuid' })),
+  commandTime: Type.String({ format: 'date-time' }), serverTime: Type.String({ format: 'date-time' }) };
+export const VillageCommandResponseSchema = Type.Union([
+  Type.Object({ ...commandMetadata, kind: Type.Literal('frame'), frame: VillageFrameSchema }),
+  Type.Object({ ...commandMetadata, kind: Type.Literal('snapshot'), state: VillageStateSchema }),
+]);
+export type VillageCommandResponse = Static<typeof VillageCommandResponseSchema>;
+export const villageCommandResponseIsValid = (value: unknown): value is VillageCommandResponse => Value.Check(VillageCommandResponseSchema, value);
 type Change = VillageFrame['changes'][number];
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);

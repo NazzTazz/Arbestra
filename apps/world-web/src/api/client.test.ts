@@ -58,3 +58,20 @@ it('preserves the server refusal code for the deposit menu', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({code:'DEPOSIT_FULLY_COMMITTED',message:'Engagé'}),{status:409})));
   await expect(getStoneDepositDetails('aube','village','target')).rejects.toMatchObject({status:409,code:'DEPOSIT_FULLY_COMMITTED'});
 });
+
+const syncFixture=async()=>JSON.parse((await import('node:fs')).readFileSync(new URL('../../../../tests/fixtures/village-sync-state.json',import.meta.url),'utf8'));
+it('requests and parses an authoritative construction frame without changing the command payload',async()=>{
+ const {villageFrame}=await import('@arbestra/contracts'),state=await syncFixture(),frame=villageFrame(state,{...state,syncRevision:2,village:{...state.village,wood:75}});
+ const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({kind:'frame',commandTime:state.serverTime,serverTime:state.serverTime,frame})));vi.stubGlobal('fetch',fetchMock);
+ const base={revision:state.syncRevision,serverTime:state.serverTime};
+ const reply=await buildBuilding(state.world.slug,state.village.id,'dwelling',{cellX:66,cellY:64},[{cellX:66,cellY:64}],'same-command',[],0,'logs',base);
+ expect(reply).toMatchObject({frame});expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({'x-village-sync':'1','x-village-revision':'1','x-village-server-time':state.serverTime});
+ const body=fetchMock.mock.calls[0]![1].body;
+ fetchMock.mockResolvedValue(new Response(JSON.stringify({kind:'snapshot',commandTime:state.serverTime,serverTime:state.serverTime,state})));
+ expect(await buildBuilding(state.world.slug,state.village.id,'dwelling',{cellX:66,cellY:64},[{cellX:66,cellY:64}],'same-command',[],0,'logs',{...base,revision:2})).toMatchObject({state});
+ expect(fetchMock.mock.calls[1]![1].body).toBe(body);
+});
+it('rejects a malformed incremental response as uncertain rather than accepting a partial village',async()=>{
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({kind:'frame',frame:{toRevision:2}}))));
+ await expect(buildBuilding('rc1','village','dwelling',{cellX:1,cellY:2},[],'same-command')).rejects.toThrow('Réponse de synchronisation invalide');
+});

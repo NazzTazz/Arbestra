@@ -11,7 +11,11 @@ import { MarketRequestSchema, MarketCommandSchema, MarketPreviewSchema, type Mar
 import { commandVillageMarket, previewVillageMarket } from './service.js';
 import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
 import {harvestGardenSelection} from './service.js';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { VillageCommandResponseSchema, type VillageState, type VillageSyncBase } from '@arbestra/contracts';
+import type { ConstructionCommit } from './service.js';
+import type { VillageSyncProjections } from './sync-projections.js';
+import { villageSyncRevision } from './sync-revision.js';
 import type { Kysely } from 'kysely';
 
 import { CatDiscoveryResponseSchema, BuildRequestSchema, DepositDetailsSchema, ExpansionRequestSchema, ExtractionRequestSchema, ExtractionResponseSchema, ExtractionWorksiteResponseSchema, ExtractionWorksiteSelectionSchema, StartExtractionWorksiteRequestSchema, ChangeExtractionWorksiteRequestSchema, HarvestRequestSchema, PopulationCommandRequestSchema, UpgradeRequestSchema, VillageStateSchema } from '@arbestra/contracts';
@@ -36,11 +40,37 @@ const BuildingParametersSchema = Type.Object({
   buildingId: Type.String({ format: 'uuid' }),
 });
 
+const ConstructionResponseSchema = Type.Union([VillageStateSchema, VillageCommandResponseSchema]);
+const ConstructionHeadersSchema = Type.Object({
+  'x-village-sync': Type.Optional(Type.Literal('1')),
+  'x-village-revision': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
+  'x-village-server-time': Type.Optional(Type.String({ format: 'date-time', maxLength: 48 })),
+}, { additionalProperties: true });
+function constructionOptions(headers: FastifyRequest['headers']) {
+  const replyMode = headers['x-village-sync'] === '1' ? 'commit' as const : 'snapshot' as const;
+  const revision = headers['x-village-revision'], serverTime = headers['x-village-server-time'];
+  let base: VillageSyncBase | undefined;
+  if (typeof revision === 'string' && typeof serverTime === 'string') {
+    const value = Number(revision);
+    if (!Number.isSafeInteger(value)) throw new HttpError(400, 'INVALID_REVISION', 'Révision invalide.');
+    base = { revision: value, serverTime };
+  }
+  return { replyMode, base };
+}
+
 export async function registerVillageRoutes(
   app: FastifyInstance,
   db: Kysely<Database>,
   config: AppConfig,
+  projections: VillageSyncProjections,
 ): Promise<void> {
+  const constructionResponse = async (accountId: string, worldSlug: string,
+    result: VillageState | ConstructionCommit, base: VillageSyncBase | undefined) => {
+    if ('cells' in result) return result;
+    // Read after COMMIT: reject shared projections started before this command.
+    const minimum = (await villageSyncRevision(db, result.worldId)).revision;
+    return projections.commandResponse(accountId, worldSlug, result, base, minimum);
+  };
   app.get('/api/worlds/:worldSlug/villages/:villageId/harvest-intents',{
     schema:{params:VillageParametersSchema,querystring:Type.Object({ids:Type.String({maxLength:2400})}),response:{200:Type.Array(HarvestReceiptSchema)}},
   },async request=>{
@@ -121,10 +151,11 @@ export async function registerVillageRoutes(
     schema: {
       params: VillageParametersSchema,
       body: BuildRequestSchema,
-      response: { 201: VillageStateSchema },
+      headers: ConstructionHeadersSchema, response: { 201: ConstructionResponseSchema },
     },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
+    const options = constructionOptions(request.headers);
     const { worldSlug, villageId } = request.params as {
       worldSlug: string;
       villageId: string;
@@ -141,29 +172,31 @@ export async function registerVillageRoutes(
       config.constructionDurationOverrideMs,
       body.commandId,
       body.expectedCosts,
-      body.quarterTurns, body.houseVariant,
-    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts,body.quarterTurns,body.houseVariant);
-    return reply.status(201).send(state);
+      body.quarterTurns, body.houseVariant, options.replyMode,
+    ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts,body.quarterTurns,body.houseVariant,options.replyMode);
+    return reply.status(201).send(await constructionResponse(account.id, worldSlug, state, options.base));
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/expansions', {
-    schema: { params: BuildingParametersSchema, body: ExpansionRequestSchema, response: { 201: VillageStateSchema } },
+    schema: { params: BuildingParametersSchema, body: ExpansionRequestSchema, headers: ConstructionHeadersSchema, response: { 201: ConstructionResponseSchema } },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
+    const options = constructionOptions(request.headers);
     const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
     const { cells, commandId, expectedCosts } = request.body as { cells: Array<{ cellX: number; cellY: number }>; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }> };
-    const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs, commandId, expectedCosts);
-    return reply.status(201).send(state);
+    const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs, commandId, expectedCosts, options.replyMode);
+    return reply.status(201).send(await constructionResponse(account.id, worldSlug, state, options.base));
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/upgrade', {
     schema: {
       params: BuildingParametersSchema,
       body: UpgradeRequestSchema,
-      response: { 201: VillageStateSchema },
+      headers: ConstructionHeadersSchema, response: { 201: ConstructionResponseSchema },
     },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
+    const options = constructionOptions(request.headers);
     const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
     const state = await upgradeBuilding(
       db,
@@ -176,9 +209,9 @@ export async function registerVillageRoutes(
       config.constructionDurationOverrideMs,
       (request.body as { commandId?: string }).commandId,
       (request.body as { expectedCosts?: Array<{ resourceCode: string; amount: number }> }).expectedCosts,
-      (request.body as { expectedLevel?: number }).expectedLevel,
+      (request.body as { expectedLevel?: number }).expectedLevel, options.replyMode,
     );
-    return reply.status(201).send(state);
+    return reply.status(201).send(await constructionResponse(account.id, worldSlug, state, options.base));
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/garden-harvests', {

@@ -48,11 +48,11 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));
-  await registerVillageSync(app, db, config);
+  const villageProjections = await registerVillageSync(app, db, config);
   await registerAuthRoutes(app, db, config);
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
-  await registerVillageRoutes(app, db, config);
+  await registerVillageRoutes(app, db, config, villageProjections);
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app,db,config);
   return app;

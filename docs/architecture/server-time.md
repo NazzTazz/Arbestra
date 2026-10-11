@@ -2,6 +2,8 @@
 
 PostgreSQL est l’horloge autoritative ; les dates sont des `timestamptz` exposés en ISO 8601 UTC. Pour l'économie, `beginVillageEconomy()` verrouille d'abord le village, puis lit `statement_timestamp()` dans l'instruction suivante. Cette borne, prise après l'attente éventuelle, est commune à la commande et à son snapshot. `transaction_timestamp()` reste utilisé par le scheduler pour l'éligibilité et le retry des notifications ; il ne doit pas fournir une borne économique périmée après attente du village.
 
+Depuis la réponse incrémentale de construction, la **commande** conserve cette borne et sa finalisation dans la même transaction, mais sa projection de transport est construite après commit en lecture seule cohérente. `commandTime` expose la borne économique ; `serverTime` date la projection plus récente, sans lui attribuer les effets économiques de la commande. La compatibilité HTTP sans négociation incrémentale conserve le snapshot historique dans la transaction. Voir le [contrat HTTP/SSE](./village-synchronization.md#réponses-http-de-construction).
+
 Trois moments sont distincts :
 
 - l’échéance métier (`construction_completes_at`) rend le résultat logiquement vrai ;

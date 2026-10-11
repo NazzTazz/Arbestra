@@ -5,7 +5,9 @@ import { villageFrame, type VillageState } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import type { AppConfig } from '../../config.js';
 import { authenticate } from '../auth/service.js';
-import { getVillageState, ownedVillage, state } from './service.js';
+import { getVillageState, ownedVillage, readVillageProjection } from './service.js';
+export { readVillageProjection } from './service.js';
+import { VillageSyncProjections } from './sync-projections.js';
 import { villageSyncRevision } from './sync-revision.js';
 import { HttpError } from '../../errors.js';
 import { advanceEnergy } from '../population/energy.js';
@@ -37,17 +39,6 @@ export async function reconcileSyncDeadline(db: Kysely<Database>, accountId: str
   await getVillageState(db,accountId,worldSlug,villageId);
 }
 
-/** No economic writes/locks. Data and commit markers share one MVCC view. */
-export function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
-  return db.transaction().setIsolationLevel('repeatable read').execute(async tx => {
-    await sql`set transaction read only`.execute(tx);
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const through = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
-    await sql`select set_config('arbestra.economy_through', ${through.toISOString()}, true)`.execute(tx);
-    return state(tx, accountId, worldSlug, { worldId: village.worldId, villageId, through }, false, true);
-  });
-}
-
 export type VillageSyncEvent = { event: 'snapshot'; data: VillageState }
   | { event: 'frame'; data: ReturnType<typeof villageFrame> }
   | { event: 'revision'; data: { worldId: string; villageId: string; revision: number } };
@@ -77,6 +68,7 @@ export class VillageSyncSession {
 }
 
 export async function registerVillageSync(app: FastifyInstance, db: Kysely<Database>, config: AppConfig) {
+  const projections = new VillageSyncProjections((accountId, worldSlug, villageId) => readVillageProjection(db, accountId, worldSlug, villageId));
   // A command's commit can race another world commit after snapshot assembly.
   // Verify the revision after COMMIT, replacing only uncertain snapshots.
   app.addHook('preSerialization', async (request, _reply, payload: unknown) => {
@@ -84,14 +76,13 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
     const wrapper = payload as { villageState?: VillageState }, candidate = wrapper.villageState ?? payload as VillageState;
     if (!candidate.world?.id || !candidate.village?.id || !Array.isArray(candidate.cells) || !candidate.serverTime) return payload;
     const current = await villageSyncRevision(db, candidate.world.id);
-    if (candidate.syncRevision === current.revision) return payload;
     const account = await authenticate(db, request.cookies[config.cookieName]);
-    const coherent = await readVillageProjection(db, account.id, candidate.world.slug, candidate.village.id);
+    if (candidate.syncRevision === current.revision) { projections.remember(account.id, candidate); return payload; }
+    const coherent = await projections.read(account.id, candidate.world.slug, candidate.village.id, current.revision);
     return wrapper.villageState ? { ...wrapper, villageState: coherent } : coherent;
   });
 
   // Share only in-flight reads, never a stale dynamic snapshot or another owner's data.
-  const flights = new Map<string, Promise<VillageState>>();
   const streams = new Set<()=>void>();
   app.addHook('preClose',async()=>{for(const close of streams)close();});
   app.get('/api/worlds/:worldSlug/villages/:villageId/events', {
@@ -101,15 +92,7 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
     const village = await db.transaction().execute(tx => ownedVillage(tx, account.id, worldSlug, villageId));
-    const key = `${account.id}:${village.worldId}:${villageId}`;
-    const read = () => {
-      let flight = flights.get(key);
-      if (!flight) {
-        flight = readVillageProjection(db, account.id, worldSlug, villageId).finally(() => flights.delete(key));
-        flights.set(key, flight);
-      }
-      return flight;
-    };
+    const read = () => projections.read(account.id, worldSlug, villageId);
     const session = new VillageSyncSession(read, async () => (await villageSyncRevision(db, village.worldId)).revision,
       snapshot=>reconcileSyncDeadline(db,account.id,worldSlug,villageId,snapshot));
     reply.hijack();
@@ -139,4 +122,5 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
     };
     void poll();
   });
+  return projections;
 }

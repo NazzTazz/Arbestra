@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { villageFrame, type VillageState } from '@arbestra/contracts';
 import { VillageSynchronization, villageRequestGeneration, type VillageEventSource } from './village-sync';
-import { getVillage } from './client';
+import { buildBuilding, getVillage } from './client';
 class Source implements VillageEventSource {
   listeners = new Map<string, (event: MessageEvent<string>) => void>();
   onerror: ((event: Event) => void) | null = null;
@@ -61,4 +61,13 @@ it('joins a newer time projection at the same persistent revision without replay
   h.sources[0]!.send('snapshot',next);expect(h.accepted).toHaveBeenCalledTimes(1);
   h.sources[0]!.send('snapshot',next);expect(h.accepted).toHaveBeenCalledTimes(1);
   expect(h.state().syncRevision).toBe(1);
+});
+
+it('captures the construction HTTP generation before a reconnect, including frame responses',async()=>{
+ const h=harness(),before=h.state(),epoch=villageRequestGeneration();let release!:(r:Response)=>void;
+ vi.stubGlobal('fetch',()=>new Promise<Response>(r=>{release=r;}));
+ const pending=buildBuilding(before.world.slug,before.village.id,'dwelling',{cellX:66,cellY:64},[],'same-command',[],0,'logs',{revision:before.syncRevision!,serverTime:before.serverTime});
+ h.sync.reconnect();const next={...before,syncRevision:2,village:{...before.village,wood:75}};
+ release(new Response(JSON.stringify({kind:'frame',commandTime:before.serverTime,serverTime:next.serverTime,frame:villageFrame(before,next)})));
+ const response=await pending;expect(response.requestGeneration).toBe(epoch);expect(response.requestGeneration).not.toBe(villageRequestGeneration());expect('frame' in response).toBe(true);
 });
