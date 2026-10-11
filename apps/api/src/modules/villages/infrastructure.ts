@@ -3,11 +3,11 @@ import {readRc1Source} from '../worlds/rc1-source.js';
 import {isDeepStrictEqual} from 'node:util';
 import {sql,type Kysely,type Transaction} from 'kysely';
 import {buildTravelNetwork,prepareInfrastructureEdit,automaticBraziers,pathIntersectsBox,buildingAccesses,emptyInfrastructure,infrastructurePlanSurface,infrastructureSidewalkSurface,subCellKey,wrappedDistance,
-  type InfrastructurePlan,type InfrastructureRequest,type InfrastructurePreview,type InfrastructureQuote,type VillageState,type SubPoint,type RoadStroke} from '@arbestra/contracts';
+  infrastructureConfirmation,type InfrastructureConfirmation,type InfrastructurePlan,type InfrastructureRequest,type InfrastructurePreview,type InfrastructureQuote,type VillageState,type SubPoint,type RoadStroke} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
 import {HttpError} from '../../errors.js';
 import {beginVillageEconomy} from './reconcile-economy.js';
-import {ownedVillage,state,debit,withVillageProjection,villageCommandResult,readInfrastructureSpatialState,type InfrastructureSpatialState,type ConstructionReplyMode,type ConstructionResult} from './service.js';
+import {ownedVillage,state,debit,withVillageProjection,villageCommandResult,readInfrastructureSpatialState,type InfrastructureSpatialState,type ConstructionReplyMode,type ConstructionCommit} from './service.js';
 export async function readInfrastructure(tx:Kysely<Database>,worldId:string,villageId:string):Promise<InfrastructurePlan>{
   return (await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).where('villageId','=',villageId).executeTakeFirst())?.plan??emptyInfrastructure();
 }
@@ -129,16 +129,32 @@ async function validateTransition(tx:Transaction<Database>,snapshot:SpatialSnaps
     if(snapshot.travelRoutes.some(r=>r.kind==='building'&&!reachable.has(r.id)))throw new HttpError(409,'ACCESS_BLOCKED','Cet obstacle rendrait l’accès d’un bâtiment impraticable.');
   }
 }
-export async function infrastructureCommand<Mode extends ConstructionReplyMode='snapshot'>(db:Kysely<Database>,accountId:string,slug:string,villageId:string,request:InfrastructureRequest,replyMode:Mode='snapshot' as Mode):Promise<ConstructionResult<Mode>>{
-  return db.transaction().execute(async tx=>{
+export type InfrastructureReplyMode=ConstructionReplyMode|'confirmation';
+type InfrastructureResult<Mode extends InfrastructureReplyMode>=Mode extends 'snapshot'?VillageState:Mode extends 'commit'?ConstructionCommit:InfrastructureConfirmation|ConstructionCommit;
+export async function infrastructureCommand<Mode extends InfrastructureReplyMode='snapshot'>(db:Kysely<Database>,accountId:string,slug:string,villageId:string,request:InfrastructureRequest,replyMode:Mode='snapshot' as Mode):Promise<InfrastructureResult<Mode>>{
+  const result=await db.transaction().execute(async tx=>{
     const village=await ownedVillage(tx,accountId,slug,villageId);
     // Verify immutable RC1 geography before holding the village lock. The
     // command context rereads identity and current local edits under the lock.
     if(village.generationVersion===3)await readRc1Source(tx,village.worldId);
     const economy=await beginVillageEconomy(tx,village.worldId,villageId,undefined,[],[],true);
-    await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${village.worldId}`},0))`.execute(tx);
-    const receipt=await tx.selectFrom('infrastructureReceipts').select('request').where('worldId','=',village.worldId).where('villageId','=',villageId).where('commandId','=',request.commandId).executeTakeFirst();
-    if(receipt){if(!isDeepStrictEqual(receipt.request,request))throw new HttpError(409,'COMMAND_REUSED','Identifiant de commande déjà utilisé.');return villageCommandResult(tx,accountId,slug,village,economy,replyMode,request.commandId);}
+    // beginVillageEconomy already holds the exclusive navigation lock.
+    const mode:ConstructionReplyMode=replyMode==='snapshot'?'snapshot':'commit';
+    const finish=async(before:InfrastructurePlan,after:InfrastructurePlan,quote:InfrastructureQuote,confirmable:boolean,commandTime=economy.through)=>{
+      const committed=await villageCommandResult(tx,accountId,slug,village,economy,mode,request.commandId);
+      if(replyMode==='confirmation'&&confirmable)return infrastructureConfirmation({worldId:village.worldId,villageId,commandId:request.commandId,commandTime:commandTime.toISOString()},before,after,quote);
+      return committed;
+    };
+    const receipt=await tx.selectFrom('infrastructureReceipts').selectAll().select(sql<Date>`created_at`.as('commandTime')).where('worldId','=',village.worldId).where('villageId','=',villageId).where('commandId','=',request.commandId).executeTakeFirst();
+    if(receipt){
+      if(!isDeepStrictEqual(receipt.request,request))throw new HttpError(409,'COMMAND_REUSED','Identifiant de commande déjà utilisé.');
+      let confirmable=isRoadRequest(receipt.request);
+      if(replyMode==='confirmation'&&request.operation.kind==='undo'&&isDeepStrictEqual(receipt.beforePlan.equipment,receipt.afterPlan.equipment)){
+        const target=await tx.selectFrom('infrastructureReceipts').select('request').where('worldId','=',village.worldId).where('villageId','=',villageId).where('commandId','=',request.operation.target).where('sessionId','=',request.sessionId).executeTakeFirst();
+        confirmable=target!==undefined&&isRoadRequest(target.request);
+      }
+      return finish(receipt.beforePlan,receipt.afterPlan,receipt.quote,confirmable,receipt.commandTime);
+    }
     const plan=await readInfrastructure(tx,village.worldId,villageId);
     if(request.operation.kind==='road'){assertInfrastructureRevision(plan,request.revision);assertRoadShape(village,plan,request.operation.stroke);}
     const prior=request.operation.kind==='undo'?await tx.selectFrom('infrastructureReceipts').selectAll().where('worldId','=',village.worldId).where('villageId','=',villageId).where('commandId','=',request.operation.target).where('sessionId','=',request.sessionId).executeTakeFirst():undefined;
@@ -162,18 +178,20 @@ export async function infrastructureCommand<Mode extends ConstructionReplyMode='
       await validateTransition(tx,snapshot,before,next,prepared.surfaces,context?.ground);
       if(!request.expected||!isDeepStrictEqual(request.expected,quote))throw new HttpError(409,'QUOTE_CHANGED','Le devis a changé. Aucun aménagement lancé.');
       if(samePlan(before,next)){
-        await tx.insertInto('infrastructureReceipts').values({worldId:village.worldId,villageId,commandId:request.commandId,sessionId:request.sessionId,request:JSON.stringify(request),beforePlan:JSON.stringify(before),afterPlan:JSON.stringify(before),quote:JSON.stringify(quote)}).execute();
-        return villageCommandResult(tx,accountId,slug,village,economy,replyMode,request.commandId);
+        await tx.insertInto('infrastructureReceipts').values({worldId:village.worldId,villageId,commandId:request.commandId,sessionId:request.sessionId,request:JSON.stringify(request),beforePlan:JSON.stringify(before),afterPlan:JSON.stringify(before),quote:JSON.stringify(quote),createdAt:sql`${economy.through.toISOString()}::timestamptz`}).execute();
+        return finish(before,before,quote,roadOnly);
       }
-      await debit(tx,village.worldId,villageId,[{resourceCode:'stone',amount:quote.stoneDebit},{resourceCode:'wood',amount:quote.woodDebit}],economy.through);
+      const costs=[{resourceCode:'stone',amount:quote.stoneDebit},{resourceCode:'wood',amount:quote.woodDebit}].filter(cost=>cost.amount>0);
+      if(costs.length)await debit(tx,village.worldId,villageId,costs,economy.through);
       next.stoneReserve=quote.reserveAfter;
     }
     next.revision=before.revision+1;
     await tx.insertInto('villageInfrastructure').values({worldId:village.worldId,villageId,plan:JSON.stringify(next)}).onConflict(c=>c.columns(['worldId','villageId']).doUpdateSet({plan:JSON.stringify(next)})).execute();
     await tx.insertInto('infrastructureReceipts').values({worldId:village.worldId,villageId,commandId:request.commandId,sessionId:request.sessionId,
-      request:JSON.stringify(request),beforePlan:JSON.stringify(before),afterPlan:JSON.stringify(next),quote:JSON.stringify(quote)}).execute();
-    return villageCommandResult(tx,accountId,slug,village,economy,replyMode,request.commandId);
+      request:JSON.stringify(request),beforePlan:JSON.stringify(before),afterPlan:JSON.stringify(next),quote:JSON.stringify(quote),createdAt:sql`${economy.through.toISOString()}::timestamptz`}).execute();
+    return finish(before,next,quote,roadOnly);
   });
+  return result as InfrastructureResult<Mode>;
 }
 export async function assertNoInfrastructure(tx:Transaction<Database>,worldId:string,cells:readonly {cellX:number;cellY:number}[],world:{widthCells:number;heightCells:number}){
   await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);

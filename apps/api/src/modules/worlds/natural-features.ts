@@ -16,7 +16,11 @@ export function naturalFeaturesQuery(db:Kysely<Database>,worldId:string,areas:re
    .where(sql<boolean>`not exists(select 1 from resource_deposits rd where rd.world_id=world_cell_occupancies.world_id and rd.feature_id=world_cell_occupancies.feature_id)`)
    .union(eb.selectFrom('projectedDeposits').select(['worldId','featureId','cellX','cellY'])))
   .selectFrom('featureLocations')
-  .innerJoin('worldFeatures',j=>j.onRef('worldFeatures.worldId','=','featureLocations.worldId').onRef('worldFeatures.id','=','featureLocations.featureId'))
+  // A new world's statistics may estimate a single row. Keep both identity
+  // keys in a bounded lookup instead of rescanning that world's features.
+  .innerJoinLateral(eb=>eb.selectFrom('worldFeatures').select(['worldId','id','featureTypeCode','variantSeed','state'])
+   .whereRef('worldFeatures.worldId','=','featureLocations.worldId').whereRef('worldFeatures.id','=','featureLocations.featureId')
+   .limit(1).as('worldFeatures'),j=>j.onTrue())
   .leftJoin('projectedDeposits as resourceDeposits',j=>j.onRef('resourceDeposits.worldId','=','worldFeatures.worldId').onRef('resourceDeposits.featureId','=','worldFeatures.id'))
   .select(['worldFeatures.id','worldFeatures.featureTypeCode','worldFeatures.variantSeed','worldFeatures.state as featureState',
    'featureLocations.cellX','featureLocations.cellY','resourceDeposits.initialAmount','resourceDeposits.remainingAmount',

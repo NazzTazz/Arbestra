@@ -14,18 +14,35 @@ const chunk = (x = 0, y = 0): TerrainChunk => ({ chunkX: x, chunkY: y, originCel
   terrainCodes: Array(34 ** 2).fill(1), elevations: Array(34 ** 2).fill(8), features: [], occupiedCells: [] });
 const stores: TerrainStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.dispose(); });
-function harness() {
+function harness(initial:VillageState=state()) {
   let now = 0;
   const requests: Array<{ chunks: Array<{ chunkX: number; chunkY: number }>; resolve: (r: TerrainResponse | TerrainUpdatesResponse) => void; reject: (e: Error) => void; signal: AbortSignal; updatesOnly: boolean }> = [];
   const fetch: TerrainFetch = (chunks, signal, updatesOnly) => new Promise((resolve, reject) => requests.push({ chunks, resolve, reject, signal, updatesOnly }));
-  const store = new TerrainStore(state(), fetch, () => now);
+  const store = new TerrainStore(initial, fetch, () => now);
   stores.push(store);
   const advance = (ms: number, maxConcurrent?: number) => { now += ms; store.tick(maxConcurrent); };
   const demand = (x = 0) => store.demandChunks([{ key: `${x}:0`, chunkX: x, chunkY: 0, visible: true, distance: 0 }]);
-  const settle = async (index: number, c = chunk()) => { requests[index]!.resolve({ world, chunks: [c] }); await new Promise(r => setTimeout(r, 0)); };
+  const settle = async (index: number, c = chunk()) => { requests[index]!.resolve({ world:initial.world, chunks: [c] }); await new Promise(r => setTimeout(r, 0)); };
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('versions ground availability, live RC1 edits and eviction without invalidating for economic feature changes',async()=>{
+    const initial=state();initial.world={...initial.world,generationVersion:3,widthCells:512,heightCells:256};
+    const h=harness(initial),rc1={stride:65,heights:Array(65**2).fill(.25),water:Array(65**2).fill(0),terraces:[]};
+    expect(h.store.ground(1,1)).toBeNull();const unavailable=h.store.groundRevision;
+    h.demand();h.advance(100);await h.settle(0,{...chunk(),rc1});
+    const available=h.store.groundRevision;expect(available).toBeGreaterThan(unavailable);expect(h.store.ground(1,1)!.height).toBe(.625);
+    h.advance(5000);h.requests[1]!.resolve({world:initial.world,chunks:[{chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[feature(deposit(1))],occupiedCells:[],rc1Edits:{terraces:[]}}]});await new Promise(r=>setTimeout(r,0));
+    expect(h.store.groundRevision).toBe(available);
+    h.advance(5000);h.requests[2]!.resolve({world:initial.world,chunks:[{chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[],occupiedCells:[],rc1Edits:{terraces:[{cellX:1,cellY:1,height:.5}]}}]});await new Promise(r=>setTimeout(r,0));
+    expect(h.store.groundRevision).toBeGreaterThan(available);expect(h.store.ground(1,1)!.height).toBe(1.25);
+    const beforeEviction=h.store.groundRevision;
+    // Fill only cache entries, without starting transport or admitting any terrain meshes.
+    for(let i=1;i<=65;i++)h.store.demandChunks([{key:(i%16)+':'+Math.floor(i/16),chunkX:i%16,chunkY:Math.floor(i/16),visible:true,distance:0}]);
+    expect(h.store.entries.size).toBe(64);expect(h.store.chunk('0:0')).toBeUndefined();expect(h.store.ground(1,1)).toBeNull();expect(h.store.groundRevision).toBeGreaterThan(beforeEviction);
+    h.demand();h.advance(100);await h.settle(3,{...chunk(),rc1});const restored=h.store.groundRevision;expect(h.store.ground(1,1)!.height).toBe(.625);
+    h.store.geographyChanged();expect(h.store.groundRevision).toBeGreaterThan(restored);expect(h.store.ground(1,1)).toBeNull();
+  });
   it('releases timed-out requests even when transport never settles and rejects their late replies', async()=>{
     vi.useFakeTimers();
     const h=harness();

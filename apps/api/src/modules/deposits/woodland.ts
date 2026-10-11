@@ -19,7 +19,50 @@ export async function materializeWoodlands(tx:Transaction<Database>,worldId:stri
     .where('featureId','in',ids).where('resourceCode','=','wood').where('woodDebitedAt','is',null).where('completesAt','<=',through).execute();
   const occupied=new Set(occupancies.map(o=>o.featureId+':'+o.cellX+':'+o.cellY)),active=new Set(available.map(f=>f.id)),pending=new Set(due.map(e=>e.featureId));
   const skip=new Set(full.filter(w=>occupied.has(w.featureId+':'+w.cellX+':'+w.cellY)&&active.has(w.featureId)&&!pending.has(w.featureId)).map(w=>w.featureId));
-  for(const id of ids)if(!skip.has(id))await materializeWoodland(tx,worldId,id,through);
+  const withoutReturns=ids.filter(id=>!skip.has(id)&&!pending.has(id));
+  if(withoutReturns.length)await materializeWoodlandsWithoutReturns(tx,worldId,withoutReturns,through);
+  // Physical returns retain their historical deadline order, including the
+  // threshold remembered before later regrowth and other villages' credits.
+  for(const id of ids)if(!skip.has(id)&&pending.has(id))await materializeWoodland(tx,worldId,id,through);
+}
+
+/** Rows are already locked; only stock/cell projections with no due physical cut. */
+async function materializeWoodlandsWithoutReturns(tx:Transaction<Database>,worldId:string,ids:string[],through:Date){
+  type Result={featureId:string;cellX:number;cellY:number;remainingAmount:string;initialAmount:string;cleared:boolean;occupied:boolean};
+  const result=await sql<Result>`
+    with current as materialized (
+      select w as deposit, o.building_id is not null as building_occupied,
+        o.world_id is not null as occupied
+      from woodland_deposits w left join world_cell_occupancies o
+        on o.world_id=w.world_id and o.cell_x=w.cell_x and o.cell_y=w.cell_y
+      where w.world_id=${worldId} and w.feature_id in (${sql.join(ids)})
+    ), projected as materialized (
+      select deposit,occupied,(deposit).cleared or building_occupied as cleared,
+        case when building_occupied then (deposit).reserved_amount::numeric
+          else woodland_stock_at(deposit,${through}) end as stock
+      from current
+    )
+    update woodland_deposits w set remaining_amount=p.stock,cleared=p.cleared,
+      regrowth_updated_at=greatest(w.regrowth_updated_at,${through}),
+      revision=w.revision+case when floor((p.deposit).remaining_amount)<>floor(p.stock)
+        or (p.deposit).cleared<>p.cleared then 1 else 0 end,
+      updated_at=case when floor((p.deposit).remaining_amount)<>floor(p.stock)
+        or (p.deposit).cleared<>p.cleared then ${through} else w.updated_at end
+    from projected p where w.world_id=${worldId} and w.feature_id=(p.deposit).feature_id
+    returning w.feature_id,w.cell_x,w.cell_y,w.remaining_amount,w.initial_amount,w.cleared,p.occupied
+  `.execute(tx);
+  const after=result.rows,blocked=(wood:Result)=>!wood.cleared&&Number(wood.remainingAmount)>Number(wood.initialAmount)/10;
+  const liberated=after.filter(w=>!blocked(w)).map(w=>w.featureId);
+  if(liberated.length)await tx.deleteFrom('worldCellOccupancies').where('worldId','=',worldId).where('featureId','in',liberated).execute();
+  const reclaimed=after.filter(w=>blocked(w)&&!w.occupied).map(w=>({worldId,featureId:w.featureId,cellX:w.cellX,cellY:w.cellY,buildingId:null,role:'body' as const}));
+  if(reclaimed.length)await tx.insertInto('worldCellOccupancies').values(reclaimed).onConflict(oc=>oc.columns(['worldId','cellX','cellY']).doNothing()).execute();
+  if(after.length)await sql`
+    update world_features f set state=case when p.cleared then 'depleted' else 'available' end,
+      updated_at=${through}
+    from jsonb_to_recordset(${JSON.stringify(after.map(w=>({feature_id:w.featureId,cleared:w.cleared})))}::jsonb)
+      as p(feature_id uuid,cleared boolean)
+    where f.world_id=${worldId} and f.id=p.feature_id
+  `.execute(tx);
 }
 
 /** All callers acquire stone rows first, then woodland UUIDs, before transitions. */

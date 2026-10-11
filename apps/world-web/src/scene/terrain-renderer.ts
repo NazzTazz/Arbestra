@@ -58,7 +58,7 @@ export class TerrainRenderer {
   meshes(): Mesh[] { return [...this.residents.values()].flatMap((r) => [...r.units.values()].flatMap((u) => u.meshes)); }
   setVisible(shown: boolean): void {
     if (shown === this.#shown) return;
-    this.#shown = shown;
+    this.#shown = shown; this.version++;
     for (const [key, resident] of this.residents) resident.root.setEnabled(shown && this.#visible.has(key));
   }
   #remove(key: string): void {

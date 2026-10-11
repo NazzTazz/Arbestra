@@ -301,6 +301,7 @@ export class BabylonVillageScene {
   #showTravel = false;
   #selectedRoute: string | null = null;
   #projectionVersion = -1;
+  #projectionGroundRevision = -1;
   #demandAt = 0;
   #metricsAt = 0;
   #frameMs: number[] = [];
@@ -1630,8 +1631,9 @@ export class BabylonVillageScene {
       this.#travelDerived={signature:derivedSignature,accesses,occupied,fires,displayRoutes:roadDisplayRoutes(state.travelRoutes,new Set([...occupied,...edited]),state.world)};
     }
     const {accesses,occupied,fires,displayRoutes}=this.#travelDerived;
+    const groundIdentity=this.#store?JSON.stringify([state.world.id,this.#store.groundRevision,this.#renderer?.version]):undefined;
     if(state.infrastructure){this.#renderer?.setInfrastructure(state.infrastructure);this.#infrastructureRenderer??=new InfrastructureRenderer(this.#scene);
-      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.rendered(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.version??0,undefined,false,accesses,{followTerrain:state.world.generationVersion===3});this.#infrastructureRenderer.visible(this.#mode!=='world');}
+      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.rendered(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.version??0,undefined,false,accesses,{followTerrain:state.world.generationVersion===3,groundIdentity});this.#infrastructureRenderer.visible(this.#mode!=='world');}
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
     const campusFires = state.cells.flatMap(site => {
@@ -1648,7 +1650,7 @@ export class BabylonVillageScene {
     this.#villageRoads ??= new VillageRoads(this.#scene);
     this.#villageRoads.update(JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.version, displayRoutes]),
       displayRoutes, this.#space!, cell => this.#renderer!.rendered(cell.cellX, cell.cellY)
-        ? this.#store!.ground(cell.cellX, cell.cellY) : null,state.world.generationVersion===3);
+        ? this.#store!.ground(cell.cellX, cell.cellY) : null,state.world.generationVersion===3,groundIdentity);
     const routes = selectedRouteId
       ? state.travelRoutes.filter((route) => route.id === selectedRouteId)
       : state.travelRoutes;
@@ -2501,8 +2503,9 @@ export class BabylonVillageScene {
       : detailPaused ? !this.#overview ? this.#overviewRetryAt > now ? 'retry' : 'loading' : null
       : this.#store.degraded ? 'retry' : this.#renderer.missingVisible ? 'loading' : null;
     if (loading !== this.#terrainLoading) { this.#terrainLoading = loading; this.#onTerrainLoading(loading); }
-    if (this.#projectionVersion !== this.#renderer.version) {
+    if (this.#projectionVersion !== this.#renderer.version || this.#projectionGroundRevision !== this.#store.groundRevision) {
       this.#projectionVersion = this.#renderer.version;
+      this.#projectionGroundRevision = this.#store.groundRevision;
       this.#refreshBuildingGround();
       this.#workers.reproject();
       // Streaming and origin changes can arrive after the pointer stopped moving.

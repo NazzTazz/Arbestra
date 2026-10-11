@@ -11,12 +11,24 @@ export type TerrainFetch = (chunks: Array<{ chunkX: number; chunkY: number }>, s
 function hasGround(chunk: TerrainUpdatesChunk): chunk is TerrainChunk {
   return 'terrainCodes' in chunk && Array.isArray(chunk.terrainCodes) && 'elevations' in chunk && Array.isArray(chunk.elevations);
 }
+const sameNumbers=(a:readonly number[],b:readonly number[])=>a===b||a.length===b.length&&a.every((value,index)=>value===b[index]);
+function sameChunkGround(a:TerrainChunk|undefined,b:TerrainChunk):boolean{
+ if(!a||a.originCellX!==b.originCellX||a.originCellY!==b.originCellY||!sameNumbers(a.terrainCodes,b.terrainCodes)||!sameNumbers(a.elevations,b.elevations))return false;
+ if(a.rc1===b.rc1)return true;if(!a.rc1||!b.rc1)return false;
+ const before=a.rc1,after=b.rc1;
+ return before.stride===after.stride&&sameNumbers(before.heights,after.heights)&&sameNumbers(before.water,after.water)
+  &&before.terraces.length===after.terraces.length&&before.terraces.every((terrace,index)=>{const next=after.terraces[index]!;return terrace.cellX===next.cellX&&terrace.cellY===next.cellY&&terrace.height===next.height;});
+}
 export class TerrainStore {
   readonly entries = new Map<string, Entry>();
   readonly revisions = new Map<string, StoneDeposit>();
   readonly changed = new Set<string>();
   readonly world: TerrainResponse['world'];
   #snapshot: VillageState;
+  #groundRevision=0;
+  /** Revision of values returned by ground(), published before terrain-mesh admission. */
+  get groundRevision():number{return this.#groundRevision;}
+  #publishGround(entry:Entry,chunk:TerrainChunk){if(!sameChunkGround(entry.chunk,chunk))this.#groundRevision++;entry.chunk=chunk;}
   #own = new Set<string>();
   #features = new Map<string, NaturalFeature>();
   #missions = new Map<string, string>();
@@ -54,7 +66,7 @@ export class TerrainStore {
     // authorization, so an updates-only refresh is insufficient.
     for (const controller of this.#controllers) { this.#cancelled.add(controller); controller.abort(); }
     for (const key of this.entries.keys()) this.changed.add(key);
-    this.entries.clear(); this.#nextDemandAt = this.now();
+    if(this.entries.size)this.#groundRevision++;this.entries.clear(); this.#nextDemandAt = this.now();
   }
   deposit(deposit: StoneDeposit): void {
     const previous = this.revisions.get(deposit.featureId);
@@ -63,6 +75,9 @@ export class TerrainStore {
     this.invalidate(this.key(deposit.cellX, deposit.cellY));
   }
   observe(state: VillageState): void {
+    const before=this.#snapshot.region,after=state.region;
+    if(before.originCellX!==after.originCellX||before.originCellY!==after.originCellY||before.width!==after.width||before.height!==after.height
+      ||!sameNumbers(before.terrainCodes,after.terrainCodes)||!sameNumbers(before.elevations,after.elevations))this.#groundRevision++;
     this.#snapshot = state;
     const own = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`));
     for (const key of new Set([...own, ...this.#own])) if (own.has(key) !== this.#own.has(key)) {
@@ -88,7 +103,7 @@ export class TerrainStore {
     const needed = new Set(demand.map((d) => d.key));
     while (this.entries.size > SETTINGS.cachedChunks) {
       const victim = [...this.entries].filter(([k]) => !needed.has(k)).sort((a, b) => a[1].touched - b[1].touched)[0];
-      if (!victim) break; this.entries.delete(victim[0]); this.changed.delete(victim[0]);
+      if (!victim) break;if(victim[1].chunk)this.#groundRevision++;this.entries.delete(victim[0]); this.changed.delete(victim[0]);
     }
     const missionChunks = new Set(this.#missions.values());
     for (const [id, deposit] of this.revisions) if (!this.entries.has(this.key(deposit.cellX, deposit.cellY))
@@ -131,7 +146,7 @@ export class TerrainStore {
             || fullChunk.elevations.length !== fullChunk.terrainCodes.length)) throw new Error('Incomplete terrain');
           const stale = ticket.invalidation !== e.invalidation || chunk.features.some((f) => f.deposit && (this.revisions.get(f.id)?.revision ?? 0) > f.deposit.revision);
           if (stale) {
-            if (!e.chunk && fullChunk) { e.chunk = { ...fullChunk, features: [], occupiedCells: [] }; this.changed.add(ticket.key); }
+            if (!e.chunk && fullChunk) { this.#publishGround(e,{ ...fullChunk, features: [], occupiedCells: [] }); this.changed.add(ticket.key); }
             e.freshAt = -Infinity; continue;
           }
           for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
@@ -140,9 +155,9 @@ export class TerrainStore {
           if (e.chunk) {
             if(chunk.rc1Edits&&!e.chunk.rc1)throw new Error('RC1 edits without substrate');
             const rc1=chunk.rc1Edits&&e.chunk.rc1?{...e.chunk.rc1,terraces:chunk.rc1Edits.terraces}:chunk.rc1;
-            e.chunk = { ...chunk, ...(rc1?{rc1}:{}), terrainCodes: e.chunk.terrainCodes, elevations: e.chunk.elevations };
+            this.#publishGround(e,{ ...chunk, ...(rc1?{rc1}:{}), terrainCodes: e.chunk.terrainCodes, elevations: e.chunk.elevations });
           }
-          else if (fullChunk) e.chunk = fullChunk;
+          else if (fullChunk) this.#publishGround(e,fullChunk);
           e.mutableSignature = signature; e.freshAt = this.now(); e.failures = 0; e.retryAt = 0;
         }
       }).catch(() => {

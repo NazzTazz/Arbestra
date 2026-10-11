@@ -1,5 +1,71 @@
 # Synchronisation village — candidate et contre-recette
 
+## Confirmation compacte et cible de 500 ms — 11 octobre, base d40a43bbeb3c76853b91ea1a581fd88c4f5ff63c
+
+**Statut : optimisations implémentées et vérifiées techniquement ; candidate pour essai interactif.** Tristan précise en fin de tranche que 500 ms est un ordre de grandeur, et que les optimisations SQL et de trafic suffisent pour cette livraison. Les temps observés restent documentés ; ce repère ne devient pas une garantie de production. Les sections datées suivantes conservent les preuves historiques. Aucune fluidité en production ni ouverture publique validée. La démo reçoit la candidate ; son essai visuel est réparti avec Tristan, sans navigateur agent.
+
+### Trames effectivement nécessaires
+
+| Échange | Contenu et utilité |
+| --- | --- |
+| Intention HTTP | Deux points X/Y (trois avec coude), largeur en subdivisions, matériau, trottoir/opération, révision du plan, devis affiché, UUID commande/session. 391–392 octets sur les portions mesurées. Z vient du terrain serveur courant. Le relâchement n'attend pas un devis HTTP ; la commande revalide le devis présenté, droits et collisions sous verrou. |
+| Confirmation HTTP | InfrastructureConfirmation négociée : monde/village, UUID, heure conservée dans le reçu, révisions de InfrastructurePlan, devis et changements du plan. 617–3 402 octets ; les captures automatiques expliquent les grandes confirmations. Envoyée après commit, sans snapshot ni syncRevision/heure de projection globale. |
+| SSE | Convergence du village canonique, stocks et transitions. La présentation du plan confirmé résiste aux anciennes trames, puis disparaît au rattrapage. Elle n'avance ni économie ni révision mondiale. |
+| Snapshot/repli | Initialisation, reconnexion, trou et clients historiques ; les équipements Infrastructure gardent la projection complète. Aucun snapshot ne conditionne l'accusé normal d'une route ou son undo sans déplacement d'équipement. |
+
+beginVillageEconomy, borne H, verrous, revalidation, finaliseur et rollback restent communs. Retry/undo utilisent les plans/devis/date des reçus : H pour les nouveaux, date de création conservée pour les historiques. Terre/gravats ne provoquent plus de débit nul. Le serializer ACK dédié passe par le cache Fastify de compileSerializationSchema, sans premier parcours du schéma complet du village.
+
+### Capacités communes effectivement raccordées
+
+- synchronizationChanges/applySynchronizationChanges servent VillageFrame et InfrastructureConfirmation, avec ordre des collections seulement si nécessaire ; application immuable et validation finale atomique, doublons/trous/contextes/générations protégés.
+- App possède le village canonique ; infrastructurePresentationState sert VillageScene et InfrastructureTools jusqu'au rattrapage SSE. La portion suivante emploie la révision acceptée du plan.
+- readRc1Ground réutilise champ/troncs/échantillons après vérification d'identité immuable et lectures dynamiques courantes. Quatre contextes, 32 768 échantillons chacun, patches isolés monde/dimensions/source. Aucun stock, occupation ou droit caché.
+- readRc1Ground et naturalFeaturesQuery utilisent des recherches corrélées LATERAL LIMIT 1 par monde/feature, uniques, afin d'éviter le balayage répété d'un nouveau monde mal estimé par les statistiques PostgreSQL. La localisation canonique économique et ses filtres restent identiques.
+- InfrastructureRenderer découpe terre/gravats en secteurs de huit cases avec halos/coutures ; TerrainStore change groundRevision à la réception avant admission du renderer. Couches manuelle/automatique consultent la même identité de hauteur, disponibilité et éviction. Sans identité fiable, probes exacts conservés.
+- materializeWoodlands groupe les projections sans retour physique dû au même H. Stocks, cursors, réserves, seuils et occupations sont équivalents ; les retours dus restent chronologiques dans materializeWoodland.
+
+### Mesures décisives et limites
+
+Copie privée UUID de la géographie réelle : 128 chunks, 36 voies manuelles, 18 héritées, 34 bâtiments physiques (33 bâtiments dans la projection), 2 018 features/éditions, six terrasses, 105 bosquets locaux dont huit partiels. Source capturée READ ONLY ; copie à stocks fixes et 15 habitants idle, sans missions actives copiées. Vrais HTTP localhost, une instance API, aucun SSE/browser/GPU. Toutes les copies nettoyées ; aucune commande sur Bressuire.
+
+**Mesure représentative des relâchements successifs :** snapshot HTTP normal une fois, puis quatre commandes sans devis serveur, sans nouvelle lecture du contexte et sans instrumentation SQL. Le client de mesure conserve le plan confirmé ; le plan appliqué est strictement égal au plan persisté après chaque portion. Premier snapshot 7 771 ms / 189 098 octets, mesuré séparément.
+
+| Portion | HTTP | Transaction | Projection complète | Demande / confirmation |
+| --- | --- | --- | --- | --- |
+| Terre 1 | 1 498 ms | 1 424,1 ms | 0 ms | 391 / 3 392 octets |
+| Terre 2 | 2 165 ms | 2 150,9 ms | 0 ms | 391 / 3 402 octets |
+| Gravats | 1 026 ms | 1 002 ms | 0 ms | 392 / 617 octets |
+| Terre 3 | 1 791 ms | 1 780,6 ms | 0 ms | 391 / 2 567 octets |
+
+Ajouts 172/192/64/64 pixels ; captures 5/5/0/0 voies héritées. Ces durées sont antérieures à la finition des clés de passages documentée ci-dessous. **500 ms non atteints même avant rendu.** Une série précédente donnait 3 038/491/340/426 ms, mais réchauffait le réseau via readContext et un devis avant chaque commande : elle ne démontre pas la fluidité des tracés consécutifs. Le SSE réel peut également réchauffer le réseau ; son coût et la contention du monolithe ne sont pas mesurés ici.
+
+Attributions causales terminées :
+
+- **SQL sur nouveau monde :** l'ancien plan estimait une ligne puis rescannait le monde pour chaque feature, près de quatre millions de buffers hit. Comparaison du vrai SELECT Kysely ancien/nouveau dans une même copie et transaction : EXPLAIN 6 931,82 → 25,333 ms, SELECT ordinaire 3 893 → 32 ms ; 2 018 lignes ordonnées strictement égales, 3 994 576 → 18 107 buffers. Aucun JIT, lecture disque, ANALYZE global ou migration. Rollback connu et absence de toutes les lignes de fixture prouvés. Le premier diagnostic à 3,65 s confirme le même plan ; la lenteur n'est plus une hypothèse de driver.
+- **Serializer froid :** Fastify réel en mémoire, même ACK 673 octets, cache de compilation conservé : premier inject union complète 1 392,3 ms → schéma ACK dédié 165,7 ms ; deuxième 2,36/1,84 ms. Corps strictement égaux, un serializer compilé par schéma puis réutilisé. Hors DB/port/rendu, ces durées ne sont pas des latences de commande RC1.
+- **Calcul restant :** profil CPU sur deux commandes réelles sans réchauffage, avec surcoût du profiler : deuxième buildTravelNetwork environ 1 115 ms, dont refineTravelRoute 607 ms et closure passageInspector 372 ms. Le nouveau tracé change réellement raster/poids ; cache miss légitime. L'ACK supprime la projection postcommit, donc la portion suivante peut calculer ce réseau pour la première fois sous verrou. Aucun effacement explicite du cache à l'écriture, et l'échantillonnage du générateur n'apparaît pas comme dominant. Le profiler ajoute du coût : ses totaux HTTP ne servent pas de benchmark.
+- **Finition navigation :** passageInspector emploie des clés numériques exactes pour les seules arêtes adjacentes canoniques de grille ⅛, avec clés textuelles pour les portes continues et segments plus longs. Mêmes bornes et scopes. Trois tests ciblés verts (18 ignorés) : quatre orientations aux coutures X/Y/coin, portes continues .36/.37 distinguées, terrain changé bloquant, DTO froid/chaud. Comparaison pure du même snapshot de 19 voies sur terrain sec plat, ancien d’abord : initial 416,3 → 308,6 ms ; trois nouvelles voies 301,6 → 297,1 / 316,7 → 200,9 / 388,3 → 302,2 ms. DTO complets identiques, 34 trajets/792 points. Pas de DB ni relief RC1 réel dans ce microbenchmark ; ce gain ne remesure pas la série HTTP précédente.
+- **Bois :** neuf bosquets, 60 → 20 requêtes, dont 12 conservées pour les retours chronologiques et huit groupées. Les premières séries HTTP après batch étaient paradoxalement plus lentes (5,5/4,3/1,9 s) à cause du plan SQL sur copie ; la suppression de requêtes seule ne prouvait aucun gain de délai.
+- **Renderer manuel isolé :** même snapshot de 19 routes, sol constant/NullEngine, ancien d'abord : trois ajouts 178,6/195,7/148,5 → 127,7/90,5/54,7 ms CPU, environ 17 000 → 179 probes ; seuls secteurs touchés remplacés. Froid 765 → 965 ms, sans gain froid revendiqué. Couche automatique complète, React et GPU exclus.
+- **Cache géométrique pur :** 15 029 arbres, 382,12 → 0,345 ms froid/chaud, terrasse réelle 421,65 ms ; SQL/réseau exclus.
+
+Ne pas additionner des composants de fixtures différentes pour revendiquer 500 ms.
+
+### Preuves terminées
+
+- Contrats : sept cas ciblés verts, quatre ignorés, diff commun/order, retry/gap/undo/échec atomique ; build/lint ciblés verts.
+- Frontend : neuf cas ciblés verts, trente ignorés, HTTP/fallback, présentation/génération, secteurs/coutures, vrais chunks et rc1Edits reçus avant demand/tick, disponibilité/éviction et secteurs conservés ; types/lint/build verts.
+- Commande API réelle : confirmation/retry/undo/fallback rejouée verte après le serializer dédié (un passé, 23 ignorés), finaliseur/transitions dues/débits préservés, aucune projection complète. Rollback avec mutations préalablement observées et erreur injectée exacte prouvé lors de la première validation ; pas attribué au dernier replay.
+- Bois : cas final rejoué vert après finition types, neuf bosquets, états complets identiques au chemin historique via savepoint, réserves/restes/seuil/retour puis repousse, pas de livraison anticipée. Ancien code reproduit rétrospectivement rouge au plafond de requêtes ; fixture annulée et absence compte/monde vérifiée.
+- Cache RC1 : trois cas purs verts après LATERAL, identité/source/terrasse/retraits/monde/bornes couverts. naturalFeaturesQuery : cas DB réel vert, égalité ancien/nouveau au même H et snapshot READ ONLY, coutures, positions canoniques, autres mondes, dépôts absents/partiels. Builds API/contrats finaux et lint ciblés verts.
+
+Aucune suite globale/e2e, reset DB, migration ni commande utilisateur. Essai visuel interactif encore à Tristan. Le coût restant est notamment le calcul des trajets automatiques sur nouvelle géométrie, encore sous le verrou de commande. La mesure du rendu réel avec SSE/GPU et charge de staging/production reste différée ; après la précision de Tristan, elle ne bloque pas la livraison de ces optimisations. Il ne justifie ni une pose déclarée réussie avant commit ni la suppression de contrôles spatiaux.
+
+Démo : frontend 5278 HMR conservé. API 3102 actualisée seule avec le build final SQL/serializer et les contrats finaux, PID 12108/session 17327, remplace PID 48048/session 43762 ; /api/health 200. Client 5278 servi en HTTP 200 avec x-infrastructure-confirmation. Préserver absolument parent fixture PID 8212/session 48641 et frontend PID 45084/session 25278. Rechargement conseillé ; données utilisateur et parent préservés. Rapports/scripts/profils ignorés dans test-results ; transcript utilisateur exclu du commit.
+
+---
+
+
 ## Clic → voie confirmée — 11 octobre, base cc43b9ca8857ab742da291a501291f57b08b08d1
 
 Tristan précise le délai après validation sur terre/gravats. Deux frontières vérifiées : TerrainRenderer invalidait toutes les unités sol visibles à chaque révision Infrastructure, même si buildRc1TerrainUnit ne consulte ni routes ni plan ; buildTravelNetwork invalidait son réseau sur des matériaux/IDs de strokes sans changement de géométrie. L’aperçu accéléré ne supprimait pas ces coûts de confirmation.

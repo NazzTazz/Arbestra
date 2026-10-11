@@ -1,5 +1,8 @@
 # Streaming du terrain autour de la caméra
 
+**Identité du sol pour la voirie, 11 octobre 2026, base d40a43b : implémentée et vérifiée techniquement.** TerrainStore.groundRevision avance à réception d'un changement réel de codes, altitudes, champ RC1/terrasses, remplacement du fallback ou retrait/éviction de données. Elle est publiée avant admission des meshes ; un changement de stock/features seul ne la fait pas avancer. Babylon la combine avec monde et disponibilité/version TerrainRenderer et la transmet aux routes manuelles et automatiques, y compris dans la garde de tick. Le renderer peut conserver les hauteurs consultées si cette identité reste identique ; sans identité, il garde sa vérification exacte. Test ciblé sur vrai transport de chunks/rc1Edits, terrasse reçue avant demand/tick et perte de disponibilité terminé vert. Le délai de rendu complet reste à valider en mode interactif ; [mesures et limites](CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md).
+
+
 Date : 30 septembre 2026. Base relue : `main`, `0a0873a`.
 Statut : **implémentée dans le worktree le 1er octobre 2026 ; correction du délai des arbres et des refreshs validée par tests ciblés et navigateur local, recette humaine à reprendre**.
 

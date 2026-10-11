@@ -86,3 +86,20 @@ it('requests an infrastructure frame using the shared base and preserves the rec
  expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({'x-village-sync':'1','x-village-revision':'1','x-village-server-time':state.serverTime});
  expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
 });
+
+
+it('receives a small authoritative infrastructure confirmation without a village snapshot and preserves retry identity',async()=>{
+ const {infrastructureConfirmation,emptyInfrastructure}=await import('@arbestra/contracts'),state=await syncFixture(),before=emptyInfrastructure();
+ const commandId='00000000-0000-4000-8000-000000000010',stroke={id:commandId,points:[{x:512,y:528},{x:528,y:528}],width:4,material:'earth' as const,border:false,operation:'paint' as const};
+ const after={...before,revision:1,roads:[stroke]},quote={stoneUnits:0,stoneDebit:0,woodDebit:0,reserveAfter:0};
+ const confirmation=infrastructureConfirmation({worldId:state.world.id,villageId:state.village.id,commandId,commandTime:state.serverTime},before,after,quote);
+ const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify(confirmation)));vi.stubGlobal('fetch',fetchMock);
+ const payload={commandId,sessionId:'00000000-0000-4000-8000-000000000011',revision:0,operation:{kind:'road' as const,stroke:{...stroke,id:'preview'}},expected:quote};
+ const reply=await commandInfrastructure(state.world.slug,state.village.id,payload,{revision:state.syncRevision,serverTime:state.serverTime});
+ expect(reply).toMatchObject({confirmation});expect('state' in reply||'frame' in reply).toBe(false);
+ expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({'x-infrastructure-confirmation':'1','x-village-sync':'1','x-village-revision':'1'});
+ fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(confirmation)));await commandInfrastructure(state.world.slug,state.village.id,payload);
+ expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
+ fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({...confirmation,changes:[{kind:'bad'}]})));
+ await expect(commandInfrastructure(state.world.slug,state.village.id,payload)).rejects.toThrow('Réponse de synchronisation invalide');
+});

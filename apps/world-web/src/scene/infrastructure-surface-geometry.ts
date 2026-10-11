@@ -11,6 +11,7 @@ export function flatRoadGeometry(
   followTerrain:boolean,
   topOffset:number,
   depth=0,
+  neighbours:ReadonlyMap<string,SurfacePixel>=pixels,
 ):VertexData{
   const positions:number[]=[],indices:number[]=[],vertices=new Map<string,number>();
   const heights=new Map<string,number|null>();
@@ -52,7 +53,7 @@ export function flatRoadGeometry(
   }
   if(depth>0){
     const width=space.width*16,height=space.height*16;
-    const neighbour=(x:number,y:number)=>pixels.has(wrap(x,width)+':'+wrap(y,height));
+    const neighbour=(x:number,y:number)=>neighbours.has(wrap(x,width)+':'+wrap(y,height));
     const edges=[
       {dx:0,dy:-1,ax:0,ay:0,bx:1,by:0},
       {dx:1,dy:0,ax:1,ay:0,bx:1,by:1},

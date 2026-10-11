@@ -3,7 +3,7 @@ import {receiveHarvestIntent,readHarvestReceipts} from './harvest-submissions.js
 import { Type } from '@sinclair/typebox';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
-import {InfrastructureRequestSchema,type InfrastructureRequest,InfrastructurePreviewSchema} from '@arbestra/contracts';
+import {InfrastructureRequestSchema,type InfrastructureRequest,InfrastructurePreviewSchema,InfrastructureConfirmationSchema} from '@arbestra/contracts';
 import {infrastructureCommand,infrastructurePreview} from './infrastructure.js';
 import { ProcessingCommandSchema, ProcessingPreviewSchema, type ProcessingCommand } from '@arbestra/contracts';
 import { commandVillageProcessing, previewVillageProcessing } from './service.js';
@@ -46,6 +46,8 @@ const VillageSyncHeadersSchema = Type.Object({
   'x-village-revision': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
   'x-village-server-time': Type.Optional(Type.String({ format: 'date-time', maxLength: 48 })),
 }, { additionalProperties: true });
+const InfrastructureHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-infrastructure-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
+const InfrastructureMutationResponseSchema=Type.Union([InfrastructureConfirmationSchema,VillageCommandResponseSchema,VillageStateSchema]);
 function villageReplyOptions(headers: FastifyRequest['headers']) {
   const replyMode = headers['x-village-sync'] === '1' ? 'commit' as const : 'snapshot' as const;
   const revision = headers['x-village-revision'], serverTime = headers['x-village-server-time'];
@@ -114,13 +116,15 @@ export async function registerVillageRoutes(
     return previewVillageProcessing(db,account.id,worldSlug,villageId,buildingId,workerCount,orderId);
   });
   for(const preview of [true,false])app.post(`/api/worlds/:worldSlug/villages/:villageId/infrastructure${preview?'/preview':''}`,{
-    schema:{params:VillageParametersSchema,body:InfrastructureRequestSchema,...(!preview?{headers:VillageSyncHeadersSchema}:{}),response:{200:preview?InfrastructurePreviewSchema:VillageMutationResponseSchema}},
+    schema:{params:VillageParametersSchema,body:InfrastructureRequestSchema,...(!preview?{headers:InfrastructureHeadersSchema}:{}),response:{200:preview?InfrastructurePreviewSchema:InfrastructureMutationResponseSchema}},
   },async (request,reply)=>{const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
     if(preview)return infrastructurePreview(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest);
     const options=villageReplyOptions(request.headers),started=performance.now();
-    const result=await infrastructureCommand(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest,options.replyMode);
-    const committed=performance.now(),response=await commandResponse(account.id,worldSlug,result,options.base);
+    const result=await infrastructureCommand(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest,request.headers['x-infrastructure-confirmation']==='1'?'confirmation':options.replyMode);
+    const committed=performance.now(),response='kind' in result?result:await commandResponse(account.id,worldSlug,result,options.base);
     reply.header('server-timing',`road_tx;dur=${(committed-started).toFixed(1)}, road_sync;dur=${(performance.now()-committed).toFixed(1)}`);
+    // Keep the first compact reply independent of the complete-village union's lazy validator.
+    if('kind' in response&&response.kind==='infrastructure-confirmation')reply.serializer(reply.compileSerializationSchema(InfrastructureConfirmationSchema,'200'));
     return response;});
   for (const preview of [true, false]) app.post(`/api/worlds/:worldSlug/villages/:villageId/exploitation${preview ? '/preview' : ''}`, {
     schema: { params: VillageParametersSchema, body: ExploitationRequestSchema, response: { 200: preview ? ExploitationPreviewSchema : VillageStateSchema } },

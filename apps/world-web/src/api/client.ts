@@ -7,7 +7,7 @@ export async function sendHarvestIntent(slug:string,villageId:string,intent:Harv
 }
 import { randomUUID } from '../random-uuid';
 import { villageRequestGeneration } from './village-sync';
-import { villageCommandResponseIsValid, type VillageFrame, type VillageSyncBase } from '@arbestra/contracts';
+import { villageCommandResponseIsValid, infrastructureConfirmationIsValid, type InfrastructureConfirmation, type VillageFrame, type VillageSyncBase } from '@arbestra/contracts';
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
@@ -33,7 +33,7 @@ import type {InfrastructureRequest,InfrastructurePreview} from '@arbestra/contra
 export async function previewInfrastructure(slug:string,villageId:string,request:InfrastructureRequest):Promise<InfrastructurePreview>{
   return parseResponse(await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure/preview`,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(request)}));
 }
-export function commandInfrastructure(slug:string,villageId:string,request:InfrastructureRequest,base?:VillageSyncBase){return requestVillageCommandState(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)},base);}
+export function commandInfrastructure(slug:string,villageId:string,request:InfrastructureRequest,base?:VillageSyncBase){return requestVillageCommandState(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)},base,true);}
 
 export async function previewExploitation(worldSlug: string, villageId: string, order: ExploitationRequest, signal?: AbortSignal): Promise<ExploitationPreview> {
   return parseResponse<ExploitationPreview>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/exploitation/preview`, {
@@ -106,6 +106,8 @@ export interface TimedVillageState {
 
 export interface TimedVillageFrame { frame: VillageFrame; serverOffsetMs: number; requestGeneration?: number }
 export type TimedVillageUpdate = TimedVillageState | TimedVillageFrame;
+export interface TimedInfrastructureConfirmation {confirmation:InfrastructureConfirmation;requestGeneration:number}
+export type TimedInfrastructureUpdate = TimedVillageUpdate | TimedInfrastructureConfirmation;
 
 async function villageRequest(request: Promise<Response>, requestedAt: number): Promise<TimedVillageState> {
   const requestGeneration = villageRequestGeneration();
@@ -119,13 +121,16 @@ function requestState(path: string, init?: RequestInit): Promise<TimedVillageSta
   const requestedAt = Date.now();
   return villageRequest(fetch(path, { credentials: 'same-origin', ...init }), requestedAt);
 }
-async function requestVillageCommandState(path: string, init: RequestInit, base?: VillageSyncBase): Promise<TimedVillageUpdate> {
+function requestVillageCommandState(path:string,init:RequestInit,base?:VillageSyncBase,confirmation?:false):Promise<TimedVillageUpdate>;
+function requestVillageCommandState(path:string,init:RequestInit,base:VillageSyncBase|undefined,confirmation:true):Promise<TimedInfrastructureUpdate>;
+async function requestVillageCommandState(path: string, init: RequestInit, base?: VillageSyncBase, confirmation=false): Promise<TimedInfrastructureUpdate> {
   const requestedAt = Date.now(), requestGeneration = villageRequestGeneration();
-  const headers = { ...init.headers, 'x-village-sync': '1', ...(base ? {
+  const headers = { ...init.headers, 'x-village-sync': '1', ...(confirmation?{'x-infrastructure-confirmation':'1'}:{}), ...(base ? {
     'x-village-revision': String(base.revision), 'x-village-server-time': base.serverTime,
   } : {}) };
   const response = await fetch(path, { credentials: 'same-origin', ...init, headers, signal: AbortSignal.timeout(15_000) });
   const receivedAt = Date.now(), data = await parseResponse<unknown>(response);
+  if (confirmation&&infrastructureConfirmationIsValid(data)) return {confirmation:data,requestGeneration};
   if (villageCommandResponseIsValid(data)) {
     const timed = { requestGeneration, serverOffsetMs: Date.parse(data.serverTime) - (requestedAt + receivedAt) / 2 };
     return data.kind === 'frame' ? { ...timed, frame: data.frame } : { ...timed, state: data.state };

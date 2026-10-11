@@ -14,6 +14,7 @@ interface RenderLayer {key:string;probes:ReadonlyMap<string,number|null>;meshes:
 export class InfrastructureRenderer{
   #meshes:Mesh[]=[];#signature='';readonly materials:Record<string,StandardMaterial>={};
   #requestSignature='';
+  #groundIdentity:string|undefined;
   #groundProbes=new Map<string,number|null>();
   #surfaceKey='';
   #surface:ReadonlyMap<string,RoadPixel>=new Map();
@@ -25,19 +26,21 @@ export class InfrastructureRenderer{
   #paving:SidewalkStone[]=[];
   constructor(readonly scene:Scene){for(const [code,color]of Object.entries({earth:'#795b3d',rubble:'#b7b8b2','stone-1':'#c5c6b8','stone-2':'#d4d3c4',border:'#c5c6b8',preview:'#95caff'})){
     const m=new StandardMaterial(`infrastructure-${code}`,scene);m.diffuseColor=Color3.FromHexString(color);m.specularColor=Color3.Black();this.materials[code]=m;}}
-  update(plan:InfrastructurePlan,space:WorldSpace,ground:(x:number,y:number)=>number|null,preview=false,terrainRevision=0,surfaceOverride?:ReadonlyMap<string,RoadPixel>,bordersOnly=false,accesses:readonly BuildingAccess[]=[],dimensions:{pavementHeight?:number;curbHeight?:number;followTerrain?:boolean}={}){
+  update(plan:InfrastructurePlan,space:WorldSpace,ground:(x:number,y:number)=>number|null,preview=false,terrainRevision=0,surfaceOverride?:ReadonlyMap<string,RoadPixel>,bordersOnly=false,accesses:readonly BuildingAccess[]=[],dimensions:{pavementHeight?:number;curbHeight?:number;followTerrain?:boolean;groundIdentity?:string|undefined}={}){
     void accesses; // Sidewalk shape is independent of building entrances.
     const planKey=JSON.stringify([surfaceOverride?[...surfaceOverride]:[plan.roads,plan.inheritedRoads,plan.inheritedCells],space.width,space.height]);
-    const signature=JSON.stringify([planKey,space.origin,space.version,preview,bordersOnly,dimensions]);
-    const requestSignature=signature+':'+terrainRevision;
+    // The caller identity covers ground values and availability, independently of mesh admission.
+    const {groundIdentity,...shape}=dimensions,sameGround=groundIdentity!==undefined&&groundIdentity===this.#groundIdentity;
+    const signature=JSON.stringify([planKey,space.origin,space.version,preview,bordersOnly,shape]);
+    const requestSignature=signature+':'+terrainRevision+':'+groundIdentity;
     if(requestSignature===this.#requestSignature)return;
-    this.#requestSignature=requestSignature;
-    if(signature===this.#signature&&[...this.#groundProbes].every(([key,height])=>{const [x,y]=key.split(':').map(Number);return ground(x!,y!)===height;}))return;
+    this.#requestSignature=requestSignature;this.#groundIdentity=groundIdentity;
+    if(signature===this.#signature&&(sameGround||[...this.#groundProbes].every(([key,height])=>{const [x,y]=key.split(':').map(Number);return ground(x!,y!)===height;})))return;
     this.#signature=signature;
     if(planKey!==this.#surfaceKey){this.#surfaceKey=planKey;this.#surface=surfaceOverride??infrastructurePlanSurface(plan,{widthCells:space.width,heightCells:space.height});}
     const surface=this.#surface;
-    const grounds=new Map<string,number|null>();this.#groundProbes=grounds;
-    const sample=(x:number,y:number)=>{const key=`${x}:${y}`;if(!grounds.has(key))grounds.set(key,ground(x,y));return grounds.get(key)!;};
+    const priorGrounds=this.#groundProbes,grounds=new Map<string,number|null>();this.#groundProbes=grounds;
+    const sample=(x:number,y:number)=>{const key=`${x}:${y}`;if(!grounds.has(key))grounds.set(key,sameGround&&priorGrounds.has(key)?priorGrounds.get(key)!:ground(x,y));return grounds.get(key)!;};
     const cell=(v:number,size:number)=>dimensions.followTerrain?((v%size)+size)%size:((Math.floor(v+.5)%size)+size)%size;
     if(preview!==this.#preview){this.#meshes.forEach(m=>m.dispose(false,false));this.#meshes=[];this.#layers.clear();this.#preview=preview;}
     const world={widthCells:space.width,heightCells:space.height};
@@ -76,8 +79,8 @@ export class InfrastructureRenderer{
     const nextLayers=new Map<string,RenderLayer>();
     const layer=(code:string,geometryKey:unknown,generate:(read:(x:number,y:number)=>number|null)=>Mesh[])=>{
       const key=baseKey+':'+JSON.stringify(geometryKey),prior=this.#layers.get(code);
-      if(prior&&prior.key===key&&[...prior.probes].every(([point,height])=>{const [x,y]=point.split(':').map(Number);return sample(x!,y!)===height;})){
-        nextLayers.set(code,prior);return;
+      if(prior&&prior.key===key&&(sameGround||[...prior.probes].every(([point,height])=>{const [x,y]=point.split(':').map(Number);return sample(x!,y!)===height;}))){
+        for(const [point,height]of prior.probes)grounds.set(point,height);nextLayers.set(code,prior);return;
       }
       const probes=new Map<string,number|null>();
       const read=(x:number,y:number)=>{const value=sample(x,y);probes.set(x+':'+y,value);return value;};
@@ -86,10 +89,21 @@ export class InfrastructureRenderer{
     };
     if(!bordersOnly)for(const code of ['earth','rubble'] as const){
       const pixels=new Map([...surface].filter(([,p])=>p.manual&&p.material===code));
-      layer(code,[...pixels.values()].map(p=>[p.x,p.y]),read=>{
-        const data=flatRoadGeometry(pixels,space,read,dimensions.followTerrain??false,.015,.025);
-        return data.indices?.length?[this.#mesh(code,data)]:[];
-      });
+      // Eight-cell sectors bound the geometry replaced by a short earth/rubble stroke.
+      const sectorSize=128,sectors=new Map<string,Map<string,RoadPixel>>();
+      for(const [point,p]of pixels){const sector=Math.floor(p.x/sectorSize)+':'+Math.floor(p.y/sectorSize);let group=sectors.get(sector);if(!group){group=new Map();sectors.set(sector,group);}group.set(point,p);}
+      for(const [sector,group]of sectors){
+        // Adjacent-sector occupancy determines exposed walls, including toric seams.
+        const halo:Array<[string,boolean]>=[];
+        for(const p of group.values())for(const [dx,dy]of [[1,0],[-1,0],[0,1],[0,-1]]){
+          const x=(p.x+dx!+space.width*16)%(space.width*16),y=(p.y+dy!+space.height*16)%(space.height*16),point=x+':'+y;
+          if(!group.has(point))halo.push([point,pixels.has(point)]);
+        }
+        layer(code+':'+sector,[[...group.values()].map(p=>[p.x,p.y]),halo],read=>{
+          const data=flatRoadGeometry(group,space,read,dimensions.followTerrain??false,.015,.025,pixels);
+          return data.indices?.length?[this.#mesh(code,data)]:[];
+        });
+      }
     }
     const pavementHeight=dimensions.pavementHeight??.04,curbHeight=dimensions.curbHeight??.06;
     if(!bordersOnly)for(const code of ['stone-1','stone-2'] as const){
@@ -153,7 +167,7 @@ export class InfrastructureRenderer{
   setInvalid(invalid:boolean){this.materials.preview!.emissiveColor=Color3.FromHexString(invalid?'#bd453b':'#244a73');this.materials.preview!.alpha=.65;}
   visible(value:boolean){this.#meshes.forEach(m=>m.setEnabled(value));}
   get meshes(){return this.#meshes;}
-  clear(){this.#meshes.forEach(m=>m.dispose(false,false));this.#meshes=[];this.#signature='';this.#requestSignature='';this.#groundProbes.clear();this.#layers.clear();this.#sidewalkKey='';this.#sidewalkReads.clear();this.#sidewalks.clear();this.#paving=[];}
+  clear(){this.#meshes.forEach(m=>m.dispose(false,false));this.#meshes=[];this.#signature='';this.#requestSignature='';this.#groundIdentity=undefined;this.#groundProbes.clear();this.#layers.clear();this.#sidewalkKey='';this.#sidewalkReads.clear();this.#sidewalks.clear();this.#paving=[];}
   dispose(){this.clear();Object.values(this.materials).forEach(m=>m.dispose());}
 }
 export interface InfrastructureGesture {kind:'hover'|'down'|'up'|'right'|'cancel';point:SubPoint|null;drag?:boolean;equipmentId?:string}

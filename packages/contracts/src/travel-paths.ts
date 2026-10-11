@@ -108,7 +108,7 @@ class StepQueue {
 
 /** Deterministic cardinal route, with a bounded preference for shared tracks. */
 /** Bounded geometric booleans only: four field revisions, 262144 segments in total. */
-const passageCaches=new Map<string,Map<string,boolean>>();
+const passageCaches=new Map<string,Map<string|number,boolean>>();
 const MAX_PASSAGE_CONTEXTS=4,MAX_PASSAGE_SEGMENTS=262144;
 let passageSegments=0;
 function passageInspector(ground:TravelGround|undefined,world:TravelNetworkState['world']){
@@ -120,9 +120,19 @@ function passageInspector(ground:TravelGround|undefined,world:TravelNetworkState
   cache=new Map();passageCaches.set(scope,cache);
   while(passageCaches.size>MAX_PASSAGE_CONTEXTS){const oldest=passageCaches.keys().next().value!;passageSegments-=passageCaches.get(oldest)!.size;passageCaches.delete(oldest);}
  }
- const segments=cache;
+ const segments=cache,w=world.widthCells*8,h=world.heightCells*8,numericSafe=Number.isSafeInteger(w)&&Number.isSafeInteger(h)&&Number.isSafeInteger(w*h*2);
  return (a:TravelCell,b:TravelCell)=>{
-  const ak=key(a),bk=key(b),k=ak<bk?ak+'|'+bk:bk+'|'+ak,prior=segments.get(k);if(prior!==undefined)return prior;
+  let k:string|number|undefined;
+  // Exact adjacent lattice edges have a unique directed start and axis, including
+  // each toric seam. Door coordinates and longer segments retain their full text.
+  const ax=a.cellX*8,ay=a.cellY*8,bx=b.cellX*8,by=b.cellY*8;
+  if(numericSafe&&Number.isInteger(ax)&&Number.isInteger(ay)&&Number.isInteger(bx)&&Number.isInteger(by)
+    &&ax>=0&&ax<w&&bx>=0&&bx<w&&ay>=0&&ay<h&&by>=0&&by<h){
+   if(ay===by){if(bx===(ax+1)%w)k=(ay*w+ax)*2;else if(ax===(bx+1)%w)k=(by*w+bx)*2;}
+   else if(ax===bx){if(by===(ay+1)%h)k=(ay*w+ax)*2+1;else if(ay===(by+1)%h)k=(by*w+bx)*2+1;}
+  }
+  if(k===undefined){const ak=key(a),bk=key(b);k=ak<bk?ak+'|'+bk:bk+'|'+ak;}
+  const prior=segments.get(k);if(prior!==undefined)return prior;
   const allowed=canWalkSpawnSegment(ground,{x:a.cellX,y:a.cellY},{x:b.cellX,y:b.cellY});
   if(passageCaches.get(scope)===segments){
    while(passageSegments>=MAX_PASSAGE_SEGMENTS&&passageCaches.size>1){const oldest=passageCaches.keys().next().value!;if(oldest===scope)break;passageSegments-=passageCaches.get(oldest)!.size;passageCaches.delete(oldest);}

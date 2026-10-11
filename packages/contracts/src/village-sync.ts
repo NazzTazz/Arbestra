@@ -7,16 +7,18 @@ if (!FormatRegistry.Has('date-time')) FormatRegistry.Set('date-time', value => /
 export const villageSnapshotIsValid = (value: unknown): value is VillageState => Value.Check(VillageStateSchema, value);
 
 const Path = Type.Array(Type.String());
+export const SynchronizationChangesSchema = Type.Array(Type.Union([
+  Type.Object({ kind: Type.Literal('set'), path: Path, value: Type.Unknown() }),
+  Type.Object({ kind: Type.Literal('remove'), path: Path }),
+  Type.Object({ kind: Type.Literal('entities'), path: Path, upsert: Type.Array(Type.Unknown()),
+    remove: Type.Array(Type.String()), order: Type.Optional(Type.Array(Type.String())) }),
+]));
+export type SynchronizationChange = Static<typeof SynchronizationChangesSchema>[number];
 export const VillageFrameSchema = Type.Object({
   worldId: Type.String({ format: 'uuid' }), villageId: Type.String({ format: 'uuid' }),
   fromRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   toRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-  changes: Type.Array(Type.Union([
-    Type.Object({ kind: Type.Literal('set'), path: Path, value: Type.Unknown() }),
-    Type.Object({ kind: Type.Literal('remove'), path: Path }),
-    Type.Object({ kind: Type.Literal('entities'), path: Path, upsert: Type.Array(Type.Unknown()),
-      remove: Type.Array(Type.String()), order: Type.Optional(Type.Array(Type.String())) }),
-  ])),
+  changes: SynchronizationChangesSchema,
 });
 export type VillageFrame = Static<typeof VillageFrameSchema>;
 export const VillageSyncBaseSchema = Type.Object({
@@ -32,7 +34,7 @@ export const VillageCommandResponseSchema = Type.Union([
 ]);
 export type VillageCommandResponse = Static<typeof VillageCommandResponseSchema>;
 export const villageCommandResponseIsValid = (value: unknown): value is VillageCommandResponse => Value.Check(VillageCommandResponseSchema, value);
-type Change = VillageFrame['changes'][number];
+type Change = SynchronizationChange;
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 function entityKey(v: unknown): string | null {
@@ -51,8 +53,10 @@ function diff(a: unknown, b: unknown, path: string[], changes: Change[]): void {
     const before = entities(a), after = entities(b);
     if (before && after) {
       const order = [...after.keys()];
+      // Upserts retain existing positions and append new entities; send order only when that is insufficient.
+      const naturalOrder = [...before.keys()].filter(k => after.has(k)).concat(order.filter(k => !before.has(k)));
       changes.push({ kind: 'entities', path, upsert: [...after].filter(([k, v]) => !equal(before.get(k), v)).map(([, v]) => v),
-        remove: [...before.keys()].filter(k => !after.has(k)), ...(!equal([...before.keys()], order) ? { order } : {}) });
+        remove: [...before.keys()].filter(k => !after.has(k)), ...(!equal(naturalOrder, order) ? { order } : {}) });
       return;
     }
   }
@@ -68,8 +72,12 @@ export function villageFrame(before: VillageState, after: VillageState): Village
   if (before.world.id !== after.world.id || before.village.id !== after.village.id
     || before.syncRevision === undefined || after.syncRevision === undefined || after.syncRevision <= before.syncRevision)
     throw Error('Invalid village frame context/revisions');
-  const changes: Change[] = []; diff(before, after, [], changes);
+  const changes = synchronizationChanges(before, after);
   return { worldId: after.world.id, villageId: after.village.id, fromRevision: before.syncRevision, toRevision: after.syncRevision, changes };
+}
+/** Shared data diff; the caller owns scope, revisions and validation of the final schema. */
+export function synchronizationChanges(before: unknown, after: unknown): SynchronizationChange[] {
+  const changes: Change[] = []; diff(before, after, [], changes); return changes;
 }
 function edit(root: unknown, path: string[], change: Change): unknown {
   if (!path.length) {
@@ -90,6 +98,10 @@ function edit(root: unknown, path: string[], change: Change): unknown {
   if (value === undefined) delete next[key]; else next[key] = value;
   return next;
 }
+/** Copy-on-write: no partially edited source is exposed if a later change fails. */
+export function applySynchronizationChanges(root: unknown, changes: readonly SynchronizationChange[]): unknown {
+  let next = root; for (const change of changes) next = edit(next, change.path, change); return next;
+}
 export type VillageFrameResult = { kind: 'applied'; state: VillageState } | { kind: 'ignored' | 'resync' };
 /** Context selection is authorized by the caller; within a context, revision
  * wins over the timestamp of a potentially delayed projection. */
@@ -109,8 +121,7 @@ export function applyVillageFrame(state: VillageState, input: unknown): VillageF
   if (frame.toRevision <= state.syncRevision) return { kind: 'ignored' };
   if (frame.fromRevision !== state.syncRevision) return { kind: 'resync' };
   try {
-    let next: unknown = state;
-    for (const change of frame.changes) next = edit(next, change.path, change);
+    let next = applySynchronizationChanges(state, frame.changes);
     if (!record(next)) return { kind: 'resync' };
     next = { ...next, syncRevision: frame.toRevision };
     if (!Value.Check(VillageStateSchema, next) || next.world.id !== state.world.id || next.village.id !== state.village.id)

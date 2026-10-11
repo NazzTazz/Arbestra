@@ -1,6 +1,7 @@
 import {useHarvestTool} from './ui/use-harvest-tool';
 import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
 import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
+import {acceptInfrastructurePresentation,currentInfrastructurePresentation,infrastructurePresentationState,type InfrastructurePresentation} from './api/infrastructure-presentation';
 import {HarvestFeedbackLayer} from './ui/HarvestFeedback';
 import {ExploitationShowroom,type ExploitationCategory} from './ui/ExploitationShowroom';
 import {nearestExploitationTarget,type ExploitationChoice} from './ui/exploitation-navigation';
@@ -24,7 +25,7 @@ import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbest
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
-import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, type TimedVillageUpdate, upgradeBuilding } from './api/client';
+import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, type TimedVillageUpdate, type TimedInfrastructureConfirmation, upgradeBuilding } from './api/client';
 import { campusRange, stonemasonRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
@@ -78,6 +79,15 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [state, setState] = useState<VillageState | null>(starter?.state??null);
   const stateRef = useRef<VillageState | null>(starter?.state??null);
   const synchronization = useRef<VillageSynchronization | null>(null);
+  const [infrastructurePresentation,setInfrastructurePresentation]=useState<InfrastructurePresentation|null>(null);
+  const infrastructurePresentationRef=useRef<InfrastructurePresentation|null>(null);
+  const sceneState=useMemo(()=>state?infrastructurePresentationState(state,infrastructurePresentation):null,[state,infrastructurePresentation]);
+  const applyInfrastructureConfirmation=useCallback((update:TimedInfrastructureConfirmation)=>{
+    const current=stateRef.current;if(!current)return;
+    const result=acceptInfrastructurePresentation(current,infrastructurePresentationRef.current,update.confirmation,update.requestGeneration,villageRequestGeneration());
+    if(result.kind==='resync'){synchronization.current?.reconnect();return;}
+    if(result.kind==='applied'){infrastructurePresentationRef.current=result.presentation;setInfrastructurePresentation(result.presentation);}
+  },[]);
   const refreshFlight = useRef<Promise<void> | null>(null);
   const initialFlight = useRef<Promise<TimedVillageState> | null>(null);
   const offsetRef = useRef(0);
@@ -195,6 +205,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
         || cell.building.garden.plots.some((plot) => plot.harvest && !activeHarvestIds.has(plot.harvest.id)))))
         pushNotification('Récolte livrée');
     }
+    const presentation=currentInfrastructurePresentation(snapshot.state,infrastructurePresentationRef.current);
+    if(presentation!==infrastructurePresentationRef.current){infrastructurePresentationRef.current=presentation;setInfrastructurePresentation(presentation);}
     stateRef.current = snapshot.state;
     setState(snapshot.state);
     starterRef.current?.onSnapshot(snapshot.state);
@@ -869,7 +881,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   return <main className="game-shell">
     {!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
     <Suspense fallback={<div className="center-message">L'oracle se rhabille...</div>}><VillageScene preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
-      onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
+      onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={sceneState??state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
       pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : []} highlightedSiteIds={highlightedSiteIds}
       constructionMode={!paletteCollapsed && !workshop && worldMode === 'construction' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={starterActive?'starter':construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
@@ -945,7 +957,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       intentState={constructionIntentState} onRetry={retryConstruction} onClearError={clearConstructionError}
       collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={(type,variant) => { clearConstructionError(); clearPreview(); if(variant)setHouseVariant(variant);setConstruction({ action: 'build', type }); }}
       domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
-      infrastructure={<InfrastructureTools state={state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
+      infrastructure={<InfrastructureTools state={sceneState??state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onConfirmation={applyInfrastructureConfirmation} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
       onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
     {workshop&&<section className="factory-workshop" aria-label="Atelier"><button onClick={()=>setWorkshop(null)}>Retour au village</button>{state.factoryEnabled?<iframe title={`Atelier ${workshop}`} src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}/>:<p>L’accès aux ateliers a été désactivé.</p>}</section>}
   </main>;

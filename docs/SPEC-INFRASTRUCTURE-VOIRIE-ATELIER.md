@@ -1,5 +1,10 @@
 # Infrastructure : voirie, équipements et atelier
 
+**Repère de réactivité demandé le 11 octobre :** environ **500 ms** entre relâchement et portion visible. Tristan précise ensuite que ce chiffre donne un ordre de grandeur : les optimisations SQL et de trafic suffisent pour la présente livraison, sans en faire un seuil bloquant ni une garantie acquise en production. Le serveur dérive Z du terrain faisant autorité ; le client transmet deux points X/Y (trois avec coude), le profil, la révision du plan, le devis attendu et les UUID de commande/session.
+
+**Confirmation ciblée, base d40a43b : implémentée, validation interactive en cours.** Routes et annulations sans équipement déplacé reçoivent après commit un devis et les changements du seul plan Infrastructure ; aucune projection complète de village ne conditionne cet accusé. Le client montre le plan confirmé, puis le réconcilie avec SSE, sans avancer la révision mondiale ni les stocks. Le même contrat de diff/application sert aux deux chemins. [Contrat de révision et reprise](architecture/village-synchronization.md#confirmation-ciblée-de-voirie), [mesures actuelles et limites](CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md). Les paragraphes datés ci-dessous conservent l'historique des adaptations antérieures ; leurs mentions de projection HTTP obligatoire sont remplacées par ce contrat pour la voirie ciblée.
+
+
 Correction clic → confirmation du 11 octobre, base cc43b9ca8857ab742da291a501291f57b08b08d1 : le terrain RC1 garde ses unités après édition d’une route, ses meshes ne consommant pas ces décorations ; terrasses et mises à jour réelles restent actives. La navigation partage raster/obstacles/maillage et passages contrôlés, et invalide sur géométrie effective plutôt que style/ID du tracé. Aucun coût ou règle de jeu changé. Server-Timing sépare transaction et projection de réponse. [Mesures et portée de preuve](CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md), validation interactive en cours.
 
 ---

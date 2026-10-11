@@ -7,6 +7,7 @@ export * from './terrain.js';
 export * from './science.js';
 export * from './exploitation.js';
 export * from './infrastructure.js';
+export * from './infrastructure-confirmation.js';
 export * from './building-access.js';
 export * from './automatic-braziers.js';
 export * from './path-obstacles.js';

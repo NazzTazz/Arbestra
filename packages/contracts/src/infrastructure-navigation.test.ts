@@ -193,3 +193,28 @@ it('reuses fine passages for an identical repaint and invalidates changed naviga
  sample.mockClear();s.world.id='effective-road-navigation-other-world';
  expect(buildTravelNetwork(s,[],ground)).toEqual(wider);expect(sample).toHaveBeenCalled();
 });
+
+
+it('keeps exact passage keys across four orientations, rectangular seams and continuous doors',()=>{
+ for(const [seam,anchor,target]of [['x',[511,40],[2,40]],['y',[200,255],[200,2]],['corner',[511,255],[2,2]]] as const)for(const quarterTurns of [0,1,2,3] as const){
+  const s=state();s.world={...s.world,id:'numeric-passages-'+seam+'-'+quarterTurns,widthCells:512,heightCells:256};
+  s.village={...s.village,anchorCellX:anchor[0],anchorCellY:anchor[1],townHallBuildingId:'hall'};
+  s.region={...s.region,originCellX:(anchor[0]-32+512)%512,originCellY:(anchor[1]-32+256)%256};
+  s.cells=[{cellX:anchor[0],cellY:anchor[1],building:{id:'hall',type:'town-hall',quarterTurns},footprint:{buildingId:'hall',state:'active'}},{cellX:target[0],cellY:target[1],building:{id:'target',type:'dwelling',quarterTurns},footprint:{buildingId:'target',state:'active'}}] as VillageState['cells'];
+  s.infrastructure!.roads=[{...road([{x:anchor[0]*8,y:anchor[1]*8},{x:target[0]*8,y:anchor[1]*8},{x:target[0]*8,y:target[1]*8}]),material:'earth'}];
+  const sample=vi.fn(()=>({elevation:1,dry:true,blocked:false})),ground={width:512,height:256,revision:'rectangular-dry',sample};
+  const cold=buildTravelNetwork(s,[],ground);expect(cold).toHaveLength(1);expect(cold[0]!.cells[0]).toEqual(buildingAccesses(s,'hall')[0]!.position);expect(cold[0]!.cells.at(-1)).toEqual(buildingAccesses(s,'target')[0]!.position);
+  sample.mockClear();expect(buildTravelNetwork(s,[],ground)).toEqual(cold);expect(sample).not.toHaveBeenCalled();
+  const fresh={...s,world:{...s.world,id:s.world.id+'-uncached'}};expect(buildTravelNetwork(fresh,[],ground)).toEqual(cold);
+  sample.mockImplementation(()=>({elevation:1,dry:false,blocked:true}));sample.mockClear();expect(buildTravelNetwork(s,[],{...ground,revision:'rectangular-blocked'})).toEqual([]);expect(sample).toHaveBeenCalled();
+ }
+ // These close continuous thresholds share an outside lattice node, but have
+ // different terrain decisions. Their cache keys must never be rounded together.
+ const continuous=state();continuous.world.id='numeric-passages-continuous';
+ continuous.cells[0]!.building!.accesses=[{id:'door',x:.36,y:0,dx:1,dy:0,width:.25,principal:true}];
+ const route:TravelRoute={id:'resource',kind:'stone',destination:{cellX:14,cellY:10},cells:[{cellX:10,cellY:10},{cellX:14,cellY:10}]};
+ const ground={width:64,height:64,revision:'same-continuous-field',sample:(x:number)=>({elevation:1,dry:Math.abs(x-10.37)>.00001,blocked:false})};
+ expect(refineTravelRoute(continuous,route,new Set(),undefined,ground)).not.toBeNull();
+ continuous.cells[0]!.building!.accesses[0]!.x=.37;
+ expect(refineTravelRoute(continuous,route,new Set(),undefined,ground)).toBeNull();
+});

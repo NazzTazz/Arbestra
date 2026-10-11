@@ -1,15 +1,16 @@
 import { randomUUID } from '../random-uuid';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,useId,type RefObject} from 'react';
-import {applyVillageFrame,prepareInfrastructureEdit,createInfrastructureEditContext,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
-import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageUpdate} from '../api/client';
+import {applyVillageFrame,applyInfrastructureConfirmation,prepareInfrastructureEdit,createInfrastructureEditContext,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
+import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageUpdate,type TimedInfrastructureConfirmation} from '../api/client';
 import type {TerrainHandle} from '../scene/VillageScene';
+import {villageRequestGeneration} from '../api/village-sync';
 import type {InfrastructureGesture} from '../scene/infrastructure-renderer';
 import {InfrastructureThumbnail} from './InfrastructureThumbnail';
 import {RoadVariantMenu} from './RoadVariantMenu';
 import './harvest-feedback.css';
 type Item={id:string;version:number;position:SubPoint;quarterTurns:number};
 const materials=[['none','Pas de route'],['earth','Terre'],['stone-1','Petite Pierre'],['stone-2','Grands Pavés']] as const;
-export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{state:VillageState;scene:RefObject<TerrainHandle|null>;active:boolean;onSnapshot:(s:TimedVillageUpdate)=>void;onWorkshop:()=>void}){
+export function InfrastructureTools({state,scene,active,onSnapshot,onConfirmation,onWorkshop}:{state:VillageState;scene:RefObject<TerrainHandle|null>;active:boolean;onSnapshot:(s:TimedVillageUpdate)=>void;onConfirmation:(s:TimedInfrastructureConfirmation)=>void;onWorkshop:()=>void}){
   const [family,setFamily]=useState('Voirie'),[material,setMaterial]=useState<RoadMaterial>('earth'),[width,setWidth]=useState(4),[border,setBorder]=useState(false),[invert,setInvert]=useState(false),[turn,setTurn]=useState(0);
   const [menu,setMenu]=useState<{code:'earth'|'stone-1'|'stone-2';anchor:HTMLButtonElement}|null>(null),menuId=useId();
   const remove=family==='Voirie'&&material==='none';
@@ -72,21 +73,34 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
       expected=shown.quote;
     }else if(next.kind!=='undo')try{expected=prepareInfrastructureEdit(c.state,next,'preview').quote;}catch(reason){setError((reason as Error).message);return;}
     const request=requestOverride??{commandId:randomUUID(),sessionId:session.current,revision:current.revision,operation:next,...(expected?{expected}:{})};
-    const sentGeneration=generation.current;
+    const sentGeneration=generation.current,sentRequestGeneration=villageRequestGeneration();
     setBusy(true);latest.current.busy=true;setError(null);try{sessionStorage.setItem(pendingKey,JSON.stringify(request));}catch{/* memory retains the identity */}
     try{const result=await commandInfrastructure(c.state.world.slug,c.state.village.id,request,c.state.syncRevision===undefined?undefined:{revision:c.state.syncRevision,serverTime:c.state.serverTime});
       // Inspect the accepted command against its exact transport base for undo history.
       // App remains the sole owner of HTTP/SSE reconciliation.
-      const applied='frame' in result?applyVillageFrame(c.state,result.frame):null;
-      const accepted='state' in result?result.state:applied?.kind==='applied'?applied.state:latest.current.state;
-      onSnapshot(result);clearPending();setUncertain(null);
+      if(result.requestGeneration!==undefined&&result.requestGeneration!==villageRequestGeneration()
+        ||latest.current.state.world.id!==c.state.world.id||latest.current.state.village.id!==c.state.village.id)return;
+      let acceptedRevision:number;
+      if('confirmation' in result){
+        if(result.confirmation.commandId!==request.commandId||result.confirmation.worldId!==c.state.world.id||result.confirmation.villageId!==c.state.village.id)throw Error('Confirmation Infrastructure incohérente.');
+        const applied=applyInfrastructureConfirmation(current,result.confirmation);
+        acceptedRevision=applied.kind==='applied'?applied.plan.revision:result.confirmation.toRevision;
+        onConfirmation(result);
+      }else{
+        const applied='frame' in result?applyVillageFrame(c.state,result.frame):null;
+        acceptedRevision=('state' in result?result.state:applied?.kind==='applied'?applied.state:latest.current.state).infrastructure?.revision??current.revision;
+        onSnapshot(result);
+      }
+      clearPending();setUncertain(null);
       if(sentGeneration===generation.current){
-        if(next.kind==='road'){if(accepted.infrastructure!.revision>current.revision)stack.current.push({id:request.commandId,anchor:next.stroke.points[0]!});setAnchor(next.stroke.points.at(-1)!);}
+        if(next.kind==='road'){if(acceptedRevision>request.revision&&!stack.current.some(entry=>entry.id===request.commandId))stack.current.push({id:request.commandId,anchor:next.stroke.points[0]!});setAnchor(next.stroke.points.at(-1)!);}
         if(next.kind==='undo'){const previous=stack.current.pop();setAnchor(previous?.anchor??null);}
         if(next.kind==='move'||next.kind==='delete'){setItem(null);setArmed(false);setPoint(null);}
       }
       setServerValid(true);
-    }catch(reason){setError(reason instanceof Error?reason.message:'Commande impossible.');
+    }catch(reason){
+      if(sentRequestGeneration!==villageRequestGeneration()||latest.current.state.world.id!==c.state.world.id||latest.current.state.village.id!==c.state.village.id)return;
+      setError(reason instanceof Error?reason.message:'Commande impossible.');
       if(!(reason instanceof ApiError)||reason.status>=500)setUncertain(request);
       else{clearPending();setUncertain(null);const fresh=await getVillage(c.state.world.slug,c.state.village.id).catch(()=>null);if(fresh)onSnapshot(fresh);}
     }finally{setBusy(false);latest.current.busy=false;}

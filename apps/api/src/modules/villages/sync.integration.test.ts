@@ -5,7 +5,7 @@ import type { Database } from '../../database/schema.js';
 import { readWorksites } from '../deposits/worksites.js';
 import { readExtraction, readExtractions } from '../deposits/stone-extractions.js';
 import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
-import { prepareInfrastructureEdit, buildingAccesses, type InfrastructureRequest } from '@arbestra/contracts';
+import { prepareInfrastructureEdit, buildingAccesses, applyInfrastructureConfirmation, type InfrastructureConfirmation, type InfrastructureRequest } from '@arbestra/contracts';
 import { constructBuilding, constructBuildingArea, withVillageProjection, readInfrastructureSpatialState, state } from './service.js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -385,7 +385,7 @@ it('road optimization: rolls back observed plan, debit, receipt and revision on 
  const base=await read(),before=await stored(db),r=await revision(),payload=roadPayload(base,67),injected=Error('road after observed finalization');let observed=false;
  await expect(db.transaction().execute(async tx=>{
   const inside={transaction:()=>({execute:<T>(run:(t:Transaction<Database>)=>Promise<T>)=>run(tx)})} as unknown as Kysely<Database>;
-  await infrastructureCommand(inside,accountId,slug,villageId,payload,'commit');
+  await infrastructureCommand(inside,accountId,slug,villageId,payload,'confirmation');
   expect((await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).executeTakeFirstOrThrow()).plan.revision).toBe(payload.revision+1);
   expect(await tx.selectFrom('infrastructureReceipts').selectAll().where('worldId','=',worldId).where('commandId','=',payload.commandId).execute()).toHaveLength(1);
   expect(Number((await tx.selectFrom('villageResources').select('amount').where('worldId','=',worldId).where('resourceCode','=','stone').executeTakeFirstOrThrow()).amount)).toBe(base.village.resources.find(r=>r.code==='stone')!.amount-payload.expected!.stoneDebit);
@@ -450,3 +450,33 @@ it('road optimization: shares footprints, doors, routes and prices with the full
  for(const unrelated of ['population_cohorts','extraction_worksites','market_exchanges','science_activities','building_type_levels'])expect(queries).not.toContain(unrelated);
  expect(await revision()).toBe(before);
 });
+
+
+it('road confirmation: confirms without projection, preserves economy, retries and undoes exactly',async()=>{
+ let armed=false,projections=0,fullReads=0,resourceWrites=0;
+ const plugin:KyselyPlugin={transformQuery(a){if(armed){const text=JSON.stringify(a.node);if(text.includes('set transaction read only'))projections++;if(text.includes('world_factory_settings'))fullReads++;if(a.node.kind==='UpdateQueryNode'&&text.includes('village_resources'))resourceWrites++;}return a.node;},async transformResult(a){return a.result;}};
+ const server=await buildApp(config,db.withPlugin(plugin));
+ const send=(payload:InfrastructureRequest)=>server.inject({method:'POST',url:'/api/worlds/'+slug+'/villages/'+villageId+'/infrastructure',cookies:{arbestra_session:token},headers:{'x-infrastructure-confirmation':'1'},payload});
+ try{
+  const base=await snapshot(server),stream=new VillageSyncSession(read,revision);await stream.check();const payload=roadPayload(base,73),started=performance.now();armed=true;
+  const response=await send(payload);expect(response.statusCode,response.body).toBe(200);const confirmation=response.json<InfrastructureConfirmation>();
+  expect(confirmation.kind).toBe('infrastructure-confirmation');expect(confirmation.commandId).toBe(payload.commandId);expect(confirmation.fromRevision).toBe(base.infrastructure!.revision);expect(confirmation.toRevision).toBe(base.infrastructure!.revision+1);
+  expect(projections).toBe(0);expect(fullReads).toBe(0);expect('syncRevision' in confirmation).toBe(false);expect('travelRoutes' in confirmation).toBe(false);
+  const accepted=applyInfrastructureConfirmation(base.infrastructure!,confirmation);expect(accepted.kind).toBe('applied');if(accepted.kind!=='applied')throw Error('No authoritative plan');
+  expect((await db.selectFrom('buildings').select('status').where('id','=',houseId).executeTakeFirstOrThrow()).status).toBe('completed');
+  const paidStone=Number((await db.selectFrom('villageResources').select('amount').where('worldId','=',worldId).where('resourceCode','=','stone').executeTakeFirstOrThrow()).amount);expect(paidStone).toBe(base.village.resources.find(r=>r.code==='stone')!.amount-payload.expected!.stoneDebit);
+  const retry=await send(payload);expect(retry.statusCode,retry.body).toBe(200);const retryConfirmation=retry.json<InfrastructureConfirmation>();expect({...retryConfirmation,changes:undefined}).toEqual({...confirmation,changes:undefined});expect(applyInfrastructureConfirmation(base.infrastructure!,retryConfirmation)).toEqual(accepted);expect(applyInfrastructureConfirmation(accepted.plan,retryConfirmation).kind).toBe('ignored');
+  const local={...base,infrastructure:accepted.plan},operation:InfrastructureRequest['operation']={kind:'road',stroke:{id:'free',points:[{x:64*8,y:74*8},{x:66*8,y:74*8}],width:4,material:'earth',border:false,operation:'paint'}};
+  const free:InfrastructureRequest={commandId:randomUUID(),sessionId:payload.sessionId,revision:accepted.plan.revision,operation,expected:prepareInfrastructureEdit(local,operation,'free').quote};expect(free.expected!.stoneDebit).toBe(0);expect(free.expected!.woodDebit).toBe(0);resourceWrites=0;
+  const freeResponse=await send(free);expect(freeResponse.statusCode,freeResponse.body).toBe(200);expect(resourceWrites).toBe(0);const next=applyInfrastructureConfirmation(accepted.plan,freeResponse.json());expect(next.kind).toBe('applied');if(next.kind!=='applied')throw Error('No free plan');
+  expect(applyInfrastructureConfirmation(next.plan,confirmation).kind).toBe('ignored');
+  const undoPayload:InfrastructureRequest={commandId:randomUUID(),sessionId:free.sessionId,revision:next.plan.revision,operation:{kind:'undo',target:free.commandId}};
+  const undo=await send(undoPayload);expect(undo.statusCode,undo.body).toBe(200);const restored=applyInfrastructureConfirmation(next.plan,undo.json());expect(restored.kind).toBe('applied');if(restored.kind!=='applied')throw Error('No undo plan');expect(restored.plan.roads).toEqual(accepted.plan.roads);
+  const undoRetry=await send(undoPayload);expect(undoRetry.statusCode,undoRetry.body).toBe(200);const retriedUndo=undoRetry.json<InfrastructureConfirmation>(),firstUndo=undo.json<InfrastructureConfirmation>();expect({...retriedUndo,changes:undefined}).toEqual({...firstUndo,changes:undefined});expect(applyInfrastructureConfirmation(next.plan,retriedUndo)).toEqual(restored);expect(projections).toBe(0);expect(fullReads).toBe(0);
+  armed=false;const event=await stream.check();expect(event.event).toBe('frame');if(event.event!=='frame')throw Error('No full convergence frame');const converged=applyVillageFrame(base,event.data);expect(converged.kind).toBe('applied');if(converged.kind!=='applied')throw Error('No converged state');expect(converged.state.infrastructure).toEqual(restored.plan);expect(converged.state.village.resources.find(r=>r.code==='stone')!.amount).toBe(paidStone);
+  const staleId=await send({...payload,revision:payload.revision+1});expect(staleId.statusCode).toBe(409);expect(staleId.json().code).toBe('COMMAND_REUSED');
+  const lightingOperation:InfrastructureRequest['operation']={kind:'lighting',cell:'64:76'},lighting:InfrastructureRequest={commandId:randomUUID(),sessionId:payload.sessionId,revision:restored.plan.revision,operation:lightingOperation,expected:prepareInfrastructureEdit(converged.state,lightingOperation,'lighting').quote};
+  const fallback=await send(lighting);expect(fallback.statusCode,fallback.body).toBe(200);expect(['snapshot','frame']).toContain(fallback.json<VillageCommandResponse>().kind);
+  console.info('ROAD_CONFIRMATION',{responseBytes:Buffer.byteLength(response.body),serverTiming:response.headers['server-timing'],testMs:Math.round(performance.now()-started)});
+ }finally{await server.close();}
+},60000);
