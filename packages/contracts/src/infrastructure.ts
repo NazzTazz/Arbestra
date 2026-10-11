@@ -153,11 +153,16 @@ export function infrastructureBorders(surface:ReadonlyMap<string,RoadPixel>,worl
 }
 /** Two subdivisions per side, united at corners without covering the roadway. */
 export function infrastructureSidewalkSurface(surface:ReadonlyMap<string,RoadPixel>,world:{widthCells:number;heightCells:number}):Map<string,{x:number;y:number}>{
-  const pixels=new Map<string,{x:number;y:number}>();
-  for(const edge of infrastructureBorders(surface,world).values())for(let step=1;step<=4;step++)for(let along=-3;along<=3;along++){
+  const pixels=new Map<string,{x:number;y:number}>(),corners=new Map<string,{x:number;y:number;axes:number}>();
+  for(const edge of infrastructureBorders(surface,world).values())for(let step=1;step<=4;step++)for(let along=-4;along<=4;along++){
     const x=wrapCoordinate(edge.x+edge.dx*step+edge.dy*along,world.widthCells*16),y=wrapCoordinate(edge.y+edge.dy*step+edge.dx*along,world.heightCells*16),key=pixelKey(x,y);
-    if(!surface.get(key)?.manual)pixels.set(key,{x,y});
+    if(surface.get(key)?.manual)continue;
+    if(Math.abs(along)<=3)pixels.set(key,{x,y});
+    const corner=corners.get(key)??{x,y,axes:0};corner.axes|=edge.dy?1:2;corners.set(key,corner);
   }
+  // Complete the fourth diagonal pixel only where perpendicular sidewalks meet.
+  // Straight end caps retain their existing extent; never cover the roadway.
+  for(const [key,p]of corners)if(p.axes===3)pixels.set(key,{x:p.x,y:p.y});
   return pixels;
 }
 /** Sidewalks are traversable everywhere; legacy border plans create no barriers. */

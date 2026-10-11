@@ -1,3 +1,11 @@
+# Raccord diagonal des trottoirs — 11 octobre 2026
+
+Base 5a0446230f07abc451989761f357c5639c5f9aa3. Capture utilisateur : onglet interrompu puis bande/décroché au coin. Reproduction géométrique isolée en L : la quatrième cellule diagonale manque au champ de trottoir, et les candidats d'orientation s'arrêtent une cellule trop tôt. Régression rouge avant correction sur la cellule 199:152.
+
+infrastructureSidewalkSurface() complète maintenant les cellules partagées par deux rives perpendiculaires sur toute leur largeur de 4 seizièmes ; extrémités droites inchangées et chaussée exclue. sidewalkPaving() utilise les candidats d'orientation sur la même largeur, pour prolonger l'onglet sans bande résiduelle. Tarifs inchangés : ils reposent sur infrastructureBorders(), pas sur les pixels ajoutés au coin. Aucun plan ou terrain utilisateur modifié. Contrôle ciblé : continuité des deux moitiés de l'onglet sur quatre rotations, plus orientation/coupes/coutures existantes. Build contrats terminé vert et deux tests géométriques ciblés terminés verts (dont continuité sur quatre rotations, après rouge avant correction). API de démo 3102 relancée en session 75155, remplace session 71875/PID 34552 ; frontend HMR 5278 conservé. Pas de navigateur agent ; validation visuelle par Tristan sur 5278. Préserver la fixture parente et les services utilisateurs ci-dessous.
+
+---
+
 # Comparaison des rues en Pierre 1 — 11 octobre 2026
 
 Base 4c94867dd4d65fc104ba056f8bac82baac3b6d8a. Tristan demande la visualisation des rues en Pierre 1. AUTOMATIC_ROAD_STYLE utilise maintenant stone-1, partagé par rendu et nouvelles captures d'édition. Largeur 4 subdivisions, trottoirs Pierre 1 allongés ×4, marche et onglets conservés. Le test existant est adapté au matériau courant ; aucun test supplémentaire lancé pour cette retouche de profil. Compilation contrats terminée verte. Démo 5278 HMR conservée ; API 3102 relancée, session 71875 (remplace session 40671/PID 49208), fixture parente toujours préservée. Validation visuelle par Tristan. Le remplacement des pavés géométriques par surfaces texturées reste une piste différée, pas une demande d'implémentation. Aucun navigateur agent ni changement de données utilisateur. Services et protections de fixture ci-dessous.

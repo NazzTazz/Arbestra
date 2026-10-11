@@ -17,3 +17,19 @@ it('aligns Pierre 1 modules with sidewalks and cuts perpendicular joins at 45 de
   expect(JSON.stringify([...surface])).toBe(before);
  }
 });
+
+it('keeps the full diagonal through the last pixel of a corner without a stepped strip',()=>{
+ const world={widthCells:512,heightCells:256};
+ const contains=(polygon:readonly {x:number;y:number}[],x:number,y:number)=>polygon.every((a,i)=>{const b=polygon[(i+1)%polygon.length]!;return (b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x)>=-1e-7;});
+ for(let turn=0;turn<4;turn++){
+  const rotate=(x:number,y:number)=>{for(let i=0;i<turn;i++)[x,y]=[192-(y-160),160+(x-192)];return {x,y};};
+  const points=[{x:80,y:80},{x:96,y:80},{x:96,y:96}].map(p=>{const r=rotate(p.x*2,p.y*2);return {x:r.x/2,y:r.y/2};});
+  const surface=infrastructureSurface([{id:'L',points,width:4,material:'stone-1',border:true,operation:'paint'}],world),sidewalks=infrastructureSidewalkSurface(surface,world);
+  const missing=rotate(199.5,152.5);expect(sidewalks.has(Math.floor(missing.x)+':'+Math.floor(missing.y))).toBe(true);
+  const stones=sidewalkPaving(surface,sidewalks,world);
+  for(const t of [.5,1.5,2.5,3.5])for(const [axis,offset]of [['x',.15],['y',-.15]] as const){
+   const p=rotate(196+t,156-t+offset),expectedAxis=turn%2?(axis==='x'?'y':'x'):axis;
+   expect(stones.some(s=>s.axis===expectedAxis&&contains(s.polygon,p.x,p.y))).toBe(true);
+  }
+ }
+});

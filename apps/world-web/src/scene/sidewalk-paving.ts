@@ -16,7 +16,7 @@ export function sidewalkPaving(surface:ReadonlyMap<string,RoadPixel>,sidewalks:R
  const w=world.widthCells*16,h=world.heightCells*16;
  type Side={wall:number;distance:number;score:number};
  const directions=new Map<string,{x?:Side;y?:Side}>();
- for(const edge of infrastructureBorders(surface,world).values())for(let step=1;step<=4;step++)for(let along=-3;along<=3;along++){
+ for(const edge of infrastructureBorders(surface,world).values())for(let step=1;step<=4;step++)for(let along=-4;along<=4;along++){
   const ux=edge.x+edge.dx*step+edge.dy*along,uy=edge.y+edge.dy*step+edge.dx*along;
   const x=wrapCoordinate(ux,w),y=wrapCoordinate(uy,h),key=x+':'+y;if(!sidewalks.has(key))continue;
   const axis=edge.dy?'x':'y',wall=axis==='x'?edge.y+(edge.dy>0?1:0)+y-uy:edge.x+(edge.dx>0?1:0)+x-ux;
