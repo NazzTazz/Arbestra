@@ -1,3 +1,9 @@
+# Comparaison des rues en Pierre 1 — 11 octobre 2026
+
+Base 4c94867dd4d65fc104ba056f8bac82baac3b6d8a. Tristan demande la visualisation des rues en Pierre 1. AUTOMATIC_ROAD_STYLE utilise maintenant stone-1, partagé par rendu et nouvelles captures d'édition. Largeur 4 subdivisions, trottoirs Pierre 1 allongés ×4, marche et onglets conservés. Le test existant est adapté au matériau courant ; aucun test supplémentaire lancé pour cette retouche de profil. Compilation contrats terminée verte. Démo 5278 HMR conservée ; API 3102 relancée, session 71875 (remplace session 40671/PID 49208), fixture parente toujours préservée. Validation visuelle par Tristan. Le remplacement des pavés géométriques par surfaces texturées reste une piste différée, pas une demande d'implémentation. Aucun navigateur agent ni changement de données utilisateur. Services et protections de fixture ci-dessous.
+
+---
+
 # Trottoirs pavés Pierre 1 et onglets — 11 octobre 2026
 
 Base 81abf5e417eed0cecf71d061341cb8b2ff6dded1. Tristan valide visuellement le rendu des routes et demande des trottoirs pavés Pierre 1, pierres alignées dans leur longueur et angles à 45°. Implémenté dans InfrastructureRenderer partagé par voies automatiques, voirie manuelle et atelier ; intégré par HMR à la démo 5278. Validation visuelle de cette retouche par Tristan, encore à valider ; pas de navigateur agent.

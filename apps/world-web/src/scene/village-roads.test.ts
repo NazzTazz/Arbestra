@@ -40,15 +40,15 @@ it('classifies shared building and resource edges without changing route kinds o
   expect(JSON.stringify(routes)).toBe(before);
 });
 
-it('renders every automatic branch as Pierre 2, four subdivisions wide, with the existing sidewalks',()=>{
+it('renders every automatic branch as Pierre 1, four subdivisions wide, with the existing sidewalks',()=>{
  const routes:TravelRoute[]=[{id:'wood',kind:'wood',cells:[{cellX:10,cellY:10},{cellX:11,cellY:10}],destination:{cellX:11,cellY:10}}],world={widthCells:512,heightCells:256};
  const before=JSON.stringify(routes),roads=automaticRoadStrokes(routes,world);
- expect(roads.every(r=>r.width===4&&r.material==='stone-2'&&r.border)).toBe(true);
+ expect(roads.every(r=>r.width===4&&r.material==='stone-1'&&r.border)).toBe(true);
  const surface=infrastructureSurface(roads,world);expect([...surface.values()].filter(p=>p.x===168)).toHaveLength(8); // 8 sixteenths = 4 subdivisions.
  const engine=new NullEngine(),scene=new Scene(engine),renderer=new VillageRoads(scene);
  try {renderer.update('first',routes,new WorldSpace(512,256,{cellX:10,cellY:10}),()=>({code:1,height:0}),true);
   const pavement=scene.meshes.find(m=>m.name==='village-road-paved')!,curbs=scene.meshes.find(m=>m.name==='village-road-curbs')!;
-  expect(pavement.material!.name).toBe('infrastructure-stone-2');expect(curbs.material!.name).toBe('infrastructure-border');
+  expect(pavement.material!.name).toBe('infrastructure-stone-1');expect(curbs.material!.name).toBe('infrastructure-border');
   const z=pavement.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...z)-Math.min(...z)).toBeCloseTo(1.25-.008);
   const edges=curbs.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...edges)-Math.min(...edges)).toBeGreaterThan(2.45);expect(Math.max(...edges)-Math.min(...edges)).toBeLessThanOrEqual(2.5);
   const roadY=pavement.getVerticesData('position')!.filter((_,i)=>i%3===1),curbY=curbs.getVerticesData('position')!.filter((_,i)=>i%3===1);
