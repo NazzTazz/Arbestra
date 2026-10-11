@@ -4,6 +4,7 @@ import { Ray } from '@babylonjs/core/Culling/ray';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { TimberThatch } from './timber-thatch';
 import { buildStonemason } from './stonemason-factory';
@@ -18,7 +19,7 @@ it('keeps both phases inside four cells and releases owned resources while prese
     constructor(width: number, height: number) { this.data = new Uint8ClampedArray(width * height * 4); }
   });
   const engine = new NullEngine(), scene = new Scene(engine), kit = new TimberThatch(scene);
-  const sharedMaterials = [...scene.materials];
+  const sharedMaterials = [...scene.materials], sharedTextures = [...scene.textures];
   try {
     const vertices: number[] = [];
     for (const phase of ['works', 'finished'] as const) for (let turn = 0; turn < 4; turn++) {
@@ -34,15 +35,30 @@ it('keeps both phases inside four cells and releases owned resources while prese
       expect(Boolean(tag)).toBe(phase === 'finished');
       if (tag) {
         tag.computeWorldMatrix(true);
-        const normal = Vector3.TransformNormal(new Vector3(0, 0, -1), tag.getWorldMatrix());
         const rear = Vector3.TransformNormal(new Vector3(0, 0, 1), root.computeWorldMatrix(true));
-        expect(Vector3.Dot(normal, rear)).toBeCloseTo(1);
-        expect(tag.position.z).toBeGreaterThan(1.85 + .28 / 2);
+        const normals = tag.getVerticesData('normal')!;
+        for (let i = 0; i < normals.length; i += 3) {
+          const normal = Vector3.TransformNormal(Vector3.FromArray(normals, i), tag.getWorldMatrix());
+          expect(Vector3.Dot(normal, rear)).toBeGreaterThanOrEqual(-1e-6);
+        }
         expect(tag.getBoundingInfo().boundingBox.minimumWorld.y).toBeGreaterThan(0);
         expect(tag.getBoundingInfo().boundingBox.maximumWorld.y).toBeLessThan(16 * .14);
-        expect(tag.getTotalVertices()).toBe(4);
-        expect(tag.material?.alpha).toBe(.9);
+        expect(tag.getTotalVertices()).toBeGreaterThan(4);
+        expect(new Set(tag.getVerticesData('position')!.filter((_, i) => i % 3 === 2)).size).toBeGreaterThan(1);
+        const paint = tag.material as StandardMaterial;
+        expect(paint.alpha).toBe(.9);
+        expect(paint.diffuseTexture?.coordinatesIndex).toBe(1);
+        expect(paint.ambientTexture).toBe(kit.stone.diffuseTexture);
+        expect(tag.getVerticesData('uv2')).toHaveLength(tag.getTotalVertices() * 2);
         expect(tag.isPickable).toBe(false);
+        if (turn === 0) {
+          const paintedAt = (x: number, y: number) => scene.pickWithRay(
+            new Ray(new Vector3(x, y, 2.1), new Vector3(0, 0, -1), .3), mesh => mesh === tag,
+          )?.hit;
+          expect(paintedAt(-1.75, .07)).toBe(true);
+          expect(paintedAt(-1.75, .14)).toBe(false); // Horizontal mortar joint stays open.
+          expect(paintedAt(-1.54, .07)).toBe(false); // Vertical joint between two stones.
+        }
       }
       expect(scene.particleSystems).toHaveLength(phase === 'finished' ? 1 : 0);
       expect(scene.lights).toHaveLength(phase === 'finished' ? 1 : 0);
@@ -75,6 +91,7 @@ it('keeps both phases inside four cells and releases owned resources while prese
       expect(scene.particleSystems).toHaveLength(0);
       expect(scene.lights).toHaveLength(0);
       expect(scene.materials).toEqual(sharedMaterials);
+      expect(scene.textures).toEqual(sharedTextures);
     }
     expect(vertices[4]).toBeGreaterThan(vertices[0]!);
   } finally { scene.dispose(); engine.dispose(); vi.unstubAllGlobals(); }

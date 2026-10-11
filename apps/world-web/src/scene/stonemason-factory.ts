@@ -1,5 +1,5 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder';
+import { CreateDecal } from '@babylonjs/core/Meshes/Builders/decalBuilder';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { CreateIcoSphereVertexData } from '@babylonjs/core/Meshes/Builders/icoSphereBuilder';
@@ -187,31 +187,55 @@ export function buildStonemason(root: Mesh, kit: TimberThatch, phase: 'finished'
     for (let i = 0; i < 4; i++) box('stonemason-construction-timber', [1.25, .09, .12], [.75, .07 + i * .09, -1.2], kit.wood);
   }
 
+  let masonry: Mesh | undefined;
   for (const [material, pieces] of batches) {
     const mesh = new Mesh(`stonemason-${material.name}`, kit.scene);
     BuildingGeometry.merge(pieces).applyToMesh(mesh); mesh.material = material;
     mesh.parent = root; mesh.isPickable = false; mesh.receiveShadows = true;
+    if (material === kit.stone) masonry = mesh;
   }
-  if (!works) {
-    // A painted tag on the outside of the rear wall; the root owns its rotation.
+  if (!works && masonry) {
+    // Project onto the actual stone faces: bevels and mortar gaps remain intact.
     const texture = new Texture('/decals/perlin-tag.png', kit.scene);
     texture.hasAlpha = true;
+    texture.coordinatesIndex = 1;
     texture.wrapU = texture.wrapV = Texture.CLAMP_ADDRESSMODE;
     const paint = new StandardMaterial('stonemason-perlin-paint', kit.scene);
     paint.diffuseTexture = texture;
+    paint.diffuseColor = kit.stone.diffuseColor.clone();
+    paint.ambientTexture = kit.stone.diffuseTexture; // Original UVs retain the limestone grain.
     paint.useAlphaFromDiffuseTexture = true;
     paint.alpha = .9;
     paint.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND;
     paint.specularColor = Color3.Black();
-    const tag = CreatePlane('stonemason-perlin-tag', { width: 3.9, height: 1.95 }, kit.scene);
-    tag.parent = root;
-    tag.position.set(0, .985, 2.002);
-    tag.rotation.y = Math.PI; // Plane front faces +Z, readable from outside.
+    const world = root.computeWorldMatrix(true);
+    masonry.computeWorldMatrix(true);
+    const tag = CreateDecal('stonemason-perlin-tag', masonry, {
+      position: Vector3.TransformCoordinates(new Vector3(0, .985, 1.99), world),
+      normal: Vector3.TransformNormal(new Vector3(0, 0, 1), world),
+      size: new Vector3(3.9, 1.95, .06),
+      captureUVS: true, cullBackFaces: true, localMode: true,
+    });
+    const positions = tag.getVerticesData('position')!, normals = tag.getVerticesData('normal')!;
+    const projected: number[] = [], colors: number[] = [];
+    for (let i = 0; i < positions.length; i += 3) {
+      projected.push(.5 - positions[i]! / 3.9, (positions[i + 1]! - .01) / 1.95);
+      const shade = .94 + Math.floor(positions[i + 1]! / courseHeight) % 3 * .02;
+      colors.push(shade, shade, shade, 1);
+      for (let axis = 0; axis < 3; axis++) positions[i + axis] = positions[i + axis]! + normals[i + axis]! * .001;
+    }
+    tag.setVerticesData('uv2', projected);
+    tag.setVerticesData('color', colors);
+    tag.setVerticesData('position', positions);
     tag.material = paint;
     tag.isPickable = false;
     tag.receiveShadows = true;
-    root.onDisposeObservable.addOnce(() => paint.dispose(false, true));
+    root.onDisposeObservable.addOnce(() => {
+      paint.ambientTexture = null; // The kit, not the tag, owns the shared grain.
+      paint.dispose(false, true);
+    });
   }
+
   if (!works && previewFires) {
     buildStonemasonFire(root,kit);
   }

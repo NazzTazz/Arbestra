@@ -1,3 +1,11 @@
+# Peinture Perlin sur les pierres — 11 octobre 2026
+
+Base 3f36de070035c8d76cabcb4bdd6499fc903f4156, main. À la demande de Tristan, le plan plat du tag est remplacé par CreateDecal sur les vraies faces du matériau pierre dans buildStonemason. Biseaux et joints sont conservés, grain partagé de la pierre avec ses UV d’origine ; dessin dans UV2, opacité .9 et cadre 3.9 × 1.95/base .01 conservés. Matrice source actualisée avant projection ; mesh local suit le bâtiment et ses quatre rotations. PNG inchangé. Matériau et texture du tag libérés sans détruire le grain partagé du kit. Même générateur pour village/cache LOD, factory et présentation.
+
+Preuves : ancienne surface plane reproduite rétrospectivement rouge (quatre sommets, sans relief). Unique test stonemason-factory terminé vert après correction : travaux/achevé × quatre orientations, normales/facettes, rayons sur pierre et dans joints horizontaux/verticaux, UV2, grain partagé et libération des ressources. Typecheck world-web terminé vert. Lint ciblé terminé vert. Pas de build complet, DB ni navigateur agent selon le mode interactif. Démo 5278 sert HTTP 200 la projection, le grain et la matrice corrigés ; recharger pour reconstruire les templates existants. Aspect final à vérifier par Tristan, pas déclaré validé produit. API et fixture utilisateur préservées. Commit/push main autorisés ; transcript utilisateur exclu.
+
+---
+
 # Tag Perlin derrière le tailleur de pierre — 11 octobre 2026
 
 Base 90a8ce31b2847f33c887d13e972bde527b198c09, main. Demande Tristan : intégrer le PNG transparent Perlin de Downloads en easter egg sur la face extérieure du mur du fond du tailleur. Implémenté dans buildStonemason, état achevé : un plan alpha de 3,9 × 1,95 unités, centre local (0,.985,2.002), base à .01 du sol, marge .01 sur chaque bord du mur et opacité .9 à la demande de Tristan, normale +Z opposée à l'ouverture -Z, enfant du root tourné existant. Même générateur utilisé en village/cache LOD, factory et présentation ; aucune entité métier ajoutée. Matériau éclairé sans reflet, PNG transparent clampé, ressources libérées avec la source de modèle. Le picking village reste celui du bâtiment existant.
