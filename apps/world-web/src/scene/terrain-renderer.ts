@@ -30,7 +30,7 @@ export class TerrainRenderer {
     this.#infrastructure=infrastructurePlanSurface(plan,{widthCells:this.space.width,heightCells:this.space.height});
     for(const p of [...this.#infrastructure.values()])this.#infrastructure.set(`cell:${Math.floor((p.x+8)/16)%this.space.width}:${Math.floor((p.y+8)/16)%this.space.height}`,p);
     this.#roadSignature='';
-    for(const key of this.#visible){const chunk=this.store.chunk(key);if(chunk)this.#queue(key,chunk);}
+    for(const key of this.#visible){const chunk=this.store.chunk(key);if(chunk&&!chunk.rc1)this.#queue(key,chunk);}
   }
   setRoads(routes: readonly TravelRoute[]): void {
     const next = pavedProfiles(routes, this.space.width, this.space.height);
@@ -39,7 +39,7 @@ export class TerrainRenderer {
     this.#roadSignature = signature; this.#roads = next;
     for (const key of this.#visible) {
       const chunk = this.store.chunk(key);
-      if (chunk) this.#queue(key, chunk);
+      if (chunk && !chunk.rc1) this.#queue(key, chunk);
     }
   }
   #cost = new Map<string, number>();
@@ -132,7 +132,10 @@ export class TerrainRenderer {
         const [cellX, cellY] = key.split(':').map(Number);
         return inside({cellX:cellX!, cellY:cellY!});
       }));
-      add(`ground:${x}:${y}`, JSON.stringify([chunk.rc1?.terraces,this.#infrastructureRevision,[...roads].sort(([a], [b]) => a.localeCompare(b))]), true, inside(focus) ? -2 : 0, cx, cy,
+      // RC1 ground reads its immutable patch and terraces, never road decorations.
+      const groundSignature = JSON.stringify(chunk.rc1 ? [chunk.rc1.terraces]
+        : [null,this.#infrastructureRevision,[...roads].sort(([a], [b]) => a.localeCompare(b))]);
+      add(`ground:${x}:${y}`, groundSignature, true, inside(focus) ? -2 : 0, cx, cy,
         () => buildTerrainUnit(this.scene, chunk, x, y, this.space, this.groundMaterial, this.waterMaterial, roads,this.#infrastructure));
       add(`decor:${x}:${y}`, signature, false, 2, cx, cy, () => this.decor(chunk, x, y));
     }

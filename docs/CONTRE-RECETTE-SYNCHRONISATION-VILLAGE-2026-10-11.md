@@ -1,5 +1,33 @@
 # Synchronisation village — candidate et contre-recette
 
+## Clic → voie confirmée — 11 octobre, base cc43b9ca8857ab742da291a501291f57b08b08d1
+
+Tristan précise le délai après validation sur terre/gravats. Deux frontières vérifiées : TerrainRenderer invalidait toutes les unités sol visibles à chaque révision Infrastructure, même si buildRc1TerrainUnit ne consulte ni routes ni plan ; buildTravelNetwork invalidait son réseau sur des matériaux/IDs de strokes sans changement de géométrie. L’aperçu accéléré ne supprimait pas ces coûts de confirmation.
+
+Correction terrain minimale RC1 : setInfrastructure/setRoads ne réadmettent plus le sol RC1, et sa signature ignore ces décorations. Une lecture renouvelée du même chunk ne réintroduit pas l’invalidation. Les terrasses restent dans la signature ; le chemin historique non-RC1 est conservé. Le rendu de chaussée/trottoirs reste dans InfrastructureRenderer/VillageRoads, avec les mêmes hauteurs et matériaux.
+
+Navigation : signature sur raster manuel effectivement consulté, barrières et positions d’équipements, dimensions, champ fin, troncs, accès et occupations. Le raster, les obstacles et le maillage fin de base sont préparés une fois pour les destinations du réseau ; les portails propres à chaque destination sont séparés. Coarse et refinement partagent les contrôles de segments. Cache de booléens géométriques borné à 262 144 segments au total et quatre contextes LRU ; périmètre world.id/dimensions/TravelGround.revision. Une révision de champ doit changer pour toute modification de hauteur/eau/obstacles/troncs. RC1 relit et vérifie les données courantes avant de fournir cette identité. Aucun stock, permission, occupation ou snapshot économique n’est gardé dans ce cache. Une nouvelle géométrie de route continue à replanifier et à être validée côté serveur.
+
+Mesures comparatives terminées avant finition du raccourci de hit chaud ; ce dernier est vérifié séparément ci-dessous :
+
+| Frontière | Résultat observé et conditions |
+| --- | --- |
+| Terrain après route | Fixture RC1 pure 32 × 32, NullEngine : 64 → 0 unités remplacées, +64 → 0 changements de version et admissions ; CPU 66,9 → 1,0 ms. Révision seule 91,5 → 0,5 ms. Terrasse réelle : reconstruction toujours active, sommet 3,125 vérifié. Aucun temps GPU ou délai réseau déduit. |
+| Recalcul réel des chemins | Même snapshot Bressuire/ground en lecture seule, R40/26 routes/33 bâtiments. Nouvelle voie terre courte ajoutant 384 pixels : ancien 3 804 ms → nouveau 1 098 ms. Repaint de géométrie identique : 1 508 → 79 ms. Courant froid 3 399 → 3 122 ms ; premier calcul reste coûteux. 34 trajets/1 035 points et DTO complets strictement identiques dans les trois variantes. Terrain déjà amorcé par la lecture, ancienne version mesurée d’abord ; chargement initial 8 022 ms hors comparaison. Ajouts hypothétiques : aucune commande ni validation de terrain/pose/persistance sur le village utilisateur. |
+| Endpoint commande valide | Fixture UUID v1 plate 512 × 256, un seul test ciblé sans reset : chaude incrémentale 178 ms, transaction 98,1/projection postcommit 75,6 ms ; legacy chaud 173 ms. Premiers totaux 2 150/1 008 ms, largement hors spans transaction/projection ; ces spans excluent authentification, hooks, initialisation et sérialisation, sans attribution mesurée du reliquat. Ne représente pas une pose RC1 réelle. |
+
+Un raccourci borné relie la signature spatiale brute exacte à cette clé canonique : 16 alias, clé brute au plus 131 072 caractères et stockage brut+canonique au plus 2 097 152 caractères. Il ne contient ni raster ni état, et un hit exige que le résultat soit encore présent dans le cache réseau (8 réseaux/50 000 points). Il évite de rasteriser de nouveau une entrée identique ; une autre entrée passe toujours par la géométrie effective. La première version mesurée ci-dessus ajoutait 46–90 ms sur les hits identiques, détectés et corrigés avant intégration.
+
+Mesure pure du raccourci final, hors DB : fixture 512 × 256, 26 voies/53 248 pixels, un trajet/41 points ; trois hits chauds 0,825/1,206/1,099 ms (cc43b9c : 0,940/0,822/2,408 ms), DTO strictement égaux et zéro échantillon terrain. Cette preuve retire le coût de raster répété ; elle ne remesure pas les trois variantes Bressuire ni le clic complet.
+
+Server-Timing sur les réponses Infrastructure réussies distingue road_tx (transaction, incluant snapshot pour legacy) et road_sync (révision/projection postcommit pour réponse négociée). Authentification et sérialisation finale sont hors de ces spans. Corps HTTP, UUID, devis attendu, trames/reprises SSE et garanties transactionnelles inchangés. Le diff de transport nécessite encore une projection complète autoritaire après commit.
+
+Preuves ciblées : terrain rouge avant/vert après, identités/queue/version conservées et vraie terrasse reconstruite ; navigation repaint rouge avant, champ fin/révision/monde/largeur/équipement et DTO froid/chaud ; comparaison READ ONLY précédente ; endpoint de mesure avec assertions de durées terminé vert. Trois cas navigation terminés verts après le raccourci final (17 ignorés), un cas terrain vert (3 ignorés), un cas DB de mesure vert (22 ignorés). Build contrats/API, types client et lint ciblé verts. Pas de navigateur agent ou de campagne globale, conformément au mode interactif. Validation de la durée complète clic → affichage dans le navigateur encore à Tristan ; coûts froids et projection finale restent des limites.
+
+Contrôle de démo après relance finale API 3102 (session 10588/PID 51804) : health 200, parent fixture et frontend 5278 conservés. Lecture authentifiée 12 674 ms/200 490 octets/R3747/29 voies ; deux devis refusés pour équipement en 3 130 puis 747 ms/153 octets, HTTP 200. Reprise après redémarrage, données et charge différentes des mesures précédentes : aucun ratio de pose valide déduit. Aucun ordre envoyé sur Bressuire. Le premier chargement reste lent.
+
+---
+
 ## Réactivité Voirie — complément actuel du 11 octobre
 
 Base eb6c4506bedc5568eafe00c92bb9ff7cd18b931e. Implémenté/intégré ; validation interactive encore à Tristan. Les anciennes limites « assemblage complet avant validation Voirie » ci-dessous sont levées pour les routes et leur annulation sans équipement déplacé. Les autres opérations gardent leur contexte complet. La projection HTTP/SSE après commit reste complète et potentiellement coûteuse.

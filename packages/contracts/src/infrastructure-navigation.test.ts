@@ -3,6 +3,7 @@ import * as infrastructureModule from './infrastructure.js';
 import {emptyInfrastructure,infrastructurePlanSurface,infrastructureBorders,infrastructureBlockedPixels,infrastructureBarrierAt,prepareInfrastructureEdit,type RoadStroke} from './infrastructure.js';
 import {automaticBraziers} from './automatic-braziers.js';
 import {buildingAccesses} from './building-access.js';
+import * as buildingAccessModule from './building-access.js';
 import {refineTravelRoute,travelDuration,buildTravelNetwork,coarseTravelPath,type TravelRoute} from './travel-paths.js';
 import {pathIntersectsBox} from './path-obstacles.js';
 import type {VillageState} from './villages.js';
@@ -37,11 +38,11 @@ describe('infrastructure spatial guarantees',()=>{
       const routes=buildTravelNetwork(s);expect(routes.length).toBeGreaterThan(0);
       surface.mockClear();s.region.features.reverse();s.cells.reverse();
       expect(buildTravelNetwork(s)).toEqual(routes.map(route=>({...route,destination:{cellX:route.destination.cellX,cellY:route.destination.cellY}})));
-      expect(surface).not.toHaveBeenCalled();
+      expect(surface).not.toHaveBeenCalled();surface.mockClear();
       s.region.features[0]!.deposit!.remainingAmount=17;
       s.region.features[0]!.deposit!.reservedAmount=3;
       s.region.features[0]!.deposit!.revision=42;
-      buildTravelNetwork(s);expect(surface).not.toHaveBeenCalled();
+      buildTravelNetwork(s);expect(surface).not.toHaveBeenCalled();surface.mockClear();
       s.infrastructure!.roads.push(road([{x:80,y:80},{x:112,y:80}]));
       buildTravelNetwork(s);expect(surface).toHaveBeenCalled();
     } finally {surface.mockRestore();}
@@ -159,4 +160,36 @@ it('returns only geometric destinations identically before and after warming the
  s.cells.push({cellX:14,cellY:10,building:{id:'target',type:'dwelling',quarterTurns:0},footprint:{buildingId:'target',state:'active'}} as VillageState['cells'][number]);
  const cold=buildTravelNetwork(s),warm=buildTravelNetwork(s);expect(cold.length).toBeGreaterThan(0);
  expect(cold).toEqual(warm);for(const route of cold)expect(Object.keys(route.destination).sort()).toEqual(['cellX','cellY']);
+});
+
+
+it('reuses fine passages for an identical repaint and invalidates changed navigation geometry',()=>{
+ const s=state();s.world.id='effective-road-navigation';
+ s.region.features.push({id:'stone',type:'stone_outcrop',cellX:14,cellY:10,deposit:{state:'available',blocksCell:true}} as VillageState['region']['features'][number]);
+ const sample=vi.fn(()=>({elevation:1,dry:true,blocked:false}));
+ let ground={width:64,height:64,revision:'terrain-one',sample};
+ s.infrastructure!.roads=[{...road([{x:80,y:74},{x:112,y:74}],4),id:'earth',material:'earth'}];
+ const first=buildTravelNetwork(s,[],ground);expect(first).toHaveLength(1);expect(sample).toHaveBeenCalled();
+ sample.mockClear();
+ s.infrastructure!.roads.push({...s.infrastructure!.roads[0]!,id:'stone-repaint',material:'stone-1'});s.infrastructure!.revision++;
+ const surface=vi.spyOn(infrastructureModule,'infrastructurePlanSurface');
+ try{
+  expect(buildTravelNetwork(s,[],ground)).toEqual(first);expect(sample.mock.calls.length).toBe(0);expect(surface).toHaveBeenCalledTimes(1);
+  surface.mockClear();expect(buildTravelNetwork(s,[],ground)).toEqual(first);expect(surface).not.toHaveBeenCalled();
+ }finally{surface.mockRestore();}
+ sample.mockClear();
+ s.infrastructure!.roads.push({...s.infrastructure!.roads[0]!,id:'wider',width:8});
+ const accesses=vi.spyOn(buildingAccessModule,'buildingAccesses');let wider:TravelRoute[];
+ try{wider=buildTravelNetwork(s,[],ground);expect(accesses.mock.calls.length).toBeGreaterThan(1);}finally{accesses.mockRestore();}
+ // A fresh scope is an uncached witness using the exact same path rules.
+ const uncached={...s,world:{...s.world,id:'effective-road-navigation-wider-oracle'}};
+ expect(wider).toEqual(buildTravelNetwork(uncached,[],ground));
+ s.infrastructure!.equipment.push({id:'blocks-door',x:80,y:74,quarterTurns:0,version:1});
+ expect(buildTravelNetwork(s,[],ground)).toEqual([]);
+ s.infrastructure!.equipment=[];sample.mockClear();ground={...ground,revision:'terrain-two'};
+ sample.mockImplementation(()=>({elevation:1,dry:false,blocked:false}));
+ expect(buildTravelNetwork(s,[],ground)).toEqual([]);expect(sample.mock.calls.length).toBeGreaterThan(0);
+ sample.mockImplementation(()=>({elevation:1,dry:true,blocked:false}));
+ sample.mockClear();s.world.id='effective-road-navigation-other-world';
+ expect(buildTravelNetwork(s,[],ground)).toEqual(wider);expect(sample).toHaveBeenCalled();
 });

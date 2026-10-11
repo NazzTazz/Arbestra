@@ -401,7 +401,9 @@ it('road optimization: measures valid legacy and incremental commands on the sam
   expect(preview.valid,preview.message??'').toBe(true);const previewMs=Math.round(performance.now()-previewStart),started=performance.now();
   const response=await app.inject({method:'POST',url:'/api/worlds/'+slug+'/villages/'+villageId+'/infrastructure',cookies:{arbestra_session:token},...(incremental?{headers:headers(base)}:{}),payload});
   expect(response.statusCode,response.body).toBe(200);const data=response.json<VillageState|VillageCommandResponse>(),mode='kind' in data?data.kind:'legacy';if(incremental)expect(mode).toBe('frame');
-  results.push({mode,previewMs,totalMs:Math.round(performance.now()-started),responseBytes:Buffer.byteLength(response.body),baseBytes:Buffer.byteLength(JSON.stringify(base))});
+  const serverTiming=String(response.headers['server-timing']??'');expect(serverTiming).toMatch(/^road_tx;dur=\d+\.\d, road_sync;dur=\d+\.\d$/);
+  const timing=serverTiming.match(/^road_tx;dur=(\d+\.\d), road_sync;dur=(\d+\.\d)$/)!;
+  results.push({mode,previewMs,totalMs:Math.round(performance.now()-started),transactionMs:Number(timing[1]),projectionMs:Number(timing[2]),responseBytes:Buffer.byteLength(response.body),baseBytes:Buffer.byteLength(JSON.stringify(base))});
  }
  writeFileSync('test-results/road-command-measures.json',JSON.stringify({world:'isolated v1 flat 512x256, no reset',results},null,2));console.info('ROAD_COMMAND_PROFILE',results);
 });

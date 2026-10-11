@@ -115,11 +115,13 @@ export async function registerVillageRoutes(
   });
   for(const preview of [true,false])app.post(`/api/worlds/:worldSlug/villages/:villageId/infrastructure${preview?'/preview':''}`,{
     schema:{params:VillageParametersSchema,body:InfrastructureRequestSchema,...(!preview?{headers:VillageSyncHeadersSchema}:{}),response:{200:preview?InfrastructurePreviewSchema:VillageMutationResponseSchema}},
-  },async request=>{const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+  },async (request,reply)=>{const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
     if(preview)return infrastructurePreview(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest);
-    const options=villageReplyOptions(request.headers);
+    const options=villageReplyOptions(request.headers),started=performance.now();
     const result=await infrastructureCommand(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest,options.replyMode);
-    return commandResponse(account.id,worldSlug,result,options.base);});
+    const committed=performance.now(),response=await commandResponse(account.id,worldSlug,result,options.base);
+    reply.header('server-timing',`road_tx;dur=${(committed-started).toFixed(1)}, road_sync;dur=${(performance.now()-committed).toFixed(1)}`);
+    return response;});
   for (const preview of [true, false]) app.post(`/api/worlds/:worldSlug/villages/:villageId/exploitation${preview ? '/preview' : ''}`, {
     schema: { params: VillageParametersSchema, body: ExploitationRequestSchema, response: { 200: preview ? ExploitationPreviewSchema : VillageStateSchema } },
   }, async request => {
