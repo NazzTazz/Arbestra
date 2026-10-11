@@ -6,7 +6,7 @@ import {coarseTravelPath} from './travel-paths.js';
 export const SUBDIVISIONS = 8;
 export const MATERIAL_UNITS = 256;
 export const SubPointSchema = Type.Object({ x: Type.Integer({minimum:0}), y: Type.Integer({minimum:0}) });
-export const RoadMaterialSchema = Type.Union(['none','earth','stone-1','stone-2'].map(value=>Type.Literal(value)));
+export const RoadMaterialSchema = Type.Union(['none','earth','rubble','stone-1','stone-2'].map(value=>Type.Literal(value)));
 export type RoadMaterial = Static<typeof RoadMaterialSchema>;
 export type SubPoint = Static<typeof SubPointSchema>;
 export const RoadStrokeSchema = Type.Object({

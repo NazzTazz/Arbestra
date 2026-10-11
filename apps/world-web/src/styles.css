@@ -606,3 +606,15 @@ button { font: inherit; }
 .market-panel label { display:grid; gap:.3rem; }
 .market-panel input,.market-panel select { width:100%; min-height:2rem; }
 .market-panel ul { margin:0; padding-left:1.25rem; }
+
+/* Road variants extend the showroom's opacity gradient above their material. */
+.road-variant-menu { position:fixed; z-index:37; display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:10px; box-sizing:border-box; border-radius:8px 8px 0 0; background-image:linear-gradient(to right,rgb(255 255 255 / 15%),rgb(255 255 255 / 0%)); background-repeat:no-repeat; backdrop-filter:blur(2px); color:#f5f8ff; text-shadow:0 1px 3px #071528; }
+.road-variant-menu button { display:grid; gap:6px; justify-items:center; padding:12px 6px; border:1px solid #ffffff24; border-radius:4px; background:#0a16302e; color:inherit; cursor:pointer; text-shadow:inherit; }
+.road-variant-menu button:hover, .road-variant-menu button[aria-pressed=true] { background:#ffffff20; border-color:#b7d6ff; }
+.road-variant-menu button:focus-visible { outline:2px solid #b7d6ff; outline-offset:1px; }
+.road-variant-menu small { font-size:.75rem; }
+.road-variant-menu .building-thumbnail { width:100%; height:65px; background:none; }
+.construction-categories .road-elbow-toggle { margin-left:auto; display:flex; align-items:center; gap:6px; }
+.road-elbow-toggle kbd { font:inherit; font-size:.7rem; opacity:.75; }
+
+.infrastructure-price span { visibility:hidden; }

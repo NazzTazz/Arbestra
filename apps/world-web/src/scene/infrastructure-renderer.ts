@@ -13,7 +13,7 @@ export class InfrastructureRenderer{
   #requestSignature='';
   #surfaceKey='';
   #surface:ReadonlyMap<string,RoadPixel>=new Map();
-  constructor(readonly scene:Scene){for(const [code,color]of Object.entries({earth:'#795b3d','stone-1':'#c5c6b8','stone-2':'#d4d3c4',border:'#c5c6b8',preview:'#95caff'})){
+  constructor(readonly scene:Scene){for(const [code,color]of Object.entries({earth:'#795b3d',rubble:'#b7b8b2','stone-1':'#c5c6b8','stone-2':'#d4d3c4',border:'#c5c6b8',preview:'#95caff'})){
     const m=new StandardMaterial(`infrastructure-${code}`,scene);m.diffuseColor=Color3.FromHexString(color);m.specularColor=Color3.Black();this.materials[code]=m;}}
   update(plan:InfrastructurePlan,space:WorldSpace,ground:(x:number,y:number)=>number|null,preview=false,terrainRevision=0,surfaceOverride?:ReadonlyMap<string,RoadPixel>,bordersOnly=false,accesses:readonly BuildingAccess[]=[],dimensions:{pavementHeight?:number;curbHeight?:number;followTerrain?:boolean}={}){
     const planKey=JSON.stringify([plan,space.width,space.height,surfaceOverride&&[...surfaceOverride]]);
@@ -57,7 +57,7 @@ export class InfrastructureRenderer{
     for(const p of surface.values())if(!bordersOnly&&p.manual&&(preview||p.material!=='none')){
       const x=(p.x+.5)/16,y=(p.y+.5)/16,h=sample(cell(x,space.width),cell(y,space.height));if(h===null)continue;
       const code=preview?'preview':p.material;
-      if(code==='earth'||preview){box(code,x,y,2.5/16,2.5/16,h+(code==='earth'?.015:.002),.025);continue;}
+      if(code==='earth'||code==='rubble'||preview){box(code,x,y,2.5/16,2.5/16,h+(preview?.04:.015),.025);continue;}
       const length=p.material==='stone-1'?6:8,depth=p.material==='stone-1'?2:4,row=Math.floor(p.y/depth),shift=(row%2)*length/2;
       const bx=Math.floor((p.x-shift)/length)*length+shift,by=row*depth,key=`${code}:${bx}:${by}`;if(seen.has(key))continue;seen.add(key);
       // Each contiguous run is clipped; cut pieces at the road's boundary keep the fixed module pitch.
@@ -76,7 +76,7 @@ export class InfrastructureRenderer{
       const code=preview?'preview':'border',positions:number[]=[],indices:number[]=[],normals:number[]=[],uvs:number[]=[];
       const point=(i:number,top:boolean)=>{const q=polygon[i]!,cx=q.x/16,cy=q.y/16,p=space.project({cellX:cx,cellY:cy});
         const height=dimensions.followTerrain?sample(cell(cx,space.width),cell(cy,space.height))??h:h;
-        return [p.x,height+.004+(top?curbHeight:0),p.z];};
+        return [p.x,height+.004+(top?curbHeight:0)+(preview?.04:0),p.z];};
       const face=(vertices:number[][],triangles:number[])=>{const offset=positions.length/3;positions.push(...vertices.flat());for(const v of vertices)uvs.push(stone.axis==='x'?v[0]!/3.75:v[2]!/3.75,stone.axis==='x'?v[2]!/.3125:v[0]!/.3125);indices.push(...triangles.map(i=>i+offset));};
       // Babylon uses left-handed winding: the visible stone top must have +Y normals.
       face(polygon.map((_,i)=>point(i,true)),Array.from({length:n-2},(_,i)=>[0,i+1,i+2]).flat());
@@ -87,7 +87,7 @@ export class InfrastructureRenderer{
     }
     for(const [code,pieces]of groups)for(let i=0;i<pieces.length;i+=1024){const mesh=new Mesh(`infrastructure-${code}`,this.scene);BuildingGeometry.merge(pieces.slice(i,i+1024)).applyToMesh(mesh);mesh.material=this.materials[code]??null;mesh.isPickable=false;this.#meshes.push(mesh);}
   }
-  setInvalid(invalid:boolean){this.materials.preview!.emissiveColor=Color3.FromHexString(invalid?'#bd453b':'#244a73');this.materials.preview!.alpha=.5;}
+  setInvalid(invalid:boolean){this.materials.preview!.emissiveColor=Color3.FromHexString(invalid?'#bd453b':'#244a73');this.materials.preview!.alpha=.65;}
   visible(value:boolean){this.#meshes.forEach(m=>m.setEnabled(value));}
   get meshes(){return this.#meshes;}
   clear(){this.#meshes.forEach(m=>m.dispose(false,false));this.#meshes=[];this.#signature='';this.#requestSignature='';}

@@ -1,20 +1,25 @@
 import { randomUUID } from '../random-uuid';
-import {useEffect,useLayoutEffect,useMemo,useRef,useState,type RefObject} from 'react';
-import {prepareInfrastructureEdit,emptyInfrastructure,infrastructureSurface,wrappedDistance,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
+import {useEffect,useLayoutEffect,useMemo,useRef,useState,useId,type RefObject} from 'react';
+import {prepareInfrastructureEdit,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
 import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageState} from '../api/client';
 import type {TerrainHandle} from '../scene/VillageScene';
 import type {InfrastructureGesture} from '../scene/infrastructure-renderer';
 import {InfrastructureThumbnail} from './InfrastructureThumbnail';
+import {RoadVariantMenu} from './RoadVariantMenu';
+import './harvest-feedback.css';
 type Item={id:string;version:number;position:SubPoint;quarterTurns:number};
-const materials:Array<[RoadMaterial,string]>=[['none','Pas de route'],['earth','Terre'],['stone-1','Pierre 1'],['stone-2','Pierre 2']];
+const materials=[['none','Pas de route'],['earth','Terre'],['stone-1','Petite Pierre'],['stone-2','Grands Pavés']] as const;
 export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{state:VillageState;scene:RefObject<TerrainHandle|null>;active:boolean;onSnapshot:(s:TimedVillageState)=>void;onWorkshop:()=>void}){
-  const [family,setFamily]=useState('Voirie'),[material,setMaterial]=useState<RoadMaterial>('earth'),[width,setWidth]=useState(4),[border,setBorder]=useState(false),[remove,setRemove]=useState(false),[invert,setInvert]=useState(false),[turn,setTurn]=useState(0);
+  const [family,setFamily]=useState('Voirie'),[material,setMaterial]=useState<RoadMaterial>('earth'),[width,setWidth]=useState(4),[border,setBorder]=useState(false),[invert,setInvert]=useState(false),[turn,setTurn]=useState(0);
+  const [menu,setMenu]=useState<{code:'earth'|'stone-1'|'stone-2';anchor:HTMLButtonElement}|null>(null),menuId=useId();
+  const remove=family==='Voirie'&&material==='none';
   const [anchor,setAnchor]=useState<SubPoint|null>(null),[point,setPoint]=useState<SubPoint|null>(null),[item,setItem]=useState<Item|null>(null),[armed,setArmed]=useState(false);
   const [busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[serverValid,setServerValid]=useState(true),[uncertain,setUncertain]=useState<InfrastructureRequest|null>(null);
-  const session=useRef<string>(randomUUID()),stack=useRef<Array<{id:string;anchor:SubPoint}>>([]),down=useRef<SubPoint|null>(null),latest=useRef({state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy});
+  const session=useRef<string>(randomUUID()),stack=useRef<Array<{id:string;anchor:SubPoint}>>([]),down=useRef<SubPoint|null>(null),latest=useRef({state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy,menu});
+  const price=useRef<HTMLSpanElement>(null);
   const generation=useRef(0),presented=useRef<{operation:string;revision:number;quote:InfrastructureQuote}|null>(null);
   const previewInFlight=useRef(false);
-  latest.current={state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy};
+  latest.current={state,family,material,width,border,remove,invert,turn,anchor,point,item,armed,busy,menu};
   const pendingKey=`arbestra:infrastructure:${state.world.id}:${state.village.id}`;
   useEffect(()=>{try{const value=JSON.parse(sessionStorage.getItem(pendingKey)??'null') as InfrastructureRequest|null;if(value?.commandId){setUncertain(value);session.current=value.sessionId;}}catch{/* corrupt local history cannot authorize an action */}},[pendingKey]);
   function operation(p:SubPoint|null,first=latest.current.anchor):InfrastructureOperation|null{
@@ -32,8 +37,13 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   },[state,stableOp]);
   const quote=prepared?.quote??null;
   const insufficient=Boolean(quote&&(quote.stoneDebit>(state.village.resources.find(r=>r.code==='stone')?.amount??0)||quote.woodDebit>state.village.wood));
-  const length=op?.kind==='road'?op.stroke.points.slice(1).reduce((n,p,i)=>n+(Math.abs(wrappedDistance(p.x,op.stroke.points[i]!.x,state.world.widthCells*8))+Math.abs(wrappedDistance(p.y,op.stroke.points[i]!.y,state.world.heightCells*8)))/8,0):0;
-  const area=useMemo(()=>stableOp?.kind==='road'?infrastructureSurface([{...stableOp.stroke,operation:'paint'}],state.world).size/256:0,[stableOp,state.world]);
+  useEffect(()=>{
+    if(!active)return;
+    // Move the label directly: pointer motion must not schedule extra React renders.
+    const move=(e:PointerEvent)=>{const node=price.current;if(!node)return;const canvas=e.target instanceof Element&&e.target.closest('.village-canvas');node.style.visibility=canvas?'visible':'hidden';if(canvas){node.style.left=e.clientX+'px';node.style.top=(e.clientY-38)+'px';}};
+    window.addEventListener('pointermove',move);
+    return ()=>window.removeEventListener('pointermove',move);
+  },[active]);
   const clearPending=()=>{try{sessionStorage.removeItem(pendingKey);}catch{/* a storage failure cannot turn a successful server response into uncertainty */}};
   useLayoutEffect(()=>{presented.current=active&&op&&quote?{operation:opKey,revision:plan.revision,quote}:null;});
   useEffect(()=>{scene.current?.infrastructurePreview(active?op:null,!serverValid||insufficient,prepared?.next);},[active,opKey,serverValid,insufficient,scene,prepared]);
@@ -77,7 +87,7 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   }
   const handler=useRef<(e:InfrastructureGesture)=>void>(()=>{});
   handler.current=e=>{
-    if(e.kind==='cancel'){generation.current++;stack.current=[];session.current=randomUUID();down.current=null;setAnchor(null);setItem(null);setPoint(null);setArmed(false);scene.current?.infrastructurePreview(null);return;}
+    if(e.kind==='cancel'){setMenu(null);generation.current++;stack.current=[];session.current=randomUUID();down.current=null;setAnchor(null);setItem(null);setPoint(null);setArmed(false);scene.current?.infrastructurePreview(null);return;}
     if(latest.current.busy||uncertain)return;const c=latest.current;
     if(e.kind==='hover'){setPoint(previous=>previous?.x===e.point?.x&&previous?.y===e.point?.y?previous:e.point);return;}
     if(e.kind==='down'){down.current=e.point;if(!c.anchor&&c.family!=='Éclairage'){setAnchor(e.point);setPoint(e.point);}return;}
@@ -99,28 +109,28 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
     let frame=0,stopped=false;
     const register=()=>{if(stopped)return;if(scene.current?.ready())scene.current.infrastructureTool(e=>handler.current(e));else frame=requestAnimationFrame(register);};register();
     const context=(e:MouseEvent)=>{if(active&&e.target instanceof Element&&e.target.closest('.village-canvas'))e.preventDefault();};
-    const key=(e:KeyboardEvent)=>{if(!active||e.target instanceof Element&&e.target.closest('input,select,textarea'))return;
-      if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();scene.current?.cancelGesture();handler.current({kind:'cancel',point:null});}
+    const key=(e:KeyboardEvent)=>{if(!active||e.target instanceof Element&&e.target.closest('input,select,textarea,[contenteditable="true"]'))return;
+      if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();if(latest.current.menu){latest.current.menu.anchor.focus();setMenu(null);return;}scene.current?.cancelGesture();handler.current({kind:'cancel',point:null});}
+      if(e.key.toLowerCase()==='a'&&!e.repeat&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&latest.current.family==='Voirie'){e.preventDefault();e.stopImmediatePropagation();setInvert(v=>!v);}
       if(e.key.toLowerCase()==='r'&&!e.repeat&&latest.current.family==='Éclairage'&&(latest.current.item||latest.current.armed)){e.preventDefault();setTurn(t=>(t+1)%4);}
     };window.addEventListener('contextmenu',context);window.addEventListener('keydown',key,true);
     return ()=>{stopped=true;cancelAnimationFrame(frame);scene.current?.infrastructureTool(null);window.removeEventListener('contextmenu',context);window.removeEventListener('keydown',key,true);};
   },[active,scene,state.world.id,state.village.id]);
-  function chooseFamily(value:string){handler.current({kind:'cancel',point:null});setFamily(value);setRemove(false);setError(null);setTurn(0);}
+  function chooseFamily(value:string){handler.current({kind:'cancel',point:null});setFamily(value);setError(null);setTurn(0);}
   return <>
-    <nav className="construction-categories" aria-label="Familles d’infrastructures">{['Voirie','Bordures','Éclairage'].map(f=><button key={f} aria-pressed={family===f} onClick={()=>chooseFamily(f)}>{f==='Bordures'?'Trottoirs':f}</button>)}</nav>
-    <section className="construction-showroom" aria-label={`Infrastructure · ${family}`}>
-      {family==='Voirie'?materials.map(([code,name])=><button className="showroom-model" key={code} aria-pressed={material===code&&!remove} onClick={()=>{setMaterial(code);setRemove(false);}}><strong>{name}</strong><InfrastructureThumbnail code={code}/><span className="resource-costs">{code.startsWith('stone')?'◆ 4 / case²':'Gratuit'}</span></button>):family==='Bordures'?<button className="showroom-model" onClick={()=>setBorder(b=>!b)} aria-pressed={border}><strong>{border?'Pierre':'Sans trottoir'}</strong><InfrastructureThumbnail code="border"/><span className="resource-costs">◆ 1 / case / côté</span></button>:<button className="showroom-model" aria-pressed={armed} onClick={()=>{setItem(null);setArmed(true);setTurn(0);}}><strong>Brasero</strong><InfrastructureThumbnail code="brazier"/><span className="resource-costs">◆ 2 · ▰ 1</span></button>}
+    <nav className="construction-categories" aria-label="Familles d’infrastructures">{['Voirie','Bordures','Éclairage'].map(f=><button key={f} aria-pressed={family===f} onClick={()=>chooseFamily(f)}>{f==='Bordures'?'Trottoirs':f}</button>)}{family==='Voirie'&&<button type="button" className="road-elbow-toggle" aria-label="Inverser le coude" aria-keyshortcuts="A" title="Inverser le coude (A)" aria-pressed={invert} onClick={()=>setInvert(v=>!v)}><svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path d={invert?'M4 19V5h16M16 1l4 4-4 4':'M4 19h16V5M16 9l4-4 4 4'} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg><kbd>A</kbd></button>}</nav>
+    <section className="construction-showroom infrastructure-showroom" aria-label={`Infrastructure · ${family}`}>
+      {family==='Voirie'?materials.map(([code,name])=><button type="button" className="showroom-model" key={code} aria-pressed={code==='earth'?material==='earth'||material==='rubble':material===code} aria-expanded={code==='none'?undefined:menu?.code===code} aria-controls={menu?.code===code?menuId:undefined} onClick={e=>{if(code==='none'){setMenu(null);setMaterial('none');setBorder(false);}else{const anchor=e.currentTarget;setMenu(current=>current?.code===code?null:{code,anchor});}}}><strong>{name}</strong><InfrastructureThumbnail code={code==='earth'&&material==='rubble'?'rubble':code}/><span className="resource-costs">{code==='none'?'Supprimer':code.startsWith('stone')?'◆ 4 / case²':'Gratuit'}</span></button>):family==='Bordures'?<button className="showroom-model" onClick={()=>setBorder(b=>!b)} aria-pressed={border}><strong>{border?'Pierre':'Sans trottoir'}</strong><InfrastructureThumbnail code="border"/><span className="resource-costs">◆ 1 / case / côté</span></button>:<button className="showroom-model" aria-pressed={armed} onClick={()=>{setItem(null);setArmed(true);setTurn(0);}}><strong>Brasero</strong><InfrastructureThumbnail code="brazier"/><span className="resource-costs">◆ 2 · ▰ 1</span></button>}
       {import.meta.env.DEV&&state.factoryEnabled&&<button className="showroom-model workshop-launcher" onClick={onWorkshop}><strong>Créer un bâtiment</strong><InfrastructureThumbnail code="workshop"/><span className="resource-costs">Atelier Infrastructure</span></button>}
     </section>
-    <aside className="construction-feedback infrastructure-feedback" aria-label="Paramètres Infrastructure">
-      {family!=='Éclairage'?<><label>Largeur utile <input type="range" min="2" max="8" value={width} onChange={e=>setWidth(Number(e.target.value))}/>{width} / 8 case</label><label><input type="checkbox" checked={border} onChange={e=>setBorder(e.target.checked)}/> Trottoirs en pierre (¼ de case par côté)</label>
-        {family==='Voirie'&&<><button onClick={()=>setInvert(v=>!v)}>Inverser le coude</button><button aria-pressed={remove} onClick={()=>setRemove(v=>!v)}>Retirer une voie</button></>}</>:<><span>{item?'Objet saisi · clic droit : supprimer':armed?'Placement · R : tourner':'Cliquez un brasero pour l’éditer'}</span>
-        {point&&plan.manualLighting.includes(subCellKey(point,state.world))&&<button disabled={busy||Boolean(uncertain)||plan.equipment.some(e=>subCellKey(e,state.world)===subCellKey(point,state.world))} onClick={()=>void send({kind:'lighting',cell:subCellKey(point,state.world)})}>Rétablir l’éclairage automatique</button>}</>}
-      <small>Matière préparée : {(plan.stoneReserve/256).toLocaleString('fr-FR')} pierre</small>
-      {op?.kind==='road'&&<small>{length.toLocaleString('fr-FR')} cases de longueur · {area.toLocaleString('fr-FR')} case² · {width} / 8 case utile</small>}
-      {quote&&<span>{(quote.stoneUnits/256).toLocaleString('fr-FR')} pierre · débit ◆ {quote.stoneDebit}{quote.woodDebit?` · ▰ ${quote.woodDebit}`:''} · réserve {(quote.reserveAfter/256).toLocaleString('fr-FR')}</span>}
+    {active&&menu&&<RoadVariantMenu anchor={menu.anchor} id={menuId} label={menu.code==='earth'?'Textures de terre':menu.code==='stone-1'?'Variantes Petite Pierre':'Variantes Grands Pavés'} onClose={()=>setMenu(null)}>
+      {menu.code==='earth'?(['earth','rubble'] as const).map(code=><button type="button" key={code} aria-pressed={material===code} onClick={()=>{setMaterial(code);setWidth(4);setBorder(false);menu.anchor.focus();setMenu(null);}}><strong>{code==='earth'?'Terre battue':'Gravats'}</strong><InfrastructureThumbnail code={code}/><small>Gratuit</small></button>):([4,6] as const).flatMap(size=>[false,true].map(sidewalk=><button type="button" key={size+':'+sidewalk} aria-pressed={material===menu.code&&width===size&&border===sidewalk} onClick={()=>{setMaterial(menu.code);setWidth(size);setBorder(sidewalk);menu.anchor.focus();setMenu(null);}}><strong>{size} de large</strong><small>{sidewalk?'Avec trottoirs':'Sans trottoir'}</small></button>))}
+    </RoadVariantMenu>}
+    <div className="harvest-feedback infrastructure-price"><span ref={price} hidden={!active||op?.kind!=='road'||!quote} className="harvest-feedback--stone" title="Débit prévisionnel en pierres">{busy?'…':quote?'−'+quote.stoneDebit.toLocaleString('fr-FR'):''}</span></div>
+    {(error||uncertain||family==='Éclairage'&&(item||armed))&&<aside className="construction-feedback infrastructure-feedback" aria-label="Action Infrastructure">
+      {family==='Éclairage'&&point&&plan.manualLighting.includes(subCellKey(point,state.world))&&<button disabled={busy||Boolean(uncertain)||plan.equipment.some(e=>subCellKey(e,state.world)===subCellKey(point,state.world))} onClick={()=>void send({kind:'lighting',cell:subCellKey(point,state.world)})}>Rétablir l’éclairage automatique</button>}
       <span role="status">{busy?'Commande en cours…':error??(insufficient?'Ressources insuffisantes.':family==='Éclairage'?(item?'Clic pour déplacer · clic droit pour supprimer · Échap pour annuler':armed?'Clic pour placer · R pour tourner':'Choisissez un brasero dans le showroom ou sur la carte'):anchor?'Clic pour poursuivre · clic droit : annuler · Échap : terminer':'Choisissez votre point de départ')}</span>
       {uncertain&&<button disabled={busy} onClick={()=>void send(uncertain.operation,uncertain)}>Vérifier la même commande</button>}
-    </aside>
+    </aside>}
   </>;
 }

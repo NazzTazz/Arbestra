@@ -40,11 +40,15 @@ it('drapes confirmed and preview masonry onto continuous RC1 relief at every ver
  try {
   const plan=emptyInfrastructure();plan.roads=[{id:'road',operation:'paint',material:'earth',width:4,border:false,points:[{x:80,y:80},{x:96,y:80}]}];
   const space=new WorldSpace(512,256,{cellX:5,cellY:5}),height=(x:number,y:number)=>2+x*.1+y*.2;
-  for(const preview of [false,true]) {
-   renderer.update(plan,space,height,preview,1,undefined,false,[],{followTerrain:true});
+  for(const material of ['earth','rubble'] as const)for(const preview of [false,true]) {
+   plan.roads[0]!.material=material;
+   renderer.update(plan,space,height,preview,1,undefined,false,[],{followTerrain:true});renderer.setInvalid(false);
+   expect(renderer.materials.preview!.alpha).toBe(.65);
    for(const mesh of renderer.meshes){const p=mesh.getVerticesData('position')!;let min=Infinity,max=-Infinity;
     for(let i=0;i<p.length;i+=3){const c=space.inverse(p[i]!,p[i+2]!);const relative=p[i+1]!-height(c.cellX,c.cellY);min=Math.min(min,relative);max=Math.max(max,relative);}
-    expect(max).toBeCloseTo(.002,4);expect(min).toBeCloseTo(-.023,4);
+    expect(max).toBeCloseTo(preview?.04:.015,4);expect(min).toBeCloseTo(preview?.015:-.01,4);
+    expect(mesh.material?.name).toBe('infrastructure-'+(preview?'preview':material));
+    if(material==='rubble'&&!preview)expect(renderer.materials.rubble!.diffuseColor.toHexString().toLowerCase()).toBe('#b7b8b2');
    }
   }
  }finally{renderer.dispose();scene.dispose();engine.dispose();}
