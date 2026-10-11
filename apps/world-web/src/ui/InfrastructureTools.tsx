@@ -41,8 +41,9 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
     if(!active)return;
     // Move the label directly: pointer motion must not schedule extra React renders.
     const move=(e:PointerEvent)=>{const node=price.current;if(!node)return;const canvas=e.target instanceof Element&&e.target.closest('.village-canvas');node.style.visibility=canvas?'visible':'hidden';if(canvas){node.style.left=e.clientX+'px';node.style.top=(e.clientY-38)+'px';}};
-    window.addEventListener('pointermove',move);
-    return ()=>window.removeEventListener('pointermove',move);
+    // Canvas gestures stop propagation: observe the pointer before canvas capture.
+    window.addEventListener('pointermove',move,{capture:true});
+    return ()=>window.removeEventListener('pointermove',move,{capture:true});
   },[active]);
   const clearPending=()=>{try{sessionStorage.removeItem(pendingKey);}catch{/* a storage failure cannot turn a successful server response into uncertainty */}};
   useLayoutEffect(()=>{presented.current=active&&op&&quote?{operation:opKey,revision:plan.revision,quote}:null;});

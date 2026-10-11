@@ -40,6 +40,30 @@ export class InfrastructureRenderer{
     const signature=JSON.stringify([planKey,space.origin,space.version,preview,bordersOnly,accesses,dimensions,[...grounds]]);
     if(signature===this.#signature)return;
     this.#meshes.forEach(m=>m.dispose(false,false));this.#meshes=[];this.#signature=signature;
+    if(preview){
+      // A single welded top surface: no masonry joints, boxes or internal walls.
+      // Keep the raster union for exact width/corners; it only tessellates the relief.
+      const pixels=new Map<string,{x:number;y:number}>();
+      if(!bordersOnly)for(const [key,p] of surface)if(p.manual)pixels.set(key,p);
+      for(const [key,p] of sidewalks)pixels.set(key,p);
+      const positions:number[]=[],indices:number[]=[],vertices=new Map<string,number>();
+      const vertex=(x:number,y:number,fallback:number)=>{
+        const cx=((x/16)%space.width+space.width)%space.width,cy=((y/16)%space.height+space.height)%space.height,key=cx+':'+cy;
+        const prior=vertices.get(key);if(prior!==undefined)return prior;
+        const point=space.project({cellX:cx,cellY:cy}),height=sample(cell(cx,space.width),cell(cy,space.height))??fallback;
+        const id=positions.length/3;positions.push(point.x,height+.04,point.z);vertices.set(key,id);return id;
+      };
+      for(const p of pixels.values()){
+        const height=sample(cell((p.x+.5)/16,space.width),cell((p.y+.5)/16,space.height));if(height===null)continue;
+        const a=vertex(p.x,p.y,height),b=vertex(p.x+1,p.y,height),c=vertex(p.x+1,p.y+1,height),d=vertex(p.x,p.y+1,height);
+        indices.push(a,b,c,a,c,d);
+      }
+      if(indices.length){
+        const data=new VertexData(),normals:number[]=[];VertexData.ComputeNormals(positions,indices,normals);Object.assign(data,{positions,indices,normals});
+        const mesh=new Mesh('infrastructure-preview',this.scene);data.applyToMesh(mesh);mesh.material=this.materials.preview!;mesh.isPickable=false;this.#meshes.push(mesh);
+      }
+      return;
+    }
     const pavementHeight=dimensions.pavementHeight??.04,curbHeight=dimensions.curbHeight??.06;
     const groups=new Map<string,BuildingGeometry[]>(),seen=new Set<string>();
     const box=(code:string,x:number,y:number,width:number,depth:number,top:number,height=.028)=>{
