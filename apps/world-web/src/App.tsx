@@ -374,18 +374,27 @@ export function App({starter}:{starter?:StarterController} = {}) {
   }, [state?.world.id,state?.village.id,beforeTownHall,applySnapshot]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
+  const inspectedFeature=selectedFeatureId ? terrainRef.current?.naturalFeatures().find(f=>f.id===selectedFeatureId)
+    ?? state?.region.features.find(f=>f.id===selectedFeatureId) : undefined;
+  const depositUnmapped=inspectedFeature?.deposit===null;
   const loadDeposit = useCallback(async (featureId: string) => {
     if (!stateRef.current) return;
     const request = ++depositRequest.current;
     setDepositLoading(true);
     try {
       const details = await getStoneDepositDetails(worldSlug, stateRef.current.village.id, featureId);
+      if (request !== depositRequest.current) return;
       terrainRef.current?.acceptDeposit(details.deposit);
-      if (request === depositRequest.current) setDepositDetails(details);
+      setDepositDetails(details);
     } catch (reason) { if (request === depositRequest.current) setError(reason instanceof Error ? reason.message : 'Inspection impossible.'); }
     finally { if (request === depositRequest.current) setDepositLoading(false); }
   }, []);
-  useEffect(() => { if (selectedFeatureId) void loadDeposit(selectedFeatureId); }, [selectedFeatureId, loadDeposit]);
+  useEffect(() => {
+    // Public scenery may have no player-known deposit. Do not issue a request
+    // that the same authoritative knowledge policy will necessarily refuse.
+    depositRequest.current++; setDepositDetails(null); setDepositLoading(false);
+    if (selectedFeatureId && !depositUnmapped) void loadDeposit(selectedFeatureId);
+  }, [selectedFeatureId, depositUnmapped, loadDeposit]);
 
   const selectedSite = useMemo(() => state?.cells.find((cell) => cell.id === selectedSiteId) ?? null, [selectedSiteId, state]);
   const selectedBuilding = useMemo(() => selectedSite?.building ?? (selectedSite?.footprint ? state?.cells.find((cell) => cell.building?.id === selectedSite.footprint?.buildingId)?.building ?? null : null), [selectedSite, state]);
@@ -877,7 +886,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
         if (modeRef.current === 'construction') { useConstructionTarget(id, anchor, inspect); return; }
         if (modeRef.current !== 'exploration') { closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); if (modeRef.current === 'population') setShowPopulation(true); }
       }} onFeatureSelected={(id, anchor) => {
-        if (modeRef.current === 'exploitation') { closePanels(); setSelectedFeatureId(id); setMenuAnchor(anchor); }
+        if (modeRef.current === 'exploitation') { closePanels(); setError(null); setSelectedFeatureId(id); setMenuAnchor(anchor); }
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
     <WorldModeBar beforeTownHall={beforeTownHall} mode={worldMode} collapsed={paletteCollapsed} onChoose={mode=>chooseMode(mode,true)} />
     <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef}/>
@@ -926,7 +935,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
         void executeConstruction({kind:'upgrade',commandId:randomUUID(),worldSlug,villageId:state.village.id,buildingId:quote.buildingId,expectedCosts:quote.costs,expectedLevel:quote.nextLevel,success:'Amélioration de l’hôtel de ville lancée'});}}/>}
     {error&&selectedBuilding.type!=='town-hall'?<p className="error">{error}</p>:null}</WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && worldMode === 'construction' ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="population" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {}} onDiscover={() => {}} /></WorldContextMenu> : null}
-    {menuAnchor && selectedFeatureId && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} loading={depositLoading} pending={pendingAction} onPrepare={(family, woodMode) => {
+    {menuAnchor && selectedFeatureId && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><DepositPanel details={depositDetails} unmapped={depositUnmapped} loading={depositLoading} pending={pendingAction} onPrepare={(family, woodMode) => {
       closePanels(); harvest.setFilter(family); setExploitationSettings(current => ({ ...current, filter: family, ...(woodMode ? { woodMode } : {}) }));
       pushNotification(`Outil ${family === 'wood' ? woodMode === 'clear' ? 'Défrichage' : 'Bois' : 'Pierre'} prêt · glissez dans le monde.`);
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}

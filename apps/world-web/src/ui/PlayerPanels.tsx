@@ -41,8 +41,9 @@ export function BuildingPanel({ mode, building, definition, serverNow, pending, 
     {mode === 'construction' && upgradeCost !== undefined ? <button type="button" disabled={pending || building.status !== 'completed'} onClick={onUpgrade}>Améliorer — {upgradeCost} bois</button> : null}</div>;
 }
 
-export function DepositPanel({ details, loading, pending, onPrepare }: { details: DepositDetails | null; loading: boolean; pending: boolean;
+export function DepositPanel({ details, unmapped = false, loading, pending, onPrepare }: { details: DepositDetails | null; unmapped?: boolean; loading: boolean; pending: boolean;
   onPrepare: (family: 'wood' | 'stone', woodMode?: 'cut' | 'clear') => void }) {
+  if (unmapped) return <div className="building-details"><strong>Ressource non relevée</strong><p>Relevé géographique nécessaire.</p></div>;
   if (loading && !details) return <div className="building-details"><strong>Ressource naturelle</strong><p>Inspection…</p></div>;
   if (!details) return <div className="building-details"><strong>Ressource naturelle</strong><p>Détails indisponibles.</p></div>;
   const wood = details.deposit.resourceCode === 'wood';

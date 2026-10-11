@@ -1,3 +1,13 @@
+# Ressources RC1 visibles mais non relevées — 11 octobre 2026
+
+Base 5189a4e5d09a868fc5dff578ecf7bd27456f3a7e, main. Capture utilisateur : vraie roche RC1 sélectionnable avec « Détails indisponibles / Gisement inconnu ». Le diagnostic « décor régional » était incomplet. Lecture seule : gisement proche (258,227), géométrie publique mais centre juste hors connaissance initiale de Bressuire (ancre 250,195) ; route économique 404 DEPOSIT_NOT_FOUND. Les 32 gisements existent, les quatre dotations connues sont épuisées. Aucune règle de connaissance/portée modifiée. [Complément de contre-recette](docs/CONTRE-RECETTE-TERRAIN-RC1-2026-10-11.md#complément--roches-visibles-non-relevées).
+
+Implémenté/intégré/vérifié techniquement, à valider produit : App utilise les features streamées pour afficher une fiche « Ressource non relevée / Relevé géographique nécessaire. » sans stock/action, sans lancer l'inspection privée. Les anciens détails sont effacés et les retours retardés ignorés avant acceptation dans le store. Régression App/Babylon rouge sur l'ancien build puis verte (inconnu → connu → inconnu, 0/1 requêtes, sans stocks résiduels ni erreurs JS), capture inspectée ; 4 tests connexes, typecheck, build client et lint ciblé verts. Les erreurs initiales de fixture ne comptent pas comme rouge métier. Aucun reset/migration/ordre économique utilisateur.
+
+Démo 5278 : test-results/deposit-inspection-dist, main-agXVISZu ; frontend session 35986/PID 51600. API inchangée 3102/session 99447/PID 47620. Toujours préserver parent fixture 8212 et enfants 22268/44552, dont la fermeture nettoie le monde utilisateur. Les anciennes références du client ci-dessous sont remplacées. Transcript utilisateur hors commit ; candidate exacte au bilan Git. Les boxes rocheuses RC1 conservent leur géométrie approuvée ; elles ne sont pas les masses régionales supprimées.
+
+---
+
 # Terrain et relief RC1 corrigés — 11 octobre 2026
 
 Base relue : **5e23577f36f111c98b96f0ea7b3c7e83a33bd4ae**, `main`. Irritants de Bressuire traités ; **implémenté, intégré à la démo, vérifié techniquement, à valider produit**. [Contre-recette, mesures et limites](docs/CONTRE-RECETTE-TERRAIN-RC1-2026-10-11.md).
