@@ -12,11 +12,15 @@ import type {
   VillageState,
   ExtractionResponse,
   TravelCell,
+  TravelNetworkState,
+  TravelRoute,
+  InfrastructurePlan,
+  RoadStroke,
   StartExtractionWorksiteRequest,
   ChangeExtractionWorksiteRequest,
   ExtractionWorksiteSelection,
 } from '@arbestra/contracts';
-import { buildTravelNetwork, exploitationAdmissionCap,travelDuration,refineTravelRoute } from '@arbestra/contracts';
+import { buildTravelNetwork, exploitationAdmissionCap,travelDuration,refineTravelRoute,infrastructureSurface,subCellKey } from '@arbestra/contracts';
 import {readInfrastructure,readNavigationInfrastructure,factoryCapability,assertNoInfrastructure} from './infrastructure.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -430,19 +434,151 @@ export async function villageCommandResult<Mode extends ConstructionReplyMode>(t
 
 /** A coherent projection for transport, with no economic writes or locks. */
 export function withVillageProjection<T>(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
-  read: (tx: Transaction<Database>, economy: VillageEconomy) => Promise<T>) {
+  read: (tx: Transaction<Database>, economy: VillageEconomy, village: OwnedVillage) => Promise<T>) {
   return db.transaction().setIsolationLevel('repeatable read').execute(async tx => {
     await sql`set transaction read only`.execute(tx);
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const through = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
     await sql`select set_config('arbestra.economy_through', ${through.toISOString()}, true)`.execute(tx);
-    return read(tx, { worldId: village.worldId, villageId, through });
+    return read(tx, { worldId: village.worldId, villageId, through }, village);
   });
 }
 
 export function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
   return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
     state(tx, accountId, worldSlug, economy, false, true));
+}
+
+/** The same persisted footprints and garden components serve projection and road validation. */
+function readVillageOccupancies(tx: Transaction<Database>, village: OwnedVillage) {
+  return tx
+      .selectFrom('worldCellOccupancies')
+      .innerJoin('buildings', (join) =>
+        join
+          .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId')
+          .onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId'),
+      )
+      .select([
+        'worldCellOccupancies.cellX',
+        'worldCellOccupancies.cellY',
+        'worldCellOccupancies.role',
+        'worldCellOccupancies.pendingExpansionId',
+        'buildings.id as buildingId',
+        'buildings.buildingType',
+        'buildings.level',
+        'buildings.targetLevel',
+        'buildings.status',
+        'buildings.constructionStartedAt',
+        'buildings.constructionCompletesAt',
+        'buildings.completedAt',
+        'buildings.visualLayout',
+        'buildings.quarterTurns',
+      ])
+      .where('worldCellOccupancies.worldId', '=', village.worldId)
+      .where('buildings.villageId', '=', village.villageId)
+      .execute();
+}
+type VillageOccupancyRows = Awaited<ReturnType<typeof readVillageOccupancies>>;
+function groupVillageOccupancies(occupancyRows: VillageOccupancyRows, village: Pick<OwnedVillage, 'widthCells' | 'heightCells'>) {
+  const activeGardenRows = occupancyRows.filter((item) => item.buildingType === 'garden'
+    && item.status === 'completed' && item.pendingExpansionId === null);
+  const gardenAt = new Map(activeGardenRows.map((item) => [worldCellKey(item.cellX, item.cellY), item]));
+  const canonicalByBuilding = new Map<string, string>();
+  const componentBuildings = new Map<string, Set<string>>();
+  const visitedGarden = new Set<string>();
+  for (const seed of activeGardenRows) {
+    const seedKey = worldCellKey(seed.cellX, seed.cellY);
+    if (visitedGarden.has(seedKey)) continue;
+    const queue = [seed], ids = new Set<string>();
+    visitedGarden.add(seedKey);
+    while (queue.length) {
+      const current = queue.shift()!; ids.add(current.buildingId);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const neighbour = gardenAt.get(worldCellKey(normalizeCell(current.cellX + dx, village.widthCells), normalizeCell(current.cellY + dy, village.heightCells)));
+        if (neighbour && !visitedGarden.has(worldCellKey(neighbour.cellX, neighbour.cellY))) {
+          visitedGarden.add(worldCellKey(neighbour.cellX, neighbour.cellY)); queue.push(neighbour);
+        }
+      }
+    }
+    const canonical = [...ids].sort()[0]!;
+    componentBuildings.set(canonical, ids);
+    for (const id of ids) canonicalByBuilding.set(id, canonical);
+  }
+  const byBuilding = new Map<string, typeof occupancyRows>();
+  for (const row of occupancyRows) {
+    const logicalId = canonicalByBuilding.get(row.buildingId) ?? row.buildingId;
+    const rows = byBuilding.get(logicalId) ?? [];
+    rows.push(row);
+    byBuilding.set(logicalId, rows);
+  }
+  return { canonicalByBuilding, componentBuildings, byBuilding };
+}
+
+/** Command-local geometry, not a partial economic VillageState or a cached permission. */
+export interface InfrastructureSpatialState extends Omit<TravelNetworkState, 'world' | 'village' | 'cells'> {
+  world: VillageState['world'];
+  village: TravelNetworkState['village'] & { id: string; wood: number; resources: Array<{ code: string; amount: number }> };
+  cells: ReadonlyArray<TravelNetworkState['cells'][number] & { footprint: VillageState['cells'][number]['footprint'] }>;
+  infrastructure: InfrastructurePlan;
+  travelRoutes: TravelRoute[];
+}
+export async function readInfrastructureSpatialState(tx: Transaction<Database>, village: OwnedVillage,
+  economy: VillageEconomy, plan?: InfrastructurePlan, routes = true, stroke?: RoadStroke): Promise<{ snapshot: InfrastructureSpatialState; ground: Snapshot['rc1'] }> {
+  if (economy.worldId !== village.worldId || economy.villageId !== village.villageId)
+    throw Error('Infrastructure context does not match village economy');
+  const [ground, occupancyRows, infrastructure, wood, stone] = await Promise.all([
+    snapshot(tx, village), readVillageOccupancies(tx, village),
+    plan ?? readInfrastructure(tx, village.worldId, village.villageId),
+    projectVillageResource(tx, village.worldId, village.villageId, 'wood', economy.through),
+    projectVillageResource(tx, village.worldId, village.villageId, 'stone', economy.through),
+  ]);
+  // Automatic paths are needed only for newly captured, unoccupied cells. The
+  // caller validates the stroke before rasterizing it; road undo needs none.
+  const occupied = new Set(occupancyRows.map(row => worldCellKey(row.cellX, row.cellY)));
+  const captured = new Set(infrastructure.inheritedCells);
+  const needsRoutes = routes && (!stroke || [...infrastructureSurface([{ ...stroke, operation: 'paint' }], village).values()]
+    .some(pixel => { const cell = subCellKey({ x: (pixel.x + .5) / 2, y: (pixel.y + .5) / 2 }, village); return !occupied.has(cell) && !captured.has(cell); }));
+  const [features, projectedPlots, extractionRows, navigation] = await Promise.all([
+    featuresInSnapshot(tx, village, ground),
+    needsRoutes ? projectGardenPlots(tx, village.worldId, village.villageId, economy.through) : Promise.resolve([]),
+    needsRoutes ? readExtractions(tx, village.worldId, village.villageId) : Promise.resolve([]),
+    needsRoutes ? readNavigationInfrastructure(tx, village, infrastructure) : Promise.resolve(infrastructure),
+  ]);
+  const { canonicalByBuilding, componentBuildings } = groupVillageOccupancies(occupancyRows, village);
+  const townHallBuildingId = occupancyRows.find(row => row.buildingType === 'town-hall')?.buildingId;
+  const context: InfrastructureSpatialState = {
+    world: { id: village.worldId, slug: village.worldSlug, name: village.worldName, topology: village.topology,
+      widthCells: village.widthCells, heightCells: village.heightCells, chunkSize: village.chunkSize,
+      seed: village.seed, generationVersion: village.generationVersion },
+    village: { id: village.villageId, anchorCellX: village.anchorCellX, anchorCellY: village.anchorCellY,
+      ...(townHallBuildingId ? { townHallBuildingId } : {}), wood: wood.amount,
+      resources: [{ code: 'wood', amount: wood.amount }, { code: 'stone', amount: stone.amount }] },
+    region: { originCellX: ground.originCellX, originCellY: ground.originCellY, width: SNAPSHOT_SIZE, height: SNAPSHOT_SIZE,
+      terrainCodes: ground.terrainCodes, features: features.map(f => ({ id: f.id, type: f.featureTypeCode,
+        cellX: f.cellX, cellY: f.cellY, deposit: f.initialAmount !== null ? {
+          ...(f.blocksCell !== null ? { blocksCell: f.blocksCell } : {}), cleared: f.cleared ?? false,
+          state: f.cleared || f.featureState === 'depleted' ? 'depleted' : 'available',
+        } : null })) },
+    cells: occupancyRows.map(row => {
+      const logicalId = canonicalByBuilding.get(row.buildingId) ?? row.buildingId;
+      const component = componentBuildings.get(logicalId);
+      const plots = row.buildingType === 'garden' ? projectedPlots.filter(p => component?.has(p.buildingId) ?? p.buildingId === row.buildingId) : [];
+      return { cellX: row.cellX, cellY: row.cellY,
+        footprint: { buildingId: logicalId, buildingType: row.buildingType, role: row.role as 'anchor' | 'extension',
+          state: row.status === 'under-construction' || row.pendingExpansionId !== null ? 'reserved' : 'active' },
+        building: row.role === 'anchor' && (!canonicalByBuilding.has(row.buildingId) || row.buildingId === logicalId)
+          ? { id: logicalId, type: row.buildingType, quarterTurns: row.visualLayout?.quarterTurns ?? row.quarterTurns,
+            visualLayout: row.visualLayout, garden: row.buildingType === 'garden' && plots.length
+              ? { plots: plots.map(p => ({ cellX: p.cellX, cellY: p.cellY })) } : null } : null };
+    }), infrastructure, travelRoutes: [],
+  };
+  if (needsRoutes) {
+    context.travelRoutes = buildTravelNetwork({ ...context, infrastructure: navigation }, [], ground.rc1?.navigation);
+    for (const { extraction } of extractionRows) if (extraction.resourceCode === 'wood' && extraction.path.length)
+      context.travelRoutes.push({ id: extraction.featureId, kind: 'wood',
+        destination: { cellX: extraction.cellX, cellY: extraction.cellY }, cells: extraction.path });
+  }
+  return { snapshot: context, ground: ground.rc1 };
 }
 
 export async function state(
@@ -490,32 +626,7 @@ export async function state(
       .where('villageResources.villageId', '=', village.villageId)
       .execute(),
     catalog(tx),
-    tx
-      .selectFrom('worldCellOccupancies')
-      .innerJoin('buildings', (join) =>
-        join
-          .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId')
-          .onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId'),
-      )
-      .select([
-        'worldCellOccupancies.cellX',
-        'worldCellOccupancies.cellY',
-        'worldCellOccupancies.role',
-        'worldCellOccupancies.pendingExpansionId',
-        'buildings.id as buildingId',
-        'buildings.buildingType',
-        'buildings.level',
-        'buildings.targetLevel',
-        'buildings.status',
-        'buildings.constructionStartedAt',
-        'buildings.constructionCompletesAt',
-        'buildings.completedAt',
-        'buildings.visualLayout',
-        'buildings.quarterTurns',
-      ])
-      .where('worldCellOccupancies.worldId', '=', village.worldId)
-      .where('buildings.villageId', '=', village.villageId)
-      .execute(),
+    readVillageOccupancies(tx, village),
     clearings(tx, village.worldId),
     tx.selectFrom('buildingHiddenSupplies').select(['buildingId', 'claimedAt'])
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
@@ -588,37 +699,7 @@ export async function state(
       .map(plot=>[worldCellKey(plot.cellX,plot.cellY),item] as const)));
   const legacyHarvestByBuilding = new Map(harvestRows.filter((item) => item.plotCellX === null)
     .map((item) => [item.buildingId, item]));
-  const activeGardenRows = occupancyRows.filter((item) => item.buildingType === 'garden'
-    && item.status === 'completed' && item.pendingExpansionId === null);
-  const gardenAt = new Map(activeGardenRows.map((item) => [worldCellKey(item.cellX, item.cellY), item]));
-  const canonicalByBuilding = new Map<string, string>();
-  const componentBuildings = new Map<string, Set<string>>();
-  const visitedGarden = new Set<string>();
-  for (const seed of activeGardenRows) {
-    const seedKey = worldCellKey(seed.cellX, seed.cellY);
-    if (visitedGarden.has(seedKey)) continue;
-    const queue = [seed], ids = new Set<string>();
-    visitedGarden.add(seedKey);
-    while (queue.length) {
-      const current = queue.shift()!; ids.add(current.buildingId);
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        const neighbour = gardenAt.get(worldCellKey(normalizeCell(current.cellX + dx, village.widthCells), normalizeCell(current.cellY + dy, village.heightCells)));
-        if (neighbour && !visitedGarden.has(worldCellKey(neighbour.cellX, neighbour.cellY))) {
-          visitedGarden.add(worldCellKey(neighbour.cellX, neighbour.cellY)); queue.push(neighbour);
-        }
-      }
-    }
-    const canonical = [...ids].sort()[0]!;
-    componentBuildings.set(canonical, ids);
-    for (const id of ids) canonicalByBuilding.set(id, canonical);
-  }
-  const byBuilding = new Map<string, typeof occupancyRows>();
-  for (const row of occupancyRows) {
-    const logicalId = canonicalByBuilding.get(row.buildingId) ?? row.buildingId;
-    const rows = byBuilding.get(logicalId) ?? [];
-    rows.push(row);
-    byBuilding.set(logicalId, rows);
-  }
+  const { canonicalByBuilding, componentBuildings, byBuilding } = groupVillageOccupancies(occupancyRows, village);
   const expansionIds = [...new Set(occupancyRows.flatMap((row) => row.pendingExpansionId ? [row.pendingExpansionId] : []))];
   const expansions = expansionIds.length === 0 ? [] : await tx.selectFrom('buildingExpansions')
     .select(['id', 'startedAt', 'completesAt']).where('worldId', '=', village.worldId)

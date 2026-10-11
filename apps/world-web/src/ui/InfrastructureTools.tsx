@@ -1,6 +1,6 @@
 import { randomUUID } from '../random-uuid';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,useId,type RefObject} from 'react';
-import {applyVillageFrame,prepareInfrastructureEdit,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
+import {applyVillageFrame,prepareInfrastructureEdit,createInfrastructureEditContext,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
 import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageUpdate} from '../api/client';
 import type {TerrainHandle} from '../scene/VillageScene';
 import type {InfrastructureGesture} from '../scene/infrastructure-renderer';
@@ -32,9 +32,10 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   const op=operation(point),plan=state.infrastructure??emptyInfrastructure();
   const opKey=JSON.stringify(op);
   const stableOp=useMemo(()=>JSON.parse(opKey) as InfrastructureOperation|null,[opKey]);
+  const editContext=useMemo(()=>createInfrastructureEditContext(state),[state.world,state.cells,state.travelRoutes,state.infrastructure]);
   const prepared=useMemo(()=>{
-    try{return stableOp?prepareInfrastructureEdit(state,stableOp,'preview'):null;}catch{return null;}
-  },[state,stableOp]);
+    try{return stableOp?prepareInfrastructureEdit(editContext.state,stableOp,'preview',editContext):null;}catch{return null;}
+  },[editContext,stableOp]);
   const quote=prepared?.quote??null;
   const insufficient=Boolean(quote&&(quote.stoneDebit>(state.village.resources.find(r=>r.code==='stone')?.amount??0)||quote.woodDebit>state.village.wood));
   useEffect(()=>{

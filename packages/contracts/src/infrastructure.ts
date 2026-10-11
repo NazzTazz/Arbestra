@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type {VillageState} from './villages.js';
-import {buildingAccesses,type BuildingAccess} from './building-access.js';
-import {coarseTravelPath} from './travel-paths.js';
+import {type BuildingAccess,type BuildingAccessState} from './building-access.js';
+import {coarseTravelPath,type TravelRoute} from './travel-paths.js';
 
 export const SUBDIVISIONS = 8;
 export const MATERIAL_UNITS = 256;
@@ -55,13 +55,13 @@ export function sameInfrastructureSurface(a:ReadonlyMap<string,RoadPixel>,b:Read
   return true;
 }
 /** Surface raster is transient: integer sixteenths, not individual persistent entities. */
-export function infrastructureSurface(roads:readonly RoadStroke[],world:{widthCells:number;heightCells:number},base?:ReadonlyMap<string,RoadPixel>):Map<string,RoadPixel>{
+export function infrastructureSurface(roads:readonly RoadStroke[],world:{widthCells:number;heightCells:number},base?:ReadonlyMap<string,RoadPixel>,history:readonly RoadStroke[]=[]):Map<string,RoadPixel>{
   const result=new Map<string,RoadPixel>(base),w=world.widthCells*16,h=world.heightCells*16;
   for(const [roadIndex,road]of roads.entries()){
     // Replacing the same centreline also retracts its old width. Cross streets survive.
     if(road.operation==='paint')for(let i=1;i<road.points.length;i++){
       const a=road.points[i-1]!,b=road.points[i]!,horizontal=a.y===b.y,axis=horizontal?1:2;
-      for(const oldRoad of roads.slice(0,roadIndex))for(let j=1;j<oldRoad.points.length;j++){
+      for(const oldRoad of [...history,...roads.slice(0,roadIndex)])for(let j=1;j<oldRoad.points.length;j++){
         const c=oldRoad.points[j-1]!,d=oldRoad.points[j]!;
         if(oldRoad.width<=road.width||oldRoad.operation!=='paint'||(horizontal?c.y!==a.y||d.y!==a.y:c.x!==a.x||d.x!==a.x))continue;
         const alongSize=horizontal?w:h,start=(horizontal?a.x:a.y)*2,end=start+wrappedDistance(horizontal?b.x:b.y,horizontal?a.x:a.y,alongSize/2)*2;
@@ -116,28 +116,44 @@ export function automaticRoadStrokes(routes:readonly VillageState['travelRoutes'
   const arms=[...node.arms];for(let i=0;i<arms.length;i++)for(let j=i+1;j<arms.length;j++)if((arms[i]!-arms[j]!+4)%2)roads.push({id:'auto:'+cell+':joint:'+i+':'+j,points:[at(arms[i]!),centre,at(arms[j]!)],...AUTOMATIC_ROAD_STYLE});
  }return roads;
 }
+export type InfrastructureEditState=BuildingAccessState & {travelRoutes:readonly TravelRoute[];infrastructure?:InfrastructurePlan};
+/** Immutable command/gesture baseline; discard when its spatial inputs change. */
+export function createInfrastructureEditContext(state:InfrastructureEditState){
+  const original=state.infrastructure??emptyInfrastructure(),surface=infrastructurePlanSurface(original,state.world);
+  const automatic=new Map<string,RoadStroke[]>(),automaticOrder=new Map<string,number>();
+  for(const road of automaticRoadStrokes(state.travelRoutes,state.world)){
+    const cell=road.id.split(':').slice(1,3).join(':'),list=automatic.get(cell)??[];
+    const inherited={...road,id:road.id.replace(/^auto:/,'inherited:')};automaticOrder.set(inherited.id,automaticOrder.size);list.push(inherited);automatic.set(cell,list);
+  }
+  return {state:{...state},original,surface,borders:infrastructureBorders(surface,state.world),captured:new Set(original.inheritedCells),
+    occupied:new Set(state.cells.filter(c=>c.footprint).map(c=>c.cellX+':'+c.cellY)),automatic,automaticOrder};
+}
+export type InfrastructureEditContext=ReturnType<typeof createInfrastructureEditContext>;
 /** Freeze only automatic geometry touched by an edit; it cannot be resurrected by a later snapshot. */
-export function prepareInfrastructureEdit(state:Pick<VillageState,'world'|'cells'|'travelRoutes'|'infrastructure'>,op:InfrastructureOperation,id:string):{next:InfrastructurePlan;quote:InfrastructureQuote;surface:ReadonlyMap<string,RoadPixel>}{
-  const original=state.infrastructure??emptyInfrastructure(),base=structuredClone(original);
+export function prepareInfrastructureEdit(state:InfrastructureEditState,op:InfrastructureOperation,id:string,context=createInfrastructureEditContext(state)):{next:InfrastructurePlan;quote:InfrastructureQuote;surface:ReadonlyMap<string,RoadPixel>;beforeSurface:ReadonlyMap<string,RoadPixel>}{
+  if(context.state.world!==state.world||context.state.cells!==state.cells||context.state.travelRoutes!==state.travelRoutes||context.state.infrastructure!==state.infrastructure)throw new Error('Contexte spatial périmé.');
+  const {original}=context;
+  let base=original,before=context.surface;
   if(op.kind==='road'){
-    const occupied=new Set(state.cells.filter(c=>c.footprint).map(c=>`${c.cellX}:${c.cellY}`));
     const selection=infrastructureSurface([{...op.stroke,operation:'paint'}],state.world);
-    const cells=new Set([...selection.values()].map(p=>`${Math.floor((p.x+8)/16)%state.world.widthCells}:${Math.floor((p.y+8)/16)%state.world.heightCells}`));
-    for(const c of base.inheritedCells??[])cells.delete(c);
+    const cells=new Set([...selection.values()].map(p=>Math.floor((p.x+8)/16)%state.world.widthCells+':'+Math.floor((p.y+8)/16)%state.world.heightCells));
+    for(const c of context.captured)cells.delete(c);
     if(cells.size){
-      base.inheritedCells=[...(base.inheritedCells??[]),...cells];base.inheritedRoads??=[];
-      for(const cell of occupied)cells.delete(cell);
-      base.inheritedRoads.push(...automaticRoadStrokes(state.travelRoutes,state.world,cells).map(r=>({...r,id:r.id.replace(/^auto:/,'inherited:')})));
+      const additions=[...cells].filter(cell=>!context.occupied.has(cell)).flatMap(cell=>context.automatic.get(cell)??[]).sort((a,b)=>context.automaticOrder.get(a.id)!-context.automaticOrder.get(b.id)!);
+      base={...original,inheritedCells:[...(original.inheritedCells??[]),...cells],inheritedRoads:[...(original.inheritedRoads??[]),...additions]};
+      // New inherited geometry precedes all manual strokes. Replay only when
+      // something was actually captured, so existing paint keeps its precedence.
+      if(additions.length)before=infrastructurePlanSurface(base,state.world);
     }
   }
-  const accesses=state.cells.flatMap(c=>c.building?buildingAccesses(state,c.building.id):[]);
-  // Road no-op detection is performed below, together with its quote. Avoid
-  // rasterizing both complete plans again inside applyInfrastructure.
   const next=applyInfrastructure(base,op,id,op.kind==='road'?undefined:state.world);
-  const surfaces={before:infrastructurePlanSurface(base,state.world),after:infrastructurePlanSurface(next,state.world)};
-  const quote=infrastructureQuote(base,next,state.world,op.kind==='place'?1:0,op.kind==='place',accesses,surfaces);
-  if(sameInfrastructureSurface(surfaces.before,surfaces.after)&&JSON.stringify(base.equipment)===JSON.stringify(next.equipment)&&JSON.stringify(base.manualLighting)===JSON.stringify(next.manualLighting)&&JSON.stringify(base.suppressedBraziers)===JSON.stringify(next.suppressedBraziers))return {next:original,quote,surface:infrastructurePlanSurface(original,state.world)};
-  return {next,quote,surface:surfaces.after};
+  // Append against the existing raster, retaining preceding centreline widths
+  // so a narrow repaint retracts its old width without damaging cross streets.
+  const after=op.kind==='road'?infrastructureSurface([next.roads.at(-1)!],state.world,before,base.roads):before;
+  const quote=infrastructureQuote(base,next,state.world,op.kind==='place'?1:0,op.kind==='place',[],
+    {before,after,...(before===context.surface?{beforeBorders:context.borders}:{})});
+  if(sameInfrastructureSurface(before,after)&&JSON.stringify(base.equipment)===JSON.stringify(next.equipment)&&JSON.stringify(base.manualLighting)===JSON.stringify(next.manualLighting)&&JSON.stringify(base.suppressedBraziers)===JSON.stringify(next.suppressedBraziers))return {next:original,quote,surface:context.surface,beforeSurface:context.surface};
+  return {next,quote,surface:after,beforeSurface:context.surface};
 }
 export interface BorderEdge {x:number;y:number;dx:number;dy:number;key:string}
 export function infrastructureBorders(surface:ReadonlyMap<string,RoadPixel>,world:{widthCells:number;heightCells:number},_accesses:readonly BuildingAccess[]=[]):Map<string,BorderEdge>{
@@ -176,11 +192,11 @@ export function infrastructureBarrierAt(blocked:ReadonlySet<string>,p:{cellX:num
     if(blocked.has(pixelKey(wrapCoordinate(Math.floor(p.cellX*16+dx),world.widthCells*16),wrapCoordinate(Math.floor(p.cellY*16+dy),world.heightCells*16))))return true;
   return false;
 }
-export function infrastructureQuote(before:InfrastructurePlan,after:InfrastructurePlan,world:{widthCells:number;heightCells:number},woodDebit=0,equipmentCost=true,accesses:readonly BuildingAccess[]=[],surfaces?:{before:ReadonlyMap<string,RoadPixel>;after:ReadonlyMap<string,RoadPixel>}):InfrastructureQuote{
+export function infrastructureQuote(before:InfrastructurePlan,after:InfrastructurePlan,world:{widthCells:number;heightCells:number},woodDebit=0,equipmentCost=true,accesses:readonly BuildingAccess[]=[],surfaces?:{before:ReadonlyMap<string,RoadPixel>;after:ReadonlyMap<string,RoadPixel>;beforeBorders?:ReadonlyMap<string,BorderEdge>}):InfrastructureQuote{
   const a=surfaces?.before??infrastructurePlanSurface(before,world),b=surfaces?.after??infrastructurePlanSurface(after,world);
   let units=0;
   for(const [key,p]of b)if(p.manual&&!p.inherited&&(p.material==='stone-1'||p.material==='stone-2')&&(!a.get(key)?.manual||a.get(key)?.inherited||a.get(key)?.material!==p.material))units+=4;
-  const ae=infrastructureBorders(a,world,accesses);for(const key of infrastructureBorders(b,world,accesses).keys())if(!ae.has(key))units+=16;
+  const ae=surfaces?.beforeBorders??infrastructureBorders(a,world,accesses);for(const key of infrastructureBorders(b,world,accesses).keys())if(!ae.has(key))units+=16;
   if(equipmentCost&&after.equipment.length>before.equipment.length)units+=2*MATERIAL_UNITS;
   const debit=Math.max(0,Math.ceil((units-before.stoneReserve)/MATERIAL_UNITS));
   return {stoneUnits:units,stoneDebit:debit,woodDebit,reserveAfter:before.stoneReserve+debit*MATERIAL_UNITS-units};

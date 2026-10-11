@@ -1,10 +1,28 @@
 import {canWalkSpawnSegment,type SpawnAccessField} from './spawn-access.js';
 export type TravelGround=SpawnAccessField & {revision:string; /** Present only when the field checks actual RC1 trunks. */ woodedCells?:readonly TravelCell[]};
 import type { VillageState } from './villages.js';
-import {buildingAccesses} from './building-access.js';
+import {buildingAccesses,type BuildingAccessState} from './building-access.js';
 import {infrastructurePlanSurface,infrastructureBlockedPixels,infrastructureBarrierAt,pixelKey} from './infrastructure.js';
 
 export interface TravelCell { cellX: number; cellY: number }
+
+/** Geometry consumed by the common route planner, without an economic projection. */
+export interface TravelNetworkState extends Omit<BuildingAccessState, 'cells'> {
+  world: BuildingAccessState['world'] & Pick<VillageState['world'], 'id'>;
+  village: Pick<VillageState['village'], 'anchorCellX' | 'anchorCellY' | 'townHallBuildingId'>;
+  region: Pick<VillageState['region'], 'originCellX' | 'originCellY' | 'width' | 'height'> & {
+    terrainCodes: readonly number[];
+    features: ReadonlyArray<Pick<VillageState['region']['features'][number], 'id' | 'type' | 'cellX' | 'cellY'> & {
+      deposit: Pick<NonNullable<VillageState['region']['features'][number]['deposit']>, 'state' | 'blocksCell' | 'cleared'> | null;
+    }>;
+  };
+  cells: ReadonlyArray<Omit<BuildingAccessState['cells'][number], 'building'> & {
+    building: (NonNullable<BuildingAccessState['cells'][number]['building']> & {
+      garden?: { plots: readonly TravelCell[] } | null;
+    }) | null;
+  }>;
+  infrastructure?: VillageState['infrastructure'];
+}
 export interface TravelRoute {
   version?:2;
   id: string;
@@ -80,7 +98,7 @@ function passageInspector(ground?:TravelGround){
   const allowed=canWalkSpawnSegment(ground,{x:a.cellX,y:a.cellY},{x:b.cellX,y:b.cellY});if(cache.size<262144)cache.set(k,allowed);return allowed;
  };
 }
-export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village' | 'region' | 'cells'|'infrastructure'>, woodlandTargets: readonly string[] = [], ground?:TravelGround): TravelRoute[] {
+export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: readonly string[] = [], ground?:TravelGround): TravelRoute[] {
   const { world, village, region } = state;
   // Snapshots change economic amounts without changing this spatial problem.
   // Cache only bounded, deterministic geometry; never retain an economic snapshot.
@@ -167,7 +185,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   const result=state.infrastructure?routes.flatMap(route=>{const refined=refineTravelRoute(state,route,guide,refinement,ground);return refined?[refined]:[];}):routes;
   if(result.reduce((n,r)=>n+r.cells.length,0)<=50_000){networkCache.set(signature,copyNetwork(result));
     while(networkCache.size>8||[...networkCache.values()].reduce((n,list)=>n+list.reduce((m,r)=>m+r.cells.length,0),0)>50_000)networkCache.delete(networkCache.keys().next().value!);}
-  return result;
+  return copyNetwork(result);
 }
 
 export function travelDuration(path:readonly TravelCell[],world?:{widthCells:number;heightCells:number}):number{
@@ -181,13 +199,13 @@ export function travelDuration(path:readonly TravelCell[],world?:{widthCells:num
 }
 
 /** Bounded local refinement; distant routes retain their territorial legs. */
-function prepareRefinement(state:Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>,ground?:TravelGround){
+function prepareRefinement(state:TravelNetworkState,ground?:TravelGround){
   const surface=infrastructurePlanSurface(state.infrastructure!,state.world);
   const curbPixels=infrastructureBlockedPixels(state.infrastructure!,state.world,state.cells.flatMap(c=>c.building?buildingAccesses(state,c.building.id):[]));
   const roadNodes=[...surface.values()].filter(p=>p.manual&&p.x%2===0&&p.y%2===0).map(p=>({cellX:p.x/2,cellY:p.y/2}));
   return {surface,curbPixels,roadNodes,walk:passageInspector(ground),woodedCells:ground?.woodedCells};
 }
-export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround):TravelRoute|null{
+export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround):TravelRoute|null{
   if(!state.infrastructure||!route.cells.length)return route;
   const anchor=state.cells.find(c=>c.cellX===state.village.anchorCellX&&c.cellY===state.village.anchorCellY);
   const hallId=state.village.townHallBuildingId??anchor?.footprint?.buildingId??anchor?.building?.id;

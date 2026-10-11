@@ -5,8 +5,8 @@ import type { Database } from '../../database/schema.js';
 import { readWorksites } from '../deposits/worksites.js';
 import { readExtraction, readExtractions } from '../deposits/stone-extractions.js';
 import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
-import { prepareInfrastructureEdit, type InfrastructureRequest } from '@arbestra/contracts';
-import { constructBuilding, constructBuildingArea } from './service.js';
+import { prepareInfrastructureEdit, buildingAccesses, type InfrastructureRequest } from '@arbestra/contracts';
+import { constructBuilding, constructBuildingArea, withVillageProjection, readInfrastructureSpatialState, state } from './service.js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { applyVillageFrame, VillageStateSchema, type VillageState, type VillageFrame, type VillageCommandResponse } from '@arbestra/contracts';
@@ -428,4 +428,23 @@ it('road optimization: batches worksite projections in three reads with identica
   expect(await readWorksites(tx,worldId,randomUUID())).toEqual([]);expect(await readExtractions(tx,worldId,randomUUID())).toEqual([]);
   checked=true;throw abort;
  })).rejects.toBe(abort);expect(checked).toBe(true);expect(await revision()).toBe(r);
+});
+
+
+it('road optimization: shares footprints, doors, routes and prices with the full projection without unrelated reads',async()=>{
+ await withVillageProjection(db,accountId,slug,villageId,async(tx,economy,village)=>{
+  const full=await state(tx,accountId,slug,economy,false,true),context=await readInfrastructureSpatialState(tx,village,economy);
+  for(const cell of full.cells)if(cell.building)expect(buildingAccesses(context.snapshot,cell.building.id)).toEqual(buildingAccesses(full,cell.building.id));
+  expect(context.snapshot.cells.map(c=>[c.cellX,c.cellY,c.footprint]).sort()).toEqual(full.cells.filter(c=>c.footprint).map(c=>[c.cellX,c.cellY,c.footprint]).sort());
+  expect(context.snapshot.travelRoutes).toEqual(full.travelRoutes);
+  const payload=roadPayload(full,72);
+  expect(prepareInfrastructureEdit(context.snapshot,payload.operation,payload.commandId)).toEqual(prepareInfrastructureEdit(full,payload.operation,payload.commandId));
+ });
+ const selects:string[]=[];
+ const plugin:KyselyPlugin={transformQuery(a){if(a.node.kind==='SelectQueryNode')selects.push(JSON.stringify(a.node));return a.node;},async transformResult(a){return a.result;}};
+ const base=await read(),payload=roadPayload(base,72),before=await revision();
+ expect(await infrastructurePreview(db.withPlugin(plugin),accountId,slug,villageId,payload)).toMatchObject({valid:true,quote:payload.expected});
+ const queries=selects.join(' ');
+ for(const unrelated of ['population_cohorts','extraction_worksites','market_exchanges','science_activities','building_type_levels'])expect(queries).not.toContain(unrelated);
+ expect(await revision()).toBe(before);
 });

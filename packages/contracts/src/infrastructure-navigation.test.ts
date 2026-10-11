@@ -152,3 +152,11 @@ describe('infrastructure spatial guarantees',()=>{
     expect(pathIntersectsBox([{cellX:63.875,cellY:1},{cellX:.125,cellY:1}],{cellX:0,cellY:1},.04,.04,world)).toBe(true);
   });
 });
+
+
+it('returns only geometric destinations identically before and after warming the route cache',()=>{
+ const s=state();s.world.id='destination-dto-regression';
+ s.cells.push({cellX:14,cellY:10,building:{id:'target',type:'dwelling',quarterTurns:0},footprint:{buildingId:'target',state:'active'}} as VillageState['cells'][number]);
+ const cold=buildTravelNetwork(s),warm=buildTravelNetwork(s);expect(cold.length).toBeGreaterThan(0);
+ expect(cold).toEqual(warm);for(const route of cold)expect(Object.keys(route.destination).sort()).toEqual(['cellX','cellY']);
+});

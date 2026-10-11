@@ -254,12 +254,14 @@ export class BabylonVillageScene {
   #infrastructureRenderer:InfrastructureRenderer|null=null;
   #infrastructurePreview:InfrastructureRenderer|null=null;
   #infrastructureHandler:((gesture:InfrastructureGesture)=>void)|null=null;
+  #infrastructureHoverFrame=0;
+  #infrastructureHoverEvent:PointerEvent|null=null;
   #infrastructureDown:{x:number;y:number;pointerId:number}|null=null;
   #infrastructureBarriers=new Set<string>();
   #infrastructureEquipment:Array<{x:number;y:number}>=[];
   #infrastructureGhost:Mesh|null=null;
   public infrastructureTool(handler:((gesture:InfrastructureGesture)=>void)|null){
-    if(!handler)this.cancelGesture();this.#infrastructureHandler=handler;
+    if(!handler){this.cancelGesture();cancelAnimationFrame(this.#infrastructureHoverFrame);this.#infrastructureHoverFrame=0;this.#infrastructureHoverEvent=null;}this.#infrastructureHandler=handler;
     if(!handler){this.#infrastructurePreview?.clear();this.#infrastructureGhost?.setEnabled(false);}
   }
   public infrastructurePreview(operation:InfrastructureOperation|null,invalid=false,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>){
@@ -270,7 +272,7 @@ export class BabylonVillageScene {
       const world=this.#state.world,next=preparedPlan??prepareInfrastructureEdit(this.#state,operation,'preview').next;
       const selected=infrastructureSurface([{...operation.stroke,operation:'paint'}],world),full=preparedSurface??infrastructurePlanSurface(next,world);
       const surface=new Map([...selected].map(([key,p])=>[key,{...(full.get(key)??p),manual:true}]));
-      this.#infrastructurePreview.update(next,this.#space,(x,y)=>this.#store?.ground(x,y)?.height??null,true,0,surface,operation.stroke.operation==='border',this.#state.cells.flatMap(c=>c.building?buildingAccesses(this.#state!,c.building.id):[]),{followTerrain:this.#state.world.generationVersion===3});
+      this.#infrastructurePreview.update(next,this.#space,(x,y)=>this.#store?.ground(x,y)?.height??null,true,0,surface,operation.stroke.operation==='border',[],{followTerrain:this.#state.world.generationVersion===3});
       this.#infrastructurePreview.setInvalid(invalid);
     }else if(operation.kind==='place'||operation.kind==='move'){
       this.#infrastructurePreview.clear();
@@ -392,7 +394,14 @@ export class BabylonVillageScene {
   };
 
   readonly #handlePointerMove = (event: PointerEvent): void => {
-    if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation){event.stopImmediatePropagation();this.#infrastructureHandler({kind:'hover',point:this.#infrastructurePoint(event)});return;}
+    if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation){
+      event.stopImmediatePropagation();this.#infrastructureHoverEvent=event;
+      // At most one terrain ray and one HUD update per display frame.
+      if(!this.#infrastructureHoverFrame)this.#infrastructureHoverFrame=requestAnimationFrame(()=>{
+        this.#infrastructureHoverFrame=0;const latest=this.#infrastructureHoverEvent;this.#infrastructureHoverEvent=null;
+        if(latest&&this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation)this.#infrastructureHandler({kind:'hover',point:this.#infrastructurePoint(latest)});
+      });return;
+    }
     if (!this.#pointerDown && this.#worldMode === 'exploitation' && this.#mode === 'village' && !this.#arrival && !this.#flyover) {
       const cell = this.#cellAtPointer(event), key = cell ? cellKey(cell) : '';
       if (cell && key !== this.#hoveredHarvestCell) { this.#hoveredHarvestCell = key; this.#onGardenHarvest(cell, true, true); }
@@ -2572,6 +2581,7 @@ export class BabylonVillageScene {
   }
 
   public dispose(): void {
+    cancelAnimationFrame(this.#infrastructureHoverFrame);this.#infrastructureHoverFrame=0;this.#infrastructureHoverEvent=null;
     this.#infrastructureRenderer?.dispose();this.#infrastructurePreview?.dispose();this.#infrastructureGhost?.dispose(false,false);
     for(const job of this.#buildingJobs)job.steps.return(job.parent);
     this.#buildingJobs.length=0;

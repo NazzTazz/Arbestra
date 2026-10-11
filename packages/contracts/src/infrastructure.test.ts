@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {Value} from '@sinclair/typebox/value';
-import {emptyInfrastructure,applyInfrastructure,infrastructureQuote,infrastructureSurface,infrastructureBorders,infrastructurePlanSurface,prepareInfrastructureEdit,RoadStrokeSchema,type RoadStroke} from './infrastructure.js';
+import {emptyInfrastructure,applyInfrastructure,infrastructureQuote,infrastructureSurface,infrastructureBorders,infrastructurePlanSurface,prepareInfrastructureEdit,createInfrastructureEditContext,RoadStrokeSchema,type RoadStroke} from './infrastructure.js';
 const world={widthCells:64,heightCells:64};
 const stroke=(x0:number,x1:number,border=false):RoadStroke=>({id:'r',points:[{x:x0,y:80},{x:x1,y:80}],width:4,material:'stone-1',border,operation:'paint'});
 describe('infrastructure geometry and payment',()=>{
@@ -45,4 +45,29 @@ it('persists free earth and rubble surfaces and erases captured automatic roads 
   const erased=prepareInfrastructureEdit(state,{kind:'road',stroke:{...stroke(80,88),material:'none',operation:'remove'}},'erase-auto');
   expect(erased.next.inheritedCells?.length).toBeGreaterThan(0);
   expect(erased.next.roads.at(-1)?.operation).toBe('remove');
+});
+
+
+it('reuses a gesture baseline without changing full-raster prices, captured paths or seam repaint widths',()=>{
+ const world={widthCells:512,heightCells:256};
+ const state:Parameters<typeof prepareInfrastructureEdit>[0]={world,cells:[],travelRoutes:[
+  {id:'auto-y',kind:'building',destination:{cellX:0,cellY:0},cells:[{cellX:0,cellY:255},{cellX:0,cellY:0}]},
+  {id:'auto-x',kind:'building',destination:{cellX:0,cellY:255},cells:[{cellX:511,cellY:255},{cellX:0,cellY:255}]},
+ ],infrastructure:emptyInfrastructure()};
+ const operations:RoadStroke[]=[
+  {id:'wide',points:[{x:4092,y:2040},{x:4,y:2040}],width:8,material:'stone-1',border:true,operation:'paint'},
+  {id:'cross',points:[{x:0,y:2032},{x:0,y:8}],width:4,material:'stone-2',border:true,operation:'paint'},
+  {id:'narrow',points:[{x:4092,y:2040},{x:4,y:2040}],width:2,material:'stone-1',border:false,operation:'paint'},
+  {id:'erase',points:[{x:4094,y:2040},{x:2,y:2040}],width:4,material:'none',border:false,operation:'remove'},
+ ];
+ for(const stroke of operations){
+  const ctx=createInfrastructureEditContext(state),before=JSON.stringify(state),edit=prepareInfrastructureEdit(state,{kind:'road',stroke},stroke.id,ctx);
+  expect(edit.beforeSurface).toEqual(infrastructurePlanSurface(state.infrastructure!,world));
+  expect(edit.surface).toEqual(infrastructurePlanSurface(edit.next,world));
+  const capturedBase={...edit.next,roads:edit.next.roads.slice(0,-1)};
+  expect(edit.quote).toEqual(infrastructureQuote(capturedBase,edit.next,world,0,false));
+  expect(JSON.stringify(state)).toBe(before);expect(prepareInfrastructureEdit(state,{kind:'road',stroke},stroke.id,ctx)).toEqual(edit);
+  state.infrastructure=edit.next;
+  expect(()=>prepareInfrastructureEdit(state,{kind:'road',stroke},'stale',ctx)).toThrow('Contexte spatial périmé');
+ }
 });
