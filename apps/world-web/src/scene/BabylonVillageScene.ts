@@ -262,13 +262,13 @@ export class BabylonVillageScene {
     if(!handler)this.cancelGesture();this.#infrastructureHandler=handler;
     if(!handler){this.#infrastructurePreview?.clear();this.#infrastructureGhost?.setEnabled(false);}
   }
-  public infrastructurePreview(operation:InfrastructureOperation|null,invalid=false,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan){
+  public infrastructurePreview(operation:InfrastructureOperation|null,invalid=false,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>){
     if(!this.#space||!this.#state)return;this.#infrastructurePreview??=new InfrastructureRenderer(this.#scene);
     this.#infrastructureGhost?.setEnabled(false);
     if(!operation){this.#infrastructurePreview.clear();return;}
     if(operation.kind==='road'){
       const world=this.#state.world,next=preparedPlan??prepareInfrastructureEdit(this.#state,operation,'preview').next;
-      const selected=infrastructureSurface([{...operation.stroke,operation:'paint'}],world),full=infrastructurePlanSurface(next,world);
+      const selected=infrastructureSurface([{...operation.stroke,operation:'paint'}],world),full=preparedSurface??infrastructurePlanSurface(next,world);
       const surface=new Map([...selected].map(([key,p])=>[key,{...(full.get(key)??p),manual:true}]));
       this.#infrastructurePreview.update(next,this.#space,(x,y)=>this.#store?.ground(x,y)?.height??null,true,0,surface,operation.stroke.operation==='border',this.#state.cells.flatMap(c=>c.building?buildingAccesses(this.#state!,c.building.id):[]),{followTerrain:this.#state.world.generationVersion===3});
       this.#infrastructurePreview.setInvalid(invalid);

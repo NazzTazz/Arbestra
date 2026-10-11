@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {Value} from '@sinclair/typebox/value';
-import {emptyInfrastructure,applyInfrastructure,infrastructureQuote,infrastructureSurface,infrastructureBorders,prepareInfrastructureEdit,RoadStrokeSchema,type RoadStroke} from './infrastructure.js';
+import {emptyInfrastructure,applyInfrastructure,infrastructureQuote,infrastructureSurface,infrastructureBorders,infrastructurePlanSurface,prepareInfrastructureEdit,RoadStrokeSchema,type RoadStroke} from './infrastructure.js';
 const world={widthCells:64,heightCells:64};
 const stroke=(x0:number,x1:number,border=false):RoadStroke=>({id:'r',points:[{x:x0,y:80},{x:x1,y:80}],width:4,material:'stone-1',border,operation:'paint'});
 describe('infrastructure geometry and payment',()=>{
@@ -28,11 +28,12 @@ describe('infrastructure geometry and payment',()=>{
 
 it('persists free earth and rubble surfaces and erases captured automatic roads with the none brush',()=>{
   const world={widthCells:512,heightCells:256};
-  const state={world,cells:[],travelRoutes:[{id:'auto',kind:'building' as const,cells:[{cellX:10,cellY:10},{cellX:11,cellY:10}]}],infrastructure:emptyInfrastructure()};
+  const state={world,cells:[],travelRoutes:[{id:'auto',kind:'building' as const,cells:[{cellX:10,cellY:10},{cellX:11,cellY:10}]}],infrastructure:emptyInfrastructure()} as unknown as Parameters<typeof prepareInfrastructureEdit>[0];
   for(const material of ['earth','rubble'] as const){
     const road={...stroke(80,88),material,border:false};
     expect(Value.Check(RoadStrokeSchema,road)).toBe(true);
     const result=prepareInfrastructureEdit(state,{kind:'road',stroke:road},'free');
+    expect(result.surface).toEqual(infrastructurePlanSurface(result.next,world));
     expect(result.quote).toEqual({stoneUnits:0,stoneDebit:0,woodDebit:0,reserveAfter:0});
     // JSON is the existing durable plan format, also used by authoritative frames.
     const roundtrip=JSON.parse(JSON.stringify(result.next));

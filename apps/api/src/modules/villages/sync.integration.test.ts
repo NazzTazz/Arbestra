@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { sql, type KyselyPlugin, type QueryId, type Kysely, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
+import { readWorksites } from '../deposits/worksites.js';
+import { readExtraction, readExtractions } from '../deposits/stone-extractions.js';
+import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
+import { prepareInfrastructureEdit, type InfrastructureRequest } from '@arbestra/contracts';
 import { constructBuilding, constructBuildingArea } from './service.js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -329,4 +333,99 @@ it('measures legacy and incremental replies on the same isolated warm village',a
   results.push({mode,totalMs:Math.round(performance.now()-started),responseBytes:Buffer.byteLength(response.body),baseBytes:Buffer.byteLength(JSON.stringify(base))});
  }
  console.info('CONSTRUCTION_HTTP_PROFILE',{world:'isolated v1 flat 512x256',results});
+});
+
+const roadPayload=(base:VillageState,y=66):InfrastructureRequest=>{
+ const operation:InfrastructureRequest['operation']={kind:'road',stroke:{id:'preview',points:[{x:64*8,y:y*8},{x:66*8,y:y*8}],width:4,material:'stone-1',border:false,operation:'paint'}};
+ return {commandId:randomUUID(),sessionId:randomUUID(),revision:base.infrastructure!.revision,operation,expected:prepareInfrastructureEdit(base,operation,'preview').quote};
+};
+const road=(payload:InfrastructureRequest,base:VillageState,server=app)=>server.inject({method:'POST',url:'/api/worlds/'+slug+'/villages/'+villageId+'/infrastructure',cookies:{arbestra_session:token},headers:headers(base),payload});
+it('road optimization: read-only preview completes while the village is locked and leaves due economy unchanged',async()=>{
+ const base=await read(),r=await revision();let release!:()=>void,enter!:()=>void;
+ const entered=new Promise<void>(f=>enter=f),barrier=new Promise<void>(f=>release=f);
+ const holder=db.transaction().execute(async tx=>{await tx.selectFrom('villages').select('id').where('id','=',villageId).forUpdate().executeTakeFirstOrThrow();enter();await barrier;});
+ let pending:ReturnType<typeof infrastructurePreview>|undefined;const deadline=setTimeout(release,15000);
+ try{
+  await entered;
+  // A lock timeout makes the old FOR UPDATE preview fail deterministically.
+  const timed={transaction:()=>({setIsolationLevel:()=>({execute:<T>(run:(tx:Transaction<Database>)=>Promise<T>)=>db.transaction().setIsolationLevel('repeatable read').execute(async tx=>{await sql`set local lock_timeout='1000ms'`.execute(tx);return run(tx);})})})} as unknown as Kysely<Database>;
+  pending=infrastructurePreview(timed,accountId,slug,villageId,roadPayload(base));
+  expect(await pending).toMatchObject({valid:true});
+  expect(await revision()).toBe(r);
+  expect((await db.selectFrom('buildings').select('status').where('id','=',houseId).executeTakeFirstOrThrow()).status).toBe('under-construction');
+ }finally{clearTimeout(deadline);release();await holder;if(pending)await pending.catch(()=>{});}
+},30000);
+it('road optimization: projects the frame after releasing locks, deduplicates HTTP/SSE and supports retry and undo',async()=>{
+ let armed=false,readOnly=false,gated=false,enter!:()=>void,release!:()=>void;
+ const entered=new Promise<void>(f=>enter=f),barrier=new Promise<void>(f=>release=f),queries=new Set<QueryId>();
+ const plugin:KyselyPlugin={transformQuery(a){const text=JSON.stringify(a.node);if(armed&&text.includes('set transaction read only'))readOnly=true;if(armed&&readOnly&&!gated&&text.includes('village_sync_changes')){gated=true;queries.add(a.queryId);}return a.node;},async transformResult(a){if(queries.delete(a.queryId)){enter();await barrier;}return a.result;}};
+ const server=await buildApp(config,db.withPlugin(plugin));let pending:ReturnType<typeof road>|undefined;
+ const deadline=setTimeout(release,20000),started=performance.now();
+ try{
+  const base=await snapshot(server),payload=roadPayload(base),stream=new VillageSyncSession(read,revision);await stream.check();armed=true;pending=road(payload,base,server);
+  await Promise.race([entered,pending.then(()=>{throw Error('Response ended without post-commit projection');})]);
+  expect(await db.selectFrom('infrastructureReceipts').selectAll().where('worldId','=',worldId).where('commandId','=',payload.commandId).execute()).toHaveLength(1);
+  await db.transaction().execute(async tx=>{await sql`set local lock_timeout='1000ms'`.execute(tx);await tx.selectFrom('villages').select('id').where('id','=',villageId).forUpdate().executeTakeFirstOrThrow();});
+  release();const response=await pending;expect(response.statusCode,response.body).toBe(200);const reply=response.json<VillageCommandResponse>(),local=applied(base,reply);
+  expect(local.infrastructure!.revision).toBe(base.infrastructure!.revision+1);
+  expect(local.village.resources.find(r=>r.code==='stone')!.amount).toBe(base.village.resources.find(r=>r.code==='stone')!.amount-payload.expected!.stoneDebit);
+  const event=await stream.check();expect(event.event).toBe('frame');if(event.event==='frame')expect(applyVillageFrame(local,event.data).kind).toBe('ignored');
+  if(reply.kind==='frame')expect(applyVillageFrame(local,reply.frame).kind).toBe('ignored');
+  const retry=await road(payload,local,server);expect(retry.statusCode,retry.body).toBe(200);const retried=retry.json<VillageCommandResponse>();const next=retried.kind==='snapshot'?retried.state:applied(local,retried);
+  expect(next.infrastructure).toEqual(local.infrastructure);expect(next.village.resources.map(r=>[r.code,r.amount])).toEqual(local.village.resources.map(r=>[r.code,r.amount]));
+  const undo=await road({commandId:randomUUID(),sessionId:payload.sessionId,revision:next.infrastructure!.revision,operation:{kind:'undo',target:payload.commandId}},next,server);
+  expect(undo.statusCode,undo.body).toBe(200);const restored=applied(next,undo.json<VillageCommandResponse>());
+  expect(restored.infrastructure!.roads).toEqual(base.infrastructure!.roads);expect(restored.village.resources.map(r=>[r.code,r.amount])).toEqual(base.village.resources.map(r=>[r.code,r.amount]));
+  console.info('ROAD_FRAME_BYTES',{snapshot:Buffer.byteLength(JSON.stringify(base)),frame:Buffer.byteLength(response.body),totalWithBarrierMs:Math.round(performance.now()-started)});
+ }finally{clearTimeout(deadline);release();try{if(pending)await pending;}finally{await server.close();}}
+},60000);
+it('road optimization: rolls back observed plan, debit, receipt and revision on an exact failure',async()=>{
+ const tables=['villages','villageResources','villageResourceFlows','buildings','worldCellOccupancies','populationCohorts','scheduledTasks','villageInfrastructure','infrastructureReceipts','buildingHiddenSupplies','villageAccomplishments','gardenPlots','scienceActivities','playerScience'] as const;
+ async function stored(source:Kysely<Database>){const result:Record<string,unknown>={};for(const table of tables)result[table]=await source.selectFrom(table).selectAll().where('worldId','=',worldId).execute();return result;}
+ const base=await read(),before=await stored(db),r=await revision(),payload=roadPayload(base,67),injected=Error('road after observed finalization');let observed=false;
+ await expect(db.transaction().execute(async tx=>{
+  const inside={transaction:()=>({execute:<T>(run:(t:Transaction<Database>)=>Promise<T>)=>run(tx)})} as unknown as Kysely<Database>;
+  await infrastructureCommand(inside,accountId,slug,villageId,payload,'commit');
+  expect((await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).executeTakeFirstOrThrow()).plan.revision).toBe(payload.revision+1);
+  expect(await tx.selectFrom('infrastructureReceipts').selectAll().where('worldId','=',worldId).where('commandId','=',payload.commandId).execute()).toHaveLength(1);
+  expect(Number((await tx.selectFrom('villageResources').select('amount').where('worldId','=',worldId).where('resourceCode','=','stone').executeTakeFirstOrThrow()).amount)).toBe(base.village.resources.find(r=>r.code==='stone')!.amount-payload.expected!.stoneDebit);
+  expect((await villageSyncRevision(tx,worldId)).revision).toBe(r+1);observed=true;throw injected;
+ })).rejects.toBe(injected);
+ expect(observed).toBe(true);expect(await revision()).toBe(r);expect(await stored(db)).toEqual(before);
+});
+
+it('road optimization: measures valid legacy and incremental commands on the same isolated village',async()=>{
+ const results=[];
+ for(const [y,incremental] of [[68,false],[69,true],[70,false],[71,true]] as const){
+  const base=await snapshot(),payload=roadPayload(base,y),previewStart=performance.now(),preview=await infrastructurePreview(db,accountId,slug,villageId,payload);
+  expect(preview.valid,preview.message??'').toBe(true);const previewMs=Math.round(performance.now()-previewStart),started=performance.now();
+  const response=await app.inject({method:'POST',url:'/api/worlds/'+slug+'/villages/'+villageId+'/infrastructure',cookies:{arbestra_session:token},...(incremental?{headers:headers(base)}:{}),payload});
+  expect(response.statusCode,response.body).toBe(200);const data=response.json<VillageState|VillageCommandResponse>(),mode='kind' in data?data.kind:'legacy';if(incremental)expect(mode).toBe('frame');
+  results.push({mode,previewMs,totalMs:Math.round(performance.now()-started),responseBytes:Buffer.byteLength(response.body),baseBytes:Buffer.byteLength(JSON.stringify(base))});
+ }
+ writeFileSync('test-results/road-command-measures.json',JSON.stringify({world:'isolated v1 flat 512x256, no reset',results},null,2));console.info('ROAD_COMMAND_PROFILE',results);
+});
+
+it('road optimization: batches worksite projections in three reads with identical active missions and ordered targets',async()=>{
+ const abort=Error('isolated batch projection cleanup'),r=await revision();let checked=false;
+ await expect(db.transaction().execute(async tx=>{
+  const features=[randomUUID(),randomUUID()],at=new Date(),siteIds:string[]=[];
+  for(const [i,featureId] of features.entries()){
+   await tx.insertInto('worldFeatures').values({id:featureId,worldId,featureTypeCode:'stone_outcrop',state:'available',variantSeed:2}).execute();
+   await tx.insertInto('stoneDeposits').values({worldId,featureId,cellX:80+i,cellY:80,initialAmount:2000,remainingAmount:2000,reservedAmount:100,revision:1,updatedAt:at}).execute();
+  }
+  for(let i=0;i<6;i++){
+   const site=await tx.insertInto('extractionWorksites').values({worldId,villageId,commandId:randomUUID(),requestedFeatureIds:features,requestedWorkerCap:2,workerCap:2,resourceCode:'stone',mode:'extract',status:'paused',waitReason:null,nextWakeAt:null,lastDepartureAt:null,updatedAt:at}).returning('id').executeTakeFirstOrThrow();siteIds.push(site.id);
+   for(const [ordinal,featureId] of [...features].reverse().entries())await tx.insertInto('extractionWorksiteTargets').values({worksiteId:site.id,worldId,villageId,featureId,ordinal,status:i===0?'pending':'completed',admittedAt:null,thresholdReachedAt:null,completedAt:i===0?null:at,reason:null}).execute();
+  }
+  const mission=await tx.insertInto('depositExtractions').values({worldId,villageId,featureId:features[0]!,worksiteId:siteIds[0]!,commandId:randomUUID(),status:'in-progress',workerCount:2,reservedAmount:100,startedAt:at,completesAt:new Date(at.getTime()+600000),completedAt:null,pathCells:sql`${JSON.stringify([{cellX:64,cellY:64},{cellX:80,cellY:80}])}::jsonb`}).returning('id').executeTakeFirstOrThrow();
+  const expectedMission=await readExtraction(tx,worldId,villageId,mission.id);let reads=0;
+  const source=tx.withPlugin({transformQuery(a){if(a.node.kind==='SelectQueryNode')reads++;return a.node;},async transformResult(a){return a.result;}}) as Transaction<Database>;
+  const projected=await readWorksites(source,worldId,villageId);expect(reads).toBe(3);expect(projected).toHaveLength(6);
+  expect(projected.find(s=>s.id===siteIds[0])!.activeExtraction).toEqual(expectedMission);
+  for(const site of projected){expect(site.targets.map(t=>t.featureId)).toEqual([...features].reverse());expect(site.targets.map(t=>[t.cellX,t.cellY])).toEqual([[81,80],[80,80]]);if(site.id!==siteIds[0])expect(site.activeExtraction).toBeNull();}
+  expect((await readExtractions(tx,worldId,villageId)).map(r=>r.extraction)).toEqual([expectedMission]);
+  expect(await readWorksites(tx,worldId,randomUUID())).toEqual([]);expect(await readExtractions(tx,worldId,randomUUID())).toEqual([]);
+  checked=true;throw abort;
+ })).rejects.toBe(abort);expect(checked).toBe(true);expect(await revision()).toBe(r);
 });

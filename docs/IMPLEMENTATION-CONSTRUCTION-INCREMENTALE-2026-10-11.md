@@ -1,5 +1,7 @@
 # Construction : réponses HTTP incrémentales
 
+Extension ultérieure du 11 octobre, base 9b32570 : Infrastructure rejoint ce protocole (dont retry et undo). Le finaliseur partagé s’appelle maintenant villageCommandResult ; les preuves de construction ci-dessous restent historiques. Voir la [contre-recette actualisée](CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md) pour cette extension et ses mesures.
+
 11 octobre 2026. Base relue : `06a460e31ab5b1ed3817b3bf98a67ac297ab821d`, main. Direction acceptée par Tristan : commencer par la construction et partager les trames SSE. **Implémentée, intégrée et vérifiée techniquement ; prête pour validation produit de cette tranche.** Aucun nouveau choix de gameplay. Ouverture publique non validée par ce travail.
 
 ## Périmètre réellement livré

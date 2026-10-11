@@ -6,7 +6,7 @@ import {buildTravelNetwork,prepareInfrastructureEdit,automaticBraziers,pathInter
 import type {Database} from '../../database/schema.js';
 import {HttpError} from '../../errors.js';
 import {beginVillageEconomy} from './reconcile-economy.js';
-import {ownedVillage,state,debit} from './service.js';
+import {ownedVillage,state,debit,withVillageProjection,villageCommandResult,type ConstructionReplyMode,type ConstructionResult} from './service.js';
 export async function readInfrastructure(tx:Kysely<Database>,worldId:string,villageId:string):Promise<InfrastructurePlan>{
   return (await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).where('villageId','=',villageId).executeTakeFirst())?.plan??emptyInfrastructure();
 }
@@ -43,11 +43,11 @@ function prepare(snapshot:VillageState,request:InfrastructureRequest){
       const a=op.stroke.points[i-1]!,b=op.stroke.points[i]!,dx=wrappedDistance(b.x,a.x,snapshot.world.widthCells*8),dy=wrappedDistance(b.y,a.y,snapshot.world.heightCells*8);
       if(dx&&dy)throw new HttpError(400,'INVALID_ROAD','Un tronçon doit être orthogonal.');length+=Math.abs(dx)+Math.abs(dy);
     }if(length>512||plan.roads.length>=2048)throw new HttpError(400,'ROAD_LIMIT','Tracez une portion plus courte.');
-    const prepared=prepareInfrastructureEdit(snapshot,op,request.commandId),next=prepared.next,before=infrastructurePlanSurface(plan,snapshot.world),after=infrastructurePlanSurface(next,snapshot.world);
+    const prepared=prepareInfrastructureEdit(snapshot,op,request.commandId),before=infrastructurePlanSurface(plan,snapshot.world),after=prepared.surface;
     for(const [key,pixel]of after)if(!isDeepStrictEqual(pixel,before.get(key))&&pixel.manual){
       assertInfrastructurePosition(snapshot,{x:(pixel.x+.5)/2,y:(pixel.y+.5)/2});
     }
-    return prepared;
+    return {...prepared,surfaces:{before,after}};
   }
   if(op.kind==='place'||op.kind==='move')assertInfrastructurePosition(snapshot,op.position,true,op.kind==='move'?op.id:undefined);
   if((op.kind==='delete'||op.kind==='move')&&op.id.startsWith('auto:')){
@@ -56,13 +56,12 @@ function prepare(snapshot:VillageState,request:InfrastructureRequest){
   }
   if(op.kind==='lighting') {const [x,y]=op.cell.split(':').map(Number);if(!Number.isInteger(x)||!Number.isInteger(y)||op.cell!==`${x}:${y}`)throw new HttpError(400,'INVALID_CELL','Case invalide.');assertInfrastructurePosition(snapshot,{x:x!*8,y:y!*8});}
   let prepared:ReturnType<typeof prepareInfrastructureEdit>;try{prepared=prepareInfrastructureEdit(snapshot,op,request.commandId);}catch(error){throw new HttpError(409,'EQUIPMENT_CHANGED',(error as Error).message);}
-  return prepared;
+  return {...prepared,surfaces:{before:infrastructurePlanSurface(plan,snapshot.world),after:prepared.surface}};
 }
 export async function infrastructurePreview(db:Kysely<Database>,accountId:string,slug:string,villageId:string,request:InfrastructureRequest):Promise<InfrastructurePreview>{
-  return db.transaction().execute(async tx=>{
-    const village=await ownedVillage(tx,accountId,slug,villageId),economy=await beginVillageEconomy(tx,village.worldId,villageId);
-    const snapshot=await state(tx,accountId,slug,economy,false);
-    try{const {quote,next}=prepare(snapshot,request);await validateTransition(tx,snapshot,snapshot.infrastructure!,next);const stone=snapshot.village.resources.find(r=>r.code==='stone')?.amount??0,wood=snapshot.village.wood;
+  return withVillageProjection(db,accountId,slug,villageId,async (tx,economy)=>{
+    const snapshot=await state(tx,accountId,slug,economy,false,true);
+    try{const {quote,next,surfaces}=prepare(snapshot,request);await validateTransition(tx,snapshot,snapshot.infrastructure!,next,surfaces);const stone=snapshot.village.resources.find(r=>r.code==='stone')?.amount??0,wood=snapshot.village.wood;
       if(stone<quote.stoneDebit||wood<quote.woodDebit)return {valid:false,message:'Ressources insuffisantes.',quote,revision:request.revision};
       return {valid:true,message:null,quote,revision:request.revision};
     }catch(error){if(!(error instanceof HttpError))throw error;return {valid:false,message:error.message,quote:{stoneUnits:0,stoneDebit:0,woodDebit:0,reserveAfter:snapshot.infrastructure!.stoneReserve},revision:snapshot.infrastructure!.revision};}
@@ -87,8 +86,8 @@ export async function readNavigationInfrastructure(tx:Kysely<Database>,village:{
   return {...own,roads:[...own.roads,...foreign.flatMap(p=>p.roads)],equipment:[...own.equipment,...foreign.flatMap(p=>p.equipment)],
     manualLighting:[...own.manualLighting,...foreign.flatMap(p=>p.manualLighting)],suppressedBraziers:[...own.suppressedBraziers,...foreign.flatMap(p=>p.suppressedBraziers)]};
 }
-async function validateTransition(tx:Transaction<Database>,snapshot:VillageState,before:InfrastructurePlan,next:InfrastructurePlan){
-  const world=snapshot.world,a=infrastructurePlanSurface(before,world),b=infrastructurePlanSurface(next,world),changed=[...b].filter(([key,p])=>!isDeepStrictEqual(p,a.get(key))&&(p.manual||a.get(key)?.manual)).map(([,p])=>p);
+async function validateTransition(tx:Transaction<Database>,snapshot:VillageState,before:InfrastructurePlan,next:InfrastructurePlan,surfaces?:{before:ReturnType<typeof infrastructurePlanSurface>;after:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>}){
+  const world=snapshot.world,a=surfaces?.before??infrastructurePlanSurface(before,world),b=surfaces?.after??infrastructurePlanSurface(next,world),changed=[...b].filter(([key,p])=>!isDeepStrictEqual(p,a.get(key))&&(p.manual||a.get(key)?.manual)).map(([,p])=>p);
   const oldSidewalk=infrastructureSidewalkSurface(a,world),sidewalk=[...infrastructureSidewalkSurface(b,world)].filter(([key])=>!oldSidewalk.has(key)).map(([,p])=>({x:(p.x+.5)/2,y:(p.y+.5)/2}));
   const moved=next.equipment.filter(e=>!isDeepStrictEqual(e,before.equipment.find(old=>old.id===e.id)));
   const ground=world.generationVersion===3?await readRc1Ground(tx,world.id):null;
@@ -111,12 +110,12 @@ async function validateTransition(tx:Transaction<Database>,snapshot:VillageState
     if(snapshot.travelRoutes.some(r=>r.kind==='building'&&!reachable.has(r.id)))throw new HttpError(409,'ACCESS_BLOCKED','Cet obstacle rendrait l’accès d’un bâtiment impraticable.');
   }
 }
-export async function infrastructureCommand(db:Kysely<Database>,accountId:string,slug:string,villageId:string,request:InfrastructureRequest):Promise<VillageState>{
+export async function infrastructureCommand<Mode extends ConstructionReplyMode='snapshot'>(db:Kysely<Database>,accountId:string,slug:string,villageId:string,request:InfrastructureRequest,replyMode:Mode='snapshot' as Mode):Promise<ConstructionResult<Mode>>{
   return db.transaction().execute(async tx=>{
     const village=await ownedVillage(tx,accountId,slug,villageId),economy=await beginVillageEconomy(tx,village.worldId,villageId,undefined,[],[],true);
     await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${village.worldId}`},0))`.execute(tx);
     const receipt=await tx.selectFrom('infrastructureReceipts').select('request').where('worldId','=',village.worldId).where('villageId','=',villageId).where('commandId','=',request.commandId).executeTakeFirst();
-    if(receipt){if(!isDeepStrictEqual(receipt.request,request))throw new HttpError(409,'COMMAND_REUSED','Identifiant de commande déjà utilisé.');return state(tx,accountId,slug,economy);}
+    if(receipt){if(!isDeepStrictEqual(receipt.request,request))throw new HttpError(409,'COMMAND_REUSED','Identifiant de commande déjà utilisé.');return villageCommandResult(tx,accountId,slug,village,economy,replyMode,request.commandId);}
     const snapshot=await state(tx,accountId,slug,economy,false),before=snapshot.infrastructure!;
     let next:InfrastructurePlan,quote:InfrastructureQuote;
     if(request.operation.kind==='undo'){
@@ -130,12 +129,12 @@ export async function infrastructureCommand(db:Kysely<Database>,accountId:string
         await tx.updateTable('villageResources').set({amount:sql`amount + ${amount}::bigint`}).where('worldId','=',village.worldId).where('villageId','=',villageId).where('resourceCode','=',code).execute();
       await tx.updateTable('infrastructureReceipts').set({undone:true}).where('worldId','=',village.worldId).where('villageId','=',villageId).where('commandId','=',prior.commandId).execute();
     }else{
-      ({next,quote}=prepare(snapshot,request));
-      await validateTransition(tx,snapshot,before,next);
+      const prepared=prepare(snapshot,request);({next,quote}=prepared);
+      await validateTransition(tx,snapshot,before,next,prepared.surfaces);
       if(!request.expected||!isDeepStrictEqual(request.expected,quote))throw new HttpError(409,'QUOTE_CHANGED','Le devis a changé. Aucun aménagement lancé.');
       if(samePlan(before,next)){
         await tx.insertInto('infrastructureReceipts').values({worldId:village.worldId,villageId,commandId:request.commandId,sessionId:request.sessionId,request:JSON.stringify(request),beforePlan:JSON.stringify(before),afterPlan:JSON.stringify(before),quote:JSON.stringify(quote)}).execute();
-        return state(tx,accountId,slug,economy);
+        return villageCommandResult(tx,accountId,slug,village,economy,replyMode,request.commandId);
       }
       await debit(tx,village.worldId,villageId,[{resourceCode:'stone',amount:quote.stoneDebit},{resourceCode:'wood',amount:quote.woodDebit}],economy.through);
       next.stoneReserve=quote.reserveAfter;
@@ -144,7 +143,7 @@ export async function infrastructureCommand(db:Kysely<Database>,accountId:string
     await tx.insertInto('villageInfrastructure').values({worldId:village.worldId,villageId,plan:JSON.stringify(next)}).onConflict(c=>c.columns(['worldId','villageId']).doUpdateSet({plan:JSON.stringify(next)})).execute();
     await tx.insertInto('infrastructureReceipts').values({worldId:village.worldId,villageId,commandId:request.commandId,sessionId:request.sessionId,
       request:JSON.stringify(request),beforePlan:JSON.stringify(before),afterPlan:JSON.stringify(next),quote:JSON.stringify(quote)}).execute();
-    return state(tx,accountId,slug,economy);
+    return villageCommandResult(tx,accountId,slug,village,economy,replyMode,request.commandId);
   });
 }
 export async function assertNoInfrastructure(tx:Transaction<Database>,worldId:string,cells:readonly {cellX:number;cellY:number}[],world:{widthCells:number;heightCells:number}){

@@ -1,7 +1,7 @@
 import { randomUUID } from '../random-uuid';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,useId,type RefObject} from 'react';
-import {prepareInfrastructureEdit,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
-import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageState} from '../api/client';
+import {applyVillageFrame,prepareInfrastructureEdit,emptyInfrastructure,type InfrastructureOperation,type InfrastructureQuote,type InfrastructureRequest,type VillageState,type SubPoint,type RoadMaterial,subCellKey} from '@arbestra/contracts';
+import {ApiError,commandInfrastructure,previewInfrastructure,getVillage,type TimedVillageUpdate} from '../api/client';
 import type {TerrainHandle} from '../scene/VillageScene';
 import type {InfrastructureGesture} from '../scene/infrastructure-renderer';
 import {InfrastructureThumbnail} from './InfrastructureThumbnail';
@@ -9,7 +9,7 @@ import {RoadVariantMenu} from './RoadVariantMenu';
 import './harvest-feedback.css';
 type Item={id:string;version:number;position:SubPoint;quarterTurns:number};
 const materials=[['none','Pas de route'],['earth','Terre'],['stone-1','Petite Pierre'],['stone-2','Grands Pavés']] as const;
-export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{state:VillageState;scene:RefObject<TerrainHandle|null>;active:boolean;onSnapshot:(s:TimedVillageState)=>void;onWorkshop:()=>void}){
+export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{state:VillageState;scene:RefObject<TerrainHandle|null>;active:boolean;onSnapshot:(s:TimedVillageUpdate)=>void;onWorkshop:()=>void}){
   const [family,setFamily]=useState('Voirie'),[material,setMaterial]=useState<RoadMaterial>('earth'),[width,setWidth]=useState(4),[border,setBorder]=useState(false),[invert,setInvert]=useState(false),[turn,setTurn]=useState(0);
   const [menu,setMenu]=useState<{code:'earth'|'stone-1'|'stone-2';anchor:HTMLButtonElement}|null>(null),menuId=useId();
   const remove=family==='Voirie'&&material==='none';
@@ -46,15 +46,14 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
   },[active]);
   const clearPending=()=>{try{sessionStorage.removeItem(pendingKey);}catch{/* a storage failure cannot turn a successful server response into uncertainty */}};
   useLayoutEffect(()=>{presented.current=active&&op&&quote?{operation:opKey,revision:plan.revision,quote}:null;});
-  useEffect(()=>{scene.current?.infrastructurePreview(active?op:null,!serverValid||insufficient,prepared?.next);},[active,opKey,serverValid,insufficient,scene,prepared]);
+  useEffect(()=>{scene.current?.infrastructurePreview(active?op:null,!serverValid||insufficient,prepared?.next,prepared?.surface);},[active,opKey,serverValid,insufficient,scene,prepared]);
   useEffect(()=>{
     if(!active||!op||busy)return;let cancelled=false;setServerValid(true);
     const request:InfrastructureRequest={commandId:randomUUID(),sessionId:session.current,revision:plan.revision,operation:op};
     let timer:ReturnType<typeof setTimeout>;
     const run=()=>{
       if(cancelled)return;
-      // A stale preview still holds the server's village lock until it returns.
-      // Coalesce pointer changes instead of queuing more economic snapshots.
+      // Coalesce obsolete read-only previews instead of queuing server work.
       if(previewInFlight.current){timer=setTimeout(run,120);return;}
       previewInFlight.current=true;
       void previewInfrastructure(state.world.slug,state.village.id,request).then(result=>{if(!cancelled){setServerValid(result.valid);setError(result.message);}}).catch(reason=>{if(!cancelled){setServerValid(false);setError(reason instanceof Error?reason.message:'Devis indisponible.');}}).finally(()=>{previewInFlight.current=false;});
@@ -73,9 +72,14 @@ export function InfrastructureTools({state,scene,active,onSnapshot,onWorkshop}:{
     const request=requestOverride??{commandId:randomUUID(),sessionId:session.current,revision:current.revision,operation:next,...(expected?{expected}:{})};
     const sentGeneration=generation.current;
     setBusy(true);latest.current.busy=true;setError(null);try{sessionStorage.setItem(pendingKey,JSON.stringify(request));}catch{/* memory retains the identity */}
-    try{const result=await commandInfrastructure(c.state.world.slug,c.state.village.id,request);onSnapshot(result);clearPending();setUncertain(null);
+    try{const result=await commandInfrastructure(c.state.world.slug,c.state.village.id,request,c.state.syncRevision===undefined?undefined:{revision:c.state.syncRevision,serverTime:c.state.serverTime});
+      // Inspect the accepted command against its exact transport base for undo history.
+      // App remains the sole owner of HTTP/SSE reconciliation.
+      const applied='frame' in result?applyVillageFrame(c.state,result.frame):null;
+      const accepted='state' in result?result.state:applied?.kind==='applied'?applied.state:latest.current.state;
+      onSnapshot(result);clearPending();setUncertain(null);
       if(sentGeneration===generation.current){
-        if(next.kind==='road'){if(result.state.infrastructure!.revision>current.revision)stack.current.push({id:request.commandId,anchor:next.stroke.points[0]!});setAnchor(next.stroke.points.at(-1)!);}
+        if(next.kind==='road'){if(accepted.infrastructure!.revision>current.revision)stack.current.push({id:request.commandId,anchor:next.stroke.points[0]!});setAnchor(next.stroke.points.at(-1)!);}
         if(next.kind==='undo'){const previous=stack.current.pop();setAnchor(previous?.anchor??null);}
         if(next.kind==='move'||next.kind==='delete'){setItem(null);setArmed(false);setPoint(null);}
       }

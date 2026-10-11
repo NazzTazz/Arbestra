@@ -9,7 +9,7 @@ import { millisecondsUntilRested } from '../population/energy.js';
 import { consumeInitialWorkers, worksiteOrderBudget } from '../villages/exploitation-budget.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
 import { clearWoodland } from './woodland.js';
-import { readExtraction, readStoneDeposit, startStoneExtraction, stoneDepositDetails, stoneExtractionDuration } from './stone-extractions.js';
+import { readExtractions, readStoneDeposit, startStoneExtraction, stoneDepositDetails, stoneExtractionDuration } from './stone-extractions.js';
 
 export const WAKE_EXTRACTION_WORKSITE_TASK = 'deposit.worksite.wake';
 const WAIT_MS = 60_000;
@@ -18,22 +18,21 @@ const MAX_ACTIVE_WORKSITES = 8;
 export async function readWorksites(tx: Transaction<Database>, worldId: string, villageId: string): Promise<ExtractionWorksite[]> {
   const rows = await tx.selectFrom('extractionWorksites').selectAll().where('worldId', '=', worldId)
     .where('villageId', '=', villageId).orderBy('createdAt', 'desc').limit(32).execute();
-  return Promise.all(rows.map(async row => {
-    const [targets, active] = await Promise.all([
-      tx.selectFrom('extractionWorksiteTargets').innerJoin('resourceDeposits', join => join
-        .onRef('resourceDeposits.worldId', '=', 'extractionWorksiteTargets.worldId')
-        .onRef('resourceDeposits.featureId', '=', 'extractionWorksiteTargets.featureId'))
-        .select(['extractionWorksiteTargets.featureId', 'extractionWorksiteTargets.status', 'extractionWorksiteTargets.reason',
-          'resourceDeposits.cellX', 'resourceDeposits.cellY'])
-        .where('worksiteId', '=', row.id).orderBy('ordinal').execute(),
-      tx.selectFrom('depositExtractions').select('id').where('worksiteId', '=', row.id)
-        .where('status', '=', 'in-progress').executeTakeFirst(),
-    ]);
-    return { id: row.id, resourceCode: row.resourceCode, mode: row.mode, status: row.status,
-      workerCap: row.workerCap, deliveredAmount: Number(row.deliveredAmount), waitReason: row.waitReason,
-      nextWakeAt: row.nextWakeAt?.toISOString() ?? null, targets,
-      activeExtraction: active ? await readExtraction(tx, worldId, villageId, active.id) : null };
-  }));
+  if(!rows.length)return [];
+  const ids=rows.map(r=>r.id),[targets,active]=await Promise.all([
+    tx.selectFrom('extractionWorksiteTargets').innerJoin('resourceDeposits',join=>join
+      .onRef('resourceDeposits.worldId','=','extractionWorksiteTargets.worldId')
+      .onRef('resourceDeposits.featureId','=','extractionWorksiteTargets.featureId'))
+      .select(['extractionWorksiteTargets.worksiteId','extractionWorksiteTargets.featureId','extractionWorksiteTargets.status','extractionWorksiteTargets.reason','resourceDeposits.cellX','resourceDeposits.cellY'])
+      .where('extractionWorksiteTargets.worldId','=',worldId).where('extractionWorksiteTargets.villageId','=',villageId)
+      .where('extractionWorksiteTargets.worksiteId','in',ids).orderBy('extractionWorksiteTargets.worksiteId').orderBy('ordinal').execute(),
+    readExtractions(tx,worldId,villageId,ids),
+  ]);
+  const grouped=new Map<string,ExtractionWorksite['targets']>(),missions=new Map(active.map(r=>[r.worksiteId,r.extraction]));
+  for(const {worksiteId,...target} of targets){const group=grouped.get(worksiteId)??[];group.push(target);grouped.set(worksiteId,group);}
+  return rows.map(row=>({id:row.id,resourceCode:row.resourceCode,mode:row.mode,status:row.status,
+    workerCap:row.workerCap,deliveredAmount:Number(row.deliveredAmount),waitReason:row.waitReason,
+    nextWakeAt:row.nextWakeAt?.toISOString()??null,targets:grouped.get(row.id)??[],activeExtraction:missions.get(row.id)??null}));
 }
 
 export async function createWorksite(tx: Transaction<Database>, economy: VillageEconomy,

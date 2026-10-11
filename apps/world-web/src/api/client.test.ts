@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { discoverOrRefreshSupplies, harvestGarden } from './client';
 import { getStoneDepositDetails, startStoneExtraction } from './client';
-import {buildBuilding} from './client';
+import {buildBuilding,commandInfrastructure} from './client';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -74,4 +74,15 @@ it('requests and parses an authoritative construction frame without changing the
 it('rejects a malformed incremental response as uncertain rather than accepting a partial village',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({kind:'frame',frame:{toRevision:2}}))));
  await expect(buildBuilding('rc1','village','dwelling',{cellX:1,cellY:2},[],'same-command')).rejects.toThrow('Réponse de synchronisation invalide');
+});
+
+it('requests an infrastructure frame using the shared base and preserves the receipt payload on retry',async()=>{
+ const {villageFrame,emptyInfrastructure}=await import('@arbestra/contracts'),state=await syncFixture(),frame=villageFrame(state,{...state,syncRevision:2,infrastructure:emptyInfrastructure()});
+ const fetchMock=vi.fn().mockImplementation(()=>Promise.resolve(new Response(JSON.stringify({kind:'frame',commandTime:state.serverTime,serverTime:state.serverTime,frame}))));vi.stubGlobal('fetch',fetchMock);
+ const payload={commandId:'same-command',sessionId:'same-session',revision:0,operation:{kind:'road' as const,stroke:{id:'preview',points:[{x:512,y:528},{x:528,y:528}],width:4,material:'earth',border:false,operation:'paint' as const}}};
+ const base={revision:state.syncRevision,serverTime:state.serverTime};
+ expect(await commandInfrastructure(state.world.slug,state.village.id,payload,base)).toMatchObject({frame});
+ await commandInfrastructure(state.world.slug,state.village.id,payload,{...base,revision:2});
+ expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({'x-village-sync':'1','x-village-revision':'1','x-village-server-time':state.serverTime});
+ expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
 });

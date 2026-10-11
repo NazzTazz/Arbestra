@@ -51,7 +51,7 @@ import type { ScienceCommand } from '@arbestra/contracts';
 import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/deposit-access.js';
 import { knownGeography } from '../science/knowledge.js';
 import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
-import { startStoneExtraction, stoneDepositDetails, readExtraction, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
+import { startStoneExtraction, stoneDepositDetails, readExtraction,readExtractions, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
 import { admitWorksites, changeWorksite, createWorksite, readWorksites } from '../deposits/worksites.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
 import { commandProcessing, previewProcessing, processingSnapshot } from './processing.js';
@@ -418,8 +418,8 @@ async function finalizeVillageEconomy(tx: Transaction<Database>, economy: Villag
 }
 export type ConstructionReplyMode = 'snapshot' | 'commit';
 export interface ConstructionCommit { worldId: string; villageId: string; through: Date; commandId?: string }
-type ConstructionResult<Mode extends ConstructionReplyMode> = Mode extends 'commit' ? ConstructionCommit : VillageState;
-async function constructionResult<Mode extends ConstructionReplyMode>(tx: Transaction<Database>, accountId: string,
+export type ConstructionResult<Mode extends ConstructionReplyMode> = Mode extends 'commit' ? ConstructionCommit : VillageState;
+export async function villageCommandResult<Mode extends ConstructionReplyMode>(tx: Transaction<Database>, accountId: string,
   worldSlug: string, village: OwnedVillage, economy: VillageEconomy, mode: Mode, commandId?: string): Promise<ConstructionResult<Mode>> {
   if (mode === 'snapshot') return await state(tx, accountId, worldSlug, economy) as ConstructionResult<Mode>;
   await finalizeVillageEconomy(tx, economy, village);
@@ -429,14 +429,20 @@ async function constructionResult<Mode extends ConstructionReplyMode>(tx: Transa
 }
 
 /** A coherent projection for transport, with no economic writes or locks. */
-export function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
+export function withVillageProjection<T>(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
+  read: (tx: Transaction<Database>, economy: VillageEconomy) => Promise<T>) {
   return db.transaction().setIsolationLevel('repeatable read').execute(async tx => {
     await sql`set transaction read only`.execute(tx);
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const through = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
     await sql`select set_config('arbestra.economy_through', ${through.toISOString()}, true)`.execute(tx);
-    return state(tx, accountId, worldSlug, { worldId: village.worldId, villageId, through }, false, true);
+    return read(tx, { worldId: village.worldId, villageId, through });
   });
+}
+
+export function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
+  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
+    state(tx, accountId, worldSlug, economy, false, true));
 }
 
 export async function state(
@@ -545,8 +551,7 @@ export async function state(
         eb('buildingType','=','town-hall'),eb('targetLevel','is not',null)])])).execute(),
     tx.selectFrom('gardenHarvests').selectAll().where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
-    tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
+    readExtractions(tx, village.worldId, village.villageId),
     projectGardenPlots(tx, village.worldId, village.villageId, at),
   ]);
   const projectedCohorts = cohorts.map((cohort) => ({
@@ -666,7 +671,7 @@ export async function state(
       woodProductionUpdatedAt: wood.productionUpdatedAt,
       population,
       accomplishments: accomplishmentRows.map((item) => ({ code: item.code, completedAt: item.completedAt.toISOString() })),
-      extractions: await Promise.all(extractionRows.map((row) => readExtraction(tx, village.worldId, village.villageId, row.id))),
+      extractions: extractionRows.map(row=>row.extraction),
       worksites: await readWorksites(tx, village.worldId, village.villageId),
       exploitationOrders: await readExploitationOrders(tx, economy),
       processingOrders: await processingSnapshot(tx, economy),
@@ -1144,7 +1149,7 @@ export async function constructBuilding<Mode extends ConstructionReplyMode = 'sn
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [{ cellX: normalizeCell(cellX, village.widthCells), cellY: normalizeCell(cellY, village.heightCells) }],[],true);
     const at = economy.through;
     const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, cellX: x, cellY: y, expectedCosts: canonicalCosts(expectedCosts) };
-    if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
     const item = await definition(tx, buildingType, 1, houseVariant);
     if (!item.buildable)
       throw new HttpError(
@@ -1223,7 +1228,7 @@ export async function constructBuilding<Mode extends ConstructionReplyMode = 'sn
       })
       .execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
   });
 }
 /** Construct a spatial building in one atomic selection. Non-spatial buildings
@@ -1241,7 +1246,7 @@ export async function constructBuildingArea<Mode extends ConstructionReplyMode =
     const at = economy.through;
     const selection = normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells);
     const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, anchor: selection.anchor, cells: selection.cells, expectedCosts: canonicalCosts(expectedCosts) };
-    if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
     const item = await definition(tx, buildingType, 1, houseVariant);
     if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
     if (item.code === 'university') {
@@ -1289,7 +1294,7 @@ export async function constructBuildingArea<Mode extends ConstructionReplyMode =
       payload: {}, dueAt: completesAt, availableAt: completesAt, lastError: null, completedAt: null,
     }).execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
   });
 }
 
@@ -1306,7 +1311,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
     const at = economy.through;
     const canonicalSelection = normalizeSpatialSelection(rawCells[0]!, rawCells, village.widthCells, village.heightCells);
     const commandRequest = { buildingId, cells: canonicalSelection.cells, expectedCosts: canonicalCosts(expectedCosts) };
-    if (await claimBuildingCommand(tx, village, commandId, 'expand', commandRequest)) return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    if (await claimBuildingCommand(tx, village, commandId, 'expand', commandRequest)) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
     const building = await tx.selectFrom('buildings').selectAll().where('id', '=', buildingId)
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).forUpdate().executeTakeFirst();
     if (!building || building.buildingType !== 'garden') throw new HttpError(404, 'GARDEN_NOT_FOUND', 'Jardin introuvable.');
@@ -1353,7 +1358,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
     if (!selection.cells.some((cell) => activeCells.some((active) =>
       toroidalManhattan(active.cellX, active.cellY, cell.cellX, cell.cellY, village.widthCells, village.heightCells) <= 1,
     ))) throw new HttpError(409, 'INVALID_BUILDING_EXTENSION', 'L’extension doit toucher le jardin actif.');
-    if (newCells.length === 0) return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    if (newCells.length === 0) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
     await assertBuildableCells(tx,village,newCells);
     const item = await definition(tx, 'garden', 1);
     const actualCosts = scaledCosts(item.costs, newCells.length);
@@ -1370,7 +1375,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
       payload: {}, dueAt: completesAt, availableAt: completesAt, lastError: null, completedAt: null,
     }).execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
   });
 }
 
@@ -1408,7 +1413,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, campusCells,[],true);
     const at = economy.through;
     const commandRequest = { buildingId, expectedLevel: expectedLevel ?? null, expectedCosts: canonicalCosts(expectedCosts) };
-    if (await claimBuildingCommand(tx, village, commandId, 'upgrade', commandRequest)) return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    if (await claimBuildingCommand(tx, village, commandId, 'upgrade', commandRequest)) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
     const building = await tx
       .selectFrom('buildings')
       .innerJoin('worldCellOccupancies', (join) =>
@@ -1518,7 +1523,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
       })
       .execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return constructionResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
   });
 }
 export async function harvestGardenSelection(db:Kysely<Database>,accountId:string,worldSlug:string,villageId:string,cells:TravelCell[],commandId:string):Promise<VillageState>{

@@ -86,6 +86,8 @@ describe('infrastructure spatial guarantees',()=>{
     expect(result.next.inheritedCells).toContain('13:12');expect(result.quote.stoneUnits).toBeGreaterThan(0);
     s.infrastructure=result.next;const same=prepareInfrastructureEdit(s,{kind:'road',stroke:road([{x:104,y:96},{x:108,y:96}],3,true)},'same');
     expect(same.next).toBe(s.infrastructure);expect(same.quote.stoneUnits).toBe(0);
+    expect(result.surface).toEqual(infrastructurePlanSurface(result.next,world));
+    expect(same.surface).toEqual(infrastructurePlanSurface(same.next,world));
   });
   it('does not recreate automatic fires from removed historical arms',()=>{
     const s=state(),corner=road([{x:96,y:96},{x:128,y:96},{x:128,y:128}]);s.infrastructure!.roads=[corner];

@@ -117,7 +117,7 @@ export function automaticRoadStrokes(routes:readonly VillageState['travelRoutes'
  }return roads;
 }
 /** Freeze only automatic geometry touched by an edit; it cannot be resurrected by a later snapshot. */
-export function prepareInfrastructureEdit(state:Pick<VillageState,'world'|'cells'|'travelRoutes'|'infrastructure'>,op:InfrastructureOperation,id:string):{next:InfrastructurePlan;quote:InfrastructureQuote}{
+export function prepareInfrastructureEdit(state:Pick<VillageState,'world'|'cells'|'travelRoutes'|'infrastructure'>,op:InfrastructureOperation,id:string):{next:InfrastructurePlan;quote:InfrastructureQuote;surface:ReadonlyMap<string,RoadPixel>}{
   const original=state.infrastructure??emptyInfrastructure(),base=structuredClone(original);
   if(op.kind==='road'){
     const occupied=new Set(state.cells.filter(c=>c.footprint).map(c=>`${c.cellX}:${c.cellY}`));
@@ -136,8 +136,8 @@ export function prepareInfrastructureEdit(state:Pick<VillageState,'world'|'cells
   const next=applyInfrastructure(base,op,id,op.kind==='road'?undefined:state.world);
   const surfaces={before:infrastructurePlanSurface(base,state.world),after:infrastructurePlanSurface(next,state.world)};
   const quote=infrastructureQuote(base,next,state.world,op.kind==='place'?1:0,op.kind==='place',accesses,surfaces);
-  if(sameInfrastructureSurface(surfaces.before,surfaces.after)&&JSON.stringify(base.equipment)===JSON.stringify(next.equipment)&&JSON.stringify(base.manualLighting)===JSON.stringify(next.manualLighting)&&JSON.stringify(base.suppressedBraziers)===JSON.stringify(next.suppressedBraziers))return {next:original,quote};
-  return {next,quote};
+  if(sameInfrastructureSurface(surfaces.before,surfaces.after)&&JSON.stringify(base.equipment)===JSON.stringify(next.equipment)&&JSON.stringify(base.manualLighting)===JSON.stringify(next.manualLighting)&&JSON.stringify(base.suppressedBraziers)===JSON.stringify(next.suppressedBraziers))return {next:original,quote,surface:infrastructurePlanSurface(original,state.world)};
+  return {next,quote,surface:surfaces.after};
 }
 export interface BorderEdge {x:number;y:number;dx:number;dy:number;key:string}
 export function infrastructureBorders(surface:ReadonlyMap<string,RoadPixel>,world:{widthCells:number;heightCells:number},_accesses:readonly BuildingAccess[]=[]):Map<string,BorderEdge>{

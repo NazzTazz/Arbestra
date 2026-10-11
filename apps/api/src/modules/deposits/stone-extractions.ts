@@ -1,5 +1,5 @@
 import {withinDepositRange} from '@arbestra/contracts';
-import { sql, type Transaction } from 'kysely';
+import { sql, type Transaction, type Selectable } from 'kysely';
 import type { DepositDetails, Extraction, StoneDeposit } from '@arbestra/contracts';
 import type { TravelCell } from '@arbestra/contracts';
 
@@ -82,11 +82,24 @@ export async function readExtraction(tx: Transaction<Database>, worldId: string,
   const row = await tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', worldId)
     .where('villageId', '=', villageId).where('id', '=', id).executeTakeFirstOrThrow();
   const deposit = await readStoneDeposit(tx, worldId, row.featureId);
+  return extractionProjection(row,deposit);
+}
+
+function extractionProjection(row:Selectable<Database['depositExtractions']>,deposit:{cellX:number;cellY:number}):Extraction {
   return { id: row.id, resourceCode: row.resourceCode, featureId: row.featureId, cellX: deposit.cellX, cellY: deposit.cellY,
     workerCount: row.workerCount, reservedAmount: safeAmount(row.reservedAmount),
     status: row.status, startedAt: row.startedAt.toISOString(), completesAt: row.completesAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
     transportMs: row.transportMs, path: row.pathCells ?? [] };
+}
+/** Batch projection only: no materialization, locks or cached economic data. */
+export async function readExtractions(tx:Transaction<Database>,worldId:string,villageId:string,worksiteIds?:readonly string[]):Promise<Array<{worksiteId:string|null;extraction:Extraction}>> {
+ if(worksiteIds&&!worksiteIds.length)return [];
+ let query=tx.selectFrom('depositExtractions').innerJoin('resourceDeposits',j=>j.onRef('resourceDeposits.worldId','=','depositExtractions.worldId').onRef('resourceDeposits.featureId','=','depositExtractions.featureId'))
+  .selectAll('depositExtractions').select(['resourceDeposits.cellX','resourceDeposits.cellY'])
+  .where('depositExtractions.worldId','=',worldId).where('depositExtractions.villageId','=',villageId).where('depositExtractions.status','=','in-progress');
+ if(worksiteIds)query=query.where('depositExtractions.worksiteId','in',worksiteIds);
+ return (await query.execute()).map(row=>({worksiteId:row.worksiteId,extraction:extractionProjection(row,row)}));
 }
 
 async function access(tx: Transaction<Database>, village: ExtractionVillage, deposit: StoneDeposit) {
