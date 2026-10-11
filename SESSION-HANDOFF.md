@@ -1,3 +1,15 @@
+# Routes automatiques Pierre 2 — 11 octobre 2026
+
+Base 82338861a08b3149280492d9dbfce2b785bcebc4, main. Tristan demande toutes les voies automatiques en Pierre 2, largeur 4 subdivisions, trottoirs/bordures activés. Implémenté et intégré à la démo ; validation visuelle produit par Tristan, encore à valider. **Mode interactif : pas de recette agent-browser pour les prochaines retouches pendant que Tristan teste ; seuls les tests ultra ciblés sont autorisés.** La recette navigateur de cette tranche a été interrompue à sa demande, sans inspection de la capture finale.
+
+AUTOMATIC_ROAD_STYLE et automaticRoadStrokes() partagent le profil entre VillageRoads et la capture d'une voie automatique dans prepareInfrastructureEdit(). VillageRoads utilise désormais InfrastructureRenderer, ses modules Pierre 2 et ses trottoirs de 2 subdivisions par côté, y compris pour les branches ressources. AutomaticBraziers utilise la largeur commune. Les plans manuels persistés et les trajets économiques ne sont pas modifiés. Aucun changement des données utilisateur.
+
+Vérifications terminées : un seul test ciblé renderer/contrat vert (1 passé, 2 ignorés), build contrats, build Vite e2e isolé et lint des quatre fichiers de code verts. Le test vérifie largeur, matériau, trottoirs et conservation des routes. Navigateur ouvert avant l'arrêt : meshes pavage/bordures présents, aucun défaut JS relevé à cette lecture ; cela ne vaut pas validation visuelle finale. Pas de campagne globale, DB ou typecheck général.
+
+Démo 5278 : même URL/world/village Bressuire, frontend désormais Vite dev HMR, mode e2e, proxy API 3102. Front session 25278/PID 45084 ; API session 40671/PID 49208. Build isolé test-results/stone2-roads-dist disponible mais non servi. **Préserver parent fixture session 48641/PID 8212 et enfants 22268/44552 : fermeture = nettoyage du monde utilisateur.** Transcript non suivi exclu du commit. Commit/push autorisés, référence exacte au bilan Git.
+
+---
+
 # Routage automatique de Bressuire rétabli — 11 octobre 2026
 
 Base 828bcfb6ba17b664047e2ab585db5fabf197b87b, main. Demande : le pavage manuel existe mais le réseau automatique manque. Diagnostic confirmé : le serveur ne renvoyait que deux trajets, enfermés par les bosquets de départ et deux scieries ; défaut supplémentaire des ancres de bâtiments multi-cases. Tristan valide explicitement le contournement des arbres réels par les piétons RC1, avec occupation pour construire conservée. **Implémenté/intégré/vérifié techniquement, à valider produit.** [Preuves, mesures et limites](docs/CONTRE-RECETTE-TERRAIN-RC1-2026-10-11.md#complément--routage-automatique-absent-de-bressuire).

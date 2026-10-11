@@ -99,6 +99,23 @@ export function infrastructurePlanSurface(plan:InfrastructurePlan,world:{widthCe
   for(const [key,p]of base){const cell=`${Math.floor((p.x+8)/16)%world.widthCells}:${Math.floor((p.y+8)/16)%world.heightCells}`;if(!captured.has(cell))base.delete(key);else p.inherited=true;}
   return infrastructureSurface(plan.roads,world,base);
 }
+/** Shared presentation recipe for every automatic route, including resource branches. */
+export const AUTOMATIC_ROAD_STYLE=Object.freeze({width:4,material:'stone-2' as const,border:true,operation:'paint' as const});
+export function automaticRoadStrokes(routes:readonly VillageState['travelRoutes'][number][],world:{widthCells:number;heightCells:number},allowedCells?:ReadonlySet<string>):RoadStroke[]{
+ const nodes=new Map<string,{x:number;y:number;arms:Set<number>}>();
+ for(const route of routes){const points=coarseTravelPath(route.cells,world);
+  for(let i=1;i<points.length;i++)for(const [a,b]of [[points[i-1]!,points[i]!],[points[i]!,points[i-1]!]]){
+   const cell=a!.cellX+':'+a!.cellY,dx=wrappedDistance(b!.cellX,a!.cellX,world.widthCells),dy=wrappedDistance(b!.cellY,a!.cellY,world.heightCells);
+   if(allowedCells&&!allowedCells.has(cell)||Math.abs(dx)+Math.abs(dy)!==1)continue;
+   const node=nodes.get(cell)??{x:a!.cellX,y:a!.cellY,arms:new Set<number>()};node.arms.add(dx>0?0:dy>0?1:dx<0?2:3);nodes.set(cell,node);
+  }
+ }
+ const roads:RoadStroke[]=[];
+ for(const [cell,node]of nodes){const at=(d:number)=>({x:wrapCoordinate(node.x*8+[4,0,-4,0][d]!,world.widthCells*8),y:wrapCoordinate(node.y*8+[0,4,0,-4][d]!,world.heightCells*8)}),centre={x:node.x*8,y:node.y*8};
+  for(const arm of node.arms)roads.push({id:'auto:'+cell+':'+arm,points:[centre,at(arm)],...AUTOMATIC_ROAD_STYLE});
+  const arms=[...node.arms];for(let i=0;i<arms.length;i++)for(let j=i+1;j<arms.length;j++)if((arms[i]!-arms[j]!+4)%2)roads.push({id:'auto:'+cell+':joint:'+i+':'+j,points:[at(arms[i]!),centre,at(arms[j]!)],...AUTOMATIC_ROAD_STYLE});
+ }return roads;
+}
 /** Freeze only automatic geometry touched by an edit; it cannot be resurrected by a later snapshot. */
 export function prepareInfrastructureEdit(state:Pick<VillageState,'world'|'cells'|'travelRoutes'|'infrastructure'>,op:InfrastructureOperation,id:string):{next:InfrastructurePlan;quote:InfrastructureQuote}{
   const original=state.infrastructure??emptyInfrastructure(),base=structuredClone(original);
@@ -109,19 +126,8 @@ export function prepareInfrastructureEdit(state:Pick<VillageState,'world'|'cells
     for(const c of base.inheritedCells??[])cells.delete(c);
     if(cells.size){
       base.inheritedCells=[...(base.inheritedCells??[]),...cells];base.inheritedRoads??=[];
-      const nodes=new Map<string,{x:number;y:number;arms:Set<number>;paved:boolean}>();
-      for(const route of state.travelRoutes){const points=coarseTravelPath(route.cells,state.world).map(p=>({x:p.cellX,y:p.cellY}));
-        for(let i=1;i<points.length;i++)for(const [a,b]of [[points[i-1]!,points[i]!],[points[i]!,points[i-1]!]]){
-          const cell=`${a!.x}:${a!.y}`,dx=wrappedDistance(b!.x,a!.x,state.world.widthCells),dy=wrappedDistance(b!.y,a!.y,state.world.heightCells);
-          if(!cells.has(cell)||occupied.has(cell)||Math.abs(dx)+Math.abs(dy)!==1)continue;
-          const node=nodes.get(cell)??{...a!,arms:new Set<number>(),paved:false};node.arms.add(dx>0?0:dy>0?1:dx<0?2:3);node.paved||=route.kind==='building';nodes.set(cell,node);
-        }
-      }
-      for(const [cell,node]of nodes){const at=(direction:number)=>({x:wrapCoordinate(node.x*8+[4,0,-4,0][direction]!,state.world.widthCells*8),y:wrapCoordinate(node.y*8+[0,4,0,-4][direction]!,state.world.heightCells*8)}),centre={x:node.x*8,y:node.y*8};
-        const recipe={width:3,material:node.paved?'stone-2':'earth',border:node.paved,operation:'paint' as const};
-        for(const arm of node.arms)base.inheritedRoads.push({id:`inherited:${cell}:${arm}`,points:[centre,at(arm)],...recipe});
-        const arms=[...node.arms];for(let i=0;i<arms.length;i++)for(let j=i+1;j<arms.length;j++)if((arms[i]!-arms[j]!+4)%2)base.inheritedRoads.push({id:`inherited:${cell}:joint:${i}:${j}`,points:[at(arms[i]!),centre,at(arms[j]!)],...recipe});
-      }
+      for(const cell of occupied)cells.delete(cell);
+      base.inheritedRoads.push(...automaticRoadStrokes(state.travelRoutes,state.world,cells).map(r=>({...r,id:r.id.replace(/^auto:/,'inherited:')})));
     }
   }
   const accesses=state.cells.flatMap(c=>c.building?buildingAccesses(state,c.building.id):[]);

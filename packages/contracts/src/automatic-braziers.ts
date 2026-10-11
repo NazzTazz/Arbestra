@@ -1,6 +1,6 @@
 import type {VillageState} from './villages.js';
 import {coarseTravelPath} from './travel-paths.js';
-import {infrastructurePlanSurface,subCellKey,wrapCoordinate,wrappedDistance,type SubPoint} from './infrastructure.js';
+import {AUTOMATIC_ROAD_STYLE,infrastructurePlanSurface,subCellKey,wrapCoordinate,wrappedDistance,type SubPoint} from './infrastructure.js';
 export interface AutomaticBrazier {id:string;position:SubPoint;cellX:number;cellY:number}
 /** Canonical decorative topology shared by picking, rendering and server validation. */
 export function automaticBraziers(state:Pick<VillageState,'world'|'cells'|'region'|'travelRoutes'|'infrastructure'>):AutomaticBrazier[]{
@@ -25,7 +25,7 @@ export function automaticBraziers(state:Pick<VillageState,'world'|'cells'|'regio
       const a=cells[i-1]!,b=cells[i]!;
       // Match the visible road runs: an excluded endpoint removes the whole arm.
       if([a,b].some(p=>occupied.has(subCellKey(p,world))||edited.has(subCellKey(p,world))))continue;
-      line(a,b,3,true);
+      line(a,b,AUTOMATIC_ROAD_STYLE.width,true);
     }
   }
   for(const road of [...(plan?.inheritedRoads??[]),...(plan?.roads??[])])if(road.operation==='paint'&&road.material!=='none')for(let i=1;i<road.points.length;i++)line(road.points[i-1]!,road.points[i]!,road.width,false);
