@@ -7,12 +7,13 @@ import {Vector3} from '@babylonjs/core/Maths/math.vector';
 import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
 import {BuildingGeometry} from './building-geometry';
 import type {WorldSpace} from './world-space';
+import {sidewalkPaving} from './sidewalk-paving';
 export class InfrastructureRenderer{
   #meshes:Mesh[]=[];#signature='';readonly materials:Record<string,StandardMaterial>={};
   #requestSignature='';
   #surfaceKey='';
   #surface:ReadonlyMap<string,RoadPixel>=new Map();
-  constructor(readonly scene:Scene){for(const [code,color]of Object.entries({earth:'#795b3d','stone-1':'#c5c6b8','stone-2':'#d4d3c4',border:'#c7cacc',preview:'#95caff'})){
+  constructor(readonly scene:Scene){for(const [code,color]of Object.entries({earth:'#795b3d','stone-1':'#c5c6b8','stone-2':'#d4d3c4',border:'#c5c6b8',preview:'#95caff'})){
     const m=new StandardMaterial(`infrastructure-${code}`,scene);m.diffuseColor=Color3.FromHexString(color);m.specularColor=Color3.Black();this.materials[code]=m;}}
   update(plan:InfrastructurePlan,space:WorldSpace,ground:(x:number,y:number)=>number|null,preview=false,terrainRevision=0,surfaceOverride?:ReadonlyMap<string,RoadPixel>,bordersOnly=false,accesses:readonly BuildingAccess[]=[],dimensions:{pavementHeight?:number;curbHeight?:number;followTerrain?:boolean}={}){
     const planKey=JSON.stringify([plan,space.width,space.height,surfaceOverride&&[...surfaceOverride]]);
@@ -68,15 +69,22 @@ export class InfrastructureRenderer{
       }
       for(const r of runs)box(code,(r.x0+r.x1)/32,(r.y0+r.y1)/32,(r.x1-r.x0)*2.5/16-.012,(r.y1-r.y0)*2.5/16-.008,(dimensions.followTerrain?sample(cell((r.x0+r.x1)/32,space.width),cell((r.y0+r.y1)/32,space.height))??h:h)+.003,pavementHeight);
     }
-    // Merge continuous strips so widening the sidewalk does not multiply masonry meshes.
-    const strips:Array<{x0:number;x1:number;y:number;h:number}>=[];
-    for(const pixel of [...sidewalks.values()].sort((a,b)=>a.y-b.y||a.x-b.x)){
-      const x=(pixel.x+.5)/16,y=(pixel.y+.5)/16,h=sample(cell(x,space.width),cell(y,space.height));if(h===null)continue;
-      const last=strips.at(-1);
-      if(!dimensions.followTerrain&&last&&last.y===pixel.y&&last.x1===pixel.x&&last.h===h)last.x1++;
-      else strips.push({x0:pixel.x,x1:pixel.x+1,y:pixel.y,h});
+    // Batched Pierre 1 stones; longitudinal joints and diagonal corner miters.
+    for(const stone of sidewalkPaving(surface,sidewalks,{widthCells:space.width,heightCells:space.height})){
+      const polygon=stone.polygon,n=polygon.length,x=polygon.reduce((s,p)=>s+p.x,0)/n/16,y=polygon.reduce((s,p)=>s+p.y,0)/n/16;
+      const h=sample(cell(x,space.width),cell(y,space.height));if(h===null)continue;
+      const code=preview?'preview':'border',positions:number[]=[],indices:number[]=[],normals:number[]=[],uvs:number[]=[];
+      const point=(i:number,top:boolean)=>{const q=polygon[i]!,cx=q.x/16,cy=q.y/16,p=space.project({cellX:cx,cellY:cy});
+        const height=dimensions.followTerrain?sample(cell(cx,space.width),cell(cy,space.height))??h:h;
+        return [p.x,height+.004+(top?curbHeight:0),p.z];};
+      const face=(vertices:number[][],triangles:number[])=>{const offset=positions.length/3;positions.push(...vertices.flat());for(const v of vertices)uvs.push(stone.axis==='x'?v[0]!/3.75:v[2]!/3.75,stone.axis==='x'?v[2]!/.3125:v[0]!/.3125);indices.push(...triangles.map(i=>i+offset));};
+      // Babylon uses left-handed winding: the visible stone top must have +Y normals.
+      face(polygon.map((_,i)=>point(i,true)),Array.from({length:n-2},(_,i)=>[0,i+1,i+2]).flat());
+      face(polygon.map((_,i)=>point(i,false)),Array.from({length:n-2},(_,i)=>[0,i+2,i+1]).flat());
+      for(let i=0;i<n;i++){const j=(i+1)%n;face([point(i,false),point(j,false),point(j,true),point(i,true)],[0,1,2,0,2,3]);}
+      VertexData.ComputeNormals(positions,indices,normals);const data=new VertexData();Object.assign(data,{positions,indices,normals,uvs});
+      const list=groups.get(code)??[];list.push(new BuildingGeometry(code,data));groups.set(code,list);
     }
-    for(const r of strips)box(preview?'preview':'border',(r.x0+r.x1)/32,(r.y+.5)/16,(r.x1-r.x0)*2.5/16,2.5/16,r.h+.004+curbHeight,curbHeight);
     for(const [code,pieces]of groups)for(let i=0;i<pieces.length;i+=1024){const mesh=new Mesh(`infrastructure-${code}`,this.scene);BuildingGeometry.merge(pieces.slice(i,i+1024)).applyToMesh(mesh);mesh.material=this.materials[code]??null;mesh.isPickable=false;this.#meshes.push(mesh);}
   }
   setInvalid(invalid:boolean){this.materials.preview!.emissiveColor=Color3.FromHexString(invalid?'#bd453b':'#244a73');this.materials.preview!.alpha=.5;}

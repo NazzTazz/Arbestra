@@ -37,10 +37,6 @@ it('classifies shared building and resource edges without changing route kinds o
   expect(edges.find(e => e.kind === 'earth')).toEqual({ from: b, to: c, kind: 'earth' });
   expect(roadEdges([...routes].reverse()).sort((x, y) => x.kind.localeCompare(y.kind)))
     .toEqual(edges.sort((x, y) => x.kind.localeCompare(y.kind)));
-  const roadY=pavement.getVerticesData('position')!.filter((_,i)=>i%3===1),curbY=curbs.getVerticesData('position')!.filter((_,i)=>i%3===1);
-  expect(Math.max(...roadY)).toBeCloseTo(.003); // Keep the road visible above grass.
-  expect(Math.min(...curbY)).toBeCloseTo(.004); // Sidewalk rests on the ground instead of being buried.
-  expect(Math.max(...curbY)-Math.max(...roadY)).toBeCloseTo(.061);
   expect(JSON.stringify(routes)).toBe(before);
 });
 
@@ -54,7 +50,15 @@ it('renders every automatic branch as Pierre 2, four subdivisions wide, with the
   const pavement=scene.meshes.find(m=>m.name==='village-road-paved')!,curbs=scene.meshes.find(m=>m.name==='village-road-curbs')!;
   expect(pavement.material!.name).toBe('infrastructure-stone-2');expect(curbs.material!.name).toBe('infrastructure-border');
   const z=pavement.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...z)-Math.min(...z)).toBeCloseTo(1.25-.008);
-  const edges=curbs.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...edges)-Math.min(...edges)).toBeCloseTo(2.5);
+  const edges=curbs.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...edges)-Math.min(...edges)).toBeGreaterThan(2.45);expect(Math.max(...edges)-Math.min(...edges)).toBeLessThanOrEqual(2.5);
+  const roadY=pavement.getVerticesData('position')!.filter((_,i)=>i%3===1),curbY=curbs.getVerticesData('position')!.filter((_,i)=>i%3===1);
+  expect(Math.max(...roadY)).toBeCloseTo(.003);
+  expect(Math.min(...curbY)).toBeCloseTo(.004);
+  expect(Math.max(...curbY)-Math.max(...roadY)).toBeCloseTo(.061);
+  const positions=curbs.getVerticesData('position')!,normals=curbs.getVerticesData('normal')!;
+  const topNormals=Array.from(positions).flatMap((y,i)=>i%3===1&&Math.abs(y-.064)<1e-6&&Math.abs(normals[i]!)>.5?[normals[i]!]:[]);
+  expect(topNormals.length).toBeGreaterThan(0);expect(topNormals.every(y=>y>.99)).toBe(true);
+  expect(curbs.getVerticesData('uv')).toHaveLength(positions.length/3*2);
   expect(JSON.stringify(routes)).toBe(before);
  }finally{renderer.dispose();scene.dispose();engine.dispose();}
 });

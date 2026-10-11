@@ -1,3 +1,13 @@
+# Trottoirs pavés Pierre 1 et onglets — 11 octobre 2026
+
+Base 81abf5e417eed0cecf71d061341cb8b2ff6dded1. Tristan valide visuellement le rendu des routes et demande des trottoirs pavés Pierre 1, pierres alignées dans leur longueur et angles à 45°. Implémenté dans InfrastructureRenderer partagé par voies automatiques, voirie manuelle et atelier ; intégré par HMR à la démo 5278. Validation visuelle de cette retouche par Tristan, encore à valider ; pas de navigateur agent.
+
+sidewalkPaving() utilise les frontières réelles infrastructureBorders()/infrastructureSidewalkSurface() : modules Pierre 1 de 24 × 2 seizièmes (longueur ×4 demandée pendant la retouche), joints fins, orientation par rive, partage diagonal entre deux rives perpendiculaires. Fragments découpés sur l'union existante, sans joint supplémentaire aux frontières du raster. Petits prismes CPU fusionnés par matériau ; pas de mesh persistant par pavé. Teinte des trottoirs identique à Pierre 1. Base +0,004 et marche +0,061 conservées, suivi continu du terrain. Aucune mutation des plans, parcours ou stocks.
+
+Vérifications ciblées : village-roads et sidewalk-paving uniquement : 4 tests terminés verts après allongement/correction des normales. Lint ciblé vert avant cette dernière retouche. Le test géométrique vérifie sens horizontal/vertical, coupes à 45° y compris aux coutures et conservation des données ; celui du renderer vérifie matériau et hauteurs. Correction d'une erreur dans le test ajouté à la tranche précédente : les assertions de hauteur avaient été insérées dans le test de classification, ignoré lors du filtre ; elles sont maintenant dans le vrai test renderer, exécuté. Le précédent résultat filtré ne prouvait donc pas les hauteurs comme annoncé. Faces supérieures corrigées selon le winding gauche Babylon (+Y), UV orientées dans le sens des pierres ; test de normales et coordonnées UV ajouté après le retour visuel de Tristan. Pas de suite générale/build/navigateur. Services de la démo et protections de fixture inchangés ; voir relais inférieur. Transcript exclu du commit.
+
+---
+
 # Marche visible des trottoirs — 11 octobre 2026
 
 Base 07849552204aad521c0106fc1ccfba2fb36cbe7f. Tristan apprécie le rendu Pierre 2 et demande une chaussée légèrement plus basse que les trottoirs. InfrastructureRenderer enterrait leur épaisseur sous un sommet quasiment au niveau du pavage. Base des trottoirs maintenant à terrain +0,004, épaisseur par défaut 0,06 ; sommet à +0,064 contre +0,003 pour le pavage. Profil partagé voirie manuelle/automatique/atelier, suit le terrain ; pas de terrassement persistant ou de changement économique. Rendu intégré par HMR à la démo 5278 ; validation visuelle par Tristan. Pas de navigateur agent.
