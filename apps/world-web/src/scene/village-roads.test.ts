@@ -72,6 +72,7 @@ it('renders automatic earth paths four subdivisions wide without sidewalks',()=>
  try{renderer.update('earth',routes,new WorldSpace(512,256,{cellX:10,cellY:10}),()=>({code:1,height:0}),true);
   const road=scene.meshes.find(m=>m.material?.name==='infrastructure-earth')!;expect(road).toBeDefined();
   expect(scene.meshes.some(m=>m.material?.name==='infrastructure-border')).toBe(false);
+  const y=road.getVerticesData('position')!.filter((_,i)=>i%3===1);expect(Math.max(...y)).toBeCloseTo(.015);expect(Math.min(...y)).toBeLessThan(0);
   const z=road.getVerticesData('position')!.filter((_,i)=>i%3===2);expect(Math.max(...z)-Math.min(...z)).toBeCloseTo(1.25);
   expect(JSON.stringify(routes)).toBe(before);
  }finally{renderer.dispose();scene.dispose();engine.dispose();}

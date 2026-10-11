@@ -1,3 +1,9 @@
+# Terre légèrement surélevée — 11 octobre 2026
+
+Base 45cb40e746c6eadd53d8039c87991e41ab477056. Tristan demande de relever très légèrement les chemins de terre pour évoquer la terre compactée. InfrastructureRenderer partagé place la surface earth à terrain +0,015 au lieu de +0,002 ; épaisseur 0,025 conservée, base partiellement enfouie. Autres profils et aperçu générique conservés. Rendu seul, suivi du terrain inchangé, aucune mutation persistante ni redémarrage API. Démo 5278 HMR ; validation visuelle par Tristan. Contrôle unique ciblé du mesh terre : niveau du sommet et base sous le sol, exécution terminée verte : 1 test passé, 3 ignorés. Pas de navigateur/build/campagne supplémentaires. Services et protections de fixture du relais ci-dessous préservés.
+
+---
+
 # Chemins de terre sans trottoirs — 11 octobre 2026
 
 Base a84392ed87407f2061ecf29196e4fb0f41c2ba7e. Tristan valide visuellement les onglets corrigés, puis demande de passer aux chemins de terre sans trottoir. Profil automatique partagé : earth, border=false, largeur 4 subdivisions conservée. Rendu et nouvelles captures d'édition utilisent AUTOMATIC_ROAD_STYLE ; plans manuels persistés conservés. Le test renderer du pavage approuvé est conservé via InfrastructureRenderer avec une fixture Pierre 1 explicite ; le profil automatique terre a son contrôle ciblé. Compilation contrats terminée verte ; deux tests renderer ciblés terminés verts (terre sans trottoirs et conservation du pavage approuvé), deux cas ignorés. Démo 5278 HMR conservée ; API 3102 relancée en session 40969, remplace session 75155/PID 32464 ; fixture parente préservée. Aucun navigateur agent, validation visuelle par Tristan sur 5278. La piste surfaces texturées reste différée ; aucun changement des stocks ou des trajets.

@@ -57,7 +57,7 @@ export class InfrastructureRenderer{
     for(const p of surface.values())if(!bordersOnly&&p.manual&&(preview||p.material!=='none')){
       const x=(p.x+.5)/16,y=(p.y+.5)/16,h=sample(cell(x,space.width),cell(y,space.height));if(h===null)continue;
       const code=preview?'preview':p.material;
-      if(code==='earth'||preview){box(code,x,y,2.5/16,2.5/16,h+.002,.025);continue;}
+      if(code==='earth'||preview){box(code,x,y,2.5/16,2.5/16,h+(code==='earth'?.015:.002),.025);continue;}
       const length=p.material==='stone-1'?6:8,depth=p.material==='stone-1'?2:4,row=Math.floor(p.y/depth),shift=(row%2)*length/2;
       const bx=Math.floor((p.x-shift)/length)*length+shift,by=row*depth,key=`${code}:${bx}:${by}`;if(seen.has(key))continue;seen.add(key);
       // Each contiguous run is clipped; cut pieces at the road's boundary keep the fixed module pitch.
