@@ -9,6 +9,7 @@ import {migrateToLatest} from '../../database/migrate.js';
 import {testDatabaseUrl} from '../../database/test-environment.js';
 import {RC1_CANONICAL_CHECKSUM} from '../onboarding/spawn-compute-protocol.js';
 import {readRc1Ground} from './rc1-ground.js';
+import {getTerrain,getTerrainUpdates} from './terrain.js';
 
 const url = testDatabaseUrl(), target = new URL(url);
 if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test') throw Error('Unexpected RC1 cache test target');
@@ -62,6 +63,17 @@ describe('RC1 verified source cache on isolated worlds', () => {
     expect(bodies()).toBe(2);
   });
 
+  it('serves negotiated mutable RC1 edits without repeating the substrate and keeps legacy compatibility',async()=>{
+    const slug='rc1-cache-'+worlds[0]!;
+    const full=await getTerrain(db,accountId,slug,'4,0');
+    const legacy=await getTerrainUpdates(db,accountId,slug,'4,0');
+    const compact=await getTerrainUpdates(db,accountId,slug,'4,0',false,true);
+    expect(legacy.chunks[0]!.rc1).toEqual(full.chunks[0]!.rc1);
+    expect(compact.chunks[0]!.rc1).toBeUndefined();
+    expect(compact.chunks[0]!.rc1Edits!.terraces).toEqual(full.chunks[0]!.rc1!.terraces);
+    expect(JSON.stringify(compact)).not.toMatch(/heights|water|stride|terrainCodes|elevations/);
+    expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(Buffer.byteLength(JSON.stringify(legacy))/10);
+  });
   it('rejects a changed artifact even with the declared checksum and transaction xmin unchanged', async () => {
     const rollback = Error('EXPECTED_CACHE_TEST_ROLLBACK');
     await expect(db.transaction().execute(async tx => {

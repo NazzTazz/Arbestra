@@ -270,7 +270,7 @@ export class BabylonVillageScene {
       const world=this.#state.world,next=preparedPlan??prepareInfrastructureEdit(this.#state,operation,'preview').next;
       const selected=infrastructureSurface([{...operation.stroke,operation:'paint'}],world),full=infrastructurePlanSurface(next,world);
       const surface=new Map([...selected].map(([key,p])=>[key,{...(full.get(key)??p),manual:true}]));
-      this.#infrastructurePreview.update(next,this.#space,(x,y)=>this.#store?.ground(x,y)?.height??null,true,0,surface,operation.stroke.operation==='border',this.#state.cells.flatMap(c=>c.building?buildingAccesses(this.#state!,c.building.id):[]));
+      this.#infrastructurePreview.update(next,this.#space,(x,y)=>this.#store?.ground(x,y)?.height??null,true,0,surface,operation.stroke.operation==='border',this.#state.cells.flatMap(c=>c.building?buildingAccesses(this.#state!,c.building.id):[]),{followTerrain:this.#state.world.generationVersion===3});
       this.#infrastructurePreview.setInvalid(invalid);
     }else if(operation.kind==='place'||operation.kind==='move'){
       this.#infrastructurePreview.clear();
@@ -684,7 +684,7 @@ export class BabylonVillageScene {
       ground: point => {
         if (!this.#space || !this.#store || !this.#renderer) return null;
         const cell=this.#space.inverse(point.x,point.z),x=Math.round(cell.cellX)%this.#space.width,y=Math.round(cell.cellY)%this.#space.height;
-        return this.#renderer.rendered(x,y) ? this.#store.ground(x,y)?.height ?? null : null;
+        return this.#renderer.rendered(x,y) ? this.#store.ground(cell.cellX,cell.cellY)?.height ?? null : null;
       },
       free: (point,radius,featureId) => {
         if (!this.#space || !this.#store || !this.#state) return false;
@@ -929,6 +929,7 @@ export class BabylonVillageScene {
       const material = this.#material('streamed-ground', '#ffffff');
       new WeatherMaterial(material, 'ground', () => this.#weather, () => this.#space);
       material.specularColor.set(0, 0, 0);
+      material.backFaceCulling=state.world.generationVersion!==3;
       material.diffuseTexture = new Texture('/tiles/atlas.png', this.#scene, false, false, Texture.BILINEAR_SAMPLINGMODE);
       material.freeze();
       this.#renderer = new TerrainRenderer(this.#scene, this.#store, this.#space, material, this.#waterRippleMaterial,
@@ -993,6 +994,7 @@ export class BabylonVillageScene {
         this.#fullGardenSites.has(site.id),
       ]),
     });
+    this.#refreshBuildingGround();
     if (visualSignature === this.#lastVisualSignature) return;
     const generationStarted=performance.now();
     this.#lastVisualSignature = visualSignature;
@@ -1001,7 +1003,7 @@ export class BabylonVillageScene {
     this.#highlightedSiteIds = new Set(highlightedSiteIds);
     this.#constructionMode = constructionMode;
     this.#updateBuildableGrid(state);
-    const planned=state.cells.flatMap(site=>{const plan=planForSite(state,site);return plan?[{plan,anchor:site}]:[];});
+    const planned=state.cells.flatMap(site=>{const plan=planForSite(state,site,(x,y)=>this.#store?.ground(x,y)?.height??null);return plan?[{plan,anchor:site}]:[];});
     const boundaries=resolveMurets(planned,state.world);
     for(const {plan} of planned)if(plan.murets.length)plan.murets=boundaries.get(plan.id)??[];
     const plans=new Map(planned.map(({plan})=>[plan.id,plan]));
@@ -1024,6 +1026,10 @@ export class BabylonVillageScene {
             ? this.#createBuilding(site)
             : this.#createAvailableSite(site);
       if(site.building&&site.building.type!=='university'&&site.building.type!=='stonemason'&&!site.building.visualLayout)mesh.rotation.y+=(site.building.quarterTurns??0)*Math.PI/2;
+      const base=this.#siteGround(site);
+      const grounded=site.building?.visualLayout||['university','stonemason','garden'].includes(site.building?.type??'')||site.footprint?.buildingType==='garden';
+      if(!grounded)mesh.position.y+=base;
+      mesh.metadata={...mesh.metadata,groundOffset:mesh.position.y-base};
       cached={signature,mesh};this.#buildingCache.set(key,cached);}
       const mesh=cached.mesh;
       // Rebasing the local frame moves a campus; it does not change its geometry.
@@ -1544,7 +1550,7 @@ export class BabylonVillageScene {
     const points = this.#space!.path(path);
     return path.map((cell, index) => {
       const x=wrapCoordinate(Math.floor(cell.cellX+.5),this.#space!.width),y=wrapCoordinate(Math.floor(cell.cellY+.5),this.#space!.height);
-      const ground = this.#store!.ground(x,y);
+      const ground = this.#store!.ground(cell.cellX,cell.cellY);
       const shown = this.#renderer!.rendered(x,y);
       return new Vector3(points[index]!.x, ground && shown ? ground.height + 0.33 : NaN, points[index]!.z);
     });
@@ -1556,7 +1562,7 @@ export class BabylonVillageScene {
     if(path.some(p=>!Number.isInteger(p.cellX)||!Number.isInteger(p.cellY)))return points;
     const hall = this.#state?.cells.find(cell => cell.building?.type === 'town-hall');
     if (!hall || points.length < 2) return points;
-    const factoryPlan=planForSite(this.#state!,hall);
+    const factoryPlan=planForSite(this.#state!,hall,(x,y)=>this.#store?.ground(x,y)?.height??null);
     if(factoryPlan)return this.#factoryDeparture(hall,factoryPlan,points);
     const centre = this.#space!.project(hall);
     centre.x = points[0]!.x + delta(centre.x, points[0]!.x, this.#worldWidthUnits);
@@ -1579,7 +1585,7 @@ export class BabylonVillageScene {
     const building=this.#state?.cells.find(c=>c.building?.id===buildingId);
     if(!building||!this.#space)return [];
     if(path.some(p=>!Number.isInteger(p.cellX)||!Number.isInteger(p.cellY)))return this.#pathPoints(path);
-    const factoryPlan=planForSite(this.#state!,building);
+    const factoryPlan=planForSite(this.#state!,building,(x,y)=>this.#store?.ground(x,y)?.height??null);
     if(factoryPlan){
       const points=this.#workerPath(path);
       if(building.building!.type==='town-hall'){const p=transformPoint(factoryPlan,factoryPlan.entry.inside),centre=this.#space.project(building);return [new Vector3(centre.x+p.x,p.y+.31,centre.z+p.z)];}
@@ -1630,7 +1636,7 @@ export class BabylonVillageScene {
     }
     const {accesses,occupied,fires,displayRoutes}=this.#travelDerived;
     if(state.infrastructure){this.#renderer?.setInfrastructure(state.infrastructure);this.#infrastructureRenderer??=new InfrastructureRenderer(this.#scene);
-      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.rendered(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.version??0,undefined,false,accesses);this.#infrastructureRenderer.visible(this.#mode!=='world');}
+      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.rendered(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.version??0,undefined,false,accesses,{followTerrain:state.world.generationVersion===3});this.#infrastructureRenderer.visible(this.#mode!=='world');}
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
     const campusFires = state.cells.flatMap(site => {
@@ -1647,7 +1653,7 @@ export class BabylonVillageScene {
     this.#villageRoads ??= new VillageRoads(this.#scene);
     this.#villageRoads.update(JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.version, displayRoutes]),
       displayRoutes, this.#space!, cell => this.#renderer!.rendered(cell.cellX, cell.cellY)
-        ? this.#store!.ground(cell.cellX, cell.cellY) : null);
+        ? this.#store!.ground(cell.cellX, cell.cellY) : null,state.world.generationVersion===3);
     const routes = selectedRouteId
       ? state.travelRoutes.filter((route) => route.id === selectedRouteId)
       : state.travelRoutes;
@@ -1694,7 +1700,8 @@ export class BabylonVillageScene {
           const y = start.y + (end.y - start.y) * fraction - 0.26;
           for (const side of [1, -1]) {
             const width = 0.32 + (this.#hash(Math.round(canonical.cellX * TILE_SIZE * 10) + side * 113, Math.round(canonical.cellY * TILE_SIZE * 10) + side * 227) - 0.5) * 0.14;
-            const edge = new Vector3(x + normalX * width * side, y, z + normalZ * width * side);
+            const ex=x+normalX*width*side,ez=z+normalZ*width*side,c=this.#space!.inverse(ex,ez);
+            const edge = new Vector3(ex,state.world.generationVersion===3?(this.#store!.ground(c.cellX,c.cellY)?.height??y)+.07:y,ez);
             positions.push(edge.x, edge.y, edge.z);
             (side === 1 ? left : right).push(edge.add(new Vector3(0, 0.012, 0)));
           }
@@ -1873,6 +1880,22 @@ export class BabylonVillageScene {
     return marker;
   }
 
+  #siteGround(site:VillageCell):number {
+    const cells=site.building?this.#state!.cells.filter(c=>c.footprint?.buildingId===site.building!.id):[];
+    return Math.max(...(cells.length?cells:[site]).map(c=>this.#store?.ground(c.cellX,c.cellY)?.height??0));
+  }
+  #refreshBuildingGround():void {
+    if(!this.#state)return;
+    const bases=new Map<string,number>();
+    for(const site of this.#state.cells){const id=site.footprint?.buildingId??site.building?.id??site.id;
+      const h=this.#store?.ground(site.cellX,site.cellY)?.height??0;
+      bases.set(id,Math.max(bases.get(id)??-Infinity,h));
+    }
+    for(const [id,cached] of this.#buildingCache){const base=bases.get(id);
+      if(base!==undefined&&cached.mesh.metadata?.groundOffset!==undefined)cached.mesh.position.y=base+cached.mesh.metadata.groundOffset;
+    }
+  }
+
   #createBuilding(site: VillageCell): Mesh {
     if (site.building?.type === 'stonemason') {
       const body = new BabylonMesh(`stonemason-${site.building.id}`, this.#scene);
@@ -1881,7 +1904,7 @@ export class BabylonVillageScene {
       this.#timberThatch ??= new TimberThatch(this.#scene);
       buildCachedProceduralBuildingLod(body,'stonemason-finished',root=>buildStonemason(root,this.#timberThatch!,'finished',false),this.#timberThatch);
       buildStonemasonFire(body,this.#timberThatch);
-      this.#createContactShadow(body, 4.5, 4.5);
+      this.#createContactShadow(body, 4.5, 4.5,body.position.y);
       return this.#registerStructure(body);
     }
     if (site.building?.type === 'garden') return this.#createGardenPlot(site, false);
@@ -1956,7 +1979,7 @@ export class BabylonVillageScene {
     if(site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2){
       this.#timberThatch??=new TimberThatch(this.#scene);
       buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,plan.phase,lod===0?body:null),this.#timberThatch);
-      this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
+      this.#createContactShadow(body,plan.width+.08,plan.depth+.08,plan.base);
       return this.#registerStructure(body);
     }
     const key=bakedPlanKey(plan);
@@ -2049,7 +2072,7 @@ export class BabylonVillageScene {
     return root;
   }
 
-  #createContactShadow(parent: Mesh, width: number, depth: number): void {
+  #createContactShadow(parent: Mesh, width: number, depth: number, ground=0): void {
     if (!this.#contactShadowSource) {
       this.#contactShadowSource = MeshBuilder.CreateDisc('contact-shadow-source', { radius: 0.5, tessellation: 16 }, this.#scene);
       this.#contactShadowSource.material = this.#contactShadowMaterial;
@@ -2059,7 +2082,7 @@ export class BabylonVillageScene {
     const shadow = this.#contactShadowSource.createInstance(`contact-shadow-${parent.name}`);
     shadow.parent = parent;
     shadow.rotation.x = Math.PI / 2;
-    shadow.position.set(0.1, -parent.position.y + 0.035, 0.12);
+    shadow.position.set(0.1, ground-parent.position.y + 0.035, 0.12);
     shadow.scaling.set(width, depth, 1);
     shadow.isPickable = false;
   }
@@ -2067,7 +2090,7 @@ export class BabylonVillageScene {
   #applySelection(): void {
     const selected = this.#selectedSiteId ? this.#selectableMeshes.get(this.#selectedSiteId) : undefined;
     this.#selectionMarker.isVisible = Boolean(selected);
-    if (selected) this.#selectionMarker.position.set(selected.position.x, 0.135, selected.position.z);
+    if (selected) this.#selectionMarker.position.set(selected.position.x, selected.position.y-(selected.metadata?.groundOffset??selected.position.y)+0.135, selected.position.z);
   }
 
   #wrapCamera(): void {
@@ -2485,6 +2508,7 @@ export class BabylonVillageScene {
     if (loading !== this.#terrainLoading) { this.#terrainLoading = loading; this.#onTerrainLoading(loading); }
     if (this.#projectionVersion !== this.#renderer.version) {
       this.#projectionVersion = this.#renderer.version;
+      this.#refreshBuildingGround();
       this.#workers.reproject();
       // Streaming and origin changes can arrive after the pointer stopped moving.
       if(this.#ghostRequest)this.updateConstructionGhost(...this.#ghostRequest);
@@ -2494,6 +2518,13 @@ export class BabylonVillageScene {
     this.#streamMs.push(performance.now() - started); if (this.#streamMs.length > 3600) this.#streamMs.shift();
     if (now < this.#metricsAt) return;
     this.#metricsAt = now + 1000;
+    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.terrainPresentation=JSON.stringify({
+      buildings:this.#state.cells.filter(c=>c.building).map(c=>{const root=this.#buildingCache.get(c.building!.id)?.mesh;return {id:c.building!.id,type:c.building!.type,base:this.#siteGround(c),y:root?.position.y,offset:root?.metadata?.groundOffset,mesh:root?.uniqueId};}),
+      roads:this.#scene.meshes.filter(m=>m.name.startsWith('village-road-')).map(m=>({name:m.name,vertices:m.getTotalVertices()})),
+      grass:this.#renderer.meshes().filter(m=>m.name==='rc1-ground-unit').some(m=>m.material?.name==='streamed-ground'&&Boolean(m.getVerticesData('uv'))),
+      anonymousMasses:Boolean(this.#scene.getMeshByName('regional-forest-rock-masses')),
+    });
+
     if (navigator.webdriver) {
       const viewport = this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight());
       this.#canvas.dataset.woodlandScreens = JSON.stringify(this.#renderer.meshes().flatMap(mesh => {

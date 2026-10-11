@@ -116,6 +116,9 @@ export class RegionalOverview {
     this.#baseColors = new Float32Array(colors); this.#litColors = new Float32Array(colors);
     mesh.material = this.#material; mesh.isPickable = false;
     this.#mesh?.dispose(false, false); this.#mesh = mesh;
+    // RC1 has real streamed trees/rocks. These historical anonymous cuboids
+    // otherwise appear as additional, uninspectable deposits at regional zoom.
+    if (data.world.generationVersion === 3) { this.#masses?.dispose(); this.#masses = null; return; }
     const masses: Parameters<typeof volumeMesh>[2] = [];
     for (let j = 0; j < subdivisions; j += 2) for (let i = 0; i < subdivisions; i += 2) {
       const x = cx - extent / 2 + (i + 1) * step, y = cy - extent / 2 + (j + 1) * step;

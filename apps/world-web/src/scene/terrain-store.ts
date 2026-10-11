@@ -109,7 +109,17 @@ export class TerrainStore {
       const tickets = wanted.map((d) => { const e = this.#entry(d.key); e.inFlight = true; return { key: d.key, incarnation: e.incarnation, sequence: ++e.sequence, invalidation: e.invalidation }; });
       const controller = new AbortController(); this.#controllers.add(controller);
       const timeout = setTimeout(() => controller.abort(), SETTINGS.requestTimeoutMs); this.#timers.add(timeout);
-      void this.fetchChunks(wanted, controller.signal, updatesOnly).then((response) => {
+      // Abort must release admission even if a transport/body parser never settles.
+      // The raced transport may still finish later; it has no publishing callback.
+      let onAbort: () => void;
+      const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(new Error('Terrain request aborted'));
+        controller.signal.addEventListener('abort', onAbort, {once: true});
+      });
+      let fetched: Promise<TerrainResponse | TerrainUpdatesResponse>;
+      try { fetched = this.fetchChunks(wanted, controller.signal, updatesOnly); }
+      catch (error) { fetched = Promise.reject(error); }
+      void Promise.race([fetched, aborted]).then((response) => {
         if (this.#cancelled.has(controller)) return;
         if (this.#disposed || response.world.id !== this.world.id || response.world.generationVersion !== this.world.generationVersion
           || response.world.chunkSize !== this.world.chunkSize || response.world.widthCells !== this.world.widthCells || response.world.heightCells !== this.world.heightCells) throw new Error('Terrain scope mismatch');
@@ -125,9 +135,13 @@ export class TerrainStore {
             e.freshAt = -Infinity; continue;
           }
           for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
-          const signature = JSON.stringify([chunk.features, chunk.occupiedCells,chunk.rc1?.terraces]);
+          const signature = JSON.stringify([chunk.features, chunk.occupiedCells,chunk.rc1Edits?.terraces??chunk.rc1?.terraces]);
           if (!e.chunk || signature !== e.mutableSignature) this.changed.add(ticket.key);
-          if (e.chunk) e.chunk = { ...chunk, terrainCodes: e.chunk.terrainCodes, elevations: e.chunk.elevations };
+          if (e.chunk) {
+            if(chunk.rc1Edits&&!e.chunk.rc1)throw new Error('RC1 edits without substrate');
+            const rc1=chunk.rc1Edits&&e.chunk.rc1?{...e.chunk.rc1,terraces:chunk.rc1Edits.terraces}:chunk.rc1;
+            e.chunk = { ...chunk, ...(rc1?{rc1}:{}), terrainCodes: e.chunk.terrainCodes, elevations: e.chunk.elevations };
+          }
           else if (fullChunk) e.chunk = fullChunk;
           e.mutableSignature = signature; e.freshAt = this.now(); e.failures = 0; e.retryAt = 0;
         }
@@ -136,6 +150,7 @@ export class TerrainStore {
         for (const t of tickets) { const e = this.entries.get(t.key); if (e?.incarnation !== t.incarnation) continue;
           e.retryAt = this.now() + [2000, 5000, 10000][Math.min(e.failures++, 2)]!; }
       }).finally(() => {
+        controller.signal.removeEventListener('abort', onAbort!);
         clearTimeout(timeout);
         this.#timers.delete(timeout);
         this.#controllers.delete(controller);

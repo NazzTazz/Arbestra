@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainResponse, TerrainUpdatesResponse, VillageState } from '@arbestra/contracts';
 import { TerrainStore, type TerrainFetch } from './terrain-store';
 import { terrainDemand } from './world-space';
@@ -26,6 +26,20 @@ function harness() {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('releases timed-out requests even when transport never settles and rejects their late replies', async()=>{
+    vi.useFakeTimers();
+    const h=harness();
+    try {
+      h.demand();h.advance(100);expect(h.store.pending).toBe(1);
+      await vi.advanceTimersByTimeAsync(30001);
+      expect(h.requests[0]!.signal.aborted).toBe(true);expect(h.store.pending).toBe(0);
+      h.advance(2000);expect(h.requests).toHaveLength(2);
+      h.requests[1]!.resolve({world,chunks:[chunk()]});await vi.advanceTimersByTimeAsync(0);
+      h.requests[0]!.resolve({world,chunks:[{...chunk(),features:[feature(deposit(99))]}]});await vi.advanceTimersByTimeAsync(0);
+      expect(h.store.chunk('0:0')!.features).toEqual([]);expect(h.store.degraded).toBe(false);
+    } finally {vi.useRealTimers();}
+  });
+
   it('finds the nearest known resource outside the rendered demand and respects current depletion',async()=>{
     const near={...feature(deposit(1)),cellX:130,cellY:0,deposit:{...deposit(1),cellX:130,cellY:0}};
     const far={...feature(deposit(1)),id:'far',cellX:10,cellY:0,deposit:{...deposit(1),featureId:'far',cellX:10,cellY:0}};
@@ -55,6 +69,18 @@ describe('terrain cache authority and lifecycle', () => {
     const patch={chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[],occupiedCells:[],rc1:{...first.rc1,terraces:[{cellX:1,cellY:1,height:.5}]}};
     h.requests[1]!.resolve({world,chunks:[patch]});await new Promise(r=>setTimeout(r,0));
     expect(h.store.ground(1,1)?.height).toBe(1.25);expect(h.store.ground(2,1)?.height).toBe(.625);expect(h.store.changed.has('0:0')).toBe(true);
+  });
+  it('replaces only RC1 edits while retaining height/water arrays, including an empty terrace scope',async()=>{
+    const h=harness();h.demand();h.advance(100);
+    const rc1={stride:65,heights:Array(65**2).fill(.25),water:Array(65**2).fill(0),terraces:[]};
+    await h.settle(0,{...chunk(),rc1});
+    for(const terraces of [[{cellX:1,cellY:1,height:.5}],[]]) {
+      h.advance(5000);const request=h.requests.at(-1)!;
+      request.resolve({world,chunks:[{chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[],occupiedCells:[],rc1Edits:{terraces}}]});
+      await new Promise(r=>setTimeout(r,0));
+      expect(h.store.chunk('0:0')!.rc1!.heights).toBe(rc1.heights);expect(h.store.chunk('0:0')!.rc1!.water).toBe(rc1.water);
+      expect(h.store.ground(1,1)!.height).toBe(terraces.length?1.25:.625);
+    }
   });
   it('requests newly authorized ground after a returned map instead of retaining an unknown cached chunk', async () => {
     const h = harness(); h.demand(); h.advance(100);

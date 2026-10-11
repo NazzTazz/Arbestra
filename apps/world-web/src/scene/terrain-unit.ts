@@ -10,16 +10,14 @@ import { normalize, WorldSpace } from './world-space';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { ROAD_DEPTH, roadTileRects, roadTileBorders } from './road-profile';
 import type {RoadPixel} from '@arbestra/contracts';
+import {hash,grassVariant} from './terrain-palette';
+export {hash} from './terrain-palette';
 const TILE_SIZE = 2.5;
 export const RENDER_UNIT_CELLS = TERRAIN_STREAMING.renderUnitCells;
-export function hash(x: number, z: number): number {
-  const value = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
-  return value - Math.floor(value);
-}
 export function buildTerrainUnit(scene: Scene, chunk: TerrainChunk, offsetX: number, offsetY: number,
   space: WorldSpace, material: StandardMaterial, waterMaterial: StandardMaterial,
   roads: ReadonlyMap<string, number> = new Map(), infrastructure:ReadonlyMap<string,RoadPixel>=new Map()): Mesh[] {
-  if(chunk.rc1)return buildRc1TerrainUnit(scene,chunk,offsetX,offsetY,space,waterMaterial);
+  if(chunk.rc1)return buildRc1TerrainUnit(scene,chunk,offsetX,offsetY,space,material,waterMaterial);
   const size = Math.sqrt(chunk.terrainCodes.length) - 2, stride = size + 2;
   const origin = space.project({ cellX: chunk.originCellX, cellY: chunk.originCellY });
   const result: Mesh[] = [];
@@ -71,7 +69,7 @@ export function buildTerrainUnit(scene: Scene, chunk: TerrainChunk, offsetX: num
             const byCell = hash(worldCellX, worldCellY);
             const byPatch = hash(Math.floor(worldCellX / 5), Math.floor(worldCellY / 5));
             const palette = current.code === 2 ? waterColors : stoneColors;
-            const variant = Math.floor(((byCell * 0.65 + byPatch * 0.35) % 1) * (current.code === 1 ? 8 : palette.length));
+            const variant = current.code===1?grassVariant(worldCellX,worldCellY):Math.floor(((byCell * 0.65 + byPatch * 0.35) % 1) * palette.length);
             const color = current.code === 0 ? Color3.FromHexString('#535563') : current.code === 1 ? white : palette[variant]!;
             const left = centerX - TILE_SIZE / 2, right = centerX + TILE_SIZE / 2;
             const back = centerZ - TILE_SIZE / 2, front = centerZ + TILE_SIZE / 2;

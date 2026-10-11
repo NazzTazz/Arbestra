@@ -4,6 +4,7 @@ import { NaturalFeatureSchema } from './villages.js';
 
 export const TerrainUpdatesChunkSchema = Type.Object({
   rc1: Type.Optional(Rc1GroundSchema),
+  rc1Edits: Type.Optional(Type.Object({terraces: Rc1GroundSchema.properties.terraces})),
   chunkX: Type.Integer({ minimum: 0 }), chunkY: Type.Integer({ minimum: 0 }),
   originCellX: Type.Integer({ minimum: 0 }), originCellY: Type.Integer({ minimum: 0 }),
   features: Type.Array(NaturalFeatureSchema),

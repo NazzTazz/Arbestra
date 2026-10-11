@@ -33,3 +33,19 @@ it('renders wide flush sidewalks continuously across a building exit',()=>{
     expect(renderer.meshes.find(m=>m.name==='infrastructure-border')!.getVerticesData('position')).toEqual(positions);
   }finally{renderer.dispose();scene.dispose();engine.dispose();}
 });
+
+
+it('drapes confirmed and preview masonry onto continuous RC1 relief at every vertex',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);
+ try {
+  const plan=emptyInfrastructure();plan.roads=[{id:'road',operation:'paint',material:'earth',width:4,border:false,points:[{x:80,y:80},{x:96,y:80}]}];
+  const space=new WorldSpace(512,256,{cellX:5,cellY:5}),height=(x:number,y:number)=>2+x*.1+y*.2;
+  for(const preview of [false,true]) {
+   renderer.update(plan,space,height,preview,1,undefined,false,[],{followTerrain:true});
+   for(const mesh of renderer.meshes){const p=mesh.getVerticesData('position')!;let min=Infinity,max=-Infinity;
+    for(let i=0;i<p.length;i+=3){const c=space.inverse(p[i]!,p[i+2]!);const relative=p[i+1]!-height(c.cellX,c.cellY);min=Math.min(min,relative);max=Math.max(max,relative);}
+    expect(max).toBeCloseTo(.002,4);expect(min).toBeCloseTo(-.023,4);
+   }
+  }
+ }finally{renderer.dispose();scene.dispose();engine.dispose();}
+});

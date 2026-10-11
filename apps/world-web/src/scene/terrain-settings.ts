@@ -1,7 +1,7 @@
 export const TERRAIN_STREAMING = {
   detailRadiusCells: 48, fadeCells: 8, graphicChunks: 17, cachedChunks: 64,
-  batchChunks: 16, concurrentBatches: 2, coalesceMs: 100, freshnessMs: 5000,
-  requestTimeoutMs: 10000, admissionMs: 1, renderUnitCells: 4,
+  batchChunks: 4, concurrentBatches: 2, coalesceMs: 100, freshnessMs: 5000,
+  requestTimeoutMs: 30000, admissionMs: 1, renderUnitCells: 4,
 } as const;
 export function coverage(width: number, height: number, size: number): { radius: number; ring: number } {
   // This bounds detailed chunk residency, not the visible geographic horizon.

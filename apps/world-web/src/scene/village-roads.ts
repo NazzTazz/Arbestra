@@ -6,6 +6,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { WorldSpace } from './world-space';
+import {drapePositions} from './terrain-drape';
 import { CELL_UNITS } from './world-space';
 import '@babylonjs/core/Meshes/Builders/boxBuilder';
 
@@ -78,15 +79,28 @@ export class VillageRoads {
     this.#curb.specularColor = Color3.Black();
   }
   update(signature: string, routes: readonly TravelRoute[], space: WorldSpace,
-    ground: (cell: TravelCell) => { code: number; height: number } | null): void {
+    ground: (cell: TravelCell) => { code: number; height: number } | null, followTerrain=false): void {
     if (signature === this.#requestSignature) return;
     this.#requestSignature = signature;
     // Streamer revisions also change when unrelated tiles enter the frustum.
     // Keep the existing meshes unless their own topology/height/projection changes.
+    const terrain=ground;
+    if(followTerrain)ground=cell=>{const g=terrain(cell);return g?{...g,height:0}:null;};
     const edges = roadEdges(routes).filter(e => [e.from, e.to].every(c => ground(c)?.code === 1));
+    const reliefSamples=(from:TravelCell,to:TravelCell)=>{
+      if(!followTerrain)return null;
+      const [a,b]=space.path([from,to]),dx=b!.x-a!.x,dz=b!.z-a!.z,length=Math.hypot(dx,dz);
+      if(!length)return [];
+      // Local continuous samples detect terraces without keying on a global
+      // streamer revision, which would rebuild roads for remote chunk arrivals.
+      return [0,.25,.5,.75,1].flatMap(t=>[-1.1,0,1.1].map(side=>{
+        const x=a!.x+dx*t-dz/length*side,z=a!.z+dz*t+dx/length*side;
+        return terrain(space.inverse(x,z))?.height;
+      }));
+    };
     const geometrySignature = JSON.stringify([space.width, space.height, space.origin,
       routes.map(route => [route.kind, route.cells]),
-      edges.map(e => [e.from, e.to, e.kind, ground(e.from)?.height, ground(e.to)?.height])]);
+      edges.map(e => [e.from,e.to,e.kind,terrain(e.from)?.height,terrain(e.to)?.height,reliefSamples(e.from,e.to)])]);
     if (geometrySignature === this.#signature) return;
     this.#signature = geometrySignature;
     for (const mesh of this.#meshes) mesh.dispose(false, false);
@@ -216,6 +230,7 @@ export class VillageRoads {
           dx,dz,length,g.height,miter(e.x0,e.z0),miter(e.x1,e.z1));
       }
     }
+    if(followTerrain){for(const group of Object.values(groups))drapePositions(group.positions,space,terrain);drapePositions(curbPositions,space,terrain);}
     for (const kind of ['paved', 'earth'] as const) {
       const group = groups[kind]; if (!group.indices.length) continue;
       const mesh = new Mesh(`village-road-${kind}`, this.scene), data = new VertexData();

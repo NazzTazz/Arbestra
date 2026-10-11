@@ -31,7 +31,7 @@ export async function registerTerrainRoutes(app: FastifyInstance, db: Kysely<Dat
   });
   app.get('/api/worlds/:worldSlug/terrain/updates', { schema: { params, querystring, response: { 200: TerrainUpdatesResponseSchema } } }, async (request) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
-    return getTerrainUpdates(db, account.id, (request.params as { worldSlug: string }).worldSlug, (request.query as { chunks: string }).chunks, !config.isProduction && request.headers['x-arbestra-science-preview'] === '1');
+    return getTerrainUpdates(db, account.id, (request.params as { worldSlug: string }).worldSlug, (request.query as { chunks: string }).chunks, !config.isProduction && request.headers['x-arbestra-science-preview'] === '1', request.headers['x-arbestra-terrain-edits'] === '1');
   });
   app.get('/api/worlds/:worldSlug/terrain/overview', { schema: { params, response: { 200: TerrainOverviewSchema, 304: Type.Null() } } }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);

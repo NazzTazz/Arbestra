@@ -147,7 +147,7 @@ export async function getTerrain(worldSlug: string, chunks: Array<{ chunkX: numb
 
 export async function getTerrainUpdates(worldSlug: string, chunks: Array<{ chunkX: number; chunkY: number }>, signal: AbortSignal): Promise<TerrainUpdatesResponse> {
   const query = chunks.map(c => `${c.chunkX},${c.chunkY}`).join(';');
-  return parseResponse<TerrainUpdatesResponse>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/updates?chunks=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal, headers: terrainHeaders() }));
+  return parseResponse<TerrainUpdatesResponse>(await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/terrain/updates?chunks=${encodeURIComponent(query)}`, { credentials: 'same-origin', signal, headers: {...terrainHeaders(),'x-arbestra-terrain-edits':'1'} }));
 }
 
 export async function getTerrainOverview(worldSlug: string, signal: AbortSignal): Promise<TerrainOverview> {

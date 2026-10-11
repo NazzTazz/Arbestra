@@ -27,10 +27,10 @@ export async function getTerrain(db: Kysely<Database>, accountId: string, slug: 
 
 export async function getPreparationTerrain(db:Kysely<Database>,accountId:string,slug:string,raw:string):Promise<TerrainResponse>{return readTerrain(db,accountId,slug,raw,true,false,true);}
 
-export async function getTerrainUpdates(db: Kysely<Database>, accountId: string, slug: string, raw: string, preview = false): Promise<TerrainUpdatesResponse> {
+export async function getTerrainUpdates(db: Kysely<Database>, accountId: string, slug: string, raw: string, preview = false, mutableRc1Only = false): Promise<TerrainUpdatesResponse> {
   const data = await readTerrain(db, accountId, slug, raw, false, preview);
   return { world: data.world, chunks: data.chunks.map(c => ({ chunkX: c.chunkX, chunkY: c.chunkY,
-    originCellX: c.originCellX, originCellY: c.originCellY, ...(c.rc1?{rc1:c.rc1}:{}), features: c.features, occupiedCells: c.occupiedCells })) };
+    originCellX: c.originCellX, originCellY: c.originCellY, ...(c.rc1?mutableRc1Only?{rc1Edits:{terraces:c.rc1.terraces}}:{rc1:c.rc1}:{}), features: c.features, occupiedCells: c.occupiedCells })) };
 }
 
 async function readTerrain(db: Kysely<Database>, accountId: string, slug: string, raw: string, includeGround: boolean, preview: boolean, preparation=false): Promise<TerrainResponse> {

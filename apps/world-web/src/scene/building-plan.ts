@@ -194,12 +194,14 @@ export function recipeFor(building:Pick<Building,'visualLayout'|'status'|'target
   return {recipe:{...base,levels,entrance:{...base.entrance,face:layout.entranceFace}},phase:building.status==='under-construction'?'works':'finished',
     sourceLevels:building.targetLevel!==null?(base.id!=='town-hall'&&building.level===2?2:1):0};
 }
-export function planForSite(state:VillageState,site:VillageCell):BuildingPlan|null {
+export function planForSite(state:VillageState,site:VillageCell,ground?:(x:number,y:number)=>number|null):BuildingPlan|null {
   if(!site.building)return null;const resolved=recipeFor(site.building);if(!resolved)return null;
   const cells=state.cells.filter(c=>c.footprint?.buildingId===site.building!.id);
   const footprint=cells.length?cells:[site];
-  const heights=footprint.map(c=>{const x=normalize(c.cellX-state.region.originCellX,state.world.widthCells),y=normalize(c.cellY-state.region.originCellY,state.world.heightCells);return (state.region.elevations[y*state.region.width+x]??0)*.025;});
-  return buildingPlan({id:site.building.id,anchor:site,cells:footprint,world:state.world,...resolved,heights,
+  const heights=footprint.map(c=>{const height=ground?.(c.cellX,c.cellY);if(height!==null&&height!==undefined)return height;const x=normalize(c.cellX-state.region.originCellX,state.world.widthCells),y=normalize(c.cellY-state.region.originCellY,state.world.heightCells);return (state.region.elevations[y*state.region.width+x]??0)*.025;});
+  // This renders an already accepted building on a rigid foundation. It does
+  // not authorize its footprint or apply any terrain modification.
+  return buildingPlan({id:site.building.id,anchor:site,cells:footprint,world:state.world,...resolved,heights:ground?[Math.max(...heights)]:heights,
     quarterTurns:site.building.visualLayout!.quarterTurns,offset:site.building.visualLayout!.offset});
 }
 export function planFocus(state:VillageState,site:VillageCell,plan:BuildingPlan){return {
