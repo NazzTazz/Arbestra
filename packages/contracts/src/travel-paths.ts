@@ -1,5 +1,5 @@
 import {canWalkSpawnSegment,type SpawnAccessField} from './spawn-access.js';
-export type TravelGround=SpawnAccessField & {revision:string};
+export type TravelGround=SpawnAccessField & {revision:string; /** Present only when the field checks actual RC1 trunks. */ woodedCells?:readonly TravelCell[]};
 import type { VillageState } from './villages.js';
 import {buildingAccesses} from './building-access.js';
 import {infrastructurePlanSurface,infrastructureBlockedPixels,infrastructureBarrierAt,pixelKey} from './infrastructure.js';
@@ -84,7 +84,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   const { world, village, region } = state;
   // Snapshots change economic amounts without changing this spatial problem.
   // Cache only bounded, deterministic geometry; never retain an economic snapshot.
-  const signature=JSON.stringify([ground?.revision,world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
+  const signature=JSON.stringify([ground?.revision,Boolean(ground?.woodedCells),world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
     region.originCellX,region.originCellY,region.width,region.height,region.terrainCodes,
     [...region.features].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>[f.id,f.type,f.cellX,f.cellY,f.deposit?.state,f.deposit?.blocksCell,f.deposit?.cleared]),
     state.cells.filter(c=>c.footprint||c.building).sort((a,b)=>a.cellX-b.cellX||a.cellY-b.cellY).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.visualLayout,c.building.accesses,c.building.garden?.plots.map(p=>[p.cellX,p.cellY]).sort((a,b)=>a[0]!-b[0]!||a[1]!-b[1]!)]]),state.infrastructure&&[state.infrastructure.roads,state.infrastructure.inheritedRoads,state.infrastructure.inheritedCells,[...state.infrastructure.equipment].sort((a,b)=>a.id.localeCompare(b.id)).map(e=>[e.id,e.x,e.y])],[...woodlandTargets].sort()]);
@@ -93,7 +93,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   const start = { cellX: village.anchorCellX, cellY: village.anchorCellY };
   const blocked = new Set(state.cells.filter((cell) => cell.footprint).map(key));
   for (const feature of region.features) {
-    if (feature.type === 'woodland' && (feature.deposit?.blocksCell === false || feature.deposit?.cleared)) continue;
+    if (feature.type === 'woodland' && (ground?.woodedCells || feature.deposit?.blocksCell === false || feature.deposit?.cleared)) continue;
     if (feature.type !== 'stone_outcrop' || feature.deposit?.state !== 'depleted') blocked.add(key(feature));
   }
   const goals: Array<Pick<TravelRoute, 'id' | 'kind' | 'destination'>> = [];
@@ -111,6 +111,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   goals.sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
   const shared = new Set<string>();
   const routes: TravelRoute[] = [];
+  const seeded=new Set<string>();
   const inside = (cell: TravelCell): boolean => {
     const x = wrap(cell.cellX - region.originCellX, world.widthCells);
     const y = wrap(cell.cellY - region.originCellY, world.heightCells);
@@ -145,7 +146,13 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
         pending.push({ cell, cost, score: cost + distance(cell, goal.destination) * 0.7, direction, steps: current.steps + 1, previous: current });
       }
     }
-    if (!found) continue;
+    if (!found) {
+      // A coarse anchor can be enclosed by its own footprint, or a trunk can
+      // block the cell-centre guide. The bounded door planner decides locally.
+      if(state.infrastructure&&Math.abs(delta(goal.destination.cellX,start.cellX,world.widthCells))<32&&Math.abs(delta(goal.destination.cellY,start.cellY,world.heightCells))<32)
+        {routes.push({...goal,cells:[start,goal.destination]});seeded.add(goal.id);}
+      continue;
+    }
     const cells: TravelCell[] = [];
     for (let cursor: Step | undefined = found; cursor; cursor = cursor.previous) cells.push(cursor.cell);
     cells.reverse();
@@ -155,7 +162,7 @@ export function buildTravelNetwork(state: Pick<VillageState, 'world' | 'village'
   // Keep the common network as the guide for local access/obstacle refinement.
   // Previously every destination started a fresh, unrelated shortest-path search.
   const guide=new Set<string>();
-  for(const route of routes)for(const p of route.cells)guide.add(key(p));
+  for(const route of routes)if(!seeded.has(route.id))for(const p of route.cells)guide.add(key(p));
   const refinement=state.infrastructure?prepareRefinement(state,ground):undefined;
   const result=state.infrastructure?routes.flatMap(route=>{const refined=refineTravelRoute(state,route,guide,refinement,ground);return refined?[refined]:[];}):routes;
   if(result.reduce((n,r)=>n+r.cells.length,0)<=50_000){networkCache.set(signature,copyNetwork(result));
@@ -178,7 +185,7 @@ function prepareRefinement(state:Pick<VillageState,'world'|'village'|'region'|'c
   const surface=infrastructurePlanSurface(state.infrastructure!,state.world);
   const curbPixels=infrastructureBlockedPixels(state.infrastructure!,state.world,state.cells.flatMap(c=>c.building?buildingAccesses(state,c.building.id):[]));
   const roadNodes=[...surface.values()].filter(p=>p.manual&&p.x%2===0&&p.y%2===0).map(p=>({cellX:p.x/2,cellY:p.y/2}));
-  return {surface,curbPixels,roadNodes,walk:passageInspector(ground)};
+  return {surface,curbPixels,roadNodes,walk:passageInspector(ground),woodedCells:ground?.woodedCells};
 }
 export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround):TravelRoute|null{
   if(!state.infrastructure||!route.cells.length)return route;
@@ -189,16 +196,16 @@ export function refineTravelRoute(state:Pick<VillageState,'world'|'village'|'reg
   const world=state.world,w=world.widthCells*8,h=world.heightCells*8;
   const local=(p:TravelCell)=>delta(p.cellX,state.village.anchorCellX,world.widthCells)>=-32&&delta(p.cellX,state.village.anchorCellX,world.widthCells)<32&&delta(p.cellY,state.village.anchorCellY,world.heightCells)>=-32&&delta(p.cellY,state.village.anchorCellY,world.heightCells)<32;
   const lastLocal=route.cells.findLastIndex(local),destination=local(route.destination)?route.destination:route.cells[lastLocal];if(!destination)return route;
-  const {surface,curbPixels,roadNodes,walk}=prepared??prepareRefinement(state,ground);
+  const {surface,curbPixels,roadNodes,walk,woodedCells}=prepared??prepareRefinement(state,ground);
   // A path cannot receive the road discount more often than there are road nodes.
   // Applying 0.7 to the entire remaining distance floods the fine grid when a
   // small edited portion lies far from the destination.
   const blocked=new Set(state.cells.filter(c=>c.footprint).map(key));
-  for(const f of state.region.features)if(f.deposit?.blocksCell!==false&&!f.deposit?.cleared&&f.deposit?.state!=='depleted')blocked.add(key(f));
+  for(const f of state.region.features)if(!(woodedCells&&f.type==='woodland')&&f.deposit?.blocksCell!==false&&!f.deposit?.cleared&&f.deposit?.state!=='depleted')blocked.add(key(f));
   const occupiedEquipment=state.infrastructure.equipment;
   // Ordinary cells have no sub-cell obstacle. Keep only their centre in the
   // search graph; portals connect it to the fine lattice near edited geometry.
-  const fineCells=new Set<string>();
+  const fineCells=new Set<string>(woodedCells?.map(key));
   const markFine=(x:number,y:number)=>fineCells.add(`${wrap(Math.floor(x+.5),world.widthCells)}:${wrap(Math.floor(y+.5),world.heightCells)}`);
   for(const p of surface.values())if(p.manual)markFine((p.x+.5)/16,(p.y+.5)/16);
   for(const k of curbPixels){const [x,y]=k.split(':').map(Number);markFine((x!+.5)/16,(y!+.5)/16);}

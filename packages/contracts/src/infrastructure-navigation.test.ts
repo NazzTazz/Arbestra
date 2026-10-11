@@ -10,6 +10,17 @@ const world={widthCells:64,heightCells:64};
 const state=()=>({world,village:{anchorCellX:10,anchorCellY:10},region:{originCellX:0,originCellY:0,width:64,height:64,terrainCodes:Array(4096).fill(1),features:[]},cells:[{cellX:10,cellY:10,footprint:{buildingId:'hall',state:'active'},building:{id:'hall',type:'town-hall',quarterTurns:0}}],travelRoutes:[],infrastructure:emptyInfrastructure()}) as unknown as VillageState;
 const road=(points:RoadStroke['points'],width=4,border=false):RoadStroke=>({id:'r',points,width,border,operation:'paint',material:'stone-1'});
 describe('infrastructure spatial guarantees',()=>{
+  it('does not discard a reachable multi-cell building because its anchor is enclosed by its own footprint',()=>{
+    const s=state();s.world={...s.world,id:'enclosed-building',widthCells:512,heightCells:256};
+    for(let y=9;y<=11;y++)for(let x=13;x<=15;x++)s.cells.push({cellX:x,cellY:y,footprint:{buildingId:'campus',state:'active'},building:x===14&&y===10?{id:'campus',type:'university',quarterTurns:0}:null} as VillageState['cells'][number]);
+    const seed:TravelRoute={id:'campus',kind:'building',destination:{cellX:14,cellY:10},cells:[{cellX:10,cellY:10},{cellX:14,cellY:10}]};
+    expect(refineTravelRoute(s,seed)).not.toBeNull();
+    const route=buildTravelNetwork(s).find(r=>r.id==='campus');
+    expect(route,'real door refinement must not depend on reaching the occupied anchor').toBeDefined();
+    expect(route!.cells[0]).toEqual(buildingAccesses(s,'hall')[0]!.position);
+    expect(route!.cells.at(-1)).toEqual(buildingAccesses(s,'campus')[0]!.position);
+  });
+
   it('connects the real hall door to a garden on the village anchor even when the coarse route has one point',()=>{
     const s=state();s.cells[0]!.cellX=9;s.village.townHallBuildingId='hall';
     const route:TravelRoute={id:'garden',kind:'garden',destination:{cellX:10,cellY:10},cells:[{cellX:10,cellY:10}]};

@@ -39,3 +39,5 @@ export * from './rc1-field.js';
 export * from './building-footprint.js';
 
 export * from './deposit-range.js';
+
+export * from './woodland-layout.js';

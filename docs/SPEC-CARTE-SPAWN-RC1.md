@@ -254,3 +254,9 @@ La tranche est livrée seulement lorsque ces critères sont vérifiés. Elle ne 
 5. Réaliser ensuite le starter-kit, les ressources et le terrassement transactionnel selon la section 7 ; recetter le parcours complet avant ouverture explicite. Le découpage technique n'autorise pas à présenter la seule carte comme une arrivée jouable complète.
 
 Hors scope : régénération géographique, marées nouvelles, simulation météorologique nouvelle, terraformation joueur, transports, combat, système général de méta-bâtiments et ouverture publique.
+
+## Complément validé le 11 octobre 2026 — passage dans les bosquets
+
+Tristan valide le contournement des arbres réels à l'intérieur d'une case boisée sur RC1. Le blocage piéton porte sur les troncs, avec une marge conservative de passage et d'échantillonnage ; la canopée n'est pas un obstacle. Les emprises et règles d'occupation pour la construction restent celles des bosquets. Le sol sec, la pente maximale de 1 niveau par case et les autres obstacles continuent à être contrôlés le long du passage. Les mondes historiques conservent leur blocage par cellule.
+
+Les positions du bosquet de complément proviennent de la même disposition déterministe pour Babylon et le terrain de navigation serveur. Le serveur utilise l'enveloppe du tronc à taille adulte, pour qu'une repousse ne fasse pas traverser un arbre par un trajet établi. Une suppression persistée ou un défrichement modifie la géométrie de navigation ; les variations de stock seules ne changent pas cette enveloppe.

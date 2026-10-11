@@ -1,5 +1,5 @@
 import type {StarterGhost} from '../spawn-map/starter-controller';
-import {poseStarterElement, spawnDelta} from '@arbestra/contracts';
+import {poseStarterElement, spawnDelta, woodlandTrees} from '@arbestra/contracts';
 import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
 import {cameraFocusAt} from './camera-focus';
@@ -1449,25 +1449,11 @@ export class BabylonVillageScene {
       if (feature.deposit?.cleared) continue;
       const ground = this.#store!.ground(feature.cellX, feature.cellY); if (!ground) continue;
       const size = this.#store!.world.chunkSize;
-      const p = this.#space!.projectFrom(feature, { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size });
-      if(feature.rc1?.trees.length){
-        const stock=feature.deposit?Math.max(.2,feature.deposit.remainingAmount/feature.deposit.initialAmount):1;
-        for(const tree of feature.rc1.trees){const at=this.#space!.projectFrom({cellX:tree.x,cellY:tree.y},{cellX:Math.floor(feature.cellX/size)*size,cellY:Math.floor(feature.cellY/size)*size});
-          const transform=Matrix.Compose(new Vector3(tree.crown*tree.size*stock,tree.size*stock,tree.crown*tree.size*stock),Quaternion.Identity(),new Vector3(at.x,tree.elevation*2.5,at.z));transforms.push(...transform.toArray());instanceFeatureIds.push(feature.id);}
-        continue;
-      }
-      const seed = Math.abs(feature.variantSeed), count = feature.rc1?3:2 + seed % 3;
-      for (let tree = 0; tree < count; tree++) {
-        const angle = (tree + this.#hash(seed, 401)) / count * Math.PI * 2;
-        const radius = 0.42 + this.#hash(seed, tree + 419) * 0.48;
-        const x = p.x + Math.cos(angle) * radius, z = p.z + Math.sin(angle) * radius;
-        const stockScale = feature.deposit ? 0.2 + 0.8 * feature.deposit.remainingAmount / feature.deposit.initialAmount : 1;
-        const scale = (0.76 + this.#hash(seed, tree + 431) * 0.26) * stockScale;
-        const rotation = this.#hash(feature.cellX * 10 + tree, feature.cellY * 10 + tree) * Math.PI;
-        const transform = Matrix.Compose(new Vector3(scale, scale, scale), Quaternion.RotationAxis(Vector3.Up(), rotation),
-          new Vector3(x, ground.height, z));
-        transforms.push(...transform.toArray());
-        instanceFeatureIds.push(feature.id);
+      for(const tree of woodlandTrees(feature)){
+        const at=this.#space!.projectFrom({cellX:tree.x,cellY:tree.y},{cellX:Math.floor(feature.cellX/size)*size,cellY:Math.floor(feature.cellY/size)*size});
+        const transform=Matrix.Compose(new Vector3(tree.scale,tree.heightScale,tree.scale),Quaternion.RotationAxis(Vector3.Up(),tree.rotation),
+          new Vector3(at.x,tree.elevation===undefined?ground.height:tree.elevation*TILE_SIZE,at.z));
+        transforms.push(...transform.toArray());instanceFeatureIds.push(feature.id);
       }
     }
     if (!transforms.length) return [];
