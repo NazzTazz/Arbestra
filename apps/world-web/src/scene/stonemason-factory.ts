@@ -1,4 +1,6 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { CreateIcoSphereVertexData } from '@babylonjs/core/Meshes/Builders/icoSphereBuilder';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -189,6 +191,25 @@ export function buildStonemason(root: Mesh, kit: TimberThatch, phase: 'finished'
     const mesh = new Mesh(`stonemason-${material.name}`, kit.scene);
     BuildingGeometry.merge(pieces).applyToMesh(mesh); mesh.material = material;
     mesh.parent = root; mesh.isPickable = false; mesh.receiveShadows = true;
+  }
+  if (!works) {
+    // A painted tag on the outside of the rear wall; the root owns its rotation.
+    const texture = new Texture('/decals/perlin-tag.png', kit.scene);
+    texture.hasAlpha = true;
+    texture.wrapU = texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+    const paint = new StandardMaterial('stonemason-perlin-paint', kit.scene);
+    paint.diffuseTexture = texture;
+    paint.useAlphaFromDiffuseTexture = true;
+    paint.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND;
+    paint.specularColor = Color3.Black();
+    const tag = CreatePlane('stonemason-perlin-tag', { width: 3.6, height: 1.8 }, kit.scene);
+    tag.parent = root;
+    tag.position.set(0, .98, 2.002);
+    tag.rotation.y = Math.PI; // Plane front faces +Z, readable from outside.
+    tag.material = paint;
+    tag.isPickable = false;
+    tag.receiveShadows = true;
+    root.onDisposeObservable.addOnce(() => paint.dispose(false, true));
   }
   if (!works && previewFires) {
     buildStonemasonFire(root,kit);

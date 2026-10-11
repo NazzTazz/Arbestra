@@ -1,3 +1,13 @@
+# Tag Perlin derrière le tailleur de pierre — 11 octobre 2026
+
+Base 90a8ce31b2847f33c887d13e972bde527b198c09, main. Demande Tristan : intégrer le PNG transparent Perlin de Downloads en easter egg sur la face extérieure du mur du fond du tailleur. Implémenté dans buildStonemason, état achevé : un plan alpha de 3,6 × 1,8 unités (+20 % à la demande suivante de Tristan), centre local (0,.98,2.002), base à .08 du sol, normale +Z opposée à l'ouverture -Z, enfant du root tourné existant. Même générateur utilisé en village/cache LOD, factory et présentation ; aucune entité métier ajoutée. Matériau éclairé sans reflet, PNG transparent clampé, ressources libérées avec la source de modèle. Le picking village reste celui du bâtiment existant.
+
+Asset public decals/perlin-tag.png copié à l'identique depuis le fichier fourni : 1774 × 887, RGBA/alpha transparent, 1 811 472 octets, SHA256 3411b26573f05d44deb936b45248103ba71eaadff2fe16fb7b3794a91cb3d4f1. Source Downloads conservée. Démo 5278 HMR, PNG servi HTTP 200/image/png ; rechargement nécessaire pour reconstruire les templates du tailleur. API 3102 et parent fixture 8212 préservés, aucune commande DB.
+
+Preuves : unique test existant stonemason-factory terminé vert, travaux/achevé et quatre rotations, normale extérieure, plan au-delà de la pierre et dans le mur, quatre sommets, emprise et libération des matériaux partagés conservées. Lint des deux fichiers terminé vert. Build world-web (types et Vite) terminé vert avant la dernière retouche de taille/hauteur ; test géométrique unique et lint rejoués après cette retouche : verts. Le build contient le PNG original ; la démo HMR sert les nouvelles dimensions. Pas de navigateur agent ni campagne de tests, conformément au mode interactif ; aspect final à vérifier par Tristan en tournant derrière son tailleur. Commit/push main autorisés, transcript utilisateur exclu.
+
+---
+
 # Voirie : confirmation compacte et coûts SQL corrigés — 11 octobre 2026
 
 Base d40a43bbeb3c76853b91ea1a581fd88c4f5ff63c, main. **Optimisations implémentées et vérifiées, candidate pour essai interactif.** Tristan précise que 500 ms est un ordre de grandeur ; les gains SQL/traffic suffisent pour cette livraison. Aucun plafond production ni ouverture publique validé. [Preuves et mesures actuelles](docs/CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md), [contrat](docs/architecture/village-synchronization.md#confirmation-ciblée-de-voirie), [spec](docs/SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md).

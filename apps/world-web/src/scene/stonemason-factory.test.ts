@@ -29,7 +29,20 @@ it('keeps both phases inside four cells and releases owned resources while prese
       expect(roofMeshes.length).toBeGreaterThan(0);
       expect(roofMeshes.every(m => m.material !== kit.stone && m.material !== kit.hay)).toBe(true);
       expect(roofMeshes.some(m => m.material === kit.boards)).toBe(phase === 'finished');
-      expect(meshes.length).toBeLessThanOrEqual(9);
+      expect(meshes.length).toBeLessThanOrEqual(phase === 'finished' ? 10 : 9);
+      const tag = meshes.find(mesh => mesh.name === 'stonemason-perlin-tag');
+      expect(Boolean(tag)).toBe(phase === 'finished');
+      if (tag) {
+        tag.computeWorldMatrix(true);
+        const normal = Vector3.TransformNormal(new Vector3(0, 0, -1), tag.getWorldMatrix());
+        const rear = Vector3.TransformNormal(new Vector3(0, 0, 1), root.computeWorldMatrix(true));
+        expect(Vector3.Dot(normal, rear)).toBeCloseTo(1);
+        expect(tag.position.z).toBeGreaterThan(1.85 + .28 / 2);
+        expect(tag.getBoundingInfo().boundingBox.minimumWorld.y).toBeGreaterThan(0);
+        expect(tag.getBoundingInfo().boundingBox.maximumWorld.y).toBeLessThan(16 * .14);
+        expect(tag.getTotalVertices()).toBe(4);
+        expect(tag.isPickable).toBe(false);
+      }
       expect(scene.particleSystems).toHaveLength(phase === 'finished' ? 1 : 0);
       expect(scene.lights).toHaveLength(phase === 'finished' ? 1 : 0);
       vertices.push(meshes.reduce((n, m) => n + m.getTotalVertices(), 0));
