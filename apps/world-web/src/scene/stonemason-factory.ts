@@ -200,11 +200,12 @@ export function buildStonemason(root: Mesh, kit: TimberThatch, phase: 'finished'
     const paint = new StandardMaterial('stonemason-perlin-paint', kit.scene);
     paint.diffuseTexture = texture;
     paint.useAlphaFromDiffuseTexture = true;
+    paint.alpha = .9;
     paint.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND;
     paint.specularColor = Color3.Black();
-    const tag = CreatePlane('stonemason-perlin-tag', { width: 3.6, height: 1.8 }, kit.scene);
+    const tag = CreatePlane('stonemason-perlin-tag', { width: 3.9, height: 1.95 }, kit.scene);
     tag.parent = root;
-    tag.position.set(0, .98, 2.002);
+    tag.position.set(0, .985, 2.002);
     tag.rotation.y = Math.PI; // Plane front faces +Z, readable from outside.
     tag.material = paint;
     tag.isPickable = false;

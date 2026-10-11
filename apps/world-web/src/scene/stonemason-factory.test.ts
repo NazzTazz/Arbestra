@@ -41,6 +41,7 @@ it('keeps both phases inside four cells and releases owned resources while prese
         expect(tag.getBoundingInfo().boundingBox.minimumWorld.y).toBeGreaterThan(0);
         expect(tag.getBoundingInfo().boundingBox.maximumWorld.y).toBeLessThan(16 * .14);
         expect(tag.getTotalVertices()).toBe(4);
+        expect(tag.material?.alpha).toBe(.9);
         expect(tag.isPickable).toBe(false);
       }
       expect(scene.particleSystems).toHaveLength(phase === 'finished' ? 1 : 0);
