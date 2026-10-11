@@ -27,8 +27,8 @@ it('keeps the full diagonal through the last pixel of a corner without a stepped
   const surface=infrastructureSurface([{id:'L',points,width:4,material:'stone-1',border:true,operation:'paint'}],world),sidewalks=infrastructureSidewalkSurface(surface,world);
   const missing=rotate(199.5,152.5);expect(sidewalks.has(Math.floor(missing.x)+':'+Math.floor(missing.y))).toBe(true);
   const stones=sidewalkPaving(surface,sidewalks,world);
-  for(const t of [.5,1.5,2.5,3.5])for(const [axis,offset]of [['x',.15],['y',-.15]] as const){
-   const p=rotate(196+t,156-t+offset),expectedAxis=turn%2?(axis==='x'?'y':'x'):axis;
+  for(const corner of ['outer','inner'])for(const t of [.5,1.5,2.5,3.5])for(const [axis,offset]of [['x',-.15],['y',.15]] as const){
+   const p=corner==='outer'?rotate(196+t,156-t+offset):rotate(188-t,164+t+offset),expectedAxis=turn%2?(axis==='x'?'y':'x'):axis;
    expect(stones.some(s=>s.axis===expectedAxis&&contains(s.polygon,p.x,p.y))).toBe(true);
   }
  }

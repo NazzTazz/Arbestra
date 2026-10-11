@@ -30,7 +30,12 @@ export function sidewalkPaving(surface:ReadonlyMap<string,RoadPixel>,sidewalks:R
    const other=sides[axis==='x'?'y':'x'];
    let polygon=[{x:p.x,y:p.y},{x:p.x+1,y:p.y},{x:p.x+1,y:p.y+1},{x:p.x,y:p.y+1}];
    if(other){const sign=(axis==='x'?p.y:p.x)+.5>=side.wall?1:-1,otherSign=(axis==='x'?p.x:p.y)+.5>=other.wall?1:-1;
-    polygon=clip(polygon,q=>sign*((axis==='x'?q.y:q.x)-side.wall)-otherSign*((axis==='x'?q.x:q.y)-other.wall)+gap*Math.SQRT2);}
+    const cornerX=axis==='x'?other.wall:side.wall,cornerY=axis==='x'?side.wall:other.wall;
+    const roadQuadrants=[[-.5,-.5],[-.5,.5],[.5,-.5],[.5,.5]].filter(([dx,dy])=>surface.get(wrapCoordinate(Math.floor(cornerX+dx!),w)+':'+wrapCoordinate(Math.floor(cornerY+dy!),h))?.manual).length;
+    // Convex road corners extend each run past its end; concave ones trim it back.
+    // Their diagonal has the same slope, but opposite ownership of the two halves.
+    const ownership=roadQuadrants===1?-1:1;
+    polygon=clip(polygon,q=>ownership*(sign*((axis==='x'?q.y:q.x)-side.wall)-otherSign*((axis==='x'?q.x:q.y)-other.wall))+gap*Math.SQRT2);}
    const across=axis==='x'?p.y:p.x,along=axis==='x'?p.x:p.y,row=Math.floor(across/2),shift=(row%2)*12;
    const start=Math.floor((along-shift)/24)*24+shift;
    for(const [coordinate,min,max]of (axis==='x'?[['x',start+gap,start+24-gap],['y',row*2+gap,row*2+2-gap]]:[['y',start+gap,start+24-gap],['x',row*2+gap,row*2+2-gap]]) as Array<['x'|'y',number,number]>){

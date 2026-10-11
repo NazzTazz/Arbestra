@@ -1,3 +1,13 @@
+# Attribution des pierres aux branches du trottoir — 11 octobre 2026
+
+Base 7c4038d8fe76ebfb9e165a0b03a09750bfee8a58. Nouveau retour visuel utilisateur : le raccord reste faux malgré le coin complété. Cause distincte : sidewalkPaving() utilisait l'appartenance du coin rentrant pour les coins sortants. Les coupes restaient à 45°, mais les pierres étaient attribuées à la branche opposée. La précédente régression encodait elle-même cette mauvaise attribution ; son succès ne prouvait donc pas un bon raccord.
+
+Correction : distinguer les quadrants de chaussée autour du coin ; inverser l'appartenance des deux moitiés pour un coin sortant, conserver celle du coin rentrant. La surface commune et les tarifs ne changent pas. Retouche renderer seule, chargée par HMR sur 5278 ; aucun redémarrage API nécessaire. Pas de navigateur agent. Validation visuelle produit à Tristan, encore à valider.
+
+Preuves terminées : attente corrigée de la branche → régression rouge avant modification, puis deux tests ciblés verts, coins rentrants/sortants sur quatre rotations et coutures existantes. Rejeu du vrai réseau Bressuire R3106 (33 bâtiments, 34 routes, 7 voies manuelles), avec le filtrage occupations/voirie de Babylon : 4 coins sortants, 14 rentrants, 144 points. Ancien helper sur ce même réseau : 32 erreurs d'appartenance ; helper corrigé : zéro. Pas de coin testable dans les plans manuels de cette fixture, ce cas reste couvert par la fixture géométrique. Image de diagnostic du vrai coin générée et inspectée localement : les deux rangées prolongent leur branche jusqu’au même onglet ; pas de recette GPU/caméra utilisateur. Aucune commande économique envoyée par l'agent ; lecture village uniquement. Services et protections de fixture ci-dessous préservés.
+
+---
+
 # Raccord diagonal des trottoirs — 11 octobre 2026
 
 Base 5a0446230f07abc451989761f357c5639c5f9aa3. Capture utilisateur : onglet interrompu puis bande/décroché au coin. Reproduction géométrique isolée en L : la quatrième cellule diagonale manque au champ de trottoir, et les candidats d'orientation s'arrêtent une cellule trop tôt. Régression rouge avant correction sur la cellule 199:152.
