@@ -39,7 +39,7 @@ export class InfrastructureRenderer{
     const signature=JSON.stringify([planKey,space.origin,space.version,preview,bordersOnly,accesses,dimensions,[...grounds]]);
     if(signature===this.#signature)return;
     this.#meshes.forEach(m=>m.dispose(false,false));this.#meshes=[];this.#signature=signature;
-    const pavementHeight=dimensions.pavementHeight??.04,curbHeight=dimensions.curbHeight??.04;
+    const pavementHeight=dimensions.pavementHeight??.04,curbHeight=dimensions.curbHeight??.06;
     const groups=new Map<string,BuildingGeometry[]>(),seen=new Set<string>();
     const box=(code:string,x:number,y:number,width:number,depth:number,top:number,height=.028)=>{
       const p=space.project({cellX:x,cellY:y}),piece=BuildingGeometry.box(code,{width,height,depth});piece.position=new Vector3(p.x,top-height/2,p.z);
@@ -76,7 +76,7 @@ export class InfrastructureRenderer{
       if(!dimensions.followTerrain&&last&&last.y===pixel.y&&last.x1===pixel.x&&last.h===h)last.x1++;
       else strips.push({x0:pixel.x,x1:pixel.x+1,y:pixel.y,h});
     }
-    for(const r of strips)box(preview?'preview':'border',(r.x0+r.x1)/32,(r.y+.5)/16,(r.x1-r.x0)*2.5/16,2.5/16,r.h+.004,curbHeight);
+    for(const r of strips)box(preview?'preview':'border',(r.x0+r.x1)/32,(r.y+.5)/16,(r.x1-r.x0)*2.5/16,2.5/16,r.h+.004+curbHeight,curbHeight);
     for(const [code,pieces]of groups)for(let i=0;i<pieces.length;i+=1024){const mesh=new Mesh(`infrastructure-${code}`,this.scene);BuildingGeometry.merge(pieces.slice(i,i+1024)).applyToMesh(mesh);mesh.material=this.materials[code]??null;mesh.isPickable=false;this.#meshes.push(mesh);}
   }
   setInvalid(invalid:boolean){this.materials.preview!.emissiveColor=Color3.FromHexString(invalid?'#bd453b':'#244a73');this.materials.preview!.alpha=.5;}

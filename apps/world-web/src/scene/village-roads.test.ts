@@ -37,6 +37,10 @@ it('classifies shared building and resource edges without changing route kinds o
   expect(edges.find(e => e.kind === 'earth')).toEqual({ from: b, to: c, kind: 'earth' });
   expect(roadEdges([...routes].reverse()).sort((x, y) => x.kind.localeCompare(y.kind)))
     .toEqual(edges.sort((x, y) => x.kind.localeCompare(y.kind)));
+  const roadY=pavement.getVerticesData('position')!.filter((_,i)=>i%3===1),curbY=curbs.getVerticesData('position')!.filter((_,i)=>i%3===1);
+  expect(Math.max(...roadY)).toBeCloseTo(.003); // Keep the road visible above grass.
+  expect(Math.min(...curbY)).toBeCloseTo(.004); // Sidewalk rests on the ground instead of being buried.
+  expect(Math.max(...curbY)-Math.max(...roadY)).toBeCloseTo(.061);
   expect(JSON.stringify(routes)).toBe(before);
 });
 

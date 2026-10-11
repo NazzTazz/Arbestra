@@ -1,3 +1,11 @@
+# Marche visible des trottoirs — 11 octobre 2026
+
+Base 07849552204aad521c0106fc1ccfba2fb36cbe7f. Tristan apprécie le rendu Pierre 2 et demande une chaussée légèrement plus basse que les trottoirs. InfrastructureRenderer enterrait leur épaisseur sous un sommet quasiment au niveau du pavage. Base des trottoirs maintenant à terrain +0,004, épaisseur par défaut 0,06 ; sommet à +0,064 contre +0,003 pour le pavage. Profil partagé voirie manuelle/automatique/atelier, suit le terrain ; pas de terrassement persistant ou de changement économique. Rendu intégré par HMR à la démo 5278 ; validation visuelle par Tristan. Pas de navigateur agent.
+
+La régression ultra ciblée existante ajoute les hauteurs réelles du mesh : pavage visible au-dessus du sol, base du trottoir au sol, marche de 0,061 unité Babylon. Exécution terminée verte : 1 test passé, 2 ignorés. Aucun build ni campagne supplémentaire pour cette retouche. Services et protections de fixture dans le relais ci-dessous, toujours à préserver. Transcript utilisateur exclu ; commit/push autorisés.
+
+---
+
 # Routes automatiques Pierre 2 — 11 octobre 2026
 
 Base 82338861a08b3149280492d9dbfce2b785bcebc4, main. Tristan demande toutes les voies automatiques en Pierre 2, largeur 4 subdivisions, trottoirs/bordures activés. Implémenté et intégré à la démo ; validation visuelle produit par Tristan, encore à valider. **Mode interactif : pas de recette agent-browser pour les prochaines retouches pendant que Tristan teste ; seuls les tests ultra ciblés sont autorisés.** La recette navigateur de cette tranche a été interrompue à sa demande, sans inspection de la capture finale.
