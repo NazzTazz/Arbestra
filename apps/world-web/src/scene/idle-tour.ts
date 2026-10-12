@@ -17,6 +17,8 @@ export function idleTour(visits:IdleVisit[],key:string):IdleLeg[]{
     legs.push({from:a.buildingId,to:b.buildingId,path,walkMs:Math.max(1000,pathLength(path)/.75*1000),insideMs:18000+((hash>>>0)+i*7919)%12000});
   }return legs;
 }
+/** Absolute phase is only for initial loading or a long absence. Live departures
+ * follow the reached doorway and their actual indoor dwell in VillageWorkers. */
 export function idleTourPhase(legs:IdleLeg[],now:number,key:string){
   let seed=0;for(const c of key)seed=(seed*31+c.charCodeAt(0))>>>0;
   const period=legs.reduce((n,l)=>n+l.walkMs+l.insideMs,0);

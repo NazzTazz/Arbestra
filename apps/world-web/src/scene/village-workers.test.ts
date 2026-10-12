@@ -5,7 +5,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { VillageState } from '@arbestra/contracts';
 import { expect, it } from 'vitest';
 import { VillageWorkers } from './village-workers';
-import { gardenHarvestPoint } from './worker-motion';
+import { gardenHarvestPoint, sampleWorkerPath, type TrafficActor } from './worker-motion';
 
 const epoch=Date.parse('2026-10-02T12:00:00Z');
 function gardenSnapshot():VillageState {
@@ -24,15 +24,15 @@ function snapshot(id='lot-1',start=epoch,count=10):VillageState {
 }
 function fixture(free:(p:{x:number;z:number})=>boolean=()=>true){
   const engine=new NullEngine(),scene=new Scene(engine),material=new StandardMaterial('shared',scene);
-  let shift=0;
+  let shift=0,ground:number|null=0;
   const view=new VillageWorkers(scene,{skin:[material,material,material],clothes:Array(5).fill(material),hair:Array(3).fill(material),pants:material,timber:material,stone:material},
-    {path:p=>p.map(c=>new Vector3(c.cellX-shift,0,c.cellY)),project:p=>({x:p.cellX-shift,z:p.cellY}),ground:()=>0,
+    {path:p=>p.map(c=>new Vector3(c.cellX-shift,0,c.cellY)),project:p=>({x:p.cellX-shift,z:p.cellY}),ground:()=>ground,
       leisurePath:(_id,p)=>p.map(c=>new Vector3(c.cellX-shift,0,c.cellY)),
       free,key:p=>`${p.x+shift}:${p.z}`,detailed:()=>true});
-  return {scene,material,view,rebase:(x:number)=>{shift=x;view.shift(x,0);},dispose:()=>{view.dispose();scene.dispose();engine.dispose();}};
+  return {scene,material,view,setGround:(value:number|null)=>{ground=value;},rebase:(x:number)=>{shift=x;view.shift(x,0);},dispose:()=>{view.dispose();scene.dispose();engine.dispose();}};
 }
 
-it('freezes only the inspected representative while the team and its server assignment continue',()=>{
+it('keeps the inspected representative moving while its authoritative information stays attached',()=>{
   const f=fixture();try{
     const state=snapshot('pair',epoch,2);
     state.village.population={total:2,housingCapacity:30,available:0,working:2,resting:0,energyCounts:[],
@@ -42,13 +42,13 @@ it('freezes only the inspected representative while the team and its server assi
     expect(before).not.toBeNull();
     const info=f.view.representativeInfo(id)!;
     expect(info.energy).toBe(8);expect(info.qualifications).toEqual(['Cartographe']);expect(info.cohortSize).toBe(2);
-    f.view.freezeRepresentative(id);
+    f.view.selectRepresentative(id);
     const other=f.view.representativePose('pair:1')!.position.clone();
     for(let t=2000;t<5000;t+=16)f.view.animate(epoch+t,true);
-    expect(f.view.representativePose(id)!.position.equals(before.position)).toBe(true);
+    expect(f.view.representativePose(id)!.position.equals(before.position)).toBe(false);
     expect(f.view.representativePose('pair:1')!.position.equals(other)).toBe(false);
     f.view.sync(state,epoch+5000);expect(f.view.representativeInfo(id)!.name).toBe(info.name);
-    f.view.freezeRepresentative(null);f.view.animate(epoch+5016,true);
+    f.view.selectRepresentative(null);f.view.animate(epoch+5016,true);
     expect(f.view.representativePose(id)!.position.equals(before.position)).toBe(false);
     expect(state.village.extractions[0]!.completesAt).toBe(new Date(epoch+80_000).toISOString());
   }finally{f.dispose();}
@@ -168,18 +168,17 @@ it('reconstructs a tour at its second plot and final return after reload or LOD 
   }finally{f.dispose();}
 });
 
-it('restores the same row progress after reload and rebasing without resetting the harvest',()=>{
+it('restores initial crop progress and preserves the row through short suspension and rebasing',()=>{
   const f=fixture();try{
     const now=epoch+35000;
     f.view.sync(gardenSnapshot(),now);f.view.animate(now,true);
     const expected=gardenHarvestPoint({x:0,z:2},33/60),gardener=f.view.figures[0]!;
     expect(gardener.root.position.x).toBeCloseTo(expected.x,8);expect(gardener.root.position.z).toBeCloseTo(expected.z,8);
     f.view.animate(now+10,false);f.view.animate(now+1000,true);
-    const resumed=gardenHarvestPoint({x:0,z:2},34/60);
-    expect(gardener.root.position.x).toBeCloseTo(resumed.x,8);expect(gardener.root.position.z).toBeCloseTo(resumed.z,8);
+    const resumed=gardener.root.position.clone();
+    expect(Math.hypot(resumed.x-expected.x,resumed.z-expected.z)).toBeLessThan(.05);
     f.rebase(100);f.view.reproject();f.view.animate(now+1034,true);
-    expect(gardener.root.position.x+100).toBeCloseTo(resumed.x,2);
-    expect(gardener.root.position.z).toBeCloseTo(resumed.z,2);
+    expect(Math.hypot(gardener.root.position.x+100-resumed.x,gardener.root.position.z-resumed.z)).toBeLessThan(.05);
     expect(f.view.metrics.layouts[0]?.phases).toEqual(['work']);expect(f.view.figures).toEqual([gardener]);
   }finally{f.dispose();}
 });
@@ -207,5 +206,124 @@ it('preserves idle representatives through LOD and recentring and still renders 
     expect(f.view.figures).toEqual(figures);expect(f.view.figures.every(p=>p.root.position.x<10)).toBe(true);
     expect(f.view.metrics.layouts.find(g=>g.id==='lot-1')?.roles).toHaveLength(10);
     f.view.sync(state,epoch+23000);expect(f.view.figures).toEqual(figures);
+  }finally{f.dispose();}
+});
+
+const actorOf=(figure:VillageWorkers['figures'][number])=>(figure as VillageWorkers['figures'][number]&{actor:TrafficActor}).actor;
+it('keeps a valid actor and pose through ordinary sync, terrain reprojection and a two second frame stall',()=>{
+  const f=fixture();try{
+    f.view.sync(snapshot('one',epoch,1),epoch);for(let t=0;t<2000;t+=16)f.view.animate(epoch+t,true);
+    const figure=f.view.figures[0]!,a=actorOf(figure),position=figure.root.position.clone(),distance=a.distance;
+    f.view.sync(snapshot('one',epoch,1),epoch+2000);f.view.reproject();
+    expect(f.view.figures[0]).toBe(figure);expect(a.distance).toBe(distance);expect(figure.root.position.equals(position)).toBe(true);
+    f.view.animate(epoch+4000,true);expect(figure.root.isEnabled()).toBe(true);
+    expect(figure.root.position.subtract(position).length()).toBeLessThan(.2);
+  }finally{f.dispose();}
+});
+it('does not reconstruct an active waiting member or its moving colleague after eight seconds',()=>{
+  const f=fixture();try{
+    f.view.sync(snapshot('pair',epoch,2),epoch);for(let t=0;t<1500;t+=16)f.view.animate(epoch+t,true);
+    const figures=f.view.figures,a=actorOf(figures[1]!);a.speed=0;a.waitingSince=epoch-9000;const distance=a.distance;
+    for(let t=1500;t<2500;t+=16)f.view.animate(epoch+t,true);
+    expect(a.distance).toBe(distance);expect(figures[1]!.root.isEnabled()).toBe(true);
+    expect(figures[1]!.root.getChildMeshes()[0]!.visibility).toBeGreaterThan(.95);
+    expect(actorOf(figures[0]!).distance).toBeGreaterThan(distance);
+  }finally{f.dispose();}
+});
+it('leaves the actually reached door after a delayed idle arrival and keeps its info indoors',()=>{
+  const f=fixture();try{
+    const key='world:village:idle:idle-cohort:0',state=idleSnapshot(1);
+    // Find an initial walking phase without coupling the assertion to the seed.
+    let now=epoch;for(;now<epoch+120000;now+=1000){f.view.sync(state,now);f.view.animate(now,true);if(f.view.metrics.layouts[0]?.phases[0]==='outbound')break;f.view.dispose();}
+    const figure=f.view.figures[0]!,a=actorOf(figure);a.speed=0;
+    for(let t=33;t<15000;t+=33)f.view.animate(now+t,true);
+    a.distance=a.path.reduce((n,p,i)=>i?n+Math.hypot(p.x-a.path[i-1]!.x,p.z-a.path[i-1]!.z):0,0);a.position={...a.path.at(-1)!};a.done=true;
+    f.view.animate(now+15033,true);expect(f.view.metrics.layouts[0]?.phases[0]).toBe('inside');
+    expect(f.view.representativeInfo(key+':0')).not.toBeNull();const door={...a.position};
+    for(let t=15066;t<55000;t+=33){f.view.animate(now+t,true);if(f.view.metrics.layouts[0]?.phases[0]==='outbound'){
+      expect(Math.hypot(a.position.x-door.x,a.position.z-door.z)).toBeLessThan(.05);return;
+    }}throw new Error('No departure after the indoor dwell');
+  }finally{f.dispose();}
+});
+
+it('holds an unavailable ground position and resumes there when height data returns',()=>{
+  const f=fixture();try{
+    f.view.sync(snapshot('one',epoch,1),epoch);for(let t=0;t<2000;t+=16)f.view.animate(epoch+t,true);
+    const figure=f.view.figures[0]!,a=actorOf(figure),position={...a.position},distance=a.distance;f.view.selectRepresentative('one:0');
+    f.setGround(null);for(let t=2000;t<5000;t+=16)f.view.animate(epoch+t,true);
+    expect(figure.root.isEnabled()).toBe(false);expect(a.distance).toBe(distance);expect(a.position).toEqual(position);
+    expect(f.view.representativeInfo('one:0')?.presence).toBe('ground-unavailable');expect(f.view.selectedRepresentative).toBe('one:0');
+    f.setGround(2);f.view.reproject();f.view.animate(epoch+5016,true);
+    expect(figure.root.isEnabled()).toBe(true);expect(figure.root.position.y).toBeCloseTo(2.215);
+    expect(Math.hypot(a.position.x-position.x,a.position.z-position.z)).toBeLessThan(.05);
+  }finally{f.dispose();}
+});
+it('invalidates cohort replacement without silently selecting the equivalent visual index',()=>{
+  const f=fixture();try{
+    const state=idleSnapshot(1);f.view.sync(state,epoch);f.view.animate(epoch,true);const id='world:village:idle:idle-cohort:0:0';
+    f.view.selectRepresentative(id);expect(f.view.selectedRepresentative).toBe(id);
+    const next=idleSnapshot(1);next.village.population!.cohorts![0]!.id='split-cohort';
+    f.view.sync(next,epoch+100);expect(f.view.selectedRepresentative).toBeNull();expect(f.view.representativeInfo(id)).toBeNull();
+    expect(f.view.representativeInfo('world:village:idle:split-cohort:0:0')?.cohortId).toBe('split-cohort');
+  }finally{f.dispose();}
+});
+it('cancels an obsolete-tail fade if the lot is current again and bounds a necessary retirement',()=>{
+  for(const cancel of [true,false]){const f=fixture();try{
+    const now=epoch+87000;f.view.sync(snapshot('old',epoch,2),now);f.view.animate(now,true);const figures=f.view.figures;
+    for(const figure of figures){const a=actorOf(figure);a.speed=0;a.distance=2;a.position=sampleWorkerPath(a.path,2);a.visible=true;}
+    f.view.sync(snapshot('next',epoch+80000,2),now);
+    for(let t=33;t<=1200;t+=33)f.view.animate(now+t,true);
+    if(cancel)f.view.sync(snapshot('old',epoch,2),now+1200);
+    for(let t=1233;t<1600;t+=33)f.view.animate(now+t,true);
+    if(cancel){expect(f.view.figures).toEqual(figures);expect(figures[0]!.root.isEnabled()).toBe(true);expect(figures[0]!.root.getChildMeshes()[0]!.visibility).toBeGreaterThan(.95);}
+    else{expect(figures.every(p=>p.root.isDisposed())).toBe(true);expect(f.view.metrics.layouts[0]?.id).toBe('next');expect(f.view.figures).toHaveLength(2);}
+  }finally{f.dispose();}}
+});
+it('defers a changed leisure itinerary until the reached door without moving on sync',()=>{
+  const f=fixture();try{
+    const state=idleSnapshot(1);f.view.sync(state,epoch);f.view.animate(epoch,true);const figure=f.view.figures[0]!,a=actorOf(figure),position={...a.position},path=a.path;
+    const next=idleSnapshot(1);next.travelRoutes[0]!.cells=[{cellX:0,cellY:0},{cellX:0,cellY:1},{cellX:2,cellY:1},{cellX:2,cellY:4}];next.cells[1]!.cellX=2;next.travelRoutes[0]!.destination.cellX=2;
+    f.view.sync(next,epoch+100);expect(f.view.figures[0]).toBe(figure);expect(a.position).toEqual(position);expect(a.path).toBe(path);
+  }finally{f.dispose();}
+});
+
+it('reconnects a changed survey route from the current actor through a shared road junction',()=>{
+  const f=fixture();try{
+    const state=snapshot();state.village.extractions=[];state.village.worksites=[];state.world.widthCells=2048;state.world.heightCells=1024;
+    const path=[{cellX:0,cellY:0},{cellX:0,cellY:1},{cellX:0,cellY:3},{cellX:0,cellY:8}];
+    state.science={activities:[{id:'survey',villageId:'village',kind:'survey',path:[...path,...path.slice().reverse()],startedAt:new Date(epoch).toISOString(),completesAt:new Date(epoch+80000).toISOString()}]} as unknown as NonNullable<VillageState['science']>;
+    f.view.sync(state,epoch);for(let t=0;t<2000;t+=16)f.view.animate(epoch+t,true);const figure=f.view.figures[0]!,a=actorOf(figure),position={...a.position};
+    const next=structuredClone(state),changed=[{cellX:0,cellY:0},{cellX:0,cellY:1},{cellX:0,cellY:3},{cellX:4,cellY:3}];
+    next.science!.activities[0]!.path=[...changed,...changed.slice().reverse()];
+    f.view.sync(next,epoch+2000);expect(a.position).toEqual(position);expect(a.path[0]).toEqual(position);
+    expect(a.path).toContainEqual(expect.objectContaining({x:0,z:3}));expect(a.path.at(-1)).toEqual(expect.objectContaining({x:4,z:3}));
+    let before=figure.root.position.clone();for(let t=2000;t<14000;t+=16){f.view.animate(epoch+t,true);expect(figure.root.position.subtract(before).length()).toBeLessThan(.1);before=figure.root.position.clone();}
+    expect(f.view.metrics.layouts[0]?.phases).toEqual(['work']);
+  }finally{f.dispose();}
+});
+
+it('installs both actual teammates without a working post blocking the shared route endpoint',()=>{
+  const f=fixture();try{
+    f.view.sync(snapshot('pair',epoch,2),epoch);for(let t=0;t<20000;t+=16)f.view.animate(epoch+t,true);
+    expect(f.view.metrics.layouts[0]?.phases).toEqual(['work','work']);
+    const [a,b]=f.view.figures;expect(a!.root.isEnabled()&&b!.root.isEnabled()).toBe(true);
+    expect(a!.root.position.subtract(b!.root.position).length()).toBeGreaterThan(.43);
+  }finally{f.dispose();}
+});
+
+it('keeps a gardener on its row across missing ground instead of advancing its absolute work clock',()=>{
+  const f=fixture();try{
+    f.view.sync(gardenSnapshot(),epoch+35000);f.view.animate(epoch+35000,true);const figure=f.view.figures[0]!,a=actorOf(figure),position={...a.position};
+    f.setGround(null);for(let t=33;t<10000;t+=33)f.view.animate(epoch+35000+t,true);
+    expect(a.position).toEqual(position);f.setGround(0);f.view.animate(epoch+45000,true);
+    expect(Math.hypot(a.position.x-position.x,a.position.z-position.z)).toBeLessThan(.05);
+  }finally{f.dispose();}
+});
+
+it('reaches both work posts after the actual corner even if the leader occupies the end gate first',()=>{
+  const f=fixture();try{
+    const state=snapshot('pair',epoch,2),m=state.village.extractions[0]!;m.cellX=3;m.cellY=6;m.path=[{cellX:0,cellY:0},{cellX:1,cellY:0},{cellX:3,cellY:0},{cellX:3,cellY:6}];m.transportMs=14000;
+    f.view.sync(state,epoch);for(let t=0;t<25000;t+=16)f.view.animate(epoch+t,true);
+    expect(f.view.metrics.layouts[0]?.phases).toEqual(['work','work']);expect(f.view.figures.every(f=>f.root.isEnabled())).toBe(true);
   }finally{f.dispose();}
 });

@@ -692,9 +692,9 @@ export class BabylonVillageScene {
         const cell=this.#space.inverse(point.x,point.z);return workerWidths.widths.get(`${Math.round(cell.cellX)%this.#space.width}:${Math.round(cell.cellY)%this.#space.height}`)??.8;
       },
       ground: point => {
-        if (!this.#space || !this.#store || !this.#renderer) return null;
-        const cell=this.#space.inverse(point.x,point.z),x=Math.round(cell.cellX)%this.#space.width,y=Math.round(cell.cellY)%this.#space.height;
-        return this.#renderer.rendered(x,y) ? this.#store.ground(cell.cellX,cell.cellY)?.height ?? null : null;
+        if (!this.#space || !this.#store) return null;
+        const cell=this.#space.inverse(point.x,point.z);
+        return this.#store.ground(cell.cellX,cell.cellY)?.height ?? null;
       },
       free: (point,radius,featureId) => {
         if (!this.#space || !this.#store || !this.#state) return false;
@@ -843,9 +843,9 @@ export class BabylonVillageScene {
       this.#ambientLight.intensity = .08 + (this.#baseAmbient - .08) * this.#presentationLight;
       this.#regionalOverview.setPresentationLight(this.#presentationLight);
       if (this.#mode !== 'world') {
-        this.#workers.freezeRepresentative(this.#inhabitantCamera.active?null:this.#selectedRepresentative);
         this.#workers.animate(workerServerNow, this.#mode === 'village' && this.#camera.radius < 165);
         const figureBlend = 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
+        if(this.#selectedRepresentative&&this.#workers.selectedRepresentative===null){this.#selectedRepresentative=null;this.#inhabitantCamera.stop();}
         this.#workers.setPopulationFocus(this.#worldMode === 'population', this.#populationFocus, this.#populationFilter);
         this.#inhabitantCamera.update(now);
         this.#workers.setVisibility(figureBlend);
@@ -1180,7 +1180,7 @@ export class BabylonVillageScene {
 
   public selectRepresentative(id:string|null){
     if(id!==this.#selectedRepresentative)this.#inhabitantCamera.stop();
-    this.#selectedRepresentative=id;this.#workers.freezeRepresentative(id);
+    this.#workers.selectRepresentative(id);this.#selectedRepresentative=this.#workers.selectedRepresentative;
   }
   public representativeInfo(id:string){return id===this.#selectedRepresentative?this.#workers.representativeInfo(id):null;}
   public representativeCamera(mode:'follow'|'pov'|'village'){

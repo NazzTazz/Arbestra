@@ -68,7 +68,7 @@ export function sampleWorkerPath(path: readonly WorkerPoint[], distance: number,
       const turnAt = (n:number) => {
         if (n===0 || n===path.length-1) return true;
         const p=path[n-1]!,q=path[n]!,r=path[n+1]!;
-        return Math.abs((q.x-p.x)*(r.z-q.z)-(q.z-p.z)*(r.x-q.x))>.01;
+        return Math.min(p.width??.8,q.width??.8,r.width??.8)<.8 || Math.abs((q.x-p.x)*(r.z-q.z)-(q.z-p.z)*(r.x-q.x))>.01;
       };
       const taper=Math.min(1,Math.min(turnAt(i-1)?t*length:1,turnAt(i)?(1-t)*length:1)/.7);
       const offset=Math.max(-width/2+WORKER_RADIUS,Math.min(width/2-WORKER_RADIUS,lateral))*taper;
@@ -91,7 +91,7 @@ export interface TrafficActor {
   path: WorkerPoint[]; distance: number; speed: number;
   position: WorkerPoint; visible: boolean; waitingSince: number|null;
   startAt: number; done: boolean;
-  member?:number; formation?:number;
+  member?:number; formation?:number; lateral?:number;
 }
 interface Passage { id:string; points:WorkerPoint[]; owners:Set<string>; lastDirection:number; served:number; straight:boolean }
 
@@ -138,7 +138,7 @@ export class WorkerTraffic {
   }
   shift(x:number,z:number){for(const passage of this.passages.values())for(const p of passage.points){p.x-=x;p.z-=z;}}
   reset(){this.passages.clear();this.#waitOrder.clear();}
-  step(actors:TrafficActor[],now:number,dt=WORKER_STEP,stationary:readonly WorkerPoint[]=[]) {
+  step(actors:TrafficActor[],now:number,dt=WORKER_STEP,stationary:readonly WorkerPoint[]=[],canOccupy:(point:WorkerPoint)=>boolean=()=>true) {
     this.blocked=0;
     const live=new Set(actors.filter(a=>!a.done).map(a=>a.id));
     for(const p of this.passages.values())for(const id of p.owners)if(!live.has(id)||!actors.some(a=>a.id===id&&p.points.some(q=>Math.hypot(a.position.x-q.x,a.position.z-q.z)<1.3)))p.owners.delete(id);
@@ -163,42 +163,66 @@ export class WorkerTraffic {
         &&Math.hypot(partner.path[0]!.x-actor.path[0]!.x,partner.path[0]!.z-actor.path[0]!.z)<.1;
       const paired=Boolean(!opposite&&!nearPassage&&(base.width??.8)>=.8&&together);
       const batch=together?[actor,partner]:[actor];
-      const proposals=batch.map(a=>{
-        const formation=Math.max(0,Math.min(1,(a.formation??0)+(paired?1:-1)*dt*4));
-        const offset=(a.member??0)*.5*Math.cos(formation*Math.PI/2);
-        const distance=Math.min(length+(a.member??0)*.5,a.distance+a.speed*dt);
-        const lateral=opposite?.22:(a.member===1?.22:-.22)*Math.sin(formation*Math.PI/2);
-        return {actor:a,distance,formation,visible:distance>=offset,point:sampleWorkerPath(a.path,Math.max(0,distance-offset),lateral)};
-      });
-      let denied=false;
-      const leases:Passage[]=[];
-      for(const proposal of proposals) {
-        const a=proposal.actor,p=proposal.point;
-        if(!proposal.visible)continue;
-        for(const n of neighbours(p))if(n.actor!==a&&!batch.includes(n.actor!)&&sweptWorkerDistance(a.visible?a.position:p,n.actor?.position??n.position,p,n.actor?.position??n.position)<WORKER_CLEARANCE-.005){denied=true;break;}
-        const other=proposals.find(v=>v.actor!==a&&v.visible);
-        if(other&&sweptWorkerDistance(a.visible?a.position:p,other.actor.visible?other.actor.position:other.point,p,other.point)<WORKER_CLEARANCE-.005){denied=true;break;}
-        for(const passage of this.passages.values())if(passage.points.some(q=>Math.hypot(p.x-q.x,p.z-q.z)<1.15)) {
-          const owners=[...passage.owners].filter(id=>!batch.some(a=>a.id===id));
-          const compatible=owners.every(id=>{const owner=actors.find(v=>v.id===id);if(!owner)return true;
-            const cycle=cycleKey(a.path);if(cycle!==null&&cycle===cycleKey(owner.path))return true;
-            const tangent=sampleWorkerPath(owner.path,owner.distance);return passage.straight&&tangent.dx*p.dx+tangent.dz*p.dz>.98;});
-          if(owners.length&&!compatible){denied=true;break;}
-          if(!passage.owners.has(a.id)) {
-            const exit=sampleWorkerPath(a.path,Math.min(length,proposal.distance+1));
-            if(neighbours(exit).some(n=>n.actor!==a&&!batch.includes(n.actor!)&&Math.hypot(exit.x-n.position.x,exit.z-n.position.z)<WORKER_CLEARANCE)){denied=true;break;}
-            const opposingWait=ordered.some(v=>v.direction!==a.direction&&v.waitingSince!==null&&passage.points.some(q=>Math.hypot(v.position.x-q.x,v.position.z-q.z)<1.6));
-            if(passage.served>=2&&passage.lastDirection===a.direction&&opposingWait){denied=true;break;}
-          }
-          leases.push(passage);
+      const propose=(a:TrafficActor,holdFormation=false,holdDistance=false)=>{
+        let formation=holdFormation||holdDistance?(a.formation??0):Math.max(0,Math.min(1,(a.formation??0)+(paired?1:-1)*dt*4));
+        let offset=(a.member??0)*.5*Math.cos(formation*Math.PI/2);
+        const priorOffset=(a.member??0)*.5*Math.cos((a.formation??0)*Math.PI/2);
+        // Formation changes must not pull a follower backwards along its route.
+        let distance=holdDistance?a.distance:Math.min(length+(a.member??0)*.5,a.distance+a.speed*dt+Math.max(0,offset-priorOffset));
+        const leader=actors.find(v=>v.mission===a.mission&&v.rank===a.rank&&v.member===0&&!v.done&&v.path===a.path);
+        if(!paired&&a.member===1&&leader&&leader.distance-a.distance+(a.member*.5*Math.cos((a.formation??0)*Math.PI/2))<.5){
+          // First open longitudinal room. Converging beside the leader keeps
+          // both lanes occupied and can trap the opposing rank at the meeting.
+          formation=a.formation??0;offset=.5*Math.cos(formation*Math.PI/2);distance=a.distance;
         }
-      }
+        const target=opposite?.22:(a.member===1?.22:-.22)*Math.sin(formation*Math.PI/2);
+        const lateral=holdFormation?(a.lateral??0):(a.lateral??0)+Math.max(-dt*.8,Math.min(dt*.8,target-(a.lateral??0)));
+        return {actor:a,distance,formation,lateral,visible:distance>=offset,point:sampleWorkerPath(a.path,Math.max(0,distance-offset),lateral)};
+      };
+      const attempt=(proposals:ReturnType<typeof propose>[])=>{
+        const batch=proposals.map(p=>p.actor);
+        let denied=false;
+        const leases:Passage[]=[];
+        for(const proposal of proposals) {
+          const a=proposal.actor,p=proposal.point;
+          if(!proposal.visible)continue;
+          if(!canOccupy(p)||!canOccupy(a.position)){denied=true;break;}
+          for(const n of neighbours(p))if(n.actor!==a&&!batch.includes(n.actor!)&&sweptWorkerDistance(a.visible?a.position:p,n.actor?.position??n.position,p,n.actor?.position??n.position)<WORKER_CLEARANCE-.005){denied=true;break;}
+          const other=proposals.find(v=>v.actor!==a&&v.visible);
+          if(other&&sweptWorkerDistance(a.visible?a.position:p,other.actor.visible?other.actor.position:other.point,p,other.point)<WORKER_CLEARANCE-.005){denied=true;break;}
+          for(const passage of this.passages.values())if(passage.points.some(q=>Math.hypot(p.x-q.x,p.z-q.z)<1.15)) {
+            const owners=[...passage.owners].filter(id=>!batch.some(a=>a.id===id));
+            const compatible=owners.every(id=>{const owner=actors.find(v=>v.id===id);if(!owner)return true;
+              if(owner.mission===a.mission&&owner.direction===a.direction)return true;
+              const cycle=cycleKey(a.path);if(cycle!==null&&cycle===cycleKey(owner.path))return true;
+              const tangent=sampleWorkerPath(owner.path,owner.distance);return passage.straight&&tangent.dx*p.dx+tangent.dz*p.dz>.98;});
+            if(owners.length&&!compatible){denied=true;break;}
+            if(!passage.owners.has(a.id)) {
+              const exit=sampleWorkerPath(a.path,Math.min(length,proposal.distance+1));
+              if(neighbours(exit).some(n=>n.actor!==a&&!batch.includes(n.actor!)&&Math.hypot(exit.x-n.position.x,exit.z-n.position.z)<WORKER_CLEARANCE)){denied=true;break;}
+              const opposingWait=ordered.some(v=>v.direction!==a.direction&&v.waitingSince!==null&&passage.points.some(q=>Math.hypot(v.position.x-q.x,v.position.z-q.z)<1.6));
+              if(passage.served>=2&&passage.lastDirection===a.direction&&opposingWait){denied=true;break;}
+            }
+            leases.push(passage);
+          }
+        }
+        if(denied)return false;
+        for(const proposal of proposals){const a=proposal.actor;a.position=proposal.point;a.distance=proposal.distance;a.formation=proposal.formation;a.lateral=proposal.lateral;a.visible=proposal.visible;a.waitingSince=null;this.#waitOrder.delete(a.id);if(a.visible)add(a.position,a);if(a.distance>=length+(a.member??0)*.5-.001)a.done=true;}
+        for(const lease of new Set(leases)) {
+          if(!batch.some(a=>lease.owners.has(a.id))){lease.served=lease.lastDirection===actor.direction?lease.served+1:1;lease.lastDirection=actor.direction;}
+          for(const a of batch)lease.owners.add(a.id);
+        }
+        return true;
+      };
       for(const a of batch)processed.add(a.id);
-      if(denied){for(const a of batch){a.waitingSince??=now;this.#waitOrder.set(a.id,a.waitingSince);}this.blocked+=batch.length;continue;}
-      for(const proposal of proposals){const a=proposal.actor;a.position=proposal.point;a.distance=proposal.distance;a.formation=proposal.formation;a.visible=proposal.visible;a.waitingSince=null;this.#waitOrder.delete(a.id);if(a.visible)add(a.position,a);if(a.distance>=length+(a.member??0)*.5-.001)a.done=true;}
-      for(const lease of new Set(leases)) {
-        if(!batch.some(a=>lease.owners.has(a.id))){lease.served=lease.lastDirection===actor.direction?lease.served+1:1;lease.lastDirection=actor.direction;}
-        for(const a of batch)lease.owners.add(a.id);
+      if(attempt(batch.map(a=>propose(a))))continue;
+      // A rank is not a rigid body. Let its leader clear a turn while the
+      // follower waits; a denied lateral convergence can keep its current lane.
+      for(const a of [...batch].sort((a,b)=>(a.member??0)-(b.member??0))){
+        const following=(a.member??0)>0&&actors.some(v=>v.mission===a.mission&&v.rank===a.rank&&v.member===0&&!v.done);
+        const changingLane=a.visible&&Math.abs((a.lateral??0)-(opposite?.22:(a.member===1?.22:-.22)*Math.sin((a.formation??0)*Math.PI/2)))>.00001;
+        if(attempt([propose(a)])||!following&&attempt([propose(a,true)])||changingLane&&attempt([propose(a,false,true)]))continue;
+        a.waitingSince??=now;this.#waitOrder.set(a.id,a.waitingSince);this.blocked++;
       }
     }
   }

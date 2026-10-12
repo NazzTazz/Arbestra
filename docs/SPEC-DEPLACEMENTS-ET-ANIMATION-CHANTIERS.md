@@ -1,6 +1,8 @@
 # Déplacements des villageois et animation des chantiers
 
-Date : 2 octobre 2026. Statut : **implémentation branchée, recette visuelle en cours**. Tristan a ensuite autorisé l'implémentation. Les détails de réalisation restent à recetter. Base : `main`, HEAD `0a0873a`, worktree comprenant les chantiers persistants en validation.
+Mise à jour : 12 octobre 2026, base relue `e212152`. Statut : **continuité implémentée ; régressions et parcours WebGL isolés vérifiés, retour utilisateur favorable sur la recette restaurée**. Ce retour ne détaille pas tous les cas de la checklist.
+
+Date initiale : 2 octobre 2026. Tristan a ensuite autorisé l'implémentation. Les détails de réalisation restent à recetter. Base : `main`, HEAD `0a0873a`, worktree comprenant les chantiers persistants en validation.
 
 Cette tranche rend lisibles les équipes qui circulent et travaillent : départs espacés, files ou binômes, collisions simples, priorités de passage, apparences variées et gestes adaptés au bois et à la pierre. Elle prolonge la [spec des chantiers](SPEC-CHANTIERS-EXPLOITATION-GISEMENTS.md), sans modifier implicitement leurs ressources, durées, fatigue ni conditions de livraison. Destinataires : Tristan pour les arbitrages et l'agent chargé de l'implémentation pour le périmètre technique.
 
@@ -18,7 +20,7 @@ Cette tranche rend lisibles les équipes qui circulent et travaillent : départs
 | Effectifs visibles | **Validé** : conserver les participants du chantier observé ; réduire d'abord le détail des animations éloignées. |
 | Priorités précises | **Proposé** : circulation à droite, premier arrivé aux conflits, groupe engagé prioritaire, entrants prioritaires à la porte avec protection contre la famine des sortants. |
 | Identité visuelle | **Proposé** : apparence stable pendant le lot et après reconstruction du même lot ; continuité entre lots du chantier autant que possible, sans identité individuelle persistante. |
-| Conséquences des attentes | **Validé** : décalage visuel accepté sur tout le parcours, économie inchangée ; reconstitution discrète si retard important, sans accélération brutale ni double incarnation. Les attentes restent locales à la présentation. |
+| Conséquences des attentes | **Validé, révisé le 12 octobre** : décalage visuel accepté, économie inchangée ; une attente active ne reconstruit plus les représentants observés. Retrait borné des missions obsolètes et reconstruction initiale/après absence longue, sans double incarnation. |
 
 Les répartitions, le compromis temporel et le maintien des effectifs ont reçu des accords distincts de Tristan. Les palettes exactes et les paramètres de circulation sont des réglages de recette, pas de nouvelles règles métier.
 
@@ -30,9 +32,20 @@ Les répartitions, le compromis temporel et le maintien des effectifs ont reçu 
 
 `worksite-layout.ts` essaie front, aire latérale et postes compacts partagés avec places d'attente et rotations. Les raccords internes essaient un nombre borné de parcours orthogonaux, contrôlés contre les obstacles. Les postes compacts conservent les dix participants ; un passage vide entre deux tours laisse sortir le précédent. Une disposition sans place praticable reste signalée `blocked` en debug : la couverture des géométries difficiles doit être recettée, sans promesse universelle.
 
-Les snapshots conservent les figures d'un même lot. La fin visuelle retient les nouveaux lots du même chantier ; le seuil de reconstitution est de huit secondes avec fondu de 350 ms. LOD/suspension reconstruisent la phase courante ; le recentrage translate aussi les raccords sans réinitialiser une attente. Les accessoires sont nettoyés avec leurs groupes. Les diagnostics DEV `data-worker-traffic` exposent rôles, phases, disposition, attentes et coût CPU borné aux 120 dernières frames ; leur publication est limitée à deux fois par seconde.
+Les synchronisations ordinaires conservent les figures et leur progression. La fin visuelle retient le dernier nouveau lot du chantier. Les attentes actives ne déclenchent plus de fondu/repositionnement collectif. Une fin remplacée expire huit secondes après son échéance ; une mission encore dans un snapshot ancien expire après max(30 secondes, deux durées de transport), avec retrait individuel de 350 ms, annulé si devenu inutile. Une interruption de plus de trente secondes reconstruit la phase actuelle ; une interruption courte conserve la progression. Le recentrage translate les raccords sans réinitialiser une attente. Les accessoires sont nettoyés avec leurs groupes. Les diagnostics DEV `data-worker-traffic` exposent rôles, phases, disposition, attentes et coût CPU borné aux 120 dernières frames ; leur publication est limitée à deux fois par seconde.
 
 Preuves et recette courantes sont consignées dans `SESSION-HANDOFF.md`. Les tests ciblés couvrent circulation, conflits voisins, boucle peuplée, couture/recentrage, formations depuis snapshot, postes contraints, alternance, LOD, chevauchement de lots et nettoyage. La recette navigateur a confirmé les équipes bois à cinq et pierre à dix via le diagnostic de scène. Ce constat ne valide pas encore la qualité des gestes, toutes les géométries contraintes ou un budget GPU à 120 figurants. Aucun E2E n'est lancé dans cette tranche.
+
+
+## Continuité des représentants — 12 octobre 2026
+
+La formation n'est plus un batch indivisible : le premier peut se dégager au coude tandis que le suivant attend. Le passage en file ouvre d'abord l'espacement longitudinal ; le changement de côté est borné et les resserrements de largeur sont anticipés. Disques balayés, priorités et passages conservés. Les raccords de chantier quittent la fin d'approche avant une porte occupée et contournent les postes réservés.
+
+Le calendrier absolu de `idleTourPhase` sert uniquement à la reconstruction initiale/après absence longue. En scène suivie : arrivée réelle → séjour de la maison atteinte → départ à sa porte. Un itinéraire de promenade actualisé est adopté à la porte atteinte. Un trajet scientifique changé rejoint le nouveau chemin depuis la position courante par un sommet commun ; sans sommet commun, le parcours engagé est conservé. Les raccords restent locaux, sans nouveau routage métier.
+
+La sélection suit le même représentant sans arrêter sa position ni ses gestes. `representativeInfo` expose le rattachement cohorte mémorisé, les données disponibles, l'attente et la présence (`visible`, `inside`, `ground-unavailable`, `offscreen`). `representativePose` conserve la position actuelle, y compris la porte pendant un séjour. Suppression, remplacement de mission, changement de monde/village ou de rattachement cohorte invalident la sélection ; aucun indice équivalent ne la récupère. Noms/apparences sont décoratifs, sans identité individuelle persistante. Le futur HUD compte la population autoritaire, jamais les figurants.
+
+Babylon installé/verrouillé : 8.56.2. Hiérarchie TransformNode/meshes, picking avec métadonnées et boucle Engine conservés ; destruction récursive sans détruire les matières partagées. `VillageWorkers` reste seul propriétaire de la position finale ; les gestes suivent le déplacement réel. AnimationGroup/blending existent, mais des clips n'amélioreraient pas la continuité de ces gestes procéduraux. NavigationPlugin V2/Recast demanderait addons, WASM et navmesh sans traiter la reconstruction applicative. Références confrontées aux déclarations installées : [animations](https://doc.babylonjs.com/features/featuresDeepDive/animation/groupAnimations/), [navigation V2](https://doc.babylonjs.com/features/featuresDeepDive/crowdNavigation/v2Intro/), [optimisation](https://doc.babylonjs.com/features/featuresDeepDive/scene/optimize_your_scene/).
 
 ## Existant vérifié avant implémentation (historique)
 
@@ -112,9 +125,9 @@ Invariants : distance ne rallonge que le transport ; aucun outil ne raccourcit l
 
 **Validé par Tristan** : préserver les dates serveur et accepter un décalage de présentation sur toute la séquence : attente de sortie → aller → installation → travail → chargement → retour → entrée. Un personnage n'effectue pas un geste de travail avant son arrivée visuelle. Le temps de geste montré peut être plus court que le travail métier lorsque l'aller a pris du retard ; ce raccourcissement visuel ne change ni énergie ni production. Le crédit peut précéder l'entrée des derniers représentants. Le panneau expose toujours l'état serveur.
 
-Un objectif de décalage inférieur à 2 secondes est un réglage de recette, pas une garantie pour tous les encombrements. Pour un retard dépassant la tolérance retenue, reconstruire la présentation sur une phase actuelle avec un fondu bref, en priorité hors champ ou derrière une occlusion. Si toute la scène est observée, un fondu de reconstitution reste potentiellement perceptible : sa discrétion sera évaluée en recette dans le compromis accepté. Pas de sprint de rattrapage, traversée corporelle forcée ou disparition instantanée d'une personne chargée. Le seuil exact de reconstitution est réglable ; il ne doit pas permettre une accumulation illimitée des anciens lots.
+Un objectif de décalage inférieur à 2 secondes reste un réglage de recette. En scène suivie, le retard se montre comme une attente : aucune reconstruction à huit secondes, aucun sprint ni collision forcée. Le retrait borné concerne seulement les missions obsolètes ; le fondu individuel retire l'ancienne présentation sans la replacer ailleurs. Une reprise après plus de trente secondes peut reconstruire une présentation actuelle.
 
-Le représentant possède une seule incarnation. Lorsqu'un nouveau lot du même chantier est reçu avant la fin visuelle du précédent, retenir son nouveau départ visuel jusqu'à libération de ses représentants ; si le retard impose une reconstitution, retirer l'ancienne incarnation avant d'installer la nouvelle. Ne jamais créer une copie à la porte pendant que son prédécesseur rentre. Conserver au plus une fin de lot et le dernier état actif par chantier, sans rejouer une liste de lots historiques manqués. Le serveur peut avoir déjà réaffecté une cohorte : la présentation n'est pas une preuve d'identité individuelle.
+Le représentant possède une seule incarnation. Lorsqu'un nouveau lot du même chantier est reçu avant la fin visuelle du précédent, retenir son nouveau départ visuel jusqu'à libération de ses représentants ; si la fin visuelle expire, retirer l'ancienne incarnation avant d'installer la nouvelle. Ne jamais créer une copie à la porte pendant que son prédécesseur rentre. Conserver au plus une fin de lot et le dernier état actif par chantier, sans rejouer une liste de lots historiques manqués. Le serveur peut avoir déjà réaffecté une cohorte : la présentation n'est pas une preuve d'identité individuelle.
 
 La réduction du nombre de personnes ne constitue pas un correctif temporel par défaut. Elle ferait disparaître des rôles demandés, notamment les dix postes pierre. Le nombre visible fait l'objet d'un arbitrage séparé dans le budget de rendu.
 
@@ -198,7 +211,7 @@ Après F5, retrouver phase, apparence et poste à partir du lot et de l'heure se
 
 Une arrivée de snapshot ne recrée pas les figures d'un même lot ni leurs matières. Déplacement et rotation de caméra ne changent pas la priorité. Recentrage du monde projette à nouveau les mêmes coordonnées ; une couture ne remet pas l'attente à zéro.
 
-Un changement de route ne recalcule pas l'itinéraire métier d'un lot engagé. Si du terrain ou un mesh manque, suspendre sa présentation sans poser les pieds dans le vide, puis reconstruire à son retour. Un bâtiment qui recouvre un ancien trajet est un conflit visuel réel : le signaler en debug et résoudre localement par un raccord praticable si disponible, sans annuler le lot serveur ni traverser arbitrairement les murs.
+Un changement de route ne recalcule pas l'itinéraire métier d'un lot engagé. La hauteur provient des données de terrain, indépendamment de `rendered()`. Un mesh absent ne masque plus une hauteur connue. Si les données de hauteur manquent réellement, retenir la progression à la position courante, masquer localement la figure, conserver son identifiant et reprendre à cette position quand la hauteur revient. Le Jardin conserve aussi sa progression de rangée. Un bâtiment qui recouvre un ancien trajet est un conflit visuel réel : le signaler en debug et résoudre localement par un raccord praticable si disponible, sans annuler le lot serveur ni traverser arbitrairement les murs.
 
 ## Ordre de réalisation proposé
 
@@ -221,7 +234,7 @@ Critères de sortie : aucune grappe sur un parcours normal, aucun passage corpor
 
 ## Garanties arbitrées et réglages de recette
 
-1. **Temps visuel validé** : décalage sur l'ensemble du parcours accepté, reconstitution discrète en cas de retard important, économie inchangée, aucune double incarnation et aucun rattrapage brutal. Les seuils précis restent des réglages de recette.
+1. **Temps visuel validé, révisé le 12 octobre** : décalage accepté, attente visible sans repositionnement en scène suivie, retrait borné des fins obsolètes, économie inchangée et aucune double incarnation.
 2. **Effectifs visibles validés** : conserver tous les participants du chantier observé, dégrader d'abord le détail des animations éloignées ; aucune réduction automatique de la composition 5/3/2.
 3. **Répartitions des rôles validées** : les deux tables sont retenues, notamment bois à quatre = un binôme et deux débiteurs, bois à dix = trois binômes et quatre débiteurs, pierre à dix = 5/3/2. Les rotations sur les postes sont une adaptation technique proposée lorsque l'espace manque ; elles conservent les rôles et doivent rester lisibles en recette.
 

@@ -132,3 +132,17 @@ describe('worksite representation',()=>{
     expect(worksiteConnector({x:0,z:-1},{x:0,z:1},{x:0,z:0},()=>false)).toBeNull();
   });
 });
+
+it('takes both members around the reported right angle all the way to the doorway',()=>{
+  const path=[{x:0,z:0,width:.5},{x:1,z:0,width:.5},{x:3,z:0,width:.8},{x:3,z:5.05,width:.8}],t=new WorkerTraffic();t.rebuild([path]);
+  const people=[0,1].map(member=>actor('pair-'+member,path,{mission:'pair',member,formation:0,speed:.8}));
+  expect(simulate(t,people,20)).toBeGreaterThanOrEqual(WORKER_CLEARANCE-.006);
+  expect(people.every(p=>p.done)).toBe(true);
+  for(const p of people){expect(p.position.x).toBeCloseTo(3);expect(p.position.z).toBeCloseTo(5.05);}
+});
+it('crosses two opposing pairs after changing to files without permanent waits',()=>{
+  const path=[{x:0,z:0,width:.5},{x:0,z:1,width:.8},{x:0,z:9,width:.8},{x:0,z:10,width:.5}],t=new WorkerTraffic();t.rebuild([path,[...path].reverse()]);
+  const people=[0,1,2,3].map(i=>actor('pair-'+i,i<2?path:[...path].reverse(),{mission:i<2?'out':'back',member:i%2,formation:0,speed:.8,direction:i<2?1:-1}));
+  expect(simulate(t,people,40)).toBeGreaterThanOrEqual(WORKER_CLEARANCE-.006);
+  expect(people.every(p=>p.done)).toBe(true);
+});
