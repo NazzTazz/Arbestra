@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ScienceCommand, ScienceState } from '@arbestra/contracts';
+import type { ScienceCommand, ScienceState, ExpeditionReceipt } from '@arbestra/contracts';
 
 const names = { mathematics: 'Mathématiques', geography: 'Géographie', astronomy: 'Astronomie' };
 const statuses = { available: 'Disponible', blocked: 'Prérequis manquants', working: 'Recherche en cours',
@@ -7,8 +7,8 @@ const statuses = { available: 'Disponible', blocked: 'Prérequis manquants', wor
 const dependencies: Record<string, string[]> = { 'mathematics-2': ['mathematics-1'], 'mathematics-3': ['mathematics-2'],
   'geography-2': ['geography-1', 'mathematics-2'], 'astronomy-1': ['mathematics-3', 'geography-2'] };
 
-export function SciencePanel({ science, villageId, buildingId, target, pending, serverNow, error, onCommand, onClose }:
-  { science: ScienceState; villageId: string; buildingId: string | null; pending: boolean; serverNow: number; error: string | null;
+export function SciencePanel({ science, villageId, buildingId, target, pending, expeditions, serverNow, error, onCommand, onClose }:
+  { science: ScienceState; villageId: string; buildingId: string | null; pending: boolean; expeditions:ReadonlyArray<{receipt?:ExpeditionReceipt;message?:string;intent?:{commandId:string}}> ; serverNow: number; error: string | null;
     target: {cellX:number;cellY:number}; onCommand: (command: ScienceCommand) => void; onClose: () => void }) {
   const campuses = science.universities.filter(u => u.villageId === villageId);
   const [chosen, setChosen] = useState(buildingId ?? campuses[0]?.buildingId ?? '');
@@ -47,6 +47,7 @@ export function SciencePanel({ science, villageId, buildingId, target, pending, 
       <div className="science-target"><label>Case X <input type="number" min="0" value={x} onChange={e => setX(Math.max(0, Math.floor(Number(e.target.value))))} /></label><label>Case Y <input type="number" min="0" value={y} onChange={e => setY(Math.max(0, Math.floor(Number(e.target.value))))} /></label><label>Budget total (min) <input type="number" min="1" max="1440" value={budget} onChange={e => setBudget(Math.max(1, Math.min(1440, Number(e.target.value))))} /></label></div>
       <button type="button" disabled={pending || !science.cartographers} onClick={() => onCommand({ action: 'survey', target: { cellX: x, cellY: y }, budgetSeconds: Math.round(budget * 60) })}>Relever un lieu repéré</button>
       {science.levels.geography >= 2 && <button type="button" disabled={pending || !science.cartographers} onClick={() => onCommand({ action: 'explore', target: { cellX: x, cellY: y }, budgetSeconds: Math.round(budget * 60) })}>Reconnaître vers cet objectif</button>}
+      {expeditions.map((item,i)=><p key={item.receipt?.commandId??item.intent?.commandId??i}>{item.receipt?.status==='admitted'?'Expédition partie · destination prévue : '+item.receipt.effectiveTarget.cellX+', '+item.receipt.effectiveTarget.cellY:item.receipt?.status==='failed'||item.receipt?.status==='rejected'?item.receipt.message:item.message??'Préparation de l’expédition…'}</p>)}
       <p>60 s de relevé, 1 s par case de trajet. Le budget réserve le retour ; les rapports arrivent avec le cartographe.</p>
       {science.activities.filter(a => ['survey', 'exploration', 'training'].includes(a.kind)).map(a => <p key={a.id}>{a.kind === 'training' ? 'Formation' : 'Expédition'} · {Math.max(0, Math.ceil((Date.parse(a.completesAt) - serverNow) / 1000))} s restantes {a.kind !== 'training' && a.villageId === villageId && <button disabled={pending} type="button" onClick={() => onCommand({ action: 'recall', activityId: a.id })}>Rappeler</button>}</p>)}
     </section>}

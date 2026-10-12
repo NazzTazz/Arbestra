@@ -1,0 +1,5 @@
+import {expect,it} from 'vitest';
+import {mergeExpeditionReceipt,expeditionReceiptIsValid,type ExpeditionReceipt} from './expeditions.js';
+const pending:ExpeditionReceipt={kind:'expedition-receipt',commandId:'cmd',worldId:'w',villageId:'v',version:1,receivedAt:new Date().toISOString(),status:'pending',requestedTarget:{cellX:4,cellY:5}};
+it('keeps a terminal decision when a delayed HTTP acknowledgement arrives',()=>{const admitted:ExpeditionReceipt={...pending,status:'admitted',version:2,activityId:'a',startedAt:pending.receivedAt,completesAt:pending.receivedAt,effectiveTarget:pending.requestedTarget};expect(mergeExpeditionReceipt(admitted,pending)).toBe(admitted);expect(mergeExpeditionReceipt(pending,admitted)).toBe(admitted);expect(mergeExpeditionReceipt(admitted,{...pending,version:3})).toBe(admitted);});
+it('rejects another context and malformed receipt',()=>{expect(mergeExpeditionReceipt(pending,{...pending,worldId:'other',version:2})).toBe(pending);expect(expeditionReceiptIsValid({...pending,status:'admitted'})).toBe(false);expect(expeditionReceiptIsValid(pending)).toBe(true);});

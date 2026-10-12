@@ -17,6 +17,6 @@ export function RepresentativePanel({person,view,onView,onClose}:{person:Represe
       <button type="button" aria-pressed={view==='follow'} onClick={()=>onView('follow')}>Bloquer caméra</button>
       {view!=='village'&&<button type="button" onClick={()=>onView('village')}>Revenir à la vue village</button>}
     </div>
-    <p>{view==='free'?'Marche libre · ZQSD · glisser pour regarder · Échap pour revenir':view==='pov'?'Vue de l’habitant · ZQSD pour marcher librement':view==='follow'?'Caméra attachée à l’habitant · Échap pour revenir':'Immobilisé pour l’inspection. La mission continue.'}</p>
+    <p>{view==='free'?'Marche libre · ZQSD · glisser pour regarder · Échap pour revenir':view==='pov'?'Vue de l’habitant · ZQSD pour marcher librement':view==='follow'?'Caméra attachée à l’habitant · Échap pour revenir':'L’habitant poursuit son activité pendant la sélection.'}</p>
   </section>;
 }

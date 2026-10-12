@@ -1,3 +1,5 @@
+import {receiveExpedition,readExpeditionReceipts} from '../science/expeditions.js';
+import {ExpeditionReceiptSchema,type ExpeditionIntent} from '@arbestra/contracts';
 import {HarvestIntentSchema,HarvestReceiptSchema,type HarvestIntent} from '@arbestra/contracts';
 import {receiveHarvestIntent,readHarvestReceipts} from './harvest-submissions.js';
 import { Type } from '@sinclair/typebox';
@@ -134,11 +136,23 @@ export async function registerVillageRoutes(
     return (preview ? previewVillageExploitation : startVillageExploitation)(db, account.id, worldSlug, villageId, request.body as ExploitationRequest);
   });
   app.post('/api/worlds/:worldSlug/villages/:villageId/science', {
-    schema: { params: VillageParametersSchema, body: ScienceCommandSchema, response: { 200: VillageStateSchema } },
-  }, async request => {
+    schema: { params: VillageParametersSchema, body: ScienceCommandSchema, response: { 200: Type.Union([VillageStateSchema,ExpeditionReceiptSchema]),202:ExpeditionReceiptSchema } },
+  }, async (request,reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-    return commandVillageScience(db, account.id, worldSlug, villageId, request.body as ScienceCommand);
+    const command=request.body as ScienceCommand;
+    if(command.action==='survey'||command.action==='explore'){
+      if(!command.commandId)throw new HttpError(400,'SCIENCE_COMMAND_ID_REQUIRED','Rechargez le client pour préparer une expédition.');
+      const receipt=await receiveExpedition(db,account.id,worldSlug,villageId,command as ExpeditionIntent);
+      return reply.status(receipt.status==='pending'?202:200).serializer(reply.compileSerializationSchema(ExpeditionReceiptSchema)).send(receipt);
+    }
+    return commandVillageScience(db, account.id, worldSlug, villageId, command);
+  });
+  app.get('/api/worlds/:worldSlug/villages/:villageId/science/expeditions',{schema:{params:VillageParametersSchema,querystring:Type.Object({ids:Type.Optional(Type.String({maxLength:2400})),before:Type.Optional(Type.String({format:'uuid'}))}),response:{200:Type.Array(ExpeditionReceiptSchema)}}},async (request,reply)=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};const {ids,before}=request.query as {ids?:string;before?:string};
+    const receipts=await readExpeditionReceipts(db,account.id,worldSlug,villageId,ids?.split(','),before);
+    const history=receipts.filter(r=>r.status!=='pending');if(!ids&&history.length===64)reply.header('x-expedition-next-before',history.at(-1)!.commandId);
+    return receipts;
   });
   app.get('/api/worlds/:worldSlug/village', {
     schema: { params: WorldParametersSchema, querystring: Type.Object({ villageId: Type.Optional(Type.String({ format: 'uuid' })) }), response: { 200: VillageStateSchema } },

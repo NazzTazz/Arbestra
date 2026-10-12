@@ -396,7 +396,8 @@ export interface SessionsTable {
 }
 
 export interface Database {
-  villageSyncChanges: { worldId: string; transactionId: ColumnType<string, string, string> };
+  expeditionSubmissions:{worldId:string;villageId:string;accountId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').ExpeditionIntent>;receipt:JSONColumnType<import('@arbestra/contracts').ExpeditionReceipt>;receivedOrder:Generated<string>;createdAt:ColumnType<Date,Date|string|undefined,Date|string>;expiresAt:ColumnType<Date,Date|string|undefined,Date|string>;attempt:Generated<number>;attemptToken:Generated<string|null>;leaseUntil:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>};
+  villageSyncChanges: { worldId: string; transactionId: ColumnType<string, string, string>; navigationChanged: Generated<boolean> };
   harvestSubmissions:{worldId:string;villageId:string;commandId:string;accountId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt|null,string|null,string|null>;createdAt:Generated<Timestamp>};
   harvestIntents: {worldId:string;villageId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt>;orderId:string|null;createdAt:Timestamp};
   villageStarterInstallations: {worldId:string;villageId:string;accountId:string;commandId:string;

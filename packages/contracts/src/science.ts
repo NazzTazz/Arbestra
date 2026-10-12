@@ -53,7 +53,7 @@ export const ScienceCommandSchema = Type.Union([
     workerCount: Type.Integer({ minimum: 1, maximum: 15 }) }),
   Type.Object({ action: Type.Union([Type.Literal('pause'), Type.Literal('resume')]), programCode: Type.String() }),
   Type.Object({ action: Type.Literal('train'), buildingId: Type.String({ format: 'uuid' }) }),
-  Type.Object({ action: Type.Union([Type.Literal('survey'), Type.Literal('explore')]), target: PointSchema,
+  Type.Object({ action: Type.Union([Type.Literal('survey'), Type.Literal('explore')]), commandId: Type.Optional(Type.String({format:'uuid'})), target: PointSchema,
     budgetSeconds: Type.Integer({ minimum: 60, maximum: 86400 }) }),
   Type.Object({ action: Type.Literal('recall'), activityId: Type.String({ format: 'uuid' }) }),
 ]);

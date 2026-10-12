@@ -1,3 +1,6 @@
+import {NavigationCompute} from './modules/navigation/compute.js';
+import {ExpeditionCoordinator} from './modules/science/expeditions.js';
+import {ExpeditionWakeups} from './modules/science/expedition-wakeups.js';
 import { registerWorldGeneratorRoutes } from './modules/world-generator/routes.js';
 import { registerOnboardingRoutes } from './modules/onboarding/routes.js';
 import cookie from '@fastify/cookie';
@@ -38,6 +41,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof HttpError) {
+      if(error.statusCode===429)reply.header('Retry-After','2');
       return reply.status(error.statusCode).send({ code: error.code, message: error.message });
     }
     if (typeof error === 'object' && error !== null && 'validation' in error && error.validation) {
@@ -48,7 +52,14 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));
-  const villageProjections = await registerVillageSync(app, db, config);
+  const wakeups=new ExpeditionWakeups(config.databaseUrl,error=>app.log.warn(error,'Expedition listener interrupted'));
+  await wakeups.start();
+  app.addHook('preClose',()=>wakeups.close());
+  const navigation=new NavigationCompute(config.expeditionWorkerCount);
+  if(config.expeditionWorkerEnabled!==false){try{await navigation.start();}catch(error){await navigation.close();await wakeups.close();throw error;}}
+  const coordinator=new ExpeditionCoordinator(db,navigation,error=>app.log.warn(error,'Expedition preparation interrupted'));
+  const stopExpeditions=config.expeditionWorkerEnabled===false?()=>coordinator.close():coordinator.start();app.addHook('preClose',stopExpeditions);
+  const villageProjections = await registerVillageSync(app, db, config,wakeups);
   await registerAuthRoutes(app, db, config);
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);

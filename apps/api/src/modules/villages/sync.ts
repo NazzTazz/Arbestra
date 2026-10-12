@@ -1,3 +1,5 @@
+import {readExpeditionReceipts} from '../science/expeditions.js';
+import type {ExpeditionWakeups} from '../science/expedition-wakeups.js';
 import { sql, type Kysely } from 'kysely';
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
@@ -67,7 +69,7 @@ export class VillageSyncSession {
   }
 }
 
-export async function registerVillageSync(app: FastifyInstance, db: Kysely<Database>, config: AppConfig) {
+export async function registerVillageSync(app: FastifyInstance, db: Kysely<Database>, config: AppConfig,wakeups?:ExpeditionWakeups) {
   const projections = new VillageSyncProjections((accountId, worldSlug, villageId) => readVillageProjection(db, accountId, worldSlug, villageId));
   // A command's commit can race another world commit after snapshot assembly.
   // Verify the revision after COMMIT, replacing only uncertain snapshots.
@@ -99,27 +101,56 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform',
       'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
     reply.raw.write('retry: 2000\n\n');
+    const deliveredReceipts=new Map<string,number>();
+    let dirty=false,checking=false,receiptDirty=false;
+    let receiptFlight:Promise<void>|undefined;
     let closed = false, timer: ReturnType<typeof setTimeout> | undefined;
-    const close = () => { if(closed)return;closed = true; if (timer) clearTimeout(timer);streams.delete(close);reply.raw.end(); };
+    const close = () => { if(closed)return;closed = true; if (timer) clearTimeout(timer);unsubscribe?.();streams.delete(close);reply.raw.end(); };
     streams.add(close);
     reply.raw.once('close', close);
     // No trust in Last-Event-ID: browser receipt does not attest application.
     // Opening/reopening always joins with a current coherent snapshot.
+    // Compact receipt reads have their own bounded single flight. A projection
+    // awaiting SQL must not hold a committed refusal behind its completion.
+    const flushReceipts=():Promise<void>=>{
+      if(closed)return Promise.resolve();
+      if(receiptFlight){receiptDirty=true;return receiptFlight;}
+      receiptDirty=false;
+      const flight=(async()=>{
+        try{
+          const current=await authenticate(db,request.cookies[config.cookieName]);
+          if(current.id!==account.id)throw new HttpError(401,'SESSION_EXPIRED','Session expirée.');
+          const receipts=await readExpeditionReceipts(db,account.id,worldSlug,villageId);
+          if(closed)return;
+          for(const receipt of receipts)if((deliveredReceipts.get(receipt.commandId)??0)<receipt.version){
+            if(reply.raw.writableLength>1_048_576){close();return;}
+            reply.raw.write('event: expedition-receipt\ndata: '+JSON.stringify(receipt)+'\n\n');deliveredReceipts.set(receipt.commandId,receipt.version);
+          }
+          while(deliveredReceipts.size>128)deliveredReceipts.delete(deliveredReceipts.keys().next().value!);
+        }catch(error){
+          if(!closed&&error instanceof HttpError&&error.statusCode===401)reply.raw.write('event: expired\ndata: {}\n\n');
+          app.log.warn(error,'Expedition receipt synchronization interrupted');close();
+        }
+      })().finally(()=>{receiptFlight=undefined;if(receiptDirty&&!closed)void flushReceipts();});
+      receiptFlight=flight;return flight;
+    };
     const poll = async () => {
+      if(closed)return;if(checking){dirty=true;return;}checking=true;dirty=false;
+      if(timer)clearTimeout(timer);
       try {
-        await authenticate(db, request.cookies[config.cookieName]);
-        await db.transaction().execute(tx => ownedVillage(tx, account.id, worldSlug, villageId));
+        await flushReceipts();if(closed)return;
         const event = await session.check();
         if (closed) return;
         const revision = event.event === 'snapshot' ? event.data.syncRevision : event.event === 'frame' ? event.data.toRevision : event.data.revision;
         if (reply.raw.writableLength > 1_048_576) { close(); return; }
         reply.raw.write(`id: ${revision}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
-        timer = setTimeout(() => void poll(), VILLAGE_SYNC_CHECK_MS); timer.unref();
+        timer = setTimeout(() => void poll(), dirty?0:VILLAGE_SYNC_CHECK_MS); timer.unref();
       } catch (error) {
         if (!closed && error instanceof HttpError && error.statusCode === 401) reply.raw.write('event: expired\ndata: {}\n\n');
         app.log.warn(error, 'Village synchronization interrupted'); close();
-      }
+      }finally{checking=false;if(dirty&&!closed){if(timer)clearTimeout(timer);timer=setTimeout(()=>void poll(),0);}}
     };
+    const unsubscribe=wakeups?.subscribe((wid,vid)=>{if(wid===village.worldId&&vid===villageId){void flushReceipts();void poll();}});
     void poll();
   });
   return projections;

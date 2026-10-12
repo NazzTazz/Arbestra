@@ -1,3 +1,4 @@
+import {expeditionReceiptIsValid,type ExpeditionReceipt} from '@arbestra/contracts';
 import { applyVillageFrame, reconcileVillageSnapshot, villageSnapshotIsValid, type VillageState } from '@arbestra/contracts';
 import type { TimedVillageState } from './client';
 
@@ -14,6 +15,7 @@ export interface VillageSyncOptions {
   offset: () => number;
   source?: (url: string) => VillageEventSource;
   onExpired?: () => void;
+  onExpeditionReceipt?: (receipt:ExpeditionReceipt)=>void;
 }
 export class VillageSynchronization {
   #source: VillageEventSource | null = null;
@@ -60,6 +62,7 @@ export class VillageSynchronization {
       } catch { this.#recover(); }
     };
     for (const kind of ['snapshot', 'frame', 'revision'] as const) source.addEventListener(kind, event => receive(kind, event));
+    source.addEventListener('expedition-receipt',event=>{if(!this.#alive(epoch))return;this.#touch();try{const receipt=JSON.parse(event.data);if(expeditionReceiptIsValid(receipt)&&receipt.worldId===this.worldId&&receipt.villageId===this.villageId)this.options.onExpeditionReceipt?.(receipt);}catch{this.#recover();}});
     source.addEventListener('expired', () => { if (this.#alive(epoch)) { this.close(); this.options.onExpired?.(); } });
     source.onerror = () => { if (this.#alive(epoch)) this.#recover(2_000); };
   }

@@ -1,5 +1,7 @@
 # Architecture autoritaire
 
+Expéditions RC1 asynchrones implémentées le 12 octobre : [spec](../SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md) et [preuves/tests/performance](../IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Noyau A→B indépendant, calcul CPU hors transaction, admission FIFO sans réservation et reçus SSE durables. Migration042 validée en test uniquement ; recette visuelle et limites de mesure précisées dans le bilan.
+
 État courant du 10 octobre : [installation RC1, vue village et dossier de contre-recette](../IMPLEMENTATION-INSTALLATION-RC1.md). Les mentions de pose non raccordée ci-dessous décrivent la tranche atlas antérieure. La candidate reste à valider avant ouverture publique.
 
 La [carte de spawn RC1](../SPEC-CARTE-SPAWN-RC1.md) utilise maintenant un [atlas léger, cercle de 8 cases et territoires](../IMPLEMENTATION-ATLAS-RC1.md), au-dessus du [prédiagnostic interne](../IMPLEMENTATION-CARTE-SPAWN-RC1.md) sur copie de test. Il n’autorise aucune installation ; certification du sol/accès, projection économique naturelle, préparation et pose transactionnelle restent à réaliser. Les informations opérationnelles des voisins restent côté serveur. Le garde d’ouverture v3 est conservé.

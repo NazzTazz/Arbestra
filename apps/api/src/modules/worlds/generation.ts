@@ -205,6 +205,7 @@ export async function generateWorld(
   await sql`select pg_advisory_xact_lock(hashtextextended(${`world-generation:${worldId}`}, 0))`.execute(
     transaction,
   );
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(transaction);
   const world = await transaction
     .selectFrom('worlds')
     .selectAll()

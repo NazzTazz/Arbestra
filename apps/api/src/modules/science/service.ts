@@ -1,3 +1,5 @@
+import {routeLength,spawnDelta,travelledCells} from '@arbestra/contracts';
+import {readRc1Ground} from '../worlds/rc1-ground.js';
 import { sql, type Transaction } from 'kysely';
 import type { ScienceCommand, ScienceState, TravelCell } from '@arbestra/contracts';
 import { combinedPeriod, measureRegime, TAU } from '@arbestra/contracts/cosmology';
@@ -89,11 +91,13 @@ async function recordPlaces(tx: Transaction<Database>, world: ScienceWorld, acco
   const chunks = await tx.selectFrom('worldChunks').select(['chunkX', 'chunkY', 'terrainCodes', 'elevations']).where('worldId', '=', world.id)
     .where(eb => eb.or([...wanted.values()].map(c => eb.and([eb('chunkX', '=', c.chunkX), eb('chunkY', '=', c.chunkY)])))).execute();
   const byChunk = new Map(chunks.map(c => [`${c.chunkX}:${c.chunkY}`, c]));
+  const generation=await tx.selectFrom('worlds').select('generationVersion').where('id','=',world.id).executeTakeFirstOrThrow();
+  const rc1=generation.generationVersion===3?await readRc1Ground(tx,world.id):null;
   const rows = unique.map(p => {
     const chunk = byChunk.get(`${Math.floor(p.cellX / world.chunkSize)}:${Math.floor(p.cellY / world.chunkSize)}`);
     if (!chunk) throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain incomplet pour les relevés.');
     const index = p.cellY % world.chunkSize * world.chunkSize + p.cellX % world.chunkSize;
-    return { worldId: world.id, accountId, ...p, terrainCode: chunk.terrainCodes[index]!, elevation: chunk.elevations[index]!,
+    return { worldId: world.id, accountId, ...p, terrainCode: rc1?.cell(p.cellX,p.cellY).code??chunk.terrainCodes[index]!, elevation: rc1?.cell(p.cellX,p.cellY).elevation??chunk.elevations[index]!,
       observedAt: at, surveyed, sourceActivityId: activityId };
   });
   for (let i = 0; i < rows.length; i += 500) await tx.insertInto('sciencePlaces').values(rows.slice(i, i + 500))
@@ -167,11 +171,11 @@ export async function completeScienceAt(tx: Transaction<Database>, economy: Vill
     .where('worldId', '=', economy.worldId).where('accountId', '=', accountId).where('code', '=', activity.programCode!).execute();
   if (activity.kind === 'survey' || activity.kind === 'exploration') {
     const world = { id: economy.worldId, ...village };
-    await recordPlaces(tx, world, accountId, activity.pathCells, at, false, id);
+    await recordPlaces(tx, world, accountId, travelledCells(activity.pathCells,village), at, false, id);
     await recordPlaces(tx, world, accountId, activity.surveyCells, at, true, id);
     await wakeOtherCampuses(tx, economy, accountId);
     // Dated exterior report. Never expose owner, stocks, workers or live production.
-    const visited = new Set(activity.pathCells.map(key));
+    const visited = new Set(travelledCells(activity.pathCells,village).map(key));
     const relative = (n: number, centre: number, size: number) => ((n-centre+size/2)%size+size)%size-size/2;
     const others = await tx.selectFrom('villages').select(['id', 'name', 'anchorCellX', 'anchorCellY']).where('worldId', '=', economy.worldId)
       .where('ownerAccountId', '!=', accountId).execute();
@@ -211,7 +215,7 @@ async function startActivity(tx: Transaction<Database>, economy: VillageEconomy,
     pathCells: sql`${JSON.stringify(input.path ?? [])}::jsonb`, surveyCells: sql`${JSON.stringify(input.surveys ?? [])}::jsonb` }).returning('id').executeTakeFirstOrThrow();
   await assignWorkers(tx, eligible, input.workers, { harvestId: null, extractionId: null, scienceActivityId: activity.id });
   await notify(tx, economy, activity.id, completesAt);
-  return true;
+  return activity.id;
 }
 
 /** After manual commands, admit new batches at H, never in the past. Engaged
@@ -280,7 +284,7 @@ export async function admitScience(tx: Transaction<Database>, economy: VillageEc
   }
 }
 
-export async function scienceCommand(tx: Transaction<Database>, economy: VillageEconomy, command: ScienceCommand) {
+export async function scienceCommand(tx: Transaction<Database>, economy: VillageEconomy, command: ScienceCommand, preparedPath?:TravelCell[]) {
   const { village, accountId } = await initializeKnowledge(tx, economy), levels = await levelsFor(tx, economy.worldId, accountId);
   if (command.action === 'pause' || command.action === 'resume') {
     const changed = await tx.updateTable('sciencePrograms').set({ paused: command.action === 'pause' }).where('worldId', '=', economy.worldId)
@@ -316,27 +320,38 @@ export async function scienceCommand(tx: Transaction<Database>, economy: Village
     const known = await tx.selectFrom('sciencePlaces').select(['cellX', 'cellY']).where('worldId', '=', economy.worldId).where('accountId', '=', accountId).execute();
     if (command.action === 'survey' && !known.some(p => key(p) === key(command.target)))
       throw new HttpError(409, 'SURVEY_UNKNOWN_TARGET', 'Ce lieu doit d’abord être repéré par une reconnaissance.');
+    let path=preparedPath;
+    if(!path){
     const coarse = await sciencePath(tx, { id: economy.worldId, ...village }, { cellX: village.anchorCellX, cellY: village.anchorCellY }, command.target);
     const worldGeneration=await tx.selectFrom('worlds').select('generationVersion').where('id','=',economy.worldId).executeTakeFirstOrThrow();
-    const path=await refineVillagePath(tx,{...village,worldId:economy.worldId,villageId:economy.villageId,generationVersion:worldGeneration.generationVersion},coarse,'science');
+    path=await refineVillagePath(tx,{...village,worldId:economy.worldId,villageId:economy.villageId,generationVersion:worldGeneration.generationVersion},coarse,'science');
+    }
     const maximumSteps = Math.floor((command.budgetSeconds * 1000 - SURVEY_MS) / 2000);
     if (maximumSteps < 0) throw new HttpError(409, 'SURVEY_BUDGET', 'Le budget doit couvrir le relevé et le retour.');
-    let stop=0;for(let i=1;i<path.length;i++){if(travelDuration(path.slice(0,i+1),village)>maximumSteps*1000)break;if(Number.isInteger(path[i]!.cellX)&&Number.isInteger(path[i]!.cellY))stop=i;}
+    let stop=0,distance=0;for(let i=1;i<path.length;i++){distance+=routeLength([path[i-1]!,path[i]!],{width:village.widthCells,height:village.heightCells});if(Math.round(distance*1000)>maximumSteps*1000)break;if(Number.isInteger(path[i]!.cellX)&&Number.isInteger(path[i]!.cellY))stop=i;}
     if(!stop&&path.length>1)throw new HttpError(409,'SURVEY_BUDGET','Le budget doit couvrir le trajet jusqu’au premier lieu et le retour.');
     const outward = path.slice(0,stop+1), target = outward.at(-1)!;
     const durationMs = travelDuration(outward,village)*2 + SURVEY_MS;
-    if (!await startActivity(tx, economy, accountId, { kind: command.action === 'survey' ? 'survey' : 'exploration', buildingId: null,
-      programCode: null, workers: 1, durationMs, workMs: SURVEY_MS, path: [...outward, ...outward.slice(0, -1).reverse()], surveys: [target] }))
-      throw new HttpError(409, 'CARTOGRAPHERS_UNAVAILABLE', 'Aucun cartographe disponible avec assez d’énergie pour revenir.');
+    const activityId=await startActivity(tx, economy, accountId, { kind: command.action === 'survey' ? 'survey' : 'exploration', buildingId: null,
+      programCode: null, workers: 1, durationMs, workMs: SURVEY_MS, path: [...outward, ...outward.slice(0, -1).reverse()], surveys: [target] });
+    if(!activityId)throw new HttpError(409, 'CARTOGRAPHERS_UNAVAILABLE', 'Aucun cartographe disponible avec assez d’énergie pour revenir.');
+    return activityId;
   } else if (command.action === 'recall') {
     const activity = await tx.selectFrom('scienceActivities').selectAll().where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('accountId', '=', accountId).where('id', '=', command.activityId).where('status', '=', 'in-progress').executeTakeFirst();
     if (!activity || !['survey', 'exploration'].includes(activity.kind)) throw new HttpError(404, 'EXPEDITION_NOT_FOUND', 'Expédition en cours introuvable.');
     const outwardCount = Math.floor((activity.pathCells.length + 1) / 2), outward = activity.pathCells.slice(0, outwardCount);
-    const elapsed = economy.through.getTime() - activity.startedAt.getTime();let steps=0;for(let i=1;i<outward.length;i++){if(travelDuration(outward.slice(0,i+1),village)>elapsed)break;steps=i;}
+    const elapsed = economy.through.getTime() - activity.startedAt.getTime();
     // Already returning: retain the original deadline and report.
     if (elapsed >= travelDuration(outward,village) + SURVEY_MS) return;
-    const visited = outward.slice(0, steps + 1), completesAt = new Date(economy.through.getTime() + travelDuration(outward.slice(0,steps+1),village));
+    const visited:TravelCell[]=[outward[0]!];let remaining=Math.max(0,elapsed);
+    for(let i=1;i<outward.length;i++){
+      const a=outward[i-1]!,b=outward[i]!,duration=travelDuration([a,b],village);
+      if(remaining>=duration){visited.push(b);remaining-=duration;continue;}
+      if(remaining>0){const fraction=remaining/duration;visited.push({cellX:normalizeCell(a.cellX+spawnDelta(b.cellX,a.cellX,village.widthCells)*fraction,village.widthCells),cellY:normalizeCell(a.cellY+spawnDelta(b.cellY,a.cellY,village.heightCells)*fraction,village.heightCells)});}
+      break;
+    }
+    const completesAt = new Date(economy.through.getTime() + travelDuration(visited,village));
     await tx.updateTable('scienceActivities').set({ completesAt, pathCells: sql`${JSON.stringify([...visited, ...visited.slice(0, -1).reverse()])}::jsonb`,
       surveyCells: sql`'[]'::jsonb` }).where('worldId', '=', economy.worldId).where('id', '=', activity.id).execute();
     await notify(tx, economy, activity.id, completesAt);

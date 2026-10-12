@@ -9,7 +9,17 @@ export function canonicalJSON(value:unknown):string {
   return JSON.stringify(value);
 }
 export function artifactChecksum(data:GeneratedLandscape):string{
-  return createHash('sha256').update(canonicalJSON(data)).digest('hex');
+  // Feed the identical canonical byte stream in bounded chunks. Materialising
+  // all intermediate array strings needlessly expands the cold worker's heap.
+  const hash=createHash('sha256');let buffer='';
+  const append=(text:string)=>{buffer+=text;if(buffer.length>=65536){hash.update(buffer);buffer='';}};
+  const write=(value:unknown)=>{
+    if(Array.isArray(value)){append('[');for(let i=0;i<value.length;i++){if(i)append(',');if(value[i]!==undefined&&typeof value[i]!=='function'&&typeof value[i]!=='symbol')write(value[i]);}append(']');}
+    else if(value!==null&&typeof value==='object'){
+      append('{');const keys=Object.keys(value).sort();for(let i=0;i<keys.length;i++){if(i)append(',');const key=keys[i]!;append(JSON.stringify(key)+':');write((value as Record<string,unknown>)[key]);}append('}');
+    }else append(JSON.stringify(value)??'undefined');
+  };
+  write(data);if(buffer)hash.update(buffer);return hash.digest('hex');
 }
 export async function readV2Artifact(db:Kysely<Database>|Transaction<Database>,worldId:string,includeProvenance=true):Promise<GeneratedLandscape>{
   const world=await db.selectFrom('worlds').selectAll().where('id','=',worldId).executeTakeFirstOrThrow();

@@ -7,7 +7,7 @@ import { readExtraction, readExtractions } from '../deposits/stone-extractions.j
 import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
 import { prepareInfrastructureEdit, buildingAccesses, applyInfrastructureConfirmation, type InfrastructureConfirmation, type InfrastructureRequest } from '@arbestra/contracts';
 import { constructBuilding, constructBuildingArea, withVillageProjection, readInfrastructureSpatialState, state } from './service.js';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { applyVillageFrame, VillageStateSchema, type VillageState, type VillageFrame, type VillageCommandResponse } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
@@ -21,14 +21,28 @@ import { villageSyncRevision } from './sync-revision.js';
 
 const url = testDatabaseUrl(), target = new URL(url);
 if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test') throw Error('Unexpected synchronization fixture DB');
-const db = createDatabase(url), worldId = randomUUID(), villageId = randomUUID(), accountId = randomUUID(), hallId = randomUUID(), houseId = randomUUID();
-const slug = 'sync-' + worldId, token = randomUUID(); let app: FastifyInstance;
+const db=createDatabase(url),accountId=randomUUID(),token=randomUUID();
+let worldId=randomUUID(),villageId=randomUUID(),hallId=randomUUID(),houseId=randomUUID(),slug='sync-'+worldId;let app:FastifyInstance;
 const read = () => readVillageProjection(db, accountId, slug, villageId);
 const revision = async () => (await villageSyncRevision(db, worldId)).revision;
 
 beforeAll(async () => {
   await migrateToLatest(url);
   await db.insertInto('accounts').values({ id: accountId, email: accountId + '@sync.test', passwordHash: 'fixture' }).execute();
+  await db.insertInto('sessions').values({ accountId, tokenHash: hashSessionToken(token), expiresAt: new Date(Date.now() + 3600000) }).execute();
+  app = await buildApp({ databaseUrl: url, host: '127.0.0.1', port: 0, isProduction: false, cookieName: 'arbestra_session',
+    sessionTtlDays: 30, constructionDurationOverrideMs: 600000, scheduledTaskPollIntervalMs: 250 }, db);
+  app.get('/snapshot-race', {schema:{response:{200:VillageStateSchema}}}, async()=>{
+    const captured=await read();
+    await db.updateTable('villages').set({name:'After snapshot before response'}).where('id','=',villageId).execute();
+    return captured;
+  });
+}, 120000);
+beforeEach(async()=>{
+  // Every case owns fresh geometry and cursors; earlier construction tests cannot obstruct later roads.
+  await db.deleteFrom('populationCohorts').where('worldId','=',worldId).execute();
+  await db.deleteFrom('worlds').where('id','=',worldId).execute();
+  worldId=randomUUID();villageId=randomUUID();hallId=randomUUID();houseId=randomUUID();slug='sync-'+worldId;
   await db.transaction().execute(async tx => {
     await tx.insertInto('worlds').values({ id: worldId, slug, name: 'Sync test', topology: 'torus', widthCells: 512, heightCells: 256,
       chunkSize: 32, seed: 4109, generationVersion: 1, generationStatus: 'ready', isOpen: true, generatedAt: new Date() }).execute();
@@ -45,15 +59,7 @@ beforeAll(async () => {
     ]).execute();
     for (const [buildingId, cellX] of [[hallId, 64], [houseId, 65]] as const) await tx.insertInto('worldCellOccupancies').values({ worldId, buildingId, featureId: null, cellX, cellY: 64, role: 'anchor' }).execute();
   });
-  await db.insertInto('sessions').values({ accountId, tokenHash: hashSessionToken(token), expiresAt: new Date(Date.now() + 3600000) }).execute();
-  app = await buildApp({ databaseUrl: url, host: '127.0.0.1', port: 0, isProduction: false, cookieName: 'arbestra_session',
-    sessionTtlDays: 30, constructionDurationOverrideMs: 600000, scheduledTaskPollIntervalMs: 250 }, db);
-  app.get('/snapshot-race', {schema:{response:{200:VillageStateSchema}}}, async()=>{
-    const captured=await read();
-    await db.updateTable('villages').set({name:'After snapshot before response'}).where('id','=',villageId).execute();
-    return captured;
-  });
-}, 120000);
+});
 afterAll(async () => {
   if (app) await app.close();
   await db.deleteFrom('populationCohorts').where('worldId', '=', worldId).execute();
@@ -197,7 +203,7 @@ it('deduplicates a real construction response and its SSE frame, retaining comma
 });
 
 it('reconciles a due construction and resting activity without relying on a live worker',async()=>{
-  const building=await db.selectFrom('worldCellOccupancies').select('buildingId').where('worldId','=',worldId).where('cellX','=',66).where('cellY','=',64).executeTakeFirstOrThrow();
+  const building=await db.selectFrom('worldCellOccupancies').select('buildingId').where('worldId','=',worldId).where('cellX','=',65).where('cellY','=',64).executeTakeFirstOrThrow();
   await db.updateTable('buildings').set({constructionCompletesAt:new Date(Date.now()-1000)}).where('worldId','=',worldId).where('id','=',building.buildingId!).execute();
   const cohortId=randomUUID(),since=new Date(Date.now()-6*3600000);
   await db.insertInto('populationCohorts').values({id:cohortId,worldId,villageId,originVillageId:villageId,memberCount:1,activity:'resting',energy:0,energyProgress:0,
@@ -261,9 +267,10 @@ it('deduplicates incremental HTTP and SSE in either order and retries the same c
   expect(await db.selectFrom('buildingCommandReceipts').selectAll().where('worldId','=',worldId).where('commandId','=',payload.commandId).execute()).toHaveLength(1);
 });
 it('includes a due unrelated completion and upgrades in the command frame, with a coherent unknown-base fallback',async()=>{
+  await constructBuilding(db,accountId,slug,villageId,67,64,'dwelling',600000,randomUUID(),undefined,0,'logs');
   const base=await snapshot();
   const due=await db.selectFrom('worldCellOccupancies').select('buildingId').where('worldId','=',worldId).where('cellX','=',67).where('cellY','=',64).executeTakeFirstOrThrow();
-  await db.updateTable('buildings').set({constructionCompletesAt:new Date(Date.now()-1000)}).where('id','=',due.buildingId!).execute();
+  await db.updateTable('buildings').set({constructionStartedAt:new Date(Date.now()-2000),constructionCompletesAt:new Date(Date.now()-1000)}).where('id','=',due.buildingId!).execute();
   const response=await build(buildPayload(69),base);expect(response.statusCode,response.body).toBe(201);
   const local=applied(base,response.json<VillageCommandResponse>());
   expect(local.cells.find(c=>c.building?.id===due.buildingId)?.building?.status).toBe('completed');
@@ -294,10 +301,10 @@ it('releases the village lock before projecting the incremental construction res
   const server=await buildApp(config,db.withPlugin(plugin));let pending:ReturnType<typeof build>|undefined;
   const deadline=setTimeout(()=>{expired=true;release();},30000);
   try{
-    const base=await snapshot(server);armed=true;pending=build(buildPayload(71),base,server);
+    const base=await snapshot(server);armed=true;pending=build(buildPayload(66),base,server);
     await Promise.race([entered,pending.then(()=>{throw Error('Response completed without projection barrier');})]);
     expect(expired).toBe(false);
-    const stored=await db.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',worldId).where('cellX','=',71).where('cellY','=',64).execute();
+    const stored=await db.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',worldId).where('cellX','=',66).where('cellY','=',64).execute();
     expect(stored).toHaveLength(1); // The command really committed before this pause.
     await db.transaction().execute(async tx=>{await sql`set local lock_timeout='1000ms'`.execute(tx);
       await tx.selectFrom('villages').select('id').where('id','=',villageId).forUpdate().executeTakeFirstOrThrow();
@@ -372,10 +379,10 @@ it('road optimization: projects the frame after releasing locks, deduplicates HT
   const event=await stream.check();expect(event.event).toBe('frame');if(event.event==='frame')expect(applyVillageFrame(local,event.data).kind).toBe('ignored');
   if(reply.kind==='frame')expect(applyVillageFrame(local,reply.frame).kind).toBe('ignored');
   const retry=await road(payload,local,server);expect(retry.statusCode,retry.body).toBe(200);const retried=retry.json<VillageCommandResponse>();const next=retried.kind==='snapshot'?retried.state:applied(local,retried);
-  expect(next.infrastructure).toEqual(local.infrastructure);expect(next.village.resources.map(r=>[r.code,r.amount])).toEqual(local.village.resources.map(r=>[r.code,r.amount]));
+  expect(next.infrastructure).toEqual(local.infrastructure);expect(next.village.resources.map(r=>[r.code,r.amount]).sort()).toEqual(local.village.resources.map(r=>[r.code,r.amount]).sort());
   const undo=await road({commandId:randomUUID(),sessionId:payload.sessionId,revision:next.infrastructure!.revision,operation:{kind:'undo',target:payload.commandId}},next,server);
   expect(undo.statusCode,undo.body).toBe(200);const restored=applied(next,undo.json<VillageCommandResponse>());
-  expect(restored.infrastructure!.roads).toEqual(base.infrastructure!.roads);expect(restored.village.resources.map(r=>[r.code,r.amount])).toEqual(base.village.resources.map(r=>[r.code,r.amount]));
+  expect(restored.infrastructure!.roads).toEqual(base.infrastructure!.roads);expect(restored.village.resources.map(r=>[r.code,r.amount]).sort()).toEqual(base.village.resources.map(r=>[r.code,r.amount]).sort());
   console.info('ROAD_FRAME_BYTES',{snapshot:Buffer.byteLength(JSON.stringify(base)),frame:Buffer.byteLength(response.body),totalWithBarrierMs:Math.round(performance.now()-started)});
  }finally{clearTimeout(deadline);release();try{if(pending)await pending;}finally{await server.close();}}
 },60000);

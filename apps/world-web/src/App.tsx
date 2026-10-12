@@ -1,3 +1,4 @@
+import {useExpeditions} from './ui/use-expeditions';
 import {useHarvestTool} from './ui/use-harvest-tool';
 import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
 import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
@@ -93,6 +94,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const offsetRef = useRef(0);
   const [loading, setLoading] = useState(!starter);
   const [needsLogin, setNeedsLogin] = useState(false);
+  const expeditions=useExpeditions(worldSlug,state?.world.id,state?.village.id,!needsLogin);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
@@ -376,14 +378,15 @@ export function App({starter}:{starter?:StarterController} = {}) {
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1_000); return () => window.clearInterval(timer); }, []);
 
   useEffect(() => {
-    if (beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
+    if (needsLogin || beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
     const stream = new VillageSynchronization(state.world.slug, state.world.id, state.village.id, {
-      current: () => stateRef.current, accept: applySnapshot, offset: () => offsetRef.current,
+      current: () => stateRef.current,
+      onExpeditionReceipt:expeditions.receive, accept: applySnapshot, offset: () => offsetRef.current,
       onExpired: () => setNeedsLogin(true),
     });
     synchronization.current = stream;
     return () => { stream.close(); if(synchronization.current===stream)synchronization.current=null; };
-  }, [state?.world.id,state?.village.id,beforeTownHall,applySnapshot]);
+  }, [state?.world.id,state?.village.id,beforeTownHall,needsLogin,applySnapshot,expeditions.receive]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const inspectedFeature=selectedFeatureId ? terrainRef.current?.naturalFeatures().find(f=>f.id===selectedFeatureId)
@@ -928,7 +931,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     </aside>}
     <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
-    {showScience && worldMode === 'population' && terrainView === 'village' && state.science && <SciencePanel target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (modeRef.current !== 'population' || arrivalActive) return; void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
+    {showScience && worldMode === 'population' && terrainView === 'village' && state.science && <SciencePanel expeditions={expeditions.entries} target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (modeRef.current !== 'population' || arrivalActive) return; if(command.action==='survey'||command.action==='explore'){expeditions.submit(command);return;} void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmology={cosmologyDebug} onOpen={open => { setShowDev(open); if (open) cancelWorldGesture(); }} onTravelPaths={setShowTravelPaths}
       onRoute={setSelectedRouteId} onCosmology={setCosmologyDebug} onReset={() => { setNoclip(false);terrainRef.current?.resetCosmology(); setCosmologyDebug(false); setShowTravelPaths(false); setSelectedRouteId(null); }} />

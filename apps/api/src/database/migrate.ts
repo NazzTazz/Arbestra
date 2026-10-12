@@ -1,3 +1,4 @@
+import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
 import * as harvestSubmissionsMigration from './migrations/040_harvest_submissions.js';
 import * as villageSyncMigration from './migrations/041_village_sync.js';
 import * as harvestIntentsMigration from './migrations/039_harvest_intents.js';
@@ -92,6 +93,7 @@ const migrationProvider: MigrationProvider = {
       '039_harvest_intents': harvestIntentsMigration,
       '040_harvest_submissions': harvestSubmissionsMigration,
       '041_village_sync': villageSyncMigration,
+      '042_async_expeditions': asyncExpeditionsMigration,
     };
   },
 };

@@ -8,6 +8,8 @@ try {
 }
 
 export interface AppConfig {
+  readonly expeditionWorkerEnabled?:boolean;
+  readonly expeditionWorkerCount?:1|2;
   readonly worldGeneratorOperatorEmails?: readonly string[];
   readonly databaseUrl: string;
   readonly host: string;
@@ -27,9 +29,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   }
 
   const cookieDomain = environment.COOKIE_DOMAIN;
+  if(environment.EXPEDITION_WORKERS&&!/^[12]$/.test(environment.EXPEDITION_WORKERS))throw Error('EXPEDITION_WORKERS must be 1 or 2');
 
   return {
     databaseUrl,
+    expeditionWorkerCount:environment.EXPEDITION_WORKERS==='2'?2:1,
     worldGeneratorOperatorEmails:(environment.WORLD_GENERATOR_OPERATOR_EMAILS??'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean),
     host: environment.HOST ?? '127.0.0.1',
     port: Number(environment.PORT ?? 3000),

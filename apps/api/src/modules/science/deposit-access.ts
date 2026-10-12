@@ -1,3 +1,6 @@
+import {canWalkSpawnSegment,buildingAccesses,spawnDelta,type BuildingAccessState} from '@arbestra/contracts';
+import {readRc1Ground} from '../worlds/rc1-ground.js';
+import {travelledCells} from '@arbestra/contracts';
 import { sql, type Transaction } from 'kysely';
 import type { TravelCell } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
@@ -8,7 +11,7 @@ import { knownGeography } from './knowledge.js';
  * at this village. An observed marker alone never grants remote exploitation. */
 export async function recognizedDepositRoute(tx: Transaction<Database>, worldId: string, villageId: string, target: TravelCell): Promise<TravelCell[] | null> {
   const village = await tx.selectFrom('villages').innerJoin('worlds', 'worlds.id', 'villages.worldId')
-    .select(['ownerAccountId', 'anchorCellX', 'anchorCellY', 'widthCells', 'heightCells', 'chunkSize']).where('villages.worldId', '=', worldId).where('villages.id', '=', villageId).executeTakeFirstOrThrow();
+    .select(['ownerAccountId', 'anchorCellX', 'anchorCellY', 'widthCells', 'heightCells', 'chunkSize', 'generationVersion']).where('villages.worldId', '=', worldId).where('villages.id', '=', villageId).executeTakeFirstOrThrow();
   const geography = await tx.selectFrom('sciencePrograms').select('code').where('worldId', '=', worldId).where('accountId', '=', village.ownerAccountId)
     .where('discipline', '=', 'geography').where('level', '>=', 1).where('acquiredAt', 'is not', null).executeTakeFirst();
   if (!geography) return null;
@@ -24,8 +27,23 @@ export async function recognizedDepositRoute(tx: Transaction<Database>, worldId:
   if (!astronomy && journey.villageId === villageId) {
     const index = journey.pathCells.findIndex(p => p.cellX === target.cellX && p.cellY === target.cellY);
     if (index < 0) return null;
+    if(village.generationVersion===3&&journey.pathCells.some(p=>!Number.isInteger(p.cellX)||!Number.isInteger(p.cellY))){
+      const path=journey.pathCells.slice(0,index+1),ground=await readRc1Ground(tx,worldId);
+      const occupied=await tx.selectFrom('worldCellOccupancies').leftJoin('buildings',j=>j.onRef('buildings.worldId','=','worldCellOccupancies.worldId').onRef('buildings.id','=','worldCellOccupancies.buildingId')).select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY','role','buildings.id','buildings.villageId','buildingType','visualLayout','quarterTurns']).where('worldCellOccupancies.worldId','=',worldId).where('buildingId','is not',null).execute();
+      const hall=occupied.find(c=>c.villageId===villageId&&c.buildingType==='town-hall'&&c.role==='anchor');if(!hall)return null;
+      const state={world:village,cells:occupied.map(c=>({...c,footprint:{buildingId:c.id!},building:c.role==='anchor'?{id:c.id!,type:c.buildingType!,visualLayout:c.visualLayout,quarterTurns:c.visualLayout?.quarterTurns??c.quarterTurns!}:null}))} as BuildingAccessState;
+      const equal=(a:TravelCell,b:TravelCell)=>Math.abs(spawnDelta(a.cellX,b.cellX,village.widthCells))+Math.abs(spawnDelta(a.cellY,b.cellY,village.heightCells))<1e-6;
+      const access=buildingAccesses(state,hall.id!).find(a=>path[0]&&path[1]&&equal(a.position,path[0])&&equal(a.outside,path[1]));if(!access)return null;
+      const owners=new Map(occupied.map(c=>[c.cellX+':'+c.cellY,c.id]));
+      const plans=await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).execute(),equipment=plans.flatMap(r=>r.plan.equipment);
+      for(let i=1;i<path.length;i++){
+        const field={...ground.navigation,sample(x:number,y:number){const base=ground.navigation.sample(x,y),cx=((Math.floor(x+.5)%village.widthCells)+village.widthCells)%village.widthCells,cy=((Math.floor(y+.5)%village.heightCells)+village.heightCells)%village.heightCells,owner=owners.get(cx+':'+cy);return{...base,blocked:base.blocked||Boolean(owner&&!(i===1&&owner===hall.id))||equipment.some(e=>Math.abs(spawnDelta(e.x/8,x,village.widthCells))<.125&&Math.abs(spawnDelta(e.y/8,y,village.heightCells))<.125)};}};
+        if(!canWalkSpawnSegment(field,{x:path[i-1]!.cellX,y:path[i-1]!.cellY},{x:path[i]!.cellX,y:path[i]!.cellY}))return null;
+      }
+      return path; // Preserve the reported fine passage, instead of inventing a coarse remote tail.
+    }
     try { return await sciencePath(tx, { id: worldId, ...village }, from, target,
-      new Set(journey.pathCells.slice(0, index + 1).map(p => `${p.cellX}:${p.cellY}`))); }
+      new Set(travelledCells(journey.pathCells.slice(0,index+1),village).map(p=>`${p.cellX}:${p.cellY}`))); }
     catch (error) { if (error instanceof Error && 'code' in error && error.code === 'SURVEY_ROUTE_UNAVAILABLE') return null; throw error; }
   }
   const known = await knownGeography(tx, worldId, village.ownerAccountId, village.widthCells, village.heightCells);

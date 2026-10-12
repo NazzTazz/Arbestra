@@ -1,3 +1,21 @@
+# Expéditions RC1 asynchrones — implémentée, recette visuelle à valider — 12 octobre 2026
+
+Base main be6532d. [Spec](docs/SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md), [preuves et performance](docs/IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Tristan demande les derniers tests/mesures puis commit/push ; publication autorisée pour cette tranche. HUD Population, combat/commerce/Rust hors périmètre.
+
+Livré : solveur A→B indépendant de la science, pool persistant1–2, terrain RC1 complet et accès réels, contexte SQL fermé avant CPU, FIFO sans réservation, intentions/reçus durables202/HTTP/GET/SSE. Admission à H sous ordre de verrous courant, contexte revalidé, affectation+activité+reçu atomiques. Budgets/baux/tentatives bornés ; rappel et connaissance consomment le préfixe réellement parcouru. SSE compact indépendant de la projection ; erreur PG17 25P04 entre deux requêtes désormais observée sans tuer l’API. Libellé ancien de sélection corrigé, représentants vivants conservés.
+
+Preuves finies : expéditions18/18, sync24/24, RC1 réel1/1, connexion1/1, checksum2/2, contrats/travel/sync client/circulation67/67. Types API/contracts/client, lint ciblé et builds API/client verts ; Vite runner nécessaire dans ce bac Windows. DB privée arbestra_test, aucune réinitialisation ni suite science.integration globale.
+
+Dernières campagnes terminées :1000 probes/6 clients sous recherche CPU, ack p95 175,9/p99 421,9ms ; santé p95 66,3ms ;20 reçus SSE majorant p95 157/max392ms, tous terminaux.101 admissions sur16 destinations certifiées,100 chaudes p95 820,7/p99 1159,1ms. Validation pure finale p95 0,46ms ; navigation détenue p95 473,3ms avec métier. Première décision froide antérieure6214ms ; nouvelle certification19 routes dont couturesX/Y, toutes found, premier calcul1945ms après bootstrap3117ms. RSS fin562Mio/pic633Mio, pas de preuve d’endurance. Limites de corpus et chronométrage explicites dans le bilan.
+
+Recette : préparation/admission et un rapport après durée réelle observés en Chrome5297→5298. Tristan utilise lui-même Population/sélection/POV pour suivre le cartographe ; ne pas annoncer ces gestes comme notre picking. Retour sur mobilité sélectionnée/virages/porte non reçu. Parcours minimal : mairie250,195→230,180,budget3min ; suivre et contrôler retour/rapport. Tranche implémentée et mesurée, recette visuelle complète reste à valider.
+
+Données : migration042 test uniquement, dev/production non migrés ni redémarrés. Monde de recette utilisateur/Aube/rc1-dev préservés. Fixture privée3e26056f-e792-4cff-8b98-4ab6f4b07eaa ; API3198/frontends5297/5298 disponibles, informations dans fichiers ignorés. Arrêt API par expedition-api-stop avant nouveaux tests DB ; relance par expedition-receipt-api.mjs. Instrumentation de performance temporaire ignorée ; relancer cette API privée sans le preload de mesure après la campagne.
+
+Git : publication de cette tranche autorisée sur main vers origin/main ; vérifier le hash et la synchronisation par git log/status. Exclure les travaux de Tristan : building-presentation, building-thumbnail-renderer, factory-preview, resource-factory, docs SPEC-FACTORY-BATIMENTS et SPEC-FACTORY-MATIERES. Exclure aussi transcript codex-session et cache %SystemDrive%.
+
+---
+
 # RC1 locale pour le développement et URL village — 12 octobre 2026
 
 Décision de Tristan : copie de la RC1 de recette vers la base `arbestra`, sans réinitialiser `arbestra_test` ni remplacer le monde historique `aube`. Migrations additives existantes 037–041 appliquées à dev seulement ; copie validée d’abord en transaction annulée, puis transaction validée : 41 tables et 27 342 lignes propres au monde, compte Bressuire rattaché à `player@arbestra.local`, voisin conservé. Les marqueurs de sync propres à la base source ont été régénérés par les triggers cible. Monde dev `rc1-dev` ; source `rc1-receipt-0ea92d24-c5c8-418b-8292-2781d0413536` intacte en test. `apps/world-web/.env.local` ignoré définit `VITE_DEFAULT_WORLD_SLUG=rc1-dev`.

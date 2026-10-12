@@ -71,3 +71,10 @@ it('captures the construction HTTP generation before a reconnect, including fram
  release(new Response(JSON.stringify({kind:'frame',commandTime:before.serverTime,serverTime:next.serverTime,frame:villageFrame(before,next)})));
  const response=await pending;expect(response.requestGeneration).toBe(epoch);expect(response.requestGeneration).not.toBe(villageRequestGeneration());expect('frame' in response).toBe(true);
 });
+
+it('delivers expedition receipts independently from village revision and ignores a closed subscription',()=>{
+ const h=harness(),received=vi.fn(),source=h.sources[0]!;h.sync.close();
+ const sync=new VillageSynchronization(h.state().world.slug,h.state().world.id,h.state().village.id,{...h.options,onExpeditionReceipt:received});sessions.push(sync);const current=h.sources.at(-1)!;
+ const receipt={kind:'expedition-receipt',commandId:'command',worldId:h.state().world.id,villageId:h.state().village.id,version:2,receivedAt:h.state().serverTime,status:'rejected',requestedTarget:{cellX:60,cellY:8},code:'CARTOGRAPHERS_UNAVAILABLE',message:'Indisponible'};
+ current.send('expedition-receipt',receipt);expect(received).toHaveBeenCalledOnce();expect(h.state().syncRevision).toBe(1);current.send('expedition-receipt',{...receipt,villageId:'other'});expect(received).toHaveBeenCalledOnce();sync.close();current.send('expedition-receipt',receipt);source.send('expedition-receipt',receipt);expect(received).toHaveBeenCalledOnce();
+});

@@ -1,3 +1,6 @@
+import type {ExpeditionIntent,ExpeditionReceipt} from '@arbestra/contracts';
+export async function sendExpedition(slug:string,villageId:string,intent:ExpeditionIntent):Promise<ExpeditionReceipt>{return parseResponse(await fetch('/api/worlds/'+encodeURIComponent(slug)+'/villages/'+encodeURIComponent(villageId)+'/science',{method:'POST',credentials:'same-origin',signal:AbortSignal.timeout(10000),headers:{'content-type':'application/json'},body:JSON.stringify(intent)}));}
+export async function readExpeditionReceipts(slug:string,villageId:string,ids?:string[]):Promise<ExpeditionReceipt[]>{return parseResponse(await fetch('/api/worlds/'+encodeURIComponent(slug)+'/villages/'+encodeURIComponent(villageId)+'/science/expeditions'+(ids?'?ids='+encodeURIComponent(ids.join(',')):''),{credentials:'same-origin',signal:AbortSignal.timeout(10000)}));}
 export async function readHarvestReceipts(slug:string,villageId:string,ids:string[]):Promise<HarvestReceipt[]>{
  return parseResponse(await fetch('/api/worlds/'+encodeURIComponent(slug)+'/villages/'+encodeURIComponent(villageId)+'/harvest-intents?ids='+encodeURIComponent(ids.join(',')),{signal:AbortSignal.timeout(10000),credentials:'same-origin'}));
 }
