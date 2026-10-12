@@ -6,6 +6,7 @@ import {poseStarterElement,latestVillageSnapshot} from '@arbestra/contracts';
 import {previewCells} from '../scene/construction-selection';
 import type {Cell} from '../scene/construction-selection';
 import {preparationState} from './preparation-state';
+import {villageRoute} from './starter-route';
 import './placement.css';
 async function read<T>(url:string,body?:unknown):Promise<T>{const response=await fetch(url,body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{credentials:'same-origin'});const value=await response.json();if(!response.ok)throw Object.assign(Error(value.message??'Le serveur est indisponible.'),{status:response.status,definitive:response.status<500});return value as T;}
 const label=(type:string)=>type==='town-hall'?'Hôtel de ville':type==='garden'?'Jardin':'Maison en troncs';
@@ -27,8 +28,15 @@ export function SpawnPlacement(){
  const [diagnostic,setDiagnostic]=useState<{key:string;valid:boolean;referenceHeight:number}|null>(null),[workerReady,setWorkerReady]=useState(0);
  const worker=useRef<Worker|null>(null),diagnosticSequence=useRef(0),diagnosticKey=useRef('');
  const request=useRef<{url:string;body:SpawnPoseRequest|StarterPoseRequest}|null>(null),busy=useRef(false),latestPoint=useRef(point);
+ const showVillageRoute=(current:StarterInstallation)=>{
+  const url=villageRoute(slug,current.remaining.length>0);
+  if(location.pathname+location.search!==url)history.replaceState(history.state,'',url);
+ };
  useEffect(()=>{let live=true;setError('');
-  void (async()=>{const [start,m]=await Promise.all([read<{kit:StarterKit;installation:StarterInstallation|null}>(base+'/starter'),read<SpawnMap>(base+'/spawn-map')]);if(!live)return;
+  void (async()=>{const start=await read<{kit:StarterKit;installation:StarterInstallation|null}>(base+'/starter');if(!live)return;
+   if(start.installation?.remaining.length===0){location.replace(villageRoute(slug));return;}
+   if(start.installation)showVillageRoute(start.installation);
+   const m=await read<SpawnMap>(base+'/spawn-map');if(!live)return;
    const c=start.installation?.anchor??initial.current;setCenter(c);setPoint(c);latestPoint.current=c;setKit(start.installation?.kit??start.kit);setInstallation(start.installation);setMap(m);if(start.installation){setManual(true);setKey(start.installation.remaining[0]??'');}
    const chunks:string[]=[];const x0=Math.floor((c.x-16)/32),y0=Math.floor((c.y-16)/32);for(let y=0;y<2;y++)for(let x=0;x<2;x++)chunks.push(((x0+x+16)%16)+','+((y0+y+8)%8));
    const [ground,state]=await Promise.all([read<TerrainResponse>(base+'/starter/terrain?chunks='+encodeURIComponent(chunks.join(';'))),start.installation?read<VillageState>(base+'/village?villageId='+start.installation.villageId):Promise.resolve(null)]);if(live){setTerrain(ground);setVillage(previous=>latestVillageSnapshot(previous,state));setReady(true);}
@@ -54,7 +62,7 @@ export function SpawnPlacement(){
    else {if(!playerName.trim()||!villageName.trim()){setError('Indiquez votre nom et celui du village.');return;}request.current={url:base+'/starter',body:{commandId:randomUUID(),artifactChecksum:map.artifactChecksum,kitVersion:kit.version,point:latestPoint.current,quarterTurns:turns,mode:manual?'manual':'grouped',playerName:playerName.trim(),villageName:villageName.trim()}};}
   }
   busy.current=true;setPending(true);setError('');
-  try{const result=await read<StarterInstallation>(request.current.url,request.current.body);const state=await read<VillageState>(base+'/village?villageId='+result.villageId);setVillage(previous=>latestVillageSnapshot(previous,state));request.current=null;setInstallation(result);setKey(result.remaining[0]!);setManual(true);setReload(n=>n+1);}
+  try{const result=await read<StarterInstallation>(request.current.url,request.current.body);showVillageRoute(result);const state=await read<VillageState>(base+'/village?villageId='+result.villageId);setVillage(previous=>latestVillageSnapshot(previous,state));request.current=null;setInstallation(result);setKey(result.remaining[0]??'');setManual(true);setReload(n=>n+1);}
   catch(e){if((e as {definitive?:boolean}).definitive)request.current=null;setError((e as Error).message+(request.current?' — résultat incertain, réessayez la même pose.':''));}
   finally{busy.current=false;setPending(false);}
  };

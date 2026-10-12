@@ -14,14 +14,16 @@ corepack pnpm dev
 ```
 
 - Lobby : <http://localhost:5173>
-- Monde : <http://localhost:5174/?world=aube>
+- Monde : <http://localhost:5174/village> (monde par défaut local) ; pour le monde historique : <http://localhost:5174/village?world=aube>
 - Compte de développement : `player@arbestra.local` / `arbestra`
+
+Sur une base déjà initialisée, lancer seulement `corepack pnpm dev` : `db:setup` migre puis réensemence. La copie RC1 du PC de Tristan est accessible sur <http://localhost:5174/village?world=rc1-dev> ; `apps/world-web/.env.local` y définit `VITE_DEFAULT_WORLD_SLUG=rc1-dev`. Cette configuration et les données locales ne sont pas versionnées. La base de tests reste séparée.
 
 ### Tester sur le réseau local
 
 `corepack pnpm dev` écoute aussi en IPv4 sur le réseau local pour les deux interfaces web (5173/5174). Depuis un appareil connecté au même réseau, ouvrir `http://<IPv4-du-PC>:5173`, puis choisir le monde. Les liens entre lobby et monde conservent automatiquement cet hôte ; les variables `VITE_WORLD_CLIENT_URL` et `VITE_LOBBY_URL`, si définies, restent prioritaires. L'API reste sur `127.0.0.1:3000`, accessible aux clients par les proxys web. Le mode e2e reste limité à localhost.
 
-Sur le PC de Tristan, adresse Wi-Fi constatée le 7 octobre 2026 : **http://192.168.1.4:5173** (monde : **http://192.168.1.4:5174/?world=aube**). Cette adresse peut changer avec le DHCP. Garder le serveur lancé et le PC éveillé. Utiliser le réseau principal, sans isolation des clients Wi-Fi. Les réglages DEV/LOD sont locaux à chaque navigateur et à chaque origine : ceux de localhost ne sont pas repris automatiquement sur l'adresse IP.
+Sur le PC de Tristan, adresse Wi-Fi constatée le 7 octobre 2026 : **http://192.168.1.4:5173** (monde : **http://192.168.1.4:5174/village**). Cette adresse peut changer avec le DHCP. Garder le serveur lancé et le PC éveillé. Utiliser le réseau principal, sans isolation des clients Wi-Fi. Les réglages DEV/LOD sont locaux à chaque navigateur et à chaque origine : ceux de localhost ne sont pas repris automatiquement sur l'adresse IP.
 
 Le pare-feu doit autoriser Node.js en entrée pour ces ports depuis le réseau local ; aucune redirection de port sur la box n'est nécessaire. Une règle Node.js existante autorise déjà le PC de Tristan. Ce serveur HTTP de développement est destiné au réseau de confiance, pas à une exposition Internet. Les UUID de commandes utilisent `getRandomValues` lorsque le navigateur réserve `randomUUID` aux contextes HTTPS/localhost.
 

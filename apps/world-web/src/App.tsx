@@ -45,7 +45,7 @@ import { DevDrawer } from './ui/DevDrawer';
 import { configuredExploitation, freezeExploitation, exploitationTargetKeys, pendingExploitationCap, directGardenExploitation } from './ui/exploitation-intent';
 
 const VillageScene = lazy(() => import('./scene/VillageScene').then((module) => ({ default: module.VillageScene })));
-const worldSlug = new URLSearchParams(window.location.search).get('world') ?? 'aube';
+const worldSlug = new URLSearchParams(window.location.search).get('world') ?? import.meta.env.VITE_DEFAULT_WORLD_SLUG ?? 'aube';
 const LOBBY_URL = import.meta.env.VITE_LOBBY_URL ?? `${window.location.protocol}//${window.location.hostname}:5173`;
 const populationAnchor = (): ScreenAnchor => ({ x: window.innerWidth / 2, y: window.innerHeight - 220 });
 

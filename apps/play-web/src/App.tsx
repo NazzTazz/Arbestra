@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import type { AvailableWorlds, SessionResponse } from '@arbestra/contracts';
 import { getSession, getWorlds, joinWorld, login, logout, register } from './api/client';
 
-const WORLD_CLIENT_URL = import.meta.env.VITE_WORLD_CLIENT_URL ?? `${window.location.protocol}//${window.location.hostname}:5174`;
+const WORLD_CLIENT_URL = import.meta.env.VITE_WORLD_CLIENT_URL ?? `${window.location.protocol}//${window.location.hostname}:5174/village`;
 function worldUrl(slug: string, villageId?: string): string {
   const url = new URL(WORLD_CLIENT_URL.replace('{world}', encodeURIComponent(slug)), window.location.href);
   if (!WORLD_CLIENT_URL.includes('{world}')) url.searchParams.set('world', slug);

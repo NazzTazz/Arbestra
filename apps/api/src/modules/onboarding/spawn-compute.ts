@@ -29,7 +29,8 @@ export class SpawnCompute {
       worker.on('message', (reply: SpawnReply) => {
         if (this.worker !== worker) return;
         clearTimeout(this.timeout);
-        const pending = this.queue.shift()!;
+        const pending = this.queue.shift();
+        if (!pending) { void this.fail(); return; }
         if (reply.ok) pending.resolve(reply.result);
         else pending.reject(new HttpError(reply.statusCode, reply.code, reply.message));
         if (this.queue.length) this.dispatch(); else worker.unref();

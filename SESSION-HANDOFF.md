@@ -1,3 +1,15 @@
+# RC1 locale pour le développement et URL village — 12 octobre 2026
+
+Décision de Tristan : copie de la RC1 de recette vers la base `arbestra`, sans réinitialiser `arbestra_test` ni remplacer le monde historique `aube`. Migrations additives existantes 037–041 appliquées à dev seulement ; copie validée d’abord en transaction annulée, puis transaction validée : 41 tables et 27 342 lignes propres au monde, compte Bressuire rattaché à `player@arbestra.local`, voisin conservé. Les marqueurs de sync propres à la base source ont été régénérés par les triggers cible. Monde dev `rc1-dev` ; source `rc1-receipt-0ea92d24-c5c8-418b-8292-2781d0413536` intacte en test. `apps/world-web/.env.local` ignoré définit `VITE_DEFAULT_WORLD_SLUG=rc1-dev`.
+
+Client : `/village` est l’URL du village depuis le lobby ; `/spawn` demeure pour le placement avant mairie. Une installation commencée passe à `/village?world=...&starter=1` et reprend le kit ; l’ancienne URL `/spawn` d’une installation terminée remplace directement l’emplacement par `/village?world=...`, sans refaire le diagnostic de spawn. Garde ajouté au worker de diagnostic pour ne pas arrêter l’API sur une réponse sans requête en attente.
+
+Preuves : 4/4 tests ciblés route/worker verts ; typecheck API, play-web et world-web verts ; ESLint ciblé vert. API 3000 : santé, spawn-map et snapshot Bressuire HTTP 200 avec session de dev. Navigateur Chrome : login local, lobby montre Aube et RC1, entrée RC1 par lien `/village?world=rc1-dev`, rendu Babylon du village, `/spawn?world=rc1-dev` redirige réellement vers `/village?world=rc1-dev`, `/village` sans paramètre ouvre RC1. L’indicateur « Chargement du terrain… » était visible pendant le chargement initial, puis a disparu après streaming. Recette 5278/API 3102 et Aube/API 3000 : HTTP 200. Le worker tsx échoue avec `os.userInfo` dans ce bac Windows si son processus ne reçoit pas le shim local ; l’API 3000 relancée en processus direct (sans watch) avec ce shim via `NODE_OPTIONS`, après un arrêt observé du processus en mode watch.
+
+Aucun reset ni seed de base test ou dev. Le README précise le démarrage d’une base déjà initialisée. Clôture commit/push sur main autorisée par Tristan le 12 octobre : habitants dans `431d413`, changements RC1/URL dans le commit suivant. Transcript utilisateur et artefacts locaux exclus. Vérifier le remote avant reprise. La refonte HUD Population reste hors de cette tranche.
+
+---
+
 # Continuité des représentants — 12 octobre 2026
 
 Base relue `e2121528e4dc7f2bd0f6c635ca70f73edbc6e1a2`, main. **Implémentée, régressions et parcours isolé vérifiés ; retour utilisateur favorable sur la recette**. [Spec actualisée](docs/SPEC-DEPLACEMENTS-ET-ANIMATION-CHANTIERS.md#continuité-des-représentants--12-octobre-2026). Reprise bornée ; aucun nouveau HUD, individu en base, système de foule ni changement économique.
