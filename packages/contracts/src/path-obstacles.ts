@@ -1,3 +1,4 @@
+import {SPAWN_PEDESTRIAN_HALF_WIDTH} from './spawn-access.js';
 import {wrappedDistance} from './infrastructure.js';
 import type {TravelCell} from './travel-paths.js';
 /** Sweep whole segments, including legacy paths with distant vertices and torus seams. */
@@ -13,4 +14,11 @@ export function pathIntersectsBox(path:readonly TravelCell[],centre:TravelCell,h
     }
     if(low<=high&&low<=1&&high>=0)return true;
   }return false;
+}
+
+/** Protect the occupied band, including cell borders and endpoint clearance.
+ * The tiny tolerance closes boundaries that the occupation sampler assigns to a cell. */
+export function pathPassageIntersectsBox(path:readonly TravelCell[],centre:TravelCell,halfX:number,halfY:number,world:{widthCells:number;heightCells:number}):boolean {
+  const margin=SPAWN_PEDESTRIAN_HALF_WIDTH+1e-9;
+  return pathIntersectsBox(path,centre,halfX+margin,halfY+margin,world);
 }

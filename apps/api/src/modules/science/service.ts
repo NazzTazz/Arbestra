@@ -81,8 +81,9 @@ async function wakeOtherCampuses(tx: Transaction<Database>, economy: VillageEcon
 /** Actual immutable terrain measurements; called only for known initial ground
  * or cells genuinely visited by a returned survey. */
 async function recordPlaces(tx: Transaction<Database>, world: ScienceWorld, accountId: string, cells: TravelCell[],
-  at: Date, surveyed: boolean, activityId: string | null) {
-  const unique = [...new Map(cells.filter(p=>Number.isInteger(p.cellX)&&Number.isInteger(p.cellY)).map(p => [key(p), p])).values()];
+  at: Date, surveys: readonly TravelCell[], activityId: string | null) {
+  const surveyed = new Set(surveys.map(key));
+  const unique = [...new Map([...cells,...surveys].filter(p=>Number.isInteger(p.cellX)&&Number.isInteger(p.cellY)).map(p => [key(p), p])).values()];
   const wanted = new Map(unique.map(p => {
     const chunkX = Math.floor(p.cellX / world.chunkSize), chunkY = Math.floor(p.cellY / world.chunkSize);
     return [`${chunkX}:${chunkY}`, { chunkX, chunkY }] as const;
@@ -97,14 +98,18 @@ async function recordPlaces(tx: Transaction<Database>, world: ScienceWorld, acco
     const chunk = byChunk.get(`${Math.floor(p.cellX / world.chunkSize)}:${Math.floor(p.cellY / world.chunkSize)}`);
     if (!chunk) throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain incomplet pour les relevés.');
     const index = p.cellY % world.chunkSize * world.chunkSize + p.cellX % world.chunkSize;
-    return { worldId: world.id, accountId, ...p, terrainCode: rc1?.cell(p.cellX,p.cellY).code??chunk.terrainCodes[index]!, elevation: rc1?.cell(p.cellX,p.cellY).elevation??chunk.elevations[index]!,
-      observedAt: at, surveyed, sourceActivityId: activityId };
+    const measurement = rc1?.cell(p.cellX,p.cellY);
+    return { worldId: world.id, accountId, ...p, terrainCode: measurement?.code??chunk.terrainCodes[index]!, elevation: measurement?.elevation??chunk.elevations[index]!,
+      observedAt: at, surveyed: surveyed.has(key(p)), sourceActivityId: activityId };
   });
   for (let i = 0; i < rows.length; i += 500) await tx.insertInto('sciencePlaces').values(rows.slice(i, i + 500))
     .onConflict(oc => oc.columns(['worldId', 'accountId', 'cellX', 'cellY']).doUpdateSet({
       surveyed: sql`science_places.surveyed or excluded.surveyed`, terrainCode: sql`excluded.terrain_code`,
       elevation: sql`excluded.elevation`, observedAt: sql`greatest(science_places.observed_at,excluded.observed_at)`,
-      sourceActivityId: sql`coalesce(excluded.source_activity_id,science_places.source_activity_id)`,
+      // A transit updates the observation, not the evidence of an actual survey.
+      sourceActivityId: sql`case when excluded.surveyed then excluded.source_activity_id
+        when science_places.surveyed then coalesce(science_places.source_activity_id,excluded.source_activity_id)
+        else coalesce(excluded.source_activity_id,science_places.source_activity_id) end`,
     })).execute();
 }
 
@@ -136,7 +141,7 @@ async function initializeKnowledge(tx: Transaction<Database>, economy: VillageEc
     const cells: TravelCell[] = [];
     for (let y = -HISTORICAL_HALF_SIZE; y < HISTORICAL_HALF_SIZE; y++) for (let x = -HISTORICAL_HALF_SIZE; x < HISTORICAL_HALF_SIZE; x++)
       cells.push({ cellX: normalizeCell(village.anchorCellX + x, village.widthCells), cellY: normalizeCell(village.anchorCellY + y, village.heightCells) });
-    await recordPlaces(tx, { id: economy.worldId, ...village }, accountId, cells, economy.through, false, null);
+    await recordPlaces(tx, { id: economy.worldId, ...village }, accountId, cells, economy.through, [], null);
   }
   return { village, accountId };
 }
@@ -171,11 +176,11 @@ export async function completeScienceAt(tx: Transaction<Database>, economy: Vill
     .where('worldId', '=', economy.worldId).where('accountId', '=', accountId).where('code', '=', activity.programCode!).execute();
   if (activity.kind === 'survey' || activity.kind === 'exploration') {
     const world = { id: economy.worldId, ...village };
-    await recordPlaces(tx, world, accountId, travelledCells(activity.pathCells,village), at, false, id);
-    await recordPlaces(tx, world, accountId, activity.surveyCells, at, true, id);
+    const visitedCells = travelledCells(activity.pathCells,village);
+    await recordPlaces(tx, world, accountId, visitedCells, at, activity.surveyCells, id);
     await wakeOtherCampuses(tx, economy, accountId);
     // Dated exterior report. Never expose owner, stocks, workers or live production.
-    const visited = new Set(travelledCells(activity.pathCells,village).map(key));
+    const visited = new Set(visitedCells.map(key));
     const relative = (n: number, centre: number, size: number) => ((n-centre+size/2)%size+size)%size-size/2;
     const others = await tx.selectFrom('villages').select(['id', 'name', 'anchorCellX', 'anchorCellY']).where('worldId', '=', economy.worldId)
       .where('ownerAccountId', '!=', accountId).execute();
@@ -317,8 +322,10 @@ export async function scienceCommand(tx: Transaction<Database>, economy: Village
     if (levels.geography < (command.action === 'survey' ? 1 : 2)) throw new HttpError(409, 'GEOGRAPHY_REQUIRED', 'Maîtrise géographique insuffisante.');
     if (command.target.cellX >= village.widthCells || command.target.cellY >= village.heightCells)
       throw new HttpError(400, 'INVALID_SURVEY_TARGET', 'Objectif hors des coordonnées canoniques.');
-    const known = await tx.selectFrom('sciencePlaces').select(['cellX', 'cellY']).where('worldId', '=', economy.worldId).where('accountId', '=', accountId).execute();
-    if (command.action === 'survey' && !known.some(p => key(p) === key(command.target)))
+    const known = command.action === 'survey' ? await tx.selectFrom('sciencePlaces').select('cellX')
+      .where('worldId', '=', economy.worldId).where('accountId', '=', accountId)
+      .where('cellX', '=', command.target.cellX).where('cellY', '=', command.target.cellY).executeTakeFirst() : undefined;
+    if (command.action === 'survey' && !known)
       throw new HttpError(409, 'SURVEY_UNKNOWN_TARGET', 'Ce lieu doit d’abord être repéré par une reconnaissance.');
     let path=preparedPath;
     if(!path){
@@ -340,6 +347,9 @@ export async function scienceCommand(tx: Transaction<Database>, economy: Village
     const activity = await tx.selectFrom('scienceActivities').selectAll().where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('accountId', '=', accountId).where('id', '=', command.activityId).where('status', '=', 'in-progress').executeTakeFirst();
     if (!activity || !['survey', 'exploration'].includes(activity.kind)) throw new HttpError(404, 'EXPEDITION_NOT_FOUND', 'Expédition en cours introuvable.');
+    // A recalled expedition has no survey left to perform. Retrying recall
+    // must preserve its already engaged return, including its original deadline.
+    if (!activity.surveyCells.length) return;
     const outwardCount = Math.floor((activity.pathCells.length + 1) / 2), outward = activity.pathCells.slice(0, outwardCount);
     const elapsed = economy.through.getTime() - activity.startedAt.getTime();
     // Already returning: retain the original deadline and report.

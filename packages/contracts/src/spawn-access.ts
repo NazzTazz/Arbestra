@@ -3,6 +3,7 @@ import { spawnPathLength } from './spawn-resources.js';
 import { wrapClimate } from './world-climate.js';
 
 export const SPAWN_ACCESS_REVISION = 1;
+export const SPAWN_PEDESTRIAN_HALF_WIDTH = 1 / 16;
 export const SPAWN_MAX_PEDESTRIAN_SLOPE = .25;
 export interface SpawnAccessSample { elevation: number; dry: boolean; blocked: boolean }
 export interface SpawnAccessField { width: number; height: number; sample: (x: number, y: number) => SpawnAccessSample }
@@ -15,7 +16,7 @@ export function canWalkSpawnSegment(field: SpawnAccessField, a: SpawnPoint, b: S
   if (Math.abs(dx) > 1e-8 && Math.abs(dy) > 1e-8) throw Error('Spawn walk requires a cardinal segment');
   const length = Math.abs(dx) + Math.abs(dy), count = Math.max(1, Math.ceil(length * 8));
   const horizontal = length / count;
-  for (const offset of [-1 / 16, 0, 1 / 16]) {
+  for (const offset of [-SPAWN_PEDESTRIAN_HALF_WIDTH, 0, SPAWN_PEDESTRIAN_HALF_WIDTH]) {
     let previous: SpawnAccessSample | undefined;
     for (let i = 0; i <= count; i++) {
       const x = a.x + dx * i / count + (dy ? offset : 0), y = a.y + dy * i / count + (dx ? offset : 0);

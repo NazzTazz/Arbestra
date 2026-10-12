@@ -1,3 +1,7 @@
+import {constructBuildingArea} from '../villages/service.js';
+import {recognizedDepositRoute} from './deposit-access.js';
+import {assertNoInfrastructure} from '../villages/infrastructure.js';
+import {canWalkSpawnSegment} from '@arbestra/contracts';
 import {VillageSyncProjections} from '../villages/sync-projections.js';
 import {randomUUID} from 'node:crypto';
 import {sql} from 'kysely';
@@ -273,6 +277,114 @@ describe.sequential('durable FIFO expedition admission on a private world',()=>{
   const activity=await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow();
   expect(activity.surveyCells).toEqual([{cellX:9,cellY:7}]);expect(activity.completesAt.getTime()-activity.startedAt.getTime()).toBeLessThanOrEqual(76000);
  });
+ it('keeps a surveyed deposit route after another returned compressed journey crosses its cell',async()=>{
+  const destination={cellX:10,cellY:8};
+  const first=await db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'explore',target:destination,budgetSeconds:120},[{cellX:8,cellY:8},{cellX:9,cellY:8},destination]));
+  const original=await db.selectFrom('scienceActivities').selectAll().where('id','=',first!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>completeScienceAt(tx,await beginVillageEconomy(tx,world,village),first!,original.completesAt));
+  const before=await db.transaction().execute(tx=>recognizedDepositRoute(tx,world,village,destination));
+  expect(before).not.toBeNull();
+  const second=await db.transaction().execute(async tx=>scienceCommand(tx,{...await beginVillageEconomy(tx,world,village),through:new Date(original.completesAt.getTime()+1000)},{action:'explore',target:{cellX:12,cellY:8},budgetSeconds:120},[{cellX:8,cellY:8},{cellX:9,cellY:8},{cellX:12,cellY:8}]));
+  const following=await db.selectFrom('scienceActivities').selectAll().where('id','=',second!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>completeScienceAt(tx,await beginVillageEconomy(tx,world,village),second!,following.completesAt));
+  const place=await db.selectFrom('sciencePlaces').select(['surveyed','sourceActivityId']).where('worldId','=',world).where('cellX','=',10).where('cellY','=',8).executeTakeFirstOrThrow();
+  expect(place.surveyed).toBe(true);expect(place.sourceActivityId).toBe(first);
+  const after=await db.transaction().execute(tx=>recognizedDepositRoute(tx,world,village,destination));
+  expect(after).not.toBeNull();
+ });
+ it('keeps a surveyed deposit route after another returned fractional journey crosses its cell',async()=>{
+  const destination={cellX:10,cellY:7};
+  const first=await db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'explore',target:destination,budgetSeconds:120},[{cellX:8,cellY:8},{cellX:8,cellY:7},{cellX:9,cellY:7},destination]));
+  const original=await db.selectFrom('scienceActivities').selectAll().where('id','=',first!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>completeScienceAt(tx,await beginVillageEconomy(tx,world,village),first!,original.completesAt));
+  const before=await db.transaction().execute(tx=>recognizedDepositRoute(tx,world,village,destination));
+  expect(before).not.toBeNull();
+  const second=await db.transaction().execute(async tx=>scienceCommand(tx,{...await beginVillageEconomy(tx,world,village),through:new Date(original.completesAt.getTime()+1000)},{action:'explore',target:{cellX:12,cellY:8},budgetSeconds:120},[{cellX:8,cellY:8},{cellX:8,cellY:7.125},{cellX:12,cellY:7.125},{cellX:12,cellY:8}]));
+  const following=await db.selectFrom('scienceActivities').selectAll().where('id','=',second!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>completeScienceAt(tx,await beginVillageEconomy(tx,world,village),second!,following.completesAt));
+  const place=await db.selectFrom('sciencePlaces').select(['surveyed','sourceActivityId']).where('worldId','=',world).where('cellX','=',10).where('cellY','=',7).executeTakeFirstOrThrow();
+  expect(place.surveyed).toBe(true);expect(place.sourceActivityId).toBe(first);
+  const after=await db.transaction().execute(tx=>recognizedDepositRoute(tx,world,village,destination));
+  expect(after).not.toBeNull();
+ });
+
+ it('refuses a building footprint that invalidates the swept width of an engaged fine route',async()=>{
+  const path=[{cellX:8,cellY:7},{cellX:9.5,cellY:7},{cellX:9.5,cellY:10},{cellX:10,cellY:10}];
+  const id=await db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'explore',target:{cellX:10,cellY:10},budgetSeconds:120},path));expect(id).toBeTypeOf('string');
+  const segment=[{x:9.5,y:7},{x:9.5,y:10}] as const;
+  const field={width:128,height:128,sample:(x:number,y:number)=>({elevation:1,dry:true,blocked:Math.floor(x+.5)===10&&Math.floor(y+.5)===8})};
+  expect(canWalkSpawnSegment({...field,sample:()=>({elevation:1,dry:true,blocked:false})},...segment)).toBe(true);
+  expect(canWalkSpawnSegment(field,...segment)).toBe(false);
+  const outcome=await db.transaction().execute(async tx=>{try{await assertNoInfrastructure(tx,world,[{cellX:10,cellY:8}],{widthCells:128,heightCells:128});return 'allowed';}catch(error){return (error as {code:string}).code;}});
+  expect(outcome).toBe('ENGAGED_PASSAGE');
+  const resources=await db.selectFrom('villageResources').selectAll().where('worldId','=',world).orderBy('resourceCode').execute();
+  await expect(constructBuildingArea(db,account,slug,village,'dwelling',{cellX:10,cellY:8},[{cellX:10,cellY:8}],null)).rejects.toMatchObject({code:'ENGAGED_PASSAGE'});
+  expect(await db.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',world).where('cellX','=',10).where('cellY','=',8).execute()).toEqual([]);
+  expect(await db.selectFrom('villageResources').selectAll().where('worldId','=',world).orderBy('resourceCode').execute()).toEqual(resources);
+ });
+ it('keeps the original return deadline if recall is submitted again while returning',async()=>{
+  const path=[{cellX:8,cellY:7.584},{cellX:8,cellY:7.125},{cellX:9,cellY:7.125},{cellX:9,cellY:7},{cellX:20,cellY:7}];
+  const id=await db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'explore',target:{cellX:20,cellY:7},budgetSeconds:120},path));
+  const original=await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow();
+  const recall=async(offset:number)=>db.transaction().execute(async tx=>scienceCommand(tx,{...await beginVillageEconomy(tx,world,village),through:new Date(original.startedAt.getTime()+offset)},{action:'recall',activityId:id!}));
+  await recall(5200);
+  const first=await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow();
+  expect(first.completesAt.getTime()-original.startedAt.getTime()).toBe(10400);
+  await recall(7000);
+  const repeated=await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow();
+  expect(repeated).toEqual(first);
+ });
+
+ it('bounds knowledge reads and combines the returned report into one terrain batch',async()=>{
+  const queries:string[]=[];
+  const instrumented=db.withPlugin({
+   transformQuery({node}){queries.push(JSON.stringify(node).replaceAll('_','').toLowerCase());return node;},
+   async transformResult({result}){return result;}
+  });
+  let readsAtDeparture=0;
+  const id=await instrumented.transaction().execute(async tx=>{
+   const economy=await beginVillageEconomy(tx,world,village);queries.length=0;
+   const activity=await scienceCommand(tx,economy,{action:'explore',target:{cellX:12,cellY:8},budgetSeconds:120},[{cellX:8,cellY:8},{cellX:12,cellY:8}]);
+   readsAtDeparture=queries.filter(q=>q.includes('"kind":"selectquerynode"')&&q.includes('"name":"scienceplaces"')).length;
+   return activity;
+  });
+  const activity=await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow();
+  let terrainReads=0,placeWrites=0;
+  await instrumented.transaction().execute(async tx=>{
+   const economy=await beginVillageEconomy(tx,world,village);queries.length=0;
+   await completeScienceAt(tx,economy,id!,activity.completesAt);
+   terrainReads=queries.filter(q=>q.includes('"kind":"selectquerynode"')&&q.includes('"name":"worldchunks"')).length;
+   placeWrites=queries.filter(q=>q.startsWith('{"kind":"insertquerynode"')&&q.includes('"name":"scienceplaces"')).length;
+  });
+  const places=await db.selectFrom('sciencePlaces').select(['cellX','cellY','surveyed','sourceActivityId']).where('worldId','=',world).orderBy('cellX').execute();
+  expect(places).toHaveLength(5);expect(places.filter(p=>p.surveyed)).toEqual([{cellX:12,cellY:8,surveyed:true,sourceActivityId:id}]);
+  console.info(JSON.stringify({expeditionSql:{readsAtDeparture,terrainReads,placeWrites}}));
+  expect({readsAtDeparture,terrainReads,placeWrites}).toEqual({readsAtDeparture:1,terrainReads:1,placeWrites:1});
+ });
+
+
+ it('rejects an unknown survey target and refreshes provenance only after a new actual survey returns',async()=>{
+  const target={cellX:10,cellY:8},path=[{cellX:8,cellY:8},{cellX:9,cellY:8},target];
+  await expect(db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'survey',target,budgetSeconds:120},path))).rejects.toMatchObject({code:'SURVEY_UNKNOWN_TARGET'});
+  const first=await db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'explore',target,budgetSeconds:120},path));
+  const original=await db.selectFrom('scienceActivities').selectAll().where('id','=',first!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>completeScienceAt(tx,await beginVillageEconomy(tx,world,village),first!,original.completesAt));
+  const next=await db.transaction().execute(async tx=>scienceCommand(tx,{...await beginVillageEconomy(tx,world,village),through:new Date(original.completesAt.getTime()+1000)},{action:'survey',target,budgetSeconds:120},path));
+  const readPlace=()=>db.selectFrom('sciencePlaces').select(['surveyed','sourceActivityId','observedAt']).where('worldId','=',world).where('cellX','=',10).where('cellY','=',8).executeTakeFirstOrThrow();
+  expect((await readPlace()).sourceActivityId).toBe(first);
+  const activity=await db.selectFrom('scienceActivities').selectAll().where('id','=',next!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>completeScienceAt(tx,await beginVillageEconomy(tx,world,village),next!,activity.completesAt));
+  expect(await readPlace()).toEqual({surveyed:true,sourceActivityId:next,observedAt:activity.completesAt});
+  expect(await db.transaction().execute(tx=>recognizedDepositRoute(tx,world,village,target))).not.toBeNull();
+ });
+ it('keeps a natural return intact when recalled after its survey',async()=>{
+  const path=[{cellX:8,cellY:8},{cellX:10,cellY:8}];
+  const id=await db.transaction().execute(async tx=>scienceCommand(tx,await beginVillageEconomy(tx,world,village),{action:'explore',target:{cellX:10,cellY:8},budgetSeconds:120},path));
+  const original=await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow();
+  await db.transaction().execute(async tx=>scienceCommand(tx,{...await beginVillageEconomy(tx,world,village),through:new Date(original.completesAt.getTime()-1000)},{action:'recall',activityId:id!}));
+  expect(await db.selectFrom('scienceActivities').selectAll().where('id','=',id!).executeTakeFirstOrThrow()).toEqual(original);
+ });
+
  it('runs the warm real coordinator and returns the committed receipt',async()=>{
   const r=request();await send(r);const claim=(await acquireExpedition(db))!;await prepare(claim);const coordinator=new ExpeditionCoordinator(db,compute);
   try{await coordinator.process(claim);}finally{await coordinator.close();}

@@ -2,7 +2,7 @@
 
 Date : 12 octobre 2026. Base relue : main, be6532d94086112ebe97af6f4127f2ea7fa9f260.
 
-Statut : **implémentée ; tests et campagnes locales de performance terminés, recette visuelle complète encore à valider**. [Bilan des preuves et mesures](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Commit/push autorisés par Tristan après ces mesures. Le handoff courant distingue les preuves terminées et les écarts restants. Migration 042 appliquée en test uniquement à ce stade ; aucune publication de cette tranche. Les objectifs de performance ci-dessous sont des critères de recette, pas des performances acquises.
+Statut : **implémentée ; réserves fonctionnelles R1–R3 corrigées et vérifiées le 12 octobre ; recette globale encore à valider**. [Corrections et mesures](CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [contre-recette historique](CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) et [campagnes initiales](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Restent les preuves mémoire/endurance, le corpus froid complet et la recette visuelle/réseau. Migration 042 appliquée en test uniquement. Les objectifs ci-dessous restent des critères de recette.
 
 ## 1. Décisions et frontière
 

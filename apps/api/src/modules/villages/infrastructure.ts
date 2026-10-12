@@ -2,7 +2,7 @@ import {readRc1Ground} from '../worlds/rc1-ground.js';
 import {readRc1Source} from '../worlds/rc1-source.js';
 import {isDeepStrictEqual} from 'node:util';
 import {sql,type Kysely,type Transaction} from 'kysely';
-import {buildTravelNetwork,prepareInfrastructureEdit,automaticBraziers,pathIntersectsBox,buildingAccesses,emptyInfrastructure,infrastructurePlanSurface,infrastructureSidewalkSurface,subCellKey,wrappedDistance,
+import {buildTravelNetwork,prepareInfrastructureEdit,automaticBraziers,pathPassageIntersectsBox,buildingAccesses,emptyInfrastructure,infrastructurePlanSurface,infrastructureSidewalkSurface,subCellKey,wrappedDistance,
   infrastructureConfirmation,type InfrastructureConfirmation,type InfrastructurePlan,type InfrastructureRequest,type InfrastructurePreview,type InfrastructureQuote,type VillageState,type SubPoint,type RoadStroke} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
 import {HttpError} from '../../errors.js';
@@ -36,7 +36,7 @@ export function assertInfrastructurePosition(snapshot:SpatialSnapshot,p:SubPoint
     if(surface.get(`${px}:${py}`)?.manual)throw new HttpError(409,'PASSAGE_BLOCKED','Placez le brasero à côté du passage.');
     const paths=[...snapshot.village.extractions.map(e=>e.path),...snapshot.cells.flatMap(c=>c.building?.garden?.plots.flatMap(plot=>plot.harvest?[plot.harvest.path,...(plot.harvest.stops?.map(s=>s.path)??[]),plot.harvest.returnPath??[]]:[])??[]),
       ...(snapshot.science?.activities.filter(a=>a.villageId===snapshot.village.id).map(a=>a.path)??[])];
-    if(paths.some(path=>pathIntersectsBox(path,{cellX:p.x/8,cellY:p.y/8},.15,.15,world)))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore ce passage.');
+    if(paths.some(path=>pathPassageIntersectsBox(path,{cellX:p.x/8,cellY:p.y/8},.125,.125,world)))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore ce passage.');
   }
 }
 function assertInfrastructureRevision(plan:InfrastructurePlan,revision:number){
@@ -112,7 +112,7 @@ async function validateTransition(tx:Transaction<Database>,snapshot:SpatialSnaps
   if(moved.length&&!isCompleteSnapshot(snapshot))throw Error('Moved equipment requires complete active-path context');
   const paths=moved.length&&isCompleteSnapshot(snapshot)?[...activePaths(snapshot),...await worldActivePaths(tx,world.id)]:[];
   for(const p of sidewalk)assertInfrastructurePosition(snapshot,p);
-  for(const e of moved)if(paths.some(path=>pathIntersectsBox(path,{cellX:e.x/8,cellY:e.y/8},.15,.15,world)))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore ce passage.');
+  for(const e of moved)if(paths.some(path=>pathPassageIntersectsBox(path,{cellX:e.x/8,cellY:e.y/8},.125,.125,world)))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore ce passage.');
   const foreign=await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',world.id).where('villageId','!=',snapshot.village.id).execute();
   const foreignCells=await tx.selectFrom('worldCellOccupancies').innerJoin('buildings',j=>j.onRef('buildings.id','=','worldCellOccupancies.buildingId').onRef('buildings.worldId','=','worldCellOccupancies.worldId'))
     .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY']).where('worldCellOccupancies.worldId','=',world.id).where('buildings.villageId','!=',snapshot.village.id).execute();
@@ -202,5 +202,5 @@ export async function assertNoInfrastructure(tx:Transaction<Database>,worldId:st
     const surface=infrastructurePlanSurface(plan,world),sidewalk=infrastructureSidewalkSurface(surface,world);
     if([...surface.values()].some(p=>p.manual&&wanted.has(`${Math.floor((p.x+8)/16)%world.widthCells}:${Math.floor((p.y+8)/16)%world.heightCells}`))||[...sidewalk.values()].some(p=>wanted.has(`${Math.floor((p.x+8)/16)%world.widthCells}:${Math.floor((p.y+8)/16)%world.heightCells}`)))throw new HttpError(409,'INFRASTRUCTURE_OCCUPIED','Déplacez ou retirez la voie ou le trottoir avant de construire.');}
   const all=await worldActivePaths(tx,worldId);
-  if(all.some(path=>cells.some(c=>pathIntersectsBox(path,c,.499,.499,world))))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore cette emprise.');
+  if(all.some(path=>cells.some(c=>pathPassageIntersectsBox(path,c,.5,.5,world))))throw new HttpError(409,'ENGAGED_PASSAGE','Une équipe utilise encore cette emprise.');
 }

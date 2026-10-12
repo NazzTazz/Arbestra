@@ -1,3 +1,35 @@
+# Expéditions RC1 — réserves fonctionnelles corrigées — 12 octobre 2026
+
+Base main 7fa926f. Tristan demande corrections, optimisations, rapport, commit et push. [Rapport de correction](docs/CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [spec](docs/SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md), [contre-recette historique](docs/CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md).
+
+R1 : les transits préservent la provenance du vrai relevé ; un nouveau relevé terminé la renouvelle. R2 : emprises et équipements protègent la bande piétonne, largeur partagée avec le solveur, frontières/coutures couvertes ; vraie commande de construction refusée sans débit. R3 : le rappel déjà engagé conserve toute l’activité et son échéance.
+
+Optimisations mesurées sur transactions privées : lectures de connaissance au départ explore 2→1 (suppression du chargement global) ; lectures de chunks et écritures de lieux au retour 2→1 chacune. Survey vérifie une clé exacte. Rapport en un lot dédupliqué, expansion du trajet et mesure RC1 de chaque cellule réutilisées.
+
+Preuves terminées : quatre régressions rouges puis vertes ; 25 tests DB expéditions, 48 tests purs navigation/contrats, 24 tests Babylon. Première campagne : 97 verts/1 échec de budget RC1 avec compilations concurrentes. Replay isolé RC1 + vraie commande de construction : 2 verts ; **98 cas distincts validés**, limites inchangées. RC1 compute.run initial 3481 ms, cache 7.5–9.5 ms (pas une mesure HTTP). Build contracts, types API/client, builds API/client et lint ciblé verts. Avertissement habituel Vite sur gros chunks. Diff vérifié.
+
+DB : mondes UUID de arbestra_test uniquement, nettoyés ; aucun reset ou migration. API QA 3198 remise sur le build corrigé, /api/health HTTP 200 vérifié ; lanceur PID12884, log ignoré expedition-api-after-fixes.log. Dev/production et recette utilisateur5278 préservés. Les régressions sont dans la suite normale, l’ancienne fixture documentaire redondante a été retirée.
+
+Statut : R1–R3 corrigées et vérifiées. La recette globale conserve ses réserves mémoire/endurance/équité, corpus froid complet et navigateur/réseau/commit→activité visible. Aucun nouveau parcours navigateur dans cette correction serveur. Migration042 test seulement.
+
+Git : publication autorisée sur main vers origin/main ; hash et résultat final fournis à la livraison. Inclure uniquement les corrections API/contrats/tests et leurs documents. Travaux ressources IG de Tristan, transcript et cache exclus et préservés.
+
+---
+
+# Expéditions RC1 asynchrones — contre-recette non acceptée — 12 octobre 2026
+
+Base contrôlée : main **7fa926fab5a2e69258b0906a9f7d92b37e7513f8**, identique à origin/main local. [Rapport et reproductions](docs/CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [spec](docs/SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md). Demande courante : contre-recette, sans correction applicative ni nouvelle publication.
+
+Trois réserves confirmées : **R1/P1**, un retour par segment comprimé ou fractionnaire remplace la provenance d’un relevé et rend son accès reconnu null ; **R2/P1**, le contrôle d’emprise accepte le bord d’un trajet dont la largeur devient impraticable ; **R3/P2**, un deuxième rappel à H+7 s repousse un retour de H+10.4 s à H+12.2 s. Quatre tests adverses rouges sur les assertions attendues, archivés en fixture rejouable hors de la découverte automatique de Vitest.
+
+Vérifications de cette revue terminées : build contracts vert ; **66/66 tests témoins verts** (18 admission DB, 1 vrai RC1, 10 solveur, 2 reçus, 4 travel, 7 sync client, 24 représentants). Pas de nouvelle campagne de charge ni de recette navigateur. Restent aussi à prouver le plafond mémoire demandé, l’endurance/équité, le corpus froid complet et commit→activité visible. Les preuves précédentes ne sont pas réattribuées à cette revue.
+
+Environnement : mondes de tests privés nettoyés, aucune réinitialisation ni migration nouvelle. API QA 3198 arrêtée pour éviter l’acquisition concurrente des demandes, puis relancée par expedition-receipt-api.mjs ; **/api/health HTTP 200** vérifié. Lanceur PID 11324, log ignoré expedition-api-after-counter-review.log. Frontends 5297/5298 et recette utilisateur 5278 préservés.
+
+Suite : corriger localement R1–R3, intégrer les reproductions comme régressions vertes, puis terminer les preuves manquantes. Code applicatif inchangé. Rapport/fixture, statut de spec et ce handoff non commités ; aucun push de revue. Travaux ressources IG de Tristan, transcript et cache préexistants préservés.
+
+---
+
 # Expéditions RC1 asynchrones — implémentée, recette visuelle à valider — 12 octobre 2026
 
 Base main be6532d. [Spec](docs/SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md), [preuves et performance](docs/IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Tristan demande les derniers tests/mesures puis commit/push ; publication autorisée pour cette tranche. HUD Population, combat/commerce/Rust hors périmètre.
