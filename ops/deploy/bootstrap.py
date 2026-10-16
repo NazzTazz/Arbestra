@@ -130,13 +130,17 @@ http://:WEB_PORT {
       header Origin https://NOC
     }
   }
-  respond @foreignOrigin 403
   @crossSite header Sec-Fetch-Site cross-site
-  respond @crossSite 403
   @adminOnPlayer {
     path /api/admin /api/admin/*
     not host NOC
   }
+  @lobby host LOBBY
+  @noc host NOC
+  @world host WORLD
+  route {
+  respond @foreignOrigin 403
+  respond @crossSite 403
   respond @adminOnPlayer 404
   handle /api/* {
     reverse_proxy 127.0.0.1:API_PORT {
@@ -147,19 +151,16 @@ http://:WEB_PORT {
       flush_interval -1
     }
   }
-  @lobby host LOBBY
   handle @lobby {
     root * /srv/arbestra/ENVIRONMENT/current/web/play
     try_files {path} /index.html
     file_server
   }
-  @noc host NOC
   handle @noc {
     root * /srv/arbestra/ENVIRONMENT/current/web/admin
     try_files {path} /index.html
     file_server
   }
-  @world host WORLD
   handle @world {
     root * /srv/arbestra/ENVIRONMENT/current/web/world
     try_files {path} /index.html
@@ -167,6 +168,7 @@ http://:WEB_PORT {
   }
   handle {
     respond 404
+  }
   }
 }
 '''

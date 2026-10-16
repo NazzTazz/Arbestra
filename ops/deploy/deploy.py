@@ -179,7 +179,7 @@ def main():
         for old in sorted((root / 'releases').iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[3:]:
             if old != current.resolve() and old.is_dir() and not old.is_symlink():
                 shutil.rmtree(old)
-        for old in sorted(Path('/var/backups/arbestra').glob(environment + '-*.dump'), reverse=True)[3:]:
+        for old in sorted(Path('/var/backups/arbestra').glob(environment + '-*.dump'), key=lambda p: p.stat().st_mtime, reverse=True)[3:]:
             old.unlink()
         print(f'DEPLOYED {environment} {revision}', flush=True)
     except Exception:

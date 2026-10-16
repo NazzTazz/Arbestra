@@ -32,4 +32,4 @@ for app in play world admin; do
 done
 printf '%s\n' "${GITHUB_SHA:-$(git rev-parse HEAD)}" > "$bundle/revision"
 printf '%s\n' "$1" > "$bundle/environment"
-tar -czf release.tar.gz -C "$bundle" api web revision environment
+tar --hard-dereference -czf release.tar.gz -C "$bundle" api web revision environment
