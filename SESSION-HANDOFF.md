@@ -1,3 +1,15 @@
+# Ouverture des deux mondes RC1 — commande prête, activation en cours — 16 octobre 2026
+
+Tristan autorise l'ouverture d'un monde en alpha et d'un en staging avec RC1 512 × 256, inscription et spawning. [Périmètre](docs/SPEC-OUVERTURE-RC1.md). Base `main` / `d3d18d6`, deux éléments non suivis antérieurs conservés. Compte alpha existant ; Tristan a choisi puis effectué lui-même son inscription staging. Les comptes auteurs sont sélectionnés par leurs UUID existants ; aucun rôle NOC/générateur ajouté.
+
+Commande serveur `open-rc1-world.js` : signature canonique calculée, dimensions vérifiées, compte auteur obligatoire ; création atomique du monde, candidat conservé et présentation puis ouverture. Relance idempotente, refus d'un autre monde au même slug, aucune copie des villages/stocks locaux. Le générateur général garde son refus des autres candidats v3. Wrapper d'exploitation explicite avec sauvegarde avant ouverture, exécution sous UID et rôle applicatifs. Noms/slug : Arbestra Alpha / alpha-rc1 et Arbestra Bêta / beta-rc1.
+
+Preuves actuelles terminées : contracts build, API build, lint ciblé et Python compile. Quatre nouveaux tests DB verts (création/atlas/lobby et indépendance, idempotence avec données joueur et présentation, mauvaise signature/auteur absent, collision) ; test connexe d'installation complète RC1 vert (1 exécuté, 9 ignorés dans ce fichier), 81,9 s sur cette machine pour ce cas incluant projections et navigation, pas un benchmark du VPS. Cible vérifiée `127.0.0.1/arbestra_test`, suites séquentielles sans reset de développement. Première exécution des nouveaux tests corrigée pour le BIGINT seed lu comme chaîne et l'adhésion obligatoire de la fixture village. Aucun défaut de gameplay masqué par ces corrections de fixture.
+
+Déploiement de la commande, sauvegardes, ouvertures et recette publique encore à effectuer à l'écriture de ce bloc. Ne pas annoncer les mondes ouverts sur la seule base de ces tests.
+
+---
+
 # Accès joueur sans authentification HTTP préalable — 16 octobre 2026
 
 Tristan demande explicitement de retirer la protection de type .htaccess avant le login joueur. Modification appliquée aux deux Caddy natifs : `basic_auth` porte uniquement le matcher des hôtes NOC. `play`, `alpha`, `play-beta` et `beta` restent accessibles sans barrière HTTP ; `noc` et `noc-beta` conservent leur protection indépendante et les permissions administratives applicatives.
