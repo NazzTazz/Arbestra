@@ -11,14 +11,15 @@ Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA ver
 
 ## État vérifié le 16 octobre 2026
 
-Les deux environnements sont installés et leurs six domaines répondent en HTTPS avec certificats publics valides. Commit applicatif déployé : `9c89057bd0027ab4bb2c1657b6d3eb0b4fc3018d`.
+Les deux environnements sont installés et leurs six domaines répondent en HTTPS avec certificats publics valides. Commit applicatif déployé : `dd7cce76ada482104200cbdeabd4558bcd5eb3a0`.
 
-- [Staging : workflow manuel réussi](https://github.com/NazzTazz/Arbestra/actions/runs/38943336467).
-- [Alpha : workflow par tag réussi](https://github.com/NazzTazz/Arbestra/actions/runs/38943582849), tag `alpha-2026.10.16.1`.
-- Chaque base contient ses 43 migrations et aucun compte/monde de développement. L'absence de monde jouable est attendue à cette étape.
+- [Staging : workflow manuel réussi](https://github.com/NazzTazz/Arbestra/actions/runs/38947615341).
+- [Alpha : workflow par tag réussi](https://github.com/NazzTazz/Arbestra/actions/runs/38947998042), tag `alpha-2026.10.16.2`.
+- Chaque base contient ses 43 migrations et un [monde RC1 ouvert](SPEC-OUVERTURE-RC1.md), `beta-rc1` ou `alpha-rc1`. Comptes inscrits normalement, aucun compte/monde de développement importé.
 - Recette HTTPS réelle : compte éphémère staging, session du lobby reconnue sur le jeu, cookies Secure/HttpOnly, identifiants et cookie refusés par alpha, jeton joueur refusé par le NOC. Compte et sessions de diagnostic supprimés.
 - Lobby et formulaire NOC des deux environnements contrôlés dans Chromium, sans erreur JavaScript relevée ; captures staging inspectées. Aucune recette d'un monde habité ni mesure de charge réalisée.
 - Sauvegarde quotidienne déclenchée et restaurée dans une nouvelle base temporaire `arbestra_restore_probe_test` : 43 migrations vérifiées, base de recette ensuite supprimée. Refus DDL et connexions à l'autre base vérifiés pour les deux rôles applicatifs.
+- Ouverture RC1 : inscription et pose réelle du village vérifiées sur des mondes de diagnostic distincts dans les deux environnements, puis nettoyage de ces seuls mondes/comptes. Parcours navigateur staging vérifié jusqu'à la préparation 3D du kit, sans modification du terrain réel. Les inscriptions joueur passent directement par le formulaire du lobby ; la barrière HTTP reste limitée au NOC.
 
 La copie locale ignorée des identifiants HTTP est `test-results/deployment-credentials/private-access.json`. Leur source reste le fichier root du VPS. Les copies locales des clés SSH privées de déploiement ont été supprimées après configuration des secrets GitHub.
 

@@ -1,3 +1,17 @@
+# RC1 ouverte en alpha et staging — inscription et spawning vérifiés — 16 octobre 2026
+
+Demande accomplie : **Arbestra Alpha / alpha-rc1** et **Arbestra Bêta / beta-rc1**, deux mondes indépendants ouverts, statut ready, version 3, 512 × 256, seed 4109 et signature RC1 canonique. [Identifiants et preuves détaillées](docs/SPEC-OUVERTURE-RC1.md). Auteurs : les deux comptes réels existants de Tristan ; il a créé lui-même celui de staging. Aucun compte/rôle administrateur ajouté, aucun import de données de développement.
+
+Code applicatif **dd7cce7** déployé : [staging 38947615341 vert](https://github.com/NazzTazz/Arbestra/actions/runs/38947615341), [alpha 38947998042 vert](https://github.com/NazzTazz/Arbestra/actions/runs/38947998042), nouveau tag **alpha-2026.10.16.2**. Sauvegardes avant les deux ouvertures. Commande explicite signée exécutée sous UID et rôle applicatifs ; aucune migration nouvelle ni réinitialisation. Le garde général des candidats v3 n'a pas été modifié. Protection HTTP toujours limitée aux NOC.
+
+Preuves terminées : quatre nouveaux tests DB et un cas connexe d'installation RC1 verts, builds contracts/API et lint ciblé, compilation Python du wrapper, builds et smoke tests GitHub. Recettes HTTPS complètes sur les deux instances : inscription éphémère, monde réel visible et joignable en atlas, préparation du kit planned ; pose puis relance idempotente et lecture du village sur un monde de diagnostic distinct de celui des joueurs. Chaque diagnostic : cinq bâtiments, quinze habitants, 128 chunks, 2 018 groupes de ressources ; tous ces mondes, modifications terrain, comptes et sessions ont été supprimés. Poses ponctuelles 15,05 / 15,78 s, lectures village 4,05 / 3,88 s depuis le VPS : pas de benchmark de charge ou FPS.
+
+Recette navigateur staging : inscription formulaire → monde Bêta → noms → atlas visible → choix (140,20) → préparation 3D Babylon avec aperçu du kit. Captures `test-results/rc1-browser/staging-atlas.png` et `staging-preparation.png` inspectées, aucune erreur JS relevée. Aucun bâtiment posé sur le monde réel pour la recette UI ; navigateur fermé et compte temporaire supprimé. Alpha : recette backend HTTPS complète, pas de deuxième parcours UI complet.
+
+Contrôle final après nettoyages : un seul monde et un compte réel par base, zéro compte diagnostic. Bêta sans village à cette observation ; **alpha possède déjà un village réel créé par Tristan**, préservé. Six services actifs ; VPS environ 1,3 Gio disponibles, 5,5 Gio de disque libre, aucune validation de charge simultanée. Aucun monde local altéré. La section « activation en cours » suivante est historique et remplacée par ce bloc. Les deux éléments non suivis préexistants restent exclus des commits.
+
+---
+
 # Ouverture des deux mondes RC1 — commande prête, activation en cours — 16 octobre 2026
 
 Tristan autorise l'ouverture d'un monde en alpha et d'un en staging avec RC1 512 × 256, inscription et spawning. [Périmètre](docs/SPEC-OUVERTURE-RC1.md). Base `main` / `d3d18d6`, deux éléments non suivis antérieurs conservés. Compte alpha existant ; Tristan a choisi puis effectué lui-même son inscription staging. Les comptes auteurs sont sélectionnés par leurs UUID existants ; aucun rôle NOC/générateur ajouté.
