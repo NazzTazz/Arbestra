@@ -1,7 +1,39 @@
 import { describe,expect,it } from 'vitest';
-import { WorkerTraffic,workerRoles,workerAppearance,sweptWorkerDistance,WORKER_STEP,WORKER_CLEARANCE,gardenHarvestPoint,
+import { WorkerTraffic,workerRoles,workerAppearance,sweptWorkerDistance,WORKER_STEP,WORKER_CLEARANCE,gardenHarvestPoint,workerPassagePath,
   type TrafficActor,type WorkerPoint } from './worker-motion';
 import { worksiteLayout,worksiteConnector } from './worksite-layout';
+
+it('keeps ten compact wood representatives in a narrow bay with a longer physically free waiting lane',()=>{
+  const free=(p:WorkerPoint,r:number)=>[[0,0],[-r,-r],[r,r],[-r,r],[r,-r]].every(([dx,dz])=>{
+    const x=p.x+dx!,z=p.z+dz!;
+    return Math.abs(x)<=1.15&&Math.abs(z)<=1.15||x>=.8&&Math.abs(z)<=.95;
+  })&&Math.hypot(p.x,p.z)>=.42+r*.3;
+  const layout=worksiteLayout('wood',10,{x:0,z:0},{x:0,z:.3125},free);
+  expect(layout.variant).toBe('compact');expect(layout.stations).toHaveLength(10);
+  for(const p of layout.stations){expect(free(p,.27)).toBe(true);expect(free(p.workAt!,.4)).toBe(true);}
+  expect(Math.max(...layout.stations.map(p=>p.x))).toBeGreaterThan(4);
+});
+
+it('reaches an inner saw post through the free aisles without crossing another occupied post',()=>{
+  const target={x:-3.75,z:-1.38},layout=worksiteLayout('wood',10,target,{x:-3.75,z:-1.0675},()=>true);
+  const destination=layout.stations[3]!,posts=layout.stations.filter((_,i)=>i!==3);
+  const free=(p:WorkerPoint)=>posts.every(q=>Math.hypot(p.x-q.x,p.z-q.z)>=.44);
+  const path=worksiteConnector({x:-2.8412259100642343,z:-.4425},destination,target,free,posts);
+  expect(path).not.toBeNull();expect(path!.at(-1)).toMatchObject({x:destination.x,z:destination.z});
+  for(let i=1;i<path!.length;i++){
+    const a=path![i-1]!,b=path![i]!;
+    for(let n=0;n<=100;n++)expect(posts.every(p=>Math.hypot(a.x+(b.x-a.x)*n/100-p.x,a.z+(b.z-a.z)*n/100-p.z)>.43)).toBe(true);
+  }
+});
+
+it('removes only closed visual detours without inventing a shortcut or mutating committed geometry',()=>{
+  const path=[{x:0,z:0},{x:1,z:0},{x:1,z:1},{x:1,z:0},{x:2,z:0},{x:3,z:0}];
+  const before=JSON.stringify(path),passage=workerPassagePath(path);
+  expect(passage).toEqual([path[0],path[1],path[4],path[5]]);
+  for(let i=1;i<passage.length;i++)expect(path.some((p,j)=>p.x===passage[i-1]!.x&&p.z===passage[i-1]!.z&&path[j+1]===passage[i])).toBe(true);
+  expect(JSON.stringify(path)).toBe(before);
+  expect(workerPassagePath([{x:0,z:0},{x:16,z:0},{x:32,z:0}])).toHaveLength(3);
+});
 
 it('sweeps three crop rows in alternating directions and stays inside the plot',()=>{
   const centre={x:17,z:-9},rows=[-.64,0,.64],directions:number[][]=[[],[],[]];

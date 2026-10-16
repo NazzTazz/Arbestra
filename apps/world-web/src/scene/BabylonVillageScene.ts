@@ -19,7 +19,7 @@ import {InfrastructureRenderer,type InfrastructureGesture} from './infrastructur
 import {selectEquipment} from './equipment-selection';
 import {infrastructureSurface,infrastructurePlanSurface,wrapCoordinate,type InfrastructureOperation,type SubPoint} from '@arbestra/contracts';
 import { sciencePreview } from '../api/client';
-import { roadDisplayRoutes, roadEdges, ROAD_HALF_WIDTH } from './road-profile';
+import { villageRoadDisplayRoutes, roadEdges, ROAD_HALF_WIDTH } from './road-profile';
 import { WeatherMap, WeatherMaterial } from './weather-view';
 import { LocalRain } from './weather-rain';
 import { weatherAt } from './weather';
@@ -710,7 +710,7 @@ export class BabylonVillageScene {
         const cell=this.#space.inverse(point.x,point.z);
         return this.#store.ground(cell.cellX,cell.cellY)?.height ?? null;
       },
-      free: (point,radius,featureId) => {
+      free: (point,radius,featureId,allowRoads=false) => {
         if (!this.#space || !this.#store || !this.#state) return false;
         for (const [dx,dz] of [[0,0],[-radius,-radius],[radius,radius],[-radius,radius],[radius,-radius]]) {
           const cell=this.#space.inverse(point.x+dx!,point.z+dz!),x=Math.round(cell.cellX)%this.#space.width,y=Math.round(cell.cellY)%this.#space.height;
@@ -723,14 +723,14 @@ export class BabylonVillageScene {
         const own=this.#state.region.features.find(f=>f.id===featureId);
         if(own){const centre=this.#space.project(own);if(Math.hypot(point.x-centre.x,point.z-centre.z)<.42+radius*.3)return false;}
         if(workerObstacles?.state!==this.#state||workerObstacles.version!==this.#space.version){
-          const routes=roadDisplayRoutes(this.#state.travelRoutes,new Set(this.#state.cells.filter(c=>c.footprint||c.building).map(cellKey)),this.#state.world);
+          const routes=villageRoadDisplayRoutes(this.#state);
           workerObstacles={state:this.#state,version:this.#space.version,
             routes:routes.map(r=>({destination:r.destination,points:this.#space!.path(r.cells)}))};
         }
         for(const equipment of this.#infrastructureEquipment){
           const p=this.#space.project({cellX:equipment.x/8,cellY:equipment.y/8});if(Math.hypot(point.x-p.x,point.z-p.z)<radius+.23)return false;
         }
-        for(const route of workerObstacles.routes){
+        if(!allowRoads)for(const route of workerObstacles.routes){
           if(own&&route.destination.cellX===own.cellX&&route.destination.cellY===own.cellY)continue;
           const path=route.points;
           for(let i=1;i<path.length;i++){const a=path[i-1]!,b=path[i]!,dx=b.x-a.x,dz=b.z-a.z;
@@ -1706,7 +1706,7 @@ export class BabylonVillageScene {
     return [...route,...points.slice(outside+1)];
   }
 
-  #travelDerived: {signature:string;accesses:ReturnType<typeof buildingAccesses>;occupied:Set<string>;displayRoutes:ReturnType<typeof roadDisplayRoutes>;fires:ReturnType<typeof automaticBraziers>} | null = null;
+  #travelDerived: {signature:string;accesses:ReturnType<typeof buildingAccesses>;occupied:Set<string>;displayRoutes:ReturnType<typeof villageRoadDisplayRoutes>;fires:ReturnType<typeof automaticBraziers>} | null = null;
   #updateTravelPaths(state: VillageState, visible: boolean, selectedRouteId: string | null, frame?: FrameTimings): void {
     const derivedSignature=JSON.stringify([state.world.id,state.travelRoutes,state.infrastructure,
       state.cells.filter(c=>c.footprint||c.building).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.visualLayout,c.building.quarterTurns,c.building.accesses]]),
@@ -1717,8 +1717,7 @@ export class BabylonVillageScene {
       const fires=automaticBraziers(state);
       this.#infrastructureEquipment=[...(state.infrastructure?.equipment??[]).map(e=>({x:e.x,y:e.y})),...fires.map(e=>e.position)];
       const occupied=new Set(state.cells.filter(c=>c.footprint||c.building).map(c=>`${c.cellX}:${c.cellY}`));
-      const edited=new Set([...infrastructurePlanSurface(state.infrastructure??{revision:0,roads:[],equipment:[],manualLighting:[],suppressedBraziers:[],stoneReserve:0},state.world).values()].map(p=>`${Math.floor((p.x+8)/16)%state.world.widthCells}:${Math.floor((p.y+8)/16)%state.world.heightCells}`));
-      this.#travelDerived={signature:derivedSignature,accesses,occupied,fires,displayRoutes:roadDisplayRoutes(state.travelRoutes,new Set([...occupied,...edited]),state.world)};
+      this.#travelDerived={signature:derivedSignature,accesses,occupied,fires,displayRoutes:villageRoadDisplayRoutes(state)};
     }
     const {accesses,occupied,fires,displayRoutes}=this.#travelDerived;
     const groundIdentity=this.#store?JSON.stringify([state.world.id,state.world.generationVersion,this.#store.groundRevision,this.#renderer?.groundVersion]):undefined;

@@ -4,7 +4,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { VillageState } from '@arbestra/contracts';
 import { expect, it } from 'vitest';
-import { VillageWorkers } from './village-workers';
+import { VillageWorkers, type WorkerHooks } from './village-workers';
 import { gardenHarvestPoint, sampleWorkerPath, type TrafficActor } from './worker-motion';
 
 const epoch=Date.parse('2026-10-02T12:00:00Z');
@@ -22,7 +22,7 @@ function snapshot(id='lot-1',start=epoch,count=10):VillageState {
       path:[{cellX:0,cellY:0},{cellX:0,cellY:1},{cellX:0,cellY:3},{cellX:0,cellY:5},{cellX:0,cellY:8}],
       startedAt:new Date(start).toISOString(),completesAt:new Date(start+80_000).toISOString(),transportMs:8000}]},cells:[] } as unknown as VillageState;
 }
-function fixture(free:(p:{x:number;z:number})=>boolean=()=>true){
+function fixture(free:WorkerHooks['free']=()=>true){
   const engine=new NullEngine(),scene=new Scene(engine),material=new StandardMaterial('shared',scene);
   let shift=0,ground:number|null=0;
   const view=new VillageWorkers(scene,{skin:[material,material,material],clothes:Array(5).fill(material),hair:Array(3).fill(material),pants:material,timber:material,stone:material},
@@ -210,6 +210,63 @@ it('preserves idle representatives through LOD and recentring and still renders 
 });
 
 const actorOf=(figure:VillageWorkers['figures'][number])=>(figure as VillageWorkers['figures'][number]&{actor:TrafficActor}).actor;
+it('deploys a compact wood team from the doorway through empty waiting places and starts the shared work posts',()=>{
+  const physical=(p:{x:number;z:number},r:number)=>[[0,0],[-r,-r],[r,r],[-r,r],[r,-r]].every(([dx,dz])=>{
+    const x=p.x+dx!,z=p.z+dz!;return Math.abs(x)<=1.15&&Math.abs(z)<=1.15||x>=.8&&Math.abs(z)<=.95;
+  })&&Math.hypot(p.x,p.z)>=.42+r*.3;
+  const f=fixture((p,r,_feature,allowRoads)=>allowRoads===true&&physical(p,r));
+  try{
+    const state=snapshot('narrow-wood',epoch,10),e=state.village.extractions[0]!;
+    e.resourceCode='wood';e.cellX=0;e.cellY=0;e.transportMs=2802;
+    e.path=[{cellX:3.75,cellY:1.38},{cellX:3.75,cellY:.9375},{cellX:3.4375,cellY:.9375},
+      {cellX:2.5,cellY:.9375},{cellX:2.5,cellY:0},{cellX:2.5,cellY:.9375},
+      {cellX:.9375,cellY:.9375},{cellX:.625,cellY:.9375},{cellX:.3125,cellY:.9375},
+      {cellX:0,cellY:.9375},{cellX:0,cellY:.625},{cellX:0,cellY:.3125},{cellX:0,cellY:0}];
+    f.view.sync(state,epoch);let saw=false,chopping=false;
+    for(let t=0;t<50000;t+=33){f.view.animate(epoch+t,true);
+      saw ||= f.scene.meshes.some(m=>m.name.startsWith('saw-')&&m.isEnabled());
+      chopping ||= f.view.figures.slice(6).some(p=>p.root.getChildTransformNodes().some(n=>n.name.endsWith('-tool')&&n.isEnabled()&&Math.hypot(p.root.position.x,p.root.position.z)<1.5));
+    }
+    expect(f.view.metrics.layouts[0]?.variant).toBe('compact');
+    expect(saw,JSON.stringify(f.view.figures.map(p=>({p:actorOf(p).position,path:actorOf(p).path,waiting:actorOf(p).waitingSince})))).toBe(true);expect(chopping).toBe(true);expect(f.view.figures).toHaveLength(10);
+  }finally{f.dispose();}
+});
+it.each([false,true])('uses physically free road posts only when traffic reservations prevent the wood layout (physical clearance: %s)',physical=>{
+  const f=fixture((_point,_radius,_feature,allowRoads)=>physical&&allowRoads===true);
+  try{
+    const state=snapshot('wood-road',epoch,10);state.village.extractions[0]!.resourceCode='wood';
+    f.view.sync(state,epoch+20000);f.view.animate(epoch+20000,true);
+    expect(f.view.metrics.layouts[0]?.variant==='blocked').toBe(!physical);
+    expect(f.view.figures).toHaveLength(10);
+    expect(f.scene.meshes.some(m=>m.name.startsWith('saw-')&&m.isEnabled())).toBe(physical);
+  }finally{f.dispose();}
+});
+it('gets a ten-person wood team past a retraced access spur and into chopping work without changing the server route',()=>{
+  const f=fixture();try{
+    const state=snapshot('wood-spur',epoch,10),mission=state.village.extractions[0]!;
+    mission.resourceCode='wood';mission.transportMs=2802;
+    mission.path=[{cellX:0,cellY:0},{cellX:0,cellY:-.4425},{cellX:-.3125,cellY:-.4425},
+      {cellX:-1.25,cellY:-.4425},{cellX:-1.25,cellY:-1.38},{cellX:-1.25,cellY:-.4425},
+      {cellX:-2.8125,cellY:-.4425},{cellX:-3.125,cellY:-.4425},{cellX:-3.4375,cellY:-.4425},
+      {cellX:-3.75,cellY:-.4425},{cellX:-3.75,cellY:-.755},{cellX:-3.75,cellY:-1.0675},{cellX:-3.75,cellY:-1.38}];
+    mission.cellX=-3.75;mission.cellY=-1.38;
+    const before=JSON.stringify(mission);
+    f.view.sync(state,epoch);
+    let separation=Infinity;
+    for(let t=0;t<40000;t+=33){
+      f.view.animate(epoch+t,true);
+      const visible=f.view.figures.filter(p=>p.root.isEnabled());
+      for(let i=0;i<visible.length;i++)for(let j=i+1;j<visible.length;j++)
+        separation=Math.min(separation,Math.hypot(visible[i]!.root.position.x-visible[j]!.root.position.x,visible[i]!.root.position.z-visible[j]!.root.position.z));
+    }
+    expect(f.view.figures).toHaveLength(10);
+    expect(f.view.metrics.layouts[0]?.phases.every(p=>p==='work'),JSON.stringify({layout:f.view.metrics.layouts[0],actors:f.view.figures.map(p=>({distance:actorOf(p).distance,position:actorOf(p).position,done:actorOf(p).done}))})).toBe(true);
+    expect(f.view.figures.every(p=>Math.hypot(p.root.position.x,p.root.position.z)>1)).toBe(true);
+    expect(f.scene.meshes.some(m=>m.name.startsWith('saw-')&&m.isEnabled())).toBe(true);
+    expect(separation).toBeGreaterThan(.43);
+    expect(JSON.stringify(mission)).toBe(before);
+  }finally{f.dispose();}
+});
 it('keeps a valid actor and pose through ordinary sync, terrain reprojection and a two second frame stall',()=>{
   const f=fixture();try{
     f.view.sync(snapshot('one',epoch,1),epoch);for(let t=0;t<2000;t+=16)f.view.animate(epoch+t,true);

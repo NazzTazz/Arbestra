@@ -32,6 +32,21 @@ export function pathLength(path: readonly WorkerPoint[]) {
   return length;
 }
 
+/** Access searches can revisit a waypoint before continuing to the worksite.
+ * Remove those closed detours for presentation: a following pair cannot pass
+ * its leader on a narrow out-and-back spur. Every retained leg already exists
+ * in the committed path. Work/economic paths and deadlines remain untouched. */
+export function workerPassagePath<T extends WorkerPoint>(path: readonly T[]): T[] {
+  const result:T[]=[],indices=new Map<string,number>();
+  for(const point of path){
+    const key=`${point.x}:${point.z}`,prior=indices.get(key);
+    if(prior!==undefined){
+      while(result.length>prior+1){const removed=result.pop()!;indices.delete(`${removed.x}:${removed.z}`);}
+    }else{indices.set(key,result.length);result.push(point);}
+  }
+  return result;
+}
+
 // Three crop rows along X, joined by rounded headland turns. Entry and exit
 // stay at the plot centre so the road/plot connectors remain continuous.
 const gardenSweep:WorkerPoint[]=[{x:0,z:0},{x:-.7,z:-.64},{x:.7,z:-.64}];

@@ -4,7 +4,7 @@ export interface WorkStation extends WorkerPoint { role:WorkerRole; facing:numbe
 export interface WorksiteLayout { stations:WorkStation[]; approach:WorkerPoint; variant:'front'|'side'|'compact'|'blocked'; }
 
 /** Small bounded presentation connectors, never a replacement for the server path. */
-export function worksiteConnector(from:WorkerPoint,to:WorkerPoint,target:WorkerPoint,free:(p:WorkerPoint,r:number)=>boolean):WorkerPoint[]|null {
+export function worksiteConnector(from:WorkerPoint,to:WorkerPoint,target:WorkerPoint,free:(p:WorkerPoint,r:number)=>boolean,posts:readonly WorkerPoint[]=[]):WorkerPoint[]|null {
   const candidates:WorkerPoint[][]=[[from,to]];
   for(const side of [-1,1]){
     candidates.push([from,{x:target.x+side*1.6,z:from.z},{x:target.x+side*1.6,z:to.z},to]);
@@ -14,13 +14,41 @@ export function worksiteConnector(from:WorkerPoint,to:WorkerPoint,target:WorkerP
     const x=target.x+side*2.8,z=target.z+end*1.6;
     candidates.push([from,{x,z:from.z},{x,z},{x:to.x,z},to]);
   }
-  for(const path of candidates){let valid=true;
-    for(let i=1;i<path.length&&valid;i++){
-      const a=path[i-1]!,b=path[i]!,steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.2));
-      for(let n=1;n<=steps;n++){const t=n/steps,p={x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t};
-        if(!free(p,.2)){valid=false;break;}}
-    }if(valid)return path;
-  }return null;
+  const clear=(a:WorkerPoint,b:WorkerPoint)=>{
+    const steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.2));
+    for(let n=1;n<=steps;n++){const t=n/steps;
+      if(!free({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t},.2))return false;}
+    return true;
+  };
+  for(const path of candidates)if(path.every((p,i)=>i===0||clear(path[i-1]!,p)))return path;
+  if(!posts.length)return null;
+  // Only a local fallback around the reserved posts, never a world pathfinder.
+  // Inflated post boundaries expose narrow aisles that the fixed bends miss.
+  const xs=[...new Set([from.x,to.x,target.x-.8,target.x+.8,...posts.flatMap(p=>[p.x-.46,p.x+.46])])].sort((a,b)=>a-b);
+  const zs=[...new Set([from.z,to.z,target.z-.8,target.z+.8,...posts.flatMap(p=>[p.z-.46,p.z+.46])])].sort((a,b)=>a-b);
+  if(xs.length*zs.length>2048)return null;
+  const points:WorkerPoint[]=[];const point=(id:number)=>points[id]??(points[id]={x:xs[id%xs.length]!,z:zs[Math.floor(id/xs.length)]!});
+  const start=xs.indexOf(from.x)+zs.indexOf(from.z)*xs.length,goal=xs.indexOf(to.x)+zs.indexOf(to.z)*xs.length;
+  const queue=[start],previous=new Map<number,number>([[start,-1]]),costs=new Map([[start,0]]),closed=new Set<number>();
+  const estimate=(id:number)=>{const p=point(id);return costs.get(id)!+Math.abs(p.x-to.x)+Math.abs(p.z-to.z);};
+  while(queue.length){
+    let best=0;for(let i=1;i<queue.length;i++)if(estimate(queue[i]!)<estimate(queue[best]!))best=i;
+    const id=queue.splice(best,1)[0]!,x=id%xs.length,z=Math.floor(id/xs.length);closed.add(id);
+    if(id===goal){
+      const path:WorkerPoint[]=[];for(let next=id;next!==-1;next=previous.get(next)!)path.push(point(next));path.reverse();
+      const simplified:WorkerPoint[]=[];
+      for(const p of path){const a=simplified.at(-2),b=simplified.at(-1);
+        if(a&&b&&(a.x===b.x&&b.x===p.x||a.z===b.z&&b.z===p.z))simplified.pop();simplified.push(p);}
+      return simplified;
+    }
+    for(const next of [x>0?id-1:-1,x+1<xs.length?id+1:-1,z>0?id-xs.length:-1,z+1<zs.length?id+xs.length:-1]){
+      if(next<0||closed.has(next))continue;
+      const a=point(id),b=point(next),cost=costs.get(id)!+Math.abs(a.x-b.x)+Math.abs(a.z-b.z);
+      if(cost>=(costs.get(next)??Infinity)||!clear(a,b))continue;
+      previous.set(next,id);costs.set(next,cost);if(!queue.includes(next))queue.push(next);
+    }
+  }
+  return null;
 }
 
 /** Bounded templates, deliberately independent of economic access or quantities. */
@@ -68,7 +96,7 @@ export function worksiteLayout(resource:'wood'|'stone'|'garden',count:number,tar
     }
     const occupied=[...posts.values()];
     if(!occupied.every(p=>free(p,.4)))continue;
-    const queues=[-1.8,1.8,-2.4,2.4,0,-.6,.6].flatMap(side=>[2.4,3,3.6,-1.6,-2.2].map(depth=>point(side,depth)));
+    const queues=[-1.8,1.8,-2.4,2.4,0,-.6,.6].flatMap(side=>[2.4,3,3.6,-1.6,-2.2,4.2,4.8,-2.8,-3.4,-4].map(depth=>point(side,depth)));
     let valid=true;
     for(const station of stations){const wait=queues.find(p=>free(p,.27)&&occupied.every(q=>Math.hypot(p.x-q.x,p.z-q.z)>=.55));
       if(!wait){valid=false;break;}station.x=wait.x;station.z=wait.z;occupied.push(wait);}

@@ -6,7 +6,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { Scene } from '@babylonjs/core/scene';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { TravelCell, VillageState, GardenHarvestStop } from '@arbestra/contracts';
-import { WorkerTraffic, WORKER_STEP, WORKER_REBUILD_MS, pathLength, sampleWorkerPath, workerAppearance, gardenHarvestPoint,
+import { WorkerTraffic, WORKER_STEP, WORKER_REBUILD_MS, WORKER_CLEARANCE, pathLength, sampleWorkerPath, workerAppearance, gardenHarvestPoint, workerPassagePath,
   type TrafficActor, type WorkerPoint, type WorkerRole } from './worker-motion';
 import { worksiteLayout, worksiteConnector, type WorksiteLayout } from './worksite-layout';
 import {idleTour,idleTourPhase,type IdleLeg,type IdleVisit} from './idle-tour';
@@ -16,7 +16,7 @@ export interface WorkerHooks {
   path:(path:TravelCell[])=>Vector3[];
   project:(point:TravelCell)=>WorkerPoint;
   ground:(point:WorkerPoint)=>number|null;
-  free:(point:WorkerPoint,radius:number,featureId:string|null)=>boolean;
+  free:(point:WorkerPoint,radius:number,featureId:string|null,allowRoads?:boolean)=>boolean;
   key:(point:WorkerPoint)=>string;
   detailed:(point:WorkerPoint)=>boolean;
   width?:(point:WorkerPoint)=>number;
@@ -58,6 +58,8 @@ export class VillageWorkers {
   #snapshot:VillageState|null=null;
   #selectedRepresentative:string|null=null;
   #hiddenRepresentative:string|null=null;
+  readonly #installationDistances=new WeakMap<WorksiteLayout,number>();
+  readonly #reservedLayouts=new WeakMap<WorksiteLayout,Map<number,WorkerPoint[]>>();
   constructor(readonly scene:Scene,readonly materials:Materials,readonly hooks:WorkerHooks){}
   get figures():VillageWorkerFigure[]{return [...this.#groups.values()].flatMap(g=>g.people);}
   get metrics(){return {figures:this.figures.length,idleRepresentatives:[...this.#groups.values()].filter(g=>g.mission.resource==='idle').length,blocked:this.#traffic.blocked,pending:this.#pending.size,
@@ -161,7 +163,8 @@ export class VillageWorkers {
   #route(m:Mission,stop=0){if(m.leisure)return m.leisure[stop]!.path.map(p=>this.#point(p,p.width));
     const path=m.stops?.[stop]?.path??m.path;
     const vectors=stop>0?(this.hooks.localPath??this.hooks.path)(path):this.hooks.path(path);
-    const p=vectors.map((v,i)=>this.#point(v,stop===0&&i<2?.5:this.hooks.width?.(v)??.8));
+    const passage=m.resource==='wood'||m.resource==='stone'?workerPassagePath(vectors):vectors;
+    const p=passage.map((v,i)=>this.#point(v,stop===0&&i<2?.5:this.hooks.width?.(v)??.8));
     if(!p.length)p.push(this.#point(this.hooks.project(m.target)));
     if(m.resource!=='garden'&&m.resource!=='survey'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
       if(length>.95){b.x-=(b.x-a.x)/length*.95;b.z-=(b.z-a.z)/length*.95;b.key=this.hooks.key(b);}}
@@ -169,8 +172,13 @@ export class VillageWorkers {
   }
   #layout(m:Mission,route:WorkerPoint[],stop=0){if(m.resource==='idle'||m.resource==='survey'){const end=route[route.length-1]!;return {stations:[{...end,role:'walk' as const,facing:0,pair:-1}],approach:end,variant:'front' as const};}
     const target=this.hooks.project(m.stops?.[stop]??m.target),last=route[Math.max(0,route.length-2)]??target;
-    return worksiteLayout(m.resource,m.count,target,last,(p,r)=>this.hooks.free(p,r,m.featureId)
-      &&![...this.#groups.values()].some(g=>g.mission.id!==m.id&&g.layout.stations.some(s=>Math.hypot(p.x-s.x,p.z-s.z)<r+.27)));}
+    const available=(p:WorkerPoint,r:number,allowRoads=false)=>this.hooks.free(p,r,m.featureId,allowRoads)
+      &&![...this.#groups.values()].some(g=>g.mission.id!==m.id&&g.layout.stations.some(s=>Math.hypot(p.x-s.x,p.z-s.z)<r+.27));
+    const layout=worksiteLayout(m.resource,m.count,target,last,available);
+    // Prefer posts outside traffic. A road crossing a nearly cleared woodland
+    // remains walkable; it must not make every valid physical post impossible.
+    return layout.variant==='blocked'&&m.resource!=='garden'
+      ?worksiteLayout(m.resource,m.count,target,last,(p,r)=>available(p,r,true)):layout;}
   #create(mission:Mission,now:number):Group {
     const stop=mission.stops?Math.max(0,mission.stops.findIndex(s=>now<mission.startedAt+s.workEndsAfterMs)):0;
     const route=this.#route(mission,stop),layout=this.#layout(mission,route,stop),root=new TransformNode(`worksite-${mission.id}`,this.scene);
@@ -294,7 +302,7 @@ export class VillageWorkers {
         for(const mesh of g.root.getChildMeshes())mesh.dispose(false,false);g.saws=[];g.blocks=[];g.root.position.setAll(0);this.#props(g);
         for(const p of g.people)if(p.phase==='work'){
           const destination=this.#post(p,g,this.#lastNow??g.createdAt);
-          const connector=worksiteConnector(p.actor.position,destination,this.hooks.project(g.mission.target),(q,r)=>this.#connectorFree(p,g,q,r));
+          const connector=worksiteConnector(p.actor.position,destination,this.hooks.project(g.mission.target),(q,r)=>this.#connectorFree(p,g,q,r),this.#connectorPosts(p,g));
           if(connector){p.phase='rotate';p.actor.path=connector;p.actor.distance=0;p.actor.member=0;p.actor.formation=0;p.actor.lateral=0;p.actor.done=false;p.actor.speed=1;p.actor.startAt=this.#lastNow??g.createdAt;}
         }
       }
@@ -310,12 +318,50 @@ export class VillageWorkers {
     this.#graphDirty=true;
   }
 
+  #reservedPosts(p:Person,g:Group){
+    let layout=this.#reservedLayouts.get(g.layout);
+    if(!layout){layout=new Map();this.#reservedLayouts.set(g.layout,layout);}
+    let posts=layout.get(p.index);
+    if(!posts){const own=g.layout.stations[p.index]!;
+      posts=g.layout.stations.filter((s,i)=>i!==p.index&&!(g.layout.variant==='compact'&&s.slot===own.slot))
+        .map(s=>g.layout.variant==='compact'?s.workAt??s:s);posts=[...new Map(posts.map(s=>[`${s.x}:${s.z}`,s])).values()];layout.set(p.index,posts);}
+    return posts;
+  }
   #connectorFree(p:Person,g:Group,point:WorkerPoint,radius:number){
-    return this.hooks.free(point,radius,g.mission.featureId)&&g.layout.stations.every((s,i)=>i===p.index
-      ||Math.hypot(point.x-s.x,point.z-s.z)>=radius+.24);
+    return this.#reservedPosts(p,g).every(s=>
+      Math.hypot(point.x-s.x,point.z-s.z)>=radius+.24)
+      &&g.people.every(other=>other===p||!other.actor.visible||Math.hypot(point.x-other.actor.position.x,point.z-other.actor.position.z)>=WORKER_CLEARANCE)
+      &&this.hooks.free(point,radius,g.mission.featureId,true);
+  }
+  #connectorPosts(p:Person,g:Group){
+    const neighbours=g.people.filter(other=>other!==p&&other.actor.visible);
+    return [...this.#reservedPosts(p,g),...neighbours.map(other=>other.actor.position)];
+  }
+  #installationDistance(g:Group){
+    let distance=this.#installationDistances.get(g.layout);
+    if(distance===undefined){
+      const target=this.hooks.project(g.mission.target);
+      // Leave the shared road before an occupied work/waiting post can stop the next
+      // teammate just outside the old fixed 1.5 m connector threshold.
+      distance=Math.max(1.5,...g.layout.stations.flatMap(s=>s.workAt?[s,s.workAt]:[s])
+        .map(s=>Math.hypot(s.x-target.x,s.z-target.z)+WORKER_CLEARANCE));
+      this.#installationDistances.set(g.layout,distance);
+    }
+    return distance;
   }
   #transition(p:Person,g:Group,now:number){
     const station=g.layout.stations[p.index]!,m=g.mission;
+    if(g.layout.variant==='compact'&&p.phase==='outbound'&&!p.actor.visible){
+      // A compact site cannot accept the whole road formation at once. Admit
+      // one arrival at a time, filling each distinct work post before its queue.
+      const first=new Set<string>(),order:Person[]=[],queue:Person[]=[];
+      for(const person of g.people){const slot=g.layout.stations[person.index]!.slot!;
+        if(first.has(slot))queue.push(person);else{first.add(slot);order.push(person);}}
+      order.push(...queue);
+      if(order.slice(0,order.indexOf(p)).some(person=>person.phase==='outbound'||person.phase==='install')){
+        p.actor.startAt=now+WORKER_STEP*1000;return;
+      }
+    }
     if(m.leisure){
       if(p.phase==='outbound'&&p.actor.done){p.phase='inside';p.phaseAt=now+m.leisure[g.stop]!.insideMs;p.actor.visible=false;}
       if(p.phase==='inside'&&now>=p.phaseAt){
@@ -336,14 +382,22 @@ export class VillageWorkers {
       return;
     }
     const roadArrival=p.actor.done||(['wood','stone'].includes(m.resource)&&p.actor.visible
-      &&pathLength(p.actor.path)-p.actor.distance+(p.actor.member??0)*.5*Math.cos((p.actor.formation??0)*Math.PI/2)<=1.5);
+      &&pathLength(p.actor.path)-p.actor.distance+(p.actor.member??0)*.5*Math.cos((p.actor.formation??0)*Math.PI/2)<=this.#installationDistance(g));
     if(p.phase==='outbound'&&roadArrival&&now>=p.connectorRetry){
       const from={...p.actor.position},target=this.hooks.project(m.target);
-      const connector=m.resource==='garden'||m.resource==='survey'?[from,station]:worksiteConnector(from,station,target,(q,r)=>this.#connectorFree(p,g,q,r));
+      const destination=g.layout.variant==='compact'?this.#post(p,g,now):station;
+      const connector=m.resource==='garden'||m.resource==='survey'?[from,destination]:worksiteConnector(from,destination,target,(q,r)=>this.#connectorFree(p,g,q,r),this.#connectorPosts(p,g));
       if(!connector){p.connectorRetry=now+1000;p.actor.waitingSince??=now;return;}
       p.phase='install';p.phaseAt=now;p.arrivedAt=now;p.harvestProgress=0;p.actor.waitingSince=null;p.actor.path=connector;
       p.actor.distance=0;p.actor.done=false;p.actor.member=0;p.actor.formation=0;p.actor.startAt=now;p.actor.rank=100+p.index;p.actor.speed=1.6;}
     else if((p.phase==='install'||p.phase==='rotate')&&p.actor.done){p.phase='work';p.phaseAt=now;}
+    if((p.phase==='install'||p.phase==='rotate')&&['wood','stone'].includes(m.resource)
+      &&p.actor.waitingSince!==null&&now-p.actor.waitingSince>=1500&&now>=p.connectorRetry){
+      p.connectorRetry=now+1500;
+      const goal=p.actor.path.at(-1)!,connector=worksiteConnector(p.actor.position,goal,this.hooks.project(m.target),
+        (q,r)=>this.#connectorFree(p,g,q,r),this.#connectorPosts(p,g));
+      if(connector){p.actor.path=connector;p.actor.distance=0;p.actor.member=0;p.actor.formation=0;p.actor.lateral=0;p.actor.startAt=now;this.#graphDirty=true;}
+    }
     if(p.phase==='work'&&m.resource==='garden'){
       const stop=m.stops?.[g.stop],duration=stop?stop.workEndsAfterMs-stop.arrivesAfterMs:m.completesAt-m.startedAt-m.transportMs*2;
       p.harvestProgress=Math.min(1,(p.harvestProgress??0)+WORKER_STEP*1000/Math.max(1,duration));
@@ -351,7 +405,7 @@ export class VillageWorkers {
     }else if(p.phase==='work'&&g.layout.variant==='compact'){
       const destination=this.#post(p,g,now);
       if(Math.hypot(destination.x-p.actor.position.x,destination.z-p.actor.position.z)>.05&&now>=p.connectorRetry){
-        const connector=worksiteConnector(p.actor.position,destination,this.hooks.project(m.target),(q,r)=>this.#connectorFree(p,g,q,r));
+        const connector=worksiteConnector(p.actor.position,destination,this.hooks.project(m.target),(q,r)=>this.#connectorFree(p,g,q,r),this.#connectorPosts(p,g));
         if(!connector){p.connectorRetry=now+1000;p.working=false;p.actor.waitingSince??=now;return;}
         p.phase='rotate';p.actor.path=connector;p.actor.distance=0;p.actor.done=false;
         p.actor.startAt=now;p.actor.member=0;p.actor.speed=1;p.actor.rank=100+p.index;
@@ -366,7 +420,7 @@ export class VillageWorkers {
       if(now>=p.connectorRetry){
         const route:WorkerPoint[]=[from];
         for(const stop of [lane,back,forward,lane,station]){
-          const connector=worksiteConnector(route[route.length-1]!,stop,target,(q,r)=>this.#connectorFree(p,g,q,r));
+          const connector=worksiteConnector(route[route.length-1]!,stop,target,(q,r)=>this.#connectorFree(p,g,q,r),this.#connectorPosts(p,g));
           if(!connector){route.length=0;break;}route.push(...connector.slice(1));
         }
         if(route.length){p.actor.path=route;p.actor.distance=0;p.actor.done=false;p.actor.visible=true;p.actor.member=0;
@@ -383,7 +437,7 @@ export class VillageWorkers {
     const returnAt=m.stops?.length?m.startedAt+m.stops[m.stops.length-1]!.workEndsAfterMs:m.completesAt-m.transportMs;
     if((p.phase==='work'||p.phase==='rotate')&&now>=Math.max(returnAt,p.arrivedAt+600)){p.phase='load';p.phaseAt=now;}
     if(p.phase==='load'&&now-p.phaseAt>=450&&now>=p.connectorRetry){
-      const back=this.#backRoute(g),connector=m.resource==='garden'||m.resource==='survey'?[{...p.actor.position},back[0]!]:worksiteConnector(p.actor.position,back[0]!,this.hooks.project(m.target),(q,r)=>this.#connectorFree(p,g,q,r));
+      const back=this.#backRoute(g),connector=m.resource==='garden'||m.resource==='survey'?[{...p.actor.position},back[0]!]:worksiteConnector(p.actor.position,back[0]!,this.hooks.project(m.target),(q,r)=>this.#connectorFree(p,g,q,r),this.#connectorPosts(p,g));
       if(!connector){p.connectorRetry=now+1000;p.actor.waitingSince??=now;return;}
       p.phase='inbound';p.phaseAt=now;p.actor.path=[...connector,...back.slice(1)];
       p.actor.distance=0;p.actor.done=false;p.actor.member=p.index%2;p.actor.formation=0;p.actor.startAt=now+Math.floor(p.index/2)*120;p.actor.direction=-1;p.actor.rank=Math.floor(p.index/2);
@@ -424,7 +478,7 @@ export class VillageWorkers {
       const detailed=this.hooks.detailed(g.layout.approach),animateLimbs=detailed||now-this.#lastAnimation>120;
       for(const p of g.people)this.#renderPerson(p,g,now,animateLimbs);
       for(const saw of g.saws){const meta=saw.metadata as {x:number;z:number;pair:number};const station=g.layout.stations.find(s=>s.role==='saw'&&s.pair===meta.pair)!;
-        saw.setEnabled(g.people.some(p=>p.role==='saw'&&p.working&&p.phase==='work')&&(g.mission.count!==2||(now-g.mission.startedAt)%12_000<8_000));
+        saw.setEnabled(g.people.some(p=>p.role==='saw'&&this.#workingAtPost(p,g))&&(g.mission.count!==2||(now-g.mission.startedAt)%12_000<8_000));
         const height=this.hooks.ground(station);saw.isVisible=height!==null;saw.position.y=(height??0)+.43;
         saw.position.x=meta.x+Math.cos(station.facing+Math.PI/2)*Math.sin(now*.005+meta.pair)*.12;
         saw.position.z=meta.z+Math.sin(station.facing+Math.PI/2)*Math.sin(now*.005+meta.pair)*.12;}
@@ -435,6 +489,11 @@ export class VillageWorkers {
     }
     if(now-this.#lastAnimation>120)this.#lastAnimation=now;
     this.#admit(now);
+  }
+  #workingAtPost(p:Person,g:Group){
+    const station=g.layout.stations[p.index]!,at=station.workAt;
+    return p.phase==='work'&&p.working&&g.layout.variant!=='blocked'
+      &&(!at||Math.hypot(p.actor.position.x-at.x,p.actor.position.z-at.z)<.1);
   }
   #renderPerson(p:Person,g:Group,now:number,animateLimbs:boolean){
     if(p.phase==='done'||p.phase==='inside'){p.visible=false;p.root.setEnabled(false);return;}
@@ -452,7 +511,7 @@ export class VillageWorkers {
     p.last={...point};p.fade=Math.min(1,p.fade+.08);
     const opacity=p.retireAt!==null?Math.max(0,1-(now-p.retireAt)/350):p.fade;
     for(const mesh of p.meshes)mesh.visibility=opacity;
-    const working=p.phase==='work'&&p.working&&g.layout.variant!=='blocked';
+    const working=this.#workingAtPost(p,g);
     const cycle=(now-g.mission.startedAt)%12_000;
     let role=p.role;
     if(working&&g.mission.resource==='stone'){

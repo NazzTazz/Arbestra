@@ -1,11 +1,19 @@
-import type { TravelCell, TravelRoute } from '@arbestra/contracts';
-import {coarseTravelPath} from '@arbestra/contracts';
+import type { TravelCell, TravelRoute, VillageState } from '@arbestra/contracts';
+import {coarseTravelPath,infrastructurePlanSurface} from '@arbestra/contracts';
 import { delta } from './world-space';
 
 export type RoadKind = 'paved' | 'earth';
 export const roadKey = (c: TravelCell) => `${c.cellX}:${c.cellY}`;
 export const ROAD_DEPTH = .06;
 export const ROAD_HALF_WIDTH = .47;
+
+/** Share the displayed automatic road footprint with worksite obstacle checks. */
+export function villageRoadDisplayRoutes(state: Pick<VillageState, 'travelRoutes' | 'cells' | 'world' | 'infrastructure'>): TravelRoute[] {
+  const masked=new Set(state.cells.filter(c=>c.footprint||c.building).map(roadKey));
+  if(state.infrastructure)for(const p of infrastructurePlanSurface(state.infrastructure,state.world).values())
+    masked.add(`${Math.floor((p.x+8)/16)%state.world.widthCells}:${Math.floor((p.y+8)/16)%state.world.heightCells}`);
+  return roadDisplayRoutes(state.travelRoutes,masked,state.world);
+}
 
 /** Trim building access from decoration only; never bridge across an occupied cell. */
 export function roadDisplayRoutes(routes: readonly TravelRoute[], occupied: ReadonlySet<string>, world?:{widthCells:number;heightCells:number}): TravelRoute[] {

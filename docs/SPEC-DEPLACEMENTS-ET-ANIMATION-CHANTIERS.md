@@ -1,5 +1,7 @@
 # Déplacements des villageois et animation des chantiers
 
+Correctif du 16 octobre 2026 : les trajets visuels bois/pierre retirent les détours fermés qui repassent par le même point, en conservant uniquement des segments du trajet serveur. Les obstacles routiers utilisent le même masque que les routes affichées ; un chantier sans emplacement peut utiliser une route physiquement libre. Les obstacles réels restent vérifiés. En site compact, les arrivées sont espacées et alimentent les différents postes avant leurs files ; les places d'attente vides ne sont pas des murs. Les raccordements locaux contournent les postes et corps présents, avec recherche bornée à 2 048 nœuds après échec des raccordements directs et nouvelle tentative après une attente de 1,5 s. Les gestes de travail demandent l'arrivée réelle au poste. Aucun changement des trajets économiques, échéances, crédits ou effectifs. Vérifications et limites de recette dans la tête du handoff courant.
+
 Mise à jour : 12 octobre 2026, base relue `e212152`. Statut : **continuité implémentée ; régressions et parcours WebGL isolés vérifiés, retour utilisateur favorable sur la recette restaurée**. Ce retour ne détaille pas tous les cas de la checklist.
 
 Date initiale : 2 octobre 2026. Tristan a ensuite autorisé l'implémentation. Les détails de réalisation restent à recetter. Base : `main`, HEAD `0a0873a`, worktree comprenant les chantiers persistants en validation.
