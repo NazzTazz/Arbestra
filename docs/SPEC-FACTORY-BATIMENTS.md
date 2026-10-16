@@ -1,5 +1,7 @@
 # Factory modulaire des bâtiments
 
+Extension du 12 octobre 2026 : [atelier des cinq matières](SPEC-FACTORY-MATIERES.md), générateurs 3D et captures PNG communs. Maquette disponible ; rondins avec écorce confirmés, apparences finales à valider. Aucun stock ou mécanisme économique ajouté.
+
 ## Hôtel de ville niveau 2 — esquisse du 6 octobre 2026
 
 À la demande de Tristan, l’esquisse est disponible dans l’atelier : `/factory-preview.html?world=aube&recipe=hall-2`, sélection « Hôtel de ville · niveau 2 · marché ». **Direction validée** : deux niveaux, séparation longitudinale de l’étage entre un long balcon couvert en bois et une salle en petites pierres. Rez-de-chaussée sur 1 × 2 cases ; balcon gauche réduit à .70 de large et salle droite élargie à 1.54. Parquet, trois poteaux et garde-corps en bois ; module pierre supérieur .14 × .07, contre .28 × .14 au rez-de-chaussée. Les pignons de l’étage reçoivent désormais une baie Médecine .56 × .70 ; les longues façades conservent les baies hautes Mathématiques.

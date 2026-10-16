@@ -18,6 +18,7 @@ import { CAMPUS_SUBDIVISIONS, MATHEMATICS_CROWN_WIDTH } from './mathematics-fact
 import { buildUniversity } from './university-factory';
 import { CELL_UNITS } from './world-space';
 import {buildInfrastructurePresentation,type InfrastructureRecipe} from './infrastructure-factory';
+import { RESOURCE_RECIPES, buildResourcePresentation, isResourceRecipe } from './resource-factory';
 
 async function openWorkshop(){
 const query=new URLSearchParams(location.search),world=query.get('world')??'aube';
@@ -30,10 +31,52 @@ const camera=new ArcRotateCamera('workshop-camera',-Math.PI/3,1.05,11,new Vector
 new HemisphericLight('workshop-day',new Vector3(-.5,1,-.3),scene).intensity=1.1;
 const ground=MeshBuilder.CreateGround('workshop-ground',{width:25,height:25},scene),material=new StandardMaterial('workshop-grass',scene);material.diffuseColor=Color3.FromHexString('#526d40');material.specularColor=Color3.Black();ground.material=material;
 const kit=new TimberThatch(scene);let root:Mesh|null=null;
+const domains=document.createElement('nav');
+domains.style.cssText='display:flex;gap:12px;margin-bottom:16px;font:13px sans-serif';
+for(const [domain,label] of [['buildings','Bâtiments'],['infrastructure','Infrastructure'],['resources','Matières']] as const){
+  const link=document.createElement('a');link.textContent=label;link.style.color='#f4eedb';
+  link.href=`/factory-preview.html?world=${encodeURIComponent(world)}${domain==='buildings'?'':`&domain=${domain}`}`;
+  if((query.get('domain')??'buildings')===domain)link.setAttribute('aria-current','page');
+  domains.append(link);
+}
+document.querySelector('h2')!.before(domains);
+document.querySelector('aside')!.style.cssText+=';max-height:calc(100vh - 70px);overflow:auto';
+let resourcePreviewRevision=0;
+let resourceCapturePending=false;
+const resourceIcon=document.createElement('div');resourceIcon.hidden=true;
+resourceIcon.innerHTML='<p><button type="button" id="resource-capture">Préparer l’icône PNG</button></p><p id="resource-icon-status" aria-live="polite"></p><div id="resource-icon-background" hidden style="background:repeating-conic-gradient(#d6d6d6 0% 25%,#f3f3f3 0% 50%) 0/16px 16px;border-radius:4px"><img id="resource-icon" alt="" style="display:block;width:100%;height:auto"></div><p><a id="resource-download" hidden style="color:#f4eedb">Télécharger le PNG</a></p>';
+document.querySelector('aside')!.append(resourceIcon);
+document.getElementById('resource-capture')!.addEventListener('click',()=>{void captureResourceIcon();});
+async function captureResourceIcon(){
+  if(resourceCapturePending)return;
+  const code=choice('recipe').slice(9);if(!isResourceRecipe(code))return;
+  const revision=++resourcePreviewRevision;
+  resourceCapturePending=true;
+  const palette={stoneColour:kit.stone.diffuseColor.toHexString(),woodColour:kit.wood.diffuseColor.toHexString(),quarterTurns:Number(choice('turn'))};
+  const status=document.getElementById('resource-icon-status')!;status.textContent='Préparation…';
+  const button=document.getElementById('resource-capture') as HTMLButtonElement;button.disabled=true;
+  try {
+    const {renderBuildingThumbnail}=await import('./building-thumbnail-renderer');
+    const image=await renderBuildingThumbnail(`resource:${code}`,1,palette);
+    if(revision!==resourcePreviewRevision)return;
+    const icon=document.getElementById('resource-icon') as HTMLImageElement;icon.src=image;icon.alt=RESOURCE_RECIPES.find(recipe=>recipe.code===code)!.label;
+    document.getElementById('resource-icon-background')!.hidden=false;
+    const download=document.getElementById('resource-download') as HTMLAnchorElement;download.href=image;download.download=`${code}.png`;download.hidden=false;
+    status.textContent='384 × 240 · fond transparent';
+  } catch {if(revision===resourcePreviewRevision)status.textContent='Impossible de préparer l’icône. Réessayez.';}
+  finally {resourceCapturePending=false;button.disabled=false;}
+}
+function resetResourceIcon(){
+  resourcePreviewRevision++;
+  document.getElementById('resource-icon-background')!.hidden=true;
+  document.getElementById('resource-download')!.hidden=true;
+  document.getElementById('resource-icon-status')!.textContent='';
+  (document.getElementById('resource-capture') as HTMLButtonElement).disabled=resourceCapturePending;
+}
 const accessControls=document.createElement('div');accessControls.innerHTML='<p><label>Accès principal <select id="access-face"><option value="default">Recette</option><option value="-x">Gauche</option><option value="+x">Droite</option><option value="-z">Avant</option><option value="+z">Arrière</option></select></label></p><p><label><input id="access-secondary" type="checkbox"> Accès secondaire opposé</label></p>';
 document.getElementById('budget')!.before(accessControls);accessControls.addEventListener('change',()=>render());
 const woodOptions=[['brown','Bois brun'],['light','Bois clair'],['natural','Bois naturel']];
-const stoneOptions=[['light','Pierre claire'],['red','Briques rouges'],['dark','Pierre sombre']];
+const stoneOptions=[['light','Pierre claire'],['red',query.get('domain')==='resources'?'Pierre ocre':'Briques rouges'],['dark','Pierre sombre']];
 const woodColours:Record<string,string>={brown:'#927059',light:'#fff4de',natural:'#ded5c8'};
 const stoneColours:Record<string,string>={light:'#fafbfc',red:'#b65f49',dark:'#606977'};
 function paletteSelector(id:string,title:string,options:string[][],initial:string,material:StandardMaterial,colours:Record<string,string>){
@@ -41,11 +84,11 @@ function paletteSelector(id:string,title:string,options:string[][],initial:strin
   label.append(`${title} `);select.id=id;
   for(const [value,text] of options){const option=document.createElement('option');option.value=value!;option.textContent=text!;select.append(option);}
   select.value=initial;label.append(select);row.append(label);document.getElementById('budget')!.before(row);
-  select.addEventListener('change',()=>{material.diffuseColor=Color3.FromHexString(colours[select.value]!);});
+  select.addEventListener('change',()=>{material.diffuseColor=Color3.FromHexString(colours[select.value]!);resetResourceIcon();});
 }
 paletteSelector('roof-colour','Toit',woodOptions,'natural',kit.boards,{...woodColours,natural:'#d7cbb9'});
-paletteSelector('stone-colour','Maçonnerie',stoneOptions,'light',kit.stone,stoneColours);
-paletteSelector('frame-colour','Charpente',woodOptions,'natural',kit.wood,woodColours);
+paletteSelector('stone-colour',query.get('domain')==='resources'?'Pierre':'Maçonnerie',stoneOptions,'light',kit.stone,stoneColours);
+paletteSelector('frame-colour',query.get('domain')==='resources'?'Bois scié':'Charpente',woodOptions,'natural',kit.wood,woodColours);
 let footprint:Mesh|null=null;
 const footprintMaterial=new StandardMaterial('workshop-footprint-fill',scene);
 scene.setRenderingAutoClearDepthStencil(1,false);
@@ -77,8 +120,23 @@ function showFootprint(columns:number,rows:number,turn:number,subdivisions=8){
 }
 const choice=(id:string)=>(document.getElementById(id) as HTMLSelectElement).value;
 function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(Number(canvas.dataset.generation??0)+1);root?.dispose(false,false);const name=choice('recipe'),works=choice('phase')==='works',turn=Number(choice('turn'));
-  accessControls.hidden=name.startsWith('infra-')||name.startsWith('university-')||name==='barracks'||name==='stonemason';
+  resetResourceIcon();
+  accessControls.hidden=name.startsWith('resource:')||name.startsWith('infra-')||name.startsWith('university-')||name==='barracks'||name==='stonemason';
   (document.getElementById('access-secondary') as HTMLInputElement).disabled=name==='wall';
+  if(name.startsWith('resource:')){
+    const code=name.slice(9);if(!isResourceRecipe(code))throw new Error(`Unknown resource recipe: ${code}`);
+    document.getElementById('stone-colour')!.closest('p')!.hidden=code!=='stone'&&code!=='cut-stone';
+    document.getElementById('frame-colour')!.closest('p')!.hidden=code!=='timber';
+    footprint?.dispose(false,false);footprint=null;delete canvas.dataset.footprint;delete canvas.dataset.subdivisions;
+    root=buildResourcePresentation(kit,code);root.rotation.y=turn*Math.PI/2;
+    const meshes=root.getChildMeshes().filter(mesh=>mesh.getTotalVertices()>0);
+    canvas.dataset.vertices=String(meshes.reduce((count,mesh)=>count+mesh.getTotalVertices(),0));canvas.dataset.meshes=String(meshes.length);
+    canvas.dataset.resource=code;
+    document.getElementById('budget')!.textContent={stone:'Fragments irréguliers de pierre.', 'cut-stone':'Blocs taillés, arêtes légèrement biseautées.',wood:'Troncs avec écorce et départs de branches.',logs:'Rondins avec écorce, coupés et ébranchés.',timber:'Planches et madrier sciés, grain et bois de bout visibles.'}[code];
+    const bounds=root.getHierarchyBoundingVectors(true),extent=bounds.max.subtract(bounds.min);
+    camera.lowerRadiusLimit=1.5;camera.radius=Math.max(3,Math.max(extent.x,extent.y,extent.z)*1.7);camera.setTarget(bounds.min.add(bounds.max).scale(.5),false,false,true);return;
+  }
+  delete canvas.dataset.resource;camera.lowerRadiusLimit=3;
   if(name.startsWith('infra-')) {
     const fixture=name.slice(6) as InfrastructureRecipe['fixture'];
     const span=Math.ceil(2*(Number(choice('infra-length'))+Number(choice('infra-width'))/16+.0625));showFootprint(span,span,turn);
@@ -149,6 +207,15 @@ if(query.get('domain')==='infrastructure') {
   document.getElementById('recipe')!.innerHTML=['straight','elbow','t','crossing','door','brazier'].map((v,i)=>`<option value="infra-${v}">${['Droit','Angle','T','Croisement','Jonction à une porte','Brasero'][i]}</option>`).join('');
   const controls=document.createElement('div');controls.innerHTML='<p><label>Largeur <select id="infra-width"><option>2</option><option selected>4</option><option>8</option></select> / 8 case</label></p><p><label>Longueur <select id="infra-length"><option>1</option><option selected>2</option></select> cases</label></p><p><label>Revêtement <select id="infra-material"><option value="none">Pas de route</option><option value="earth">Terre battue</option><option value="rubble">Gravats</option><option selected value="stone-1">Pierre 1 · 3 × 1</option><option value="stone-2">Pierre 2 · 4 × 2</option></select></label></p><p><label><input id="infra-border" type="checkbox" checked> Trottoirs pierre</label></p><p><label>Épaisseur du pavage <select id="infra-pavement-height"><option value=".02">Fine</option><option selected value=".04">Carte actuelle</option><option value=".08">Épaisse</option></select></label></p><p><label>Épaisseur des trottoirs <select id="infra-curb-height"><option value=".06">Basse</option><option selected value=".04">Carte actuelle</option><option value=".18">Haute</option></select></label></p><p><label>Échelle du brasero <select id="infra-brazier-scale"><option value=".75">75 %</option><option selected value="1">100 %</option><option value="1.25">125 %</option></select></label></p>';
   document.getElementById('budget')!.before(controls);controls.addEventListener('change',render);
+}
+if(query.get('domain')==='resources'){
+  document.querySelector('h2')!.textContent='Atelier des matières';document.title='Arbestra — atelier des matières';
+  const recipes=document.getElementById('recipe') as HTMLSelectElement;recipes.replaceChildren();
+  for(const recipe of RESOURCE_RECIPES){const option=document.createElement('option');option.value=`resource:${recipe.code}`;option.textContent=recipe.label;recipes.append(option);}
+  const requested=query.get('recipe')??'';if(isResourceRecipe(requested))recipes.value=`resource:${requested}`;
+  for(const id of ['phase','roof-colour'])document.getElementById(id)!.closest('p')!.hidden=true;
+  accessControls.hidden=true;resourceIcon.hidden=false;
+  material.diffuseColor=Color3.FromHexString('#41483f');
 }
 render();engine.runRenderLoop(()=>{scene.render();if(root?.getChildMeshes().every(m=>m.isReady())){canvas.dataset.ready='true';canvas.dataset.renderedGeneration=canvas.dataset.generation;}});window.addEventListener('resize',()=>engine.resize());
 window.addEventListener('pagehide',()=>{scene.dispose();engine.dispose();},{once:true});
