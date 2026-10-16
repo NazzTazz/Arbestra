@@ -4,12 +4,43 @@ import { Scene } from '@babylonjs/core/scene';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
+import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
+import { ClusteredLightContainer } from '@babylonjs/core/Lights/Clustered/clusteredLightContainer';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { ShaderStore } from '@babylonjs/core/Engines/shaderStore';
 import { Particle } from '@babylonjs/core/Particles/particle';
 import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { bindBrazierLights, brazierBlocks, roadCorners, VillageBraziers } from './village-braziers';
 import type { TravelRoute } from '@arbestra/contracts';
+
+it('illuminates receivers with every brazier group within the material light budget and preserves independent lifetimes',()=>{
+  vi.stubGlobal('OffscreenCanvas',class{constructor(public width:number,public height:number){} getContext(){return {putImageData(){}};}});
+  vi.stubGlobal('ImageData',class{data:Uint8ClampedArray;constructor(width:number,height:number){this.data=new Uint8ClampedArray(width*height*4);}});
+  const engine=new NullEngine(),scene=new Scene(engine);
+  Object.assign(engine.getCaps(),{texelFetch:true,colorBufferFloat:true,blendFloat:true,shaderFloatPrecision:23});
+  Object.defineProperty(engine,'version',{value:2});
+  new HemisphericLight('sky',Vector3.Up(),scene);new DirectionalLight('sun',Vector3.Down(),scene);
+  const ground=MeshBuilder.CreateGround('receiver',{width:20,height:20},scene),material=new StandardMaterial('receiver',scene);ground.material=material;
+  const groups=[new VillageBraziers(scene),new VillageBraziers(scene),new VillageBraziers(scene)];
+  try{
+    groups.forEach((group,i)=>{group.updatePoints([{id:`fire-${i}`,x:i,y:0,z:0,seed:.4}]);group.animate(1000,true,1);});
+    const received=()=>ground.lightSources.slice(0,material.maxSimultaneousLights).flatMap(light=>light instanceof ClusteredLightContainer?light.lights:[]);
+    expect(received().map(light=>(light as PointLight).position.x).sort()).toEqual([0,1,2]);
+    const cluster=scene.lights.find(light=>light instanceof ClusteredLightContainer) as ClusteredLightContainer;
+    expect(scene.lights.filter(light=>light instanceof ClusteredLightContainer)).toHaveLength(1);
+    const [road,hall,workshop]=[0,1,2].map(x=>cluster.lights.find(l=>(l as PointLight).position.x===x)!);
+    groups[0]!.animate(2000,false,1);expect(road!.intensity).toBe(0);expect(hall!.intensity).toBeGreaterThan(0);expect(workshop!.intensity).toBeGreaterThan(0);
+    expect(received()).toContain(hall);expect(received()).toContain(workshop);
+    groups[1]!.animate(2000,true,0);expect(hall!.intensity).toBe(0);expect(cluster.isEnabled()).toBe(true);
+    groups[2]!.dispose();expect(workshop!.isDisposed()).toBe(true);expect(hall!.isDisposed()).toBe(false);expect(cluster.isEnabled()).toBe(false);
+    groups[0]!.animate(3000,true,1);expect(received()).toContain(road);expect(road!.intensity).toBeGreaterThan(0);
+    groups[0]!.updatePoints([{id:'fire-0',x:-80,y:.5,z:-80,seed:.4}]);
+    expect(cluster.lights).toContain(road);expect((road as PointLight).position.asArray()).toEqual([-80,.66,-80]);
+    groups[0]!.dispose();groups[1]!.dispose();expect(cluster.isDisposed()).toBe(true);
+    expect(scene.lights.map(light=>light.name)).toEqual(['sky','sun']);
+  }finally{for(const group of groups)group.dispose();scene.dispose();engine.dispose();vi.unstubAllGlobals();}
+});
 
 it.each(['equipment','decoration'])('moves %s braziers with their lights and flames without rebuilding, then removes absent items',kind=>{
   vi.stubGlobal('OffscreenCanvas',class{constructor(public width:number,public height:number){} getContext(){return {putImageData(){}};}});

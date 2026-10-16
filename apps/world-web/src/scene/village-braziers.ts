@@ -28,6 +28,12 @@ import { delta, type WorldSpace } from './world-space';
 
 export interface BrazierPoint { x: number; y: number; z: number; seed: number;id?:string;renderKey?:string }
 
+// Road, campus and building fires share one material light slot and one GPU mask.
+// Separate containers can exceed the receiver's light budget (sky + sun + fires).
+// Owners still control their own intensities and must not switch off other fires.
+interface BrazierCluster { light: ClusteredLightContainer; owners: Set<VillageBraziers>; active: Set<VillageBraziers> }
+const sceneClusters = new WeakMap<Scene, BrazierCluster>();
+
 /** Full canonical topology, not the currently streamed subset. */
 export function roadCorners(routes: readonly TravelRoute[], width: number, height: number): TravelCell[] {
   const nodes = new Map<string, { cell: TravelCell; directions: Set<string> }>();
@@ -96,7 +102,7 @@ export class VillageBraziers {
   #signature = '';
   #nextBind = 0;
   #lighting = false;
-  #cluster: ClusteredLightContainer | null = null;
+  #cluster: BrazierCluster | null = null;
   #clusterChecked = false;
   #meshIndex: BrazierMeshIndex | null = null;
   readonly #stone: StandardMaterial;
@@ -198,27 +204,37 @@ export class VillageBraziers {
       if (!this.#clusterChecked) {
         this.#clusterChecked = true;
         if (ClusteredLightContainer.IsLightSupported(light)) {
-          this.#cluster = new ClusteredLightContainer('village-brazier-cluster', [], this.scene);
-          this.#cluster.maxRange = 5;
+          let cluster = sceneClusters.get(this.scene);
+          if (!cluster) {
+            const container = new ClusteredLightContainer('village-brazier-cluster', [], this.scene);
+            container.maxRange = 5; container.setEnabled(false);
+            cluster = {light:container,owners:new Set(),active:new Set()};
+            sceneClusters.set(this.scene,cluster);
+          }
+          this.#cluster = cluster; cluster.owners.add(this);
           // Existing frozen materials must compile the new light type once.
           for (const material of this.scene.materials) if (material.isFrozen) material.unfreeze();
         }
         const canvas=this.scene.getEngine().getRenderingCanvas();
         if(import.meta.env.DEV&&canvas)canvas.dataset.brazierLighting=this.#cluster?'clustered':'bounded';
       }
-      if(this.#cluster)this.#cluster.addLight(light);
+      if(this.#cluster)this.#cluster.light.addLight(light);
       else light.includedOnlyMeshes = meshes;
       this.#items.push({key,point:{...p},meshes,flame,burning:false,light,phase:p.seed*Math.PI*2,tempo:.8+p.seed*.4});
     }
     for (const item of previous.values()) {
-      item.flame.dispose(false); this.#cluster?.removeLight(item.light); item.light.dispose();
+      item.flame.dispose(false); this.#cluster?.light.removeLight(item.light); item.light.dispose();
       for (const mesh of item.meshes) mesh.dispose(false,false);
     }
   }
   animate(now: number, night: boolean, alpha: number): void {
     const lighting = night && alpha > 0;
     if (lighting !== this.#lighting) { this.#lighting = lighting; this.#nextBind = 0; }
-    if(this.#cluster&&this.#cluster.isEnabled()!==lighting)this.#cluster.setEnabled(lighting);
+    if(this.#cluster){
+      if(lighting&&this.#items.length)this.#cluster.active.add(this);else this.#cluster.active.delete(this);
+      const enabled=this.#cluster.active.size>0;
+      if(this.#cluster.light.isEnabled()!==enabled)this.#cluster.light.setEnabled(enabled);
+    }
     if (!this.#cluster&&!lighting) for (const item of this.#items) if (item.light.isEnabled()) item.light.setEnabled(false);
     if (alpha <= 0) {
       for (const item of this.#items) {
@@ -248,6 +264,15 @@ export class VillageBraziers {
       item.light.intensity=night ? .9*flicker*alpha : 0;
     }
   }
-  #clear(): void { for (const item of this.#items) { item.flame.dispose(false); this.#cluster?.removeLight(item.light); item.light.dispose(); for (const mesh of item.meshes) mesh.dispose(false,false); } this.#items=[]; }
-  dispose(): void { this.#clear(); this.#meshIndex?.dispose(); this.#meshIndex=null; this.#cluster?.dispose(false,true); this.#cluster=null; this.#stone.dispose(); this.#fire.dispose(); }
+  #clear(): void { for (const item of this.#items) { item.flame.dispose(false); this.#cluster?.light.removeLight(item.light); item.light.dispose(); for (const mesh of item.meshes) mesh.dispose(false,false); } this.#items=[]; }
+  dispose(): void {
+    this.#clear(); this.#meshIndex?.dispose(); this.#meshIndex=null;
+    if(this.#cluster){
+      this.#cluster.active.delete(this);this.#cluster.owners.delete(this);
+      if(this.#cluster.owners.size===0){this.#cluster.light.dispose(false,true);sceneClusters.delete(this.scene);}
+      else this.#cluster.light.setEnabled(this.#cluster.active.size>0);
+      this.#cluster=null;
+    }
+    this.#stone.dispose();this.#fire.dispose();
+  }
 }
