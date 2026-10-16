@@ -1,3 +1,19 @@
+# Incident alpha — admission des chantiers et lecture village — 16 octobre 2026
+
+Signalement : opérations économiques bloquées et 500 pour le village de Number. Diagnostic en lecture seule : cinq notifications réessayées, avec la même erreur PostgreSQL `invalid input syntax for type integer: "4051.9999999999995"`. Le journal PostgreSQL identifie précisément `deposit_extractions.transport_ms`, et non les stocks ou l'énergie. Les anciennes extractions et récoltes associées étaient déjà terminées ; aucune notification ne devait être acquittée ni aucune livraison recréditée manuellement.
+
+Cause dans `deposits/worksites.ts` : durée entière du contrat convertie en secondes puis remultipliée par 1000 ; 4052 ms perd son intégralité binaire. L'admission automatique échoue et annule la transaction commune, y compris lors des lectures village et des réveils d'autres activités. Correctif **fca10fa** : conservation des millisecondes entières, y compris pour le classement des cibles, avec dimensions toriques explicites. Aucun changement de schéma ni de règle économique.
+
+Régression DB reproduite rouge avec exactement la valeur de production, puis verte : départ à 4052 ms, échéance, double complétion sans double livraison, relance du lot suivant. Contracts et API compilés ; lint ciblé vert ; 11 tests chantiers et 12 tests bois verts. Suite pierre : 20 cas verts au premier passage ; quatre cas interrompus dans les hooks de préparation à 10 s et nettoyage final également expiré. Ces quatre cas et le nettoyage sont verts après relance ciblée avec `--hookTimeout 60000` (101,69 s). **47 cas distincts validés**, sans prétendre que le premier lancement global était vert. Cible locale vérifiée `127.0.0.1/arbestra_test`, suites DB séquentielles. Aucune base de développement ou de production réinitialisée.
+
+Staging **fca10fa** actif, workflow [38955508986](https://github.com/NazzTazz/Arbestra/actions/runs/38955508986) vert ; alpha au même commit, tag **alpha-2026.10.16.3**, workflow [38956119611](https://github.com/NazzTazz/Arbestra/actions/runs/38956119611) vert. Symlinks de release et trois services de chaque environnement vérifiés actifs. Sauvegardes et smoke tests du contrôleur habituel, aucune migration nouvelle.
+
+Contrôle production après reprise : **5/5 notifications de l'incident terminées par le worker**, erreurs effacées ; zéro notification incomplète avec erreur dans toute la base alpha. Le village affecté a deux extractions en cours, aucune extraction en retard, quatre extractions et deux récoltes terminées à cette observation. Deux appels réels à `getVillageState` sous UID/rôle applicatif passent le contrat `VillageStateSchema`, en 2936 puis 378 ms ; chantiers running et trajets 4052 / 11552 ms à ces lectures. Ces mesures ponctuelles ne constituent pas un benchmark. Validation du service serveur et du contrat, sans création de session joueur ni recette navigateur sous l'identité de Number.
+
+Aucun SQL de réparation, acquittement manuel de notification, re-crédit ou modification arbitraire de données métier. La reprise et les lectures de diagnostic utilisent les chemins économiques ordinaires. Les changements locaux antérieurs ci-dessous et les deux éléments non suivis sont préservés ; la note d'accès NOC préexistante reste hors du commit de cet incident.
+
+---
+
 # RC1 ouverte en alpha et staging — inscription et spawning vérifiés — 16 octobre 2026
 
 Demande accomplie : **Arbestra Alpha / alpha-rc1** et **Arbestra Bêta / beta-rc1**, deux mondes indépendants ouverts, statut ready, version 3, 512 × 256, seed 4109 et signature RC1 canonique. [Identifiants et preuves détaillées](docs/SPEC-OUVERTURE-RC1.md). Auteurs : les deux comptes réels existants de Tristan ; il a créé lui-même celui de staging. Aucun compte/rôle administrateur ajouté, aucun import de données de développement.
