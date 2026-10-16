@@ -1,3 +1,17 @@
+# Extérieurs reconnaissables des villages voisins — 16 octobre 2026
+
+Tristan voit des pavés bruns chez un voisin puis valide explicitement des bâtiments reconnaissables, en conservant privées les données métier. L'ancien rendu utilisait uniquement des boîtes et l'API ne transmettait pas leurs apparences. Nouvelle décision consignée dans la spec des trois vues et les références science/grille : projection publique bornée avec apparences sélectionnées, sans identifiant de bâtiment, propriétaire, stocks, habitants, missions, production ou échéance. Les rapports scientifiques restent archivés ; la présence publique actuelle ne se dégrade plus en anciens cubes lorsqu'un rapport existe. Les nouveaux rapports capturent une apparence par bâtiment, et non par cellule ; anciens formats compatibles.
+
+Rendu : variantes distantes existantes des maisons/HDV/université et recettes communes simplifiées des ateliers ; géométries partagées et au plus deux chargements/instanciations simultanés. Hiérarchies statiques, relief et coutures toriques pris en compte, masquage en vue Monde, aucune recréation pour un échantillon inchangé ou un rebase. Les Jardins sont des parcelles statiques ; les vieux blocs sans apparence ont des toitures. Pas d'habitant, picking ou effets opératoires chez les voisins. Aucune migration ni réparation de données.
+
+Preuves locales terminées : régression rétrospective isolée de l'ancienne API rouge sur l'absence d'`exterior`, fichiers temporaires supprimés ; quatre tests DB ciblés terrain/science verts, dont accès anonyme, coutures, confidentialité et immutabilité du rapport. Onze cas distincts renderer/assets/tore verts, incluant conservation des modèles et publication de relief. Contracts et API compilés, typecheck monde et lint ciblé verts. Les compilations/tests parallèles ont fortement ralenti la machine ; le contrôle final de types a été terminé seul. Cible DB locale `_test` uniquement, aucun reset de développement/production.
+
+Recette `agent-browser` locale avec la classe réellement utilisée en jeu et les vrais assets, sur scène de diagnostic sans compte : neuf extérieurs chargés sans erreur, vues proche/région/couture inspectées ; 143 meshes et 237572 sommets inchangés après zoom/rebase. Captures ignorées `test-results/regional-exteriors-{near,region,seam}.png`. Ce sont des fixtures de rendu, pas un parcours joueur authentifié ni un benchmark de FPS. Problème initial de daemon/browser isolé repris avec succès ; navigateur fermé et page de diagnostic supprimée. Déploiements staging/alpha et contrôle de projection réelle encore à effectuer.
+
+Les deux éléments non suivis et la note NOC locale antérieure sont préservés hors commit de cette tranche.
+
+---
+
 # Incident alpha — admission des chantiers et lecture village — 16 octobre 2026
 
 Signalement : opérations économiques bloquées et 500 pour le village de Number. Diagnostic en lecture seule : cinq notifications réessayées, avec la même erreur PostgreSQL `invalid input syntax for type integer: "4051.9999999999995"`. Le journal PostgreSQL identifie précisément `deposit_extractions.transport_ms`, et non les stocks ou l'énergie. Les anciennes extractions et récoltes associées étaient déjà terminées ; aucune notification ne devait être acquittée ni aucune livraison recréditée manuellement.

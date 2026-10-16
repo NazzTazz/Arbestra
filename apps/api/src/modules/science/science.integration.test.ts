@@ -159,7 +159,7 @@ it('shows remote landscape without acquiring science or exposing deposit amounts
   expect(await db.selectFrom('sciencePlaces').selectAll().where('worldId', '=', ids.world).where('accountId', '=', ids.account).execute()).toEqual(before);
 });
 
-it('keeps a discovered village as a dated report after its live buildings change', async () => {
+it('keeps the scientific report dated while showing the current public exterior', async () => {
   const accountId = randomUUID(), villageId = randomUUID();
   try {
     await db.insertInto('accounts').values({ id:accountId,email:`${accountId}@test.local`,passwordHash:'fixture' }).execute();
@@ -175,11 +175,13 @@ it('keeps a discovered village as a dated report after its live buildings change
       constructionStartedAt:null,constructionCompletesAt:null,completedAt:new Date()}).returning('id').executeTakeFirstOrThrow();
     await db.insertInto('worldCellOccupancies').values({worldId:ids.world,buildingId:building.id,featureId:null,pendingExpansionId:null,cellX:1028,cellY:512,role:'anchor'}).execute();
     const reported=(await getTerrainVillages(db,world,1024,512,ids.account)).villages.find(v=>v.id===villageId)!;
-    expect(reported.blocks).toEqual([{x:0,y:0,width:1,depth:1,garden:false}]);
+    expect(reported.blocks).toEqual([{x:0,y:0,width:1,depth:1,exterior:{model:'dwelling',level:1,phase:'finished',quarterTurns:0}}]);
+    const archived = await db.selectFrom('scienceVillageReports').selectAll().where('worldId','=',ids.world).where('villageId','=',villageId).executeTakeFirstOrThrow();
     await db.updateTable('villages').set({name:'Nom ultérieur'}).where('id','=',villageId).execute();
     await db.deleteFrom('worldCellOccupancies').where('buildingId','=',building.id).execute();
     await db.insertInto('worldCellOccupancies').values({worldId:ids.world,buildingId:building.id,featureId:null,pendingExpansionId:null,cellX:1029,cellY:512,role:'anchor'}).execute();
-    expect((await getTerrainVillages(db,world,1024,512,ids.account)).villages.find(v=>v.id===villageId)?.blocks).toEqual(reported.blocks);
+    expect((await getTerrainVillages(db,world,1024,512,ids.account)).villages.find(v=>v.id===villageId)?.blocks).toEqual(reported.blocks.map(b=>({...b,x:1})));
+    expect(await db.selectFrom('scienceVillageReports').selectAll().where('worldId','=',ids.world).where('villageId','=',villageId).executeTakeFirstOrThrow()).toEqual(archived);
     const terrain=await getTerrain(db,ids.account,'aube','32,16');
     expect(terrain.chunks[0]!.occupiedCells.some(c=>c.cellX===1029&&c.cellY===512)).toBe(false);
   } finally {

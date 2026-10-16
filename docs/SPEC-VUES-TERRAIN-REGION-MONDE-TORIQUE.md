@@ -1,5 +1,13 @@
 # Vues Village, Région et Monde torique
 
+## Décision du 16 octobre 2026 — extérieurs des villages voisins
+
+Tristan valide des bâtiments reconnaissables à leur apparence en vue régionale. Cette décision remplace les restrictions historiques ci-dessous aux seuls pavés anonymes : la projection publique expose désormais le modèle, le niveau visuel, la phase extérieure et le placement nécessaires au rendu, y compris les Jardins. Elle ne révèle ni propriétaire, nom inconnu, identifiant de bâtiment, stock, habitant, mission, production ou échéance. Les bornes restent 32 villages, 64 bâtiments par village et 320 cases par axe.
+
+Utiliser les modèles distants existants et les recettes communes, avec géométrie partagée, chargement progressif et transformations statiques. Le village chargé garde ses vrais bâtiments et ses interactions. Les voisins sont sans picking, habitants ou effets animés ; leur implantation suit le relief et les coutures du tore. Un échantillon inchangé ou un rebase ne recrée pas les modèles.
+
+La vue publique actuelle reste actuelle même lorsqu'un rapport scientifique ancien existe. Les rapports archivés, leur identité et leur date ne sont pas modifiés par la caméra ; les anciens formats restent rendus avec des silhouettes munies de toitures. Les nouveaux relevés enregistrent les apparences par bâtiment. La consultation ne produit aucune connaissance ni opération économique. Preuves de recette et limites dans le handoff.
+
 Date : 1er octobre 2026. Base relue : `main`, `0a0873a`, avec l'implémentation streaming non commitée du worktree. Babylon installé : **8.56.2**.
 
 Statut : **implémentation autorisée par Tristan le 1er octobre 2026, en cours de validation dans le worktree**. Cette spec reste la cible et sa liste de vérifications n'est pas une preuve de livraison. Les comportements exécutés et les limites constatées figurent dans [la passation courante](../SESSION-HANDOFF.md).

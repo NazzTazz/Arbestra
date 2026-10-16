@@ -2,6 +2,7 @@ import { sql, type Kysely } from 'kysely';
 import type { TerrainOverview, TerrainVillageOverview } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
+import { readVillageExteriorBlocks } from './building-exterior.js';
 
 /** Nearby public exteriors, bounded independently of economic reconciliation. */
 export async function getTerrainVillages(db: Kysely<Database>, world: TerrainOverview['world'], x: number, y: number, accountId: string, preview = false): Promise<TerrainVillageOverview> {
@@ -32,33 +33,20 @@ export async function getTerrainVillages(db: Kysely<Database>, world: TerrainOve
       Math.max(distance(a.anchorCellX, x, world.widthCells), distance(a.anchorCellY, y, world.heightCells))
       - Math.max(distance(b.anchorCellX, x, world.widthCells), distance(b.anchorCellY, y, world.heightCells)) || a.id.localeCompare(b.id)).slice(0, 32);
     if (!villages.length) return { world, sampledAt: new Date().toISOString(), truncated: false, villages: [] };
-    const blocks = await sql<{ villageId: string; garden: boolean; underConstruction:boolean; x: number; y: number; width: number; depth: number }>`
-      with cells as (
-        select b.id, b.village_id, b.building_type = 'garden' as garden, b.status='under-construction' as under_construction,
-          case when o.cell_x-v.anchor_cell_x > ${world.widthCells / 2} then o.cell_x-v.anchor_cell_x-${world.widthCells}
-            when o.cell_x-v.anchor_cell_x < ${-world.widthCells / 2} then o.cell_x-v.anchor_cell_x+${world.widthCells}
-            else o.cell_x-v.anchor_cell_x end as dx,
-          case when o.cell_y-v.anchor_cell_y > ${world.heightCells / 2} then o.cell_y-v.anchor_cell_y-${world.heightCells}
-            when o.cell_y-v.anchor_cell_y < ${-world.heightCells / 2} then o.cell_y-v.anchor_cell_y+${world.heightCells}
-            else o.cell_y-v.anchor_cell_y end as dy
-        from buildings b join villages v on v.id=b.village_id and v.world_id=b.world_id
-        join world_cell_occupancies o on o.building_id=b.id and o.world_id=b.world_id
-        where b.world_id=${world.id} and b.village_id in (${sql.join(villages.map(v => v.id))})
-      ), grouped as (
-        select id, village_id, garden, under_construction, (min(dx)+max(dx))::float8/2 as x, (min(dy)+max(dy))::float8/2 as y,
-          (max(dx)-min(dx)+1)::float8 as width, (max(dy)-min(dy)+1)::float8 as depth,
-          row_number() over(partition by village_id order by id) as rank
-        from cells group by id, village_id, garden, under_construction
-      ) select village_id, garden, under_construction, x, y, width, depth from grouped where rank <= 64`.execute(tx);
+    const blocks = await readVillageExteriorBlocks(tx, world, villages.map(v => v.id));
+    const liveIds = new Set(rows.rows.map(v => v.id));
     return { world, sampledAt: new Date().toISOString(), truncated: candidates.size > 32,
       villages: villages.map(v => {
         const report = !v.own && reportsById.get(v.id);
-        if (report) return { id: report.villageId, anchorCellX: report.anchorCellX, anchorCellY: report.anchorCellY, blocks: report.blocks };
+        // Reports remain dated knowledge. They must not downgrade today's public
+        // exterior to old cuboids while the actual village is visible nearby.
+        if (report && !liveIds.has(v.id)) return { id: report.villageId, anchorCellX: report.anchorCellX, anchorCellY: report.anchorCellY, blocks: report.blocks };
         const detailed = v.own || preview;
-        return { ...(detailed ? { id: v.id } : {}), anchorCellX: v.anchorCellX, anchorCellY: v.anchorCellY,
-          blocks: blocks.rows.filter(b => b.villageId === v.id && (detailed || !b.garden))
-            .map(({ garden, underConstruction, x, y, width, depth }) => ({ x, y, width, depth,
-              ...(detailed ? { garden, ...(underConstruction ? { underConstruction: true } : {}) } : {}) })) };
+        return { ...(detailed || report ? { id: v.id } : {}), anchorCellX: v.anchorCellX, anchorCellY: v.anchorCellY,
+          blocks: blocks.filter(b => b.villageId === v.id)
+            .map(b => { const { garden, underConstruction, x, y, width, depth } = b;
+              return { x, y, width, depth, ...(b.exterior ? { exterior: b.exterior } : {}),
+              ...(detailed ? { garden, ...(underConstruction ? { underConstruction: true } : {}) } : {}) }; }) };
       }) };
   });
 }

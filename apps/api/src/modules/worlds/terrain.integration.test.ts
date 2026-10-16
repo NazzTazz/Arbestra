@@ -72,7 +72,8 @@ describe.sequential('read-only streamed terrain', () => {
     expect(data.villages).toHaveLength(1);
     expect(data.villages[0]).toMatchObject({ id: DEVELOPMENT_IDS.village, anchorCellX: 1024, anchorCellY: 512,
       blocks: [{ x: -1, y: 0, width: 1, depth: 1, garden: false }] });
-    expect(JSON.stringify(data)).not.toMatch(/owner|resources|population|level|status|buildingId|production/);
+    expect(data.villages[0].blocks[0].exterior).toMatchObject({ model: 'town-hall', level: 1, phase: 'finished' });
+    expect(JSON.stringify(data)).not.toMatch(/owner|resources|population|status|buildingId|production|completesAt/);
     const before = await db.selectFrom('buildings').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).execute();
     const occupancies = await db.selectFrom('worldCellOccupancies').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world)
       .where(eb => eb.or([eb('buildingId', '=', DEVELOPMENT_IDS.townHall), eb.and([eb('cellX', 'in', [2047, 0]), eb('cellY', '=', 1023)])])).execute();
@@ -84,7 +85,8 @@ describe.sequential('read-only streamed terrain', () => {
       cellX, cellY: 1023, buildingId: DEVELOPMENT_IDS.townHall, featureId: null, role: 'extension' as const }))).execute();
     const seam = await app.inject({ url: '/api/worlds/aube/terrain/overview/villages?x=2047&y=1023', headers: { cookie } });
     expect(seam.statusCode).toBe(200);
-    expect(seam.json().villages[0].blocks).toEqual([{ x: -.5, y: -1, width: 2, depth: 1, garden: false }]);
+    expect(seam.json().villages[0].blocks).toEqual([expect.objectContaining({ x: -.5, y: -1, width: 2, depth: 1, garden: false,
+      exterior: expect.objectContaining({ model: 'town-hall' }) })]);
     expect(await db.selectFrom('buildings').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).execute()).toEqual(before);
     const far = await app.inject({ url, headers: { cookie } }); expect(far.json().villages).toEqual([]);
     } finally {
@@ -107,7 +109,8 @@ describe.sequential('read-only streamed terrain', () => {
       await db.insertInto('worldCellOccupancies').values({ worldId, buildingId: building.id, featureId: null, cellX: 1030, cellY: 520, role: 'anchor' }).execute();
       const read = async () => (await app.inject({ url, headers: { cookie } })).json();
       const anonymous = (await read()).villages.find((v: { anchorCellX: number }) => v.anchorCellX === 1030);
-      expect(anonymous).toEqual({ anchorCellX: 1030, anchorCellY: 520, blocks: [{ x: 0, y: 0, width: 1, depth: 1 }] });
+      expect(anonymous).toEqual({ anchorCellX: 1030, anchorCellY: 520, blocks: [{ x: 0, y: 0, width: 1, depth: 1,
+        exterior: { model: 'dwelling', level: 1, phase: 'works', quarterTurns: 0 } }] });
       expect(JSON.stringify(anonymous)).not.toMatch(new RegExp(`${villageId}|${building.id}|Secret|garden|underConstruction`));
       await db.insertInto('playerScience').values({ worldId, accountId: DEVELOPMENT_IDS.account, observationsSince: null, solarReport: null }).execute();
       const observedAt = new Date('2026-01-01T00:00:00Z');
@@ -115,7 +118,7 @@ describe.sequential('read-only streamed terrain', () => {
       await db.insertInto('scienceVillageReports').values({ worldId, accountId: DEVELOPMENT_IDS.account, villageId,
         name: 'Old report name', anchorCellX: 1030, anchorCellY: 520, observedAt, blocks: JSON.stringify(blocks) }).execute();
       const reported = (await read()).villages.filter((v: { anchorCellX: number }) => v.anchorCellX === 1030);
-      expect(reported).toEqual([{ id: villageId, anchorCellX: 1030, anchorCellY: 520, blocks }]);
+      expect(reported).toEqual([{ ...anonymous, id: villageId }]);
       expect(await db.selectFrom('scienceVillageReports').select(['name', 'observedAt', 'blocks']).where('worldId', '=', worldId)
         .where('accountId', '=', DEVELOPMENT_IDS.account).where('villageId', '=', villageId).executeTakeFirstOrThrow())
         .toEqual({ name: 'Old report name', observedAt, blocks });

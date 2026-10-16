@@ -17,7 +17,7 @@ import {createRockSurface,rockOutcropElevation} from './rock-surface';
 import { buildResourcePresentation, isResourceRecipe } from './resource-factory';
 
 /** Uses the same generators as the village. The result is centred on its footprint. */
-export function buildPresentation(kit: TimberThatch, code: string, level = 1): Mesh {
+export function buildPresentation(kit: TimberThatch, code: string, level = 1, phase: 'finished' | 'works' = 'finished'): Mesh {
   const resource = code.startsWith('resource:') ? code.slice(9) : '';
   if (isResourceRecipe(resource)) return buildResourcePresentation(kit, resource);
   if(code.startsWith('infra:')) {const kind=code.slice(6);return buildInfrastructurePresentation(kit.scene,{fixture:kind==='brazier'?'brazier':kind==='workshop'?'crossing':'elbow',width:4,length:1,material:['border','workshop','brazier'].includes(kind)?'earth':kind, border:kind==='border',quarterTurns:0,preview:kind==='none'});}
@@ -37,14 +37,14 @@ export function buildPresentation(kit: TimberThatch, code: string, level = 1): M
     const flame=MeshBuilder.CreateCylinder('icon-flame',{diameterBottom:.21,diameterTop:0,height:.65,tessellation:5},kit.scene);
     flame.position.set(.85,.5,.85);flame.material=fire;flame.parent=root;
   }
-  else if (code === 'university') buildUniversity(root, kit, level, 'finished', 0, { mathematics: false, astronomy: false });
-  else if (code === 'stonemason') buildStonemason(root, kit, 'finished', false);
+  else if (code === 'university') buildUniversity(root, kit, level, phase, 0, { mathematics: false, astronomy: false });
+  else if (code === 'stonemason') buildStonemason(root, kit, phase, false);
   else if (code === 'barracks') buildBarracks(root, kit);
-  else if(code==='town-hall'&&level>=2)buildTownHallMarket(root,kit,'finished');
+  else if(code==='town-hall'&&level>=2)buildTownHallMarket(root,kit,phase,kit.lod ? null : root);
   else if (code.startsWith('dwelling') || code === 'town-hall') {
     const recipe = code.startsWith('dwelling') ? { ...(code==='dwelling-logs'?LOG_HOUSE_RECIPE:code==='dwelling-beams'?BEAM_HOUSE_RECIPE:HOUSE_RECIPE), levels: level >= 2 ? 2 : 1 } : HALL_RECIPE;
     const cells = code === 'town-hall' ? [{ cellX: 0, cellY: 0 }, { cellX: 0, cellY: 1 }] : [{ cellX: 0, cellY: 0 }];
-    const plan = buildingPlan({ id: root.name, anchor: cells[0]!, cells, world: { widthCells: 2048, heightCells: 1024 }, recipe });
+    const plan = buildingPlan({ id: root.name, anchor: cells[0]!, cells, world: { widthCells: 2048, heightCells: 1024 }, recipe, phase });
     kit.build(root, plan);
     root.position.y = plan.base;
   } else if (code === 'sawmill') {
@@ -53,7 +53,7 @@ export function buildPresentation(kit: TimberThatch, code: string, level = 1): M
     };
     const sawmill = buildSawmill(kit.scene, { stone: material('stone', '#686a5f'), timber: material('timber', '#794521'), lightTimber: material('light-timber', '#a8672f'),
       darkTimber: material('dark-timber', '#402718'), roof: material('roof', '#5d3226'),
-      trunk: material('trunk', '#523620'), packedEarth: material('earth', '#4f5839'), sawdust: material('sawdust', '#806b3d') }, root.name, level);
+      trunk: material('trunk', '#523620'), packedEarth: material('earth', '#4f5839'), sawdust: material('sawdust', '#806b3d') }, root.name, level, 0, 0, kit.lod);
     sawmill.parent = root;
   } else if (code === 'woodland') {
     const leaves=new StandardMaterial('preview-grove-leaves',kit.scene);leaves.diffuseColor=Color3.FromHexString('#365425');leaves.specularColor=Color3.Black();

@@ -60,7 +60,7 @@ import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainOverview, Trave
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import { getTerrain, getTerrainUpdates, getTerrainOverview, getTerrainVegetationOverview, getTerrainVillages } from '../api/client';
-import { WorldSpace, terrainDemand, delta } from './world-space';
+import { WorldSpace, terrainDemand, delta, normalize } from './world-space';
 import { TerrainStore } from './terrain-store';
 import { TerrainRenderer } from './terrain-renderer';
 import { CloudTransition } from './cloud-transition';
@@ -758,7 +758,15 @@ export class BabylonVillageScene {
 
     this.#deepGround = this.#createTerrain();
     this.#regionalOverview = new RegionalOverview(this.#scene, () => this.#weather, () => this.#space);
-    this.#regionalVillages = new RegionalVillages(this.#scene);
+    this.#regionalVillages = new RegionalVillages(this.#scene, (x, y) => {
+      const ground = this.#store?.ground(x, y)?.height;
+      if (ground !== undefined) return ground;
+      const data = this.#overview;
+      if (!data) return null;
+      const bx = Math.floor(normalize(x, data.world.widthCells) * data.gridWidth / data.world.widthCells);
+      const by = Math.floor(normalize(y, data.world.heightCells) * data.gridHeight / data.world.heightCells);
+      return (data.meanElevations[by * data.gridWidth + bx] ?? 0) * .025;
+    });
     this.#clouds = new CloudTransition(this.#engine);
     for (const material of this.#scene.materials) material.freeze();
     this.#pendingHarvestMaterial = this.#material('harvest-pending', '#f2cf68', 1, '#f2cf68');
@@ -859,7 +867,7 @@ export class BabylonVillageScene {
           const target='sourceMesh' in mesh ? (mesh as import('@babylonjs/core/Meshes/instancedMesh').InstancedMesh).sourceMesh : mesh;
           if(target.visibility!==visibility)target.visibility=visibility;
         }
-        this.#regionalVillages.update(this.#space, this.#state.village.id);
+        this.#regionalVillages.update(this.#space, this.#state.village.id, this.#store?.groundRevision ?? 0);
         for (const mesh of this.#renderer?.meshes() ?? []) {
           mesh.visibility = this.#overview ? 1 - blend : 1;
         }
@@ -2409,6 +2417,7 @@ export class BabylonVillageScene {
     this.#buildableArea?.setEnabled(mode === 'village');
     for (const mesh of this.#previewMeshes) mesh.setEnabled(mode === 'village');
     this.#infrastructureRenderer?.visible(mode!=='world');this.#infrastructurePreview?.visible(mode==='village');if(mode!=='village')this.#infrastructureGhost?.setEnabled(false);
+    this.#regionalVillages.visible(mode !== 'world');
     this.#onCameraMoved(); this.#onViewChanged(mode);
   }
   #updateViewMode(): void {
@@ -2537,6 +2546,7 @@ export class BabylonVillageScene {
           this.#space!.inverse(this.#camera.target.x, this.#camera.target.z), () => this.#weather);
         view.setGeography(data); view.setGlobalModel(this.#globalModelAvailable());
         this.#overview = data; this.#regionalOverview.set(data); this.#torusOverview = view;
+        this.#regionalVillages.invalidateGround();
         if (this.#requestedWorld) this.showWorld();
 
       }).catch(() => { this.#overviewRetryAt = performance.now() + 5_000; })

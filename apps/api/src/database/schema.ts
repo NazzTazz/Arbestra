@@ -1,5 +1,5 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
-import type {BuildingVisualLayout,GardenHarvestStop,TravelCell,ExploitationRequest,InfrastructurePlan,InfrastructureQuote} from '@arbestra/contracts';
+import type {BuildingVisualLayout,GardenHarvestStop,TravelCell,ExploitationRequest,InfrastructurePlan,InfrastructureQuote,TerrainBuildingExterior} from '@arbestra/contracts';
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -451,7 +451,7 @@ export interface Database {
   sciencePlaces: { worldId: string; accountId: string; cellX: number; cellY: number; terrainCode: number; elevation: number;
     observedAt: Timestamp; surveyed: boolean; sourceActivityId: string | null };
   scienceVillageReports: { worldId: string; accountId: string; villageId: string; name: string; anchorCellX: number; anchorCellY: number;
-    observedAt: Timestamp; blocks: JSONColumnType<Array<{ x: number; y: number; width: number; depth: number; garden: boolean }>> };
+    observedAt: Timestamp; blocks: JSONColumnType<Array<{ x: number; y: number; width: number; depth: number; garden: boolean; underConstruction?: boolean; exterior?: TerrainBuildingExterior }>> };
     extractionWorksites: ExtractionWorksitesTable;
     extractionWorksiteTargets: ExtractionWorksiteTargetsTable;
     extractionWorksiteCommands: ExtractionWorksiteCommandsTable;

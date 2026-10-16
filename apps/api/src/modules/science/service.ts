@@ -1,4 +1,5 @@
 import { devTime } from '../operations/dev-timing.js';
+import { readVillageExteriorBlocks } from '../worlds/building-exterior.js';
 import {routeLength,spawnDelta,travelledCells} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
 import { sql, type Transaction } from 'kysely';
@@ -182,15 +183,13 @@ export async function completeScienceAt(tx: Transaction<Database>, economy: Vill
     await wakeOtherCampuses(tx, economy, accountId);
     // Dated exterior report. Never expose owner, stocks, workers or live production.
     const visited = new Set(visitedCells.map(key));
-    const relative = (n: number, centre: number, size: number) => ((n-centre+size/2)%size+size)%size-size/2;
     const others = await tx.selectFrom('villages').select(['id', 'name', 'anchorCellX', 'anchorCellY']).where('worldId', '=', economy.worldId)
       .where('ownerAccountId', '!=', accountId).execute();
     for (const other of others) if (visited.has(key({ cellX: other.anchorCellX, cellY: other.anchorCellY }))) {
-      const blocks = await tx.selectFrom('worldCellOccupancies').innerJoin('buildings', join => join.onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId').onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'))
-        .select(['cellX', 'cellY', 'buildingType']).where('buildings.worldId', '=', economy.worldId).where('buildings.villageId', '=', other.id).limit(64).execute();
+      const blocks = await readVillageExteriorBlocks(tx, world, [other.id]);
       await tx.insertInto('scienceVillageReports').values({ worldId: economy.worldId, accountId, villageId: other.id, name: other.name,
         anchorCellX: other.anchorCellX, anchorCellY: other.anchorCellY, observedAt: at,
-        blocks: JSON.stringify(blocks.map(c => ({ x: relative(c.cellX,other.anchorCellX,village.widthCells), y: relative(c.cellY,other.anchorCellY,village.heightCells), width: 1, depth: 1, garden: c.buildingType === 'garden' }))) })
+        blocks: JSON.stringify(blocks.map(({ x, y, width, depth, garden, underConstruction, exterior }) => ({ x, y, width, depth, garden, underConstruction, exterior }))) })
         .onConflict(oc => oc.columns(['worldId', 'accountId', 'villageId']).doUpdateSet({ name: other.name, observedAt: at, blocks: sql`excluded.blocks` })).execute();
     }
   }

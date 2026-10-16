@@ -48,8 +48,19 @@ export const TerrainVegetationOverviewSchema = Type.Composite([OverviewIdentityS
 })]);
 export type TerrainVegetationOverview = Static<typeof TerrainVegetationOverviewSchema>;
 
-// Anonymous exteriors omit id and block metadata. Owned villages and dated
-// reports retain their known identity/details; report dates live in science.villageReports.
+/** Public visual state only: no building identity, deadline or economic data. */
+export const TerrainBuildingExteriorSchema = Type.Object({
+  model: Type.Union(['town-hall', 'dwelling', 'dwelling-logs', 'dwelling-beams', 'university', 'sawmill', 'stonemason', 'barracks', 'garden'].map(value => Type.Literal(value))),
+  level: Type.Integer({ minimum: 1, maximum: 3 }),
+  phase: Type.Union([Type.Literal('finished'), Type.Literal('works')]),
+  quarterTurns: Type.Integer({ minimum: 0, maximum: 3 }),
+  entranceFace: Type.Optional(Type.Union([Type.Literal('-x'), Type.Literal('+x'), Type.Literal('-z'), Type.Literal('+z')])),
+  offset: Type.Optional(Type.Tuple([Type.Number(), Type.Number()])),
+});
+export type TerrainBuildingExterior = Static<typeof TerrainBuildingExteriorSchema>;
+
+// Anonymous exteriors omit village identity. Dated reports remain snapshots;
+// their observation date lives in science.villageReports. Old blocks remain valid.
 export const TerrainVillageOverviewSchema = Type.Object({
   world: TerrainOverviewWorldSchema, sampledAt: Type.String(), truncated: Type.Boolean(),
   villages: Type.Array(Type.Object({
@@ -58,6 +69,7 @@ export const TerrainVillageOverviewSchema = Type.Object({
       x: Type.Number(), y: Type.Number(), width: Type.Number({ minimum: 1 }), depth: Type.Number({ minimum: 1 }),
       garden: Type.Optional(Type.Boolean()),
       underConstruction: Type.Optional(Type.Boolean()),
+      exterior: Type.Optional(TerrainBuildingExteriorSchema),
     }), { maxItems: 64 }),
   }), { maxItems: 32 }),
 });
