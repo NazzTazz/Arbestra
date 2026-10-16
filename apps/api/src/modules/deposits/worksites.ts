@@ -141,9 +141,9 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
         .where('id', '=', site.id).execute();
       continue;
     }
-    const candidates: Array<{ featureId: string; amount: number; path: TravelCell[]; distance: number }> = [];
+    const candidates: Array<{ featureId: string; amount: number; path: TravelCell[]; transportMs: number }> = [];
     let waitingStock = false, waitingAccess = false;
-    let waitingTarget: { featureId: string; distance: number } | null = null;
+    let waitingTarget: { featureId: string; transportMs: number } | null = null;
     for (const target of targets) {
       const deposit = await readStoneDeposit(tx, economy.worldId, target.featureId);
       if (deposit.resourceCode !== site.resourceCode || (site.resourceCode === 'wood' && deposit.cleared && !target.thresholdReachedAt)) {
@@ -163,14 +163,18 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
       }
       const path = await pathFor(target.featureId);
       if (!path) { waitingAccess = true; continue; }
+      // Keep the contract's integer milliseconds throughout admission. A trip
+      // through seconds can turn 4052 into 4051.9999999999995 and abort the
+      // village transaction when PostgreSQL stores transport_ms as an integer.
+      const transportMs = travelDuration(path, village);
       if (deposit.availableAmount < 1) {
         waitingStock = true;
-        if (!waitingTarget || travelDuration(path)/1000 < waitingTarget.distance)
-          waitingTarget = { featureId: target.featureId, distance: travelDuration(path)/1000 };
+        if (!waitingTarget || transportMs < waitingTarget.transportMs)
+          waitingTarget = { featureId: target.featureId, transportMs };
         continue;
       }
       candidates.push({ featureId: target.featureId, amount: Math.min(100, deposit.availableAmount),
-        path, distance: travelDuration(path)/1000 });
+        path, transportMs });
     }
     if (!candidates.length) {
       const remaining = await tx.selectFrom('extractionWorksiteTargets').select('featureId')
@@ -194,11 +198,11 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
       }
       continue;
     }
-    candidates.sort((a, b) => a.distance - b.distance || a.featureId.localeCompare(b.featureId));
+    candidates.sort((a, b) => a.transportMs - b.transportMs || a.featureId.localeCompare(b.featureId));
     const next = candidates[0]!;
     await tx.updateTable('extractionWorksiteTargets').set({ admittedAt: economy.through })
       .where('worksiteId', '=', site.id).where('featureId', '=', next.featureId).where('admittedAt', 'is', null).execute();
-    const transportMs = next.distance * 1_000;
+    const transportMs = next.transportMs;
     const budget = site.exploitationOrderId ? await worksiteOrderBudget(tx, economy, site.exploitationOrderId, site.resourceCode, site.workerCap) : { cap: site.workerCap };
     if (budget.cap < 1) {
       await tx.updateTable('extractionWorksites').set({ waitReason: 'shared-budget', updatedAt: economy.through }).where('id', '=', site.id).execute();

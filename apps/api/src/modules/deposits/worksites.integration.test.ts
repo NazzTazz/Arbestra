@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { travelDuration } from '@arbestra/contracts';
 import { sql, type Transaction } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import type { Database } from '../../database/schema.js';
@@ -47,6 +48,27 @@ const village = { widthCells: 2048, heightCells: 1024 };
 const path = async () => [{ cellX: 1024, cellY: 512 }, { cellX: 1024, cellY: 513 }, { cellX: 1023, cellY: 514 }];
 const current = (tx: Transaction<Database>, worksiteId: string) => tx.selectFrom('depositExtractions').selectAll()
   .where('worksiteId', '=', worksiteId).where('status', '=', 'in-progress').executeTakeFirst();
+
+it('admits and resumes a worksite with an exact 4052 ms sub-cell journey', async () => {
+  await fixture(async (tx, featureId, t) => {
+    const route = [{ cellX: 1024, cellY: 512 }, { cellX: 1024.526, cellY: 512 }, { cellX: 1023, cellY: 514 }];
+    expect(travelDuration(route, village)).toBe(4052);
+    const economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [featureId] });
+    await admitWorksites(tx, economy, village, async () => route);
+    const first = (await current(tx, id))!;
+    expect(first.transportMs).toBe(4052);
+    expect(first.completesAt.getTime() - t.getTime()).toBe(300_000 + 2 * 4052);
+    await completeStoneExtractionAt(tx, worldId, villageId, first.id, first.completesAt);
+    await completeStoneExtractionAt(tx, worldId, villageId, first.id, first.completesAt);
+    await admitWorksites(tx, { ...economy, through: first.completesAt }, village, async () => route);
+    const next = (await current(tx, id))!;
+    expect(next.id).not.toBe(first.id);
+    expect(next.transportMs).toBe(4052);
+    const site = await tx.selectFrom('extractionWorksites').select('deliveredAmount').where('id', '=', id).executeTakeFirstOrThrow();
+    expect(site.deliveredAmount).toBe('100');
+  });
+});
 
 it('keeps sending proportional lots and delivers until the renewable cutting threshold', async () => {
   await fixture(async (tx, featureId, t) => {
