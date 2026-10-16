@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
-import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {CamelCasePlugin, Kysely, PostgresDialect, sql} from 'kysely';
 import {Pool} from 'pg';
 import type {GeneratedLandscape} from '@arbestra/contracts';
@@ -73,6 +73,16 @@ describe('RC1 verified source cache on isolated worlds', () => {
     expect(compact.chunks[0]!.rc1Edits!.terraces).toEqual(full.chunks[0]!.rc1!.terraces);
     expect(JSON.stringify(compact)).not.toMatch(/heights|water|stride|terrainCodes|elevations/);
     expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(Buffer.byteLength(JSON.stringify(legacy))/10);
+  });
+  it('does not prepare an immutable patch for a mutable-only RC1 refresh', async () => {
+    const ground = await readRc1Ground(db, worlds[0]!);
+    const patch = vi.spyOn(ground, 'patch');
+    try {
+      const compact = await getTerrainUpdates(db, accountId, 'rc1-cache-' + worlds[0]!, '4,0;5,1', false, true);
+      expect(compact.chunks[0]!.rc1Edits?.terraces).toEqual(ground.terraces.filter(t => t.cellX >= 128 && t.cellX < 160 && t.cellY < 32));
+      expect(compact.chunks[1]!.rc1Edits?.terraces).toEqual([]);
+      expect(patch).not.toHaveBeenCalled();
+    } finally { patch.mockRestore(); }
   });
   it('rejects a changed artifact even with the declared checksum and transaction xmin unchanged', async () => {
     const rollback = Error('EXPECTED_CACHE_TEST_ROLLBACK');

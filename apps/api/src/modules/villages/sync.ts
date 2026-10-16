@@ -7,7 +7,7 @@ import { villageFrame, type VillageState } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import type { AppConfig } from '../../config.js';
 import { authenticate } from '../auth/service.js';
-import { getVillageState, ownedVillage, readVillageProjection } from './service.js';
+import { reconcileVillageForRead, ownedVillage, readVillageProjection } from './service.js';
 export { readVillageProjection } from './service.js';
 import { VillageSyncProjections } from './sync-projections.js';
 import { villageSyncRevision } from './sync-revision.js';
@@ -15,6 +15,7 @@ import { HttpError } from '../../errors.js';
 import { advanceEnergy } from '../population/energy.js';
 import { energyState } from '../population/work.js';
 import { markHttpStream, operationsFor } from '../operations/telemetry.js';
+import type {TravelNetworkExecutor} from '../navigation/network-job.js';
 
 export const VILLAGE_SYNC_CHECK_MS = 2_000;
 
@@ -39,7 +40,7 @@ export async function reconcileSyncDeadline(db: Kysely<Database>, accountId: str
   const at=(await db.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
   const cohorts=await db.selectFrom('populationCohorts').selectAll().where('worldId','=',snapshot.world.id).where('villageId','=',villageId).execute();
   if (!villageTransitionDue(snapshot,at) && !cohorts.some(c=>advanceEnergy(energyState(c),at).activity!==c.activity)) return;
-  await getVillageState(db,accountId,worldSlug,villageId);
+  await reconcileVillageForRead(db,accountId,worldSlug,villageId);
 }
 
 export type VillageSyncEvent = { event: 'snapshot'; data: VillageState }
@@ -70,8 +71,8 @@ export class VillageSyncSession {
   }
 }
 
-export async function registerVillageSync(app: FastifyInstance, db: Kysely<Database>, config: AppConfig,wakeups?:ExpeditionWakeups) {
-  const projections = new VillageSyncProjections((accountId, worldSlug, villageId) => readVillageProjection(db, accountId, worldSlug, villageId));
+export async function registerVillageSync(app: FastifyInstance, db: Kysely<Database>, config: AppConfig,compute:TravelNetworkExecutor,wakeups?:ExpeditionWakeups) {
+  const projections = new VillageSyncProjections((accountId, worldSlug, villageId) => readVillageProjection(db, accountId, worldSlug, villageId,compute));
   // A command's commit can race another world commit after snapshot assembly.
   // Verify the revision after COMMIT, replacing only uncertain snapshots.
   app.addHook('preSerialization', async (request, _reply, payload: unknown) => {

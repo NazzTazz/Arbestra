@@ -2,7 +2,7 @@
 
 Date : 12 octobre 2026. Base relue : main, be6532d94086112ebe97af6f4127f2ea7fa9f260.
 
-Statut : **implémentée ; réserves fonctionnelles R1–R3 corrigées et vérifiées le 12 octobre ; recette globale encore à valider**. [Corrections et mesures](CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [contre-recette historique](CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) et [campagnes initiales](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Restent les preuves mémoire/endurance, le corpus froid complet et la recette visuelle/réseau. Migration 042 appliquée en test uniquement. Les objectifs ci-dessous restent des critères de recette.
+Statut : **implémentée ; réserves fonctionnelles R1–R3 corrigées et vérifiées le 12 octobre ; recette globale encore à valider**. [Corrections et mesures](CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [contre-recette historique](CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) et [campagnes initiales](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Restent les preuves mémoire/endurance, le corpus froid complet et la recette visuelle/réseau. Migration 042 appliquée en test et en développement local (`arbestra`) ; API dev redémarrée sur le code actuel le 12 octobre. Les objectifs ci-dessous restent des critères de recette.
 
 ## 1. Décisions et frontière
 
@@ -13,6 +13,8 @@ Statut : **implémentée ; réserves fonctionnelles R1–R3 corrigées et vérif
 **Aucun arbitrage produit bloquant restant pour ce périmètre.** L'ordre validé porte sur les expéditions asynchrones du même village. Il ne leur donne aucune priorité ni réservation vis-à-vis d'une récolte, d'une recherche ou d'une autre activité. Le premier demandeur peut donc être refusé si ses moyens ont été mobilisés entre-temps.
 
 ### Noyau réutilisable, première intégration scientifique
+
+Extension du 16 octobre : le pool `NavigationCompute` est également utilisé pour les projections de réseau village HTTP/SSE. Ce job conserve l'algorithme de réseau existant et ses caches ; le moteur A→B et les règles d'expédition ci-dessous ne changent pas. Une file de lectures bornée partage la capacité CPU, sans connexion PostgreSQL pendant le calcul. Voir [synchronisation village](architecture/village-synchronization.md#calcul-du-réseau-dans-le-worker-de-navigation--16-octobre) pour les limites, erreurs et portée de cette extension.
 
 La navigation a vocation à être utilisée ensuite pour rejoindre un combat et acheminer des ressources entre joueurs. **La première intégration métier est l'expédition ; le moteur géométrique ne dépend pas de la science.** Cette séparation fait partie des critères de livraison de la tranche.
 

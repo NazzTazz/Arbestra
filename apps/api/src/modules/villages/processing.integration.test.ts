@@ -84,13 +84,14 @@ it('rolls back demonstrated changes to stock, team, order, lot, receipt and noti
   await expect(locked(async tx=>{
     await commandProcessing(tx,ctx(),{commandId:randomUUID(),action:'start',buildingId:id,lots:2,workerCount:1});
     expect(Number((await tx.selectFrom('villageResources').select('amount').where('villageId','=',ids.village).where('resourceCode','=','wood').executeTakeFirstOrThrow()).amount)).toBe(1975);
-    expect(await tx.selectFrom('populationCohorts').select('id').where('processingLotId','is not',null).execute()).toHaveLength(1);
-    expect(await tx.selectFrom('processingCommandReceipts').selectAll().execute()).toHaveLength(1);
+    expect(await tx.selectFrom('populationCohorts').select('id').where('worldId','=',ids.world).where('processingLotId','is not',null).execute()).toHaveLength(1);
+    expect(await tx.selectFrom('processingCommandReceipts').selectAll().where('worldId','=',ids.world).execute()).toHaveLength(1);
     expect(await tx.selectFrom('scheduledTasks').selectAll().where('taskType','=',COMPLETE_PROCESSING_TASK).execute()).toHaveLength(1);
     throw error;
   })).rejects.toBe(error);
   expect(await amount('wood')).toBe(2000);expect(await amount('timber')).toBe(0);expect(await orders()).toHaveLength(0);
-  expect(await db.selectFrom('processingLots').selectAll().execute()).toHaveLength(0);expect(await db.selectFrom('processingCommandReceipts').selectAll().execute()).toHaveLength(0);
+  // The reset owns this world; unrelated test worlds can retain their history.
+  expect(await db.selectFrom('processingLots').selectAll().where('worldId','=',ids.world).execute()).toHaveLength(0);expect(await db.selectFrom('processingCommandReceipts').selectAll().where('worldId','=',ids.world).execute()).toHaveLength(0);
   expect(await db.selectFrom('scheduledTasks').selectAll().where('taskType','=',COMPLETE_PROCESSING_TASK).execute()).toHaveLength(0);
   expect(await db.selectFrom('populationCohorts').selectAll().where('villageId','=',ids.village).execute()).toEqual(before);
 });

@@ -52,7 +52,8 @@ it('rejects locked market, same or unknown resources, zero results and insuffici
   for (const overrides of [{ requestedResource: 'wood' }, { requestedResource: 'rings' }, { offeredResource: 'unknown' }, { amount: 1 }, { amount: 2001 }])
     expect((await locked(tx => previewMarket(tx, ctx(), { ...request(), ...overrides }))).valid).toBe(false);
   expect(await amount('wood')).toBe(2000);
-  expect(await db.selectFrom('marketExchanges').selectAll().execute()).toHaveLength(0);
+  // The reset owns this world; unrelated test worlds can retain their history.
+  expect(await db.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(0);
 });
 it('debits once, delivers only at ten minutes and replays without touching notifications', async () => {
   await open(); const command = request(); await locked(tx => commandMarket(tx, ctx(), command));
@@ -91,12 +92,12 @@ it('rejects changed quotes and rolls back demonstrated debit, exchange and notif
   await expect(locked(async tx => {
     await commandMarket(tx, ctx(), request());
     expect(Number((await tx.selectFrom('villageResources').select('amount').where('villageId', '=', ids.village).where('resourceCode', '=', 'wood').executeTakeFirstOrThrow()).amount)).toBe(1900);
-    expect(await tx.selectFrom('marketExchanges').selectAll().execute()).toHaveLength(1);
+    expect(await tx.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(1);
     expect(await tx.selectFrom('scheduledTasks').selectAll().where('taskType', '=', COMPLETE_MARKET_TASK).execute()).toHaveLength(1);
     throw injected;
   })).rejects.toBe(injected);
   expect(await amount('wood')).toBe(2000);
-  expect(await db.selectFrom('marketExchanges').selectAll().execute()).toHaveLength(0);
+  expect(await db.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(0);
   expect(await db.selectFrom('scheduledTasks').selectAll().where('taskType', '=', COMPLETE_MARKET_TASK).execute()).toHaveLength(0);
 });
 it('worker delivery is authoritative even for an old notification and only acknowledges its own task', async () => {
@@ -113,7 +114,7 @@ it('checks ownership and world before admitting trades', async () => {
   await open();
   await expect(commandVillageMarket(db, randomUUID(), 'aube', ids.village, request())).rejects.toMatchObject({ statusCode: 404 });
   await expect(commandVillageMarket(db, ids.account, 'missing-world', ids.village, request())).rejects.toMatchObject({ statusCode: 404 });
-  expect(await db.selectFrom('marketExchanges').selectAll().execute()).toHaveLength(0);
+  expect(await db.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(0);
 });
 it('serializes two competing debits while a village lock is held', async () => {
   await open(); await db.updateTable('villageResources').set({ amount: 100 }).where('villageId', '=', ids.village).where('resourceCode', '=', 'wood').execute();
@@ -139,5 +140,5 @@ it('serializes two competing debits while a village lock is held', async () => {
   const rejected=settled.find(r=>r.status==='rejected');
   if(rejected?.status==='rejected')expect(rejected.reason).toMatchObject({code:'MARKET_UNAVAILABLE'});
   expect(await amount('wood')).toBe(0);
-  expect(await db.selectFrom('marketExchanges').selectAll().execute()).toHaveLength(1);
+  expect(await db.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(1);
 });

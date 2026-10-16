@@ -14,7 +14,7 @@ import { SCIENCE_PROGRAMS } from './programs.js';
 import { getTerrain, getTerrainUpdates } from '../worlds/terrain.js';
 import { wakeScience } from './worker.js';
 import { getTerrainVillages } from '../worlds/terrain-villages.js';
-import { constructBuilding, getVillageState, getStoneDepositDetails } from '../villages/service.js';
+import { constructBuilding, state, getStoneDepositDetails } from '../villages/service.js';
 
 const url = testDatabaseUrl(), db = createDatabase(url), rollback = new Error('science fixture rollback');
 beforeAll(async () => { await migrateToLatest(url); await resetE2eState(url); });
@@ -78,7 +78,7 @@ it('constructs one University with a thirty-cell footprint, charges its catalogu
   await fixture(async(tx)=>{
     const inside={transaction:()=>({execute:<T>(run:(tx:Transaction<Database>)=>Promise<T>)=>run(tx)})} as unknown as Kysely<Database>;
     await tx.updateTable('villageResources').set({amount:1000}).where('worldId','=',ids.world).where('villageId','=',ids.village).where('resourceCode','=','stone').execute();
-    const before=await getVillageState(inside,ids.account,'aube');
+    const before=await state(tx,ids.account,'aube',await beginVillageEconomy(tx,ids.world,ids.village));
     const free=new Set(before.cells.filter(c=>c.canBuild).map(c=>`${c.cellX}:${c.cellY}`));
     const site=before.cells.find(c=>[-2,-1,0,1,2].every(dx=>[-2,-1,0,1,2,3].every(dy=>free.has(`${c.cellX+dx}:${c.cellY+dy}`))));
     expect(site).toBeDefined();

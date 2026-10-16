@@ -1,14 +1,17 @@
 import {receiveHarvestIntent,readHarvestReceipts,processHarvestSubmission} from '../villages/harvest-submissions.js';
 import {acceptHarvestIntent} from '../villages/harvest-intents.js';
 import {wakeExtractionWorksite} from '../villages/complete-construction.js';
-import {createSpawnTerrainField} from '@arbestra/contracts';
+import {createSpawnTerrainField,buildTravelNetwork} from '@arbestra/contracts';
+import {NavigationCompute} from '../navigation/compute.js';
+import {rc1NetworkGround} from '../navigation/rc1-network-ground.js';
+import type {NetworkJob,TravelNetworkExecutor} from '../navigation/network-job.js';
 import {infrastructurePreview,infrastructureCommand} from '../villages/infrastructure.js';
 import {buildApp} from '../../app.js';
 import {loadConfig} from '../../config.js';
 import {hashSessionToken} from '../../security/sessions.js';
 import {beginVillageEconomy,reconcileVillageEconomy} from '../villages/reconcile-economy.js';
 import {materializeWoodlands} from '../deposits/woodland.js';
-import {ownedVillage,stoneTravelPath,startVillageStoneExtraction,constructBuilding,constructBuildingArea,getVillageState} from '../villages/service.js';
+import {ownedVillage,stoneTravelPath,startVillageStoneExtraction,constructBuilding,constructBuildingArea,getVillageState,readVillageProjection} from '../villages/service.js';
 import {getTerrain,getTerrainUpdates} from '../worlds/terrain.js';
 import {readFileSync} from 'node:fs';
 import {sql} from 'kysely';
@@ -39,10 +42,33 @@ describe('effective RC1 installation on isolated worlds',()=>{
   const f=await fixture(),installed=await installVillage(db,compute,accountId,f.slug,f.input);
   expect(installed.remaining).toEqual([]);
   const playable=await getVillageState(db,accountId,f.slug);
+  const navigation=new NavigationCompute(),transfers:boolean[]=[];let captured:NetworkJob|undefined;
+  const executor:TravelNetworkExecutor={network:load=>navigation.network(async known=>{const job=await load(known);captured=job;transfers.push(Boolean(job.ground?.artifact));return job;})};
+  try{
+   expect(playable.travelRoutes.length).toBeGreaterThan(0);
+   const projected=await readVillageProjection(db,accountId,f.slug,playable.village.id,executor);
+   expect(projected.travelRoutes).toEqual(playable.travelRoutes);
+   expect((await readVillageProjection(db,accountId,f.slug,playable.village.id,executor)).travelRoutes).toEqual(playable.travelRoutes);
+   expect(transfers).toEqual([true,false]);
+   // Same signed source, different local height: no previous geometric answer
+   // may survive the changed overlay. The in-process planner is the oracle.
+   const job=captured!;expect(job.ground).toBeDefined();
+   const start=playable.travelRoutes[0]!.cells[0]!,cellX=Math.round(start.cellX),cellY=Math.round(start.cellY);
+   const edits={...job.ground!.edits,terraces:[...job.ground!.edits.terraces.filter(t=>t.cellX!==cellX||t.cellY!==cellY),{cellX,cellY,height:99}]};
+   const changed=buildTravelNetwork(job.state,[],rc1NetworkGround(artifact,createSpawnTerrainField(artifact),edits));
+   expect(changed).not.toEqual(playable.travelRoutes);
+   expect(await navigation.network(async()=>({...job,ground:{...job.ground!,edits}}))).toEqual(changed);
+   expect(await navigation.network(async()=>job)).toEqual(playable.travelRoutes);
+  }finally{await navigation.close();}
   expect(playable.cells.filter(c=>c.building)).toHaveLength(4); // Adjacent gardens form one logical site.
   expect(playable.cells.flatMap(c=>c.building?.garden?.plots??[])).toHaveLength(2);expect(playable.village.population.total).toBe(15);
   const terrain=await getTerrain(db,accountId,f.slug,'4,0');expect(terrain.chunks[0]!.rc1?.terraces).toHaveLength(6);
   const updates=await getTerrainUpdates(db,accountId,f.slug,'4,0');expect(updates.chunks[0]!.rc1?.terraces).toEqual(terrain.chunks[0]!.rc1!.terraces);
+  const mutable=await getTerrainUpdates(db,accountId,f.slug,'4,0',false,true);
+  expect(mutable.chunks[0]!.features).toEqual(updates.chunks[0]!.features);
+  expect(mutable.chunks[0]!.occupiedCells).toEqual(updates.chunks[0]!.occupiedCells);
+  expect(mutable.chunks[0]!.rc1Edits?.terraces).toEqual(terrain.chunks[0]!.rc1!.terraces);
+  expect(mutable.chunks[0]!.rc1).toBeUndefined();
   expect(await db.selectFrom('worldChunks').select('chunkX').where('worldId','=',f.id).execute()).toHaveLength(128);
   expect(await readInstallation(db,accountId,f.slug)).toEqual(installed);
   const buildings=await db.selectFrom('buildings').selectAll().where('worldId','=',f.id).execute();expect(buildings).toHaveLength(5);
@@ -55,7 +81,7 @@ describe('effective RC1 installation on isolated worlds',()=>{
   expect(await db.selectFrom('buildings').selectAll().where('worldId','=',f.id).execute()).toEqual(buildings);
   await expect(installVillage(db,compute,accountId,f.slug,{...f.input,point:{x:141,y:20}})).rejects.toMatchObject({code:'COMMAND_CONFLICT'});
   expect((await db.selectFrom('worldGenerationCandidates').select('artifact').where('worldId','=',f.id).executeTakeFirstOrThrow()).artifact).toEqual(artifact);
- },120000);
+ },180000);
  it('refuses the audited rock footprint before any ordinary construction effects',async()=>{
   const f=await fixture();const installed=await installVillage(db,compute,accountId,f.slug,{...f.input,mode:'manual',point:{x:189,y:246}});
   const read=async()=>({resources:await db.selectFrom('villageResources').selectAll().where('worldId','=',f.id).orderBy('resourceCode').execute(),occupancy:await db.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',f.id).orderBy('cellX').orderBy('cellY').execute(),buildings:await db.selectFrom('buildings').selectAll().where('worldId','=',f.id).orderBy('id').execute(),tasks:await db.selectFrom('scheduledTasks').selectAll().where('worldId','=',f.id).orderBy('id').execute()});

@@ -106,7 +106,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
       lastObservedAt: new Date().toISOString(), lastSuccessAt: state.lastSuccessAt, lastErrorAt: state.lastErrorAt,
       note: 'Connexion LISTEN locale observée ; ne prouve pas la livraison réseau au navigateur.' };
   });
-  const villageProjections = await registerVillageSync(app, db, config,wakeups);
+  const villageProjections = await registerVillageSync(app, db, config,navigation,wakeups);
   // Close SSE owners before rejecting their outstanding CPU work at shutdown.
   app.addHook('preClose',stopExpeditions);
   await registerAuthRoutes(app, db, config);
@@ -114,7 +114,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerAdminRoutes(app, db, config, async () => operations.snapshot(await databaseProbe.read()));
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
-  await registerVillageRoutes(app, db, config, villageProjections);
+  await registerVillageRoutes(app, db, config, villageProjections,navigation);
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app,db,config);
   return app;

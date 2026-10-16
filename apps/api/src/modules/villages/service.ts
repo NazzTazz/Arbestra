@@ -1,7 +1,10 @@
+import { devTime, devTimeSync } from '../operations/dev-timing.js';
 import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
 import {readRc1Source} from '../worlds/rc1-source.js';
 import {villageSyncRevision} from './sync-revision.js';
+import { VillageReadReconciliations } from './read-reconciliation.js';
+import {networkJob,networkState,type NetworkJob,type TravelNetworkExecutor} from '../navigation/network-job.js';
 import {naturalFeaturesQuery} from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -84,11 +87,12 @@ export interface OwnedVillage {
 const number = (value: string | number) => Number(value);
 
 export async function ownedVillage(
-  tx: Transaction<Database>,
+  tx: Kysely<Database>,
   accountId: string,
   worldSlug: string,
   villageId?: string,
 ): Promise<OwnedVillage> {
+  return devTime('ownership', async () => {
   const row = await tx
     .selectFrom('villages')
     .innerJoin('worlds', 'worlds.id', 'villages.worldId')
@@ -124,6 +128,7 @@ export async function ownedVillage(
       'Village introuvable dans ce monde.',
     );
   return row;
+  });
 }
 async function catalog(
   tx: Transaction<Database>,
@@ -191,6 +196,7 @@ async function snapshot(
   tx: Transaction<Database>,
   village: OwnedVillage,
 ): Promise<Snapshot> {
+  return devTime('snapshot_ground', async () => {
   const originCellX = normalizeCell(
       village.anchorCellX - SNAPSHOT_SIZE / 2,
       village.widthCells,
@@ -261,6 +267,7 @@ async function snapshot(
         : undefined;
     },
   };
+  });
 }
 
 /** Route beyond the visual snapshot, using real world chunks and occupancy in a bounded corridor. */
@@ -381,11 +388,13 @@ async function featuresInSnapshot(
   village: OwnedVillage,
   ground: Snapshot,
 ) {
+  return devTime('features', async () => {
   const endX = ground.originCellX + SNAPSHOT_SIZE;
   const endY = ground.originCellY + SNAPSHOT_SIZE;
   const xs=endX<=village.widthCells?[[ground.originCellX,endX]]:[[ground.originCellX,village.widthCells],[0,endX-village.widthCells]];
   const ys=endY<=village.heightCells?[[ground.originCellY,endY]]:[[ground.originCellY,village.heightCells],[0,endY-village.heightCells]];
   return naturalFeaturesQuery(tx,village.worldId,xs.flatMap(([minX,maxX])=>ys.map(([minY,maxY])=>({minX:minX!,maxX:maxX!,minY:minY!,maxY:maxY!})))).execute();
+  });
 }
 function protectedCell(
   cellX: number,
@@ -412,6 +421,7 @@ function protectedCell(
 
 /** Final writes common to command replies and ordinary snapshots. */
 async function finalizeVillageEconomy(tx: Transaction<Database>, economy: VillageEconomy, village: OwnedVillage, admit = true) {
+  return devTime('admission', async () => {
   // Keep the command bound, including zero-duration transitions and admissions.
   await reconcileVillageEconomy(tx, economy);
   if (admit) {
@@ -419,6 +429,7 @@ async function finalizeVillageEconomy(tx: Transaction<Database>, economy: Villag
     await admitWorksites(tx, economy, village, featureId => stoneTravelPath(tx, village, featureId));
     await admitScience(tx, economy);
   }
+  });
 }
 export type ConstructionReplyMode = 'snapshot' | 'commit';
 export interface ConstructionCommit { worldId: string; villageId: string; through: Date; commandId?: string }
@@ -444,9 +455,26 @@ export function withVillageProjection<T>(db: Kysely<Database>, accountId: string
   });
 }
 
-export function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
-  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
+export async function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
+  compute?:TravelNetworkExecutor) {
+  // The low-level inline reader remains usable by transactional integration
+  // callers. Every application HTTP/SSE projection injects the shared CPU pool.
+  if(!compute)return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
     state(tx, accountId, worldSlug, economy, false, true));
+  let projected:VillageState|undefined;
+  const routes=await compute.network(async known=>{
+    let captured:{input:NetworkJob['state'];ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined}|undefined;
+    projected=await withVillageProjection(db,accountId,worldSlug,villageId,(tx,economy)=>
+      state(tx,accountId,worldSlug,economy,false,true,(input,ground)=>{captured={input,ground};}));
+    // All data comes from that one MVCC snapshot. SQL is finished before worker
+    // transfer/search, and the result does not acquire a newer revision or H.
+    if(!captured)throw Error('Missing navigation projection');
+    const {input,ground}=captured;
+    return devTimeSync('navigation_input',()=>networkJob(input,ground,known));
+  });
+  if(!projected)throw Error('Missing village projection');
+  projected.travelRoutes.unshift(...routes); // Committed woodland paths were captured with the snapshot.
+  return projected;
 }
 
 /** The same persisted footprints and garden components serve projection and road validation. */
@@ -588,7 +616,10 @@ export async function state(
   existingEconomy?: VillageEconomy,
   admit = true,
   readOnly = false,
+  deferNavigation?: (input:NetworkJob['state'],ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined)=>void,
 ): Promise<VillageState> {
+  return devTime('snapshot', async () => {
+  if(deferNavigation&&!readOnly)throw Error('Deferred navigation requires a read-only projection');
   if(readOnly&&!existingEconomy)throw Error('Read-only projection requires an explicit clock/context');
   const village = await ownedVillage(tx, accountId, worldSlug, existingEconomy?.villageId);
   // Prepare immutable geography before the economy lock. snapshot() revalidates
@@ -608,7 +639,7 @@ export async function state(
     protectedRows,
     hiddenSupplyRows,
     accomplishmentRows,
-  ] = await Promise.all([
+  ] = await devTime('snapshot_reads', () => Promise.all([
     snapshot(tx, village),
     tx
       .selectFrom('villageResources')
@@ -633,8 +664,8 @@ export async function state(
     tx.selectFrom('villageAccomplishments').select(['code', 'completedAt'])
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
       .orderBy('completedAt').orderBy('code').execute(),
-  ]);
-  const resources = await Promise.all(
+  ]));
+  const resources = await devTime('resources', () => Promise.all(
     resourcesRows.map(async (row) => {
       const projected = await projectVillageResource(
         tx,
@@ -653,8 +684,8 @@ export async function state(
           projected.productionUpdatedAt?.toISOString() ?? null,
       };
     }),
-  );
-  const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots] = await Promise.all([
+  ));
+  const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots] = await devTime('population', () => Promise.all([
     readOnly ? tx.selectFrom('populationCohorts').selectAll().where('worldId','=',village.worldId)
       .where('villageId','=',village.villageId).orderBy('id').execute() : reconcileRestHousing(tx,village.worldId,village.villageId,at),
     tx.selectFrom('buildings').select(['id','buildingType', 'level']).where('worldId', '=', village.worldId)
@@ -664,7 +695,7 @@ export async function state(
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
     readExtractions(tx, village.worldId, village.villageId),
     projectGardenPlots(tx, village.worldId, village.villageId, at),
-  ]);
+  ]));
   const projectedCohorts = cohorts.map((cohort) => ({
     ...cohort,
     energy: advanceEnergy({
@@ -880,9 +911,11 @@ export async function state(
       })
       .filter((cell) => cell.canBuild || cell.footprint !== null),
   };
-  villageState.infrastructure=await readInfrastructure(tx,village.worldId,village.villageId);
+  villageState.infrastructure=await devTime('infrastructure',()=>readInfrastructure(tx,village.worldId,village.villageId));
   villageState.factoryEnabled=await factoryCapability(tx,village.worldId);
-  villageState.travelRoutes = buildTravelNetwork({...villageState,infrastructure:await readNavigationInfrastructure(tx,village,villageState.infrastructure)},[],ground.rc1?.navigation);
+  const navigationInfrastructure = await devTime('infrastructure',()=>readNavigationInfrastructure(tx,village,villageState.infrastructure));
+  if(deferNavigation){deferNavigation(networkState({...villageState,infrastructure:navigationInfrastructure}),ground.rc1);villageState.travelRoutes=[];}
+  else villageState.travelRoutes = devTimeSync('navigation',()=>buildTravelNetwork({...villageState,infrastructure:navigationInfrastructure},[],ground.rc1?.navigation));
   // Reuse committed mission paths; do not search routes to every woodland in the snapshot.
   for (const extraction of villageState.village.extractions) if (extraction.resourceCode === 'wood' && extraction.path.length) {
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',
@@ -893,6 +926,7 @@ export async function state(
   // HTTP adapter replaces such a snapshot after commit with a coherent reader.
   if (syncBefore.others === syncAfter.others) villageState.syncRevision = syncAfter.revision;
   return villageState;
+  });
 }
 
 async function definition(
@@ -1043,15 +1077,32 @@ async function reserveSelection(
   }
 }
 
-export function getVillageState(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId?: string,
-) {
-  return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    return state(tx, accountId, worldSlug, await beginVillageEconomy(tx, village.worldId, village.villageId));
+const readReconciliations = new WeakMap<Kysely<Database>, VillageReadReconciliations>();
+
+/** Read-side wakeup: finish all economic writes, but do not build a transport
+ * snapshot while holding village/deposit/navigation locks. */
+export async function reconcileVillageForRead(db: Kysely<Database>, accountId: string, worldSlug: string, villageId?: string) {
+  // Resolve the default village and check this caller before joining a flight.
+  const candidate = await ownedVillage(db, accountId, worldSlug, villageId);
+  let reconciliations = readReconciliations.get(db);
+  if (!reconciliations) {
+    reconciliations = new VillageReadReconciliations((owner, slug, id) => db.transaction().execute(async tx => {
+      const village = await ownedVillage(tx, owner, slug, id);
+      if (village.generationVersion === 3) await readRc1Source(tx, village.worldId);
+      const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+      return villageCommandResult(tx, owner, slug, village, economy, 'commit');
+    }));
+    readReconciliations.set(db, reconciliations);
+  }
+  return reconciliations.run(accountId, worldSlug, candidate.worldId, candidate.villageId);
+}
+
+export function getVillageState(db: Kysely<Database>, accountId: string, worldSlug: string, villageId?: string,compute?:TravelNetworkExecutor) {
+  return devTime('village', async () => {
+    const committed = await reconcileVillageForRead(db, accountId, worldSlug, villageId);
+    // This fresh MVCC view starts after the wakeup committed; its own serverTime
+    // and revision cover every projected field. Commands retain their existing H.
+    return readVillageProjection(db, accountId, worldSlug, committed.villageId,compute);
   });
 }
 

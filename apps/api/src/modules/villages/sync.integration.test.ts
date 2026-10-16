@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
 import { writeFileSync } from 'node:fs';
-import { sql, type KyselyPlugin, type QueryId, type Kysely, type Transaction } from 'kysely';
+import { sql, CamelCasePlugin, PostgresDialect, Kysely, type KyselyPlugin, type QueryId, type Transaction } from 'kysely';
+import pg from 'pg';
 import type { Database } from '../../database/schema.js';
 import { readWorksites } from '../deposits/worksites.js';
 import { readExtraction, readExtractions } from '../deposits/stone-extractions.js';
 import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
 import { prepareInfrastructureEdit, buildingAccesses, applyInfrastructureConfirmation, type InfrastructureConfirmation, type InfrastructureRequest } from '@arbestra/contracts';
-import { constructBuilding, constructBuildingArea, withVillageProjection, readInfrastructureSpatialState, state } from './service.js';
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import { constructBuilding, constructBuildingArea, withVillageProjection, readInfrastructureSpatialState, state, getVillageState, reconcileVillageForRead } from './service.js';
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import * as contracts from '@arbestra/contracts';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { applyVillageFrame, VillageStateSchema, type VillageState, type VillageFrame, type VillageCommandResponse } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
@@ -18,6 +21,11 @@ import { buildApp } from '../../app.js';
 import { completeConstruction } from './complete-construction.js';
 import { readVillageProjection, reconcileSyncDeadline, VillageSyncSession } from './sync.js';
 import { villageSyncRevision } from './sync-revision.js';
+import { instrumentHttp, OperationsTelemetry, operationsFor } from '../operations/telemetry.js';
+import { discoverBuildingSuppliesInTransaction } from './service.js';
+import { HttpError } from '../../errors.js';
+import { DevTimingTrace, withDevTiming } from '../operations/dev-timing.js';
+import { parseDevServerTiming } from '@arbestra/contracts';
 
 const url = testDatabaseUrl(), target = new URL(url);
 if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test') throw Error('Unexpected synchronization fixture DB');
@@ -37,6 +45,17 @@ beforeAll(async () => {
     await db.updateTable('villages').set({name:'After snapshot before response'}).where('id','=',villageId).execute();
     return captured;
   });
+  app.get('/noc-v11-fixture/:kind', async (request, reply) => {
+    const { kind } = request.params as { kind: string };
+    if (kind === 'busy') throw new HttpError(503, 'ADMIN_BUSY', 'Capacité occupée.');
+    if (kind === 'unavailable') throw new HttpError(503, 'ADMIN_DATA_UNAVAILABLE', 'Lecture indisponible.');
+    if (kind === 'direct') return reply.status(503).send({ code: 'must-not-inspect-payload' });
+    throw new Error('secret-exception\npostgres://secret-noc:password@private', { cause: new Error('nested-secret-noc') });
+  });
+  app.get('/noc-v11-serialization', { schema: { response: { 200: { type: 'object', required: ['requiredNumber'],
+    properties: { requiredNumber: { type: 'integer' } } } } } }, async () => ({}));
+  app.get('/noc-v11-validation', { schema: { querystring: { type: 'object', required: ['count'],
+    properties: { count: { type: 'integer', minimum: 1 } } } } }, async () => ({ ok: true }));
 }, 120000);
 beforeEach(async()=>{
   // Every case owns fresh geometry and cursors; earlier construction tests cannot obstruct later roads.
@@ -131,11 +150,18 @@ it('recovers an unannounced worker commit on a connected SSE client, without a f
   // the reason this lost publication is recovered. The worker commits alone.
   await db.updateTable('buildings').set({ constructionCompletesAt: new Date(Date.now() + 3600000) })
     .where('worldId', '=', worldId).where('id', '=', houseId).execute();
+  const operations = operationsFor(app);
+  if (!operations) throw Error('HTTP/SSE instrumentation is not registered');
+  const observation = () => operations.snapshot({ status: 'unknown', latencyMs: null, observedAt: null,
+    connections: null, activeQueries: null, note: 'Database health is not probed by this SSE assertion.' });
+  const httpBefore = observation().http;
   const base = await app.listen({ host: '127.0.0.1', port: 0 }), controller = new AbortController();
   const response = await fetch(`${base}/api/worlds/${slug}/villages/${villageId}/events?revision=0`, {
-    signal: controller.signal, headers: { cookie: `arbestra_session=${token}`, 'Last-Event-ID': '999999' },
+    signal: controller.signal, headers: { cookie: `arbestra_session=${token}`, 'Last-Event-ID': '999999', 'X-Request-Id': 'forged-sse-id' },
   });
   expect(response.status).toBe(200); expect(response.headers.get('content-type')).toBe('text/event-stream');
+  const requestId = response.headers.get('x-request-id');
+  expect(requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const reader = response.body!.getReader(), decoder = new TextDecoder(); let buffer = '';
   async function nextEvent() {
     const deadline = setTimeout(() => controller.abort(), 15000);
@@ -154,6 +180,11 @@ it('recovers an unannounced worker commit on a connected SSE client, without a f
   }
   try {
     const initial = await nextEvent(); expect(initial.event).toBe('snapshot'); const local = initial.data as VillageState;
+    const connected = observation();
+    expect(connected.sse).toMatchObject({ connections: 1, accounts: 1,
+      worlds: [{ worldId, connections: 1, accounts: 1 }] });
+    expect(connected.http.activeRequests).toBe(0); // The open SSE has its own counter.
+    expect(connected.http.requests).toBe(httpBefore.requests);
     expect(local.cells.find(c => c.building?.id === houseId)?.building?.status).toBe('under-construction');
     const started = performance.now();
     // Actual worker handler and transaction; there is intentionally no publish call.
@@ -175,17 +206,145 @@ it('recovers an unannounced worker commit on a connected SSE client, without a f
     expect(await revision()).toBe(committedRevision); // No following business mutation.
     expect(applyVillageFrame(result.state, frame).kind).toBe('ignored');
     console.info('SYNC_WORKER_RECOVERY', { totalMs: Math.round(performance.now() - started), afterCommitMs: Math.round(performance.now()-committed), snapshotBytes: JSON.stringify(local).length, frameBytes: JSON.stringify(frame).length });
-  } finally { controller.abort(); await reader.cancel().catch(() => undefined); }
+  } finally {
+    controller.abort(); await reader.cancel().catch(() => undefined);
+    const closeDeadline = performance.now() + 5_000;
+    while (observation().sse.connections !== 0 && performance.now() < closeDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    const disconnected = observation();
+    expect(disconnected.sse).toMatchObject({ connections: 0, accounts: 0, worlds: [] });
+    expect(disconnected.http.activeRequests).toBe(0);
+    expect(disconnected.http.requests).toBe(httpBefore.requests);
+    expect(disconnected.http.aborted).toBe(httpBefore.aborted);
+    expect(operations.httpDiagnostics.list({ requestId: requestId! }).items).toHaveLength(0);
+  }
 });
 
 it('versions real HTTP reads and refuses an unauthenticated stream', async () => {
   const response = await app.inject({ url: `/api/worlds/${slug}/village?villageId=${villageId}`, cookies: { arbestra_session: token } });
   expect(response.statusCode).toBe(200); expect(response.json<VillageState>().syncRevision).toBe(await revision());
+  const operations = operationsFor(app)!;
+  const database = { status: 'unknown' as const, latencyMs: null, observedAt: null, connections: null, activeQueries: null, note: 'Test' };
+  const beforeRefusal = operations.snapshot(database).http;
   const denied = await app.inject({ url: `/api/worlds/${slug}/villages/${villageId}/events` }); expect(denied.statusCode).toBe(401);
+  expect(denied.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+  expect(operations.snapshot(database).http.errors4xx).toBe(beforeRefusal.errors4xx + 1);
   const foreign=await app.inject({url:`/api/worlds/${slug}/villages/${hallId}/events`,cookies:{arbestra_session:token}});expect(foreign.statusCode).toBe(404);
   // No foreign world's markers are part of this revision.
   const count = (await sql<{n:string}>`select count(*)::text as n from village_sync_changes where world_id=${worldId}::uuid`.execute(db)).rows[0]!.n;
   expect(Number(count)).toBe(await revision());
+});
+
+it('preserves supplies credits and SQL with HTTP and development diagnostics enabled or absent', async () => {
+  // Replay the same existing economic command against the same private fixture.
+  // Exact sentinel rollbacks restore it between variants, after observing writes.
+  await db.updateTable('buildings').set({ constructionCompletesAt: new Date(Date.now() + 3_600_000) })
+    .where('id', '=', houseId).execute();
+  await db.insertInto('buildingHiddenSupplies').values({ worldId, villageId, buildingId: hallId,
+    resourceCode: 'wood', amount: 250, claimedAt: null }).execute();
+  const tables = ['villageResources', 'villageResourceFlows', 'buildingHiddenSupplies',
+    'villageAccomplishments', 'buildings', 'scheduledTasks', 'populationCohorts', 'sciencePlaces', 'playerScience'] as const;
+  async function stored(source: Kysely<Database>) {
+    const result: Record<string, unknown> = {};
+    for (const table of tables) result[table] = await source.selectFrom(table).selectAll().where('worldId', '=', worldId).execute();
+    return result;
+  }
+  // Only the real statement_timestamp-derived dates differ across the replays.
+  // geographyRevision is max(science_places.observed_at) in milliseconds, not a counter.
+  const withoutDates = (value: unknown) => JSON.parse(JSON.stringify(value, (key, item: unknown) =>
+    key === 'geographyRevision' && typeof item === 'number' && item > 0 ? '<timestamp>' : item
+  ).replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z/g, '<timestamp>')) as unknown;
+  const before = await stored(db), priorRevision = await revision();
+  const results: Array<{ response: unknown; stored: unknown; queryKinds: string[] }> = [];
+  for (const mode of ['plain', 'http', 'dev'] as const) {
+    const enabled = mode !== 'plain', devTrace = new DevTimingTrace();
+    const server = Fastify(), telemetry = new OperationsTelemetry(Date.now, false, { slowThresholdMs: 250 });
+    let clock = 0;
+    if (enabled) instrumentHttp(server, telemetry, { monotonicNow: () => { clock += 300; return clock; } });
+    const queryKinds: string[] = [];
+    const plugin: KyselyPlugin = { transformQuery(args) { queryKinds.push(args.node.kind); return args.node; },
+      async transformResult(args) { return args.result; } };
+    const injected = new Error('noc-supplies-after-observed-writes');
+    server.post('/supplies', async () => {
+      let response: VillageState | undefined, written: unknown;
+      const execute = () => db.withPlugin(plugin).transaction().execute(async tx => {
+        response = await discoverBuildingSuppliesInTransaction(tx, accountId, slug, villageId, hallId);
+        expect(response.village.wood).toBe(2250);
+        const repeated = await discoverBuildingSuppliesInTransaction(tx, accountId, slug, villageId, hallId);
+        expect(repeated.village.wood).toBe(2250); // No double credit on retry.
+        written = await stored(tx);
+        expect(await tx.selectFrom('villageAccomplishments').selectAll().where('worldId', '=', worldId).execute()).toHaveLength(1);
+        expect((await tx.selectFrom('buildingHiddenSupplies').select('claimedAt').where('worldId', '=', worldId).executeTakeFirstOrThrow()).claimedAt).not.toBeNull();
+        throw injected;
+      });
+      await expect(mode === 'dev' ? withDevTiming(devTrace, execute) : execute()).rejects.toBe(injected);
+      if (mode === 'dev') {
+        const timings = parseDevServerTiming(devTrace.header());
+        expect(timings.find(m => m.phase === 'sql')!.count).toBeGreaterThan(20);
+        expect(timings.some(m => m.phase === 'economy')).toBe(true);
+        expect(timings.some(m => m.phase === 'snapshot')).toBe(true);
+      }
+      results.push({ response: withoutDates(response), stored: withoutDates(written), queryKinds });
+      return response;
+    });
+    try {
+      const response = await server.inject({ method: 'POST', url: '/supplies' });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json<VillageState>().village.wood).toBe(2250);
+      if (enabled) expect(telemetry.httpDiagnostics.metadata().retained).toBe(1);
+      expect(await stored(db)).toEqual(before);
+      expect(await revision()).toBe(priorRevision);
+    } finally { await server.close(); telemetry.close(); }
+  }
+  expect(results[1]).toEqual(results[0]);
+  expect(results[2]).toEqual(results[0]);
+}, 120_000);
+
+it('reports actual village and terrain phases only on opted-in development reads', async () => {
+  // Terrain reads require the complete 3×3 halo around chunk (2,2).
+  for (const chunkX of [1,2,3]) for (const chunkY of [1,2,3]) if (chunkX === 3 || chunkY === 3)
+    await db.insertInto('worldChunks').values({ worldId, chunkX, chunkY, generationVersion: 1,
+      terrainCodes: Array(1024).fill(1), elevations: Array(1024).fill(0) }).execute();
+  const before = await app.inject({ url: `/api/worlds/${slug}/village`, cookies: { arbestra_session: token } });
+  expect(before.statusCode, before.body).toBe(200); expect(before.headers['server-timing']).toBeUndefined();
+  for (const [path, phases] of [
+    ['village', ['auth','village','village_lock','economy','snapshot','sync','serialize','pool','sql']],
+    ['terrain?chunks=2,2', ['auth','terrain','knowledge','chunks','serialize','pool','sql']],
+  ] as const) {
+    const response = await app.inject({ url: `/api/worlds/${slug}/${path}`, cookies: { arbestra_session: token }, headers: { 'x-arbestra-dev-timing': '1' } });
+    expect(response.statusCode, response.body).toBe(200);
+    const rows = parseDevServerTiming(String(response.headers['server-timing']));
+    for (const phase of phases) expect(rows.map(m => m.phase), phase).toContain(phase);
+    expect(rows.find(m => m.phase === 'sql')!.count).toBeGreaterThan(0);
+    expect(response.headers['server-timing']).not.toMatch(/select |password|accountId|token/);
+    expect(response.json().world.id).toBe(worldId);
+  }
+}, 120_000);
+
+it('classifies HTTP outcomes through the real application error handler', async () => {
+  const telemetry = operationsFor(app)!;
+  for (const [url, status, code] of [
+    ['/noc-v11-fixture/busy', 503, 'ADMIN_BUSY'],
+    ['/noc-v11-fixture/unavailable', 503, 'ADMIN_DATA_UNAVAILABLE'],
+    ['/noc-v11-fixture/direct', 503, 'HTTP_SERVER_RESPONSE'],
+    ['/noc-v11-fixture/exception', 500, 'INTERNAL_ERROR'],
+    ['/noc-v11-serialization', 500, 'INTERNAL_ERROR'],
+  ] as const) {
+    const response = await app.inject({ url: url + '?secret=query-secret-noc', headers: { 'x-request-id': randomUUID() } });
+    expect(response.statusCode, response.body).toBe(status);
+    const requestId = response.headers['x-request-id'] as string;
+    const detail = telemetry.httpRequestDetail(requestId, telemetry.instanceId);
+    expect(detail.observation).toMatchObject({ requestId, statusCode: status, safeCode: code,
+      outcome: 'response', reasons: expect.arrayContaining(['server_error']) });
+    expect(detail.events).toHaveLength(1);
+    expect(detail.events[0]?.httpRequest).toEqual({ instanceId: telemetry.instanceId, requestId });
+    expect(JSON.stringify(detail)).not.toMatch(/secret-noc|password|private|must-not-inspect-payload/);
+  }
+  const validation = await app.inject('/noc-v11-validation?count=invalid');
+  expect(validation.statusCode).toBe(400);
+  expect(validation.json().code).toBe('VALIDATION_ERROR');
+  expect(validation.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
 });
 
 it('deduplicates a real construction response and its SSE frame, retaining command idempotence',async()=>{
@@ -213,6 +372,128 @@ it('reconciles a due construction and resting activity without relying on a live
   const update=await session.check();expect(update.event).toBe('frame');
   expect((await db.selectFrom('buildings').select('status').where('id','=',building.buildingId!).executeTakeFirstOrThrow()).status).toBe('completed');
   expect((await db.selectFrom('populationCohorts').select('activity').where('id','=',cohortId).executeTakeFirstOrThrow()).activity).toBe('idle');
+});
+
+it('offloads HTTP snapshot navigation without changing the projected routes', async () => {
+  await reconcileVillageForRead(db, accountId, slug, villageId);
+  const reference = await read();
+  const inline = vi.spyOn(contracts, 'buildTravelNetwork');
+  try {
+    const response = await app.inject({ url: `/api/worlds/${slug}/village`, cookies: { arbestra_session: token } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json<VillageState>().travelRoutes).toEqual(reference.travelRoutes);
+    expect(inline).not.toHaveBeenCalled();
+  } finally { inline.mockRestore(); }
+});
+
+it('releases the only SQL connection before route computation and retains the captured revision', async () => {
+  await reconcileVillageForRead(db,accountId,slug,villageId);
+  const reference=await read();
+  const single=new Kysely<Database>({dialect:new PostgresDialect({pool:new pg.Pool({connectionString:url,max:1})}),plugins:[new CamelCasePlugin()]});
+  let enter!:()=>void,release!:()=>void,expire!:(error:Error)=>void;
+  const entered=new Promise<void>(r=>{enter=r;}),gate=new Promise<void>(r=>{release=r;});
+  const timeout=new Promise<never>((_,reject)=>{expire=reject;});
+  const timer=setTimeout(()=>{release();expire(Error('Projection worker barrier timed out'));},15000);
+  const pending=readVillageProjection(single,accountId,slug,villageId,{network:async load=>{
+    const captured=await load({sources:new Set()});enter();await gate;
+    return contracts.buildTravelNetwork(captured.state);
+  }});
+  let changed:Promise<unknown>|undefined;
+  try{
+    await Promise.race([entered,timeout,pending.then(()=>{throw Error('Missing off-thread projection');})]);
+    // This statement needs the sole connection and must finish while the CPU
+    // result is still withheld. It also advances the world after the capture.
+    changed=single.updateTable('villages').set({name:'Changed during CPU work'}).where('id','=',villageId).execute();
+    await Promise.race([changed,timeout]);expect(await revision()).toBeGreaterThan(reference.syncRevision!);
+    release();const result=await pending;
+    expect(result.village.name).toBe(reference.village.name);
+    expect(result.syncRevision).toBe(reference.syncRevision);
+    expect(result.travelRoutes).toEqual(reference.travelRoutes);
+  }finally{clearTimeout(timer);release();await Promise.allSettled([pending,...(changed?[changed]:[])]);await single.destroy();}
+});
+
+it('initial read releases economic locks before its coherent transport projection', async () => {
+  let enter!: () => void, release!: () => void, rejectTimeout!: (error: Error) => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const timeout = new Promise<never>((_, reject) => { rejectTimeout = reject; });
+  const gatedQueries = new Set<QueryId>(); let projecting = false, gated = false;
+  const plugin: KyselyPlugin = {
+    transformQuery(args) {
+      const node = JSON.stringify(args.node);
+      if (node.includes('set transaction read only')) projecting = true;
+      if (projecting && !gated && node.includes('village_sync_changes')) { gated = true; gatedQueries.add(args.queryId); }
+      return args.node;
+    },
+    async transformResult(args) { if (gatedQueries.delete(args.queryId)) { enter(); await barrier; } return args.result; },
+  };
+  const pending = getVillageState(db.withPlugin(plugin), accountId, slug, villageId);
+  const timer = setTimeout(() => { release(); rejectTimeout(Error('Initial projection barrier timed out')); }, 15_000);
+  try {
+    await Promise.race([entered, timeout, pending.then(() => { throw Error('Read completed without a post-commit projection'); })]);
+    const beforeRevision = await revision();
+    expect((await db.selectFrom('buildings').select('status').where('id', '=', houseId).executeTakeFirstOrThrow()).status).toBe('completed');
+    // A real second transaction can lock/change the village while the projection waits.
+    await db.transaction().execute(async tx => {
+      await sql`set local lock_timeout='500ms'`.execute(tx);
+      await tx.updateTable('villages').set({ name: 'Committed during projection' }).where('id', '=', villageId).execute();
+    });
+    expect(await revision()).toBeGreaterThan(beforeRevision);
+    release();
+    const result = await pending;
+    expect(result.village.name).toBe('Initial');
+    expect(result.syncRevision).toBe(beforeRevision);
+    expect(result.cells.find(c => c.building?.id === houseId)?.building?.status).toBe('completed');
+  } finally { clearTimeout(timer); release(); await pending.catch(() => undefined); }
+});
+
+it('deadline reconciliation commits the economy without assembling a discarded snapshot', async () => {
+  const previous = await read(), trace = new DevTimingTrace();
+  const task = await db.insertInto('scheduledTasks').values({ worldId, taskType: 'building.complete', subjectId: houseId,
+    payload: {}, dueAt: new Date(), availableAt: new Date(), attempts: 0, lastError: null, completedAt: null }).returningAll().executeTakeFirstOrThrow();
+  await withDevTiming(trace, () => reconcileSyncDeadline(db, accountId, slug, villageId, previous));
+  expect((await db.selectFrom('buildings').select('status').where('id', '=', houseId).executeTakeFirstOrThrow()).status).toBe('completed');
+  expect(await db.selectFrom('scheduledTasks').selectAll().where('id', '=', task.id).executeTakeFirstOrThrow()).toEqual(task);
+  expect(trace.metrics.has('snapshot')).toBe(false);
+  expect(trace.metrics.has('navigation')).toBe(false);
+});
+
+it('overlapping read wakeups join one economic transaction after ownership checks', async () => {
+  let enter!: () => void, release!: () => void, joined!: () => void, expire!: (error: Error) => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const checked = new Promise<void>(resolve => { joined = resolve; });
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const timeout = new Promise<never>((_, reject) => { expire = reject; });
+  let locks = 0, ownerships = 0;
+  const lockQueries = new Set<QueryId>(), ownershipQueries = new Set<QueryId>();
+  const plugin: KyselyPlugin = {
+    transformQuery(args) {
+      const text = JSON.stringify(args.node);
+      if (text.includes('world_memberships')) { ownerships++; if (ownerships === 3) ownershipQueries.add(args.queryId); }
+      if (text.includes('villages') && text.includes('ForUpdate')) { locks++; if (locks === 1) lockQueries.add(args.queryId); }
+      return args.node;
+    },
+    async transformResult(args) {
+      if (ownershipQueries.delete(args.queryId)) joined();
+      if (lockQueries.delete(args.queryId)) { enter(); await barrier; }
+      return args.result;
+    },
+  };
+  const source = db.withPlugin(plugin), jobs: Array<Promise<unknown>> = [];
+  const timer = setTimeout(() => { release(); expire(Error('Shared read barrier timed out')); }, 15_000);
+  try {
+    const first = reconcileVillageForRead(source, accountId, slug); jobs.push(first);
+    await Promise.race([entered, timeout, first.then(() => { throw Error('Missing economic lock barrier'); })]);
+    const second = reconcileVillageForRead(source, accountId, slug, villageId); jobs.push(second);
+    await Promise.race([checked, timeout]); await setImmediate();
+    expect(ownerships).toBe(3); expect(locks).toBe(1);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(b).toEqual(a); expect(locks).toBe(1);
+    expect((await db.selectFrom('buildings').select('status').where('id', '=', houseId).executeTakeFirstOrThrow()).status).toBe('completed');
+    await reconcileVillageForRead(source, accountId, slug, villageId);
+    expect(locks).toBe(2); // A settled wakeup is not a cache.
+  } finally { clearTimeout(timer); release(); await Promise.allSettled(jobs); }
 });
 
 it('measures the idle authoritative revision check separately from snapshot reads',async()=>{

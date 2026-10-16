@@ -1,3 +1,4 @@
+import { devTime } from '../operations/dev-timing.js';
 import {routeLength,spawnDelta,travelledCells} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
 import { sql, type Transaction } from 'kysely';
@@ -369,6 +370,7 @@ export async function scienceCommand(tx: Transaction<Database>, economy: Village
 }
 
 export async function scienceSnapshot(tx: Transaction<Database>, economy: VillageEconomy, readOnly = false): Promise<ScienceState> {
+  return devTime('science', async () => {
   const owner = readOnly ? await context(tx, economy) : null;
   const { accountId, science } = owner ? { accountId: owner.ownerAccountId,
     science: await tx.selectFrom('playerScience').selectAll().where('worldId','=',economy.worldId)
@@ -405,4 +407,5 @@ export async function scienceSnapshot(tx: Transaction<Database>, economy: Villag
     solarObservations: { since: science.observationsSince?.toISOString() ?? null,
       readyAt: science.observationsSince ? new Date(science.observationsSince.getTime() + combinedPeriod()).toISOString() : null, complete: facts.solar },
     villageReports: reports.map(r => ({ villageId: r.villageId, name: r.name, anchor: { cellX: r.anchorCellX, cellY: r.anchorCellY }, observedAt: r.observedAt.toISOString() })) };
+  });
 }

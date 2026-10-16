@@ -13,7 +13,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { completeStoneExtraction } from '../villages/complete-construction.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from '../villages/reconcile-economy.js';
-import { constructBuilding, feedPopulation, getStoneDepositDetails, getVillageState, harvestGarden, restPopulation, startVillageStoneExtraction } from '../villages/service.js';
+import { constructBuilding, feedPopulation, getStoneDepositDetails, getVillageState, state, harvestGarden, restPopulation, startVillageStoneExtraction } from '../villages/service.js';
 import { advanceEnergy } from '../population/energy.js';
 import { materializeCohorts, energyState } from '../population/work.js';
 import { startGardenHarvest } from '../population/garden-harvest.js';
@@ -447,7 +447,7 @@ describe.sequential('stone regression proofs', () => {
       await tx.insertInto('worldFeatures').values({id:featureId,worldId:otherWorld,featureTypeCode:'woodland',state:'available',variantSeed:42}).execute();
       await tx.insertInto('worldCellOccupancies').values({worldId:otherWorld,featureId,buildingId:null,pendingExpansionId:null,cellX:0,cellY:0,role:'body'}).execute();
       await tx.updateTable('villages').set({anchorCellX:0,anchorCellY:0}).where('id','=',villageId).execute();
-      const snapshot=await getVillageState(inside(tx),DEVELOPMENT_IDS.account,'aube');
+      const snapshot=await state(tx,DEVELOPMENT_IDS.account,'aube',await beginVillageEconomy(tx,worldId,villageId));
       expect(snapshot.region.features.some(feature=>feature.id===featureId)).toBe(false);
       throw rollback;
     })).rejects.toBe(rollback);

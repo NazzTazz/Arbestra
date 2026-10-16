@@ -1,3 +1,4 @@
+import { devTime } from '../operations/dev-timing.js';
 import { sql, type Transaction } from 'kysely';
 
 import type { Database } from '../../database/schema.js';
@@ -31,14 +32,17 @@ export async function beginVillageEconomy(
   targetFeatureIds: string[] = [],
   navigationWrite = false,
 ): Promise<VillageEconomy> {
-  await transaction.selectFrom('villages').select('id')
+  return devTime('economy', async () => {
+  await devTime('village_lock', () => transaction.selectFrom('villages').select('id')
     .where('worldId', '=', worldId).where('id', '=', villageId)
-    .forUpdate().executeTakeFirstOrThrow();
+    .forUpdate().executeTakeFirstOrThrow());
   // Readers may admit trips, including automatic worksite relaunches. Acquire
   // before deposits; a spatial writer must never upgrade a shared lock later.
   const navigationKey=`infrastructure:${worldId}`;
-  if(navigationWrite)await sql`select pg_advisory_xact_lock(hashtextextended(${navigationKey},0))`.execute(transaction);
-  else await sql`select pg_advisory_xact_lock_shared(hashtextextended(${navigationKey},0))`.execute(transaction);
+  await devTime('navigation_lock', async () => {
+    if(navigationWrite)await sql`select pg_advisory_xact_lock(hashtextextended(${navigationKey},0))`.execute(transaction);
+    else await sql`select pg_advisory_xact_lock_shared(hashtextextended(${navigationKey},0))`.execute(transaction);
+  });
   // Read after waiting for the village lock: transaction_timestamp may be stale.
   const through = (await transaction.selectNoFrom(sql<Date>`statement_timestamp()`.as('through'))
     .executeTakeFirstOrThrow()).through;
@@ -84,12 +88,14 @@ export async function beginVillageEconomy(
       .where('worldId', '=', worldId).where('id', '=', villageId).execute();
   }
   return economy;
+  });
 }
 
 /** Requires the village lock and a context retained within this same transaction. */
 export async function reconcileVillageEconomy(
   transaction: Transaction<Database>, economy: VillageEconomy,
 ): Promise<void> {
+  return devTime('reconcile', async () => {
   const [constructions, expansions, harvests, extractions, science, processing, market] = await Promise.all([
     transaction.selectFrom('buildings').select(['id', 'constructionCompletesAt'])
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
@@ -146,6 +152,7 @@ export async function reconcileVillageEconomy(
     else
       await completeStoneExtractionAt(transaction, economy.worldId, economy.villageId, transition.id, transition.through);
   }
+  });
 }
 
 async function completeConstructionAt(

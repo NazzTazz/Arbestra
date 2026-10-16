@@ -1,14 +1,16 @@
-import {createHash} from 'node:crypto';
+import { devTime, devTimeSync } from '../operations/dev-timing.js';
 import {type Kysely} from 'kysely';
-import {woodlandTrees,woodlandPassage,type WoodlandTree,type GeneratedLandscape,type Rc1Ground,type Rc1FeatureGeometry,type SpawnTerrace} from '@arbestra/contracts';
+import {type TravelGround,type GeneratedLandscape,type Rc1Ground,type Rc1FeatureGeometry,type SpawnTerrace} from '@arbestra/contracts';
+import {rc1NetworkGround,type Rc1NetworkEdits} from '../navigation/rc1-network-ground.js';
 import type {Database} from '../../database/schema.js';
 import {readRc1Source} from './rc1-source.js';
 import {editedRc1Field} from '../onboarding/rc1-field.js';
-type GroundGeometry={data:GeneratedLandscape;field:ReturnType<typeof editedRc1Field>;cell:(x:number,y:number)=>{code:number;elevation:number};patch:(x:number,y:number,size:number)=>Rc1Ground;terraces:SpawnTerrace[];navigation:{width:number;height:number;revision:string;woodedCells:Array<{cellX:number;cellY:number}>;sample:(x:number,y:number)=>{elevation:number;dry:boolean;blocked:boolean}}};
+type GroundGeometry={data:GeneratedLandscape;field:ReturnType<typeof editedRc1Field>;cell:(x:number,y:number)=>{code:number;elevation:number};patch:(x:number,y:number,size:number)=>Rc1Ground;terraces:SpawnTerrace[];navigation:TravelGround;navigationEdits:Rc1NetworkEdits};
 const geometries=new Map<string,GroundGeometry>();
-const MAX_GEOMETRIES=4,MAX_GEOMETRY_KEY=131_072,MAX_WALK_SAMPLES=32_768;
+const MAX_GEOMETRIES=4,MAX_GEOMETRY_KEY=131_072;
 const patches=new Map<string,{data:GeneratedLandscape;ground:Omit<Rc1Ground,'terraces'>}>();
 export async function readRc1Ground(db:Kysely<Database>,worldId:string){
+  return devTime('rc1_ground', async () => {
  const source=await readRc1Source(db,worldId),{world}=source;
  // Current transactional edits are always read, even when their geometric
  // projection is reusable. No stock, permission or occupancy is cached.
@@ -36,7 +38,7 @@ export async function readRc1Ground(db:Kysely<Database>,worldId:string){
   groves.map(r=>[r.cellX,r.cellY,r.variantSeed??3,Number(r.initialAmount)===0?0:1])]);
  const prior=geometries.get(key);
  if(prior?.data===source.data){geometries.delete(key);geometries.set(key,prior);return prior;}
- const field=editedRc1Field(source.data,source.field,terraces,removed);
+ const field=devTimeSync('rc1_field',()=>editedRc1Field(source.data,source.field,terraces,removed));
  const cell=(x:number,y:number)=>{const s=field.sample(x,y);return{code:s.elevation<=Math.max(0,s.surface)+1e-6?2:1,elevation:Math.round(s.elevation*100)};};
  const patch=(originX:number,originY:number,size:number):Rc1Ground=>{
   const patchKey=worldId+':'+world.widthCells+':'+world.heightCells+':'+originX+':'+originY+':'+size;
@@ -44,20 +46,19 @@ export async function readRc1Ground(db:Kysely<Database>,worldId:string){
   if(!p||p.data!==source.data){const stride=size*2+1,heights:number[]=[],water:number[]=[];for(let y=0;y<stride;y++)for(let x=0;x<stride;x++){const s=source.field.sample(originX-.5+x/2,originY-.5+y/2);heights.push(s.elevation);water.push(Math.max(0,s.surface));}p={data:source.data,ground:{stride,heights,water}};patches.set(patchKey,p);while(patches.size>32)patches.delete(patches.keys().next().value!);}
   return {...p.ground,terraces:terraces.filter(t=>t.cellX>=originX&&t.cellX<originX+size&&t.cellY>=originY&&t.cellY<originY+size)};
  };
- const absentSet=new Set(absent);
- const trees:WoodlandTree[]=(source.data.forest?.trees??[]).flatMap((t,i)=>absentSet.has(i)?[]:[{x:t.x,y:t.y,scale:t.crown*t.size,heightScale:t.size,rotation:0}]);
- for(const r of groves)trees.push(...woodlandTrees({cellX:r.cellX!,cellY:r.cellY!,variantSeed:r.variantSeed??3,rc1:{trees:[],rocks:[]},deposit:{remainingAmount:Number(r.initialAmount),initialAmount:Number(r.initialAmount),cleared:false}}));
- const trunks=woodlandPassage(trees,world);
- const geometryRevision=createHash('sha256').update(JSON.stringify([terraces,trees.map(t=>[t.x,t.y,t.scale])])).digest('hex');
- const walkSamples=new Map<string,{elevation:number;dry:boolean;blocked:boolean}>();
- const navigation={width:world.widthCells,height:world.heightCells,revision:worldId+':'+geometryRevision,woodedCells:trunks.cells,sample(x:number,y:number){const sampleKey=x+':'+y,prior=walkSamples.get(sampleKey);if(prior)return prior;const v=field.sample(x,y),result={elevation:v.elevation,dry:v.elevation>Math.max(0,v.surface)+1e-6,blocked:field.intersectsRock({x,y,halfWidth:0,halfHeight:0})||trunks.blocked(x,y)};if(walkSamples.size>=MAX_WALK_SAMPLES)walkSamples.clear();walkSamples.set(sampleKey,result);return result;}};
- const geometry={data:source.data,field,cell,patch,terraces,navigation};
+ const navigationEdits:Rc1NetworkEdits={worldId,width:world.widthCells,height:world.heightCells,terraces,absent,
+  groves:groves.map(r=>({cellX:r.cellX!,cellY:r.cellY!,variantSeed:r.variantSeed??3,initialAmount:Number(r.initialAmount)}))};
+ const navigation=rc1NetworkGround(source.data,source.field,navigationEdits,field);
+ const geometry={data:source.data,field,cell,patch,terraces,navigation,navigationEdits};
  if(key.length<=MAX_GEOMETRY_KEY){geometries.delete(key);geometries.set(key,geometry);while(geometries.size>MAX_GEOMETRIES)geometries.delete(geometries.keys().next().value!);}
  return geometry;
+  });
 }
 export async function rc1FeatureGeometry(db:Kysely<Database>,worldId:string,data:GeneratedLandscape,ids:string[]):Promise<Map<string,Rc1FeatureGeometry>>{
+  return devTime('rc1_geometry', async () => {
  if(!ids.length)return new Map();
  const rows=await db.selectFrom('worldRc1Resources').select(['featureId','sourceKey','treeIndices','removedIndices']).where('worldId','=',worldId).where('featureId','in',ids).execute();
  return new Map(rows.map(r=>{const removed=new Set(r.removedIndices);return[r.featureId,{trees:r.treeIndices.filter(i=>!removed.has(i)).map(i=>data.forest!.trees[i]!),rocks:r.sourceKey.startsWith('stone:')?data.stoneSites?.find(s=>String(s.id)===r.sourceKey.slice(6))?.rocks??[]:[]}];}));
+  });
 }
 export function rc1CellHeight(terraces:readonly SpawnTerrace[],x:number,y:number,fallback:number):number{return terraces.find(t=>t.cellX===x&&t.cellY===y)?.height??fallback;}

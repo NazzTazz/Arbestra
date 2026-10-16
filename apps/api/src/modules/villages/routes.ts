@@ -17,6 +17,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { VillageCommandResponseSchema, type VillageState, type VillageSyncBase } from '@arbestra/contracts';
 import type { ConstructionCommit } from './service.js';
 import type { VillageSyncProjections } from './sync-projections.js';
+import type {TravelNetworkExecutor} from '../navigation/network-job.js';
 import { villageSyncRevision } from './sync-revision.js';
 import type { Kysely } from 'kysely';
 
@@ -67,6 +68,7 @@ export async function registerVillageRoutes(
   db: Kysely<Database>,
   config: AppConfig,
   projections: VillageSyncProjections,
+  navigation: TravelNetworkExecutor,
 ): Promise<void> {
   const commandResponse = async (accountId: string, worldSlug: string,
     result: VillageState | ConstructionCommit, base: VillageSyncBase | undefined) => {
@@ -159,7 +161,7 @@ export async function registerVillageRoutes(
   }, async (request) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug } = request.params as { worldSlug: string };
-    return getVillageState(db, account.id, worldSlug, (request.query as { villageId?: string }).villageId);
+    return getVillageState(db, account.id, worldSlug, (request.query as { villageId?: string }).villageId,navigation);
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes', {

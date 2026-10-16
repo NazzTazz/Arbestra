@@ -1,3 +1,4 @@
+import { devTime, devTimeSync } from '../operations/dev-timing.js';
 import {sql, type Kysely} from 'kysely';
 import {RC1_WORLD, createSpawnTerrainField, type GeneratedLandscape} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
@@ -15,6 +16,7 @@ const rowVersion = sql<string>`xmin::text || ':' || ctid::text`.as('rowVersion')
 
 /** Only immutable, checksum-verified geography is cached. No local edits live here. */
 export async function readRc1Source(db: Kysely<Database>, worldId: string) {
+  return devTime('rc1_source', async () => {
   const world = await db.selectFrom('worlds').select(['widthCells', 'heightCells', 'chunkSize', 'seed'])
     .where('id', '=', worldId).executeTakeFirstOrThrow();
   if (world.widthCells !== RC1_WORLD.widthCells || world.heightCells !== RC1_WORLD.heightCells || world.chunkSize !== RC1_WORLD.chunkSize)
@@ -32,14 +34,15 @@ export async function readRc1Source(db: Kysely<Database>, worldId: string) {
       .where('worldId', '=', worldId).executeTakeFirst();
     if (!row || row.checksum !== RC1_CANONICAL_CHECKSUM)
       throw new HttpError(409, 'WORLD_NOT_READY', 'Géographie RC1 indisponible.');
-    const data = JSON.parse(row.json) as GeneratedLandscape;
-    if (artifactChecksum(data) !== RC1_CANONICAL_CHECKSUM)
+    const data = devTimeSync('rc1_parse', () => JSON.parse(row.json) as GeneratedLandscape);
+    if (devTimeSync('rc1_checksum', () => artifactChecksum(data)) !== RC1_CANONICAL_CHECKSUM)
       throw new HttpError(409, 'WORLD_NOT_READY', 'Géographie RC1 invalide.');
-    canonical ??= {data, field: createSpawnTerrainField(data)};
+    canonical ??= {data, field: devTimeSync('rc1_field', () => createSpawnTerrainField(data))};
     versions.set(worldId, row.rowVersion);
     while (versions.size > 32) versions.delete(versions.keys().next().value!);
   }
   if (Number(world.seed) !== canonical.data.seed)
     throw new HttpError(409, 'WORLD_NOT_READY', 'Identité RC1 incohérente.');
   return {world, ...canonical};
+  });
 }
