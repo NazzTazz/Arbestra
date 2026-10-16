@@ -1,3 +1,63 @@
+# Clôture Git demandée — 16 octobre 2026
+
+Demande explicite de commit/push. Branche `main`, distant récupéré avant clôture et aligné sur `795f260`. Trois commits fonctionnels distincts :
+
+- `09a3c9f` : déblocage visuel des représentants de coupe sur les sites compacts.
+- `dbdaa4f` : raffinement local avant les faux refus « sans chemin ».
+- `236d1d2` : croissance vers 50 % des couchages, un habitant par minute, migration 043 et rattrapage progressif.
+
+Les preuves déjà terminées sont détaillées ci-dessous : 50 tests pour les représentants, 11 pour les chemins, 58 pour la croissance et les suites connexes ; builds et lint ciblés réussis lors de ces tranches. Aucun nouveau résultat applicatif revendiqué pour cette clôture Git. Vérification des fichiers inclus et `git diff --cached --check` avant chaque commit. Les deux éléments non suivis préexistants restent exclus et préservés. Push prévu sur `origin/main` après ce commit documentaire ; résultat à vérifier contre le HEAD distant.
+
+Limites maintenues : recette complète RC1 après les erreurs de navigation à confirmer ; rotation/retour de toute l'équipe du site compact et absence de régression FPS non prouvées. La croissance a été vérifiée côté serveur et dans le panneau Habitants du monde Aube. Les mentions « aucun commit/push » des sections suivantes décrivent leur état historique avant cette clôture.
+
+---
+
+# Croissance vers 50 % des couchages — implémentée et activée — 16 octobre 2026
+
+Tristan demande des arrivées progressives liées aux logements et un rattrapage des anciens villages ; il confirme **un habitant par minute**. [Règles de la tranche](docs/SPEC-CROISSANCE-POPULATION.md) : cible `floor(capacité / 2)`, HDV compris, habitants excédentaires conservés, pas de satisfaction/repas/départ ajoutés. Base `main` / `795f260`, changements précédents intégralement conservés, aucun commit/push.
+
+`population/growth.ts` conserve prochaine arrivée et borne d'activation dans `village_populations`. Les arrivées sont intercalées avant les transitions dues ; la nouvelle capacité commence à l'achèvement réel. Les minutes partielles sont conservées pendant une progression, sans accumuler du temps à la cible. Les logements en amélioration gardent les couchages de leur niveau existant ; nouvelles places uniquement à l'échéance. Chaque arrivant garde sa propre date d'énergie, énergie initiale 10, origine/rattachement local, aucun métier ou qualification offert. L'installation initiale et la pose séparée du logement du kit amorcent également cette progression.
+
+Migration additive **043** : rattrapage démarrant à l'application pour les villages sous la cible, sans ajout instantané ni calcul depuis l'âge des maisons. Notifications `population.arrive` uniques par village et échéance ; exception limitée au type dans l'index des notifications pendantes, pour créer le successeur sans toucher la notification acquise. Les réveils appellent la réconciliation habituelle, sans relancer systématiquement tous les chantiers/sciences à chaque arrivée. Les admissions existantes conservent leurs propres déclencheurs. Le snapshot et le panneau Habitants exposent cible/cadence/prochaine date, sans nouveau polling ni mutation dans les projections MVCC/NOC.
+
+**Vérifications terminées : 58 tests ciblés verts** — croissance 9, économie 27, population 9, logement 6, protocole workers navigation 7. Croissance : dates exactes et hors connexion, plafond/arrondi, achèvements entrelacés et amélioration, absence de temps accumulé, migration sur tables temporaires, notifications conservées, rollback comparé après changements vérifiés et réveils concurrents avec attente PostgreSQL observée. Cible DB vérifiée `127.0.0.1/arbestra_test`. Suites DB exécutées séquentiellement. Première campagne élargie interrompue après timeouts de hooks pendant des compilations ; relance isolée réussie avec limites de hooks/tests à 60 s. L'ancien test d'amélioration attend désormais 35 couchages pendant les travaux, puis 55 après, conformément au maintien des cinq places existantes. Builds contracts/API/world-web et lint ciblé terminés avec succès ; avertissement existant des bundles Vite. Diff-check vert.
+
+**Activation développement autorisée par la demande de rattrapage :** seule migration en attente 043, appliquée avec succès le 16/10 à 16:44:15 UTC. Cohortes et stocks existants non réinitialisés. API finale compilée PID **9736**, port 3000, `/api/health` vérifié, autres services conservés. Avant : Bressuire 15/330, Clairière 210/860, Départ 15/40, Village témoin 15/0. Preuve de suivi : après vingt minutes, Bressuire 35 et Clairière 230, vingt réveils acquittés chacun, zéro échec ; Départ arrêté à **20/40** après cinq réveils, prochain réveil nul ; Village témoin reste 15/0 sans départ forcé ni notification.
+
+**Recette réelle :** parcours Aube → Habitants, cible 430, cadence 1/min, prochaine date absolue, compteur HUD et panneau cohérents. Capture inspectée `test-results/population-growth-panel.png` à 228/860 ; preuve suivante à 231/860 confirme les mises à jour réelles. Aucun clic métier de construction, repas, repos ou récolte pendant la recette. Navigateur de recette fermé après contrôle. Artefacts et scripts de preuve ignorés dans `test-results/population-*`.
+
+**Limite séparée :** les premières entrées RC1 ont échoué sur les calculs de navigation (`NAVIGATION_UNAVAILABLE/BUSY`). Un processus local tsx a aussi renvoyé un ENOMEM transitoire ; la mémoire disponible observée ensuite était ample, donc aucune conclusion de PC insuffisant ni attribution causale certaine. La recette complète RC1 reste à confirmer, malgré le rattrapage serveur Bressuire vérifié. Aucun changement permanent du module ou des budgets de navigation, aucun bilan FPS. Les limites de rotation de cohortes des tranches précédentes restent ouvertes.
+
+Git final : `main`, HEAD `795f260`, modifications non committées, fichiers non suivis préexistants `%SystemDrive%/` et export de session préservés.
+
+---
+
+# Récolte bois — faux refus « sans chemin » corrigés et API relancée — 16 octobre 2026
+
+Signalement : nombreux refus lors de la désignation du bois. Base `main` / `795f260`, changements locaux précédents conservés. Lecture seule des vingt derniers reçus de Bressuire/RC1 : huit bosquets récemment refusés reproduisent tous `stoneTravelPath = undefined`. Le raffinement local existant trouve pourtant pour chacun une route de 89 à 197 points. Le guide grossier de case en case abandonne avant le calcul fin, notamment lorsque l'ancre de l'HDV est entourée de son emprise ou que des troncs bloquent les centres des cases.
+
+Correction bornée dans `stoneTravelPath` : après échec du guide grossier, essayer le raffinement autoritaire existant pour les cibles à moins de 32 cases sur chaque axe torique. Les contrôles terrain, bâtiments, bordures, équipements et navigation RC1 restent actifs. Un vrai refus du raffinement donne toujours une absence de trajet ; les erreurs techniques sont propagées. Accès territoriaux reconnus, trajets engagés, durées, ressources et permissions inchangés. Les refus historiques ne sont pas réécrits : refaire les sélections refusées crée de nouvelles intentions.
+
+Preuves de cette tranche : nouvelle régression DB sur monde privé de `127.0.0.1/arbestra_test`, rouge avant correction car l'ancre de l'HDV était enfermée dans sa propre emprise ; verte après, avec sortie par la vraie porte et refus d'un anneau d'eau réel. Fixture entièrement rollbackée avec erreur identifiée, sans reset dans cette nouvelle suite. Suite connexes des chantiers : 10 tests verts, exécutés ensuite, sans concurrence entre suites DB. **11 tests actuels verts**, build contracts, lint des deux fichiers API et build API terminés avec succès. Relecture des huit bosquets en développement : huit routes désormais trouvées, sans commande de récolte ni modification des données de développement. Script/preuve ignorés : `test-results/wood-path-audit.*`.
+
+Activation locale : API compilée précédente PID 29216 remplacée par PID 21756, même commande `node apps/api/dist/server.js`, fenêtre cachée, port 3000 ; `/api/health` vérifié. Aucun reset/migration de développement, aucun commit/push. Les autres services et tous les changements antérieurs sont conservés. Correctif serveur et documentation non committés sur `main`. La nouvelle désignation dans le client reste à confirmer par Tristan ; aucune récolte n'a été lancée à sa place. Les limites de rotation/FPS de la tranche visuelle précédente restent ouvertes et ne sont pas corrigées par ce changement serveur.
+
+---
+
+# Cohortes bois — blocages de présentation corrigés, recette partielle du site compact — 16 octobre 2026
+
+Demande : représentants restant près de l’HDV pendant la coupe. Base `main` / `795f260`. Les deux éléments non suivis préexistants (`%SystemDrive%/` et export de session) sont conservés. Aucun commit/push, migration ou commande économique dans cette tranche.
+
+Constats reproduits avant correction : le trajet réel de la dernière extraction bois RC1 comporte un aller-retour fermé près de l’HDV, qui bloque la formation. Les réservations routières des postes ne partageaient pas le masque des routes affichées. Le bosquet presque épuisé est traversable par des routes de bâtiments ; réserver toutes ces bandes interdit alors tous les postes pourtant physiquement libres. Enfin, les raccordements fixes, places d’attente réservées mais vides et arrivées simultanées peuvent bloquer le chantier compact. Les premières recettes ont montré de faux positifs : un outil pouvait être activé alors que son porteur était encore à une place d’attente. Ne pas utiliser les anciennes captures intermédiaires comme preuve de livraison.
+
+Correction côté world-web : simplification des détours fermés pour la présentation bois/pierre, sans nouveau segment ni mutation du trajet serveur ; même masque routier pour rendu et obstacles ; secours autorisant une route physiquement libre en conservant les contrôles terrain, bâtiments, barrières, équipements et centre du gisement. Raccordements locaux bornés à 2 048 nœuds après les essais directs, corps présents pris en compte, reprise depuis la position atteinte après 1,5 s d’attente. Les postes et distances d’installation sont mis en cache. Les files vides ne constituent plus des murs. En compact, arrivées espacées, un poste de chaque rôle alimenté avant ses files. Les gestes de travail demandent une arrivée physique au poste. Économie et effectifs inchangés.
+
+Vérifications terminées : **50 tests ciblés verts** (village-workers 28, worker-motion 21, road-profile 1), lint des huit fichiers verts. Régressions constatées rouges avant correction : masque routier, détour réel, couloir compact étroit avec outil réellement au poste. Les tests gardent les dix représentants, les séparations et l’immuabilité de la mission serveur. Aucun test DB : changements de présentation uniquement.
+
+Recette navigateur : compte dev, vraie géométrie et vrais contrôles d’obstacles RC1, dernière mission bois terminée relue par SELECT puis rejouée uniquement dans un contrôleur visuel indépendant. Aucun lancement de mission, écriture SQL ou reset des mondes. Sciage et débitage observés à 8 976 ms, quatre représentants déjà sortis, dix conservés dans le contrôleur ; quatre poses de membres changent au pas suivant. Capture finale inspectée (`test-results/cohort-chopping-verified.png`), preuve `cohort-visual-final.json`, artefacts ignorés. Rejeu complet : neuf représentants sortis à la fin de la durée économique, le dixième encore en attente ; la rotation et le retour complets de toute l’équipe sur ce site très contraint restent **à valider/améliorer**. Ne pas prétendre les dix simultanément au travail. Des pointes CPU existent pendant les recherches locales sous forte charge hôte/build ; absence de nouvelle régression FPS **non démontrée**. Navigateur de recette fermé, services conservés. Build final world-web (`tsc -b` + Vite) terminé avec code 0 ; avertissement existant de taille des bundles. Diff-check vert. Git final : `main`, HEAD `795f260`, correctif et documentation non committés ; aucun push.
+
+---
+
 # Livraison Git — série fonctionnelle poussée sur main — 16 octobre 2026
 
 À la demande de Tristan, les changements de la session ont été répartis en commits fonctionnels puis poussés sur `origin/main` (`NazzTazz/Arbestra`), sans force-push. Le distant était encore à `9c8dde4` après fetch ; le premier push a confirmé `9c8dde4..1e3d479`.
