@@ -1,3 +1,4 @@
+import { clientTime } from '../dev/statistics';
 import {rc1Height} from './rc1-terrain';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainResponse, TerrainUpdatesChunk, TerrainUpdatesResponse, VillageState } from '@arbestra/contracts';
 import { normalize, type ChunkDemand } from './world-space';
@@ -5,7 +6,7 @@ import { TERRAIN_STREAMING as SETTINGS } from './terrain-settings';
 
 interface Entry {
   incarnation: number; sequence: number; invalidation: number; inFlight: boolean;
-  chunk?: TerrainChunk; freshAt: number; retryAt: number; failures: number; touched: number; mutableSignature: string;
+  chunk?: TerrainChunk; groundRevision?: number; freshAt: number; retryAt: number; failures: number; touched: number; mutableSignature: string;
 }
 export type TerrainFetch = (chunks: Array<{ chunkX: number; chunkY: number }>, signal: AbortSignal, updatesOnly: boolean) => Promise<TerrainResponse | TerrainUpdatesResponse>;
 function hasGround(chunk: TerrainUpdatesChunk): chunk is TerrainChunk {
@@ -26,9 +27,15 @@ export class TerrainStore {
   readonly world: TerrainResponse['world'];
   #snapshot: VillageState;
   #groundRevision=0;
+  #snapshotGroundRevision=0;
   /** Revision of values returned by ground(), published before terrain-mesh admission. */
   get groundRevision():number{return this.#groundRevision;}
-  #publishGround(entry:Entry,chunk:TerrainChunk){if(!sameChunkGround(entry.chunk,chunk))this.#groundRevision++;entry.chunk=chunk;}
+  #publishGround(entry:Entry,chunk:TerrainChunk){if(!sameChunkGround(entry.chunk,chunk))entry.groundRevision=++this.#groundRevision;entry.chunk=chunk;}
+  /** Local dependency for continuous probes: a whole substrate chunk, or snapshot fallback. */
+  groundRevisionAt(x:number,y:number):number{
+    const entry=this.entries.get(this.key(normalize(Math.round(x),this.world.widthCells),normalize(Math.round(y),this.world.heightCells)));
+    return entry?.chunk?entry.groundRevision!:this.#snapshotGroundRevision;
+  }
   #own = new Set<string>();
   #features = new Map<string, NaturalFeature>();
   #missions = new Map<string, string>();
@@ -77,7 +84,7 @@ export class TerrainStore {
   observe(state: VillageState): void {
     const before=this.#snapshot.region,after=state.region;
     if(before.originCellX!==after.originCellX||before.originCellY!==after.originCellY||before.width!==after.width||before.height!==after.height
-      ||!sameNumbers(before.terrainCodes,after.terrainCodes)||!sameNumbers(before.elevations,after.elevations))this.#groundRevision++;
+      ||!sameNumbers(before.terrainCodes,after.terrainCodes)||!sameNumbers(before.elevations,after.elevations))this.#snapshotGroundRevision=++this.#groundRevision;
     this.#snapshot = state;
     const own = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`));
     for (const key of new Set([...own, ...this.#own])) if (own.has(key) !== this.#own.has(key)) {
@@ -94,8 +101,8 @@ export class TerrainStore {
     for (const [id, key] of new Map([...this.#missions, ...missions])) if (missions.has(id) !== this.#missions.has(id)) this.invalidate(key);
     this.#missions = missions;
   }
-  demandChunks(demand: ChunkDemand[]): void {
-    if (demand.map((d) => d.key + d.visible).join('|') !== this.#demand.map((d) => d.key + d.visible).join('|')) this.#nextDemandAt = this.now() + SETTINGS.coalesceMs;
+  demandChunks(demand: ChunkDemand[], immediate = false): void {
+    if (demand.map((d) => d.key + d.visible).join('|') !== this.#demand.map((d) => d.key + d.visible).join('|')) this.#nextDemandAt = this.now() + (immediate ? 0 : SETTINGS.coalesceMs);
     const previous = new Set(this.#demand.map((d) => d.key));
     for (const d of demand) if (!previous.has(d.key) && this.now() - this.#entry(d.key).freshAt >= SETTINGS.freshnessMs) this.invalidate(d.key);
     this.#demand = demand;
@@ -110,12 +117,13 @@ export class TerrainStore {
       && !this.#features.has(id) && !missionChunks.has(this.key(deposit.cellX, deposit.cellY))) this.revisions.delete(id);
   }
   revalidate(): void { for (const d of this.#demand) if (d.visible) this.invalidate(d.key); }
-  tick(maxConcurrent: number = SETTINGS.concurrentBatches): void {
+  tick(maxConcurrent: number = SETTINGS.concurrentBatches, initial = false): void {
     const now = this.now();
     if (this.#disposed || this.#paused || now < this.#nextDemandAt) return;
     while (this.#controllers.size < Math.max(1, Math.min(SETTINGS.concurrentBatches, maxConcurrent))) {
       const eligible = this.#demand.filter((d) => { const e = this.#entry(d.key);
-        return !e.inFlight && now >= e.retryAt && (!e.chunk || (d.visible && now - e.freshAt >= SETTINGS.freshnessMs) || (!d.visible && e.freshAt === -Infinity));
+        if (initial && !d.visible) return false;
+        return !e.inFlight && now >= e.retryAt && (!e.chunk || (d.visible && (e.freshAt === -Infinity || !initial && now - e.freshAt >= SETTINGS.freshnessMs)) || (!d.visible && e.freshAt === -Infinity));
       });
       const first = eligible.find(d => d.visible && !this.#entry(d.key).chunk) ?? eligible.find(d => d.visible) ?? eligible[0];
       if (!first) break;
@@ -135,6 +143,7 @@ export class TerrainStore {
       try { fetched = this.fetchChunks(wanted, controller.signal, updatesOnly); }
       catch (error) { fetched = Promise.reject(error); }
       void Promise.race([fetched, aborted]).then((response) => {
+    return clientTime('terrain', () => {
         if (this.#cancelled.has(controller)) return;
         if (this.#disposed || response.world.id !== this.world.id || response.world.generationVersion !== this.world.generationVersion
           || response.world.chunkSize !== this.world.chunkSize || response.world.widthCells !== this.world.widthCells || response.world.heightCells !== this.world.heightCells) throw new Error('Terrain scope mismatch');
@@ -160,7 +169,8 @@ export class TerrainStore {
           else if (fullChunk) this.#publishGround(e,fullChunk);
           e.mutableSignature = signature; e.freshAt = this.now(); e.failures = 0; e.retryAt = 0;
         }
-      }).catch(() => {
+          });
+}).catch(() => {
         if (this.#disposed || this.#cancelled.has(controller)) return;
         for (const t of tickets) { const e = this.entries.get(t.key); if (e?.incarnation !== t.incarnation) continue;
           e.retryAt = this.now() + [2000, 5000, 10000][Math.min(e.failures++, 2)]!; }

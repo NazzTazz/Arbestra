@@ -5,9 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#17241a" />
     <title>Arbestra — Monde</title>
+    <link rel="preload" as="image" href="/arbestra-loading.png" fetchpriority="high" />
+    <link rel="stylesheet" href="/src/ui/world-loading.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><section class="world-loading" aria-label="Chargement du monde">
+      <img class="world-loading-art" src="/arbestra-loading.png" alt="" fetchpriority="high" />
+      <div class="world-loading-content"><p class="world-loading-eyebrow">Bienvenue dans Arbestra</p><h1>Arbestra</h1>
+        <div class="world-loading-rule" aria-hidden="true"><span>✦</span></div><p class="world-loading-step" role="status">Préparation du monde…</p>
+        <noscript>Activez JavaScript pour entrer dans le monde.</noscript>
+      </div></section></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

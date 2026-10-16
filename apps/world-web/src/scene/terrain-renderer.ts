@@ -9,6 +9,7 @@ import { buildTerrainUnit, RENDER_UNIT_CELLS as UNIT } from './terrain-unit';
 import { type ChunkDemand, WorldSpace, normalize, delta } from './world-space';
 import type { TerrainStore } from './terrain-store';
 import { TERRAIN_STREAMING } from './terrain-settings';
+import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 
 interface Unit { signature: string; meshes: Mesh[]; ground: boolean }
 interface Resident { chunk: Pick<TerrainChunk, 'originCellX' | 'originCellY'>; root: TransformNode; units: Map<string, Unit> }
@@ -44,6 +45,8 @@ export class TerrainRenderer {
   }
   #cost = new Map<string, number>();
   version = 0;
+  // Published ground availability, independent of the camera's demand/culling mask.
+  groundVersion = 0;
   peakGraphicChunks = 0;
   slowestUnit: { kind: string; ms: number } = { kind: '', ms: 0 };
   readonly integrationMs: number[] = [];
@@ -54,11 +57,19 @@ export class TerrainRenderer {
     private readonly woodland: (features: NaturalFeature[]) => Mesh[], private readonly focus: () => TravelCell = () => space.origin,
     private readonly now: () => number = () => performance.now()) {}
   get queued(): number { return this.#jobs.size; }
+  get groundProgress(): {completed: number; total: number} {
+    let completed = 0, total = 0;
+    for (const [key, mask] of this.#masks) for (const unit of mask) {
+      total++;
+      if (!this.store.changed.has(key) && !this.#jobs.has(`${key}/ground:${unit}`) && this.residents.get(key)?.units.has(`ground:${unit}`)) completed++;
+    }
+    return {completed, total};
+  }
   get missingVisible(): boolean { return [...this.#masks].some(([key, mask]) => [...mask].some(unit => !this.residents.get(key)?.units.has(`ground:${unit}`))); }
   meshes(): Mesh[] { return [...this.residents.values()].flatMap((r) => [...r.units.values()].flatMap((u) => u.meshes)); }
   setVisible(shown: boolean): void {
     if (shown === this.#shown) return;
-    this.#shown = shown; this.version++;
+    this.#shown = shown; this.version++; this.groundVersion++;
     for (const [key, resident] of this.residents) resident.root.setEnabled(shown && this.#visible.has(key));
   }
   #remove(key: string): void {
@@ -66,7 +77,7 @@ export class TerrainRenderer {
     for (const u of r.units.values()) for (const m of u.meshes) m.dispose(false, false);
     r.root.dispose();
     this.residents.delete(key); for (const [id, job] of this.#jobs) if (job.chunkKey === key) this.#jobs.delete(id);
-    this.version++;
+    this.version++; this.groundVersion++;
   }
   demand(demand: readonly ChunkDemand[], intersectsUnit: (x: number, y: number, size: number) => boolean = () => true): void {
     const previousVisible = this.#visible;
@@ -95,7 +106,12 @@ export class TerrainRenderer {
     }
     for (const [key, r] of this.residents) {
       r.root.setEnabled(this.#shown && this.#visible.has(key));
-      if (wanted.has(key)) { const p = this.space.project({ cellX: r.chunk.originCellX, cellY: r.chunk.originCellY }); r.root.position.set(p.x, 0, p.z); }
+      if (wanted.has(key)) {
+        const p = this.space.project({ cellX: r.chunk.originCellX, cellY: r.chunk.originCellY });
+        if (r.root.position.x !== p.x || r.root.position.z !== p.z) {
+          r.root.position.set(p.x, 0, p.z); refreshStaticHierarchy(r.root);
+        }
+      }
     }
     for (const d of demand) if (d.visible && (this.store.changed.has(d.key) || !this.residents.has(d.key) || !previousVisible.has(d.key)
       || [...this.#masks.get(d.key)!].join('|') !== [...(previousMasks.get(d.key) ?? [])].join('|'))) {
@@ -109,6 +125,7 @@ export class TerrainRenderer {
     if (!resident) {
       const root = new TransformNode(`terrain-chunk-${chunkKey}`, this.scene);
       const p = this.space.project({ cellX: chunk.originCellX, cellY: chunk.originCellY }); root.position.set(p.x, 0, p.z);
+      freezeStaticHierarchy(root);
       resident = { chunk: { originCellX: chunk.originCellX, originCellY: chunk.originCellY }, root, units: new Map() }; this.residents.set(chunkKey, resident);
     }
     const keys = new Set<string>();
@@ -161,7 +178,7 @@ export class TerrainRenderer {
     }
     for (const [id, j] of this.#jobs) if (j.chunkKey === chunkKey && !keys.has(j.key)) this.#jobs.delete(id);
   }
-  tick(): void {
+  tick(budgetMs: number = TERRAIN_STREAMING.admissionMs): void {
     const started = this.now();
     // One bounded unit at a time. Admission reserves one allocation beyond residents.
     const demandOrder = new Map(this.store.demand.map((d, i) => [d.key, i]));
@@ -175,11 +192,11 @@ export class TerrainRenderer {
     const hadJobs = this.#jobs.size > 0;
     let published = 0;
     while (this.#ordered.length) {
-      if (this.now() - started >= TERRAIN_STREAMING.admissionMs) break;
+      if (this.now() - started >= budgetMs) break;
       const [id, job] = this.#ordered[0]!;
       if (this.#jobs.get(id) !== job) { this.#ordered.shift(); continue; }
       const kind = job.key.split(':')[0]!;
-      if (published && this.now() - started + (this.#cost.get(kind) ?? 1) > TERRAIN_STREAMING.admissionMs) break;
+      if (published && this.now() - started + (this.#cost.get(kind) ?? 1) > budgetMs) break;
       this.#ordered.shift();
       const resident = this.residents.get(job.chunkKey); this.#jobs.delete(id); if (!resident) continue;
       this.peakGraphicChunks = Math.max(this.peakGraphicChunks, this.residents.size + 1);
@@ -187,17 +204,25 @@ export class TerrainRenderer {
       for (const mesh of meshes) {
         mesh.unfreezeWorldMatrix(); mesh.parent = resident.root;
         mesh.position.x -= resident.root.position.x; mesh.position.z -= resident.root.position.z;
+        freezeStaticHierarchy(mesh);
       }
       for (const m of resident.units.get(job.key)?.meshes ?? []) m.dispose(false, false);
       resident.units.set(job.key, { signature: job.signature, meshes, ground: job.ground });
       const cost = this.now() - buildStarted;
       this.#cost.set(kind, cost); published++;
       if (cost > this.slowestUnit.ms) this.slowestUnit = { kind, ms: cost };
-      if (job.ground) this.version++;
+      if (job.ground) { this.version++; this.groundVersion++; }
     }
     const elapsed = this.now() - started;
     this.integrationMs.push(elapsed); if (this.integrationMs.length > 3600) this.integrationMs.shift();
     if (hadJobs) { this.activeIntegrationMs.push(elapsed); if (this.activeIntegrationMs.length > 3600) this.activeIntegrationMs.shift(); }
+  }
+  /** Published tiles outlive the camera mask; Babylon culls their retained geometry. */
+  hasGround(x: number, y: number): boolean {
+    const { widthCells: w, heightCells: h, chunkSize: s } = this.store.world;
+    x = normalize(Math.round(x), w); y = normalize(Math.round(y), h);
+    const resident = this.residents.get(this.store.key(x, y));
+    return Boolean(this.#shown && resident?.units.has(`ground:${Math.floor(x % s / UNIT) * UNIT}:${Math.floor(y % s / UNIT) * UNIT}`));
   }
   rendered(x: number, y: number): boolean {
     const { widthCells: w, heightCells: h, chunkSize: s } = this.store.world;
@@ -207,7 +232,9 @@ export class TerrainRenderer {
     return Boolean(resident?.root.isEnabled() && this.#masks.get(this.store.key(x, y))?.has(unit) && resident.units.has(`ground:${unit}`));
   }
   shift(x: number, z: number): void {
-    for (const r of this.residents.values()) { r.root.position.x -= x; r.root.position.z -= z; }
+    for (const r of this.residents.values()) {
+      r.root.position.x -= x; r.root.position.z -= z; refreshStaticHierarchy(r.root);
+    }
     this.version++;
   }
   dispose(): void { for (const key of [...this.residents.keys()]) this.#remove(key); this.#jobs.clear(); this.#ordered.length = 0; }

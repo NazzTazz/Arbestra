@@ -1,5 +1,13 @@
 # Architecture autoritaire
 
+Les [corrections de streaming au mouvement du 15 octobre](../SPEC-STREAMING-TERRAIN.md) conservent le support de voirie hors masque caméra, limitent les remplacements de pavés/trottoirs à des secteurs locaux et réutilisent leur topologie. Les dépendances locales du sol évitent les sondes distantes à chaque publication de terrain. L'overlay DEV ventile aussi les phases de chaque image, avec moyenne et maximum récents. Les tests de réutilisation et de géométrie passent ; la fluidité générale reste à mesurer séparément, avec preuves et limites courantes dans le [handoff](../../SESSION-HANDOFF.md).
+
+Le client monde propose [DEV → Statistiques en overlay](operations.md#statistiques-de-développement-village-et-terrain) : ventilation facultative des lectures village/terrain et coûts client/rendu, réservée au développement. Les mesures restent locales et les inconnues explicites ; aucun polling ni changement économique ajouté.
+
+La [console NOC](operations.md) ajoute une application `admin-web` et des endpoints de consultation protégés par identifiants de comptes. La [spec V1](../SPEC-NOC-V1.md) distingue données métier persistées, instrumentation du processus répondant et commandes futures. Les lectures n'exécutent aucune réconciliation économique ; métriques inconnues et portée des observations restent explicites.
+
+Tranche NOC **implémentée et vérifiée fonctionnellement en local, performance à confirmer** : [diagnostic HTTP et corrélation locale V1.1](../SPEC-NOC-V1-1-DIAGNOSTIC-HTTP.md). Identifier les requêtes lentes/5xx et interrompues, expliquer le statut et retrouver une référence dans des journaux expurgés, sans attribution automatique de cause ni mutation du jeu. Le [handoff](../../SESSION-HANDOFF.md) porte les preuves courantes.
+
 Expéditions RC1 asynchrones implémentées le 12 octobre : [spec](../SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md) et [preuves/tests/performance](../IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Noyau A→B indépendant, calcul CPU hors transaction, admission FIFO sans réservation et reçus SSE durables. Migration042 validée en test uniquement ; recette visuelle et limites de mesure précisées dans le bilan.
 
 État courant du 10 octobre : [installation RC1, vue village et dossier de contre-recette](../IMPLEMENTATION-INSTALLATION-RC1.md). Les mentions de pose non raccordée ci-dessous décrivent la tranche atlas antérieure. La candidate reste à valider avant ouverture publique.

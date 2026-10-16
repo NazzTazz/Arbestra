@@ -26,22 +26,61 @@ function harness(initial:VillageState=state()) {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('can begin the initial fixed-camera transfer without waiting for motion coalescing', async () => {
+    const h = harness();
+    h.store.demandChunks([{key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0}], true);
+    h.store.tick(2, true); expect(h.requests).toHaveLength(1); await h.settle(0);
+  });
+  it('reserves startup requests for visible missing terrain, then resumes refresh and prefetch', async () => {
+    const h = harness();
+    h.store.demandChunks([{key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0},
+      {key: '1:0', chunkX: 1, chunkY: 0, visible: false, distance: 1}]);
+    // Advance the injected clock without admitting a background batch.
+    h.store.setPaused(true); h.advance(100); h.store.setPaused(false); h.store.tick(2, true);
+    expect(h.requests).toHaveLength(1); expect(h.requests[0]!.chunks.map(c => c.chunkX)).toEqual([0]);
+    await h.settle(0);
+    h.store.setPaused(true); h.advance(6000); h.store.setPaused(false); h.store.tick(2, true);
+    expect(h.requests).toHaveLength(1);
+    // Real invalidations remain eligible even behind the loading screen.
+    h.store.invalidate('0:0'); h.store.tick(2, true); expect(h.requests[1]!.updatesOnly).toBe(true);
+    await h.settle(1); h.store.tick();
+    expect(h.requests[2]!.chunks.map(c => c.chunkX)).toEqual([1]);
+    await h.settle(2, chunk(1));
+    h.advance(6000); expect(h.requests[3]!.updatesOnly).toBe(true);
+    await h.settle(3);
+  });
   it('versions ground availability, live RC1 edits and eviction without invalidating for economic feature changes',async()=>{
     const initial=state();initial.world={...initial.world,generationVersion:3,widthCells:512,heightCells:256};
     const h=harness(initial),rc1={stride:65,heights:Array(65**2).fill(.25),water:Array(65**2).fill(0),terraces:[]};
     expect(h.store.ground(1,1)).toBeNull();const unavailable=h.store.groundRevision;
     h.demand();h.advance(100);await h.settle(0,{...chunk(),rc1});
     const available=h.store.groundRevision;expect(available).toBeGreaterThan(unavailable);expect(h.store.ground(1,1)!.height).toBe(.625);
+    const local=h.store.groundRevisionAt(1,1);expect(local).toBe(available);expect(h.store.groundRevisionAt(513,257)).toBe(local);
     h.advance(5000);h.requests[1]!.resolve({world:initial.world,chunks:[{chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[feature(deposit(1))],occupiedCells:[],rc1Edits:{terraces:[]}}]});await new Promise(r=>setTimeout(r,0));
     expect(h.store.groundRevision).toBe(available);
+    expect(h.store.groundRevisionAt(1,1)).toBe(local);
     h.advance(5000);h.requests[2]!.resolve({world:initial.world,chunks:[{chunkX:0,chunkY:0,originCellX:0,originCellY:0,features:[],occupiedCells:[],rc1Edits:{terraces:[{cellX:1,cellY:1,height:.5}]}}]});await new Promise(r=>setTimeout(r,0));
     expect(h.store.groundRevision).toBeGreaterThan(available);expect(h.store.ground(1,1)!.height).toBe(1.25);
+    expect(h.store.groundRevisionAt(1,1)).toBeGreaterThan(local);expect(h.store.groundRevisionAt(40,1)).toBe(unavailable);
     const beforeEviction=h.store.groundRevision;
     // Fill only cache entries, without starting transport or admitting any terrain meshes.
     for(let i=1;i<=65;i++)h.store.demandChunks([{key:(i%16)+':'+Math.floor(i/16),chunkX:i%16,chunkY:Math.floor(i/16),visible:true,distance:0}]);
     expect(h.store.entries.size).toBe(64);expect(h.store.chunk('0:0')).toBeUndefined();expect(h.store.ground(1,1)).toBeNull();expect(h.store.groundRevision).toBeGreaterThan(beforeEviction);
+    expect(h.store.groundRevisionAt(1,1)).toBe(unavailable);
     h.demand();h.advance(100);await h.settle(3,{...chunk(),rc1});const restored=h.store.groundRevision;expect(h.store.ground(1,1)!.height).toBe(.625);
     h.store.geographyChanged();expect(h.store.groundRevision).toBeGreaterThan(restored);expect(h.store.ground(1,1)).toBeNull();
+  });
+  it('keeps loaded substrate identities when another chunk or snapshot fallback changes',async()=>{
+    const initial=state(),h=harness(initial);
+    h.demand();h.advance(100);await h.settle(0);
+    const first=h.store.groundRevisionAt(1,1);
+    h.demand(1);h.advance(100);await h.settle(1,chunk(1));
+    expect(h.store.groundRevisionAt(1,1)).toBe(first);expect(h.store.groundRevisionAt(33,1)).not.toBe(first);
+    const fallback=h.store.groundRevisionAt(70,1);
+    h.store.observe({...initial,region:{...initial.region,originCellX:64,elevations:[24]}});
+    expect(h.store.groundRevisionAt(1,1)).toBe(first);expect(h.store.groundRevisionAt(70,1)).not.toBe(fallback);
+    expect(h.store.ground(64,0)?.height).toBeCloseTo(.6);
+    h.store.geographyChanged();expect(h.store.groundRevisionAt(1,1)).not.toBe(first);
   });
   it('releases timed-out requests even when transport never settles and rejects their late replies', async()=>{
     vi.useFakeTimers();

@@ -6,8 +6,31 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { ShaderStore } from '@babylonjs/core/Engines/shaderStore';
-import { bindBrazierLights, brazierBlocks, roadCorners } from './village-braziers';
+import { Particle } from '@babylonjs/core/Particles/particle';
+import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
+import { bindBrazierLights, brazierBlocks, roadCorners, VillageBraziers } from './village-braziers';
 import type { TravelRoute } from '@arbestra/contracts';
+
+it.each(['equipment','decoration'])('moves %s braziers with their lights and flames without rebuilding, then removes absent items',kind=>{
+  vi.stubGlobal('OffscreenCanvas',class{constructor(public width:number,public height:number){} getContext(){return {putImageData(){}};}});
+  vi.stubGlobal('ImageData',class{data:Uint8ClampedArray;constructor(width:number,height:number){this.data=new Uint8ClampedArray(width*height*4);}});
+  const engine=new NullEngine(),scene=new Scene(engine),braziers=new VillageBraziers(scene);
+  try{
+    const point={...(kind==='equipment'?{id:'brazier-1'}:{renderKey:'campus:building:1'}),x:10,y:1,z:20,seed:.4};braziers.updatePoints([point]);
+    const masonry=scene.getMeshByName('brazier-masonry')!,light=scene.getLightByName('brazier-light-0') as PointLight,flame=scene.particleSystems[0] as ParticleSystem;
+    const particle=new Particle(flame);particle.position.set(10,1.4,20);flame.particles.push(particle);
+    const centre=masonry.getBoundingInfo().boundingBox.centerWorld.clone(),emitter=(flame.emitter as Vector3).clone(),lightPosition=light.position.clone();
+    braziers.updatePoints([{...point,x:-70,y:1.5,z:-60}]);
+    const shift=new Vector3(-80,.5,-80);
+    expect(scene.getMeshByName('brazier-masonry')).toBe(masonry);expect(masonry.isDisposed()).toBe(false);expect(masonry.isWorldMatrixFrozen).toBe(true);
+    expect(masonry.isPickable).toBe(kind==='equipment');expect(masonry.metadata?.equipmentId).toBe(kind==='equipment'?'brazier-1':undefined);
+    expect(masonry.getBoundingInfo().boundingBox.centerWorld.equalsWithEpsilon(centre.add(shift),1e-5)).toBe(true);
+    expect(scene.particleSystems[0]).toBe(flame);expect((flame.emitter as Vector3).equalsWithEpsilon(emitter.add(shift))).toBe(true);
+    expect(particle.position.equalsWithEpsilon(new Vector3(-70,1.9,-60))).toBe(true);
+    expect(scene.getLightByName('brazier-light-0')).toBe(light);expect(light.position.equalsWithEpsilon(lightPosition.add(shift))).toBe(true);
+    braziers.updatePoints([]);expect(masonry.isDisposed()).toBe(true);expect(scene.particleSystems).toHaveLength(0);expect(scene.getLightByName('brazier-light-0')).toBeNull();
+  }finally{braziers.dispose();scene.dispose();engine.dispose();vi.unstubAllGlobals();}
+});
 
 it('registers clustered light shaders before the first night frame', () => {
   expect(ShaderStore.ShadersStore.lightProxyVertexShader).toContain('gl_Position');

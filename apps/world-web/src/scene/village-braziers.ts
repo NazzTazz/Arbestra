@@ -1,5 +1,7 @@
 import {automaticBraziers,type VillageState,type TravelCell,type TravelRoute,type InfrastructurePlan,subCellKey} from '@arbestra/contracts';
 import type { Scene } from '@babylonjs/core/scene';
+import { BrazierMeshIndex } from './brazier-mesh-index';
+import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
@@ -24,7 +26,7 @@ import '@babylonjs/core/Shaders/particles.fragment';
 import { roadEdges, roadInnerCorners } from './road-profile';
 import { delta, type WorldSpace } from './world-space';
 
-export interface BrazierPoint { x: number; y: number; z: number; seed: number;id?:string }
+export interface BrazierPoint { x: number; y: number; z: number; seed: number;id?:string;renderKey?:string }
 
 /** Full canonical topology, not the currently streamed subset. */
 export function roadCorners(routes: readonly TravelRoute[], width: number, height: number): TravelCell[] {
@@ -51,21 +53,26 @@ export function brazierBlocks() {
 
 /** Only called for the bounded, enabled lights. Preserve Babylon's bindings when unchanged. */
 export function bindBrazierLights(lights: readonly PointLight[], meshes: readonly AbstractMesh[]): void {
-  const targets = lights.map(() => [] as AbstractMesh[]);
+  const targets = lights.map(() => new Set<AbstractMesh>());
   for (const mesh of meshes) {
     if (!mesh.isEnabled() || !mesh.isVisible) continue;
     const center = mesh.getBoundingInfo().boundingSphere.centerWorld;
-    const near = lights.map((light, i) => ({ i, d: Vector3.DistanceSquared(center, light.position) }))
-      .filter(p => p.d < 25).sort((a, b) => a.d - b.d).slice(0, 2);
-    for (const p of near) {
-      targets[p.i]!.push(mesh);
-      if(mesh instanceof InstancedMesh&&!targets[p.i]!.includes(mesh.sourceMesh)){
-        targets[p.i]!.push(mesh.sourceMesh);
+    let first = -1, second = -1, firstDistance = 25, secondDistance = 25;
+    for (let i = 0; i < lights.length; i++) {
+      const d = Vector3.DistanceSquared(center, lights[i]!.position);
+      if (d < firstDistance) { second = first; secondDistance = firstDistance; first = i; firstDistance = d; }
+      else if (d < secondDistance) { second = i; secondDistance = d; }
+    }
+    for (const i of [first, second]) {
+      if (i < 0) continue;
+      targets[i]!.add(mesh);
+      if(mesh instanceof InstancedMesh){
+        targets[i]!.add(mesh.sourceMesh);
         // Six bounded road lights plus the two global lights, attenuated per instance.
         if(mesh.material instanceof StandardMaterial)mesh.material.maxSimultaneousLights=8;
       }
     }
-    if (near.length) {
+    if (first >= 0) {
       if (mesh.material?.isFrozen) mesh.material.unfreeze();
       for (const sub of mesh.subMeshes ?? []) {
         const material = sub.getMaterial();
@@ -74,7 +81,7 @@ export function bindBrazierLights(lights: readonly PointLight[], meshes: readonl
     }
   }
   lights.forEach((light, i) => {
-    const next = targets[i]!;
+    const next = [...targets[i]!];
     // An empty inclusion list means "all meshes" in Babylon: disable instead.
     if (light.isEnabled() !== (next.length > 0)) light.setEnabled(next.length > 0);
     if (next.length && (next.length !== light.includedOnlyMeshes.length
@@ -85,12 +92,13 @@ export function bindBrazierLights(lights: readonly PointLight[], meshes: readonl
 }
 
 export class VillageBraziers {
-  #items: Array<{ key: string; meshes: Mesh[]; flame: ParticleSystem; burning: boolean; light: PointLight; phase: number; tempo: number }> = [];
+  #items: Array<{ key: string; point: BrazierPoint; meshes: Mesh[]; flame: ParticleSystem; burning: boolean; light: PointLight; phase: number; tempo: number }> = [];
   #signature = '';
   #nextBind = 0;
   #lighting = false;
   #cluster: ClusteredLightContainer | null = null;
   #clusterChecked = false;
+  #meshIndex: BrazierMeshIndex | null = null;
   readonly #stone: StandardMaterial;
   readonly #fire: DynamicTexture;
   constructor(private readonly scene: Scene) {
@@ -128,8 +136,19 @@ export class VillageBraziers {
     const previous = new Map(this.#items.map(item => [item.key, item]));
     this.#items = [];
     for (const [index,p] of points.entries()) {
-      const key = JSON.stringify(p), existing = previous.get(key);
-      if (existing) { this.#items.push(existing); previous.delete(key); continue; }
+      // A streamed height or floating-origin change moves the same equipment.
+      // Preserve its geometry, light and live particles instead of recreating them.
+      const key = (p.id || p.renderKey) && !parent ? JSON.stringify([p.id??null,p.renderKey??null,p.seed]) : JSON.stringify(p), existing = previous.get(key);
+      if (existing) {
+        const shift=new Vector3(p.x-existing.point.x,p.y-existing.point.y,p.z-existing.point.z);
+        if(shift.lengthSquared()>0){
+          for(const mesh of existing.meshes){mesh.position.addInPlace(shift);refreshStaticHierarchy(mesh);}
+          (existing.flame.emitter as Vector3).addInPlace(shift);
+          for(const particle of existing.flame.particles)particle.position.addInPlace(shift);
+          existing.light.position.addInPlace(shift);
+        }
+        existing.point={...p};this.#items.push(existing); previous.delete(key); continue;
+      }
       const meshes: Mesh[] = [];
       const scale=.085;
       for (const [blockIndex,block] of brazierBlocks().entries()) {
@@ -154,6 +173,7 @@ export class VillageBraziers {
       const masonry = Mesh.MergeMeshes(meshes, true, false)!;
       masonry.name = 'brazier-masonry'; masonry.isPickable = Boolean(p.id);masonry.metadata=p.id?{equipmentId:p.id}:null;
       if (parent) masonry.setParent(parent);
+      else freezeStaticHierarchy(masonry);
       meshes.length = 0; meshes.push(masonry);
       const flame=new ParticleSystem(`brazier-fire-${index}`,24,this.scene);
       flame.particleTexture=this.#fire; flame.emitter=new Vector3(p.x,p.y+.10,p.z);
@@ -188,7 +208,7 @@ export class VillageBraziers {
       }
       if(this.#cluster)this.#cluster.addLight(light);
       else light.includedOnlyMeshes = meshes;
-      this.#items.push({key,meshes,flame,burning:false,light,phase:p.seed*Math.PI*2,tempo:.8+p.seed*.4});
+      this.#items.push({key,point:{...p},meshes,flame,burning:false,light,phase:p.seed*Math.PI*2,tempo:.8+p.seed*.4});
     }
     for (const item of previous.values()) {
       item.flame.dispose(false); this.#cluster?.removeLight(item.light); item.light.dispose();
@@ -214,7 +234,9 @@ export class VillageBraziers {
         - Vector3.DistanceSquared(b.light.position, eye)).slice(0, 6);
       const selected = new Set(active);
       for (const item of this.#items) if (!selected.has(item) && item.light.isEnabled()) item.light.setEnabled(false);
-      bindBrazierLights(active.map(item => item.light), this.scene.meshes);
+      const lights = active.map(item => item.light);
+      this.#meshIndex ??= new BrazierMeshIndex(this.scene);
+      bindBrazierLights(lights, this.#meshIndex.nearby(lights));
     }
     for (const item of this.#items) {
       const t=now*item.tempo, phase=item.phase;
@@ -227,5 +249,5 @@ export class VillageBraziers {
     }
   }
   #clear(): void { for (const item of this.#items) { item.flame.dispose(false); this.#cluster?.removeLight(item.light); item.light.dispose(); for (const mesh of item.meshes) mesh.dispose(false,false); } this.#items=[]; }
-  dispose(): void { this.#clear(); this.#cluster?.dispose(false,true); this.#cluster=null; this.#stone.dispose(); this.#fire.dispose(); }
+  dispose(): void { this.#clear(); this.#meshIndex?.dispose(); this.#meshIndex=null; this.#cluster?.dispose(false,true); this.#cluster=null; this.#stone.dispose(); this.#fire.dispose(); }
 }

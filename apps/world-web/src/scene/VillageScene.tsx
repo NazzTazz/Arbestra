@@ -8,6 +8,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { CosmologyDebug } from './CosmologyDebug';
 import { createPortal } from 'react-dom';
 import { VillageSolarPreview } from './VillageSolarPreview';
+import type { InitialLoadProgress } from './initial-village-load';
 
 import type { NaturalFeature, StoneDeposit, VillageState } from '@arbestra/contracts';
 
@@ -17,6 +18,7 @@ import type { AreaPreview, Cell } from './construction-selection';
 import type { ActiveWorldMode } from '../ui/world-mode';
 
 interface VillageSceneProps {
+  onInitialLoad?: ((progress: InitialLoadProgress) => void) | undefined;
   preparing?:boolean; starterGhost?:StarterGhost|null; onStarterManual?:(()=>void)|undefined;
   worldMode: ActiveWorldMode;
   populationFocus?: string | null;
@@ -53,9 +55,9 @@ interface VillageSceneProps {
 }
 export interface TerrainHandle { focusCell:(cell:Cell)=>void; viewCenter:()=>Cell|null; naturalFeatures:()=>NaturalFeature[]; ready:()=>boolean; infrastructureTool:(handler:((gesture:InfrastructureGesture)=>void)|null)=>void; infrastructurePreview:(operation:InfrastructureOperation|null,invalid?:boolean,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>)=>void; equipmentAt:(point:SubPoint,pickedId?:string)=>{id:string;version:number;position:SubPoint;quarterTurns:number}|null; selectRepresentative:(id:string|null)=>void; representativeInfo:(id:string)=>RepresentativeInfo|null; projectRepresentative:(id:string)=>ScreenAnchor|null; representativeCamera:(mode:'pov'|'follow'|'village')=>void; representativeCameraMode:()=>InhabitantCameraMode; cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
 
-export function VillageScene({ preparing=false, starterGhost=null, onStarterManual, worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
+export function VillageScene({ onInitialLoad, preparing=false, starterGhost=null, onStarterManual, worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
   const [arrival, setArrival] = useState<VillageArrival | null>(null);
-  const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled }); callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled };
+  const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad }); callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad };
   const [devTarget, setDevTarget] = useState<HTMLElement | null>(null);
   useEffect(() => { setDevTarget(devOpen ? document.getElementById('dev-cosmology-slot') : null); }, [devOpen, cosmologyDebug]);
   const [loading, setLoading] = useState<TerrainStatus>(null);
@@ -95,6 +97,7 @@ export function VillageScene({ preparing=false, starterGhost=null, onStarterManu
         setArrival(value); callbacks.current.onArrivalActive?.(value !== null);
       },
       () => callbacks.current.onEyesFound?.(),
+      progress => callbacks.current.onInitialLoad?.(progress),
     );
     sceneRef.current = scene;
     return () => {
@@ -102,7 +105,7 @@ export function VillageScene({ preparing=false, starterGhost=null, onStarterManu
       scene.dispose();
       sceneRef.current = null;
     };
-  }, [state.world.id, state.world.generationVersion, BabylonVillageScene]);
+  }, [state.world.id, state.world.generationVersion, state.village.id, BabylonVillageScene]);
 
   useEffect(() => {
     // React's development mount probe is disposed before the next frame. Do not

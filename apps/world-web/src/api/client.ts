@@ -95,10 +95,10 @@ export class ApiError extends Error {
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Une erreur est survenue.' })) as { message?: string; code?: string };
+    const error: { message?: string; code?: string } = await timedJson<{ message?: string; code?: string }>(response).catch(() => ({ message: 'Une erreur est survenue.' }));
     throw new ApiError(error.message ?? 'Une erreur est survenue.', response.status, error.code);
   }
-  return response.json() as Promise<T>;
+  return timedJson<T>(response);
 }
 
 export interface TimedVillageState {
@@ -145,7 +145,7 @@ async function requestVillageCommandState(path: string, init: RequestInit, base?
 }
 
 export function getVillage(worldSlug: string, villageId?: string): Promise<TimedVillageState> {
-  return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/village${villageId ? `?villageId=${encodeURIComponent(villageId)}` : ''}`);
+  return requestState(`/api/worlds/${encodeURIComponent(worldSlug)}/village${villageId ? `?villageId=${encodeURIComponent(villageId)}` : ''}`, {signal: AbortSignal.timeout(90_000)});
 }
 
 export async function getTerrain(worldSlug: string, chunks: Array<{ chunkX: number; chunkY: number }>, signal: AbortSignal): Promise<TerrainResponse> {
@@ -293,3 +293,4 @@ export async function setFactoryEnabled(worldSlug:string,enabled:boolean,village
   const response=await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/dev/factory-access`,{method:'PUT',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({enabled})});
   await parseResponse(response);return getVillage(worldSlug,villageId);
 }
+import { timedFetch as fetch, timedJson } from '../dev/statistics';

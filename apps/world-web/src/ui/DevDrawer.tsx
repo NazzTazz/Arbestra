@@ -1,6 +1,7 @@
 import type { TerrainViewMode } from '../scene/BabylonVillageScene';
 import type { VillageState } from '@arbestra/contracts';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+import { setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from '../dev/statistics';
 import { DEFAULT_BUILDING_LOD, getBuildingLodSettings, setBuildingLodSettings } from '../scene/building-lod-settings';
 
 function BuildingLodControls() {
@@ -31,12 +32,15 @@ export function DevDrawer({ noclip, onNoclip, open, view, state, showTravelPaths
   onRoute: (id: string | null) => void;
   onCosmology: (value: boolean) => void;
 }) {
+  const statistics = useSyncExternalStore(subscribeStatistics, statisticsEnabled, () => false);
   if (!import.meta.env.DEV) return null;
   return <aside className={`dev-shell${open ? ' is-open' : ''}`} aria-label="Outils développeur">
     {open && <div className="dev-drawer">
       <header><strong>Laboratoire</strong><button type="button" onClick={() => onOpen(false)}>Fermer</button></header>
       <section><strong>Ateliers</strong><label><input type="checkbox" checked={Boolean(state.factoryEnabled)} onChange={event=>onFactory(event.target.checked)}/> Activer les ateliers Bâtiments et Infrastructure</label></section>
       <section><strong>Visualisations</strong>
+        <label><input type="checkbox" checked={statistics} onChange={event => setStatisticsEnabled(event.target.checked)}/> Statistiques en overlay</label>
+        <small>Texte blanc. Mesure les prochaines lectures ; choix conservé après rechargement pour observer le démarrage.</small>
         <label><input type="checkbox" checked={noclip} onChange={event=>onNoclip(event.target.checked)}/> Passe-muraille</label>
         <label><input type="checkbox" checked={showTravelPaths} onChange={event => onTravelPaths(event.target.checked)}/> Chemins et transports</label>
         {showTravelPaths && <select value={selectedRouteId ?? ''} onChange={event => onRoute(event.target.value || null)}>

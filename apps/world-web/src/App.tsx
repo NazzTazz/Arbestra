@@ -1,3 +1,4 @@
+import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
 import {useExpeditions} from './ui/use-expeditions';
 import {useHarvestTool} from './ui/use-harvest-tool';
 import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
@@ -21,7 +22,7 @@ import type { RepresentativeInfo } from './scene/village-workers';
 import type { InhabitantCameraMode } from './scene/inhabitant-camera';
 import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
 import { discoverCatEyes } from './api/client';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbestra/contracts';
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
@@ -45,8 +46,13 @@ import { commandScience } from './api/client';
 import { DevDrawer } from './ui/DevDrawer';
 import { configuredExploitation, freezeExploitation, exploitationTargetKeys, pendingExploitationCap, directGardenExploitation } from './ui/exploitation-intent';
 
-const VillageScene = lazy(() => import('./scene/VillageScene').then((module) => ({ default: module.VillageScene })));
-const worldSlug = new URLSearchParams(window.location.search).get('world') ?? import.meta.env.VITE_DEFAULT_WORLD_SLUG ?? 'aube';
+import { WorldLoading } from './ui/WorldLoading';
+import type { InitialLoadProgress } from './scene/initial-village-load';
+import { initialVillageRead, initialWorldName, requestedWorldSlug } from './api/initial-village';
+let sceneModule: Promise<typeof import('./scene/VillageScene')> | undefined;
+const loadScene = () => sceneModule ??= import('./scene/VillageScene');
+const VillageScene = lazy(() => loadScene().then((module) => ({ default: module.VillageScene })));
+const worldSlug = requestedWorldSlug;
 const LOBBY_URL = import.meta.env.VITE_LOBBY_URL ?? `${window.location.protocol}//${window.location.hostname}:5173`;
 const populationAnchor = (): ScreenAnchor => ({ x: window.innerWidth / 2, y: window.innerHeight - 220 });
 
@@ -93,8 +99,12 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const initialFlight = useRef<Promise<TimedVillageState> | null>(null);
   const offsetRef = useRef(0);
   const [loading, setLoading] = useState(!starter);
+  const [worldLabel, setWorldLabel] = useState(worldSlug);
+  const [initialProgress, setInitialProgress] = useState<{key: string; progress: InitialLoadProgress} | null>(null);
+  const sceneKey = state ? `${state.world.id}:${state.world.generationVersion}:${state.village.id}` : '';
+  const initialReady = initialProgress?.key === sceneKey && initialProgress.progress.phase === 'ready';
   const [needsLogin, setNeedsLogin] = useState(false);
-  const expeditions=useExpeditions(worldSlug,state?.world.id,state?.village.id,!needsLogin);
+  const expeditions=useExpeditions(worldSlug,state?.world.id,state?.village.id,!needsLogin && initialReady);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
@@ -134,6 +144,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [showGardens, setShowGardens] = useState(false);
   const [showTravelPaths, setShowTravelPaths] = useState(false);
   const [showDev, setShowDev] = useState(false);
+  const showStatistics = useSyncExternalStore(subscribeStatistics, statisticsEnabled, () => false);
   const [cosmologyDebug, setCosmologyDebug] = useState(false);
   const [terrainView, setTerrainView] = useState<TerrainViewMode>('village');
   const [arrivalActive, setArrivalActive] = useState(false);
@@ -155,6 +166,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   const starterRef=useRef(starter);starterRef.current=starter;
   const applySnapshot = useCallback((update: TimedVillageUpdate) => {
+    return clientTime('apply', () => {
     const previous = stateRef.current;
     if (update.requestGeneration !== undefined && update.requestGeneration !== villageRequestGeneration()) return;
     let snapshot: TimedVillageState;
@@ -214,7 +226,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
     starterRef.current?.onSnapshot(snapshot.state);
     setServerOffsetMs(snapshot.serverOffsetMs);
     offsetRef.current = snapshot.serverOffsetMs;
-  }, [pushNotification]);
+      });
+}, [pushNotification]);
 
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
@@ -343,7 +356,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   }, [previewRequest]);
 
   const refresh = useCallback(async () => {
-    if(beforeTownHall)return;
+    if(beforeTownHall || !initialReady)return;
     if (synchronization.current) { synchronization.current.reconnect(); return; }
     if (actionInFlight.current) return;
     if (refreshFlight.current) return refreshFlight.current;
@@ -351,9 +364,10 @@ export function App({starter}:{starter?:StarterController} = {}) {
       try { applySnapshot(await getVillage(worldSlug, stateRef.current?.village.id)); } catch { /* Background refresh is best effort. */ }
     })().finally(() => { refreshFlight.current = null; });
     return refreshFlight.current;
-  }, [applySnapshot,beforeTownHall]);
+  }, [applySnapshot,beforeTownHall,initialReady]);
 
-  useEffect(() => { if(starter) return; let cancelled=false; initialFlight.current??=getVillage(worldSlug);
+  useEffect(() => { void loadScene().catch(() => {}); if(starter) return; let cancelled=false; initialFlight.current??=initialVillageRead();
+    void initialWorldName().then(name => { if (!cancelled && name) setWorldLabel(name); });
     void initialFlight.current.then(snapshot=>{if(!cancelled)applySnapshot(snapshot);}).catch((reason) => {
     if(cancelled)return;
     if (reason instanceof ApiError && reason.status === 401) setNeedsLogin(true);
@@ -378,7 +392,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1_000); return () => window.clearInterval(timer); }, []);
 
   useEffect(() => {
-    if (needsLogin || beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
+    if (!initialReady || needsLogin || beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
     const stream = new VillageSynchronization(state.world.slug, state.world.id, state.village.id, {
       current: () => stateRef.current,
       onExpeditionReceipt:expeditions.receive, accept: applySnapshot, offset: () => offsetRef.current,
@@ -386,7 +400,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     });
     synchronization.current = stream;
     return () => { stream.close(); if(synchronization.current===stream)synchronization.current=null; };
-  }, [state?.world.id,state?.village.id,beforeTownHall,needsLogin,applySnapshot,expeditions.receive]);
+  }, [state?.world.id,state?.village.id,beforeTownHall,needsLogin,applySnapshot,expeditions.receive,initialReady]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const inspectedFeature=selectedFeatureId ? terrainRef.current?.naturalFeatures().find(f=>f.id===selectedFeatureId)
@@ -504,6 +518,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (!initialReady) return;
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || actionInFlight.current && !(event.key === 'Escape' && exploitationActive.current)) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.closest('input, textarea, select')) return;
@@ -878,12 +893,12 @@ export function App({starter}:{starter?:StarterController} = {}) {
       { commandId: randomUUID(), action, ...(cap === undefined ? {} : { workerCap: cap }) }));
   }
 
-  if (loading) return <main className="center-message">Chargement du monde…</main>;
-  if (needsLogin) return <main className="center-message"><a href={LOBBY_URL}>Se connecter pour entrer dans ce monde</a></main>;
-  if (!state) return <main className="center-message" role="alert">{error ?? 'Village indisponible.'}</main>;
-  return <main className="game-shell">
-    {!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
-    <Suspense fallback={<div className="center-message">L'oracle se rhabille...</div>}><VillageScene preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
+  if (loading) return <WorldLoading worldName={worldLabel} message="Lecture du village et de ses trajets" lobbyUrl={LOBBY_URL}/>;
+  if (needsLogin) return <WorldLoading worldName={state?.world.name ?? worldLabel} error="Connectez-vous pour entrer dans ce monde." lobbyUrl={LOBBY_URL}/>;
+  if (!state) return <WorldLoading worldName={worldLabel} error={error ?? 'Village indisponible.'} onRetry={() => location.reload()} lobbyUrl={LOBBY_URL}/>;
+  return <><main className="game-shell" data-initial-loading={!initialReady} inert={!initialReady} aria-hidden={!initialReady}>
+    {initialReady&&!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
+    <Suspense fallback={null}><VillageScene onInitialLoad={progress => setInitialProgress({key: sceneKey, progress})} preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={sceneState??state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
       pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : []} highlightedSiteIds={highlightedSiteIds}
       constructionMode={!paletteCollapsed && !workshop && worldMode === 'construction' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
@@ -929,12 +944,12 @@ export function App({starter}:{starter?:StarterController} = {}) {
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
-    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
     {showScience && worldMode === 'population' && terrainView === 'village' && state.science && <SciencePanel expeditions={expeditions.entries} target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (modeRef.current !== 'population' || arrivalActive) return; if(command.action==='survey'||command.action==='explore'){expeditions.submit(command);return;} void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmology={cosmologyDebug} onOpen={open => { setShowDev(open); if (open) cancelWorldGesture(); }} onTravelPaths={setShowTravelPaths}
-      onRoute={setSelectedRouteId} onCosmology={setCosmologyDebug} onReset={() => { setNoclip(false);terrainRef.current?.resetCosmology(); setCosmologyDebug(false); setShowTravelPaths(false); setSelectedRouteId(null); }} />
+      onRoute={setSelectedRouteId} onCosmology={setCosmologyDebug} onReset={() => { setStatisticsEnabled(false);setNoclip(false);terrainRef.current?.resetCosmology(); setCosmologyDebug(false); setShowTravelPaths(false); setSelectedRouteId(null); }} />
     {showWorksites && worldMode === 'exploitation' && terrainView === 'village' && <WorksitePanel orders={state.village.exploitationOrders ?? []} serverNow={serverNow} worksites={state.village.worksites} pending={pendingAction} onAction={commandWorksite} />}
     {menuAnchor && showGardens && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><div><strong>Choisir un Jardin</strong>{gardenSites.map((site, index) => <button type="button" key={site.id} onClick={() => { setShowGardens(false); setSelectedSiteId(site.id); }}>Jardin {index + 1} · {site.cellX}, {site.cellY} · {site.building!.garden!.activeCellCount} parcelle(s)</button>)}</div></WorldContextMenu> : null}
     {representative && menuAnchor && worldMode==='population' && <WorldContextMenu anchor={representativeView==='village'?menuAnchor:{x:window.innerWidth-330,y:110}}><RepresentativePanel person={representative} view={representativeView} onView={mode=>terrainRef.current?.representativeCamera(mode)} onClose={closePanels}/></WorldContextMenu>}
@@ -963,5 +978,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       infrastructure={<InfrastructureTools state={sceneState??state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onConfirmation={applyInfrastructureConfirmation} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
       onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
     {workshop&&<section className="factory-workshop" aria-label="Atelier"><button onClick={()=>setWorkshop(null)}>Retour au village</button>{state.factoryEnabled?<iframe title={`Atelier ${workshop}`} src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}/>:<p>L’accès aux ateliers a été désactivé.</p>}</section>}
-  </main>;
+  </main>{!initialReady && <WorldLoading worldName={state.world.name} message="Préparation de la scène"
+    progress={initialProgress?.key === sceneKey ? initialProgress.progress : undefined}
+    onRetry={() => location.reload()} lobbyUrl={LOBBY_URL}/>}</>;
 }

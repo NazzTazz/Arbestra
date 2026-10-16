@@ -59,7 +59,8 @@ it('coordinates three cached levels, adjusts thresholds without rebuilding and r
   } finally { setBuildingLodSettings({...DEFAULT_BUILDING_LOD}); scene.dispose(); engine.dispose(); }
 });
 
-it('switches the whole instanced recipe, preserving picking, identity, origin shifts and shared sources', () => {
+it.each([false, true])('switches the whole instanced recipe, preserving picking, identity, origin shifts and shared sources (frozen: %s)', async frozen => {
+  const { freezeStaticHierarchy, refreshStaticHierarchy } = await import('./static-transforms');
   const engine = new NullEngine({ renderWidth: 1200, renderHeight: 750, textureSize: 512, deterministicLockstep: false, lockstepMaxSteps: 4 });
   const scene = new Scene(engine), camera = new FreeCamera('camera', new Vector3(0, 0, -20), scene);
   const containers: AssetContainer[] = [];
@@ -73,7 +74,9 @@ it('switches the whole instanced recipe, preserving picking, identity, origin sh
     const makeBuilding = (id: string, x: number) => {
       const root = new Mesh(id, scene); root.metadata = { siteId: id }; root.position.x = x;
       const a = instantiateBakedBuilding(detail, root), b = instantiateBakedBuilding(coarse, root);
-      coordinateBuildingLod(root, a.rootNodes, b.rootNodes); return root;
+      coordinateBuildingLod(root, a.rootNodes, b.rootNodes);
+      if (frozen) freezeStaticHierarchy(root);
+      return root;
     };
     const a = makeBuilding('site-a', 0), b = makeBuilding('site-b', 12);
     const sources = scene.meshes.filter(m => m instanceof Mesh && m.instances.length);
@@ -93,8 +96,9 @@ it('switches the whole instanced recipe, preserving picking, identity, origin sh
       evaluate(-10);
     }
     evaluate(-100); const diameter = a.metadata.buildingLod.diameter;
-    a.rotation.y = Math.PI / 2; scene.render(); expect(a.metadata.buildingLod.diameter).toBeCloseTo(diameter);
+    a.rotation.y = Math.PI / 2; refreshStaticHierarchy(a); scene.render(); expect(a.metadata.buildingLod.diameter).toBeCloseTo(diameter);
     a.position.x -= 1000; b.position.x -= 1000; camera.position.x -= 1000;
+    refreshStaticHierarchy(a); refreshStaticHierarchy(b);
     scene.render(); expect(a.metadata.buildingLod.diameter).toBeCloseTo(diameter);
     camera.mode = Camera.ORTHOGRAPHIC_CAMERA; camera.orthoLeft = -10; camera.orthoRight = 10; camera.orthoTop = 6; camera.orthoBottom = -6;
     scene.render(); expect(a.metadata.buildingLod.active).toBe('detailed');

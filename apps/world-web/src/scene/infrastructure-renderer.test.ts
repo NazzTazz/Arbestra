@@ -8,6 +8,67 @@ import {TerrainStore} from './terrain-store';
 import {TerrainRenderer} from './terrain-renderer';
 import {VillageRoads} from './village-roads';
 import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
+import {createHash} from 'node:crypto';
+import * as infrastructureContracts from '@arbestra/contracts';
+import {Vector3} from '@babylonjs/core/Maths/math.vector';
+
+it('moves retained paving and sidewalks through chunk and torus rebases without rebuilding or resampling',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene,true);
+ const borders=vi.spyOn(infrastructureContracts,'infrastructureBorders');
+ try{
+  const plan=emptyInfrastructure(),space=new WorldSpace(512,256,{cellX:480,cellY:224});
+  plan.roads=[{id:'road',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:8,y:8},{x:24,y:8}]}];
+  const ground=vi.fn(()=>1),update=()=>renderer.update(plan,new WorldSpace(space.width,space.height,{...space.origin}),ground,false,1,undefined,false,[],{followTerrain:true,groundIdentity:'stable'});
+  update();const first=[...renderer.meshes],calls=borders.mock.calls.length;
+  expect(first.length).toBeGreaterThan(1);
+  const bounds=first.map(m=>m.getBoundingInfo().boundingBox.centerWorld.clone());ground.mockClear();
+  for(const target of [{cellX:0,cellY:0},{cellX:32,cellY:32},{cellX:480,cellY:224},{cellX:0,cellY:0}]){
+   const shift=space.rebase(target,32)!;update();
+   expect(renderer.meshes).toEqual(first);expect(ground).not.toHaveBeenCalled();expect(borders.mock.calls.length).toBe(calls);
+   first.forEach((m,i)=>{bounds[i]!.subtractInPlace(new Vector3(shift.x,0,shift.z));expect(m.getBoundingInfo().boundingBox.centerWorld.equalsWithEpsilon(bounds[i]!,1e-5)).toBe(true);expect(m.isWorldMatrixFrozen).toBe(true);});
+  }
+  // A real terrace received after rebasing still changes geometry at the new origin.
+  ground.mockReturnValue(1.5);renderer.update(plan,space,ground,false,2,undefined,false,[],{followTerrain:true,groundIdentity:'terrace'});
+  expect(first.every(m=>m.isDisposed())).toBe(true);
+  renderer.meshes.forEach((m,i)=>{const centre=m.getBoundingInfo().boundingBox.centerWorld;expect(centre.x).toBeCloseTo(bounds[i]!.x,5);expect(centre.y).toBeCloseTo(bounds[i]!.y+.5,5);expect(centre.z).toBeCloseTo(bounds[i]!.z,5);});
+ }finally{borders.mockRestore();renderer.dispose();scene.dispose();engine.dispose();}
+});
+
+it('reprojects the opposite toric copy while retaining nearby road layers',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene,true),fresh=new InfrastructureRenderer(scene,true);
+ try{
+  const plan=emptyInfrastructure(),space=new WorldSpace(512,256,{cellX:0,cellY:0});
+  plan.roads=[{id:'near',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:8,y:8},{x:24,y:8}]},
+   {id:'opposite',operation:'paint',material:'earth',width:4,border:false,points:[{x:240*8,y:8},{x:242*8,y:8}]}];
+  const update=(r:InfrastructureRenderer)=>r.update(plan,space,()=>1,false,1,undefined,false,[],{followTerrain:true,groundIdentity:'stable'});
+  update(renderer);const near=renderer.meshes.filter(m=>m.name==='infrastructure-stone-1'),far=renderer.meshes.filter(m=>m.name==='infrastructure-earth');
+  space.rebase({cellX:480,cellY:0},32);update(renderer);update(fresh);
+  expect(near.length).toBeGreaterThan(0);expect(near.every(m=>renderer.meshes.includes(m))).toBe(true);expect(far.every(m=>m.isDisposed())).toBe(true);
+  renderer.meshes.forEach((m,i)=>{expect(m.getBoundingInfo().boundingBox.minimumWorld.equalsWithEpsilon(fresh.meshes[i]!.getBoundingInfo().boundingBox.minimumWorld,1e-4)).toBe(true);expect(m.getBoundingInfo().boundingBox.maximumWorld.equalsWithEpsilon(fresh.meshes[i]!.getBoundingInfo().boundingBox.maximumWorld,1e-4)).toBe(true);});
+ }finally{renderer.dispose();fresh.dispose();scene.dispose();engine.dispose();}
+});
+
+it('reuses the road topology when only ground changes while projecting the new heights',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene,true);
+ const borders=vi.spyOn(infrastructureContracts,'infrastructureBorders');
+ try{
+  const plan=emptyInfrastructure(),space=new WorldSpace(512,256,{cellX:10,cellY:10});
+  plan.roads=[{id:'road',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:80,y:80},{x:96,y:80}]}];
+  renderer.update(plan,space,()=>1,false,1,undefined,false,[],{followTerrain:true,groundIdentity:'ground-1'});
+  const first=[...renderer.meshes],calls=borders.mock.calls.length;
+  expect(first.every(mesh=>mesh.isWorldMatrixFrozen)).toBe(true);
+  expect(calls).toBeGreaterThan(0);
+  const heights=first.map(m=>Array.from(m.getVerticesData('position')!).filter((_,i)=>i%3===1));
+  renderer.update(plan,space,()=>1.25,false,2,undefined,false,[],{followTerrain:true,groundIdentity:'ground-2'});
+  expect(borders.mock.calls.length).toBe(calls);
+  expect(first.every(m=>m.isDisposed())).toBe(true);
+  renderer.meshes.forEach((m,i)=>Array.from(m.getVerticesData('position')!).filter((_,j)=>j%3===1).forEach((y,j)=>expect(y-heights[i]![j]!).toBeCloseTo(.25,5)));
+  plan.roads[0]!.border=false;
+  renderer.update(plan,space,()=>1.25,false,3,undefined,false,[],{followTerrain:true,groundIdentity:'ground-2'});
+  expect(borders.mock.calls.length).toBeGreaterThan(calls);
+  expect(renderer.meshes.some(m=>m.name==='infrastructure-border')).toBe(false);
+ }finally{borders.mockRestore();renderer.dispose();scene.dispose();engine.dispose();}
+});
 
 it('retains road meshes for an unrelated chunk revision and rebuilds for local ground changes',()=>{
   const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);
@@ -162,8 +223,9 @@ it('uses the published ground identity before terrace mesh admission and tracks 
  const terrain=new TerrainRenderer(scene,store,space,material,material,()=>[],()=>[],()=>[]);
  const demand=[{key:'0:0',chunkX:0,chunkY:0,visible:true,distance:0}],plan=emptyInfrastructure();plan.roads=[{id:'identity-road',operation:'paint',material:'earth',width:4,border:false,points:[{x:8,y:8},{x:16,y:8}]}];
  const route={id:'automatic-identity',kind:'building' as const,destination:{cellX:3,cellY:1},cells:[{cellX:1,cellY:1},{cellX:3,cellY:1}]};
- const ground=vi.fn((x:number,y:number)=>terrain.rendered(x,y)?store.ground(x,y)?.height??null:null);
- const update=()=>{const identity=JSON.stringify([initial.world.id,store.groundRevision,terrain.version]);roads.update(plan,space,ground,false,terrain.version,undefined,false,[],{followTerrain:true,groundIdentity:identity});automatic.update('same-routes',[route],space,cell=>{const height=ground(cell.cellX,cell.cellY);return height===null?null:{code:1,height};},true,identity);};
+ const ground=vi.fn((x:number,y:number)=>terrain.hasGround(x,y)?store.ground(x,y)?.height??null:null);
+ const cellIdentity=(x:number,y:number)=>terrain.hasGround(x,y)?store.groundRevisionAt(x,y)+1:0;
+ const update=()=>{const identity=JSON.stringify([initial.world.id,store.groundRevision,terrain.groundVersion]);roads.update(plan,space,ground,false,terrain.groundVersion,undefined,false,[],{followTerrain:true,groundIdentity:identity,groundCellIdentity:cellIdentity});automatic.update('same-routes',[route],space,cell=>{const height=ground(cell.cellX,cell.cellY);return height===null?null:{code:1,height};},true,identity,cellIdentity);};
  const settle=async(index:number,value:TerrainChunk|TerrainUpdatesResponse['chunks'][number])=>{responses[index]!({world:initial.world,chunks:[value]});await new Promise(r=>setTimeout(r,0));};
  try{
   store.demandChunks(demand);terrain.demand(demand,(x,y)=>x===0&&y===0);update();expect(roads.meshes).toHaveLength(0);
@@ -181,6 +243,95 @@ it('uses the published ground identity before terrace mesh admission and tracks 
  }finally{automatic.dispose();roads.dispose();terrain.dispose();store.dispose();scene.dispose();engine.dispose();}
 });
 
+
+it('retains both road layers when rotation changes the camera mask over already published ground',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),material=new StandardMaterial('terrain',scene),roads=new InfrastructureRenderer(scene),automatic=new VillageRoads(scene);
+ const chunk:TerrainChunk={chunkX:0,chunkY:0,originCellX:0,originCellY:0,terrainCodes:Array(34**2).fill(1),elevations:Array(34**2).fill(0),features:[],occupiedCells:[],
+  rc1:{stride:65,heights:Array(65**2).fill(.5),water:Array(65**2).fill(0),terraces:[]}};
+ const demand=[{key:'0:0',chunkX:0,chunkY:0,visible:true,distance:0}];
+ const store={world:{widthCells:512,heightCells:256,chunkSize:32},changed:new Set<string>(),demand,chunk:()=>chunk,key:()=> '0:0'};
+ const space=new WorldSpace(512,256,{cellX:0,cellY:0}),terrain=new TerrainRenderer(scene,store as unknown as TerrainStore,space,material,material,()=>[],()=>[],()=>[]);
+ const plan=emptyInfrastructure();plan.roads=[{id:'manual',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:8,y:16},{x:32,y:16}]}];
+ const route={id:'automatic',kind:'building' as const,destination:{cellX:2,cellY:2},cells:[{cellX:1,cellY:2},{cellX:2,cellY:2}]};
+ const ground=vi.fn((x:number,y:number)=>terrain.hasGround(x,y)?1.25:null);
+ const update=()=>{const identity=String(terrain.groundVersion);
+  roads.update(plan,space,ground,false,terrain.groundVersion,undefined,false,[],{followTerrain:true,groundIdentity:identity});
+  automatic.update('same-routes',[route],space,c=>{const h=ground(c.cellX,c.cellY);return h===null?null:{code:1,height:h};},true,identity);};
+ try{
+  terrain.demand(demand,(x,y)=>x===0&&y===0);for(let frame=0;terrain.queued&&frame<100;frame++)terrain.tick();expect(terrain.queued).toBe(0);
+  update();const manual=[...roads.meshes],generated=scene.meshes.filter(m=>m.name.startsWith('village-road-'));expect(manual.length).toBeGreaterThan(0);expect(generated.length).toBeGreaterThan(0);
+  const published=terrain.groundVersion;ground.mockClear();
+  terrain.demand(demand,(x,y)=>x===4&&y===0);expect(terrain.rendered(1,1)).toBe(false);update();expect(ground).not.toHaveBeenCalled();
+  expect(roads.meshes.map(m=>m.uniqueId)).toEqual(manual.map(m=>m.uniqueId));expect(scene.meshes.filter(m=>m.name.startsWith('village-road-')).map(m=>m.uniqueId)).toEqual(generated.map(m=>m.uniqueId));
+  expect([...manual,...generated].every(m=>!m.isDisposed())).toBe(true);
+  terrain.demand(demand.map(d=>({...d,visible:false})));update();
+  expect(terrain.groundVersion).toBe(published);expect(ground).not.toHaveBeenCalled();
+  expect(roads.meshes.map(m=>m.uniqueId)).toEqual(manual.map(m=>m.uniqueId));
+  expect(scene.meshes.filter(m=>m.name.startsWith('village-road-')).map(m=>m.uniqueId)).toEqual(generated.map(m=>m.uniqueId));
+  // True loss of resident visibility still removes the roads, then restores them.
+  terrain.setVisible(false);update();expect(roads.meshes).toHaveLength(0);expect(scene.meshes.filter(m=>m.name.startsWith('village-road-'))).toHaveLength(0);
+  terrain.setVisible(true);update();expect(roads.meshes.length).toBeGreaterThan(0);
+  terrain.dispose();update();expect(terrain.groundVersion).toBeGreaterThan(published);expect(roads.meshes).toHaveLength(0);expect(scene.meshes.filter(m=>m.name.startsWith('village-road-'))).toHaveLength(0);
+ }finally{automatic.dispose();roads.dispose();terrain.dispose();scene.dispose();engine.dispose();}
+});
+
+it('preserves the masonry triangles across sector boundaries and the toric seam',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);
+ try{
+  const plan=emptyInfrastructure();plan.roads=[
+   {id:'stone-1',operation:'paint',material:'stone-1',width:6,border:true,points:[{x:58,y:62},{x:70,y:62},{x:70,y:70}]},
+   {id:'stone-2',operation:'paint',material:'stone-2',width:7,border:true,points:[{x:120,y:122},{x:136,y:122},{x:136,y:130}]},
+   {id:'seam',operation:'paint',material:'stone-1',width:3,border:true,points:[{x:4094,y:20},{x:2,y:20}]},
+  ];
+  renderer.update(plan,new WorldSpace(512,256,{cellX:0,cellY:0}),(x,y)=>.5+Math.sin(x)*.01+Math.cos(y)*.02,false,0,undefined,false,[],{followTerrain:true});
+  const triangles:string[]=[];
+  for(const mesh of renderer.meshes){const p=mesh.getVerticesData('position')!,indices=mesh.getIndices()!;
+   for(let i=0;i<indices.length;i+=3)triangles.push(mesh.material!.name+':'+Array.from(indices.slice(i,i+3)).flatMap(j=>Array.from(p.slice(j*3,j*3+3))).map(n=>n.toFixed(5)).join(','));}
+  const hash=createHash('sha256').update(triangles.sort().join('\n')).digest('hex');
+  // Captured from the pre-sector renderer at 9c8dde4, independently of mesh grouping/order.
+  expect({triangles:triangles.length,hash}).toEqual({triangles:12192,hash:'b1f2a1a135ef8b8a7d804d647eac3a853128c42aa8395c194f6995ff0c17531f'});
+ }finally{renderer.dispose();scene.dispose();engine.dispose();}
+});
+
+it('rebuilds only nearby paving and sidewalks after local ground becomes available',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);
+ try{
+  const plan=emptyInfrastructure();plan.roads=[
+   {id:'near',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:16,y:16},{x:32,y:16}]},
+   {id:'far',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:320,y:16},{x:336,y:16}]},
+  ];
+  const space=new WorldSpace(512,256,{cellX:0,cellY:0});
+  renderer.update(plan,space,x=>x<10?null:0,false,0,undefined,false,[],{followTerrain:true,groundIdentity:'far-only'});
+  const far=[...renderer.meshes];expect(far.length).toBeGreaterThan(1);
+  renderer.update(plan,space,()=>0,false,1,undefined,false,[],{followTerrain:true,groundIdentity:'both'});
+  expect(far.every(m=>!m.isDisposed()&&renderer.meshes.includes(m))).toBe(true);
+  const near=renderer.meshes.filter(m=>!far.includes(m));expect(near.length).toBeGreaterThan(1);
+  renderer.update(plan,space,x=>x<10?.25:0,false,2,undefined,false,[],{followTerrain:true,groundIdentity:'near-terrace'});
+  expect(near.every(m=>m.isDisposed())).toBe(true);expect(far.every(m=>!m.isDisposed()&&renderer.meshes.includes(m))).toBe(true);
+ }finally{renderer.dispose();scene.dispose();engine.dispose();}
+});
+
+it('skips remote ground publications and samples only changed cells while preserving distant meshes',()=>{
+ const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);
+ try{
+  const plan=emptyInfrastructure(),space=new WorldSpace(512,256,{cellX:0,cellY:0});
+  plan.roads=[{id:'near',operation:'paint',material:'stone-1',width:4,border:true,points:[{x:16,y:16},{x:32,y:16}]},
+   {id:'far',operation:'paint',material:'stone-2',width:4,border:true,points:[{x:320,y:16},{x:336,y:16}]}];
+  let near=0,height=0;
+  const ground=vi.fn((x:number)=>x<10?height:0),cellIdentity=(x:number)=>x<10?near:0;
+  const update=(revision:number)=>renderer.update(plan,space,ground,false,revision,undefined,false,[],{followTerrain:true,groundIdentity:String(revision),groundCellIdentity:cellIdentity});
+  update(0);const first=[...renderer.meshes];ground.mockClear();
+  update(1);expect(ground).not.toHaveBeenCalled();expect(renderer.meshes).toEqual(first);
+  near++;height=.25;update(2);
+  expect(ground.mock.calls.length).toBeGreaterThan(0);expect(ground.mock.calls.every(([x])=>x<10)).toBe(true);
+  expect(first.some(m=>m.isDisposed())).toBe(true);
+  const far=first.filter(m=>m.name==='infrastructure-stone-2');expect(far.length).toBeGreaterThan(0);expect(far.every(m=>renderer.meshes.includes(m))).toBe(true);
+  const changed=[...renderer.meshes];near++;update(3);expect(renderer.meshes).toEqual(changed); // Same actual heights after a coarser chunk revision.
+  ground.mockClear();update(4);expect(ground).not.toHaveBeenCalled();
+  space.rebase({cellX:96,cellY:96},32);update(5);expect(renderer.meshes).toEqual(changed);expect(ground).not.toHaveBeenCalled();
+  renderer.clear();update(6);expect(renderer.meshes.length).toBeGreaterThan(0);
+ }finally{renderer.dispose();scene.dispose();engine.dispose();}
+});
 
 it('does not reread unchanged ground probes when an earth stroke is added in another sector',()=>{
  const engine=new NullEngine(),scene=new Scene(engine),renderer=new InfrastructureRenderer(scene);

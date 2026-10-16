@@ -6,6 +6,7 @@ import { TimberThatch } from './timber-thatch';
 import { mathematicsCrownPlan } from './mathematics-factory';
 import { facePoint } from './building-plan';
 import { buildResourceDisplay } from './town-hall-resource-display';
+import { keepWorldMatrixDynamic } from './static-transforms';
 
 /** The Mathematics glazed pavilion, fitted to the hall, with a local-time clock. */
 export function buildTownHallClock(parent:Mesh,kit:TimberThatch,phase:'finished'|'works',floor:number,width:number){
@@ -36,6 +37,7 @@ export function buildTownHallClock(parent:Mesh,kit:TimberThatch,phase:'finished'
   }
   const hands=[.10,.14].map(length=>{
     const pivot=new Mesh('market-clock-hand-pivot',kit.scene);pivot.parent=clock;
+    keepWorldMatrixDynamic(pivot);
     const hand=MeshBuilder.CreateBox('market-clock-hand',{width:.012,height:length,depth:.017},kit.scene);
     hand.position.set(-.03,length/2,0);hand.material=dark;hand.parent=pivot;return pivot;
   });

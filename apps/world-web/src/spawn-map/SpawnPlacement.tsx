@@ -8,7 +8,7 @@ import type {Cell} from '../scene/construction-selection';
 import {preparationState} from './preparation-state';
 import {villageRoute} from './starter-route';
 import './placement.css';
-async function read<T>(url:string,body?:unknown):Promise<T>{const response=await fetch(url,body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{credentials:'same-origin'});const value=await response.json();if(!response.ok)throw Object.assign(Error(value.message??'Le serveur est indisponible.'),{status:response.status,definitive:response.status<500});return value as T;}
+async function read<T>(url:string,body?:unknown):Promise<T>{const response=await fetch(url,body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{credentials:'same-origin'});const value=await timedJson<T & {message?:string}>(response);if(!response.ok)throw Object.assign(Error(value.message??'Le serveur est indisponible.'),{status:response.status,definitive:response.status<500});return value as T;}
 const label=(type:string)=>type==='town-hall'?'Hôtel de ville':type==='garden'?'Jardin':'Maison en troncs';
 export function SpawnPlacement(){
  const params=new URLSearchParams(location.search),slug=params.get('world')??'',base=`/api/worlds/${encodeURIComponent(slug)}`;
@@ -85,3 +85,4 @@ export function SpawnPlacement(){
   names:!installation&&<section className="starter-names" aria-label="Noms du village"><label>Votre nom<input maxLength={40} value={playerName} disabled={pending||!!request.current} onChange={e=>setPlayerName(e.target.value)}/></label><label>Nom du village<input maxLength={60} value={villageName} disabled={pending||!!request.current} onChange={e=>setVillageName(e.target.value)}/></label><a aria-disabled={pending} onClick={e=>{if(pending||request.current)e.preventDefault();}} href={'/spawn-map?world='+encodeURIComponent(slug)}>Revenir à la carte</a></section>
  }}/>;
 }
+import { timedFetch as fetch, timedJson } from '../dev/statistics';

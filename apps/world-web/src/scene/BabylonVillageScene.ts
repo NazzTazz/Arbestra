@@ -1,3 +1,4 @@
+import { clientTime, FrameTimings, statisticsEnabled, recordFrame, timedFetch as fetch, timedJson } from '../dev/statistics';
 import type {StarterGhost} from '../spawn-map/starter-controller';
 import {poseStarterElement, spawnDelta, woodlandTrees} from '@arbestra/contracts';
 import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
@@ -74,11 +75,14 @@ import { VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
+import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
+import { RenderDiagnostics } from '../dev/render-diagnostics';
 
 const TOWN_HALL_DOOR_Z = -1.1;
 import { buildingPlan, recipeFor, entranceConnector, planForSite, resolveMurets, transformPoint, type BuildingPlan } from './building-plan';
 const TILE_SIZE = 2.5;
 
+import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
 export type TerrainStatus = 'loading' | 'retry' | null;
 export type TerrainViewMode = 'village' | 'region' | 'world';
 
@@ -91,6 +95,7 @@ export class BabylonVillageScene {
   readonly #engine: Engine;
   readonly #scene: Scene;
   readonly #sceneStats: SceneInstrumentation | null;
+  readonly #renderDiagnostics: RenderDiagnostics | null;
   readonly #camera: ArcRotateCamera;
   readonly #canvas: HTMLCanvasElement;
   readonly #villageMeshes: Mesh[] = [];
@@ -110,6 +115,11 @@ export class BabylonVillageScene {
   readonly #onCameraMoved: () => void;
   readonly #onTerrainLoading: (loading: TerrainStatus) => void;
   #terrainLoading: TerrainStatus = null;
+  #initialLoad = new InitialVillageLoad();
+  #initialProgress: InitialLoadProgress | null = null;
+  #initialRoutesReady = false;
+  #initialRoutesAnnounced = false;
+  #initialFailure: string | null = null;
   readonly #onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void;
   readonly #onGardenHarvest: (cell: Cell | null, newGesture: boolean, previewOnly?: boolean) => void;
   readonly #onWorldGestureCancelled: () => void;
@@ -171,6 +181,7 @@ export class BabylonVillageScene {
   #geographyRevision = 0;
   #globalModelAvailable(): boolean { return sciencePreview() || this.#state?.science?.globalModelAvailable === true; }
   readonly #flyoverKey = (event: KeyboardEvent): void => {
+    if (!this.#initialLoad.ready) return;
     if(event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
     if(event.code==='KeyV' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault(); event.stopPropagation(); this.startFlyover();
@@ -318,6 +329,7 @@ export class BabylonVillageScene {
   #onBuildingHover: (id: string | null) => void = () => {};
   #constructionAction: 'build' | 'upgrade' | 'extend' | null = null;
   readonly #navigationKeyDown = (event: KeyboardEvent): void => {
+    if (!this.#initialLoad.ready) return;
     if (event.key === 'Escape') {
       this.#cameraFocus=null;
       const owned = Boolean(this.#pointerDown?.harvest || this.#pointerDown?.mouseArea);
@@ -573,6 +585,7 @@ export class BabylonVillageScene {
     onViewChanged: (mode: TerrainViewMode) => void = () => {},
     private readonly onArrival: (arrival: VillageArrival | null) => void = () => {},
     private readonly onEyesFound: () => void = () => {},
+    private readonly onInitialLoad: (progress: InitialLoadProgress) => void = () => {},
   ) {
     this.#canvas = canvas;
     this.#canvas.dataset.workerModel = 'low-poly';
@@ -593,6 +606,7 @@ export class BabylonVillageScene {
       this.#sceneStats.captureActiveMeshesEvaluationTime = true;
       this.#sceneStats.captureRenderTime = true;
     }
+    this.#renderDiagnostics = this.#sceneStats ? new RenderDiagnostics(this.#engine, this.#scene, this.#sceneStats) : null;
     this.#scene.skipPointerMovePicking = true;
     this.#scene.clearColor = Color4.FromHexString('#8ea0a0ff');
     this.#scene.fogMode = Scene.FOGMODE_LINEAR;
@@ -780,7 +794,12 @@ export class BabylonVillageScene {
     this.#resizeObserver = new ResizeObserver(() => { this.#engine.resize(); this.#torusOverview?.fit(this.#engine); });
     this.#resizeObserver.observe(canvas);
     this.#engine.runRenderLoop(() => {
+      if (this.#initialFailure) return;
+      try {
       const now = performance.now();
+      const measureFrame = statisticsEnabled();
+      const frame = measureFrame ? new FrameTimings(now) : undefined;
+      let renderMs = 0;
       const wasTransitioning = this.#transition.active;
       const wasLocked = this.#transition.locked;
       this.#transition.update(now, this.#clouds.covered, this.#clouds.ready);
@@ -810,11 +829,26 @@ export class BabylonVillageScene {
           this.#canvas.dataset.viewTarget = `${Math.floor(target.cellX)},${Math.floor(target.cellY)}`;
         }
       }
+      frame?.mark('camera');
       if (this.#mode !== 'world') {
-        this.#streamTerrain(now);
+        this.#streamTerrain(now, frame);
+        frame?.mark('streamingStats');
         if (this.#space) this.#regionalOverview.update(this.#space, this.#space.inverse(this.#camera.target.x, this.#camera.target.z));
       }
-      this.#loadOverview(now);
+      if (!this.#initialLoad.ready) {
+        this.#advanceBuildings();
+        const progress = this.#observeInitialLoad(false);
+        if (progress.phase === 'routes' && !progress.error) {
+          // Let React paint the actual phase before starting its synchronous work.
+          if (!this.#initialRoutesAnnounced) { this.#initialRoutesAnnounced = true; return; }
+          this.#refreshBuildingGround(); this.#workers.reproject();
+          this.#updateTravelPaths(this.#state!, this.#showTravel, this.#selectedRoute, frame);
+          this.#projectionVersion = this.#renderer!.version; this.#projectionGroundRevision = this.#store!.groundRevision;
+          this.#initialRoutesReady = true;
+          return;
+        }
+        if (progress.phase !== 'render' || progress.error) return;
+      } else this.#loadOverview(now);
       if (this.#space && this.#state) {
         const blend = Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
         this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1);
@@ -831,6 +865,7 @@ export class BabylonVillageScene {
         }
         this.#canvas.dataset.regionalVillages = String(this.#regionalVillages.meshes.size);
       }
+      frame?.mark('visibility');
       const workerServerNow = Date.now() - this.#serverOffsetMs;
       this.#updateResourceOverlay(now);
       if (import.meta.env.DEV&&now-this.#workerDebugAt>500) {this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);this.#workerDebugAt=now;}
@@ -842,6 +877,7 @@ export class BabylonVillageScene {
       this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
       this.#ambientLight.intensity = .08 + (this.#baseAmbient - .08) * this.#presentationLight;
       this.#regionalOverview.setPresentationLight(this.#presentationLight);
+      frame?.mark('environment');
       if (this.#mode !== 'world') {
         this.#workers.animate(workerServerNow, this.#mode === 'village' && this.#camera.radius < 165);
         const figureBlend = 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
@@ -850,9 +886,30 @@ export class BabylonVillageScene {
         this.#inhabitantCamera.update(now);
         this.#workers.setVisibility(figureBlend);
         this.#animateWater(now);
+        frame?.mark('population');
+        const renderAt = measureFrame ? performance.now() : 0;
+        this.#renderDiagnostics?.beforeRender(this.#scene);
         this.#scene.render();
-      } else { this.#workers.animate(workerServerNow, false); this.#torusOverview?.scene.render(); }
+        if (measureFrame) renderMs += performance.now() - renderAt;
+        frame?.mark('render');
+        this.#renderDiagnostics?.afterRender(this.#scene, 'village');
+      } else {
+        this.#workers.animate(workerServerNow, false);
+        frame?.mark('population');
+        const renderAt = measureFrame ? performance.now() : 0;
+        if (this.#torusOverview) {
+          this.#renderDiagnostics?.beforeRender(this.#torusOverview.scene);
+          this.#torusOverview.scene.render();
+        }
+        if (measureFrame) renderMs += performance.now() - renderAt;
+        frame?.mark('render');
+        if (this.#torusOverview) this.#renderDiagnostics?.afterRender(this.#torusOverview.scene, 'world');
+      }
+      const cloudsAt = measureFrame ? performance.now() : 0;
       this.#clouds.render(this.#transition.alpha, now);
+      if (measureFrame) renderMs += performance.now() - cloudsAt;
+      frame?.mark('clouds');
+      if (!this.#initialLoad.ready && this.#scene.isReady()) this.#observeInitialLoad(true);
       const observing = this.#mode === 'world' && !this.#flyover && !this.#cosmologyDebug && !this.#transition.active && !document.hidden
         && !this.#state?.village.accomplishments.some(item => item.code === 'cat-eyes') && this.#torusOverview?.eyesVisible();
       if (!observing) this.#eyesSince = null;
@@ -907,11 +964,36 @@ export class BabylonVillageScene {
       }
       this.#frameMs.push(this.#lastFrameAt ? now - this.#lastFrameAt : 0); if (this.#frameMs.length > 3600) this.#frameMs.shift();
       this.#lastFrameAt = now;
+      frame?.mark('diagnostics');
       this.#advanceBuildings();
+      frame?.mark('buildings');
+      if (measureFrame) recordFrame(now, renderMs, performance.now(), frame?.costs);
+      } catch (error) {
+        if (this.#initialLoad.ready) throw error;
+        this.#initialFailure = 'La préparation du paysage a été interrompue.';
+        this.#observeInitialLoad(false);
+        console.error('Initial village preparation failed', error);
+      }
     });
   }
 
+  #observeInitialLoad(rendered: boolean): InitialLoadProgress {
+    const assets = [...this.#buildingCache.values()].map(c => c.mesh.metadata?.assetState);
+    const progress = this.#initialLoad.observe({ground: this.#renderer?.groundProgress ?? {completed: 0, total: 0},
+      detailsPending: this.#renderer?.queued ?? 0, terrainFailed: this.#store?.degraded ?? false,
+      buildingsPending: this.#buildingJobs.length > 0 || assets.includes('loading'), buildingsFailed: assets.includes('error'),
+      routesPrepared: this.#initialRoutesReady, rendered});
+    if (this.#initialFailure) progress.error = this.#initialFailure;
+    this.#canvas.dataset.initialLoad = progress.phase;
+    this.#canvas.dataset.initialGround = `${progress.completed}/${progress.total}`;
+    if (JSON.stringify(progress) !== JSON.stringify(this.#initialProgress)) {
+      this.#initialProgress = progress; this.onInitialLoad(progress);
+    }
+    return progress;
+  }
+
   public update(state: VillageState, highlightedSiteIds: string[] = [], constructionMode = false, showTravelPaths = false, selectedRouteId: string | null = null): void {
+    return clientTime('scene', () => {
     if(import.meta.env.DEV&&new URLSearchParams(location.search).get('barracksPreview')==='1'){
       // Preview the new house kit without changing the server's persisted layouts.
       state={...state,cells:state.cells.map(cell=>cell.building?.type==='dwelling'&&!cell.building.visualLayout
@@ -931,7 +1013,7 @@ export class BabylonVillageScene {
       this.#setMode('village');
       this.#space = new WorldSpace(state.world.widthCells, state.world.heightCells, this.#villageAnchor);
       this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) => this.#preparing
-        ? fetch('/api/worlds/'+encodeURIComponent(state.world.slug)+'/starter/terrain?chunks='+encodeURIComponent(chunks.map(c=>c.chunkX+','+c.chunkY).join(';')), {signal}).then(async r=>{if(!r.ok)throw Error('Terrain indisponible');return r.json();})
+        ? fetch('/api/worlds/'+encodeURIComponent(state.world.slug)+'/starter/terrain?chunks='+encodeURIComponent(chunks.map(c=>c.chunkX+','+c.chunkY).join(';')), {signal}).then(async r=>{if(!r.ok)throw Error('Terrain indisponible');return timedJson<TerrainResponse>(r);})
         : updatesOnly
         ? getTerrainUpdates(state.world.slug, chunks, signal) : getTerrain(state.world.slug, chunks, signal));
       this.#weather?.dispose(); this.#weather = new WeatherMap(this.#scene, state.world.id);
@@ -977,13 +1059,17 @@ export class BabylonVillageScene {
     this.#camera.upperRadiusLimit = Math.min(680, Math.max(80, Math.min(state.world.widthCells, state.world.heightCells) * TILE_SIZE * 0.7));
     this.#deepGround.scaling.set(state.world.widthCells / 2048, 1, state.world.heightCells / 1024);
     this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
+    // Start network transfers before the synchronous assembly of the campus.
+    if (!this.#initialLoad.ready) this.#streamTerrain(performance.now());
     const plots = state.cells.flatMap((cell) => cell.building?.garden?.plots ?? []);
     this.#gardenStages = new Map(plots.map((plot) => [cellKey(plot), gardenTileStage(plot)]));
     this.#harvestableSites = new Set(state.cells.flatMap((cell) => cell.building?.garden && !cell.building.garden.harvest
       ? cell.building.garden.plots.filter((plot) => plot.storedCarrots >= 1 && !plot.harvest).map(cellKey) : []));
     this.#fullGardenSites = new Set(plots.filter((plot) => plot.full && !plot.harvest).map(cellKey));
     this.#workers.sync(state, Date.now() - this.#serverOffsetMs);
-    this.#updateTravelPaths(state, showTravelPaths, selectedRouteId);
+    // Prepare the baked legacy substrate once, but project route meshes only on complete ground.
+    if (this.#initialLoad.ready) this.#updateTravelPaths(state, showTravelPaths, selectedRouteId);
+    else { if (state.infrastructure) this.#renderer?.setInfrastructure(state.infrastructure); this.#initialRoutesReady = false; }
     this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
     this.#canvas.dataset.completedBuildingCount = String(state.cells.filter((site) => site.building?.status === 'completed').length);
     this.#canvas.dataset.underConstructionCount = String(state.cells.filter((site) => site.building?.status === 'under-construction').length);
@@ -1051,6 +1137,7 @@ export class BabylonVillageScene {
           && !selectable.name.startsWith('garden-full-') && !selectable.name.startsWith('site-border-') && selectable.metadata?.buildingAttachment !== 'glass';
       }
       this.#villageMeshes.push(mesh);
+      freezeStaticHierarchy(mesh);
       this.#selectableMeshes.set(site.id, mesh);
       if(site.building)for(const cell of state.cells.filter(c=>c.footprint?.buildingId===site.building!.id))this.#selectableMeshes.set(cell.id,mesh);
     }
@@ -1067,6 +1154,7 @@ export class BabylonVillageScene {
         }
         const centre=this.#space.project({cellX:placement.cellX+.5,cellY:placement.cellY+2});cached.mesh.position.set(centre.x,placement.base,centre.z);
         this.#villageMeshes.push(cached.mesh);
+        freezeStaticHierarchy(cached.mesh);
       }
     }
     for(const [key,cached] of this.#buildingCache)if(!retained.has(key)){cached.mesh.dispose(false,false);this.#buildingCache.delete(key);}
@@ -1076,7 +1164,8 @@ export class BabylonVillageScene {
     if(import.meta.env.MODE==='e2e')this.#canvas.dataset.buildingMeshIds=JSON.stringify(Object.fromEntries([...this.#buildingCache].map(([key,value])=>[key,value.mesh.uniqueId])));
     if(import.meta.env.DEV)this.#canvas.dataset.factoryBuildMs=String(Math.round(performance.now()-generationStarted));
     this.#applySelection();
-  }
+      });
+}
 
   public selectSite(siteId: string, anchor: ScreenAnchor, inspect = false): void {
     if (this.#worldMode === 'exploration') return;
@@ -1174,6 +1263,7 @@ export class BabylonVillageScene {
         mesh.metadata={...mesh.metadata,siteId:job.siteId};mesh.isPickable=true;
       }
       if(result.done)this.#buildingJobs.shift();
+      refreshStaticHierarchy(job.parent);
     }
     if(import.meta.env.DEV){this.#canvas.dataset.pendingBuildingJobs=String(this.#buildingJobs.length);this.#canvas.dataset.buildingAssets=JSON.stringify([...this.#buildingCache.values()].filter(c=>c.mesh.metadata?.assetState).map(c=>({name:c.mesh.name,state:c.mesh.metadata.assetState})));}
   }
@@ -1617,7 +1707,7 @@ export class BabylonVillageScene {
   }
 
   #travelDerived: {signature:string;accesses:ReturnType<typeof buildingAccesses>;occupied:Set<string>;displayRoutes:ReturnType<typeof roadDisplayRoutes>;fires:ReturnType<typeof automaticBraziers>} | null = null;
-  #updateTravelPaths(state: VillageState, visible: boolean, selectedRouteId: string | null): void {
+  #updateTravelPaths(state: VillageState, visible: boolean, selectedRouteId: string | null, frame?: FrameTimings): void {
     const derivedSignature=JSON.stringify([state.world.id,state.travelRoutes,state.infrastructure,
       state.cells.filter(c=>c.footprint||c.building).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.visualLayout,c.building.quarterTurns,c.building.accesses]]),
       state.region.originCellX,state.region.originCellY,state.region.terrainCodes,state.region.features.map(f=>[f.cellX,f.cellY,f.deposit?.blocksCell,f.deposit?.cleared,f.deposit?.state])]);
@@ -1631,9 +1721,12 @@ export class BabylonVillageScene {
       this.#travelDerived={signature:derivedSignature,accesses,occupied,fires,displayRoutes:roadDisplayRoutes(state.travelRoutes,new Set([...occupied,...edited]),state.world)};
     }
     const {accesses,occupied,fires,displayRoutes}=this.#travelDerived;
-    const groundIdentity=this.#store?JSON.stringify([state.world.id,this.#store.groundRevision,this.#renderer?.version]):undefined;
-    if(state.infrastructure){this.#renderer?.setInfrastructure(state.infrastructure);this.#infrastructureRenderer??=new InfrastructureRenderer(this.#scene);
-      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.rendered(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.version??0,undefined,false,accesses,{followTerrain:state.world.generationVersion===3,groundIdentity});this.#infrastructureRenderer.visible(this.#mode!=='world');}
+    const groundIdentity=this.#store?JSON.stringify([state.world.id,state.world.generationVersion,this.#store.groundRevision,this.#renderer?.groundVersion]):undefined;
+    const groundCellIdentity=(x:number,y:number)=>`${state.world.id}:${state.world.generationVersion}:${this.#renderer?.hasGround(x,y)?(this.#store?.groundRevisionAt(x,y)??0)+1:0}`;
+    frame?.mark('roadsPlan');
+    if(state.infrastructure){this.#renderer?.setInfrastructure(state.infrastructure);this.#infrastructureRenderer??=new InfrastructureRenderer(this.#scene,true);
+      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.hasGround(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.groundVersion??0,undefined,false,accesses,{followTerrain:state.world.generationVersion===3,groundIdentity,groundCellIdentity});this.#infrastructureRenderer.visible(this.#mode!=='world');}
+    frame?.mark('roadsManual');
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
     const campusFires = state.cells.flatMap(site => {
@@ -1641,16 +1734,19 @@ export class BabylonVillageScene {
       const centre = this.#universityCentre(site);
       const turn=(site.building.quarterTurns??0)*Math.PI/2,c=Math.cos(turn),s=Math.sin(turn),z=2.5*TILE_SIZE-(TILE_SIZE/2+.18);
       return [-1, 1].flatMap(sign => [3.125, 4.375, 5.625].map((x, index) => ({
+        renderKey: `campus:${site.building!.id}:${sign}:${index}`,
         x: centre.x+c*sign*x+s*z, y: centre.y+.02, z: centre.z-s*sign*x+c*z,
         seed: (index + (sign > 0 ? 3 : 0) + .5) / 6,
       })));
     });
-    this.#villageBraziers.update(displayRoutes, this.#space!, cell => this.#renderer!.rendered(cell.cellX,cell.cellY)
+    this.#villageBraziers.update(displayRoutes, this.#space!, cell => this.#renderer!.hasGround(cell.cellX,cell.cellY)
       ? this.#store!.ground(cell.cellX,cell.cellY) : null, occupied, campusFires,state.infrastructure,state,fires);
+    frame?.mark('braziers');
     this.#villageRoads ??= new VillageRoads(this.#scene);
-    this.#villageRoads.update(JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.version, displayRoutes]),
-      displayRoutes, this.#space!, cell => this.#renderer!.rendered(cell.cellX, cell.cellY)
-        ? this.#store!.ground(cell.cellX, cell.cellY) : null,state.world.generationVersion===3,groundIdentity);
+    this.#villageRoads.update(JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion, displayRoutes]),
+      displayRoutes, this.#space!, cell => this.#renderer!.hasGround(cell.cellX, cell.cellY)
+        ? this.#store!.ground(cell.cellX, cell.cellY) : null,state.world.generationVersion===3,groundIdentity,groundCellIdentity);
+    frame?.mark('roadsAutomatic');
     const routes = selectedRouteId
       ? state.travelRoutes.filter((route) => route.id === selectedRouteId)
       : state.travelRoutes;
@@ -1889,7 +1985,10 @@ export class BabylonVillageScene {
       bases.set(id,Math.max(bases.get(id)??-Infinity,h));
     }
     for(const [id,cached] of this.#buildingCache){const base=bases.get(id);
-      if(base!==undefined&&cached.mesh.metadata?.groundOffset!==undefined)cached.mesh.position.y=base+cached.mesh.metadata.groundOffset;
+      if(base!==undefined&&cached.mesh.metadata?.groundOffset!==undefined){
+        const y=base+cached.mesh.metadata.groundOffset;
+        if(cached.mesh.position.y!==y){cached.mesh.position.y=y;refreshStaticHierarchy(cached.mesh);}
+      }
     }
   }
 
@@ -1959,6 +2058,7 @@ export class BabylonVillageScene {
         mesh.metadata={...mesh.metadata,siteId:body.metadata?.siteId};
         mesh.isPickable=body.isPickable&&mesh.metadata?.buildingAttachment!=='glass';mesh.receiveShadows=true;
       }
+      refreshStaticHierarchy(body);
     }).catch(error=>{
       if(body.isDisposed())return;
       if(attempt<2){
@@ -2107,12 +2207,13 @@ export class BabylonVillageScene {
     for (const mesh of [...this.#villageMeshes, ...this.#previewMeshes, ...this.#pendingHarvestMeshes,
       this.#selectionMarker, this.#constructionGhost, this.#buildableGrid, this.#buildableArea].filter((m): m is Mesh => m !== null)) {
       mesh.position.x -= villageShift.x; mesh.position.z -= villageShift.z; mesh.computeWorldMatrix(true);
+      refreshStaticHierarchy(mesh);
     }
     for (const cell of this.#e2eCells) { cell.x -= villageShift.x; cell.z -= villageShift.z; }
     for (const feature of this.#e2eFeatures) { feature.x -= shift.x; feature.z -= shift.z; }
     this.#renderer?.shift(shift.x, shift.z);
     this.#regionalOverview.shift(shift.x, shift.z);
-    if (this.#state) this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
+    if (this.#state && this.#initialLoad.ready) this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
   }
 
   readonly #testCamera = (event: Event): void => {
@@ -2465,7 +2566,7 @@ export class BabylonVillageScene {
     }
   }
 
-  #streamTerrain(now: number): void {
+  #streamTerrain(now: number, frame?: FrameTimings): void {
     if (!this.#space || !this.#store || !this.#renderer || !this.#state) return;
     const started = performance.now();
     const detailPaused = (this.#mode !== 'village' || this.#arrival !== null) && (this.#camera.radius >= 160 || this.#requestedWorld);
@@ -2489,21 +2590,24 @@ export class BabylonVillageScene {
           new Vector3(p.x + (span - 0.5) * TILE_SIZE + margin, 8, p.z + (span - 0.5) * TILE_SIZE + margin)).isInFrustum(planes);
       };
       const demand = terrainDemand(target, this.#space.width, this.#space.height, size, (x, y) => intersects(x * size, y * size, size));
-      this.#terrainDemand = demand; this.#terrainIntersects = intersects; this.#store.demandChunks(demand);
+      this.#terrainDemand = demand; this.#terrainIntersects = intersects; this.#store.demandChunks(demand, !this.#initialLoad.ready);
       }
       if (moved || this.#terrainDemand.some(d => d.visible && this.#store!.changed.has(d.key)))
         this.#renderer.demand(this.#terrainDemand, this.#terrainIntersects);
       this.#demandAt = now + TERRAIN_STREAMING.coalesceMs;
     }
     if (document.visibilityState === 'visible') this.#store.tick(
-      this.#overviewLoading || this.#vegetationLoading || this.#villagesLoading || this.#requestedWorld && !this.#overview ? 1 : TERRAIN_STREAMING.concurrentBatches);
-    if (!detailPaused) this.#renderer.tick();
+      this.#overviewLoading || this.#vegetationLoading || this.#villagesLoading || this.#requestedWorld && !this.#overview ? 1 : TERRAIN_STREAMING.concurrentBatches, !this.#initialLoad.ready);
+    frame?.mark('demand');
+    if (!detailPaused) this.#renderer.tick(this.#initialLoad.ready ? TERRAIN_STREAMING.admissionMs : 8);
+    frame?.mark('integration');
     const loading: TerrainStatus = this.#requestedWorld && !this.#torusOverview
       ? this.#overviewRetryAt > now ? 'retry' : 'loading'
       : detailPaused ? !this.#overview ? this.#overviewRetryAt > now ? 'retry' : 'loading' : null
       : this.#store.degraded ? 'retry' : this.#renderer.missingVisible ? 'loading' : null;
     if (loading !== this.#terrainLoading) { this.#terrainLoading = loading; this.#onTerrainLoading(loading); }
     if (this.#projectionVersion !== this.#renderer.version || this.#projectionGroundRevision !== this.#store.groundRevision) {
+      if (!this.#initialLoad.ready) { this.#initialRoutesReady = false; return; }
       this.#projectionVersion = this.#renderer.version;
       this.#projectionGroundRevision = this.#store.groundRevision;
       this.#refreshBuildingGround();
@@ -2511,8 +2615,11 @@ export class BabylonVillageScene {
       // Streaming and origin changes can arrive after the pointer stopped moving.
       if(this.#ghostRequest)this.updateConstructionGhost(...this.#ghostRequest);
       if(this.#areaRequest){this.#lastPreviewSignature='';this.updateAreaSelection(...this.#areaRequest);}
-      this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
+      frame?.mark('projection');
+      this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute, frame);
+      frame?.mark('roadsDebug');
     }
+    frame?.mark('projection');
     this.#streamMs.push(performance.now() - started); if (this.#streamMs.length > 3600) this.#streamMs.shift();
     if (now < this.#metricsAt) return;
     this.#metricsAt = now + 1000;
@@ -2593,7 +2700,7 @@ export class BabylonVillageScene {
     this.#villageRoads?.dispose();
     this.#rain.dispose(); this.#weather?.dispose();
     this.#overviewAbort?.abort(); this.#torusOverview?.dispose(); this.#regionalOverview.dispose(); this.#regionalVillages.dispose(); this.#clouds.dispose();
-    this.#sceneStats?.dispose();
+    this.#renderDiagnostics?.dispose();
     this.#canvas.removeEventListener('terrain-camera', this.#testCamera);
     this.#canvas.removeEventListener('terrain-metrics-reset', this.#testMetricsReset);
     window.removeEventListener('online', this.#resumeTerrain);
@@ -2617,3 +2724,4 @@ export class BabylonVillageScene {
     this.#canvas.height = 0;
   }
 }
+import type { TerrainResponse } from '@arbestra/contracts';

@@ -8,6 +8,56 @@ import { TerrainRenderer } from './terrain-renderer';
 import type { TerrainStore } from './terrain-store';
 import { WorldSpace, type ChunkDemand } from './world-space';
 import { TERRAIN_STREAMING } from './terrain-settings';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Ray } from '@babylonjs/core/Culling/ray';
+
+it('counts prepared visible ground only after mesh admission, including replacement terraces', () => {
+  const engine = new NullEngine(), scene = new Scene(engine), material = new StandardMaterial('ground', scene);
+  const chunk: TerrainChunk = {chunkX: 0, chunkY: 0, originCellX: 0, originCellY: 0, terrainCodes: Array(36).fill(1),
+    elevations: Array(36).fill(0), features: [], occupiedCells: [], rc1: {stride: 9, heights: Array(81).fill(1), water: Array(81).fill(0), terraces: []}};
+  let received = false;
+  const demand = [{key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0}];
+  const store = {world: {widthCells: 128, heightCells: 128, chunkSize: 4}, changed: new Set<string>(), demand, chunk: () => received ? chunk : undefined};
+  const renderer = new TerrainRenderer(scene, store as unknown as TerrainStore, new WorldSpace(128, 128, {cellX: 0, cellY: 0}), material, material, () => [], () => [], () => []);
+  try {
+    expect(renderer.groundProgress).toEqual({completed: 0, total: 0});
+    renderer.demand(demand); expect(renderer.groundProgress).toEqual({completed: 0, total: 1});
+    received = true; store.changed.add('0:0'); renderer.demand(demand);
+    expect(renderer.groundProgress.completed).toBe(0); // Downloaded is not rendered.
+    for (let i = 0; renderer.queued && i < 100; i++) renderer.tick();
+    expect(renderer.groundProgress).toEqual({completed: 1, total: 1});
+    chunk.rc1!.terraces = [{cellX: 1, cellY: 1, height: 2}]; store.changed.add('0:0');
+    expect(renderer.groundProgress.completed).toBe(0); // Receipt precedes requeue.
+    renderer.demand(demand); expect(renderer.groundProgress.completed).toBe(0);
+    for (let i = 0; renderer.queued && i < 100; i++) renderer.tick();
+    expect(renderer.groundProgress.completed).toBe(1);
+  } finally {renderer.dispose(); scene.dispose(); engine.dispose();}
+});
+
+it('refreezes published ground and its picking bounds after origin shifts and toric reprojection', () => {
+  const engine = new NullEngine(), scene = new Scene(engine), material = new StandardMaterial('ground', scene);
+  const space = new WorldSpace(128, 128, { cellX: 0, cellY: 0 });
+  const chunk: TerrainChunk = { chunkX: 0, chunkY: 0, originCellX: 0, originCellY: 0,
+    terrainCodes: Array(36).fill(1), elevations: Array(36).fill(0), features: [], occupiedCells: [] };
+  const demand = [{ key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 }];
+  const store = { world: { widthCells: 128, heightCells: 128, chunkSize: 4 }, changed: new Set<string>(), demand, chunk: () => chunk };
+  const renderer = new TerrainRenderer(scene, store as unknown as TerrainStore, space, material, material, () => [], () => [], () => []);
+  try {
+    renderer.demand(demand); for (let i = 0; renderer.queued && i < 50; i++) renderer.tick();
+    const ground = renderer.meshes()[0]!; ground.isPickable = true;
+    expect(ground.isWorldMatrixFrozen).toBe(true);
+    const initial = ground.getBoundingInfo().boundingSphere.centerWorld.clone();
+    renderer.shift(80, -40);
+    expect(ground.getBoundingInfo().boundingSphere.centerWorld.x).toBeCloseTo(initial.x - 80);
+    expect(ground.getBoundingInfo().boundingSphere.centerWorld.z).toBeCloseTo(initial.z + 40);
+    // demand reprojects a retained resident from its canonical origin.
+    renderer.demand(demand);
+    const centre = ground.getBoundingInfo().boundingSphere.centerWorld;
+    expect(centre.equalsWithEpsilon(initial)).toBe(true);
+    expect(renderer.meshes()[0]).toBe(ground);
+    expect(scene.pickWithRay(new Ray(new Vector3(centre.x, 100, centre.z), Vector3.Down()), m => m === ground)?.hit).toBe(true);
+  } finally { renderer.dispose(); scene.dispose(); engine.dispose(); }
+});
 
 it('publishes nearby trees after their ground without waiting for all ground and pebbles', () => {
   const engine = new NullEngine(), scene = new Scene(engine), material = new StandardMaterial('shared', scene);

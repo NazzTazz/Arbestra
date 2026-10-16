@@ -11,6 +11,7 @@ import type {AssetContainer} from '@babylonjs/core/assetContainer';
 import {attachFrostedGlass} from './frosted-glass';
 import manifestJson from './building-assets-manifest.json';
 import {coordinateBuildingLod} from './building-lod';
+import { refreshStaticHierarchy } from './static-transforms';
 
 export const buildingAssets:Record<string,{url:string;bytes:number;thumbnail?:string}>=manifestJson;
 const scenes=new WeakMap<Scene,Map<string,Promise<AssetContainer>>>();
@@ -66,6 +67,7 @@ export async function loadBakedBuilding(parent:Mesh,key:string,withLod=false,clo
   const scene=parent.getScene();
   const container=await bakedContainer(scene,key);if(parent.isDisposed()||scene.isDisposed)return;
   const detailed=instantiateBakedBuilding(container,parent,cloneMeshes);
+  refreshStaticHierarchy(parent);
   // The detailed model becomes usable immediately. A failed/delayed optional variant
   // neither blocks the building nor causes the detailed model to be instantiated twice.
   if(withLod&&buildingAssets[`${key}-lod1`]){
@@ -75,6 +77,7 @@ export async function loadBakedBuilding(parent:Mesh,key:string,withLod=false,clo
       if(parent.isDisposed()||scene.isDisposed)return;
       const variants=containers.map(coarse=>instantiateBakedBuilding(coarse,parent));
       coordinateBuildingLod(parent,detailed.rootNodes,variants.at(-1)!.rootNodes,variants.length===2?variants[0]!.rootNodes:undefined);
+      refreshStaticHierarchy(parent);
       parent.metadata={...parent.metadata,lodAssetState:'ready'};
     }).catch(error=>{
       if(parent.isDisposed()||scene.isDisposed)return;
