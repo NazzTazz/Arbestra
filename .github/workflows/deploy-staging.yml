@@ -1,0 +1,27 @@
+name: Deploy staging
+on:
+  push:
+    tags: ['staging-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: staging
+      url: https://play-beta.arbestra.world
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/deploy
+        with:
+          environment: staging
+          host: ${{ vars.VPS_HOST }}
+          host-key: ${{ secrets.VPS_HOST_KEY }}
+          ssh-key: ${{ secrets.VPS_DEPLOY_KEY }}

@@ -1,0 +1,50 @@
+name: Native Arbestra deployment
+description: Build on GitHub, send a verified release to a restricted VPS account
+inputs:
+  environment:
+    required: true
+    description: alpha or staging
+  host:
+    required: true
+    description: VPS address
+  host-key:
+    required: true
+    description: Pinned OpenSSH known_hosts entry
+  ssh-key:
+    required: true
+    description: Environment-specific restricted deployment key
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24.22.0'
+    - shell: bash
+      run: npm install --global pnpm@10.15.1
+    - shell: bash
+      run: pnpm install --frozen-lockfile
+    - shell: bash
+      run: bash ops/deploy/build.sh "$DEPLOY_ENVIRONMENT"
+      env:
+        DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+    - shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_KEY: ${{ inputs.ssh-key }}
+        DEPLOY_HOST_KEY: ${{ inputs.host-key }}
+      run: |
+        set -euo pipefail
+        test -n "$DEPLOY_HOST"
+        test -n "$DEPLOY_HOST_KEY"
+        test -n "$DEPLOY_KEY"
+        credentials=$(mktemp -d)
+        trap 'rm -rf "$credentials"' EXIT
+        chmod 700 "$credentials"
+        printf '%s\n' "$DEPLOY_KEY" > "$credentials/key"
+        printf '%s\n' "$DEPLOY_HOST_KEY" > "$credentials/known_hosts"
+        chmod 600 "$credentials/key" "$credentials/known_hosts"
+        digest=$(sha256sum release.tar.gz | cut -d ' ' -f 1)
+        ssh -T -i "$credentials/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+          -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$credentials/known_hosts" \
+          -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+          "arbestra-deploy@$DEPLOY_HOST" "deploy $GITHUB_SHA $digest" < release.tar.gz

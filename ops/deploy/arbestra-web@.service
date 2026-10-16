@@ -1,0 +1,22 @@
+[Unit]
+Description=Arbestra %i native internal web server
+After=network.target
+
+[Service]
+Type=simple
+User=arbestra-web
+Group=arbestra-web
+ExecStart=/usr/local/bin/arbestra-caddy run --config /etc/arbestra/%i.Caddyfile --adapter caddyfile
+ExecReload=/bin/kill -USR1 $MAINPID
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=96M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

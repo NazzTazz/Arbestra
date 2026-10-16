@@ -1,0 +1,26 @@
+[Unit]
+Description=Arbestra %i world generator
+After=network.target postgresql.service arbestra-api@%i.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=arbestra-%i
+Group=arbestra-%i
+WorkingDirectory=/srv/arbestra/%i/current/api
+EnvironmentFile=/etc/arbestra/%i.env
+ExecStart=/usr/local/bin/node dist/world-generator-worker.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryHigh=128M
+MemoryMax=900M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

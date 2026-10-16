@@ -1,0 +1,9 @@
+[Unit]
+Description=Arbestra native PostgreSQL local backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/arbestra/backup.py
+UMask=0077
+Nice=10

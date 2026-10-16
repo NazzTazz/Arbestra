@@ -1,3 +1,15 @@
+# Déploiements natifs OVH — installation et workflows en cours — 16 octobre 2026
+
+Demande : deux workflows GitHub, staging et alpha, sans image Docker Arbestra, PostgreSQL natif, Caddy existant conservé. Domaines explicitement validés : alpha `play`, `alpha`, `noc` ; staging `play-beta`, `beta`, `noc-beta`, tous sous `arbestra.world`. Bases séparées, aucun import/reset des mondes locaux, aucun seed de développement. [Procédure et limites](docs/DEPLOIEMENT-VPS.md).
+
+Base `main` / `f20e1a1`, deux éléments locaux non suivis préservés. VPS inspecté : Debian 13, 4 Go RAM, environ 6,5 Go libres avant installation, Caddy public existant en conteneur partagé avec d'autres projets. Node 24.22.0 vérifié par SHA256 officiel, PostgreSQL 17 natif, rôles applicatifs et de migration séparés par base. Services systemd API/générateur/web isolés. Serveurs web Caddy internes natifs accessibles seulement depuis la passerelle existante ; configuration publique enrichie avec validation puis reload, sans recréation du conteneur ni modification des sites antérieurs. Secrets root uniquement sous `/etc/arbestra`, aucune valeur secrète versionnée.
+
+Deux GitHub Environments configurés avec clés SSH restreintes distinctes, clé d'hôte épinglée depuis la session PuTTY préexistante, règles `main` et tags `alpha-*` / `staging-*`. Refus d'ouverture d'un shell avec une clé de déploiement constaté. Contrôleur root installé séparément : archive bornée, extraction/code/migration sous UID applicatif, sauvegarde avant migration, reprise automatique du code précédent seulement si schéma inchangé. Timer de sauvegardes quotidiennes locales installé ; copie hors VPS non configurée.
+
+Vérifications actuelles : cinq scripts Python compilés, `bash -n` du build sur le VPS, actionlint 1.7.12 sans erreur, configurations Caddy validées, PostgreSQL et deux services web actifs. Provisioning initial interrompu par une syntaxe de matcher Caddy invalide, corrigée puis reprise sans remplacer les secrets PostgreSQL créés. Déploiement applicatif GitHub, migrations et smoke tests de bout en bout encore à effectuer. Les six DNS ne résolvent ni depuis le poste ni depuis le VPS au contrôle initial ; Tristan informé, HTTPS public dépend de leur correction.
+
+---
+
 # Clôture Git demandée — 16 octobre 2026
 
 Demande explicite de commit/push. Branche `main`, distant récupéré avant clôture et aligné sur `795f260`. Trois commits fonctionnels distincts :

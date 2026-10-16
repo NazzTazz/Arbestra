@@ -1,5 +1,7 @@
 # Architecture autoritaire
 
+Les [déploiements natifs OVH](../DEPLOIEMENT-VPS.md) séparent staging et alpha : workflows GitHub par tags, PostgreSQL natif, services systemd et passerelle Caddy existante. Le handoff donne les preuves et les prérequis DNS restants.
+
 La [croissance de population](../SPEC-CROISSANCE-POPULATION.md) vise 50 % des couchages à un habitant par minute, avec rattrapage progressif des anciens villages, sous le verrou économique et via le scheduler existant. Le handoff porte les preuves de validation et d'activation de la migration 043.
 
 Les [corrections de streaming au mouvement du 15 octobre](../SPEC-STREAMING-TERRAIN.md) conservent le support de voirie hors masque caméra, limitent les remplacements de pavés/trottoirs à des secteurs locaux et réutilisent leur topologie. Les dépendances locales du sol évitent les sondes distantes à chaque publication de terrain. L'overlay DEV ventile aussi les phases de chaque image, avec moyenne et maximum récents. Les tests de réutilisation et de géométrie passent ; la fluidité générale reste à mesurer séparément, avec preuves et limites courantes dans le [handoff](../../SESSION-HANDOFF.md).

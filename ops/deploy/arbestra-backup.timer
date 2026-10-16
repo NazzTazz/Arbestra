@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Arbestra PostgreSQL backups
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
