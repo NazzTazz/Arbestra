@@ -19,6 +19,7 @@ runs:
     - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
       with:
         node-version: '24.22.0'
+        package-manager-cache: false
     - shell: bash
       run: npm install --global pnpm@10.15.1
     - shell: bash
