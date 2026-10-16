@@ -233,6 +233,8 @@ export interface VillagePopulationsTable {
   worldId: string;
   villageId: string;
   initializedAt: Generated<Timestamp>;
+  nextArrivalAt: ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
+  growthStartedAt: ColumnType<Date,Date|string|undefined,Date|string>;
 }
 
 export interface PopulationCohortsTable {

@@ -10,6 +10,12 @@ import { admitVillageWorksites } from './worksite-admission.js';
 import { admitScience } from '../science/service.js';
 
 export const COMPLETE_CONSTRUCTION_TASK = 'building.complete';
+export async function arrivePopulation(transaction:Transaction<Database>,task:ScheduledTask):Promise<void>{
+  const village=await transaction.selectFrom('villages').select('id').where('worldId','=',task.worldId)
+    .where('id','=',task.subjectId).executeTakeFirst();
+  if(!village)return;
+  await beginVillageEconomy(transaction,task.worldId,village.id);
+}
 export const COMPLETE_EXPANSION_TASK = 'building-expansion.complete';
 export async function deliverMarket(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
   const exchange = await transaction.selectFrom('marketExchanges').select('villageId')

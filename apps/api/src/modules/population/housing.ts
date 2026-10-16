@@ -6,8 +6,7 @@ type Cohort=Selectable<PopulationCohortsTable>;
 /** Caller owns the village lock; energy has already been materialized at H. */
 export async function allocateRestHousing(tx:Transaction<Database>,worldId:string,villageId:string,cohorts:Cohort[]):Promise<Cohort[]>{
   const homes=await tx.selectFrom('buildings').select(['id','buildingType','level']).where('worldId','=',worldId)
-    .where('villageId','=',villageId).where(eb=>eb.or([eb('status','=','completed'),eb.and([
-      eb('buildingType','=','town-hall'),eb('targetLevel','is not',null)])]))
+    .where('villageId','=',villageId).where(eb=>eb.or([eb('status','=','completed'),eb('targetLevel','is not',null)]))
     .where('buildingType','in',['dwelling','town-hall']).orderBy('id').execute();
   homes.sort((a,b)=>(a.buildingType==='town-hall'?1:0)-(b.buildingType==='town-hall'?1:0)||a.id.localeCompare(b.id));
   const free=new Map(homes.map(h=>[h.id,housingCapacity(h.buildingType,h.level)]));

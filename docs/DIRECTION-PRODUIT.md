@@ -45,8 +45,8 @@ Les quêtes suivent le spawn dans le parcours standard et accompagnent la décou
 
 ### Acté comme direction produit
 
-- Les couchages sont une limite de population, pas un mécanisme de création automatique d'habitants.
-- La population croît par petits groupes lorsque les conditions de satisfaction sont bonnes, dans la limite de l'accueil disponible.
+- Les couchages bornent l'accueil disponible ; la tranche du 16 octobre déclenche désormais des arrivées progressives vers la moitié de cette capacité.
+- Tranche validée le 16 octobre : [un habitant par minute jusqu'à 50 % des couchages](SPEC-CROISSANCE-POPULATION.md), avec rattrapage progressif des anciens villages. La satisfaction comme condition d'une croissance par groupes reste une évolution future distincte.
 - Faire travailler les habitants fatigués les rend ronchons. L'énergie et la bonne humeur sont deux notions liées, sans imposer ici leur représentation technique.
 - Les habitants ronchons mangent automatiquement si des carottes sont disponibles. Une carotte rend de l'énergie et un peu de bonne humeur ; quantités exactes et seuils restent ouverts.
 

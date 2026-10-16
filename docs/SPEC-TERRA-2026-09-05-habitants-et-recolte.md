@@ -2,6 +2,8 @@
 
 Date : 5 septembre 2026. Auteur : Astra/Codex. Base relue : commit `4dfd494`, avec migration 009. Aucun code applicatif modifié pour cette rédaction.
 
+Évolution validée le 16 octobre 2026 : la règle historique d'effectif fixe et les maisons sans arrivées sont remplacées par la [croissance progressive vers 50 % des couchages](SPEC-CROISSANCE-POPULATION.md), à un habitant par minute. Les 15 habitants initiaux, l'énergie, les affectations et les règles de récolte conservent leurs contrats existants.
+
 > Portée historique : cette spec décrit la tranche initiale. La [direction produit du 6 septembre](./DIRECTION-PRODUIT.md) définit une évolution future (satisfaction, repas automatiques, croissance par groupes et couchages comme plafond). Ces mécanismes ne sont pas livrés ; la minute de récolte ci-dessous est une durée de POC, pas une cible de rythme définitive. Ne pas appliquer silencieusement ces évolutions à cette tranche.
 
 ## 0. Statut et contrat d'exécution

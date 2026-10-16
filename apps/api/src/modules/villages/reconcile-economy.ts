@@ -1,4 +1,5 @@
 import { devTime } from '../operations/dev-timing.js';
+import {advancePopulationGrowth} from '../population/growth.js';
 import { sql, type Transaction } from 'kysely';
 
 import type { Database } from '../../database/schema.js';
@@ -129,6 +130,7 @@ export async function reconcileVillageEconomy(
     || left.id.localeCompare(right.id) || left.type.localeCompare(right.type));
   while (due.length) {
     const transition = due.shift()!;
+    await advancePopulationGrowth(transaction,economy.worldId,economy.villageId,transition.through);
     if (transition.type === 'construction')
       await completeConstructionAt(transaction, economy, transition.id, transition.through);
     else if (transition.type === 'expansion')
@@ -152,6 +154,7 @@ export async function reconcileVillageEconomy(
     else
       await completeStoneExtractionAt(transaction, economy.worldId, economy.villageId, transition.id, transition.through);
   }
+  await advancePopulationGrowth(transaction,economy.worldId,economy.villageId,economy.through);
   });
 }
 
@@ -174,6 +177,8 @@ async function completeConstructionAt(
   await transaction.updateTable('buildings').set({
     level: sql`coalesce(target_level, level)`, targetLevel: null, status: 'completed', completedAt: sql.ref('constructionCompletesAt'),
   }).where('id', '=', building.id).where('status', '=', 'under-construction').executeTakeFirstOrThrow();
+  if(building.buildingType==='dwelling'||building.buildingType==='town-hall')
+    await advancePopulationGrowth(transaction,economy.worldId,economy.villageId,through,true);
   if (building.buildingType === 'garden') {
     const cells = await transaction.selectFrom('worldCellOccupancies').select(['cellX', 'cellY'])
       .where('worldId', '=', economy.worldId).where('buildingId', '=', building.id)

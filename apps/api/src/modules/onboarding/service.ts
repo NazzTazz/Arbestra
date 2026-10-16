@@ -1,3 +1,4 @@
+import {advancePopulationGrowth} from '../population/growth.js';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { AvailableWorlds, JoinWorldRequest } from '@arbestra/contracts';
@@ -96,6 +97,7 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
       await tx.insertInto('villagePopulations').values({worldId:world.id,villageId}).execute();
       await tx.insertInto('populationCohorts').values({worldId:world.id,villageId,originVillageId:villageId,memberCount:15,activity:'idle',
         energy:10,energyProgress:0,energyUpdatedAt:through,restingSince:null,foodUsedSinceRest:0,harvestId:null,extractionId:null}).execute();
+      await advancePopulationGrowth(tx,world.id,villageId,through,true);
       return {villageId};
     }
     throw new HttpError(409,'NO_STARTER_LOCATION','Aucune clairière disponible ne peut accueillir votre village. Réessayez plus tard.');

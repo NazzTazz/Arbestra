@@ -1,4 +1,5 @@
-﻿import {randomUUID} from 'node:crypto';
+import {advancePopulationGrowth} from '../population/growth.js';
+import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {sql,type Kysely,type Transaction} from 'kysely';
 import {withinBuildReach,emptyInfrastructure,poseStarterElement,type StarterElement,type StarterInstallation,type SpawnPoseRequest,type StarterPoseRequest} from '@arbestra/contracts';
@@ -70,6 +71,7 @@ export async function installVillage(db:Kysely<Database>,compute:Pick<SpawnCompu
   await tx.insertInto('villageInfrastructure').values({worldId:world.id,villageId,plan:JSON.stringify(emptyInfrastructure())}).execute();
   await tx.insertInto('villagePopulations').values({worldId:world.id,villageId}).execute();
   await tx.insertInto('populationCohorts').values({worldId:world.id,villageId,originVillageId:villageId,memberCount:15,activity:'idle',energy:10,energyProgress:0,energyUpdatedAt:through,restingSince:null,foodUsedSinceRest:0,harvestId:null,extractionId:null}).execute();
+  await advancePopulationGrowth(tx,world.id,villageId,through,true);
   const row=await tx.insertInto('villageStarterInstallations').values({worldId:world.id,villageId,accountId,commandId:input.commandId,request:JSON.stringify(input),kit:JSON.stringify(STARTER_KIT),remaining:JSON.stringify(STARTER_KIT.elements.filter(e=>!elements.includes(e)).map(e=>e.key)),anchorX:input.point.x,anchorY:input.point.y,quarterTurns:input.quarterTurns,referenceHeight:plan.cleaning.referenceHeight}).returningAll().executeTakeFirstOrThrow();
   return serialize(row);
  });
@@ -94,6 +96,7 @@ export async function poseRemainingStarter(db:Kysely<Database>,compute:Pick<Spaw
   await removeSpawnTrees(tx,village.worldId,plan.cleaning.removedTreeIndices,placed.cells,economy.through);
   await flatten(tx,village.worldId,villageId,placed.cells,row.referenceHeight);
   const buildingId=await insertElement(tx,village.worldId,villageId,placed,economy.through);
+  if(element.type==='dwelling')await advancePopulationGrowth(tx,village.worldId,villageId,economy.through,true);
   const remaining=row.remaining.filter(k=>k!==element.key);
   await tx.updateTable('villageStarterInstallations').set({remaining:JSON.stringify(remaining)}).where('worldId','=',village.worldId).where('villageId','=',villageId).execute();
   await tx.insertInto('starterPoseReceipts').values({worldId:village.worldId,villageId,commandId:input.commandId,request:JSON.stringify(input),buildingId}).execute();

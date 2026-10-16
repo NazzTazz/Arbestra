@@ -191,7 +191,8 @@ describe.sequential('economy with PostgreSQL', () => {
     expect(before.village.population.housingCapacity).toBe(35);
     const pending = await upgradeBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, id,
       undefined, undefined, 10_000);
-    expect(pending.village.population.housingCapacity).toBe(30);
+    // The existing five beds remain usable; the additional twenty wait for completion.
+    expect(pending.village.population.housingCapacity).toBe(35);
     expect(pending.cells.find((cell) => cell.building?.id === id)?.building)
       .toMatchObject({ level: 1, targetLevel: 2, status: 'under-construction' });
     expect(before.village.resources.find(r=>r.code==='timber')!.amount-pending.village.resources.find(r=>r.code==='timber')!.amount).toBe(300);

@@ -228,6 +228,8 @@ export const VillageStateSchema = Type.Object({
     woodProductionUpdatedAt: Type.String({ format: 'date-time' }),
     population: Type.Object({
       total: Type.Integer({ minimum: 0 }), housingCapacity: Type.Integer({ minimum: 0 }),
+      growth: Type.Optional(Type.Object({target:Type.Integer({minimum:0}),arrivalIntervalMs:Type.Integer({minimum:1}),
+        nextArrivalAt:Type.Union([Type.String({format:'date-time'}),Type.Null()])})),
       available: Type.Integer({ minimum: 0 }), working: Type.Integer({ minimum: 0 }), resting: Type.Integer({ minimum: 0 }),
       energyCounts: Type.Array(Type.Integer({ minimum: 0 })),
       cohorts: Type.Optional(Type.Array(Type.Object({id:Type.String({format:'uuid'}),memberCount:Type.Integer({minimum:1}),

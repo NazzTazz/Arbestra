@@ -1,3 +1,5 @@
+import {POPULATION_ARRIVAL_TASK} from './modules/population/growth.js';
+import {arrivePopulation} from './modules/villages/complete-construction.js';
 import {HARVEST_SUBMISSION_TASK,processHarvestSubmission} from './modules/villages/harvest-submissions.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
@@ -19,7 +21,7 @@ const app = await buildApp(config, db);
 const operations = operationsFor(app);
 const stopWorker = startScheduledTaskWorker(
   db,
-  { [HARVEST_SUBMISSION_TASK]:processHarvestSubmission, [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
+  { [POPULATION_ARRIVAL_TASK]:arrivePopulation, [HARVEST_SUBMISSION_TASK]:processHarvestSubmission, [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
   config.scheduledTaskPollIntervalMs,
   () => app.log.error({ code: 'SCHEDULER_FAILED' }, 'Scheduled task worker failed'),
   operations ? observeScheduler(operations) : undefined,

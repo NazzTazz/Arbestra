@@ -51,6 +51,7 @@ import { startGardenHarvest } from '../population/garden-harvest.js';
 import {startGardenTour} from '../population/garden-tour.js';
 import {planGardenTour} from '@arbestra/contracts';
 import {housingCapacity} from '../population/housing.js';
+import {POPULATION_ARRIVAL_INTERVAL_MS} from '../population/growth.js';
 import {reconcileRestHousing} from '../population/work.js';
 import { eligibleWorkers, materializeCohorts, withoutAssignment, workingTeam } from '../population/work.js';
 import { admitScience, scienceSnapshot, scienceCommand } from '../science/service.js';
@@ -696,16 +697,17 @@ export async function state(
       };
     }),
   ));
-  const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots] = await devTime('population', () => Promise.all([
+  const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots, growth] = await devTime('population', () => Promise.all([
     readOnly ? tx.selectFrom('populationCohorts').selectAll().where('worldId','=',village.worldId)
       .where('villageId','=',village.villageId).orderBy('id').execute() : reconcileRestHousing(tx,village.worldId,village.villageId,at),
     tx.selectFrom('buildings').select(['id','buildingType', 'level']).where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId).where(eb=>eb.or([eb('status','=','completed'),eb.and([
-        eb('buildingType','=','town-hall'),eb('targetLevel','is not',null)])])).execute(),
+      .where('villageId', '=', village.villageId).where(eb=>eb.or([eb('status','=','completed'),eb('targetLevel','is not',null)])).execute(),
     tx.selectFrom('gardenHarvests').selectAll().where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where('status', '=', 'in-progress').execute(),
     readExtractions(tx, village.worldId, village.villageId),
     projectGardenPlots(tx, village.worldId, village.villageId, at),
+    tx.selectFrom('villagePopulations').select('nextArrivalAt').where('worldId','=',village.worldId)
+      .where('villageId','=',village.villageId).executeTakeFirst(),
   ]));
   const projectedCohorts = cohorts.map((cohort) => ({
     ...cohort,
@@ -718,6 +720,8 @@ export async function state(
   const population = {
     total: projectedCohorts.reduce((total, cohort) => total + cohort.memberCount, 0),
     housingCapacity: housingRows.reduce((total, row) => total + housingCapacity(row.buildingType,row.level), 0),
+    growth:{target:Math.floor(housingRows.reduce((total,row)=>total+housingCapacity(row.buildingType,row.level),0)/2),
+      arrivalIntervalMs:POPULATION_ARRIVAL_INTERVAL_MS,nextArrivalAt:growth?.nextArrivalAt?.toISOString()??null},
     cohorts: projectedCohorts.map(c=>({id:c.id,memberCount:c.memberCount,activity:c.energy.activity,
       restBuildingId:c.restBuildingId,restingSince:c.energy.restingSince?.toISOString()??null,
       energy: displayedEnergy(c.energy), cartographer: c.cartographer,

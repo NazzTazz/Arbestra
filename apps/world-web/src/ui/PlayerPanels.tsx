@@ -9,6 +9,10 @@ export function PopulationPanel({ population, pending, count, focus = null, onFo
   const cohorts = population.cohorts?.filter(c => (!buildingId || c.restBuildingId === buildingId || !!c.assignmentId && assignmentIds.includes(c.assignmentId))
     && (filter === 'all' || filter === 'training' ? filter === 'all' || c.assignmentKind === 'science' : c.activity === filter)) ?? [];
   return <div className="building-details population-panel"><span>Habitants</span><strong>{population.total} / {population.housingCapacity} couchages</strong><p>{population.available} disponibles · {population.working} au travail · {population.resting} au repos</p>
+    {population.growth ? <p>Cible : {population.growth.target} habitants · 50 % des couchages.
+      {population.growth.nextArrivalAt && population.total < population.growth.target
+        ? ` Arrivées : 1 habitant par minute. Prochaine arrivée prévue le ${new Date(population.growth.nextArrivalAt).toLocaleString('fr-FR')}.`
+        : population.total >= population.growth.target ? ' Cible atteinte.' : ' Arrivées en préparation.'}</p> : null}
     <div className="population-filters">{[['all','Tous'],['idle','Disponibles'],['working','Travail'],['resting','Repos'],['training','Science / formation']].map(([id,label]) => <button type="button" key={id} aria-pressed={filter === id} onClick={() => { setFilter(id!); onFocus?.(null, id!); }}>{label}</button>)}</div>
     <div className="cohort-list">{cohorts.map(c => <button type="button" key={c.id} aria-pressed={focus === c.id || focus === c.assignmentId} onClick={() => onFocus?.(focus === c.id ? null : c.id, filter)}>
       {c.memberCount} personnes · {c.activity === 'resting' ? 'Repos' : c.activity === 'idle' ? 'Disponibles' : c.assignmentKind === 'garden' ? 'Récolte' : c.assignmentKind === 'extraction' ? 'Chantier' : c.assignmentKind === 'processing' ? 'Fabrication' : 'Science'} · énergie {c.energy ?? '—'}{c.cartographer ? ' · cartographes' : ''}
