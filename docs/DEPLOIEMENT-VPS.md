@@ -54,7 +54,7 @@ Les workflows mettent à jour les releases applicatives, pas le contrôleur root
 
 Les cookies joueur portent des noms distincts par environnement, `Secure`, `HttpOnly`, `SameSite=Lax`. Le partage lobby/jeu impose ici le domaine `.arbestra.world` : le navigateur transmet donc les deux cookies aux sous-domaines frères, mais chaque API ne reconnaît que le sien et sa propre base. Tous ces sous-domaines doivent rester sous contrôle de confiance. Les cookies administrateur restent limités à leur hôte et `/api/admin`, avec vérification de l'origine et des UUID autorisés à chaque appel. Le proxy rejette les origines étrangères et n'expose pas `/api/admin` sur les hôtes joueur.
 
-Une authentification HTTP Caddy couvre les trois hôtes de chaque environnement, en plus des comptes applicatifs. Les identifiants aléatoires sont conservés dans `/etc/arbestra/private-access.json` (root, 0600). Ils ne sont pas stockés dans GitHub ni dans le dépôt. Il s'agit de la barrière privée initiale, pas d'un système d'invitations individuelles.
+Les lobbies et clients jeu sont accessibles sans authentification HTTP préalable : les joueurs utilisent uniquement le formulaire applicatif de connexion/inscription. Les endpoints métier conservent leur authentification serveur. L'authentification HTTP Caddy supplémentaire est limitée aux deux hôtes NOC, en plus des permissions administratives applicatives. Ses identifiants aléatoires sont conservés dans `/etc/arbestra/private-access.json` (root, 0600) ; ils ne sont pas stockés dans GitHub ni dans le dépôt. Cette protection du NOC n'est pas un système d'invitations individuelles pour le jeu.
 
 ## Séquence et récupération
 
@@ -68,6 +68,6 @@ Le déploiement refuse moins de 1,5 Gio libres. Sur ce VPS partagé de 4 Go, les
 
 ## Première ouverture
 
-La migration crée le schéma uniquement. **Aucun `db:seed` ni `db:setup` en production** : ces commandes contiennent le compte et les données de développement. Aucun monde local n'est importé. Créer un compte normalement derrière la barrière privée, puis attribuer explicitement son UUID vérifié dans `ADMIN_ACCOUNT_IDS` et redémarrer l'API. Les droits ne doivent jamais être accordés sur la seule base d'une adresse email déclarative. La création/publication d'un monde et l'activation d'opérateurs de génération demandent leur recette propre ; déployer l'application ne signifie pas qu'un monde jouable est déjà initialisé.
+La migration crée le schéma uniquement. **Aucun `db:seed` ni `db:setup` en production** : ces commandes contiennent le compte et les données de développement. Aucun monde local n'est importé. Créer un compte depuis le lobby, puis attribuer explicitement son UUID vérifié dans `ADMIN_ACCOUNT_IDS` et redémarrer l'API. Les droits ne doivent jamais être accordés sur la seule base d'une adresse email déclarative. La création/publication d'un monde et l'activation d'opérateurs de génération demandent leur recette propre ; déployer l'application ne signifie pas qu'un monde jouable est déjà initialisé.
 
 Références : [GitHub Environments](https://docs.github.com/en/actions/concepts/workflows-and-actions/deployment-environments), [ordre explicite des routes Caddy](https://caddyserver.com/docs/caddyfile/directives/route), [sauvegardes PostgreSQL](https://www.postgresql.org/docs/17/backup-dump.html).

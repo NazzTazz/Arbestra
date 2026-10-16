@@ -62,17 +62,22 @@ def web_smoke(environment):
         return response.code, response.read()
 
     hosts = [urllib.parse.urlsplit(access[key]).hostname for key in ('lobby', 'game', 'noc')]
-    for host in hosts:
-        if request(host, authenticated=False)[0] != 401:
-            raise RuntimeError('Private HTTP gate is not enforced')
-        status, body = request(host)
+    for index, host in enumerate(hosts):
+        is_admin = index == 2
+        if request(host, authenticated=False)[0] != (401 if is_admin else 200):
+            raise RuntimeError('Unexpected public/private frontend access')
+        status, body = request(host, authenticated=is_admin)
         if status != 200 or b'<script' not in body:
             raise RuntimeError('Frontend smoke check failed: ' + host)
-        status, body = request(host, '/api/health')
+        status, body = request(host, '/api/health', authenticated=is_admin)
         if status != 200 or json.loads(body).get('status') != 'ok':
             raise RuntimeError('API proxy smoke check failed')
-        if request(host, '/api/health', extra={'Origin': 'https://untrusted.invalid'})[0] != 403:
+        if request(host, '/api/health', authenticated=is_admin, extra={'Origin': 'https://untrusted.invalid'})[0] != 403:
             raise RuntimeError('Foreign origin was accepted')
+        if not is_admin:
+            status, body = request(host, '/api/auth/session', authenticated=False)
+            if status != 401 or json.loads(body).get('code') != 'AUTHENTICATION_REQUIRED':
+                raise RuntimeError('Player authentication is not enforced')
     if request(hosts[0], '/api/admin/session')[0] != 404:
         raise RuntimeError('Administrative route exposed on player host')
     status, body = request(hosts[2], '/api/admin/session')

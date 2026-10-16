@@ -111,7 +111,7 @@ def setup():
 }
 http://:WEB_PORT {
   bind 172.18.0.1
-  basic_auth {
+  basic_auth @noc {
     arbestra GATE_HASH
   }
   header {

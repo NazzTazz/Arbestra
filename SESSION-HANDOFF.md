@@ -1,3 +1,15 @@
+# Accès joueur sans authentification HTTP préalable — 16 octobre 2026
+
+Tristan demande explicitement de retirer la protection de type .htaccess avant le login joueur. Modification appliquée aux deux Caddy natifs : `basic_auth` porte uniquement le matcher des hôtes NOC. `play`, `alpha`, `play-beta` et `beta` restent accessibles sans barrière HTTP ; `noc` et `noc-beta` conservent leur protection indépendante et les permissions administratives applicatives.
+
+Le bootstrap et le contrôleur de déploiement versionnés reflètent ce choix. Le contrôleur installé sur le VPS a été mis à jour ; ses smoke tests vérifient maintenant les frontends joueur anonymes et le refus de session applicative sans connexion. Configurations Caddy sauvegardées et validées avant redémarrage des seuls services web ; API, workers et bases inchangés.
+
+Preuves terminées : compilation Python des deux scripts modifiés, smoke tests complets alpha/staging verts ; contrôles publics HTTPS stricts sur les six domaines : quatre réponses 200 sans `WWW-Authenticate`, deux NOC 401 avec challenge ; endpoints de session des deux lobbies 401 sans challenge HTTP. Aucune modification de données, migration ou recompilation applicative nécessaire. Les références historiques à une barrière sur les six hôtes dans les sections antérieures sont remplacées par cette décision.
+
+Base Git `main` / `254cb19`, deux éléments locaux non suivis préexistants préservés. Documentation de déploiement actualisée. Aucun tag existant déplacé et aucune release applicative redéployée pour ce changement de configuration d'exploitation.
+
+---
+
 # Déploiements natifs OVH — alpha et staging actifs, workflows verts — 16 octobre 2026
 
 Livraison de la demande de deux déploiements GitHub sur le VPS : aucune image Docker Arbestra, PostgreSQL 17 natif, Node 24.22.0, API/scheduler/navigation + générateur et web sous systemd. Passerelle Caddy existante conservée ; aucun des projets préexistants redémarré/recréé. Domaines validés par Tristan : alpha `play`, `alpha`, `noc` ; staging `play-beta`, `beta`, `noc-beta`, sous `arbestra.world`. DNS corrigés par Tristan pendant la tranche, six adresses A vérifiées puis six connexions HTTPS avec vérification stricte des certificats réussies. [Procédure complète](docs/DEPLOIEMENT-VPS.md).
