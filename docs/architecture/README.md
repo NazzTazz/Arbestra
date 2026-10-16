@@ -1,6 +1,6 @@
 # Architecture autoritaire
 
-Les [déploiements natifs OVH](../DEPLOIEMENT-VPS.md) séparent staging et alpha : workflows GitHub par tags, PostgreSQL natif, services systemd et passerelle Caddy existante. Le handoff donne les preuves et les prérequis DNS restants.
+Les [déploiements natifs OVH](../DEPLOIEMENT-VPS.md) séparent staging et alpha : workflows GitHub par tags, PostgreSQL natif, services systemd et passerelle Caddy existante. Les deux environnements sont actifs en HTTPS ; le handoff donne les preuves de déploiement, de restauration et les préparatifs du premier monde.
 
 La [croissance de population](../SPEC-CROISSANCE-POPULATION.md) vise 50 % des couchages à un habitant par minute, avec rattrapage progressif des anciens villages, sous le verrou économique et via le scheduler existant. Le handoff porte les preuves de validation et d'activation de la migration 043.
 

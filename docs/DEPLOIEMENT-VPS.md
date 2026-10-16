@@ -9,6 +9,19 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## État vérifié le 16 octobre 2026
+
+Les deux environnements sont installés et leurs six domaines répondent en HTTPS avec certificats publics valides. Commit applicatif déployé : `9c89057bd0027ab4bb2c1657b6d3eb0b4fc3018d`.
+
+- [Staging : workflow manuel réussi](https://github.com/NazzTazz/Arbestra/actions/runs/38943336467).
+- [Alpha : workflow par tag réussi](https://github.com/NazzTazz/Arbestra/actions/runs/38943582849), tag `alpha-2026.10.16.1`.
+- Chaque base contient ses 43 migrations et aucun compte/monde de développement. L'absence de monde jouable est attendue à cette étape.
+- Recette HTTPS réelle : compte éphémère staging, session du lobby reconnue sur le jeu, cookies Secure/HttpOnly, identifiants et cookie refusés par alpha, jeton joueur refusé par le NOC. Compte et sessions de diagnostic supprimés.
+- Lobby et formulaire NOC des deux environnements contrôlés dans Chromium, sans erreur JavaScript relevée ; captures staging inspectées. Aucune recette d'un monde habité ni mesure de charge réalisée.
+- Sauvegarde quotidienne déclenchée et restaurée dans une nouvelle base temporaire `arbestra_restore_probe_test` : 43 migrations vérifiées, base de recette ensuite supprimée. Refus DDL et connexions à l'autre base vérifiés pour les deux rôles applicatifs.
+
+La copie locale ignorée des identifiants HTTP est `test-results/deployment-credentials/private-access.json`. Leur source reste le fichier root du VPS. Les copies locales des clés SSH privées de déploiement ont été supprimées après configuration des secrets GitHub.
+
 ## Déclencher
 
 Depuis un commit de `main` vérifié :
@@ -27,7 +40,7 @@ GitHub Environments contient `VPS_HOST` (variable), `VPS_HOST_KEY` (entrée know
 
 ## Installation et services
 
-`ops/deploy/bootstrap.py` est une procédure initiale **spécifique au VPS audité**, à exécuter comme root après revue. Elle refuse de remplacer une installation marquée existante. Elle suppose la passerelle `wai-gateway-caddy-1` sur `wai-edge`, adresse `172.18.0.3` et hôte `172.18.0.1`. Ces adresses sont à vérifier après toute recréation de la passerelle. Le binaire Caddy existant est copié pour les deux serveurs web internes natifs ; aucune nouvelle image n'est créée ou téléchargée. La passerelle publique ne fait que terminer TLS et relayer les trois domaines de chaque environnement vers le serveur natif correspondant.
+`ops/deploy/bootstrap.py` est une procédure initiale **spécifique au VPS audité**, à exécuter comme root après revue. Elle refuse de remplacer une installation marquée existante. Elle suppose la passerelle `wai-gateway-caddy-1` sur `wai-edge`, adresse `172.18.0.3` et hôte `172.18.0.1`. Ces adresses sont à vérifier après toute recréation de la passerelle. Le binaire Caddy existant est copié pour les deux serveurs web internes natifs ; aucune nouvelle image n'est créée ou téléchargée. `ops/deploy/configure-gateway.py` ajoute les seuls blocs Arbestra à la configuration publique avec sauvegarde, validation et reload ; les directives des autres projets sont conservées. La passerelle publique ne fait que terminer TLS et relayer les trois domaines de chaque environnement vers le serveur natif correspondant.
 
 - API : `arbestra-api@alpha` / `@staging`, localhost 3100 / 3200. Scheduler et workers navigation/expéditions existants inclus.
 - Génération : `arbestra-generator@alpha` / `@staging`, worker natif séparé.
@@ -36,6 +49,8 @@ GitHub Environments contient `VPS_HOST` (variable), `VPS_HOST_KEY` (entrée know
 - Configuration : `/etc/arbestra/<environnement>.env`, migration séparée `*-migration.env`, secrets root uniquement.
 - PostgreSQL : `arbestra_alpha` / `arbestra_staging`. Propriétaire de migration séparé du rôle applicatif, sans superuser ; le rôle applicatif n'a aucun droit DDL et ne peut pas se connecter à l'autre base.
 - Logs : `journalctl -u arbestra-api@staging`, `-u arbestra-generator@staging`, `-u arbestra-web@staging`. Ne pas publier les fichiers env ou les mots de passe.
+
+Les workflows mettent à jour les releases applicatives, pas le contrôleur root, les unités systemd ni la configuration Caddy. Toute évolution de ces fichiers d'exploitation est appliquée séparément sur le VPS après revue ; ne pas relancer le bootstrap sur l'installation existante. Le binaire Caddy natif doit également suivre les mises à jour de sécurité de la passerelle.
 
 Les cookies joueur portent des noms distincts par environnement, `Secure`, `HttpOnly`, `SameSite=Lax`. Le partage lobby/jeu impose ici le domaine `.arbestra.world` : le navigateur transmet donc les deux cookies aux sous-domaines frères, mais chaque API ne reconnaît que le sien et sa propre base. Tous ces sous-domaines doivent rester sous contrôle de confiance. Les cookies administrateur restent limités à leur hôte et `/api/admin`, avec vérification de l'origine et des UUID autorisés à chaque appel. Le proxy rejette les origines étrangères et n'expose pas `/api/admin` sur les hôtes joueur.
 
@@ -54,3 +69,5 @@ Le déploiement refuse moins de 1,5 Gio libres. Sur ce VPS partagé de 4 Go, les
 ## Première ouverture
 
 La migration crée le schéma uniquement. **Aucun `db:seed` ni `db:setup` en production** : ces commandes contiennent le compte et les données de développement. Aucun monde local n'est importé. Créer un compte normalement derrière la barrière privée, puis attribuer explicitement son UUID vérifié dans `ADMIN_ACCOUNT_IDS` et redémarrer l'API. Les droits ne doivent jamais être accordés sur la seule base d'une adresse email déclarative. La création/publication d'un monde et l'activation d'opérateurs de génération demandent leur recette propre ; déployer l'application ne signifie pas qu'un monde jouable est déjà initialisé.
+
+Références : [GitHub Environments](https://docs.github.com/en/actions/concepts/workflows-and-actions/deployment-environments), [ordre explicite des routes Caddy](https://caddyserver.com/docs/caddyfile/directives/route), [sauvegardes PostgreSQL](https://www.postgresql.org/docs/17/backup-dump.html).
