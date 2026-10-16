@@ -333,7 +333,18 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
     cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
   } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
   const path=buildTravelNetwork(routeState, [featureId],rc1?.navigation).find((route) => route.id === featureId)?.cells;
-  return path?refineVillagePath(tx,village,path,featureId):undefined;
+  if(path)return refineVillagePath(tx,village,path,featureId);
+  // Coarse centres can be blocked by the hall's own footprint or RC1 trunks
+  // while the real door and sub-cell passages remain accessible. Let the
+  // existing bounded local planner certify access before declaring failure.
+  if(Math.abs(dx)<32&&Math.abs(dy)<32){
+    try{return await refineVillagePath(tx,village,[
+      {cellX:village.anchorCellX,cellY:village.anchorCellY},
+      {cellX:deposit.cellX,cellY:deposit.cellY},
+    ],featureId);}
+    catch(error){if(error instanceof HttpError&&error.code==='DESTINATION_UNREACHABLE')return undefined;throw error;}
+  }
+  return undefined;
 }
 
 export async function refineVillagePath(tx:Transaction<Database>,village:Pick<OwnedVillage,'worldId'|'villageId'|'anchorCellX'|'anchorCellY'|'widthCells'|'heightCells'|'chunkSize'|'generationVersion'>,path:TravelCell[],id:string):Promise<TravelCell[]>{
