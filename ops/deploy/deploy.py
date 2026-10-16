@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 """Root-owned deploy controller. Uploaded application code runs only as its own UID."""
 import datetime
+import base64
 import fcntl
 import hashlib
+import json
 import os
 from pathlib import Path
 import pwd
@@ -13,6 +15,8 @@ import sys
 import tarfile
 import time
 import urllib.request
+import urllib.error
+import urllib.parse
 
 
 def run(args, **kwargs):
@@ -37,6 +41,43 @@ def application(command, environment_file, user, directory):
             env[key] = value
     account = pwd.getpwnam(user)
     run(command, env=env, cwd=directory, user=account.pw_uid, group=account.pw_gid, extra_groups=[])
+
+
+def web_smoke(environment):
+    access = json.loads(Path('/etc/arbestra/private-access.json').read_text())[environment]
+    authorization = 'Basic ' + base64.b64encode((access['http_user'] + ':' + access['http_password']).encode()).decode()
+    port = 3101 if environment == 'alpha' else 3201
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def request(host, path='/', authenticated=True, extra=None):
+        headers = {'Host': host}
+        if authenticated:
+            headers['Authorization'] = authorization
+        headers.update(extra or {})
+        request = urllib.request.Request(f'http://172.18.0.1:{port}' + path, headers=headers)
+        try:
+            response = opener.open(request, timeout=10)
+        except urllib.error.HTTPError as error:
+            response = error
+        return response.code, response.read()
+
+    hosts = [urllib.parse.urlsplit(access[key]).hostname for key in ('lobby', 'game', 'noc')]
+    for host in hosts:
+        if request(host, authenticated=False)[0] != 401:
+            raise RuntimeError('Private HTTP gate is not enforced')
+        status, body = request(host)
+        if status != 200 or b'<script' not in body:
+            raise RuntimeError('Frontend smoke check failed: ' + host)
+        status, body = request(host, '/api/health')
+        if status != 200 or json.loads(body).get('status') != 'ok':
+            raise RuntimeError('API proxy smoke check failed')
+        if request(host, '/api/health', extra={'Origin': 'https://untrusted.invalid'})[0] != 403:
+            raise RuntimeError('Foreign origin was accepted')
+    if request(hosts[0], '/api/admin/session')[0] != 404:
+        raise RuntimeError('Administrative route exposed on player host')
+    status, body = request(hosts[2], '/api/admin/session')
+    if status != 401 or json.loads(body).get('code') != 'AUTHENTICATION_REQUIRED':
+        raise RuntimeError('Administrative authentication smoke check failed')
 
 
 def main():
@@ -133,6 +174,7 @@ def main():
         # Real runtime-role SQL read and production dependency/worker availability.
         application(['/usr/local/bin/node', '--input-type=module', '-e', "import pg from 'pg'; const p=new pg.Pool({connectionString:process.env.DATABASE_URL,max:1}); try {await p.query('SELECT count(*) FROM worlds');} finally {await p.end();}"], Path('/etc/arbestra') / (environment + '.env'), user, release / 'api')
         run(['systemctl', 'is-active', *services, 'arbestra-web@' + environment])
+        web_smoke(environment)
         # Keep current + two older releases. Never prune data/backups here.
         for old in sorted((root / 'releases').iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[3:]:
             if old != current.resolve() and old.is_dir() and not old.is_symlink():

@@ -109,7 +109,8 @@ def setup():
     client_ip_headers X-Forwarded-For
   }
 }
-http://172.18.0.1:WEB_PORT {
+http://:WEB_PORT {
+  bind 172.18.0.1
   basic_auth {
     arbestra GATE_HASH
   }
