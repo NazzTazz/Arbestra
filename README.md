@@ -1,6 +1,6 @@
 # Arbestra
 
-Jeu de stratégie web persistant : deux frontends React, une scène Babylon.js, un monolithe Fastify et PostgreSQL comme source de vérité.
+Jeu de stratégie web persistant : trois frontends React (lobby, monde et NOC), une scène Babylon.js, un monolithe Fastify et PostgreSQL comme source de vérité.
 
 ## Développement local
 
@@ -15,6 +15,7 @@ corepack pnpm dev
 
 - Lobby : <http://localhost:5173>
 - Monde : <http://localhost:5174/village> (monde par défaut local) ; pour le monde historique : <http://localhost:5174/village?world=aube>
+- Console NOC : <http://localhost:5175> (accès privilégié explicite, voir ci-dessous).
 - Compte de développement : `player@arbestra.local` / `arbestra`
 
 Sur une base déjà initialisée, lancer seulement `corepack pnpm dev` : `db:setup` migre puis réensemence. La copie RC1 du PC de Tristan est accessible sur <http://localhost:5174/village?world=rc1-dev> ; `apps/world-web/.env.local` y définit `VITE_DEFAULT_WORLD_SLUG=rc1-dev`. Cette configuration et les données locales ne sont pas versionnées. La base de tests reste séparée.
@@ -49,6 +50,16 @@ corepack pnpm lint
 corepack pnpm typecheck
 corepack pnpm build
 ```
+
+## Console d’exploitation NOC
+
+`apps/admin-web` fournit une console sombre de supervision et de support en lecture seule : infrastructure observée, mondes, comptes, villages et diagnostics d’activité. Les espaces de commandes administratives restent futurs. Aucun compte n’est autorisé par défaut.
+
+Le diagnostic HTTP V1.1 ajoute les raisons actives du statut et les fiches des requêtes lentes, 5xx ou interrompues, avec référence serveur corrélée aux journaux. La conservation reste locale et bornée : 512 fiches pendant dix minutes au plus. `NOC_HTTP_SLOW_MS` vaut 2 000 ms par défaut ; `NOC_HTTP_LOG_MODE=anomalies|off` contrôle les lignes diagnostiques, sans désactiver les mesures ni les contrôles d’accès.
+
+Configurer `ADMIN_ACCOUNT_IDS` avec les UUID des comptes existants explicitement autorisés et `ADMIN_ORIGIN=http://localhost:5175` pour le développement, puis redémarrer l’API. La console utilise une session distincte de celle du jeu ; les emails ne confèrent aucun droit. `corepack pnpm dev` lance aussi le frontend NOC. Il peut être lancé seul par `corepack pnpm --filter @arbestra/admin-web dev`.
+
+La [documentation d’exploitation](docs/architecture/operations.md) décrit les sources et limites des mesures, la configuration HTTPS de `admin.arbestra.world`, le proxy, les permissions et les vérifications. Les métriques runtime couvrent l’instance répondante ; leur historique borné est perdu au redémarrage. Les diagnostics économiques lisent l’état persisté sans déclencher de réconciliation. La [spec V1](docs/SPEC-NOC-V1.md) précise le périmètre et les critères d’acceptation.
 
 ## Travail avec les agents
 

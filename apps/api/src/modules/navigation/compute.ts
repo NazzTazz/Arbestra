@@ -10,8 +10,10 @@ export interface NavigationExecutor {readonly available:number;run(load:(known:{
 export class NavigationCompute implements NavigationExecutor {
  private closed=false;
  private lanes:Lane[];
+ private lastSuccessAt:string|null=null;private lastErrorAt:string|null=null;
  constructor(size=1){this.lanes=Array.from({length:Math.max(1,Math.min(2,size))},()=>({busy:false,contexts:new Set(),sources:new Set()}));}
  get available(){return this.closed?0:this.lanes.filter(l=>!l.busy&&!l.boot).length;}
+ get observation(){return {closed:this.closed,ready:this.lanes.filter(l=>l.worker&&!l.boot).length,total:this.lanes.length,active:this.lanes.filter(l=>l.busy).length,waiting:0,lastSuccessAt:this.lastSuccessAt,lastErrorAt:this.lastErrorAt};}
  async start(){if(this.closed)throw Error('Navigation fermée');await Promise.all(this.lanes.map(l=>this.ensureWorker(l)));}
  private async ensureWorker(lane:Lane){
   if(lane.boot)return lane.boot.promise;if(lane.worker)return;
@@ -23,12 +25,12 @@ export class NavigationCompute implements NavigationExecutor {
   lane.boot={promise,resolve,reject,timer:setTimeout(()=>void this.fail(lane,'Démarrage navigation interrompu'),source?60000:8000)};
   worker.on('message',(reply:{ready?:boolean;id?:string;result?:RouteResult;contexts?:string[];sources?:string[];stage?:string;error?:string})=>{
    if(lane.worker!==worker)return;
-   if(reply.ready){const boot=lane.boot;lane.boot=undefined;if(boot){clearTimeout(boot.timer);boot.resolve();}if(!lane.work)worker.unref();return;}
+   if(reply.ready){this.lastSuccessAt=new Date().toISOString();const boot=lane.boot;lane.boot=undefined;if(boot){clearTimeout(boot.timer);boot.resolve();}if(!lane.work)worker.unref();return;}
    if(!lane.work||reply.id!==lane.work.id)return;
    if(reply.stage){lane.work.stage=reply.stage;return;}
    const work=lane.work;lane.work=undefined;clearTimeout(work.timer);
-   if(reply.error||!reply.result)work.reject(Error(reply.error??'Réponse navigation invalide'));
-   else{lane.contexts=new Set(reply.contexts);lane.sources=new Set(reply.sources);work.resolve(reply.result);}
+   if(reply.error||!reply.result){this.lastErrorAt=new Date().toISOString();work.reject(Error(reply.error??'Réponse navigation invalide'));}
+   else{this.lastSuccessAt=new Date().toISOString();lane.contexts=new Set(reply.contexts);lane.sources=new Set(reply.sources);work.resolve(reply.result);}
    worker.unref();
   });
   worker.on('error',(e)=>{if(lane.worker===worker)void this.fail(lane,e.message);});worker.on('exit',()=>{if(lane.worker===worker)void this.fail(lane);});
@@ -45,6 +47,7 @@ export class NavigationCompute implements NavigationExecutor {
   }finally{lane.busy=false;}
  }
  private async fail(lane:Lane,message?:string){
+  if(!this.closed)this.lastErrorAt=new Date().toISOString();
   const boot=lane.boot;lane.boot=undefined;if(boot){clearTimeout(boot.timer);boot.reject(Error(message??'Démarrage navigation interrompu'));}
   const work=lane.work;lane.work=undefined;if(work){clearTimeout(work.timer);work.reject(Error(message??'Navigation interrompue ('+work.stage+')'));}
   const worker=lane.worker;lane.worker=undefined;lane.contexts.clear();lane.sources.clear();await worker?.terminate();

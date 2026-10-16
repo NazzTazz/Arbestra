@@ -7,7 +7,7 @@ import type { Database } from '../../database/schema.js';
 import type { Kysely } from 'kysely';
 import { authenticate, getSessionForAccount, login, logout, register } from './service.js';
 
-import { HttpError } from '../../errors.js';
+import { AttemptLimiter } from '../../security/attempt-limiter.js';
 
 function cookieOptions(config: AppConfig) {
   return {
@@ -25,19 +25,11 @@ export async function registerAuthRoutes(
   db: Kysely<Database>,
   config: AppConfig,
 ): Promise<void> {
-  const attempts = new Map<string, { count: number; until: number }>();
-  const limit = (ip: string, kind: string, maximum: number) => {
-    const now = Date.now();
-    for (const [key, value] of attempts) if (value.until <= now) attempts.delete(key);
-    const key = `${kind}:${ip}`, value = attempts.get(key) ?? { count: 0, until: now + 15 * 60_000 };
-    if (value.count >= maximum || (!attempts.has(key) && attempts.size >= 10_000))
-      throw new HttpError(429, 'TOO_MANY_ATTEMPTS', 'Trop de tentatives. Réessayez dans quelques minutes.');
-    value.count++; attempts.set(key, value);
-  };
+  const attempts = new AttemptLimiter();
   app.post('/api/auth/register', {
     schema: { body: RegisterRequestSchema, response: { 201: SessionResponseSchema } },
   }, async (request, reply) => {
-    limit(request.ip, 'register', 5);
+    attempts.consume([{ key: `register:ip:${request.ip}`, maximum: 5 }]);
     const body = request.body as RegisterRequest, result = await register(db, config, body.email, body.password);
     reply.setCookie(config.cookieName, result.token, cookieOptions(config));
     return reply.status(201).send(result.session);
@@ -46,6 +38,7 @@ export async function registerAuthRoutes(
     schema: { body: LoginRequestSchema, response: { 200: SessionResponseSchema } },
   }, async (request, reply) => {
     const body = request.body as { email: string; password: string };
+    attempts.login(request.ip, body.email);
     const result = await login(db, config, body.email, body.password);
     reply.setCookie(config.cookieName, result.token, cookieOptions(config));
     return result.session;

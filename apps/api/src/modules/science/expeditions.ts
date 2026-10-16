@@ -133,6 +133,8 @@ export async function finaliseExpedition(db:Kysely<Database>,claim:Submission,pr
 export class ExpeditionCoordinator {
  private ticking=false;private stopped=false;private timer:ReturnType<typeof setTimeout>|undefined;private flights=new Set<Promise<void>>();private manifests=new Map<string,NavigationData['accesses']>();
  constructor(private db:Kysely<Database>,private compute:NavigationExecutor=new NavigationCompute(),private onError:(e:unknown)=>void=()=>{}){}
+ private lastTickAt:string|null=null;private lastErrorAt:string|null=null;
+ get observation(){return {stopped:this.stopped,active:this.flights.size,lastTickAt:this.lastTickAt,lastErrorAt:this.lastErrorAt};}
  start(){this.stopped=false;void this.tick();return()=>this.close();}
  private async tick(){
   if(this.stopped||this.ticking)return;this.ticking=true;
@@ -143,7 +145,8 @@ export class ExpeditionCoordinator {
     const flight=this.process(claim).catch(this.onError).finally(()=>{this.flights.delete(flight);if(!this.stopped){if(this.timer)clearTimeout(this.timer);this.timer=setTimeout(()=>void this.tick(),0);}});
     this.flights.add(flight);
    }
-  }catch(error){this.onError(error);}
+   this.lastTickAt=new Date().toISOString();
+  }catch(error){this.lastErrorAt=new Date().toISOString();this.onError(error);}
   this.ticking=false;if(!this.stopped){if(this.timer)clearTimeout(this.timer);this.timer=setTimeout(()=>void this.tick(),250);}
  }
  async process(claim:Submission){

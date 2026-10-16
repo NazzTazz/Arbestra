@@ -14,6 +14,7 @@ import { villageSyncRevision } from './sync-revision.js';
 import { HttpError } from '../../errors.js';
 import { advanceEnergy } from '../population/energy.js';
 import { energyState } from '../population/work.js';
+import { markHttpStream, operationsFor } from '../operations/telemetry.js';
 
 export const VILLAGE_SYNC_CHECK_MS = 2_000;
 
@@ -77,11 +78,13 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
     if (!payload || typeof payload !== 'object') return payload;
     const wrapper = payload as { villageState?: VillageState }, candidate = wrapper.villageState ?? payload as VillageState;
     if (!candidate.world?.id || !candidate.village?.id || !Array.isArray(candidate.cells) || !candidate.serverTime) return payload;
+    return devTime('sync', async () => {
     const current = await villageSyncRevision(db, candidate.world.id);
     const account = await authenticate(db, request.cookies[config.cookieName]);
     if (candidate.syncRevision === current.revision) { projections.remember(account.id, candidate); return payload; }
     const coherent = await projections.read(account.id, candidate.world.slug, candidate.village.id, current.revision);
     return wrapper.villageState ? { ...wrapper, villageState: coherent } : coherent;
+    });
   });
 
   // Share only in-flight reads, never a stale dynamic snapshot or another owner's data.
@@ -91,21 +94,31 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
     schema: { params: Type.Object({ worldSlug: Type.String({ minLength: 1, maxLength: 64 }), villageId: Type.String({ format: 'uuid' }) }),
       querystring: Type.Object({ revision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })) }) },
   }, async (request, reply) => {
+    // A slow pool/authentication can outlive the browser's SSE watchdog. The
+    // response close event may already have fired before we install its listener;
+    // never create an orphan subscription after that point.
+    const disconnected = () => reply.raw.destroyed || reply.raw.writableEnded;
+    if (disconnected()) return;
     const account = await authenticate(db, request.cookies[config.cookieName]);
+    if (disconnected()) return;
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
     const village = await db.transaction().execute(tx => ownedVillage(tx, account.id, worldSlug, villageId));
+    if (disconnected()) return;
+    const operations = operationsFor(app);
+    const closeObservation = operations?.openStream(request, account.id, village.worldId);
+    markHttpStream(request);
     const read = () => projections.read(account.id, worldSlug, villageId);
     const session = new VillageSyncSession(read, async () => (await villageSyncRevision(db, village.worldId)).revision,
       snapshot=>reconcileSyncDeadline(db,account.id,worldSlug,villageId,snapshot));
     reply.hijack();
     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform',
-      'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+      'X-Accel-Buffering': 'no', 'X-Request-Id': request.id, Connection: 'keep-alive' });
     reply.raw.write('retry: 2000\n\n');
     const deliveredReceipts=new Map<string,number>();
     let dirty=false,checking=false,receiptDirty=false;
     let receiptFlight:Promise<void>|undefined;
     let closed = false, timer: ReturnType<typeof setTimeout> | undefined;
-    const close = () => { if(closed)return;closed = true; if (timer) clearTimeout(timer);unsubscribe?.();streams.delete(close);reply.raw.end(); };
+    const close = () => { if(closed)return;closed = true; closeObservation?.(); if (timer) clearTimeout(timer);unsubscribe?.();streams.delete(close);reply.raw.end(); };
     streams.add(close);
     reply.raw.once('close', close);
     // No trust in Last-Event-ID: browser receipt does not attest application.
@@ -119,17 +132,21 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
       const flight=(async()=>{
         try{
           const current=await authenticate(db,request.cookies[config.cookieName]);
+          if(closed)return;
           if(current.id!==account.id)throw new HttpError(401,'SESSION_EXPIRED','Session expirée.');
           const receipts=await readExpeditionReceipts(db,account.id,worldSlug,villageId);
           if(closed)return;
           for(const receipt of receipts)if((deliveredReceipts.get(receipt.commandId)??0)<receipt.version){
             if(reply.raw.writableLength>1_048_576){close();return;}
             reply.raw.write('event: expedition-receipt\ndata: '+JSON.stringify(receipt)+'\n\n');deliveredReceipts.set(receipt.commandId,receipt.version);
+            operations?.sseEvent();
           }
           while(deliveredReceipts.size>128)deliveredReceipts.delete(deliveredReceipts.keys().next().value!);
         }catch(error){
+          if(closed)return;
           if(!closed&&error instanceof HttpError&&error.statusCode===401)reply.raw.write('event: expired\ndata: {}\n\n');
-          app.log.warn(error,'Expedition receipt synchronization interrupted');close();
+          request.log.warn({ code: 'SSE_RECEIPTS_INTERRUPTED' }, 'Expedition receipt synchronization interrupted');close();
+          operations?.sseFailure(village.worldId, villageId);
         }
       })().finally(()=>{receiptFlight=undefined;if(receiptDirty&&!closed)void flushReceipts();});
       receiptFlight=flight;return flight;
@@ -144,10 +161,13 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
         const revision = event.event === 'snapshot' ? event.data.syncRevision : event.event === 'frame' ? event.data.toRevision : event.data.revision;
         if (reply.raw.writableLength > 1_048_576) { close(); return; }
         reply.raw.write(`id: ${revision}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+        operations?.sseEvent();
         timer = setTimeout(() => void poll(), dirty?0:VILLAGE_SYNC_CHECK_MS); timer.unref();
       } catch (error) {
+        if (closed) return;
         if (!closed && error instanceof HttpError && error.statusCode === 401) reply.raw.write('event: expired\ndata: {}\n\n');
-        app.log.warn(error, 'Village synchronization interrupted'); close();
+        request.log.warn({ code: 'SSE_INTERRUPTED' }, 'Village synchronization interrupted'); close();
+        operations?.sseFailure(village.worldId, villageId);
       }finally{checking=false;if(dirty&&!closed){if(timer)clearTimeout(timer);timer=setTimeout(()=>void poll(),0);}}
     };
     const unsubscribe=wakeups?.subscribe((wid,vid)=>{if(wid===village.worldId&&vid===villageId){void flushReceipts();void poll();}});
@@ -155,3 +175,4 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
   });
   return projections;
 }
+import { devTime } from '../operations/dev-timing.js';

@@ -1,11 +1,15 @@
 import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
+import { instrumentDevDriver } from '../modules/operations/dev-timing.js';
 
 import type { Database } from './schema.js';
 
 const { Pool } = pg;
+class ObservedPostgresDialect extends PostgresDialect {
+  override createDriver() { return instrumentDevDriver(super.createDriver()); }
+}
 
-export function createDatabase(databaseUrl: string, onConnectionError: (error:Error)=>void = error=>console.error('PostgreSQL connection interrupted:',error.message)): Kysely<Database> {
+export function createDatabase(databaseUrl: string, onConnectionError: (error:Error)=>void = ()=>console.error('POSTGRES_CONNECTION_INTERRUPTED: PostgreSQL connection interrupted')): Kysely<Database> {
   const pool=new Pool({connectionString:databaseUrl,max:10});
   const reported=new WeakSet<Error>();
   const report=(error:Error)=>{if(!reported.has(error)){reported.add(error);onConnectionError(error);}};
@@ -15,7 +19,7 @@ export function createDatabase(databaseUrl: string, onConnectionError: (error:Er
   pool.on('connect',client=>client.on('error',report));
   pool.on('error',report);
   return new Kysely<Database>({
-    dialect: new PostgresDialect({
+    dialect: new ObservedPostgresDialect({
       pool,
     }),
     plugins: [new CamelCasePlugin()],

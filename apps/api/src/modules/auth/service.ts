@@ -1,3 +1,4 @@
+import { devTime } from '../operations/dev-timing.js';
 import { scrypt as callbackScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -66,6 +67,7 @@ export async function authenticate(
   db: Kysely<Database>,
   token: string | undefined,
 ): Promise<AuthenticatedAccount> {
+  return devTime('auth', async () => {
   if (!token) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Connexion requise.');
 
   const account = await db.selectFrom('sessions')
@@ -77,6 +79,7 @@ export async function authenticate(
 
   if (!account) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Session invalide ou expirée.');
   return account;
+  });
 }
 
 export async function getSessionForAccount(

@@ -11,6 +11,13 @@ export interface ProcessScheduledTaskResult {
   outcome: 'completed' | 'retry-scheduled';
 }
 
+export type ScheduledWorkerObservation = { kind: 'poll' | 'idle' | 'error' | 'stopped' }
+  | { kind: 'processed'; outcome: ProcessScheduledTaskResult['outcome'] };
+type Observer = (event: ScheduledWorkerObservation) => void;
+function observe(observer: Observer | undefined, event: ScheduledWorkerObservation): void {
+  try { observer?.(event); } catch { /* Monitoring must never change task handling. */ }
+}
+
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.slice(0, 2_000);
@@ -70,11 +77,14 @@ export async function drainScheduledTasks(
   db: Kysely<Database>,
   handlers: ScheduledTaskHandlers,
   limit = 50,
+  observer?: Observer,
 ): Promise<number> {
   let processed = 0;
   while (processed < limit) {
     const result = await processNextScheduledTask(db, handlers);
     if (!result) break;
+    // The transaction has committed before its outcome is observed.
+    observe(observer, { kind: 'processed', outcome: result.outcome });
     processed += 1;
   }
   return processed;
@@ -85,15 +95,17 @@ export function startScheduledTaskWorker(
   handlers: ScheduledTaskHandlers,
   pollIntervalMs: number,
   onError: (error: unknown) => void,
+  observer?: Observer,
 ): () => Promise<void> {
   let stopped = false;
   let currentRun: Promise<void> | null = null;
 
   const poll = () => {
     if (stopped || currentRun) return;
-    currentRun = drainScheduledTasks(db, handlers)
-      .then(() => undefined)
-      .catch(onError)
+    observe(observer, { kind: 'poll' });
+    currentRun = drainScheduledTasks(db, handlers, 50, observer)
+      .then(() => { observe(observer, { kind: 'idle' }); })
+      .catch(error => { observe(observer, { kind: 'error' }); onError(error); })
       .finally(() => { currentRun = null; });
   };
 
@@ -105,5 +117,6 @@ export function startScheduledTaskWorker(
     stopped = true;
     clearInterval(timer);
     await currentRun;
+    observe(observer, { kind: 'stopped' });
   };
 }

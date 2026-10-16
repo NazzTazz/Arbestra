@@ -1,3 +1,5 @@
+export * from './http-diagnostics.js';
+export * from './admin.js';
 export * from './auth.js';
 export * from './villages.js';
 export * from './village-sync.js';
@@ -45,3 +47,5 @@ export * from './woodland-layout.js';
 
 export * from './route-planner.js';
 export * from './expeditions.js';
+export * from './operations.js';
+export * from './dev-timing.js';
