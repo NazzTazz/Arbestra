@@ -10,6 +10,9 @@ const reasonLabels = { slow: 'Lente', server_error: 'Erreur serveur', aborted: '
 const explanations: Record<string, string> = {
   INTERNAL_ERROR: 'Erreur interne non classée. Sa cause technique n’est pas établie par cette observation.',
   ADMIN_BUSY: 'La capacité de lecture de la console était occupée.',
+  OBSERVATION_BUSY:'Le calcul d’observation a été différé pour préserver la capacité du jeu.',
+  OBSERVATION_RATE:'La limite de lectures d’observation a été atteinte.',
+  OBSERVATION_LIMIT:'La limite de baux d’observation a été atteinte.',
   ADMIN_DATA_UNAVAILABLE: 'La lecture diagnostique était indisponible. Le temps SQL, l’attente du pool et la cause technique ne sont pas connus.',
   VALIDATION_ERROR: 'La requête ne satisfaisait pas le contrat attendu.',
   HTTP_SERVER_RESPONSE: 'Une réponse serveur en erreur a été observée sans annotation plus précise.',

@@ -1,4 +1,5 @@
 import { devTime } from '../operations/dev-timing.js';
+import {observationAuthenticated} from '../admin/observation-actions.js';
 import { scrypt as callbackScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -78,6 +79,7 @@ export async function authenticate(
     .executeTakeFirst();
 
   if (!account) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Session invalide ou expirée.');
+  observationAuthenticated(account.id);
   return account;
   });
 }

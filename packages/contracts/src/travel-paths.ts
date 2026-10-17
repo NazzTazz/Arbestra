@@ -146,7 +146,8 @@ function navigationGeometry(state:TravelNetworkState){
  const curbPixels=infrastructureBlockedPixels(state.infrastructure!,state.world,state.cells.flatMap(c=>c.building?buildingAccesses(state,c.building.id):[]));
  return {surface,curbPixels};
 }
-export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: readonly string[] = [], ground?:TravelGround): TravelRoute[] {
+export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: readonly string[] = [], ground?:TravelGround, checkpoint?:()=>void): TravelRoute[] {
+  checkpoint?.();
   const { world, village, region } = state;
   // Snapshots change economic amounts without changing this spatial problem.
   // Cache only bounded, deterministic geometry; never retain an economic snapshot.
@@ -192,6 +193,7 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
   const distance = (a: TravelCell, b: TravelCell): number =>
     Math.abs(delta(a.cellX, b.cellX, world.widthCells)) + Math.abs(delta(a.cellY, b.cellY, world.heightCells));
   for (const goal of goals) {
+    checkpoint?.();
     if (!inside(goal.destination) && goal.kind !== 'stone') continue;
     const maxSteps = distance(start, goal.destination) + 8;
     const pending = new StepQueue();
@@ -199,6 +201,7 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
     const best = new Map<string, number>();
     let found: Step | undefined;
     while (pending.length) {
+      checkpoint?.();
       const current = pending.pop();
       const currentKey = `${key(current.cell)}:${current.direction}`;
       if (current.cost > (best.get(currentKey) ?? Infinity)) continue;
@@ -236,7 +239,7 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
   const guide=new Set<string>();
   for(const route of routes)if(!seeded.has(route.id))for(const p of route.cells)guide.add(key(p));
   const refinement=state.infrastructure?prepareRefinement(state,ground,geometry,walk):undefined;
-  const result=state.infrastructure?routes.flatMap(route=>{const refined=refineTravelRoute(state,route,guide,refinement,ground);return refined?[refined]:[];}):routes;
+  const result=state.infrastructure?routes.flatMap(route=>{checkpoint?.();const refined=refineTravelRoute(state,route,guide,refinement,ground,checkpoint);return refined?[refined]:[];}):routes;
   if(result.reduce((n,r)=>n+r.cells.length,0)<=50_000){networkCache.set(signature,copyNetwork(result));
     while(networkCache.size>8||[...networkCache.values()].reduce((n,list)=>n+list.reduce((m,r)=>m+r.cells.length,0),0)>50_000)networkCache.delete(networkCache.keys().next().value!);rememberNetworkAlias(input,signature);}
   return copyNetwork(result);
@@ -266,7 +269,7 @@ function prepareRefinement(state:TravelNetworkState,ground?:TravelGround,geometr
  for(const e of occupiedEquipment)for(const dx of [-.25,0,.25])for(const dy of [-.25,0,.25])markFine(e.x/8+dx,e.y/8+dy);
  return {surface,curbPixels,roadNodes,walk,blocked,occupiedEquipment,fineCells};
 }
-export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround):TravelRoute|null{
+export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround,checkpoint?:()=>void):TravelRoute|null{
   if(!state.infrastructure||!route.cells.length)return route;
   const anchor=state.cells.find(c=>c.cellX===state.village.anchorCellX&&c.cellY===state.village.anchorCellY);
   const hallId=state.village.townHallBuildingId??anchor?.footprint?.buildingId??anchor?.building?.id;
@@ -333,7 +336,7 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
     };
     const pending=new StepQueue(),seen=new Map<string,number>();pending.push({cell:from,cost:0,score:estimate(from),direction:-1,steps:0});
     let found:Step|undefined,visited=0;
-    while(pending.length&&visited++<65_536){const cur=pending.pop();if(cur.cost>(seen.get(key(cur.cell))??Infinity))continue;
+    while(pending.length&&visited++<65_536){checkpoint?.();const cur=pending.pop();if(cur.cost>(seen.get(key(cur.cell))??Infinity))continue;
       if(key(cur.cell)===key(to)){found=cur;break;}
       if(cur.steps+distance(cur.cell,to)>distance(from,to)+128)continue;
       for(const via of neighbours(cur.cell)){

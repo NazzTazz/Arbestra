@@ -14,10 +14,13 @@ const methods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIO
 const sites = new Set(['http.error-handler', 'http.on-error', 'http.finalize', 'admin.read']);
 const categories: Record<string, HttpRequestObservation['errorCategory']> = {
   INTERNAL_ERROR: 'internal', ADMIN_BUSY: 'application', ADMIN_DATA_UNAVAILABLE: 'application',
+  OBSERVATION_BUSY:'application',OBSERVATION_RATE:'application',OBSERVATION_LIMIT:'application',
   VALIDATION_ERROR: 'application', HTTP_SERVER_RESPONSE: 'unknown', CONNECTION_INTERRUPTED: 'transport',
 };
 const consoleRoutes = new Set(['session', 'overview', 'infrastructure', 'worlds', 'worlds/:id', 'accounts', 'accounts/:id',
-  'villages/:id', 'activities', 'activities/:id', 'http-requests', 'http-requests/:requestId'].map(path => '/api/admin/' + path));
+  'villages/:id', 'activities', 'activities/:id', 'http-requests', 'http-requests/:requestId',
+  'observations','observations/','observations/launch','observations/:id','observations/:id/heartbeat','observations/:id/follow','observations/:id/snapshot','observations/:id/events','observations/:id/terrain'].map(path => '/api/admin/' + path));
+for(const path of ['exchange',':id',':id/heartbeat',':id/follow',':id/snapshot',':id/events',':id/terrain'])consoleRoutes.add('/api/observation/'+path);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function safeHttpAnnotation(code: unknown, captureSite: unknown = 'http.error-handler') {

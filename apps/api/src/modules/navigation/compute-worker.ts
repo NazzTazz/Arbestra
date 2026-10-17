@@ -57,20 +57,25 @@ function build(data:NavigationData,stage:(name:string)=>void):NavigationField{
  if(data.legacy)field.forGoals=goals=>{const cells=new Set(goals.flatMap(g=>g.kind==='point'?[wrap(Math.floor(g.cellX+.5),data.width)+':'+wrap(Math.floor(g.cellY+.5),data.height)]:[]));return{...field,sample:(x,y)=>sample(x,y,undefined,cells)};};
  return field;
 }
-parentPort!.on('message',(job:{id:string;query?:RouteQuery;data?:NavigationData;network?:NetworkJob})=>{
+parentPort!.on('message',(job:{id:string;query?:RouteQuery;data?:NavigationData;network?:NetworkJob;observation?:SharedArrayBuffer})=>{
  try{
   const began=performance.now(),stage=(name:string)=>parentPort!.postMessage({id:job.id,stage:name});stage('inputs');
   if(job.network){
+   const beganSearch=performance.now(),cancel=job.observation?new Int32Array(job.observation):undefined;
+   const checkpoint=()=>{if(cancel&&(Atomics.load(cancel,0)!==0||performance.now()-beganSearch>1000))throw Error('OBSERVATION_BUSY');};checkpoint();
    const {state,ground:input}=job.network;let ground:TravelGround|undefined;
    if(input){
+    // Never parse/build a cold geography for a low-priority diagnostic read.
+    if(cancel&&!sources.has(input.sourceId))throw Error('OBSERVATION_BUSY');
     const edits=input.edits;
     if(edits.worldId!==state.world.id||edits.width!==state.world.widthCells||edits.height!==state.world.heightCells)throw Error('Contexte réseau incohérent');
     const source=sourceFor(input.sourceId,input.artifact,edits.width,edits.height,stage);
     const key=JSON.stringify([input.sourceId,edits]);ground=networkGrounds.get(key);
+    if(!ground&&cancel)throw Error('OBSERVATION_BUSY');
     if(!ground){stage('network-ground');ground=rc1NetworkGround(source.data,source.field,edits);
      if(key.length<=131072){networkGrounds.set(key,ground);while(networkGrounds.size>4)networkGrounds.delete(networkGrounds.keys().next().value!);}}
    }
-   stage('network-search');const network=buildTravelNetwork(state,[],ground);
+   checkpoint();stage('network-search');const network=buildTravelNetwork(state,[],ground,checkpoint);
    while(sources.size>2)sources.delete(sources.keys().next().value!);
    parentPort!.postMessage({id:job.id,network,contexts:[...contexts.keys()],sources:[...sources.keys()]});return;
   }

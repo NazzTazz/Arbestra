@@ -5,6 +5,10 @@ const base = { DATABASE_URL: 'postgres://unused/unused_test', NODE_ENV: 'product
 const id = 'c12da950-b066-4dd0-8bda-eb576f77c92a';
 
 describe('administrator and proxy configuration', () => {
+  it('accepts an explicit world origin and rejects unsafe production observation destinations',()=>{
+    expect(loadConfig({...base,WORLD_ORIGIN:'https://alpha.arbestra.world/'}).worldOrigin).toBe('https://alpha.arbestra.world');
+    for(const WORLD_ORIGIN of ['http://alpha.arbestra.world','https://user:secret@alpha.arbestra.world','https://alpha.arbestra.world/village','https://alpha.arbestra.world/?token=x'])expect(()=>loadConfig({...base,WORLD_ORIGIN})).toThrow();
+  });
   it('enables safe HTTP anomaly logs in both environments and validates all diagnostic settings', () => {
     for (const NODE_ENV of ['development', 'production']) {
       expect(loadConfig({ ...base, NODE_ENV })).toMatchObject({ nocHttpSlowMs: 2000, nocHttpLogMode: 'anomalies' });

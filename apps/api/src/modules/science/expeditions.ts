@@ -140,6 +140,7 @@ export class ExpeditionCoordinator {
   if(this.stopped||this.ticking)return;this.ticking=true;
   try{
    await expireExpeditions(this.db);
+   if(this.compute instanceof NavigationCompute)this.compute.setExpeditionDemand(this.compute.observing&&Boolean(await this.db.selectFrom('expeditionSubmissions').select('commandId').where(sql<boolean>`receipt->>'status'='pending'`).where('expiresAt','>',sql<Date>`statement_timestamp()`).limit(1).executeTakeFirst()));
    while(this.compute.available&&this.flights.size<2){
     const claim=await acquireExpedition(this.db);if(!claim)break;
     const flight=this.process(claim).catch(this.onError).finally(()=>{this.flights.delete(flight);if(!this.stopped){if(this.timer)clearTimeout(this.timer);this.timer=setTimeout(()=>void this.tick(),0);}});

@@ -1,3 +1,4 @@
+import type {ObservationPose} from '@arbestra/contracts';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -172,6 +173,19 @@ export class RegionalOverview {
 }
 
 export class TorusOverview {
+  observationPose():Extract<ObservationPose,{mode:'world'}>{
+    this.camera.getViewMatrix(true);
+    const inverse=this.#cosmology.root.computeWorldMatrix(true).clone().invert();
+    const local=this.camera.parent===this.#cosmology.root;
+    const eye=local?this.camera.position:Vector3.TransformCoordinates(this.camera.globalPosition,inverse),target=this.camera.getTarget();
+    const canonicalTarget=local?target:Vector3.TransformCoordinates(target,inverse);
+    const up=local?this.camera.upVector:Vector3.TransformNormal(this.camera.upVector,inverse).normalize();
+    return{mode:'world',eye:eye.asArray() as [number,number,number],target:canonicalTarget.asArray() as [number,number,number],up:up.asArray() as [number,number,number],fov:this.camera.fov};
+  }
+  applyObservationPose(p:Extract<ObservationPose,{mode:'world'}>){
+    this.camera.parent=this.#cosmology.root;this.camera.upVector=Vector3.FromArray(p.up);this.camera.setTarget(Vector3.FromArray(p.target));this.camera.setPosition(Vector3.FromArray(p.eye));this.camera.fov=p.fov;
+    this.camera.inertialAlphaOffset=this.camera.inertialBetaOffset=this.camera.inertialRadiusOffset=0;
+  }
   readonly scene: Scene;
   readonly camera: ArcRotateCamera;
   readonly #mesh: MeshType;

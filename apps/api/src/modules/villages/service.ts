@@ -1,3 +1,4 @@
+import {observationVillage} from '../admin/observation-actions.js';
 import { devTime, devTimeSync } from '../operations/dev-timing.js';
 import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
@@ -128,6 +129,7 @@ export async function ownedVillage(
       'VILLAGE_NOT_FOUND',
       'Village introuvable dans ce monde.',
     );
+  observationVillage(accountId,row.worldId,row.villageId);
   return row;
   });
 }
@@ -467,6 +469,16 @@ export function withVillageProjection<T>(db: Kysely<Database>, accountId: string
   });
 }
 
+/** Inspection needs persisted infrastructure and committed paths, never speculative routing. */
+export async function readVillageObservation(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
+  const village = await ownedVillage(db, accountId, worldSlug, villageId);
+  // Parse/check immutable geography before starting the bounded transaction.
+  // The snapshot revalidates its row identity and reads every mutable edit.
+  if (village.generationVersion === 3) await readRc1Source(db, village.worldId);
+  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
+    state(tx, accountId, worldSlug, economy, false, true, 'observation'));
+}
+
 export async function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
   compute?:TravelNetworkExecutor) {
   // The low-level inline reader remains usable by transactional integration
@@ -628,7 +640,7 @@ export async function state(
   existingEconomy?: VillageEconomy,
   admit = true,
   readOnly = false,
-  deferNavigation?: (input:NetworkJob['state'],ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined)=>void,
+  deferNavigation?: 'observation' | ((input:NetworkJob['state'],ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined)=>void),
 ): Promise<VillageState> {
   return devTime('snapshot', async () => {
   if(deferNavigation&&!readOnly)throw Error('Deferred navigation requires a read-only projection');
@@ -916,6 +928,7 @@ export async function state(
               }
             : null,
           canBuild:
+            deferNavigation !== 'observation' &&
             available.has(key) &&
             !row &&
             !featureCells.has(key) &&
@@ -924,13 +937,18 @@ export async function state(
             !protectedCell(cellX, cellY, protectedRows, village),
         };
       })
-      .filter((cell) => cell.canBuild || cell.footprint !== null),
+      // Keep the same spatial support for the shared renderer, but inspection
+      // never needs the expensive terrain suitability previews for commands.
+      .filter((cell) => deferNavigation === 'observation' || cell.canBuild || cell.footprint !== null),
   };
   villageState.infrastructure=await devTime('infrastructure',()=>readInfrastructure(tx,village.worldId,village.villageId));
   villageState.factoryEnabled=await factoryCapability(tx,village.worldId);
-  const navigationInfrastructure = await devTime('infrastructure',()=>readNavigationInfrastructure(tx,village,villageState.infrastructure));
-  if(deferNavigation){deferNavigation(networkState({...villageState,infrastructure:navigationInfrastructure}),ground.rc1);villageState.travelRoutes=[];}
-  else villageState.travelRoutes = devTimeSync('navigation',()=>buildTravelNetwork({...villageState,infrastructure:navigationInfrastructure},[],ground.rc1?.navigation));
+  if(deferNavigation==='observation') villageState.travelRoutes=[];
+  else {
+    const navigationInfrastructure = await devTime('infrastructure',()=>readNavigationInfrastructure(tx,village,villageState.infrastructure));
+    if(deferNavigation){deferNavigation(networkState({...villageState,infrastructure:navigationInfrastructure}),ground.rc1);villageState.travelRoutes=[];}
+    else villageState.travelRoutes = devTimeSync('navigation',()=>buildTravelNetwork({...villageState,infrastructure:navigationInfrastructure},[],ground.rc1?.navigation));
+  }
   // Reuse committed mission paths; do not search routes to every woodland in the snapshot.
   for (const extraction of villageState.village.extractions) if (extraction.resourceCode === 'wood' && extraction.path.length) {
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',

@@ -10,6 +10,32 @@ const state:TravelNetworkState={world:{id:'world',widthCells:16,heightCells:16},
  cells:[{cellX:3,cellY:3,footprint:{buildingId:'obstacle'},building:null},
   {cellX:4,cellY:3,footprint:{buildingId:'house'},building:{id:'house',type:'dwelling',quarterTurns:0,visualLayout:null,accesses:[]}}]};
 function gate(){let release!:()=>void;const promise=new Promise<void>(r=>{release=r;});return{promise,release};}
+
+it('refuses diagnostic work before its SQL loader when an expedition is ready',async()=>{
+ const compute=new NavigationCompute(),load=vi.fn(async()=>({state}));try{await compute.start();await expect(compute.observationNetwork(load,async()=>true)).rejects.toMatchObject({code:'OBSERVATION_BUSY'});expect(load).not.toHaveBeenCalled();}finally{await compute.close();}
+});
+it('preempts diagnostic work at a bounded barrier without terminating the shared worker',async()=>{
+ const compute=new NavigationCompute(),entered=gate(),release=gate();const jobs:Promise<unknown>[]=[];
+ try{await compute.start();
+  const diagnostic=compute.observationNetwork(async()=>{entered.release();await release.promise;return{state};},async()=>false);jobs.push(diagnostic);const rejected=expect(diagnostic).rejects.toMatchObject({code:'OBSERVATION_BUSY'});
+  await bounded(entered.promise);const player=compute.network(async()=>({state}));jobs.push(player);release.release();await rejected;expect(await player).toEqual(buildTravelNetwork(state));expect(compute.observation.ready).toBe(1);
+ }finally{release.release();await Promise.allSettled(jobs);await compute.close();}
+});
+it('refuses cold observation geography without parsing it or interrupting a later player',async()=>{
+ const compute=new NavigationCompute();try{await compute.start();
+  await expect(compute.observationNetwork(async()=>({state,ground:{sourceId:'cold',artifact:'{not JSON',edits:{worldId:'world',width:16,height:16,terraces:[],absent:[],groves:[]}}}),async()=>false)).rejects.toMatchObject({code:'OBSERVATION_BUSY'});
+  expect(compute.observation.lastErrorAt).toBeNull();expect(await compute.network(async()=>({state}))).toEqual(buildTravelNetwork(state));
+ }finally{await compute.close();}
+});
+it('cancels a diagnostic search through the shared atomic flag and keeps the lane for a player',async()=>{
+ const compute=new NavigationCompute();let player:Promise<unknown>|undefined;const entered=gate();const original=Worker.prototype.emit;
+ const slow={...state,world:{id:'observation-heavy-search',widthCells:128,heightCells:128},region:{...state.region,width:128,height:128,terrainCodes:Array(128*128).fill(1)},cells:Array.from({length:200},(_,i)=>({cellX:50+i%20,cellY:50+Math.floor(i/20),footprint:{buildingId:'goal-'+i},building:{id:'goal-'+i,type:'dwelling' as const,quarterTurns:0,visualLayout:null,accesses:[]}}))};
+ await compute.start();
+ const emit=vi.spyOn(Worker.prototype,'emit').mockImplementation(function(this:Worker,event,...args){const message=args[0] as {stage?:string}|undefined;if(event==='message'&&message?.stage==='network-search'&&!player){player=compute.network(async()=>({state}));entered.release();}return Reflect.apply(original,this,[event,...args]) as boolean;});
+ const diagnostic=compute.observationNetwork(async()=>({state:slow}),async()=>false);const rejected=expect(diagnostic).rejects.toMatchObject({code:'OBSERVATION_BUSY'});
+ try{await bounded(entered.promise);await rejected;expect(await player).toEqual(buildTravelNetwork(state));expect(compute.observation.ready).toBe(1);expect(compute.observation.lastErrorAt).toBeNull();}
+ finally{emit.mockRestore();await Promise.allSettled([diagnostic,...(player?[player]:[])]);await compute.close();}
+});
 async function bounded<T>(work:Promise<T>){let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('Test barrier expired')),15000);})]);}finally{clearTimeout(timer);}}
 const routeQuery:RouteQuery={worldId:'world',contextId:'legacy',policyVersion:ROUTE_POLICY_VERSION,movementProfileId:'pedestrian-v1',traversalConstraintsId:'none',
  starts:[{kind:'point',cellX:2,cellY:2}],goals:[{kind:'point',cellX:4,cellY:2}],limits:{maxNodes:1000,maxDurationMs:1000}};

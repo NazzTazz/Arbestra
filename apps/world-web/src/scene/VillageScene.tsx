@@ -1,3 +1,6 @@
+import {observationCameraReader} from '../observation';
+import type {ObservationPose} from '@arbestra/contracts';
+import type {SceneTransport} from './scene-transport';
 import type {StarterGhost} from '../spawn-map/starter-controller';
 import type {InfrastructureGesture} from './infrastructure-renderer';
 import type {InfrastructureOperation,SubPoint} from '@arbestra/contracts';
@@ -18,6 +21,9 @@ import type { AreaPreview, Cell } from './construction-selection';
 import type { ActiveWorldMode } from '../ui/world-mode';
 
 interface VillageSceneProps {
+  transport?:SceneTransport|undefined;
+  observationPose?:ObservationPose|null|undefined;
+  onManualCamera?:(()=>void)|undefined;
   onInitialLoad?: ((progress: InitialLoadProgress) => void) | undefined;
   preparing?:boolean; starterGhost?:StarterGhost|null; onStarterManual?:(()=>void)|undefined;
   worldMode: ActiveWorldMode;
@@ -55,7 +61,7 @@ interface VillageSceneProps {
 }
 export interface TerrainHandle { focusCell:(cell:Cell)=>void; viewCenter:()=>Cell|null; naturalFeatures:()=>NaturalFeature[]; ready:()=>boolean; infrastructureTool:(handler:((gesture:InfrastructureGesture)=>void)|null)=>void; infrastructurePreview:(operation:InfrastructureOperation|null,invalid?:boolean,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>)=>void; equipmentAt:(point:SubPoint,pickedId?:string)=>{id:string;version:number;position:SubPoint;quarterTurns:number}|null; selectRepresentative:(id:string|null)=>void; representativeInfo:(id:string)=>RepresentativeInfo|null; projectRepresentative:(id:string)=>ScreenAnchor|null; representativeCamera:(mode:'pov'|'follow'|'village')=>void; representativeCameraMode:()=>InhabitantCameraMode; cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
 
-export function VillageScene({ onInitialLoad, preparing=false, starterGhost=null, onStarterManual, worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
+export function VillageScene({ transport, observationPose, onManualCamera, onInitialLoad, preparing=false, starterGhost=null, onStarterManual, worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
   const [arrival, setArrival] = useState<VillageArrival | null>(null);
   const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad }); callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad };
   const [devTarget, setDevTarget] = useState<HTMLElement | null>(null);
@@ -98,14 +104,17 @@ export function VillageScene({ onInitialLoad, preparing=false, starterGhost=null
       },
       () => callbacks.current.onEyesFound?.(),
       progress => callbacks.current.onInitialLoad?.(progress),
+      transport,
     );
     sceneRef.current = scene;
+    const stopObservation=transport?.readOnly?()=>{}:observationCameraReader(()=>scene.observationPose());
     return () => {
+      stopObservation();
       callbacks.current.onArrivalActive?.(false);
       scene.dispose();
       sceneRef.current = null;
     };
-  }, [state.world.id, state.world.generationVersion, state.village.id, BabylonVillageScene]);
+  }, [state.world.id, state.world.generationVersion, state.village.id, BabylonVillageScene, transport]);
 
   useEffect(() => {
     // React's development mount probe is disposed before the next frame. Do not
@@ -119,6 +128,9 @@ export function VillageScene({ onInitialLoad, preparing=false, starterGhost=null
     });
     return () => cancelAnimationFrame(frame);
   }, [state, preparing, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId, BabylonVillageScene]);
+
+  const followed=useRef(observationPose);followed.current=observationPose;
+  useEffect(()=>{if(!transport?.readOnly)return;let frame=0;const tick=()=>{if(followed.current)sceneRef.current?.applyObservationPose(followed.current);frame=requestAnimationFrame(tick);};frame=requestAnimationFrame(tick);return()=>cancelAnimationFrame(frame);},[transport]);
 
   useImperativeHandle(terrainRef, () => ({ ready:()=>Boolean(sceneRef.current), infrastructureTool:handler=>sceneRef.current?.infrastructureTool(handler),infrastructurePreview:(op,invalid,preparedPlan,preparedSurface)=>sceneRef.current?.infrastructurePreview(op,invalid,preparedPlan,preparedSurface),equipmentAt:(p,pickedId)=>sceneRef.current?.equipmentAt(p,pickedId)??null,selectRepresentative:id=>sceneRef.current?.selectRepresentative(id), representativeInfo:id=>sceneRef.current?.representativeInfo(id)??null, projectRepresentative:id=>sceneRef.current?.projectRepresentative(id)??null, representativeCamera:mode=>sceneRef.current?.representativeCamera(mode), representativeCameraMode:()=>sceneRef.current?.representativeCameraMode??'village', cancelGesture: () => sceneRef.current?.cancelGesture(), resetCosmology: () => { sceneRef.current?.setCosmologyPhase(null); sceneRef.current?.setCosmologyPeriod(28800); }, featuresAt: cell => sceneRef.current?.featuresAt(cell) ?? [], acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit),
     projectPopulation: id => sceneRef.current?.projectPopulation(id) ?? null,
@@ -140,6 +152,7 @@ export function VillageScene({ onInitialLoad, preparing=false, starterGhost=null
   useEffect(() => { sceneRef.current?.setCosmologyServerOffset(serverOffsetMs); }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
 
   const keyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    onManualCamera?.();
     if (event.key === 'Escape' && viewMode === 'world') { sceneRef.current?.showRegion(); event.preventDefault(); }
     if (event.key === '+' || event.key === '=') {
       if (viewMode === 'world') sceneRef.current?.showRegion();
@@ -159,7 +172,7 @@ export function VillageScene({ onInitialLoad, preparing=false, starterGhost=null
     if (viewMode === 'world' && event.key === 'Enter') { sceneRef.current?.selectWorldCenter(); event.preventDefault(); }
   };
 
-  return <><canvas ref={canvasRef} className="village-canvas" data-testid="village-canvas" aria-label="Vue stratégique du village" tabIndex={0} onKeyDown={keyDown} data-view-mode={viewMode} />
+  return <><canvas ref={canvasRef} className="village-canvas" data-testid="village-canvas" aria-label="Vue stratégique du village" tabIndex={0} onPointerDownCapture={()=>{if(transport?.readOnly)canvasRef.current?.focus({preventScroll:true});onManualCamera?.();}} onWheelCapture={()=>onManualCamera?.()} onKeyDown={keyDown} data-view-mode={viewMode} />
     {arrival && <div className="village-arrival" role="dialog" aria-label={`Arrivée à ${arrival.name}`} onClick={event => { event.stopPropagation(); sceneRef.current?.skipArrival(true); }}
       onWheel={event => { event.stopPropagation(); sceneRef.current?.zoomDuringArrival(event.deltaY); }}
       onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); sceneRef.current?.skipArrival(true); } }}>

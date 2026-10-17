@@ -76,6 +76,8 @@ export async function registerVillageSync(app: FastifyInstance, db: Kysely<Datab
   // A command's commit can race another world commit after snapshot assembly.
   // Verify the revision after COMMIT, replacing only uncertain snapshots.
   app.addHook('preSerialization', async (request, _reply, payload: unknown) => {
+    // Observation owns its read-only transport and independent admin session.
+    if(request.routeOptions.url?.startsWith('/api/admin/observations')||request.routeOptions.url?.startsWith('/api/observation/'))return payload;
     if (!payload || typeof payload !== 'object') return payload;
     const wrapper = payload as { villageState?: VillageState }, candidate = wrapper.villageState ?? payload as VillageState;
     if (!candidate.world?.id || !candidate.village?.id || !Array.isArray(candidate.cells) || !candidate.serverTime) return payload;

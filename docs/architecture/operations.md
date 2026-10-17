@@ -1,5 +1,7 @@
 # NOC : observation et exploitation
 
+Évolution **implémentée localement, à revue humaine, non déployée** : [observation d’un village et assistance en direct](../SPEC-NOC-OBSERVATION-VILLAGE.md). Baux d’observation, scène sur l’origine NOC, suivi de caméra et fil d’actions borné. Le [dossier d’implémentation](../IMPLEMENTATION-NOC-OBSERVATION-VILLAGE-2026-10-17.md) distingue les preuves exécutées et les validations restantes.
+
 15 octobre 2026. Architecture de la [V1 NOC](../SPEC-NOC-V1.md) et du [diagnostic HTTP V1.1](../SPEC-NOC-V1-1-DIAGNOSTIC-HTTP.md). Les preuves de recette et l’état de déploiement figurent dans le [handoff courant](../../SESSION-HANDOFF.md). Ce document décrit le code et les opérations nécessaires ; il ne certifie pas la configuration DNS, TLS ou du proxy public.
 
 ## Composants et périmètre
@@ -8,7 +10,7 @@
 
 L'instrumentation est référencée par `app.server`, le serveur HTTP partagé entre les instances Fastify encapsulées. Les routes NOC enregistrées dans leur plugin retrouvent ainsi les mêmes observations et événements que les routes racines.
 
-Le NOC permet de parcourir l’installation, les mondes, comptes, villages et activités. Les stocks, cohortes et échéances affichés sont **persistés**, sans matérialiser de production, terminer une activité ou déclencher une réconciliation. Les seuls endpoints de mutation NOC créent et suppriment la session administrateur. Les outils de mutation métier restent hors V1.
+Le NOC permet de parcourir l’installation, les mondes, comptes, villages et activités. Les stocks, cohortes et échéances affichés sont **persistés**, sans matérialiser de production, terminer une activité ou déclencher une réconciliation. Les POST/DELETE NOC contrôlent la session administrateur et les observations éphémères. Les outils de mutation métier restent hors V1.
 
 La console utilise les tables et le rôle PostgreSQL existants. Elle ne crée aucun rôle SQL, aucune table ni migration. Le worker externe de génération n’est pas instrumenté par cette V1 : son état runtime est inconnu, même lorsque le processus API répond. La console n’agrège pas plusieurs instances et n’observe pas une machine distante.
 
@@ -115,10 +117,34 @@ Tous les chemins suivants commencent par `/api/admin`. Les lectures exigent la p
 | `GET /villages/:id` | `worldId` obligatoire ; état persisté et échéances. |
 | `GET /activities` | Filtres facultatifs `worldId`, `villageId`, `accountId`, `kind`. `villageId` exige `worldId`. |
 | `GET /activities/:id` | `worldId` et `kind` obligatoires, `villageId` facultatif pour lever une ambiguïté. |
+| `POST /observations/` | `worldId`, `villageId` ; ouvre un bail propre à l’administrateur. |
+| `GET /observations/:id` | Métadonnées, sources et fil d’actions ; propriétaire courant vérifié. |
+| `POST /observations/:id/heartbeat` | Maintient le bail visible. |
+| `POST /observations/:id/follow` | Audite le choix `sourceId` ou le retour en libre. |
+| `DELETE /observations/:id` | Ferme le bail et son flux. |
+| `GET /observations/:id/snapshot` | Projection persistée cohérente, sans réconciliation. |
+| `GET /observations/:id/events` | SSE snapshot/trames, statuts, caméras ; une génération par bail. |
+| `GET /observations/:id/terrain` | `kind=chunks\|updates\|overview\|vegetation\|villages`, paramètres de viewport bornés. |
 
 Les types d’activité sont `expedition`, `science` et `task`. Les recherches et détails de comptes peuvent exposer leur adresse email aux administrateurs autorisés pour le support ; les événements de supervision ne la contiennent pas.
 
 `/api/admin/world-generator` est une API opérateur historique distincte, avec ses propres autorisations et mutations. Elle n’appartient pas au NOC et doit être exclue du routage du domaine administrateur.
+
+### Observation d’un village
+
+Depuis la fiche village, **Observer le village** ouvre un nouvel onglet lanceur `#/observe?worldId=…&villageId=…`, puis le client monde `/village?world=…&observe=…#observationToken=…`. `POST /api/admin/observations/launch` délivre un jeton aléatoire à usage unique, valable 30 s, lié au bail et à la session admin. Le client retire immédiatement le fragment et l’échange via `POST /api/observation/exchange` contre un cookie observateur HttpOnly, hôte seul, SameSite Strict, Secure en production et `Path=/api/observation/<bail>`. La session admin ne quitte pas le NOC. Copier l’URL nettoyée ne transmet aucun accès ; avant consommation, le lien est sensible. Le rechargement utilise le cookie dédié.
+
+`WORLD_ORIGIN` doit contenir l’origine HTTPS du client monde en production (`https://alpha.arbestra.world` ou `https://beta.arbestra.world`) ; la création d’un lien est refusée sans elle. Le bootstrap natif la renseigne pour les installations nouvelles ; compléter les environnements existants avant promotion. En développement loopback seulement, le port 5174 sert de valeur de repli. Les lecteurs utilisent `/api/observation/:id` et ses sous-routes, avec les mêmes handlers de lecture que `/api/admin/observations`, revalidation de la session admin et contrôle du bail exact à chaque requête. L’échange du jeton n’attend aucune lecture de projection ; les routes de données revalident la propriété avant livraison. Aucune migration requise.
+
+La scène réside dans `world-web`, avec les mêmes `VillageScene`, HUD, écran de chargement, renderer et assets que le joueur. `ObservationEntry` fournit seulement le contrôle d’observation et le transport `readOnly`. Le contrôleur joueur et ses prélectures ne sont pas montés, aucune commande ni source caméra joueur n’est raccordée. Le NOC ne contient plus de renderer ni de copie d’assets. Le joueur conserve sa session et une bannière d’assistance ; ses POST `/api/worlds/:worldSlug/villages/:villageId/observation/{status,sources,camera}` vérifient origine, session et propriété.
+
+`observation-hub.ts` borne les baux à 4 par administrateur / 16 par instance, durée 30 min, inactivité 45 s. Les caches, sources et journaux sont séparés par monde/village/propriétaire ; changement de propriétaire ou dernière fermeture efface le contexte concerné. Les sources sont aussi liées à la session et à l’onglet : au plus 4, confirmation toutes les 5 s, poses jusqu’à 5 Hz, suspension à 15 s et suppression à 30 s. La vue habitant n’est pas suivie. Le journal couvre les familles de commandes testées dans `observation-actions.test.ts`, distingue admission métier et transport HTTP, et reprend les reçus jardin/bois/pierre et expéditions. Aucun historique antérieur à la collecte, ni preuve de rendu du navigateur joueur.
+
+`observation-reads.ts` partage projection, révision et reçus par contexte à cadence 2 s ; au plus 64 reçus par lecture. Une projection joueur déjà transportée est réutilisable seulement pour le même propriétaire/monde/village et la révision exacte, âge au plus 2 s ; une projection en vol n’est jamais attendue. `readVillageObservation()` assemble le village en lecture seule sans réseau de trajets prévisionnels : infrastructures persistées et chemins des missions engagées conservés, aucune lane de navigation requise. Un village hors ligne peut être inspecté avec le cache worker RC1 froid. Les routes prévisionnelles absentes ne sont pas un diagnostic d’inaccessibilité. Le dernier état cohérent est daté et conservé en cas de dégradation ; sans premier état, l’interface indique la lecture initiale retardée. Le statut publié après la lecture retire l’avertissement à la reprise, même sans nouvelle révision.
+
+Le pool habituel passe de 10 à 8 connexions maximales ; le pool d’observation réserve les 2 restantes, toutes lectures confondues, en lecture seule par défaut. Pas de nouveau rôle ni migration. Acquisition 500 ms, instruction 2 s, verrou 250 ms, transaction 4 s ; la sonde de santé distincte conserve son budget existant. La géographie immuable RC1 est préparée après contrôle de propriété, avant la transaction bornée ; son identité et les modifications locales sont relues dans le snapshot. La lecture autonome conserve les cellules pour le renderer mais ne calcule pas leur aptitude à construire (`canBuild=false`), les commandes étant interdites. SSE : 1 Mio par connexion, 8 Mio cumulés, remplacement par génération ; réauthentification toutes les 5 s, livraison coupée au plus tard à 10 s sans autorisation confirmée. Le SSE NOC n’est pas compté comme présence joueur ni comme longue requête HTTP ordinaire. Terrain : 2 lectures en vol par bail, 4 globales, 5 départs/s/bail ; 429 et Retry-After. Codes de saturation contrôlés dans le diagnostic HTTP.
+
+Les baux, poses, actions (500 / 15 min, 8 Mio globaux) et buffers sont locaux à une instance et disparaissent au redémarrage. Le multi-instance sans affinité n’est pas pris en charge. Ouverture, fermeture, source suivie et refus sont audités avec identifiants sûrs ; le sink existant expurge cookies, corps et erreurs brutes. La rétention durable dépend toujours de l’exploitation. Aucun déploiement/proxy distant n’a été modifié pour cette tranche.
 
 ## Statistiques de développement village et terrain
 

@@ -1,3 +1,4 @@
+import {observationCommitted} from '../admin/observation-actions.js';
 import {receiveExpedition,readExpeditionReceipts} from '../science/expeditions.js';
 import {ExpeditionReceiptSchema,type ExpeditionIntent} from '@arbestra/contracts';
 import {HarvestIntentSchema,HarvestReceiptSchema,type HarvestIntent} from '@arbestra/contracts';
@@ -125,6 +126,7 @@ export async function registerVillageRoutes(
     if(preview)return infrastructurePreview(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest);
     const options=villageReplyOptions(request.headers),started=performance.now();
     const result=await infrastructureCommand(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest,request.headers['x-infrastructure-confirmation']==='1'?'confirmation':options.replyMode);
+    observationCommitted(request);
     const committed=performance.now(),response='kind' in result?result:await commandResponse(account.id,worldSlug,result,options.base);
     reply.header('server-timing',`road_tx;dur=${(committed-started).toFixed(1)}, road_sync;dur=${(performance.now()-committed).toFixed(1)}`);
     // Keep the first compact reply independent of the complete-village union's lazy validator.
@@ -199,6 +201,7 @@ export async function registerVillageRoutes(
       body.expectedCosts,
       body.quarterTurns, body.houseVariant, options.replyMode,
     ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts,body.quarterTurns,body.houseVariant,options.replyMode);
+    observationCommitted(request);
     return reply.status(201).send(await commandResponse(account.id, worldSlug, state, options.base));
   });
 
@@ -210,6 +213,7 @@ export async function registerVillageRoutes(
     const { worldSlug, villageId, buildingId } = request.params as { worldSlug: string; villageId: string; buildingId: string };
     const { cells, commandId, expectedCosts } = request.body as { cells: Array<{ cellX: number; cellY: number }>; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }> };
     const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs, commandId, expectedCosts, options.replyMode);
+    observationCommitted(request);
     return reply.status(201).send(await commandResponse(account.id, worldSlug, state, options.base));
   });
 
@@ -236,6 +240,7 @@ export async function registerVillageRoutes(
       (request.body as { expectedCosts?: Array<{ resourceCode: string; amount: number }> }).expectedCosts,
       (request.body as { expectedLevel?: number }).expectedLevel, options.replyMode,
     );
+    observationCommitted(request);
     return reply.status(201).send(await commandResponse(account.id, worldSlug, state, options.base));
   });
 

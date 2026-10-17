@@ -29,6 +29,12 @@ async function drain(diagnostics: { snapshot(): { queuedLines: number } }) {
 }
 
 describe('safe HTTP logging', () => {
+  it('retains controlled observation audit identities while stripping secrets',async()=>{
+    const lines:string[]=[],h=await harness((line,done)=>{lines.push(line);done();});const actorId=randomUUID(),worldId=randomUUID(),villageId=randomUUID(),observationId=randomUUID();
+    try{h.app.log.info({event:'admin.observation_closed',actorId,worldId,villageId,observationId,reason:'authorization_revoked',password:'secret-observation-password',cookie:'secret-observation-cookie'},'unsafe secret-observation-message');await drain(h.diagnostics);
+      expect(JSON.parse(lines[0]!)).toMatchObject({event:'admin.observation_closed',actorId,worldId,villageId,observationId,reason:'authorization_revoked'});expect(lines.join('')).not.toContain('secret-observation');
+    }finally{await h.close();}
+  });
   for (const nodeEnv of ['development', 'production']) {
     it(`keeps secrets out of real Fastify/Pino output and correlates server UUIDs in ${nodeEnv}`, async () => {
       const lines: string[] = [];

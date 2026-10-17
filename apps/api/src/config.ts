@@ -13,6 +13,7 @@ export interface AppConfig {
   readonly nocHttpLogMode?: 'anomalies' | 'off';
   readonly adminAccountIds?: readonly string[];
   readonly adminOrigin?: string;
+  readonly worldOrigin?: string;
   readonly trustedProxyCidrs?: readonly string[];
   readonly expeditionWorkerEnabled?:boolean;
   readonly expeditionWorkerCount?:1|2;
@@ -75,6 +76,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   const isProduction = environment.NODE_ENV === 'production';
   const admins = adminAccountIds(environment.ADMIN_ACCOUNT_IDS);
   const origin = adminOrigin(environment.ADMIN_ORIGIN, isProduction, admins.length > 0);
+  const worldOrigin = adminOrigin(environment.WORLD_ORIGIN, isProduction, false);
   const slowText = environment.NOC_HTTP_SLOW_MS ?? '2000';
   if (!/^\d+$/.test(slowText) || Number(slowText) < 250 || Number(slowText) > 60_000) {
     throw new Error('NOC_HTTP_SLOW_MS must be an integer between 250 and 60000');
@@ -88,6 +90,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     nocHttpLogMode: logMode,
     adminAccountIds: admins,
     ...(origin ? { adminOrigin: origin } : {}),
+    ...(worldOrigin ? { worldOrigin } : {}),
     trustedProxyCidrs: trustedProxyCidrs(environment.TRUSTED_PROXY_CIDRS),
     databaseUrl,
     expeditionWorkerCount:environment.EXPEDITION_WORKERS==='2'?2:1,

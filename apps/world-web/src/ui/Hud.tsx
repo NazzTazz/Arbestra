@@ -3,7 +3,7 @@ import { NotificationStack, type GameNotification } from './NotificationStack';
 
 const format = (value: number) => Math.floor(value).toLocaleString('fr-FR');
 
-export function Hud({ beforeTownHall=false, state, displayedWood, notifications, onPopulation, onJournal, devOpen, devActive, onDev }: { beforeTownHall?:boolean; state: VillageState; displayedWood: number; notifications: GameNotification[]; onPopulation: () => void; onJournal: () => void; devOpen:boolean;devActive:boolean;onDev:()=>void }) {
+export function Hud({ readOnly=false,beforeTownHall=false, state, displayedWood, notifications, onPopulation, onJournal, devOpen, devActive, onDev }: { readOnly?:boolean;beforeTownHall?:boolean; state: VillageState; displayedWood: number; notifications: GameNotification[]; onPopulation: () => void; onJournal: () => void; devOpen:boolean;devActive:boolean;onDev:()=>void }) {
   const stone = state.village.resources.find((resource) => resource.code === 'stone')?.amount ?? 0;
   const population = state.village.population;
   return <header className="top-bar">
@@ -13,8 +13,8 @@ export function Hud({ beforeTownHall=false, state, displayedWood, notifications,
     <div className="resource" aria-label={`${format(state.village.carrots)} carottes`}><span className="resource-icon resource-icon--carrot" aria-hidden="true" /><strong>{format(state.village.carrots)}</strong></div>
     <div className="resource" title="Pierre brute · retour d’extraction" aria-label={`${format(stone)} pierres brutes`}><span aria-hidden="true">◆</span><strong>{format(stone)}</strong></div>
     <div className="resource" title="Pierre taillée · fabrication au tailleur" aria-label={`${format(state.village.resources.find(r=>r.code==='cut-stone')?.amount??0)} pierres taillées`}><span className="resource-icon resource-icon--cut-stone" aria-hidden="true"/><strong>{format(state.village.resources.find(r=>r.code==='cut-stone')?.amount??0)}</strong></div>
-    <button className="population-button" type="button" disabled={beforeTownHall} onClick={onPopulation} aria-label="Gérer les habitants"><span aria-hidden="true">♟</span><strong>{population.total}/{population.housingCapacity}</strong><small>{population.available} libres</small></button>
-    <button className="journal-button" type="button" onClick={onJournal} aria-label="Ouvrir le grimoire de l'Oracle"><span aria-hidden="true">◇</span><strong>Grimoire</strong>{state.village.accomplishments.length > 0 ? <small>{state.village.accomplishments.length}</small> : null}</button>
+    <button className="population-button" type="button" disabled={beforeTownHall||readOnly} onClick={onPopulation} aria-label={readOnly?'Habitants du village observé':'Gérer les habitants'}><span aria-hidden="true">♟</span><strong>{population.total}/{population.housingCapacity}</strong><small>{population.available} libres</small></button>
+    <button className="journal-button" type="button" onClick={onJournal} aria-label={readOnly?'Ouvrir le journal d’observation':"Ouvrir le grimoire de l'Oracle"}><span aria-hidden="true">◇</span><strong>{readOnly?'Journal':'Grimoire'}</strong>{!readOnly&&state.village.accomplishments.length > 0 ? <small>{state.village.accomplishments.length}</small> : null}</button>
     <NotificationStack notifications={notifications} />
     {import.meta.env.DEV&&<button className="dev-toggle resource-dev" type="button" aria-expanded={devOpen} onClick={onDev}>DEV{devActive?' · actif':''}</button>}
   </header>;

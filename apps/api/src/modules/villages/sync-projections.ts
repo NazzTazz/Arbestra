@@ -8,6 +8,11 @@ export class VillageSyncProjections {
   #bases = new Map<string, Entry[]>();
   #flights = new Map<string, Promise<VillageState>>();
   #bytes = 0;
+  peek(accountId:string,worldSlug:string,villageId:string){return this.#flights.get(accountId+':'+worldSlug+':'+villageId);}
+  /** Observation only: never used to answer a player command or advance its clock. */
+  observedBase(accountId:string,worldId:string,villageId:string,revision:number,now=Date.now()){
+    return this.#bases.get(accountId+':'+worldId+':'+villageId)?.findLast(e=>e.state.syncRevision===revision&&Date.parse(e.state.serverTime)<=now+1000&&now-Date.parse(e.state.serverTime)<=2000)?.state;
+  }
   constructor(private readonly load: Reader, private readonly limits = {
     snapshots: 8, contexts: 32, bytes: 16 * 1024 * 1024,
   }) {}

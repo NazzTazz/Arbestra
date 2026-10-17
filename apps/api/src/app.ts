@@ -1,4 +1,7 @@
 import {NavigationCompute} from './modules/navigation/compute.js';
+import {ObservationHub} from './modules/admin/observation-hub.js';
+import {registerObservationRoutes} from './modules/admin/observation-routes.js';
+import {instrumentObservationActions} from './modules/admin/observation-actions.js';
 import { randomUUID } from 'node:crypto';
 import {ExpeditionCoordinator} from './modules/science/expeditions.js';
 import {ExpeditionWakeups} from './modules/science/expedition-wakeups.js';
@@ -107,6 +110,9 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
       note: 'Connexion LISTEN locale observée ; ne prouve pas la livraison réseau au navigateur.' };
   });
   const villageProjections = await registerVillageSync(app, db, config,navigation,wakeups);
+  const observations=new ObservationHub();
+  await registerObservationRoutes(app,db,config,observations,villageProjections);
+  instrumentObservationActions(app,observations);
   // Close SSE owners before rejecting their outstanding CPU work at shutdown.
   app.addHook('preClose',stopExpeditions);
   await registerAuthRoutes(app, db, config);

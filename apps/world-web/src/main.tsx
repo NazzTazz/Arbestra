@@ -14,8 +14,12 @@ import './styles.css';
 import { StatisticsOverlay } from './dev/StatisticsOverlay';
 import { WorldLoading, WorldLoadingBoundary } from './ui/WorldLoading';
 import { initialVillageRead, initialWorldName } from './api/initial-village';
+import {startObservation} from './api/observation-client';
+const observing=new URLSearchParams(location.search).has('observe')||new URLSearchParams(location.hash.slice(1)).has('observationToken');
+const ObservationEntry=lazy(()=>import('./ObservationEntry'));
+if(observing)void startObservation().catch(()=>{});
 
-if (!isStarterRoute(location.pathname, location.search)
+if (!observing && !isStarterRoute(location.pathname, location.search)
   && !['/spawn-map', '/terrain-study', '/geography-preview', '/terrain-kit', '/world-generator'].includes(location.pathname)) {
   void initialVillageRead().catch(() => {}); // App presents the error with recovery actions.
   void initialWorldName();
@@ -24,7 +28,7 @@ if (!isStarterRoute(location.pathname, location.search)
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {import.meta.env.DEV && <StatisticsOverlay/>}
-    {isStarterRoute(location.pathname, location.search) ? <Suspense fallback={<p>Préparation du village…</p>}><SpawnPlacement /></Suspense> : location.pathname === '/spawn-map' ? <Suspense fallback={<p>Chargement de la carte…</p>}><SpawnMap /></Suspense> : (
+    {observing?<WorldLoadingBoundary><Suspense fallback={<WorldLoading message="Ouverture du village observé"/>}><ObservationEntry/></Suspense></WorldLoadingBoundary>:isStarterRoute(location.pathname, location.search) ? <Suspense fallback={<p>Préparation du village…</p>}><SpawnPlacement /></Suspense> : location.pathname === '/spawn-map' ? <Suspense fallback={<p>Chargement de la carte…</p>}><SpawnMap /></Suspense> : (
     location.pathname === '/terrain-study' ? <Suspense fallback={<p>Chargement du monde témoin…</p>}><TerrainStudy /></Suspense> : location.pathname === '/geography-preview' ? <Suspense fallback={<p>Chargement de la géographie...</p>}><GeographyPreview /></Suspense> : location.pathname === '/terrain-kit' ? <Suspense fallback={<p>Chargement du kit...</p>}><TerrainKitPreview /></Suspense> : location.pathname === '/world-generator' ? <Suspense fallback={<p>Chargement du World generator…</p>}><WorldGenerator /></Suspense> : <WorldLoadingBoundary><Suspense fallback={<WorldLoading/>}><App /><GeneratorEntry /></Suspense></WorldLoadingBoundary>
     )}
   </StrictMode>,

@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     build:{rollupOptions:{input:{main:'index.html',workshop:'factory-preview.html'}}},
     server: {
       host: mode === 'development' ? '0.0.0.0' : 'localhost',
-      proxy: { '/api': environment.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3000' },
+      proxy: { '/api': {target:environment.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3000',changeOrigin:false} },
     },
   };
 });

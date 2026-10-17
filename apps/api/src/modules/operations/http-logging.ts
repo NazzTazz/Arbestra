@@ -6,16 +6,20 @@ import type { HttpDiagnosticLogger } from './http-diagnostics.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE']);
 const CODES = new Set(['INTERNAL_ERROR', 'ADMIN_BUSY', 'ADMIN_DATA_UNAVAILABLE', 'VALIDATION_ERROR',
+  'OBSERVATION_BUSY','OBSERVATION_RATE','OBSERVATION_LIMIT','OBSERVATION_DB_INTERRUPTED',
   'HTTP_SERVER_RESPONSE', 'CONNECTION_INTERRUPTED', 'AUTHENTICATION_REQUIRED', 'INVALID_CREDENTIALS',
   'ADMIN_DISABLED', 'ADMIN_REQUIRED', 'ADMIN_HTTPS_REQUIRED', 'INVALID_ORIGIN', 'ADMIN_ORIGIN_REQUIRED',
   'TOO_MANY_ATTEMPTS', 'EXPEDITION_LISTENER_INTERRUPTED', 'EXPEDITION_PREPARATION_INTERRUPTED',
   'SCHEDULER_FAILED', 'SERVER_LISTEN_FAILED', 'POSTGRES_CONNECTION_INTERRUPTED',
   'SSE_INTERRUPTED', 'SSE_RECEIPTS_INTERRUPTED']);
 const DIAGNOSTIC_CODES = new Set(['INTERNAL_ERROR', 'ADMIN_BUSY', 'ADMIN_DATA_UNAVAILABLE',
+  'OBSERVATION_BUSY','OBSERVATION_RATE','OBSERVATION_LIMIT',
   'VALIDATION_ERROR', 'HTTP_SERVER_RESPONSE', 'CONNECTION_INTERRUPTED']);
 const ERROR_CATEGORIES = new Set(['application', 'internal', 'transport', 'unknown']);
-const AUDIT_EVENTS = new Set(['admin.access', 'admin.denied', 'admin.session_created', 'admin.session_deleted']);
-const ACTIONS = new Set(['read', 'login', 'logout', 'session', 'probe', 'worlds']);
+const OBSERVATION_AUDIT_EVENTS=new Set(['admin.observation_opened','admin.observation_closed','admin.observation_stopped','admin.observation_follow']);
+const OBSERVATION_REASONS=new Set(['closed','expired','shutdown','owner_changed','authorization_timeout','authorization_revoked']);
+const AUDIT_EVENTS = new Set(['admin.access', 'admin.denied', 'admin.session_created', 'admin.session_deleted',...OBSERVATION_AUDIT_EVENTS]);
+const ACTIONS = new Set(['read', 'login', 'logout', 'session', 'probe', 'worlds','observe','observation_open','observe_stream','observe_terrain','observe_follow']);
 const CAPTURE_SITES = new Set(['http.error-handler', 'http.on-error', 'http.finalize', 'admin.read']);
 const MAX_LINES = 256;
 const MAX_BYTES = 512 * 1024;
@@ -67,10 +71,11 @@ function safeLog(value: unknown): Record<string, unknown> {
   const result: Record<string, unknown> = { event };
   if (source instanceof Error || source.err || source.error) result.code = 'INTERNAL_ERROR';
   if (source.code !== undefined) result.code = known(source.code, CODES, 'INTERNAL_ERROR');
-  if (source.reason !== undefined) result.reason = known(source.reason, CODES, 'INTERNAL_ERROR');
+  if (source.reason !== undefined) result.reason = known(source.reason,OBSERVATION_AUDIT_EVENTS.has(event)?OBSERVATION_REASONS:CODES,'INTERNAL_ERROR');
   if (source.action !== undefined) result.action = known(source.action, ACTIONS, 'read');
   if (uuid(source.actorId)) result.actorId = source.actorId;
   if (uuid(source.requestId)) result.requestId = source.requestId;
+  if(OBSERVATION_AUDIT_EVENTS.has(event))for(const field of ['worldId','villageId','observationId','sourceId'])if(uuid(source[field]))result[field]=source[field];
   // Pino applies the configured serializer synchronously before queuing the string.
   if (source.req) result.req = source.req;
   if (source.res) result.res = safeResponseLog(source.res);

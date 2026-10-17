@@ -1,3 +1,4 @@
+import {useObservationPublisher} from './observation';
 import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
 import {useExpeditions} from './ui/use-expeditions';
 import {useHarvestTool} from './ui/use-harvest-tool';
@@ -84,6 +85,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const beforeTownHall=starter?.beforeTownHall??false;
   const starterActive=Boolean(starter?.active);
   const [state, setState] = useState<VillageState | null>(starter?.state??null);
+  const observationActive=useObservationPublisher(starterActive?null:state);
   const stateRef = useRef<VillageState | null>(starter?.state??null);
   const synchronization = useRef<VillageSynchronization | null>(null);
   const [infrastructurePresentation,setInfrastructurePresentation]=useState<InfrastructurePresentation|null>(null);
@@ -896,7 +898,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   if (loading) return <WorldLoading worldName={worldLabel} message="Lecture du village et de ses trajets" lobbyUrl={LOBBY_URL}/>;
   if (needsLogin) return <WorldLoading worldName={state?.world.name ?? worldLabel} error="Connectez-vous pour entrer dans ce monde." lobbyUrl={LOBBY_URL}/>;
   if (!state) return <WorldLoading worldName={worldLabel} error={error ?? 'Village indisponible.'} onRetry={() => location.reload()} lobbyUrl={LOBBY_URL}/>;
-  return <><main className="game-shell" data-initial-loading={!initialReady} inert={!initialReady} aria-hidden={!initialReady}>
+  return <>{observationActive&&<div role="status" style={{position:'fixed',top:8,left:'50%',transform:'translateX(-50%)',zIndex:1000,padding:'8px 16px',background:'#102924ed',color:'#d4fff2',border:'1px solid #7dbbaa',borderRadius:6}}>Assistance : observation administrative active</div>}<main className="game-shell" data-initial-loading={!initialReady} inert={!initialReady} aria-hidden={!initialReady}>
     {initialReady&&!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
     <Suspense fallback={null}><VillageScene onInitialLoad={progress => setInitialProgress({key: sceneKey, progress})} preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={sceneState??state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}

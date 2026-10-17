@@ -30,6 +30,9 @@ describe('bounded HTTP diagnostics', () => {
     expect(store.record(completion(origin, { method: 'private-method', route: '/token?password=private' })))
       .toMatchObject({ method: 'OTHER', route: 'unmatched', scope: 'api' });
     expect(store.record(completion(origin, { route: '/api/admin/http-requests/:requestId' }))?.scope).toBe('console');
+    expect(store.record(completion(origin, { route: '/api/admin/observations/:id/snapshot', annotation: safeHttpAnnotation('OBSERVATION_BUSY')! })))
+      .toMatchObject({scope:'console',safeCode:'OBSERVATION_BUSY',errorCategory:'application'});
+    expect(store.record(completion(origin,{route:'/api/admin/observations'}))?.scope).toBe('console');
     expect(store.record(completion(origin, { route: '/api/admin/world-jobs/:id' }))?.scope).toBe('api');
     expect(JSON.stringify(store.list())).not.toMatch(/password|private-method|token/);
   });

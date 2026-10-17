@@ -1,3 +1,99 @@
+# NOC : correction de l’observation bloquée — 17 octobre 2026
+
+Reprise après pause demandée par Tristan. Cause reproduite : la première projection attendait `NavigationCompute.observationNetwork()`, qui refuse le cache worker RC1 froid (`OBSERVATION_BUSY`). Régression intégration rouge avant correction, puis verte. Le lecteur autonome `readVillageObservation()` réutilise l’assemblage cohérent sans réconciliation, sans trajets prévisionnels et sans attente d’une projection joueur en vol ; seule une base joueur déjà terminée, fraîche et de révision exacte est réutilisable. Infrastructures et chemins des missions engagées conservés. Préparation immuable RC1 avant la transaction bornée, propriété/identité/éditions revalidées dans celle-ci. Cellules conservées pour le renderer, prévisualisations de construction omises et `canBuild=false`. Chemin joueur inchangé, aucun budget DB augmenté.
+
+Statut SSE après chaque tentative : erreur → dégradé, lecture réussie → avertissement retiré même sans nouvelle révision ni snapshot. Première lecture retardée distinguée d’un ancien état conservé ; autres erreurs restent séparées. **75 cas distincts / 9 fichiers verts** (43 ciblés puis 32 synchronisation joueur), suite observation finale 11/11 verte après finitions. Un passage intermédiaire a expiré sur la seconde connexion froide de reçus, sous charge : fixture préparant maintenant explicitement les deux connexions bornées avant ses assertions métier. Builds API/monde et lint ciblé verts, warning gros chunks monde conservé. Pas de suite globale ni certification du budget p95.
+
+Recette `agent-browser` sur deux nouvelles fixtures privées `127.0.0.1/arbestra_test`, sans reset : vrai bouton NOC → client monde RC1 512×256 avec propriétaire hors ligne et cache worker froid, terrain prêt, jeton retiré, inspection réelle HDV en lecture seule, aucune erreur JavaScript. Panne injectée uniquement dans le serveur de fixture : état/date conservés, message retiré au rétablissement sans changement de révision ; ouverture pendant la panne avec texte de lecture initiale, puis chargement automatique. Nouvelle recette après les dernières finitions du lecteur : scène prête et inspection HDV. Deux mondes/comptes/cookies nettoyés sélectivement, navigateurs et trois services temporaires arrêtés.
+
+Contrôle réel local, lecteur sans écritures : **Bressuire RC1 chargé dès la première tentative finale**, environ 6,7 s à froid sur poste chargé (mesure ponctuelle). Le « Village témoin » n’a pas les ressources/flux économiques initiaux requis et reste non inspectable ; aucune réparation ni donnée fictive ajoutée. Les refus froids d’acquisition DB restent possibles et sont repris par le flux. Réserves de stress/endurance/charge précédentes toujours ouvertes ; [dossier courant](docs/IMPLEMENTATION-NOC-OBSERVATION-VILLAGE-2026-10-17.md), [spec](docs/SPEC-NOC-OBSERVATION-VILLAGE.md) et [exploitation](docs/architecture/operations.md) actualisés.
+
+API source sans watcher relancée sur 3000 : session exec **58565 / PID 41120** ; NOC `http://localhost:5175` session exec **36974 / PID 43232**. Lobby 5173 / monde 5174 préexistants conservés. Contrôle final : API health / HTML NOC / HTML monde 200, session admin anonyme 401. Aucun serveur restant sur 3305/5374/5375. **Fermer les anciens onglets d’observation puis rouvrir Observer**, les baux en mémoire ayant disparu au redémarrage. Relancer l’API après une future modification source.
+
+Git `main` / `6a08fe4`, changements locaux préexistants conservés et non commités. Aucun accès production, déploiement, migration, commit ou push pour cette correction. **À revue humaine locale.**
+
+---
+
+# Urgences alpha — terrasse Number et relevés Yume — 17 octobre 2026
+
+Demande explicite d’intervention production. **Number / Canard / Petibonom : 30 terrasses appliquées**, zone X57–62 / Y198–202 au nord de l’HDV ; université à ancre **(59,200), rotation 1 (90°)**. Hauteur initiale conservée, 42 bâtiments inchangés, occupations/ressources/cohortes identiques dans la transaction, 3 051 points de fondation inchangés, 5 passages engagés protégés. Commande opérateur [bornée](ops/repairs/2026-10-17-number-university.mjs), verrous village → navigation, garde de construction existant. Prévalidation avec écritures prouvées puis rollback contrôlé ; application et nouvelle lecture/route worker ensuite vertes. Aucun bâtiment posé à sa place, aucun crédit de ressources. Sauvegarde alpha avant intervention et image ciblée root, chemins et SHA dans le [rapport d’incident](docs/INCIDENT-ALPHA-UNIVERSITE-NUMBER-RELEVES-YUME-2026-10-17.md).
+
+**Yume : deux causes vérifiées.** (445,23) est l’HDV, (445,25) un Jardin : points d’arrivée bloqués. Les routes de production vers (445,29), (444,22), (443,23) sont trouvées et les lieux déjà repérés. La demande vers (445,29) a dépassé la recherche de route puis été refusée `CARTOGRAPHERS_UNAVAILABLE` ; son unique cartographe était au repos jusqu’à **19:04:25 Paris**. Une nouvelle formation engagée dans le jeu, non lancée par l’agent, est **terminée à 14:53:52 Paris**. Contrôle à 14:54:45 : **deux formés dont un éligible** pour les 77 604 ms nécessaires vers (445,29). Yume peut envoyer une **nouvelle demande** sur cette cible ; admission effective non testée à sa place. Pas de modification administrative d’énergie/qualification. Présentation trompeuse identifiée : total cartographes incluant le repos, cible par défaut sur l’ancre HDV occupée ; amélioration UX à traiter séparément, sans relâcher fatigue/collisions.
+
+Release alpha reste `718af3b`, aucun déploiement applicatif ni migration ; trois services actifs et API/client/lobby 200. Scripts/worker distants temporaires fermés ; préexistant NOC et données réelles préservés hors les 30 terrasses autorisées. Lint et syntaxe du script opérateur verts ; pas de nouvelle suite applicative ou recette joueur prétendue. Git `main` / `6a08fe4`, changements non commités ; aucun push.
+
+---
+
+# Observer ouvre le client monde — 17 octobre 2026
+
+Correction demandée explicitement par Tristan : la scène embarquée dans le NOC ne correspond pas à son attente. **Observer ouvre désormais un nouvel onglet du client joueur `/village`**, avec jeton de lancement à usage unique (30 s) dans le fragment, immédiatement retiré puis échangé contre un cookie observateur HttpOnly lié au bail et à la session admin. `ObservationEntry` monte les mêmes `VillageScene`, HUD, écran d’attente et assets que le jeu ; son transport reste strictement en lecture seule. Le contrôleur joueur et ses prélectures ne sont pas montés. L’ancienne scène NOC et sa copie d’assets sont retirées. Cette section remplace les descriptions de renderer sur l’origine NOC plus bas.
+
+**53 cas / 10 fichiers verts** après correction (les 18 cas du premier passage y sont inclus). Régressions : révocation SSE sans événement `expired` corrigée ; échange de jeton consommé puis 500 sur lecture bloquée reproduit rétrospectivement rouge avec verrou PostgreSQL forcé, puis vert après découplage de l’échange et de la projection. Les routes de données revalident toujours la propriété. Tests supplémentaires de consommation concurrente unique, replay, expiration, origine, cookie propre au bail, séparation des sessions et révocation. Cible exclusivement `127.0.0.1/arbestra_test`, aucune réinitialisation de développement.
+
+Recette `agent-browser` : vrai bouton NOC → nouvel onglet monde, terrain prêt, village étranger sans cookie joueur, jeton absent de l’adresse, zoom suivi, retour libre, reprise après rechargement et inspection au clic HDV niveau 1 terminé. Commandes désactivées, bannière joueur et aucune erreur JavaScript sur les deux contextes. Arrêter retire la scène ; finition du message de fin pour effacer l’ancien avertissement. Retard de projection réellement observé, ancien état daté conservé et fraîcheur caméra distincte : les réserves de performance antérieures restent ouvertes. Aucun benchmark supplémentaire ni conclusion de FPS. Détails et vérifications finales : [dossier d’implémentation](docs/IMPLEMENTATION-NOC-OBSERVATION-VILLAGE-2026-10-17.md).
+
+Builds contrats/API/monde/NOC verts ; lint complet puis ciblé des finitions verts. Liens docs, syntaxe bootstrap Python, espaces des nouvelles sources et `git diff --check` vérifiés. Après la recette : horloge de présentation stabilisée entre notifications caméra, listes vides réutilisées et message d’arrêt corrigé ; typage/lint/build vérifiés sans nouvelle recette navigateur de ces détails. Le NOC compile sans Babylon (37 modules, JS 266,09 Ko / 81,04 Ko gzip) ; warning gros chunks conservé côté monde.
+
+API source 3000, NOC `http://localhost:5175` et client monde préexistant 5174 laissés actifs. Le watcher API provoquait des redémarrages et des 500 proxy vides pendant les builds ; remplacé par **`node --import tsx src/server.ts` dans `apps/api`, sans watcher**, session exec 64994 / PID 32064. Relancer ce processus après une nouvelle modification API. Contrôle final : API health / HTML monde / HTML NOC 200 ; session admin et échange de jeton invalide via proxy monde 401. Fermer les anciennes vues d’observation et cliquer de nouveau sur Observer pour le nouveau parcours. Deux fixtures navigateur et leurs comptes/cookies supprimés sélectivement ; trois services temporaires et navigateurs de recette arrêtés. Aucun compte réel ni donnée de monde réel modifié. `WORLD_ORIGIN` doit être ajouté aux environnements de production existants avant promotion ; le bootstrap est adapté aux installations nouvelles. Valeur de repli dev loopback : client port 5174.
+
+Git `main` / `6a08fe4`, changements non commités, fichiers utilisateur préexistants conservés. **Implémentation locale à revue humaine ; aucun déploiement, commit ou push.**
+
+---
+
+# NOC dev relancé — 17 octobre 2026
+
+Demande utilisateur : NOC local absent. Frontend de développement démarré sur `http://localhost:5175` (session exec 82276). Ancienne API compilée remplacée par `corepack pnpm --filter @arbestra/api dev` sur 3000 (session exec 21427), pour charger les routes d’observation courantes. Configuration vérifiée sans exposer de secret : environnement non production, PostgreSQL local, origine NOC 5175 et liste administrative préexistante conservée. Contrôle via le proxy : HTML 200, `/api/health` 200, session et route observation anonymes 401. Services laissés actifs pour la revue humaine ; aucune migration, réinitialisation, attribution de droit ou modification de monde. Lobby et client monde préexistants conservés.
+
+---
+
+# NOC observation de village — à revue humaine, 17 octobre 2026
+
+Feu vert utilisateur : implémentation de la spec corrigée jusqu’à revue humaine. Fonctionnalité locale disponible, **non déployée**. Base `main` / `6a08fe4` inchangée ; aucun commit/push. Modifications documentaires antérieures et fichiers utilisateur `%SystemDrive%/`, dump de session et revue/spec locales préservés. Ne pas les inclure automatiquement dans une future clôture Git.
+
+Parcours : fiche village NOC → Observer ; lien sans jeton, bail propre à l’administrateur, scène Babylon sur l’origine NOC avec transport de lecture dédié. Caméra libre/suivie village-région-monde, sources par onglet/session, bannière joueur ; mode habitant explicitement indisponible. Terrain prêt avant révélation. Inspection des bâtiments, journal rétractable, résultats métier/HTTP séparés et reçus asynchrones partiels. Invariants lecture seule : pool PG dédié 2 + habituel 8 (ancien 10), pas de réconciliation, acquittement ou initialisation métier. Navigation NOC refusée à saturation, annulation atomique coopérative, pas de worker ajouté ni repli inline.
+
+Preuves terminées : **123 cas distincts / 15 fichiers** verts, sur fixtures privées `127.0.0.1/arbestra_test`, suites DB séquentielles sans reset de développement. Passages de 53, 89, 40 puis 15 cas avec recouvrements ; ne pas additionner les relances. Régressions rouges/vertes : cookie joueur exigé à tort sur snapshot admin, mélange entre propriétaires successifs, sixième pose/s admise, erreur DB transformée en 500 au lieu de 503 + Retry-After. Après le dernier garde de typage, les deux cas droits/lecture expirée sont aussi verts. Les 32 tests de synchronisation et 25 d’expéditions existants passent. Build complet racine vert puis recompilations finales API/monde/NOC vertes ; lint complet des TS modifiés et lint des dernières finitions verts. Gros chunk Babylon NOC chargé à la demande, warning Vite conservé. Pas de suite globale ni Playwright complet revendiqué.
+
+Recette `agent-browser` avec vrais assets/renderer et contextes joueur/NOC séparés : terrain prêt, suivi zoom/monde, caméra immobile fraîche plusieurs minutes, multi-onglets/visibilité, retour libre, journal d’expédition pending puis refus HTTP 202 distinct. Trou de trames : même bail repris, ancien snapshot ignoré. Inspection au clic réellement vérifiée après correction du mode exploration, de l’identifiant cellule et du focus sans défilement ; panneau HDV niveau 1 terminé, aucune commande, aucune erreur JS. Captures ignorées dans `test-results/noc-observation-*.png`. Le renderer automatisé est plafonné à 5 FPS par convention : aucune mesure de FPS réelle. Navigateurs et serveurs temporaires fermés, deux mondes/comptes de fixture et cookies locaux supprimés sélectivement. Processus préexistants conservés.
+
+**Réserves avant déploiement :** budget p95 +5 % non certifié. Deux séries locales 160 commandes off / 160 on : 495,64 → 745,48 ms (+50,41 %, trafic auxiliaire partiellement refusé), puis confirmation 361,59 → 268,06 ms (−25,87 %, aucun refus). Forte dispersion ; poste Windows i7-1065G7 / 31,8 Gio, services préexistants actifs, aucun navigateur/build/test pendant ces mesures. Refaire sur machine isolée avec RC1 et mesure d’admission/expiration des expéditions. Stress 16 baux/lecteurs lents, mémoire/endurance, barrières auth/fermeture et recette prolongée coutures/rebases restent à valider. Source/contexte de sol RC1 froid : observation indisponible jusqu’à préparation par le jeu, limitation visible. Multi-instance sans affinité hors scope. Aucun audit durable du sink distant après redémarrage vérifié.
+
+Reprise et revue : [dossier d’implémentation](docs/IMPLEMENTATION-NOC-OBSERVATION-VILLAGE-2026-10-17.md), [spec](docs/SPEC-NOC-OBSERVATION-VILLAGE.md), [exploitation](docs/architecture/operations.md). La demande n’autorise pas encore commit/push ou promotion alpha/staging. Pour une recette humaine locale, relancer API et console depuis ce checkout avec la configuration NOC habituelle ; ne pas réinitialiser une base ni inventer un compte privilégié.
+
+---
+
+# Correction de la spec NOC observation — 17 octobre 2026
+
+Tristan demande d’intégrer les recommandations de revue. `docs/SPEC-NOC-OBSERVATION-VILLAGE.md` corrigée directement : priorité des travaux joueur/expédition et dégradation des projections NOC, budgets CPU/DB, récoltes asynchrones et admissions partielles, distinction résultat métier/livraison HTTP, fraîcheur des caméras immobiles confirmée par heartbeat, protocole caméra par mode, connexions SSE par génération et plafonds globaux/terrain. Cas de recette correspondants ajoutés ; estimation initiale explicitement à réévaluer. Rapport de revue annoté pour distinguer réserves documentaires traitées et preuves applicatives à produire. Vérification documentaire : liens locaux, cohérence des règles remplacées et `git diff --check`. Aucun code, test applicatif, accès production, commit ou push ; modifications antérieures conservées. Base `main` / `6a08fe4`.
+
+---
+
+# Revue de la spec NOC observation — 17 octobre 2026
+
+Revue demandée par Tristan, sans implémentation. Rapport : `docs/REVIEW-NOC-OBSERVATION-VILLAGE-2026-10-17.md`. Base `main` / `6a08fe4`, spec locale et modifications préexistantes conservées. Quatre réserves : P1 admission/priorité des projections NOC dans le pool de navigation partagé ; P1 récoltes asynchrones avec décisions partielles absentes du cycle de reçus spécifié ; P2 caméra immobile déclarée périmée malgré heartbeat ; P2 nombre de connexions SSE non borné par les limites de baux. Recommandations et cas de validation consignés dans le rapport. Lecture documentaire/code seulement, aucun test applicatif ni accès production ; risques déduits, pas incidents reproduits. Spec inchangée, rapport et handoff non commités.
+
+---
+
+# Spec NOC observation de village — 17 octobre 2026
+
+Demande de spécification, sans implémentation : `docs/SPEC-NOC-OBSERVATION-VILLAGE.md`. Base relue `main` / `6a08fe4`, worktree local préexistant conservé. Cible : lien NOC protégé par la session administrateur, projection du village et terrain dans le contexte du propriétaire, caméra libre/suivie et fil des commandes reçues côté serveur. Aucun accès au compte joueur, aucune commande métier, aucune réconciliation déclenchée par l’observation. Les baux, la collecte éphémère, les bornes et la bannière d’assistance sont proposés, pas livrés. Recette détaillée : sécurité, absence d’effets métier, résultats après commit, SSE, multi-onglets et caméra torique, navigateur réel et mesure de charge. Références ajoutées à l’index architecture et exploitation. Vérification documentaire uniquement ; pas de test applicatif, déploiement, commit ou push pour cette demande. Notes locales antérieures préservées.
+
+---
+
+# Diagnostic exp?ditions de Yume ? 17 octobre 2026
+
+Contr?le alpha en lecture seule : deux demandes de relev? (00:08 et 00:09 UTC), budget 600 s, vers (445, 23), rejet?es d?s la premi?re tentative avec `DESTINATION_UNREACHABLE`. Cette case est l?ancre de Pinkystan et est occup?e par son HDV. Le frontend initialise pr?cis?ment la cible sur l?ancre du village en l?absence de gisement s?lectionn? (`App.tsx` ? `SciencePanel`), ce qui propose implicitement une destination occup?e. D?faut UX identifi? ; pas de panne g?n?rale du worker d?montr?e.
+
+Rejeu sans admission avec le contexte r?el et le worker de navigation d?ploy? : demande originale rejet?e ; acc?s du HDV vers lui-m?me trouv? ; destination vers elle-m?me rejet?e. Contr?le d?occupation SQL : HDV ? (445, 23). Trajets depuis le m?me acc?s vers (444, 22) et (443, 23) trouv?s (respectivement 1,052 et 2,052 cases). Ces r?sultats prouvent les trajets ? cet instant, pas l?admission compl?te d?une exp?dition. Aucun ordre lanc? pour Marie, aucune ?criture m?tier, aucune r?paration SQL, aucun d?ploiement ni test local applicatif. Correction UX restant ? impl?menter : s?lection explicite d?une destination et diagnostic distinguant d?part/destination ; ne pas contourner les collisions pour entrer dans l?HDV.
+
+---
+
+# Diagnostic HDV de Yume — 16 octobre 2026
+
+Signalement d'amélioration HDV impossible. Contrôle alpha en lecture seule à 21:12 UTC : HDV niveau 1 terminé, sans amélioration engagée. Catalogue réel et migration 034 concordent : passage au niveau 2 = 500 bois d'œuvre et 120 pierres taillées. Stocks observés : 105 bois d'œuvre, 140 pierres taillées ; il manque donc 395 bois d'œuvre. Le bois brut est un stock distinct. Aucun lot de fabrication échu non terminé, aucune notification en erreur dans la base. `MarketPanel` désactive correctement le bouton sous ce seuil ; pas de bug démontré ni modification de coût/ressource/chantier. Aucun compte joueur utilisé, aucune commande économique exécutée, aucun correctif ou déploiement nécessaire. Ce diagnostic et la note NOC antérieure restent locaux ; base Git inchangée `main` / `6a08fe4`.
+
+---
+
 # Extérieurs reconnaissables des villages voisins — 16 octobre 2026
 
 Tristan voit des pavés bruns chez un voisin puis valide explicitement des bâtiments reconnaissables, en conservant privées les données métier. L'ancien rendu utilisait uniquement des boîtes et l'API ne transmettait pas leurs apparences. Nouvelle décision consignée dans la spec des trois vues et les références science/grille : projection publique bornée avec apparences sélectionnées, sans identifiant de bâtiment, propriétaire, stocks, habitants, missions, production ou échéance. Les rapports scientifiques restent archivés ; la présence publique actuelle ne se dégrade plus en anciens cubes lorsqu'un rapport existe. Les nouveaux rapports capturent une apparence par bâtiment, et non par cellule ; anciens formats compatibles.
@@ -27,6 +123,16 @@ Staging **fca10fa** actif, workflow [38955508986](https://github.com/NazzTazz/Ar
 Contrôle production après reprise : **5/5 notifications de l'incident terminées par le worker**, erreurs effacées ; zéro notification incomplète avec erreur dans toute la base alpha. Le village affecté a deux extractions en cours, aucune extraction en retard, quatre extractions et deux récoltes terminées à cette observation. Deux appels réels à `getVillageState` sous UID/rôle applicatif passent le contrat `VillageStateSchema`, en 2936 puis 378 ms ; chantiers running et trajets 4052 / 11552 ms à ces lectures. Ces mesures ponctuelles ne constituent pas un benchmark. Validation du service serveur et du contrat, sans création de session joueur ni recette navigateur sous l'identité de Number.
 
 Aucun SQL de réparation, acquittement manuel de notification, re-crédit ou modification arbitraire de données métier. La reprise et les lectures de diagnostic utilisent les chemins économiques ordinaires. Les changements locaux antérieurs ci-dessous et les deux éléments non suivis sont préservés ; la note d'accès NOC préexistante reste hors du commit de cet incident.
+
+---
+
+# Accès NOC de Tristan activé sur les deux environnements — 16 octobre 2026
+
+Demande explicite de rendre administrateur le compte désigné par Tristan. Comptes déjà présents identifiés dans chaque base, puis UUID respectifs ajoutés à `ADMIN_ACCOUNT_IDS` dans les seuls fichiers de configuration root du VPS. Aucune autorisation dynamique par email, aucun compte créé, aucun mot de passe ni donnée de monde modifié. Les listes préexistantes auraient été conservées ; elles étaient vides. Sauvegarde locale root 0600 des deux fichiers avant changement. Origines NOC HTTPS existantes conservées.
+
+Les deux configurations ont été chargées et validées par le code compilé sous UID applicatif : UUID attendu présent, production et origine HTTPS contrôlées. API alpha et staging redémarrées et santé HTTP vérifiée ; refus anonyme HTTPS du NOC toujours 401 AUTHENTICATION_REQUIRED derrière la barrière HTTP. La connexion avec le vrai mot de passe de Tristan n'a pas été effectuée ; aucun mot de passe demandé, essayé ou changé. L'accès effectivement livré est la permission `noc:read` de la V1, pas un back-office d'écriture. Les générateurs ne reçoivent aucun rôle supplémentaire.
+
+Configuration conservée sur le serveur et non remplacée par les déploiements applicatifs. Aucun nouveau build ni déploiement de release requis. Base Git `main` / `513131e` ; mise à jour de ce handoff locale, sans commit/push demandé pour cette opération. Les éléments non suivis préexistants sont préservés. Les anciennes mentions d'absence d'opérateur NOC décrivent l'état avant cette activation.
 
 ---
 

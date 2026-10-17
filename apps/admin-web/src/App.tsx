@@ -4,6 +4,7 @@ import { currentSession, errorMessage, request, SessionExpiry } from './api';
 import { absoluteTime, shortId } from './format';
 import { Empty } from './components';
 import { HttpRequestDetailView, HttpRequestsPageView } from './http-diagnostics';
+import {ObservationPage} from './observation';
 import {
   AccountPage, AccountsPage, ActivitiesPage, ActivityPage, AdministrationPage, InfrastructurePage,
   OverviewPage, VillagePage, WorldPage, WorldsPage,
@@ -51,6 +52,7 @@ function useRoute() {
 }
 function Page({ route }: { route: ReturnType<typeof useRoute> }) {
   const { section, id, query, queryString } = route;
+  if(section==='observe'&&query.get('worldId')&&query.get('villageId'))return <ObservationPage worldId={query.get('worldId')!} villageId={query.get('villageId')!}/>;
   if (section === 'overview') return <OverviewPage />;
   if (section === 'infrastructure' && id === 'http') {
     if (route.detailId && query.get('instanceId')) return <HttpRequestDetailView requestId={route.detailId} instanceId={query.get('instanceId')!} returnTo={query.get('returnTo')} />;

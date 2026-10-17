@@ -5,6 +5,14 @@ import {VillageSyncProjections} from './sync-projections.js';
 const fixture=()=>JSON.parse(readFileSync(new URL('../../../../../tests/fixtures/village-sync-state.json',import.meta.url),'utf8')) as VillageState;
 const commit=(state:VillageState)=>({worldId:state.world.id,villageId:state.village.id,through:new Date(state.serverTime)});
 const base=(state:VillageState)=>({revision:state.syncRevision!,serverTime:state.serverTime});
+it('reuses only a recent exact-revision transport base for the same observed owner and world',()=>{
+ const state=fixture(),now=Date.parse(state.serverTime),store=new VillageSyncProjections(async()=>state);store.remember('owner',state);
+ expect(store.observedBase('owner',state.world.id,state.village.id,state.syncRevision!,now+1000)).toBe(state);
+ expect(store.observedBase('other',state.world.id,state.village.id,state.syncRevision!,now)).toBeUndefined();
+ expect(store.observedBase('owner','other-world',state.village.id,state.syncRevision!,now)).toBeUndefined();
+ expect(store.observedBase('owner',state.world.id,state.village.id,state.syncRevision!+1,now)).toBeUndefined();
+ expect(store.observedBase('owner',state.world.id,state.village.id,state.syncRevision!,now+2001)).toBeUndefined();
+});
 it('returns the shared frame and never reuses another owner or time projection as its base',async()=>{
  const before=fixture(),after={...before,syncRevision:2,village:{...before.village,wood:225}};
  const store=new VillageSyncProjections(async()=>after);store.remember('owner',before);

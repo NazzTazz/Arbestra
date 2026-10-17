@@ -1,3 +1,6 @@
+import type {ObservationPose} from '@arbestra/contracts';
+import {interpolateObservationPose} from '@arbestra/contracts';
+import {playerSceneTransport,type SceneTransport} from './scene-transport';
 import { clientTime, FrameTimings, statisticsEnabled, recordFrame, timedFetch as fetch, timedJson } from '../dev/statistics';
 import type {StarterGhost} from '../spawn-map/starter-controller';
 import {poseStarterElement, spawnDelta, woodlandTrees} from '@arbestra/contracts';
@@ -59,7 +62,6 @@ import { Scene } from '@babylonjs/core/scene';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainOverview, TravelCell, VillageCell, VillageState } from '@arbestra/contracts';
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
-import { getTerrain, getTerrainUpdates, getTerrainOverview, getTerrainVegetationOverview, getTerrainVillages } from '../api/client';
 import { WorldSpace, terrainDemand, delta, normalize } from './world-space';
 import { TerrainStore } from './terrain-store';
 import { TerrainRenderer } from './terrain-renderer';
@@ -470,7 +472,7 @@ export class BabylonVillageScene {
       return;
     }
     if (this.#mode === 'region') { this.#pointerDown = null; return; }
-    if (this.#worldMode === 'exploration') { this.#pointerDown = null; return; }
+    if (this.#worldMode === 'exploration'&&!this.transport.readOnly) { this.#pointerDown = null; return; }
     const gesture = this.#pointerDown;
     if (gesture.harvest) {
       if (!this.#endsOnWorldSurface(event)) { this.#handlePointerCancel(); return; }
@@ -586,6 +588,7 @@ export class BabylonVillageScene {
     private readonly onArrival: (arrival: VillageArrival | null) => void = () => {},
     private readonly onEyesFound: () => void = () => {},
     private readonly onInitialLoad: (progress: InitialLoadProgress) => void = () => {},
+    private readonly transport:SceneTransport=playerSceneTransport,
   ) {
     this.#canvas = canvas;
     this.#canvas.dataset.workerModel = 'low-poly';
@@ -1023,7 +1026,7 @@ export class BabylonVillageScene {
       this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) => this.#preparing
         ? fetch('/api/worlds/'+encodeURIComponent(state.world.slug)+'/starter/terrain?chunks='+encodeURIComponent(chunks.map(c=>c.chunkX+','+c.chunkY).join(';')), {signal}).then(async r=>{if(!r.ok)throw Error('Terrain indisponible');return timedJson<TerrainResponse>(r);})
         : updatesOnly
-        ? getTerrainUpdates(state.world.slug, chunks, signal) : getTerrain(state.world.slug, chunks, signal));
+        ? this.transport.getTerrainUpdates(state.world.slug, chunks, signal) : this.transport.getTerrain(state.world.slug, chunks, signal));
       this.#weather?.dispose(); this.#weather = new WeatherMap(this.#scene, state.world.id);
       this.#weather.update(Date.now() + this.#cosmologyServerOffsetMs);
       const material = this.#material('streamed-ground', '#ffffff');
@@ -1141,7 +1144,7 @@ export class BabylonVillageScene {
       if(!site.building&&!site.footprint){mesh.isVisible=this.#constructionMode&&site.canBuild;mesh.material=this.#siteMaterial;for(const border of mesh.getChildMeshes())border.isVisible=mesh.isVisible;}
       for (const selectable of [mesh, ...mesh.getChildMeshes()]) {
         selectable.metadata = { ...selectable.metadata, siteId: site.id };
-        selectable.isPickable = Boolean(site.footprint || this.#constructionMode && site.canBuild)
+        selectable.isPickable = Boolean(site.footprint || this.transport.readOnly&&site.building || this.#constructionMode && site.canBuild)
           && !selectable.name.startsWith('garden-full-') && !selectable.name.startsWith('site-border-') && selectable.metadata?.buildingAttachment !== 'glass';
       }
       this.#villageMeshes.push(mesh);
@@ -1176,7 +1179,7 @@ export class BabylonVillageScene {
 }
 
   public selectSite(siteId: string, anchor: ScreenAnchor, inspect = false): void {
-    if (this.#worldMode === 'exploration') return;
+    if (this.#worldMode === 'exploration'&&!this.transport.readOnly) return;
     if (!this.#selectableMeshes.has(siteId)) return;
     this.#selectedFeatureId = null;
     this.#applyFeatureSelection();
@@ -1209,7 +1212,25 @@ export class BabylonVillageScene {
     return this.#space?.inverse(ray.origin.x + ray.direction.x * distance, ray.origin.z + ray.direction.z * distance) ?? null;
   }
 
+  public observationPose():ObservationPose|null {
+    if(!this.#space||!this.#state)return null;
+    if(this.#transition.active)return{mode:'transition'};
+    if(this.#inhabitantCamera.mode==='pov'||this.#inhabitantCamera.mode==='free')return{mode:'inhabitant'};
+    if(this.#mode==='world')return this.#torusOverview?.observationPose()??null;
+    const cell=this.#space.inverse(this.#camera.target.x,this.#camera.target.z);
+    return{mode:this.#mode,...cell,altitude:this.#camera.target.y,alpha:((this.#camera.alpha+Math.PI*2)%(Math.PI*2)),beta:this.#camera.beta,radius:this.#camera.radius/2.5,fov:this.#camera.fov};
+  }
+  public applyObservationPose(p:ObservationPose):void {
+    if(!this.#space||this.#transition.active)return;
+    const current=this.observationPose();if(current&&this.#state)p=interpolateObservationPose(current,p,this.#state.world,.25);
+    if(p.mode==='inhabitant'||p.mode==='transition')return;
+    if(p.mode==='world'){if(this.#mode!=='world'){this.showWorld();return;}this.#torusOverview?.applyObservationPose(p);return;}
+    if(this.#mode!==p.mode){if(p.mode==='region')this.showRegion();else this.showVillage();return;}
+    const pos=this.#space.project(p);this.#camera.target.copyFromFloats(pos.x,p.altitude,pos.z);this.#camera.alpha=p.alpha;this.#camera.beta=p.beta;this.#camera.radius=p.radius*2.5;this.#camera.fov=p.fov;
+    this.#camera.inertialAlphaOffset=this.#camera.inertialBetaOffset=this.#camera.inertialRadiusOffset=this.#camera.inertialPanningX=this.#camera.inertialPanningY=0;
+  }
   public setWorldMode(mode: 'exploration' | 'exploitation' | 'population' | 'construction'): void {
+    if(this.transport.readOnly&&mode!=='exploration')return;
     if (mode !== 'exploration') this.setVillageSolarPreview(null);
     if (mode === this.#worldMode) return;
     this.#handlePointerCancel();
@@ -2540,7 +2561,7 @@ export class BabylonVillageScene {
     if (!this.#overview && !this.#overviewLoading && now >= this.#overviewRetryAt && store.pending < 2
       && (explicitOverview || idleVillage && this.#renderer?.rendered(center.cellX, center.cellY))) {
       this.#overviewLoading = true;
-      void getTerrainOverview(world.slug, signal).then((data) => {
+      void this.transport.getTerrainOverview(world.slug, signal).then((data) => {
         if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
         const view = this.#torusOverview ?? new TorusOverview(this.#engine, data, this.#villageAnchor,
           this.#space!.inverse(this.#camera.target.x, this.#camera.target.z), () => this.#weather);
@@ -2556,7 +2577,7 @@ export class BabylonVillageScene {
     if (this.#overview && !this.#villagesLoading && !this.#vegetationLoading && (now >= this.#villagesDue || villageCenter !== this.#villagesCenter)
       && store.pending < 2 && (explicitOverview || idleVillage)) {
       this.#villagesLoading = true; this.#villagesCenter = villageCenter;
-      void getTerrainVillages(world.slug, center.cellX, center.cellY, signal).then(data => {
+      void this.transport.getTerrainVillages(world.slug, center.cellX, center.cellY, signal).then(data => {
         if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
         this.#regionalVillages.set(data); this.#villagesDue = performance.now() + 30_000;
       }).catch(() => { this.#villagesDue = performance.now() + 5_000; })
@@ -2565,7 +2586,7 @@ export class BabylonVillageScene {
     if (this.#overview && !this.#villagesLoading && !this.#vegetationLoading && now >= this.#vegetationDue && store.pending < 2
       && (explicitOverview || idleVillage || this.#mode === 'world')) {
       this.#vegetationLoading = true;
-      void getTerrainVegetationOverview(world.slug, signal).then((data) => {
+      void this.transport.getTerrainVegetationOverview(world.slug, signal).then((data) => {
         if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
         this.#regionalOverview.set(this.#overview!, data);
         this.#torusOverview?.setVegetation(data);

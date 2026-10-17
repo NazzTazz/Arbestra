@@ -90,7 +90,7 @@ def setup():
             sql('postgres', f"CREATE ROLE {owner} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{owner_password}'; CREATE ROLE {app} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE CONNECTION LIMIT 24 PASSWORD '{app_password}';")
             sql('postgres', f'CREATE DATABASE {database} OWNER {owner};')
             sql(database, f'REVOKE ALL ON DATABASE {database} FROM PUBLIC; GRANT CONNECT ON DATABASE {database} TO {app}; REVOKE ALL ON SCHEMA public FROM PUBLIC;')
-        common = f'NODE_ENV=production\nHOST=127.0.0.1\nPORT={port}\nCOOKIE_NAME=__Secure-arbestra_{environment}\nCOOKIE_DOMAIN=.arbestra.world\nADMIN_ORIGIN=https://{noc}\nADMIN_ACCOUNT_IDS=\nTRUSTED_PROXY_CIDRS=127.0.0.1\nEXPEDITION_WORKERS=1\nSCHEDULED_TASK_POLL_INTERVAL_MS=1000\nWORLD_GENERATOR_MEMORY_MB=384\n'
+        common = f'NODE_ENV=production\nHOST=127.0.0.1\nPORT={port}\nCOOKIE_NAME=__Secure-arbestra_{environment}\nCOOKIE_DOMAIN=.arbestra.world\nADMIN_ORIGIN=https://{noc}\nWORLD_ORIGIN=https://{world}\nADMIN_ACCOUNT_IDS=\nTRUSTED_PROXY_CIDRS=127.0.0.1\nEXPEDITION_WORKERS=1\nSCHEDULED_TASK_POLL_INTERVAL_MS=1000\nWORLD_GENERATOR_MEMORY_MB=384\n'
         if not exists:
             private(CONFIG / (environment + '.env'), f'DATABASE_URL=postgresql://{app}:{app_password}@127.0.0.1:5432/{database}\n' + common)
             private(CONFIG / (environment + '-migration.env'), f'DATABASE_URL=postgresql://{owner}:{owner_password}@127.0.0.1:5432/{database}\nNODE_ENV=production\n')
