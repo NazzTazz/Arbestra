@@ -9,7 +9,15 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
-## État vérifié le 16 octobre 2026
+## Publication NOC du 17 octobre 2026
+
+Release applicative `74d33e2e193b9f068bec11aef6a07a6f4e3e9b62` installée en staging par le tag `staging-2026.10.17.1`, [workflow réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39040381712). Sauvegarde de déploiement et catalogue vérifiés, trois services actifs après bascule. `WORLD_ORIGIN` ajouté aux deux environnements avec sauvegarde root des configurations ; aucun bootstrap ni seed relancé. Alpha conserve `718af3b`, aucune promotion NOC lancée à ce stade.
+
+Les contrôles suivants ont rencontré une indisponibilité SSH/TLS intermittente du VPS ; charge 28,65 observée, sans OOM ni redémarrage des API, cause non déterminée. Le [contrôle public indépendant GitHub](https://github.com/NazzTazz/Arbestra/actions/runs/39041215202) a échoué sur 18 requêtes staging expirées. L’installation réussie ne vaut donc pas validation de disponibilité. Rétablir l’accès serveur, contrôler staging puis promouvoir le même commit en alpha. Le handoff porte les détails et la suite nécessaire.
+
+Le workflow manuel **Verify public deployment** accepte `environment=staging|alpha` et ne modifie rien : TLS, pages publiques, barrière HTTP NOC, santé API, refus des routes administratives sur l’hôte joueur et refus d’observation anonyme. Il n’utilise aucun secret et ne remplace ni les contrôles métier ni la recette authentifiée.
+
+## État historique vérifié le 16 octobre 2026
 
 Les deux environnements sont installés et leurs six domaines répondent en HTTPS avec certificats publics valides. Commit applicatif déployé : `dd7cce76ada482104200cbdeabd4558bcd5eb3a0`.
 

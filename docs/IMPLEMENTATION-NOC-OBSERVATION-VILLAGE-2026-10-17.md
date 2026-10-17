@@ -1,6 +1,6 @@
 # NOC observation de village — dossier pour revue humaine
 
-17 octobre 2026, base `main` / `6a08fe4`. Implémentation locale de la [spec corrigée](SPEC-NOC-OBSERVATION-VILLAGE.md), autorisée jusqu’à revue humaine. Aucun déploiement, commit ou push pour cette tranche. Les changements documentaires et fichiers locaux présents avant le travail sont conservés.
+17 octobre 2026, base initiale `main` / `6a08fe4`. Implémentation de la [spec corrigée](SPEC-NOC-OBSERVATION-VILLAGE.md). Tristan a ensuite autorisé commit, push et déploiement : release `74d33e2` installée en staging, promotion alpha bloquée par l’accès VPS. Le [handoff](../SESSION-HANDOFF.md) porte l’état courant ; les sections de validation locale ci-dessous décrivent les preuves précédant cette publication.
 
 ## Parcours disponible
 
@@ -91,10 +91,18 @@ Contrôle du développement, sans écritures du lecteur : Bressuire RC1 a fourni
 
 Cette correction remplace la limitation historique imposant un joueur connecté pour réchauffer le cache de navigation. Les réserves de charge/endurance et de revue humaine restent ouvertes. Aucun accès production, déploiement, migration, commit ou push pour cette correction.
 
-## État de revue
+## Publication autorisée et état courant
+
+Commit applicatif `74d33e2` poussé sur main et installé par le [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39040381712), tag `staging-2026.10.17.1`. Sauvegarde vérifiée, trois services actifs après bascule, origines des clients monde ajoutées seules aux configurations existantes avec sauvegardes root. Lint complet et 31 cas complémentaires / 6 fichiers verts pour la publication, en plus des 75 cas de la correction ; build complet exécuté avec succès par GitHub.
+
+Le contrôle authentifié staging n’avait pas de village initialisé à cibler : un monde fermé de diagnostic et une session temporaire d’un compte administrateur déjà autorisé ont été créés puis supprimés en `finally` après échec de la connexion HTTPS du VPS vers lui-même. Le contrôle suivant via Caddy natif n’a pas pu établir SSH. Aucun monde existant modifié par ces contrôles, aucun privilège ajouté.
+
+Des connexions SSH/TLS expirent depuis le poste et depuis GitHub. Charge serveur 28,65 observée, mémoire disponible et aucune trace d’OOM/redémarrage des API ; cause non déterminée. [Contrôle public GitHub échoué](https://github.com/NazzTazz/Arbestra/actions/runs/39041215202) : 18 requêtes staging expirées entre 14:33 et 14:36 UTC. La disponibilité publique et le parcours distant complet restent non validés. **Alpha reste `718af3b`, aucun déploiement NOC lancé.** Rétablir l’accès serveur et contrôler staging avant promotion du même commit. Aucun redémarrage du VPS ni intervention sur les autres projets tenté.
+
+## État historique à l’issue de la revue locale
 
 Implémentation et recette fonctionnelle locales disponibles ; **revue humaine attendue**. La première version avait passé `corepack pnpm build`, puis les recompilations API/monde/NOC et le lint ciblé. Son chunk Babylon NOC de 2,87 Mo était chargé à la demande ; ce chunk et la copie des assets ne font plus partie du NOC corrigé. Les vérifications de la correction sont consignées séparément, sans réutiliser ce résultat comme preuve de compilation actuelle.
 
 Les fixtures navigateur, comptes, sessions et fichiers de cookies sont nettoyés sélectivement ; serveurs de recette et navigateurs fermés. Pour la revue humaine, NOC de développement sur `http://localhost:5175`, API source sur 3000 et client monde préexistant sur 5174 laissés actifs. Aucun compte réel n’a été ajouté à la liste pour la recette. En production, renseigner `WORLD_ORIGIN` dans les environnements existants avant promotion ; le bootstrap est adapté pour les installations nouvelles, sans modification du VPS dans cette tranche.
 
-Git reste sur `main` / `6a08fe4`, changements locaux non commités. Aucun accès production, déploiement ou push. Aucune promotion en alpha/staging tant que la revue et les réserves de validation applicables ne sont pas levées.
+À cette étape historique, Git était sur `main` / `6a08fe4`, sans commit/push ni déploiement. L’autorisation et la publication ultérieures sont consignées dans la section précédente ; elles ne certifient pas les réserves de performance et d’endurance restées ouvertes.
