@@ -1,6 +1,6 @@
 # NOC observation de village — dossier pour revue humaine
 
-17 octobre 2026, base initiale `main` / `6a08fe4`. Implémentation de la [spec corrigée](SPEC-NOC-OBSERVATION-VILLAGE.md). Tristan a ensuite autorisé commit, push et déploiement : release `74d33e2` installée en staging, promotion alpha bloquée par l’accès VPS. Le [handoff](../SESSION-HANDOFF.md) porte l’état courant ; les sections de validation locale ci-dessous décrivent les preuves précédant cette publication.
+17 octobre 2026, base initiale `main` / `6a08fe4`. Implémentation de la [spec corrigée](SPEC-NOC-OBSERVATION-VILLAGE.md). Tristan a ensuite autorisé commit, push et déploiement : release **`74d33e2` publiée en staging et alpha**. Le [handoff](../SESSION-HANDOFF.md) porte l’état courant ; les sections de validation locale ci-dessous décrivent les preuves précédant cette publication.
 
 ## Parcours disponible
 
@@ -97,7 +97,11 @@ Commit applicatif `74d33e2` poussé sur main et installé par le [workflow stagi
 
 Le contrôle authentifié staging n’avait pas de village initialisé à cibler : un monde fermé de diagnostic et une session temporaire d’un compte administrateur déjà autorisé ont été créés puis supprimés en `finally` après échec de la connexion HTTPS du VPS vers lui-même. Le contrôle suivant via Caddy natif n’a pas pu établir SSH. Aucun monde existant modifié par ces contrôles, aucun privilège ajouté.
 
-Des connexions SSH/TLS expirent depuis le poste et depuis GitHub. Charge serveur 28,65 observée, mémoire disponible et aucune trace d’OOM/redémarrage des API ; cause non déterminée. [Contrôle public GitHub échoué](https://github.com/NazzTazz/Arbestra/actions/runs/39041215202) : 18 requêtes staging expirées entre 14:33 et 14:36 UTC. La disponibilité publique et le parcours distant complet restent non validés. **Alpha reste `718af3b`, aucun déploiement NOC lancé.** Rétablir l’accès serveur et contrôler staging avant promotion du même commit. Aucun redémarrage du VPS ni intervention sur les autres projets tenté.
+Un épisode SSH/TLS expiré depuis le poste et GitHub a retardé la promotion. Charge 28,65 observée, mémoire disponible et aucune trace d’OOM/redémarrage des API ; cause non déterminée. [Premier contrôle public échoué](https://github.com/NazzTazz/Arbestra/actions/runs/39041215202) : 18 requêtes staging sans réponse HTTP entre 14:33 et 14:36 UTC. Accès revenu et charge à 0,93 à 14:56 UTC ; aucun redémarrage global ni intervention sur les autres projets.
+
+**Publication terminée** : `alpha-2026.10.17.1` désigne le même `74d33e2` que staging, [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39042854587). Contrôles publics indépendants verts en [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39042788127) et [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39042987423), six services actifs, sauvegardes et catalogues vérifiés. Le parcours authentifié staging a ensuite passé sur les vrais domaines HTTPS : lancement, échange unique/cookie sécurisé, rejeu/anonyme refusés, snapshot, terrain, SSE et révocation ; fixture fermée et session temporaire supprimées. L’essai intermédiaire sur le proxy interne avec Host forcé retournait 404 et ne constitue pas une erreur applicative reproduite.
+
+En alpha, l’approbation automatique a refusé le test créant une session temporaire dans la base partagée : aucune exécution de cette action. Alternative sans écriture passée sur Pinkystan/Yume : projection et terrain par le code de la release, pool PG imposant la lecture seule, 36 cellules de bâtiments, révision valide et construction neutralisée. Aucun compte, session ou monde de diagnostic créé en alpha. Ne pas présenter cela comme un parcours admin HTTPS authentifié complet alpha ; le parcours correspondant est prouvé en staging et la scène dans la recette navigateur locale. Les réserves de charge/endurance restent ouvertes.
 
 ## État historique à l’issue de la revue locale
 

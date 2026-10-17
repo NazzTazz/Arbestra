@@ -1,6 +1,6 @@
 # NOC — Observation d’un village et assistance en direct
 
-17 octobre 2026. Base inspectée initiale : `main`, `6a08fe4`. **Statut : implémentation `74d33e2` installée en staging ; disponibilité publique non validée, promotion alpha bloquée par l’accès VPS.** Tristan a explicitement autorisé commit, push et déploiement après la recette locale. Le [dossier d’implémentation](IMPLEMENTATION-NOC-OBSERVATION-VILLAGE-2026-10-17.md) et le [handoff](../SESSION-HANDOFF.md) distinguent les preuves exécutées, l’incident d’accès distant et les validations restantes. La [revue initiale](REVIEW-NOC-OBSERVATION-VILLAGE-2026-10-17.md) demeure une référence historique.
+17 octobre 2026. Base inspectée initiale : `main`, `6a08fe4`. **Statut : implémentation `74d33e2` déployée en staging et alpha, contrôles publics verts.** Tristan a explicitement autorisé commit, push et déploiement après la recette locale. Le [dossier d’implémentation](IMPLEMENTATION-NOC-OBSERVATION-VILLAGE-2026-10-17.md) et le [handoff](../SESSION-HANDOFF.md) distinguent les preuves exécutées, l’épisode d’accès distant résolu et les validations de charge restantes. La [revue initiale](REVIEW-NOC-OBSERVATION-VILLAGE-2026-10-17.md) demeure une référence historique.
 
 Références : [NOC V1](SPEC-NOC-V1.md), [diagnostic HTTP](SPEC-NOC-V1-1-DIAGNOSTIC-HTTP.md), [exploitation](architecture/operations.md), [synchronisation du village](architecture/village-synchronization.md).
 
