@@ -13,7 +13,7 @@ export function fixedBuildingFootprint(type:'university'|'stonemason',anchor:Foo
  return transformFootprint(offsets,{x:anchor.cellX,y:anchor.cellY},turns,world).map(({cellX,cellY})=>({cellX,cellY}));
 }
 
-export const BUILD_REACH = 5;
+export const BUILD_REACH = 8;
 /** Caller chooses eligible completed footprints; kit and paid construction retain their own costs. */
 export function withinBuildReach(target:FootprintCell,cells:readonly FootprintCell[],world:SpatialDimensions):boolean {
  return cells.some(c=>Math.max(Math.abs(wrappedDistance(target.cellX,c.cellX,world.widthCells)),Math.abs(wrappedDistance(target.cellY,c.cellY,world.heightCells)))<=BUILD_REACH);

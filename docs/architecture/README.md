@@ -1,6 +1,8 @@
 # Architecture autoritaire
 
-**Implémentation vérifiée localement, prête pour recette utilisateur :** [nivellement préalable au placement](../SPEC-NIVELLEMENT-PLACEMENT.md), aperçu commun client/serveur et chantier avec habitants sur les emprises sèches libres RC1. Migration 047 appliquée sur test et développement ; aucun déploiement distant.
+**Implémentée et vérifiée localement :** [extension progressive du village](../SPEC-EXTENSION-VILLAGE.md), portée de 8 cases, terrain et connaissance locale suivant les emprises au-delà de la zone initiale. Non déployée.
+
+**Déployé sur alpha et staging :** [nivellement préalable au placement](../SPEC-NIVELLEMENT-PLACEMENT.md), aperçu commun client/serveur et chantier avec habitants sur les emprises sèches libres RC1. Migration 047 appliquée ; tags `alpha-2026.10.18.5` et `staging-2026.10.18.5`.
 
 **Implémentation déployée en staging et alpha :** [pathfinding hiérarchique et cache durable HDV–HDV](../SPEC-PATHFINDING-HIERARCHIQUE.md). Le marché combine un index compact d'arêtes physiques, un essai de graphe de portails borné et le repli `coarseFirst`. La migration 046 persiste routes, traversées, index et versions locales ; les chemins sont recertifiés ou réparés autour des obstacles, puis revalidés avant acceptation. `NAVIGATION_HIERARCHICAL=0` restitue l'ancienne stratégie. Recettes ordinateur/mobile locales vertes ; release `20f8f2a`, migration et contrôles publics vérifiés dans les deux environnements. Mesures et limites courantes dans le handoff.
 

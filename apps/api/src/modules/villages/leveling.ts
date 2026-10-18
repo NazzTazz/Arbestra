@@ -63,7 +63,8 @@ async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageE
   const foreign = await tx.selectFrom('worldCellOccupancies as o').innerJoin('buildings as b', j => j.onRef('b.worldId', '=', 'o.worldId').onRef('b.id', '=', 'o.buildingId'))
     .select(['o.cellX', 'o.cellY', 'o.role', 'b.id', 'b.buildingType', 'b.visualLayout', 'b.quarterTurns'])
     .where('o.worldId', '=', v.worldId).where('b.villageId', '!=', v.villageId).execute();
-  const foreignCells = foreign.filter(c => Math.abs(spawnDelta(c.cellX, v.anchorCellX, v.widthCells)) < 32 && Math.abs(spawnDelta(c.cellY, v.anchorCellY, v.heightCells)) < 32);
+  const foreignCells = foreign.filter(c => wrap(c.cellX - snapshot.region.originCellX, v.widthCells) < snapshot.region.width
+    && wrap(c.cellY - snapshot.region.originCellY, v.heightCells) < snapshot.region.height);
   const foreignKeys = new Set(foreignCells.map(key));
   const current = { ...snapshot, infrastructure, cells: [...snapshot.cells.filter(c => !foreignKeys.has(key(c))), ...foreignCells.map(c => ({
     cellX: c.cellX, cellY: c.cellY, footprint: {buildingId:c.id},

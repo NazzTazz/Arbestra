@@ -87,7 +87,7 @@ La migration conserve strictement les bâtiments et extensions existants.
 - normalisation et distance aux jointures du tore ;
 - conflit atomique bâtiment/bâtiment et bâtiment/feature ;
 - réservation atomique d’une empreinte multizone ;
-- rayon de 5 calculé depuis toute l’emprise terminée ;
+- rayon de 8 calculé depuis toute l’emprise terminée (extension du 18 octobre 2026) ;
 - chantier non influent mais déjà occupant ;
 - Jardin niveau 2 toujours jointif et réservé une seule fois.
 

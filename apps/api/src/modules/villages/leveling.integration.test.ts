@@ -48,6 +48,20 @@ afterAll(async () => {
   await db.destroy();
 }, 60000);
 
+it('previews a remote campus outside the original region using its actual terrain and building accesses', async () => {
+  // The village anchor is a presentation origin; the physical hall keeps its own identity and access.
+  await db.updateTable('villages').set({anchorCellX:19}).where('worldId','=',worldId).where('id','=',villageId).execute();
+  try {
+    const state=await getVillageState(db,accountId,slug,villageId);
+    expect(state.region.width).toBeGreaterThan(64);
+    expect(cells.every(c=>state.cells.some(s=>s.cellX===c.cellX&&s.cellY===c.cellY&&s.canBuild))).toBe(true);
+    const preview=await previewLeveling(db,accountId,slug,villageId,request);
+    expect(preview.valid).toBe(true);expect(preview.quote.cells).toHaveLength(30);
+  } finally {
+    await db.updateTable('villages').set({anchorCellX:59}).where('worldId','=',worldId).where('id','=',villageId).execute();
+  }
+},120000);
+
 it('reserves a dry university pad, spends labour once, persists the level ground and then permits manual construction', async () => {
   const before = await getVillageState(db, accountId, slug, villageId);
   const preview = await previewLeveling(db, accountId, slug, villageId, request);

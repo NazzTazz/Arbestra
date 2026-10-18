@@ -4,6 +4,8 @@ Statut : **implémenté dans le worktree**. Preuves serveur et navigateur du 30 
 
 ## Principe
 
+L’[extension progressive](../SPEC-EXTENSION-VILLAGE.md) porte la portée à **8 cases** autour des emprises terminées, sur le tore. Le rectangle de terrain suit l’étendue du village avec une marge d’exploitation ; les 64 × 64 cases initiales ne constituent plus une frontière. La connaissance locale suit aussi les emprises terminées, dans le rayon d’exploitation existant de 16 cases.
+
 Le [nivellement préalable](../SPEC-NIVELLEMENT-PLACEMENT.md) corrige l’aperçu des emprises fixes Université/Tailleur et ajoute un chantier distinct sur les sols secs libres RC1. La planéité de l’emprise entière est partagée avec le serveur. Les occupations temporaires protègent le terrain jusqu’à sa fin autoritaire, puis le joueur construit manuellement.
 
 Depuis 029, une construction de maison peut fournir `houseVariant: stone | logs | beams` (défaut API `stone`). Les deux chemins de commande, cellule et sélection spatiale, persistent respectivement `stone-house`, `log-house` ou `beam-house` dans `visual_layout`, avec la même emprise et les mêmes coûts actuels. Le matériau est inclus dans le reçu idempotent ; une amélioration conserve la recette et l'orientation. Aucun stock de bois transformé ni déblocage d'ère n'est créé dans cette passe. Le rendu compilé et sa génération sont décrits dans la [spec factory](../SPEC-FACTORY-BATIMENTS.md).

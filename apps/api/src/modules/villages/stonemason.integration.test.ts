@@ -7,11 +7,41 @@ import {DEVELOPMENT_IDS as ids} from '../../database/seed.js';
 import {testDatabaseUrl} from '../../database/test-environment.js';
 import {buildApp} from '../../app.js';
 import {constructBuilding,getVillageState} from './service.js';
+import {knownGeography} from '../science/knowledge.js';
 
 const url=testDatabaseUrl(),db=createDatabase(url);
 beforeAll(()=>migrateToLatest(url));
 beforeEach(async()=>{await resetE2eState(url);await db.updateTable('villageResources').set({amount:100}).where('villageId','=',ids.village).where('resourceCode','=','stone').execute();});
 afterAll(()=>db.destroy());
+it('builds beyond the former 64-cell border and reveals resources around the expanded village',async()=>{
+  const village=await db.selectFrom('villages').select(['anchorCellX','anchorCellY']).where('worldId','=',ids.world).where('id','=',ids.village).executeTakeFirstOrThrow();
+  const world=await db.selectFrom('worlds').select(['widthCells','heightCells']).where('id','=',ids.world).executeTakeFirstOrThrow();
+  const wrap=(x:number)=>((x%world.widthCells)+world.widthCells)%world.widthCells;
+  const cellX=wrap(village.anchorCellX+40),cellY=village.anchorCellY;
+  const id=randomUUID();
+  await db.insertInto('buildings').values({id,worldId:ids.world,villageId:ids.village,buildingType:'dwelling',level:1,status:'completed',completedAt:new Date(),constructionStartedAt:null,constructionCompletesAt:null}).execute();
+  await db.insertInto('worldCellOccupancies').values({worldId:ids.world,cellX:wrap(cellX-7),cellY,buildingId:id,featureId:null,role:'anchor',pendingExpansionId:null}).execute();
+  // Restore the shared immutable terrain fixture even when an assertion fails.
+  const chunkX=Math.floor(cellX/32),chunkY=Math.floor(cellY/32);
+  const chunk=await db.selectFrom('worldChunks').select(['terrainCodes','elevations']).where('worldId','=',ids.world).where('chunkX','=',chunkX).where('chunkY','=',chunkY).executeTakeFirstOrThrow();
+  const terrainCodes=[...chunk.terrainCodes],elevations=[...chunk.elevations];
+  for(const dx of [0,1])for(const dy of [0,1]) {const i=((cellY+dy)%32)*32+(cellX+dx)%32;terrainCodes[i]=1;elevations[i]=25;}
+  await db.updateTable('worldChunks').set({terrainCodes,elevations}).where('worldId','=',ids.world).where('chunkX','=',chunkX).where('chunkY','=',chunkY).execute();
+  try {
+  const before=await getVillageState(db,ids.account,'aube',ids.village);
+  expect(before.cells.find(c=>c.cellX===cellX&&c.cellY===cellY)?.canBuild).toBe(true);
+  const knowledge=await knownGeography(db,ids.world,ids.account,world.widthCells,world.heightCells);
+  expect(knowledge.known({cellX:wrap(cellX+8),cellY})).toBe(true);
+  expect(knowledge.known({cellX:wrap(cellX+10),cellY})).toBe(false);
+  const built=await constructBuilding(db,ids.account,'aube',ids.village,cellX,cellY,'stonemason',0,randomUUID());
+  expect(built.cells.filter(c=>c.footprint?.buildingType==='stonemason')).toHaveLength(4);
+  expect(built.village.wood).toBe(before.village.wood-50);
+  // The next site is still constrained by the progressive radius, not by the loaded rectangle.
+  await expect(constructBuilding(db,ids.account,'aube',ids.village,wrap(cellX+11),cellY,'garden',0,randomUUID())).rejects.toMatchObject({code:'OUTSIDE_VILLAGE_REACH'});
+  } finally {
+    await db.updateTable('worldChunks').set(chunk).where('worldId','=',ids.world).where('chunkX','=',chunkX).where('chunkY','=',chunkY).execute();
+  }
+});
 async function freeSquare(){
   const state=await getVillageState(db,ids.account,'aube',ids.village);
   const free=new Set(state.cells.filter(c=>c.canBuild).map(c=>`${c.cellX}:${c.cellY}`));

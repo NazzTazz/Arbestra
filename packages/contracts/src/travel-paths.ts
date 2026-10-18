@@ -163,7 +163,8 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
   const signature=JSON.stringify([spatial,geometry&&[[...geometry.surface.values()].filter(p=>p.manual).map(p=>[p.x,p.y]).sort((a,b)=>a[0]!-b[0]!||a[1]!-b[1]!),[...geometry.curbPixels].sort(),state.infrastructure!.equipment.map(e=>[e.x,e.y]).sort((a,b)=>a[0]!-b[0]!||a[1]!-b[1]!)]]);
   const cached=networkCache.get(signature);if(cached){rememberNetworkAlias(input,signature);networkCache.delete(signature);networkCache.set(signature,cached);return copyNetwork(cached);}
   const walk=passageInspector(ground,world);
-  const start = { cellX: village.anchorCellX, cellY: village.anchorCellY };
+  const hall = state.cells.find(c=>c.building && (village.townHallBuildingId ? c.building.id===village.townHallBuildingId : c.building.type==='town-hall'));
+  const start = hall ? {cellX:hall.cellX,cellY:hall.cellY} : { cellX: village.anchorCellX, cellY: village.anchorCellY };
   const blocked = new Set(state.cells.filter((cell) => cell.footprint).map(key));
   for (const feature of region.features) {
     if (feature.type === 'woodland' && (ground?.woodedCells || feature.deposit?.blocksCell === false || feature.deposit?.cleared)) continue;
@@ -224,7 +225,7 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
     if (!found) {
       // A coarse anchor can be enclosed by its own footprint, or a trunk can
       // block the cell-centre guide. The bounded door planner decides locally.
-      if(state.infrastructure&&Math.abs(delta(goal.destination.cellX,start.cellX,world.widthCells))<32&&Math.abs(delta(goal.destination.cellY,start.cellY,world.heightCells))<32)
+      if(state.infrastructure&&inside(goal.destination))
         {routes.push({...goal,cells:[start,goal.destination]});seeded.add(goal.id);}
       continue;
     }
@@ -276,7 +277,7 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
   const hall=state.cells.find(c=>c.building?.id===hallId&&c.building?.type==='town-hall');if(!hall?.building)return route;
   const starts=buildingAccesses(state,hall.building.id),ends=route.kind==='building'?buildingAccesses(state,route.id):[];
   const world=state.world,w=world.widthCells*8,h=world.heightCells*8;
-  const local=(p:TravelCell)=>delta(p.cellX,state.village.anchorCellX,world.widthCells)>=-32&&delta(p.cellX,state.village.anchorCellX,world.widthCells)<32&&delta(p.cellY,state.village.anchorCellY,world.heightCells)>=-32&&delta(p.cellY,state.village.anchorCellY,world.heightCells)<32;
+  const local=(p:TravelCell)=>wrap(p.cellX-state.region.originCellX,world.widthCells)<state.region.width&&wrap(p.cellY-state.region.originCellY,world.heightCells)<state.region.height;
   const lastLocal=route.cells.findLastIndex(local),destination=local(route.destination)?route.destination:route.cells[lastLocal];if(!destination)return route;
   const {surface,curbPixels,roadNodes,walk,blocked,occupiedEquipment,fineCells}=prepared??prepareRefinement(state,ground);
   // Shared obstacles and fine cells are immutable; only destination portals vary.
