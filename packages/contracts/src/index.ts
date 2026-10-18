@@ -55,3 +55,4 @@ export * from './dev-timing.js';
 export * from './observation.js';
 export * from './observation-camera.js';
 export * from './terrain-vertices.js';
+export * from './terrain-conversion.js';

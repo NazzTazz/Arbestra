@@ -1,3 +1,17 @@
+# Conversion du monde alpha — 19 octobre 2026
+
+**Demandée par Tristan, en cours.** Porter le monde alpha existant sur la géométrie à sommets partagés ; conserver comptes, villages et économie. Staging peut être régénéré en conservant les comptes. En réalité son monde `beta-rc1` est vide : activation directe effectuée, sans reset, compte unique conservé par comparaison complète. Sauvegarde préalable `/var/backups/arbestra/staging-terrain-vertices-20261018T223028.dump`, services redémarrés et actifs.
+
+**Publication précédente terminée :** `317cc93bddf7f4cdcf50886840cf7ac1b13675cb` poussé sur main, tags `staging-2026.10.19.1` et `alpha-2026.10.19.1`. Migration 048 et déploiements réussis : staging [39171906460](https://github.com/NazzTazz/Arbestra/actions/runs/39171906460), alpha [39172097347](https://github.com/NazzTazz/Arbestra/actions/runs/39172097347). Contrôles publics verts : staging 39172066984, alpha 39172269491. Les mentions de publication encore en préparation plus bas sont historiques.
+
+**Conversion bornée :** l’audit initial était trop strict sur chaque échantillon naturel. Le rendu des bâtiments repose sur le maximum des centres de leur emprise. La conversion conserve ces appuis au millionième, donne une plateforme plane aux universités/tailleurs à leur hauteur actuelle, conserve les terrasses imposées et résout les autres centres par composantes diagonales. Les jardins et voies suivent le nouveau sol. Aucun conflit moyenné silencieusement. Contrôles de sécheresse, accès, passages voisins de voirie et corridors des extractions engagées ; autres missions/chantiers engagés bloquants. Activation transactionnelle avec vérifications opérateur possibles avant commit.
+
+**Validation actuelle :** cinq tests du solveur et quatre de géométrie verts ; quatre intégrations PostgreSQL finales de conversion vertes sur `127.0.0.1/arbestra_test` (appuis/plateforme, voirie et contrat d’extraction inchangés, idempotence, refus des contradictions, refus d’un trajet non auditable, rollback après écritures terrain/modèle/révision effectivement observées). Le contrôle de voirie a d’abord reproduit une erreur sur les segments diagonaux ; correction pour vérifier les arêtes cardinales réellement admises par la navigation. Lint ciblé et builds contrats/API verts. Audit complet en lecture seule sur alpha : 670 sommets, zéro conflit, 236 appuis structurels conservés, aucun des 488 accès perdu, 25 752 points de voirie contrôlés, quatre extractions compatibles, variation maximale d’appui 4,715e-7. Audit distant en 3,2 secondes. Ceci n’est pas encore une conversion distante ni une recette visuelle alpha.
+
+World alpha `45f81817-cad6-47f8-9e35-ec0dab16cff3`, six comptes/six villages lors du relevé ; staging `e25c4a95-92fc-4ab5-95cf-07786195266b`, un compte/zéro village. Les scripts opérateur et résultats détaillés sont ignorés sous `test-results/`. Deux chemins personnels non suivis préservés. [Spec](docs/SPEC-TERRAIN-SOMMETS-PARTAGES.md).
+
+---
+
 # Terrain à sommets partagés — 18–19 octobre 2026
 
 **Recette Tristan acceptée le 19 octobre ; publication alpha et staging autorisée.** Préparation du commit et des tags `staging-2026.10.19.1` / `alpha-2026.10.19.1`. Cette release inclut aussi l’extension de construction déjà poussée sur `main`. La migration 048 conserve le modèle des mondes existants ; aucune conversion distante implicite. Les vérifications décrites ci-dessous précèdent cette publication, sans nouvelle campagne applicative pour la seule clôture Git.
