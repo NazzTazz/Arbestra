@@ -90,6 +90,38 @@ it('reports an invalid worker input without an inline fallback, then recovers',a
  }finally{await compute.close();}
 });
 
+it('bounds queued trade routes before loading SQL and releases timed-out entries',async()=>{
+ const compute=new NavigationCompute(1,{waiting:1,waitMs:500,computeMs:30000}),entered=gate(),release=gate();
+ const jobs:Promise<unknown>[]=[];
+ try{
+  await compute.start();
+  const held=compute.network(async()=>{entered.release();await release.promise;return{state};});jobs.push(held);
+  await bounded(entered.promise);
+  const load=vi.fn(async()=>routeJob),queued=compute.run(load,{waitForLane:true});jobs.push(queued);
+  const expired=expect(queued).rejects.toMatchObject({code:'NAVIGATION_BUSY'});
+  expect(compute.observation.waiting).toBe(1);
+  await expect(compute.run(load,{waitForLane:true})).rejects.toMatchObject({code:'NAVIGATION_BUSY'});
+  await expired;expect(load).not.toHaveBeenCalled();expect(compute.observation.waiting).toBe(0);
+  release.release();await held;
+  expect((await compute.run(load,{waitForLane:true})).kind).toBe('found');
+ }finally{release.release();await Promise.allSettled(jobs);await compute.close();}
+});
+
+it('lets a queued trade preempt observation and keeps background routes fail-fast',async()=>{
+ const compute=new NavigationCompute(),entered=gate(),release=gate();const jobs:Promise<unknown>[]=[];
+ try{
+  await compute.start();
+  const diagnostic=compute.observationNetwork(async()=>{entered.release();await release.promise;return{state};},async()=>false);
+  jobs.push(diagnostic);const rejected=expect(diagnostic).rejects.toMatchObject({code:'OBSERVATION_BUSY'});
+  await bounded(entered.promise);
+  const background=vi.fn(async()=>routeJob);
+  await expect(compute.run(background)).rejects.toThrow('Navigation occupée');expect(background).not.toHaveBeenCalled();
+  const trade=compute.run(async()=>routeJob,{waitForLane:true});jobs.push(trade);
+  expect(compute.observation.waiting).toBe(1);
+  release.release();await rejected;expect((await trade).kind).toBe('found');expect(compute.observation.ready).toBe(1);
+ }finally{release.release();await Promise.allSettled(jobs);await compute.close();}
+});
+
 it('terminates a non-answering worker at its deadline and reboots the shared lane',async()=>{
  const compute=new NavigationCompute(1,{waiting:2,waitMs:15000,computeMs:100});
  await compute.start();

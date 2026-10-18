@@ -10,7 +10,7 @@ type Work={kind:'route'|'network';stage:string;id:string;resolve:(r:RouteResult|
 type Boot={promise:Promise<void>;resolve:()=>void;reject:(e:Error)=>void;timer:ReturnType<typeof setTimeout>};
 type Lane={worker?:Worker|undefined;boot?:Boot|undefined;busy:boolean;work?:Work|undefined;contexts:Set<string>;sources:Set<string>;observation?:Int32Array|undefined};
 type Waiting={resolve:(lane:Lane)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>};
-export interface NavigationExecutor {readonly available:number;run(load:(known:{contexts:ReadonlySet<string>;sources:ReadonlySet<string>})=>Promise<{query:RouteQuery;data?:NavigationData}>):Promise<RouteResult>;close():Promise<void>}
+export interface NavigationExecutor {readonly available:number;run(load:(known:{contexts:ReadonlySet<string>;sources:ReadonlySet<string>})=>Promise<{query:RouteQuery;data?:NavigationData}>,options?:{waitForLane?:boolean}):Promise<RouteResult>;close():Promise<void>}
 /** Persistent CPU lanes; module startup is distinct from bounded geography work. */
 export class NavigationCompute implements NavigationExecutor,TravelNetworkExecutor {
  private closed=false;
@@ -59,9 +59,12 @@ export class NavigationCompute implements NavigationExecutor,TravelNetworkExecut
   worker.on('error',(e)=>{if(lane.worker===worker)void this.fail(lane,e.message);});worker.on('exit',()=>{if(lane.worker===worker)void this.fail(lane);});
   return promise;
  }
- async run(load:(known:{contexts:ReadonlySet<string>;sources:ReadonlySet<string>})=>Promise<{query:RouteQuery;data?:NavigationData}>):Promise<RouteResult>{
+ async run(load:(known:{contexts:ReadonlySet<string>;sources:ReadonlySet<string>})=>Promise<{query:RouteQuery;data?:NavigationData}>,options:{waitForLane?:boolean}={}):Promise<RouteResult>{
   this.preemptObservation();
-  const lane=this.lanes.find(l=>!l.busy&&!l.boot);if(this.closed||!lane)throw Error('Navigation occupée');lane.busy=true;
+  // Interactive trades share the bounded projection queue. Background expedition
+  // callers retain fail-fast admission and their existing scheduler retries.
+  const lane=options.waitForLane?await this.acquireNetwork():this.lanes.find(l=>!l.busy&&!l.boot);
+  if(this.closed||!lane)throw Error('Navigation occupée');lane.busy=true;
   try{
    await this.ensureWorker(lane);if(this.closed)throw Error('Navigation fermée');
    const job=await load(lane);if(this.closed)throw Error('Navigation fermée');

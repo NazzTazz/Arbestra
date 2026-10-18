@@ -291,6 +291,30 @@ it('rejects a changed local certificate before debiting a prepared real route',a
   }finally{await compute.close();}
 });
 
+it('waits for a busy projection lane, then prepares and accepts the trade without a manual retry',async()=>{
+  const compute=new NavigationCompute();
+  let release!:()=>void,entered!:()=>void;
+  const held=new Promise<void>(r=>{release=r;}),ready=new Promise<void>(r=>{entered=r;});
+  const jobs:Promise<unknown>[]=[];
+  try{
+    await compute.start();await commandPlayerMarket(db,ids.account,slug,ids.village,publication());
+    const o=await offer();
+    // Hold the SQL loader rather than relying on two coincident promises.
+    const projection=compute.network(async()=>{entered();await held;throw Error('Released test projection');});
+    jobs.push(projection);void projection.catch(()=>{});
+    await ready;
+    const preparation=prepareTrade(db,account,slug,visitor,o.id,compute);
+    jobs.push(preparation);void preparation.catch(()=>{});
+    await expect.poll(()=>compute.observation.waiting,{timeout:2000}).toBe(1);
+    expect(await amount(visitor,'stone')).toBe(2000);
+    release();const plan=await preparation;
+    expect(plan.path.length).toBeGreaterThan(2);
+    await lock([visitor,ids.village],(tx,through)=>acceptTrade(tx,{worldId:ids.world,villageId:visitor,through},o.id,plan));
+    expect(await amount(visitor,'stone')).toBe(1750);
+    expect(await db.selectFrom('tradeJourneys').select('id').where('worldId','=',ids.world).where('offerId','=',o.id).execute()).toHaveLength(1);
+  }finally{release();await Promise.allSettled(jobs);await compute.close();}
+});
+
 it('returns a retryable preparation error without admitting or debiting when navigation is interrupted',async()=>{
   await commandPlayerMarket(db,ids.account,slug,ids.village,publication());
   const o=await offer();

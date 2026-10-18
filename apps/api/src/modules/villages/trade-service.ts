@@ -60,13 +60,13 @@ export async function prepareTrade(db: Kysely<Database>, accountId: string, slug
       movementProfileId: 'pedestrian-v1', traversalConstraintsId: 'none', coarseFirst: true, starts: endpoints(villageId), goals: endpoints(offer.villageId),
       ...(manifest&&!shortest?{hierarchy:{chunkSize:manifest.chunkSize,crossings:await readCrossings(db,manifest),meshes:await readChunkMeshes(db,manifest),...(previousPath?{previousPath}:{})}}:{}),preferShortest:shortest,
       limits: { maxNodes: 262144, maxDurationMs } }, data: context.data! };
-   });
+   },{waitForLane:true});
    const certificate=manifest&&result.kind==='found'?{namespace:manifest.namespace,dependencies:routeDependencies(manifest,result.path)}:undefined;
    if(manifest&&certificate&&result.kind==='found'&&!await publishHallRoute(db,manifest,key,{path:result.path,cost:result.cost,certificate},result.hierarchy?.crossings??[],result.hierarchy?.meshes??[]))
      throw new HttpError(409,'TRADE_ROUTE_CHANGED','Le terrain a changé. Vérifiez à nouveau le trajet.');
    return{result,revision,certificate};
   }).catch(error => {
-    if (error instanceof HttpError) throw error;
+    if (error instanceof HttpError && !['NAVIGATION_BUSY','NAVIGATION_UNAVAILABLE'].includes(error.code)) throw error;
     throw new HttpError(503, 'TRADE_PREPARATION_BUSY', 'La préparation du trajet est occupée. Réessayez.');
   });
   let {result,revision,certificate}=await calculate();

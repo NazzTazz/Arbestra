@@ -1,3 +1,13 @@
+# Correctif d'admission du devis commercial alpha — 18 octobre 2026
+
+Signalement après publication : refus « préparation du trajet occupée » entre Yume (Pinkystan) et Tristan (offre Catmark). Journaux alpha : sept POST trade-preview à `TRADE_PREPARATION_BUSY` en 68–172 ms, donc refus immédiat plutôt qu'épuisement du budget de recherche. Chargement du contexte, traversées et index vérifié avec le rôle applicatif et PostgreSQL forcé en lecture seule. Deux calculs isolés Pinkystan → Catmark sur le serveur trouvent 467 points en 21,248 / 21,429 s ; aucune acceptation ni modification des stocks. Sonde de publication dans une transaction systématiquement annulée : aucune exception SQL, publication refusée sur certificat devenu périmé pendant le calcul. Ce refus métier distinct ne produit pas le message générique observé. Scripts ignorés sous `test-results/`.
+
+Défaut reproduit localement : `NavigationCompute.run()` refuse immédiatement un calcul commercial quand une projection utilise le seul worker. Le test tient le chargeur de projection, vérifie l'attente, puis libère et accepte le commerce une seule fois. Échec observé avant correction, réussite après. Cause compatible avec les refus alpha ; l'état exact du worker vivant lors des requêtes historiques n'est pas journalisé. Inspection navigateur du NOC indisponible faute de Chrome accessible via CDP ; aucun état de session utilisateur modifié.
+
+Correctif : option `waitForLane` réservée au marché, réutilisant la file des projections (4 places / 15 s maximum avant chargement terrain). Budget CPU inchangé, aucun nouveau worker, admission immédiate des expéditions conservée. Préemption de l'observation, expiration et saturation testées ; erreurs d'admission remappées en `TRADE_PREPARATION_BUSY`. Aucun changement de règle économique ou de migration. Build API et lint ciblé terminés verts ; 55 tests / 3 fichiers terminés verts (commerce 17, navigation 13, expéditions 25). Publication corrective staging puis alpha prévue dans la continuité de la livraison demandée, résultats à compléter.
+
+---
+
 # Publication du pathfinding commercial — 18 octobre 2026
 
 Tristan confirme que l'échange fonctionne de nouveau et demande commit, push et tags alpha + staging. **Commit applicatif `20f8f2abdccb8e98139a81c2b9e6157f1f8b6267` poussé sur `main` et déployé dans les deux environnements** : cache durable HDV–HDV et index physique par chunk, réparation locale, mutualisation bornée et raccord fin des extrémités.
