@@ -1,6 +1,6 @@
 # Terrain de village à sommets partagés
 
-18–19 octobre 2026 — base d’implémentation : `64f90a4`. **Déployée sur alpha/staging, release `317cc93`, recette Tristan acceptée.** L’extension progressive à huit cases accompagne cette publication. Migration additive 048 appliquée dans les deux environnements. Tristan demande désormais la conversion du monde alpha existant en conservant les villages ; le staging peut repartir de zéro en conservant ses comptes. Son monde étant déjà vide, il a été activé directement, compte conservé. Conversion alpha en préparation ; résultats opératoires dans le handoff.
+18–19 octobre 2026 — base d’implémentation : `64f90a4`. **Déployée sur alpha/staging, recette Tristan acceptée.** Release terrain `317cc93`, puis conversion `51755ac` et tags `alpha-2026.10.19.2` / `staging-2026.10.19.2`. Migration additive 048 appliquée dans les deux environnements. Monde alpha converti sous sauvegarde : six comptes, six villages et empreintes de 72 tables métier conservés. Staging était déjà vide : activation directe, compte conservé, sans reset. L’extension progressive à huit cases accompagne la publication. Résultats opératoires et limites de recette dans le handoff.
 
 ## Résultat attendu et périmètre
 

@@ -1,6 +1,6 @@
 # Architecture autoritaire
 
-**Déployé sur alpha/staging, release `317cc93` :** [terrain à sommets partagés](../SPEC-TERRAIN-SOMMETS-PARTAGES.md). Modèle RC1 versionné par monde, coins persistés et surface commune au serveur/rendu. Migration 048 additive ; staging activé, conversion du monde alpha existant demandée et en préparation, avec préservation des appuis des bâtiments et de l’économie. Aucun autre monde converti implicitement. Nivellement réduit à une minute par case et quart de hauteur déplacé, divisée par l’effectif. État opératoire dans le handoff.
+**Déployé et activé sur alpha/staging, release `51755ac` :** [terrain à sommets partagés](../SPEC-TERRAIN-SOMMETS-PARTAGES.md). Modèle RC1 versionné par monde, coins persistés et surface commune au serveur/rendu. Migration 048 additive ; monde alpha converti sous sauvegarde avec conservation des six villages, appuis structurels et économie, staging vide activé avec son compte conservé. Aucun autre monde converti implicitement. Nivellement réduit à une minute par case et quart de hauteur déplacé, divisée par l’effectif. Preuves et limites de recette dans le handoff.
 
 **Déployée avec la release `317cc93` :** [extension progressive du village](../SPEC-EXTENSION-VILLAGE.md), portée de 8 cases, terrain et connaissance locale suivant les emprises au-delà de la zone initiale.
 
