@@ -1,3 +1,7 @@
+# Accès aux bâtiments en vue libre — décision du 18 octobre 2026
+
+Le clic ou toucher sur l’hôtel de ville ouvre sa fiche et le marché, sur la scierie ou le tailleur de pierre ouvre la fabrication, et sur l’université ouvre directement l’arbre des connaissances. Le joueur reste en Vue libre ; les commandes de ces panneaux conservent les validations serveur existantes. Les déplacements de caméra ne déclenchent pas l’ouverture d’un panneau. Cette décision remplace l’interdiction historique d’inspection métier en Exploration ci-dessous pour ces quatre bâtiments.
+
 # Récolte par intention — décision du 10 octobre 2026
 
 Cette décision de Tristan remplace, pour le parcours courant de récolte, les prescriptions historiques ci-dessous imposant une estimation Auto affichée avant envoi.
@@ -112,7 +116,7 @@ Sur une largeur réduite : faire défiler horizontalement les familles/catalogue
 
 | Mode | Monde et interaction |
 |---|---|
-| Exploration | Navigation, rendu naturel sans grille métier, recentrage et navigation vers les lieux connus. Aperçu d'éclairage local. Pas de récolte, construction, affectation ni inspection métier par clic dans le monde. |
+| Exploration | Navigation, rendu naturel sans grille métier, recentrage et navigation vers les lieux connus. Aperçu d'éclairage local. Accès par clic à l’hôtel de ville, aux fabrications de la scierie/du tailleur de pierre et aux connaissances de l’université. Les commandes passent par les panneaux existants ; pas de récolte ni construction par geste sur le terrain. |
 | Exploitation | Exploitables connus accentués ; outils de prélèvement, swipe mixte, suivi des ordres/chantiers et fiches de ressources. |
 | Population | Compteurs cohérents, filtres/cohortes, inspection des représentants et activités ; repos, repas, recherche, formation et expéditions existants. Ne construit ni ne récolte. |
 | Construction | Catalogue, damier constructible, placement, amélioration et extension existants. |

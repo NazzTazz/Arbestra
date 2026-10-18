@@ -1,5 +1,7 @@
 # Factory des matières
 
+Suite du 18 octobre 2026 : la tranche [marché joueurs](SPEC-MARCHE-JOUEURS.md) réutilise ces présentations dans ses sélections et ajoute la recette visuelle `carrot` (racines orange et fanes vertes). Elle ne crée aucun nouveau stock : `carrot` était déjà catalogué. Recette technique du marché validée sur desktop et tactile ; voir le handoff courant.
+
 12 octobre 2026 · base `main`, `be6532d`. **Maquette implémentée ; apparences à valider avec Tristan.**
 
 ## Périmètre et décisions

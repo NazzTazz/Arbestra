@@ -12,6 +12,9 @@ import { ProcessingCommandSchema, ProcessingPreviewSchema, type ProcessingComman
 import { commandVillageProcessing, previewVillageProcessing } from './service.js';
 import { MarketRequestSchema, MarketCommandSchema, MarketPreviewSchema, type MarketRequest, type MarketCommand } from '@arbestra/contracts';
 import { commandVillageMarket, previewVillageMarket } from './service.js';
+import { TradeCommandSchema, TradePageSchema, TradePreviewSchema, type TradeCommand } from '@arbestra/contracts';
+import { commandPlayerMarket, browsePlayerMarket, previewPlayerTrade } from './trade-service.js';
+import type { NavigationExecutor } from '../navigation/compute.js';
 import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
 import {harvestGardenSelection} from './service.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -78,6 +81,29 @@ export async function registerVillageRoutes(
     const minimum = (await villageSyncRevision(db, result.worldId)).revision;
     return projections.commandResponse(accountId, worldSlug, result, base, minimum);
   };
+  const tradeNavigation = navigation as TravelNetworkExecutor & NavigationExecutor;
+  app.get('/api/worlds/:worldSlug/villages/:villageId/market/offers', {
+    schema: { params: VillageParametersSchema, querystring: Type.Object({ mine: Type.Optional(Type.Boolean()), cursor: Type.Optional(Type.String({ format: 'uuid' })) }), response: { 200: TradePageSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    const { mine, cursor } = request.query as { mine?: boolean; cursor?: string };
+    return browsePlayerMarket(db, account.id, worldSlug, villageId, !!mine, cursor);
+  });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/market/trade-preview', {
+    schema: { params: VillageParametersSchema, body: Type.Object({ offerId: Type.String({ format: 'uuid' }) }, { additionalProperties: false }), response: { 200: TradePreviewSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return previewPlayerTrade(db, account.id, worldSlug, villageId, (request.body as { offerId: string }).offerId, tradeNavigation);
+  });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/market/trades', {
+    schema: { params: VillageParametersSchema, body: TradeCommandSchema, response: { 200: VillageStateSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return commandPlayerMarket(db, account.id, worldSlug, villageId, request.body as TradeCommand, tradeNavigation);
+  });
   app.get('/api/worlds/:worldSlug/villages/:villageId/harvest-intents',{
     schema:{params:VillageParametersSchema,querystring:Type.Object({ids:Type.String({maxLength:2400})}),response:{200:Type.Array(HarvestReceiptSchema)}},
   },async request=>{

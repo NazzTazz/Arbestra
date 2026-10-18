@@ -28,6 +28,11 @@ export function villageTransitionDue(snapshot: VillageState, at: Date) {
     ...snapshot.village.worksites.filter(w=>w.status==='running').map(w=>w.nextWakeAt),
     ...(snapshot.village.processingOrders?.map(o=>o.currentLot?.completesAt)??[]),
     ...(snapshot.village.market?.exchanges.filter(e=>!e.completedAt).map(e=>e.completesAt)??[]),
+    ...(snapshot.village.market?.offers?.filter(o=>o.status==='open'&&o.oracleEligible).map(o=>o.oracleAt)??[]),
+    ...(snapshot.village.market?.journeys?.flatMap(j=>[
+      ...(j.destinationVillageId===snapshot.village.id&&Date.parse(j.arrivesAt)>Date.parse(snapshot.serverTime)?[j.arrivesAt]:[]),
+      ...(j.villageId===snapshot.village.id?[j.returnsAt]:[]),
+    ])??[]),
     ...(snapshot.village.exploitationOrders?.filter(o=>o.status!=='completed').map(o=>o.deadline)??[]),
     ...(snapshot.science?.activities.map(a=>a.completesAt)??[]),
   ];

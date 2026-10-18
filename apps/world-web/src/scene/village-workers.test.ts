@@ -32,6 +32,27 @@ function fixture(free:WorkerHooks['free']=()=>true){
   return {scene,material,view,setGround:(value:number|null)=>{ground=value;},rebase:(x:number)=>{shift=x;view.shift(x,0);},dispose:()=>{view.dispose();scene.dispose();engine.dispose();}};
 }
 
+it('shows every trade porter on both legs after reload and removes them at the authoritative return',()=>{
+  const f=fixture();try {
+    const state={world:{id:'world'},village:{id:'village',worksites:[],extractions:[],market:{journeys:[{
+      id:'trade',villageId:'village',destinationVillageId:'other',workerCount:2,
+      path:[{cellX:0,cellY:0},{cellX:0,cellY:10}],startedAt:new Date(epoch).toISOString(),
+      arrivesAt:new Date(epoch+10000).toISOString(),returnsAt:new Date(epoch+20000).toISOString(),
+    }]}},cells:[]} as unknown as VillageState;
+    f.view.sync(state,epoch+4000);f.view.animate(epoch+4000,true);f.view.animate(epoch+4016,true);
+    expect(f.view.figures).toHaveLength(2);
+    expect(f.view.figures.every(p=>p.root.isEnabled())).toBe(true);
+    expect(f.view.figures[0]!.root.position.z).toBeGreaterThan(f.view.figures[1]!.root.position.z);
+    expect(f.view.figures[0]!.root.position.z).toBeCloseTo(4,0);
+    f.view.dispose();
+    f.view.sync(state,epoch+14000);f.view.animate(epoch+14000,true);f.view.animate(epoch+14016,true);
+    expect(f.view.metrics.layouts[0]?.phases).toEqual(['inbound','inbound']);
+    expect(f.view.figures[0]!.root.position.z).toBeCloseTo(6,0);
+    for(let t=14032;t<=20100;t+=32)f.view.animate(epoch+t,true);
+    expect(f.view.figures).toHaveLength(0);
+  }finally{f.dispose();}
+});
+
 it('keeps the inspected representative moving while its authoritative information stays attached',()=>{
   const f=fixture();try{
     const state=snapshot('pair',epoch,2);

@@ -1,5 +1,7 @@
 # Place de marché et Oracle
 
+Suite implémentée en worktree et validée localement le 18 octobre 2026 : [marché entre joueurs et parcours tactile](SPEC-MARCHE-JOUEURS.md). Cette nouvelle spec consigne les décisions de session, dont dix minutes de priorité joueur puis livraison Oracle instantanée. Le présent document décrit la tranche Oracle historique ; les nouvelles règles préservent les échéances des échanges déjà engagés.
+
 Date : 6 octobre 2026. Base relue : `3648eab` et worktree économique courant. Statut : **plomberie et prototype implémentés, parcours Chromium validé**. Tristan autorise la plomberie et un prototype d’interface ; il conserve la réflexion sur présentation et UX.
 
 Correction visuelle du 11 octobre 2026 : le modèle niveau 2 du marché présente sa porte sur la face d’entrée enregistrée du kit RC1 (+X), par retournement de sa racine locale avant la rotation du bâtiment. Les quatre orientations conservent l’accès et les trajets existants ; atelier canonique et modèles historiques restent inchangés. Régression géométrique ciblée vérifiée, raccord visuel sur la démo encore à valider par Tristan.

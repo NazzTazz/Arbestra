@@ -15,7 +15,7 @@ export function PopulationPanel({ population, pending, count, focus = null, onFo
         : population.total >= population.growth.target ? ' Cible atteinte.' : ' Arrivées en préparation.'}</p> : null}
     <div className="population-filters">{[['all','Tous'],['idle','Disponibles'],['working','Travail'],['resting','Repos'],['training','Science / formation']].map(([id,label]) => <button type="button" key={id} aria-pressed={filter === id} onClick={() => { setFilter(id!); onFocus?.(null, id!); }}>{label}</button>)}</div>
     <div className="cohort-list">{cohorts.map(c => <button type="button" key={c.id} aria-pressed={focus === c.id || focus === c.assignmentId} onClick={() => onFocus?.(focus === c.id ? null : c.id, filter)}>
-      {c.memberCount} personnes · {c.activity === 'resting' ? 'Repos' : c.activity === 'idle' ? 'Disponibles' : c.assignmentKind === 'garden' ? 'Récolte' : c.assignmentKind === 'extraction' ? 'Chantier' : c.assignmentKind === 'processing' ? 'Fabrication' : 'Science'} · énergie {c.energy ?? '—'}{c.cartographer ? ' · cartographes' : ''}
+      {c.memberCount} personnes · {c.activity === 'resting' ? 'Repos' : c.activity === 'idle' ? 'Disponibles' : c.assignmentKind === 'garden' ? 'Récolte' : c.assignmentKind === 'extraction' ? 'Chantier' : c.assignmentKind === 'processing' ? 'Fabrication' : c.assignmentKind === 'trade' ? 'Transport commercial' : 'Science'} · énergie {c.energy ?? '—'}{c.cartographer ? ' · cartographes' : ''}
     </button>)}</div>
     <div className="energy-list" aria-label="Répartition de l’énergie">{population.energyCounts.map((amount, energy) => amount ? <span key={energy}>Énergie {energy} : {amount}</span> : null)}</div>
     {population.restHousing ? <p>Au repos : {population.restHousing.reduce((n,h)=>n+h.restingCount,0)} avec un couchage{population.restingWithoutHousing ? ` · ${population.restingWithoutHousing} sans couchage` : ''}</p> : null}
@@ -29,7 +29,7 @@ export function BuildingPanel({ mode, building, definition, serverNow, pending, 
   const next = definition.levels.find((level) => level.level === building.level + 1);
   const upgradeCost = next?.costs.find((cost) => cost.resourceCode === 'wood')?.amount;
   const extensionCost = current?.costs.find((cost) => cost.resourceCode === 'wood')?.amount ?? 0;
-  return <div className="building-details"><span>{definition.displayName}</span><strong>Niveau {building.level}{building.targetLevel ? ` → ${building.targetLevel}` : ''}</strong>
+  const details = <div className="building-details"><span>{definition.displayName}</span><strong>Niveau {building.level}{building.targetLevel ? ` → ${building.targetLevel}` : ''}</strong>
     {building.type === 'town-hall' ? building.hiddenSuppliesAvailable ? <><p>Un vieux coffre est dissimulé dans les réserves.</p>{mode === 'exploitation' && <button disabled={pending} type="button" onClick={onDiscover}>Fouiller les réserves</button>}</> : <p>Réserves fouillées · le coffre est vide.</p> : null}
     {current?.processing && <p>{current.processing.workerCap} poste(s) de fabrication.</p>}
     {garden ? <><p>{garden.activeCellCount} parcelle{garden.activeCellCount > 1 ? 's' : ''} active{garden.activeCellCount > 1 ? 's' : ''}{garden.pendingCellCount ? ` · ${garden.pendingCellCount} en chantier` : ''}</p>
@@ -43,6 +43,8 @@ export function BuildingPanel({ mode, building, definition, serverNow, pending, 
       {mode === 'construction' && <button type="button" disabled={pending || building.status !== 'completed' || garden.expansion !== null} onClick={onUpgrade}>Étendre — {extensionCost} bois / case</button>}</> : null}
     {building.status === 'under-construction' ? <p className="construction-status">Chantier — {secondsUntil(building.constructionCompletesAt!, serverNow)} s</p> : null}
     {mode === 'construction' && upgradeCost !== undefined ? <button type="button" disabled={pending || building.status !== 'completed'} onClick={onUpgrade}>Améliorer — {upgradeCost} bois</button> : null}</div>;
+  return mode==='exploitation'&&building.type==='town-hall'&&building.level>=2
+    ? <details className="market-hall-details"><summary>Hôtel de ville et réserves</summary>{details}</details> : details;
 }
 
 export function DepositPanel({ details, unmapped = false, loading, pending, onPrepare }: { details: DepositDetails | null; unmapped?: boolean; loading: boolean; pending: boolean;

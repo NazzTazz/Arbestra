@@ -253,6 +253,7 @@ export interface PopulationCohortsTable {
   extractionId: string | null;
   scienceActivityId: ColumnType<string | null, string | null | undefined, string | null>;
   processingLotId: ColumnType<string | null, string | null | undefined, string | null>;
+  tradeJourneyId: ColumnType<string | null, string | null | undefined, string | null>;
   cartographer: ColumnType<boolean, boolean | undefined, boolean>;
   restBuildingId: ColumnType<string|null,string|null|undefined,string|null>;
   createdAt: Generated<Timestamp>;
@@ -398,6 +399,22 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  tradeOffers: {
+    id: Generated<string>; worldId: string; villageId: string;
+    requestedResource: string; requestedAmount: number; offeredResource: string; offeredAmount: number;
+    maxTravelSeconds: number; status: 'open' | 'cancelled' | 'accepted' | 'oracle';
+    createdAt: Timestamp; oracleAt: Timestamp; oracleEligible: boolean;
+  };
+  tradeJourneys: {
+    id: Generated<string>; worldId: string; villageId: string; destinationVillageId: string; offerId: string;
+    workerCount: number; path: JSONColumnType<import('@arbestra/contracts').TravelCell[]>;
+    startedAt: Timestamp; arrivesAt: Timestamp; returnsAt: Timestamp;
+  };
+  tradeDeliveries: {
+    id: Generated<string>; worldId: string; villageId: string; journeyId: string;
+    resourceCode: string; amount: number; dueAt: Timestamp; completedAt: Timestamp | null; releaseWorkers: boolean;
+  };
+  tradeReceipts: { worldId: string; villageId: string; commandId: string; request: JSONColumnType<import('@arbestra/contracts').TradeCommand> };
   expeditionSubmissions:{worldId:string;villageId:string;accountId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').ExpeditionIntent>;receipt:JSONColumnType<import('@arbestra/contracts').ExpeditionReceipt>;receivedOrder:Generated<string>;createdAt:ColumnType<Date,Date|string|undefined,Date|string>;expiresAt:ColumnType<Date,Date|string|undefined,Date|string>;attempt:Generated<number>;attemptToken:Generated<string|null>;leaseUntil:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>};
   villageSyncChanges: { worldId: string; transactionId: ColumnType<string, string, string>; navigationChanged: Generated<boolean> };
   harvestSubmissions:{worldId:string;villageId:string;commandId:string;accountId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt|null,string|null,string|null>;createdAt:Generated<Timestamp>};

@@ -13,6 +13,7 @@ import { buildSawmill } from './sawmill-factory';
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { buildPresentation } from './building-presentation';
 import { VillageWorkers } from './village-workers';
+import {WORKER_COLOURS} from './worker-figure';
 import { TimberThatch } from './timber-thatch';
 import {barracksPreviewPlacement,buildBarracks} from './barracks-factory';
 import { buildUniversityMonuments } from './university-factory';
@@ -472,7 +473,6 @@ export class BabylonVillageScene {
       return;
     }
     if (this.#mode === 'region') { this.#pointerDown = null; return; }
-    if (this.#worldMode === 'exploration'&&!this.transport.readOnly) { this.#pointerDown = null; return; }
     const gesture = this.#pointerDown;
     if (gesture.harvest) {
       if (!this.#endsOnWorldSurface(event)) { this.#handlePointerCancel(); return; }
@@ -691,10 +691,10 @@ export class BabylonVillageScene {
       routes:Array<{destination:TravelCell;points:ReturnType<WorldSpace['path']>}>}|null=null;
     let workerWidths:{state:VillageState;widths:Map<string,number>}|null=null;
     this.#workers = new VillageWorkers(this.#scene, {
-      skin: ['#e2ba94','#b98157','#684532'].map((color,i) => this.#material(`worker-skin-${i}`,color)),
-      clothes: ['#42604a','#526e86','#b69a4c','#a95f47','#d9cfb4'].map((color,i) => this.#material(`worker-clothes-${i}`,color)),
-      hair: ['#2d231e','#745039','#c4a364'].map((color,i) => this.#material(`worker-hair-${i}`,color)),
-      pants: this.#material('worker-pants','#4b4033'), timber: this.#trunkMaterial, stone: this.#stoneMaterial,
+      skin: WORKER_COLOURS.skin.map((color,i) => this.#material(`worker-skin-${i}`,color)),
+      clothes: WORKER_COLOURS.clothes.map((color,i) => this.#material(`worker-clothes-${i}`,color)),
+      hair: WORKER_COLOURS.hair.map((color,i) => this.#material(`worker-hair-${i}`,color)),
+      pants: this.#material('worker-pants',WORKER_COLOURS.pants), timber: this.#trunkMaterial, stone: this.#stoneMaterial,
     }, {
       path: path => this.#workerPath(path), project: cell => this.#space!.project(cell),
       localPath: path=>this.#pathPoints(path),
@@ -1179,7 +1179,11 @@ export class BabylonVillageScene {
 }
 
   public selectSite(siteId: string, anchor: ScreenAnchor, inspect = false): void {
-    if (this.#worldMode === 'exploration'&&!this.transport.readOnly) return;
+    if (this.#worldMode === 'exploration'&&!this.transport.readOnly) {
+      const site = this.#state?.cells.find(c => c.id === siteId);
+      const building = site?.building ?? this.#state?.cells.find(c => c.building?.id === site?.footprint?.buildingId)?.building;
+      if (!building || !['town-hall', 'sawmill', 'stonemason', 'university'].includes(building.type)) return;
+    }
     if (!this.#selectableMeshes.has(siteId)) return;
     this.#selectedFeatureId = null;
     this.#applyFeatureSelection();

@@ -4,6 +4,18 @@ Date : 6 octobre 2026. Base relue : `main`, `3648eab` (tranche graphique du tail
 
 ## 1. Intention et arbitrages
 
+### Production par durée et boutons factory — 18 octobre 2026
+
+**Validé par Tristan, implémentation autorisée jusqu’à sa recette visuelle :** la durée devient le choix principal de production ; le plafond de 20 lots est supprimé. La durée désigne du **travail prévu** : une commande de 12 h n’expire pas après 12 h réelles si elle rencontre des attentes ; celles-ci repoussent sa fin. L’objectif exprimé est de transformer les stocks de matière première disponibles au fil d’une commande longue et de relancer moins souvent les artisans. La commande reste finie, à hauteur de la quantité correspondant à la durée et à l’effectif choisis. Ces décisions remplacent les prescriptions historiques correspondantes ci-dessous.
+
+**Interface validée et implémentée :** fiche commune Scierie/Tailleur avec grande représentation factory de la matière produite, durées tactiles 1 h / 3 h / 12 h, boutons 1/2/3 habitants selon les postes du bâtiment, quantité raffinée et besoin brut recalculés à chaque sélection. À durée choisie constante, l’effectif détermine le nombre de lots. Trois PNG transparents 384 × 240 réutilisent le corps et la palette des personnages du village ; taille des personnages, angle et éclairage communs, sélection verte et postes indisponibles grisés. Les recettes économiques restent inchangées. **Recette visuelle acceptée par Tristan le 18 octobre ; commit, push et publication alpha/staging autorisés.** Statut des preuves techniques et environnements dans le handoff courant.
+
+**Disposition affinée par Tristan :** image de la ressource, puis trois durées côte à côte, puis trois effectifs côte à côte, y compris sur mobile. Aucun cadre autour des groupes de choix ; les boutons conservent leur sélection visible. Quantité produite, durée et besoin brut apparaissent ensuite dans un récapitulatif sans encadré.
+
+**Allègement et attente validés par Tristan :** supprimer la ligne technique « Par lot… Débit au démarrage… » et la vérification périodique des moyens dans la fiche. Valider sans matière première crée une commande en attente, sans débit ni affectation, avec reprise explicite conservée après réapprovisionnement. Les icônes « Inactif » et « Rupture de stocks » au-dessus des artisans sont prévues pour plus tard, hors de cette tranche.
+
+**Périmètre retenu :** reprise explicite conservée après un manque de ressources/habitants ; pas de nouvelle mécanique de reprise automatique. Pause/annulation prennent toujours effet après le lot payé. La migration conservatrice 045 retire les deux contraintes de 20 sur quantité commandée et numéro de lot, en gardant leur positivité. L’API accepte une durée parmi les trois choix, calcule les lots sur le serveur et conserve la compatibilité des anciennes commandes par quantité ; la borne technique de stockage est celle de l’entier PostgreSQL, sans plafond de gameplay à 20.
+
 **Demandé par Tristan :** une tranche économie distinguant bois et pierre bruts, bois d’œuvre et pierre taillée, intégrant le tailleur de pierres. Son apparence et son intégration décorative dans Construire → Production sont déjà validées. Cela ne valide pas les rendements, les coûts ou une mécanique de travail.
 
 **Proposition de cette spec :** deux transformations par lots, réalisées par des habitants ; stocks communs au village ; commandes finies ; premiers ateliers constructibles avec des matières brutes ; premières dépenses raffinées dans les nouvelles habitations et les améliorations de scierie.
@@ -68,9 +80,9 @@ Avec `n` habitants, durée = `ceil(600000 / n)` millisecondes. Le niveau augment
 
 ### Cycle d’une commande
 
-Une commande choisit un nombre entier de lots (1–20) et un nombre d’habitants. Un seul ordre non terminal par atelier ; pas de file supplémentaire. Chaque lot reçoit un identifiant propre et un numéro dans l’ordre.
+La fiche choisit une durée (1 h, 3 h ou 12 h) et un nombre d’habitants. Le serveur calcule un nombre entier de lots avec `floor(durée / ceil(travail_par_lot / effectif))`. Les recettes courantes permettent les trois durées exactement. Les anciennes commandes par lots positifs restent compatibles, sans limite de 20. Un seul ordre non terminal par atelier ; pas de file supplémentaire. Chaque lot reçoit un identifiant propre et un numéro dans l’ordre.
 
-1. **Démarrage :** atelier achevé, équipe et matière du premier lot disponibles ; affecter l’équipe et débiter exactement les intrants de ce lot dans la même transaction. Un refus initial ne crée ni ordre ni débit. Ne pas réserver les matières des lots futurs.
+1. **Démarrage :** atelier achevé et effectif conforme à sa capacité. Si la matière du premier lot manque, enregistrer la commande en attente sans débit, lot, tâche d’achèvement ni affectation. Sinon, exiger l’équipe disponible, l’affecter et débiter exactement les intrants du lot dans la même transaction. Les autres refus initiaux ne créent ni ordre ni débit. Ne pas réserver les matières des lots futurs.
 2. **Fabrication :** habitants occupés jusqu’à l’échéance, énergie suivant les règles communes. Pas de trajets ni de transport simulés pour ce travail sur place : matières et sorties utilisent le stock abstrait du village. Ce raccourci appartient au périmètre validé.
 3. **Achèvement :** créditer la sortie une seule fois, matérialiser l’énergie et libérer l’équipe à cette échéance. Si l’ordre continue, réévaluer immédiatement les intrants et l’éligibilité pour le lot suivant à cette même date ; réutiliser les mêmes habitants s’ils sont aptes. Une relève n’est choisie qu’à la reprise explicite.
 4. **Blocage :** faute de matière ou d’équipe apte, aucun nouveau débit ; libérer les habitants et garder le nombre de lots restant. Afficher `missing-input` ou `missing-workers`. Une livraison ultérieure ne relance pas automatiquement l’ordre : « Reprendre » réévalue à la borne de la commande.
@@ -135,7 +147,7 @@ Ajouter une notification de fin de lot au scheduler existant. Worker : tâche `S
 
 Le HUD distingue les quatre matières par libellé et icône, plus les carottes. Le détail du stock explique sa provenance ; un rendement potentiel d’atelier n’est pas affiché comme un revenu passif garanti.
 
-La fiche de scierie/tailleur permet de choisir lots et effectif, présente entrée/sortie totales prévues et coût immédiat du prochain lot, puis affiche progression datée du serveur et lots restants. Sur blocage : matière manquante ou habitants inaptes, avec reprise explicite. Pendant une fabrication, « Pause après ce lot » et « Annuler après ce lot » annoncent l’effet réel.
+La fiche de scierie/tailleur permet de choisir durée et effectif sans clavier, présente entrée/sortie totales prévues, puis affiche progression datée du serveur et travail restant. Elle ne lance plus de pré-vérification périodique ; la commande serveur décide du démarrage ou de l’attente. Sur reprise avec un autre effectif, la quantité restant à produire est conservée et la durée restante s’ajuste. Sur blocage : matière manquante ou habitants inaptes, avec reprise explicite. Pendant une fabrication, « Pause après ce lot » et « Annuler après ce lot » annoncent l’effet réel.
 
 L’aperçu local ne décide ni du coût ni des crédits. Les piles de pierres et le brasero du modèle restent décoratifs ; aucune pierre du mesh ne devient une entité persistante. Cette tranche exige un parcours navigateur fonctionnel, mais pas de nouveaux gestes animés ou de transport de matériaux.
 
@@ -152,7 +164,8 @@ Cette grille décrit les résultats attendus. Les exécutions achevées, reprise
 | Cas | Résultat observable attendu |
 |---|---|
 | Un lot, deux snapshots avant/après échéance | Entrée débitée au départ ; sortie nulle avant, crédit exact après ; relecture et notification répétée ne changent plus rien. |
-| Intrants insuffisants / équipe déjà occupée | Aucun débit, affectation ni premier ordre admis ; explication cohérente entre aperçu et commande. |
+| Intrants insuffisants dès la validation | Un ordre en attente, sans débit, affectation, lot ni notification ; rejeu sans doublon, réapprovisionnement puis reprise explicite. |
+| Équipe déjà occupée avec intrants disponibles | Aucun débit, affectation ni premier ordre admis ; explication cohérente entre aperçu et commande. |
 | Deux lots, matières pour un seul | Premier résultat acquis ; ordre bloqué, intrants restants intacts, habitants libérés ; livraison puis reprise démarre à la date de reprise. |
 | Pause/annulation pendant le lot | Lot et échéance conservés, sortie créditée une fois ; aucun prochain débit ; reprise conserve les lots restant à faire. |
 | Fatigue et fractionnement | Énergie commune exacte, population conservée, exclusivité avec Jardin/pierre/bois/sciences, aucun habitant bloqué après fin. |

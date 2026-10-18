@@ -92,7 +92,8 @@ async function worldActivePaths(tx:Transaction<Database>,worldId:string){
   const paths=await tx.selectFrom('depositExtractions').select('pathCells').where('worldId','=',worldId).where('status','=','in-progress').execute();
   const harvests=await tx.selectFrom('gardenHarvests').select(['pathCells','returnPathCells','stops']).where('worldId','=',worldId).where('status','=','in-progress').execute();
   const science=await tx.selectFrom('scienceActivities').select('pathCells').where('worldId','=',worldId).where('status','=','in-progress').execute();
-  return [...paths.map(p=>p.pathCells??[]),...harvests.flatMap(p=>[p.pathCells??[],p.returnPathCells??[],...(p.stops?.map(s=>s.path)??[])]),...science.map(p=>p.pathCells)];
+  const trades=await tx.selectFrom('tradeJourneys').select('path').where('worldId','=',worldId).where('returnsAt','>',sql<Date>`statement_timestamp()`).execute();
+  return [...paths.map(p=>p.pathCells??[]),...harvests.flatMap(p=>[p.pathCells??[],p.returnPathCells??[],...(p.stops?.map(s=>s.path)??[])]),...science.map(p=>p.pathCells),...trades.map(p=>p.path)];
 }
 /** Nearby physical obstacles participate in routing without granting edit rights. */
 export async function readNavigationInfrastructure(tx:Kysely<Database>,village:{worldId:string;villageId:string;anchorCellX:number;anchorCellY:number;widthCells:number;heightCells:number},local?:InfrastructurePlan):Promise<InfrastructurePlan>{

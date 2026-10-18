@@ -1,5 +1,5 @@
 import { infrastructurePlanSurface, spawnPathSurfaces, type SpawnSurface, type TravelCell } from '@arbestra/contracts';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { Database } from '../../database/schema.js';
 
 /** Private server snapshot. Never serialize routes or resource reservations into
@@ -38,6 +38,8 @@ export async function spawnSpatialState(db: Kysely<Database>, worldId: string) {
   for (const row of orders) if (row.gardenPlan) { protect(row.gardenPlan.returnPath); for (const stop of row.gardenPlan.stops) protect(stop.path); }
   const activities = await db.selectFrom('scienceActivities').select('pathCells').where('worldId', '=', worldId).where('status', '=', 'in-progress').execute();
   for (const row of activities) protect(row.pathCells);
+  const trades = await db.selectFrom('tradeJourneys').select('path').where('worldId', '=', worldId).where('returnsAt', '>', sql<Date>`statement_timestamp()`).execute();
+  for (const row of trades) protect(row.path);
   // Reserved wood can still have feature.state=available while workers are away.
   const reserved = await db.selectFrom('woodlandDeposits').select(['cellX', 'cellY']).where('worldId', '=', worldId).where('reservedAmount', '>', '0').execute();
   for (const c of reserved) {

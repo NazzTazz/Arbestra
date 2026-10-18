@@ -4,6 +4,7 @@ import { MARKET_DELIVERY_MS, oracleAmount, type MarketRequest, type MarketComman
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { materializeVillageResource } from './economy.js';
+import { ownTradeOffers, tradeJourneys } from './trade-economy.js';
 
 export const COMPLETE_MARKET_TASK = 'market.deliver';
 type Context = { worldId: string; villageId: string; through: Date };
@@ -79,6 +80,7 @@ export async function marketSnapshot(tx: Transaction<Database>, ctx: Context): P
     unlocked(tx, ctx),
   ]);
   return { unlocked: enabled, deliveryMs: MARKET_DELIVERY_MS, commissionPercent: 30, resources,
+    offers: await ownTradeOffers(tx, ctx), journeys: await tradeJourneys(tx, ctx),
     exchanges: [...active, ...recent].map(e => ({ id: e.id, offeredResource: e.offeredResource,
       requestedResource: e.requestedResource, offeredAmount: Number(e.offeredAmount), receivedAmount: Number(e.receivedAmount),
       startedAt: e.startedAt.toISOString(), completesAt: e.completesAt.toISOString(), completedAt: e.completedAt?.toISOString() ?? null })) };

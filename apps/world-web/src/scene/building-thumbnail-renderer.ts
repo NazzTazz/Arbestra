@@ -34,6 +34,8 @@ export async function renderBuildingThumbnail(code: string, level: number,
       // Compact resources fit their actual silhouette, including angular fragments
       // and branches, instead of the empty corners of their enclosing boxes.
       const points: Vector3[] = [];
+      // Keep each person at the same scale in the one/two/three-person buttons.
+      if(code.startsWith('workers:'))for(const x of [-.5,.5])for(const y of [-.22,.5])for(const z of [-.28,.28])points.push(new Vector3(x,y,z));
       if (code.startsWith('resource:')) for (const mesh of root.getChildMeshes()) {
         const positions = mesh.getVerticesData('position'); if (!positions) continue;
         for (let i = 0; i < positions.length; i += 3) points.push(Vector3.TransformCoordinates(Vector3.FromArray(positions, i), mesh.getWorldMatrix()));

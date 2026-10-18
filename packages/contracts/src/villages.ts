@@ -237,7 +237,7 @@ export const VillageStateSchema = Type.Object({
         restingSince:Type.Union([Type.String({format:'date-time'}),Type.Null()]),
         energy: Type.Optional(Type.Integer({minimum:0,maximum:10})),
         assignmentId: Type.Optional(Type.Union([Type.String({format:'uuid'}),Type.Null()])),
-        assignmentKind: Type.Optional(Type.Union([Type.Literal('garden'),Type.Literal('extraction'),Type.Literal('science'),Type.Literal('processing'),Type.Null()])),
+        assignmentKind: Type.Optional(Type.Union([Type.Literal('garden'),Type.Literal('extraction'),Type.Literal('science'),Type.Literal('processing'),Type.Literal('trade'),Type.Null()])),
         cartographer: Type.Optional(Type.Boolean())}))),
       restHousing:Type.Optional(Type.Array(Type.Object({buildingId:Type.String({format:'uuid'}),capacity:Type.Integer({minimum:0}),restingCount:Type.Integer({minimum:0})}))),
       restingWithoutHousing:Type.Optional(Type.Integer({minimum:0})),

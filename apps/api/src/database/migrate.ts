@@ -45,6 +45,8 @@ import * as materialProcessingMigration from './migrations/031_material_processi
 import * as stoneHouseCostsMigration from './migrations/032_stone_house_costs.js';
 import * as logHouseRawWoodMigration from './migrations/033_log_house_raw_wood.js';
 import * as oracleMarketMigration from './migrations/034_oracle_market.js';
+import * as playerMarketMigration from './migrations/044_player_market.js';
+import * as processingDurationMigration from './migrations/045_processing_duration.js';
 
 import * as worldGeneratorMigration from './migrations/035_world_generator.js';
 import * as worldGeneratorRecipeMigration from './migrations/036_world_generator_recipe.js';
@@ -96,6 +98,8 @@ const migrationProvider: MigrationProvider = {
       '041_village_sync': villageSyncMigration,
       '042_async_expeditions': asyncExpeditionsMigration,
       '043_population_growth': populationGrowthMigration,
+      '044_player_market': playerMarketMigration,
+      '045_processing_duration': processingDurationMigration,
     };
   },
 };

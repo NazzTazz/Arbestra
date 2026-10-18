@@ -1,5 +1,16 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+export const PROCESSING_DURATIONS_SECONDS = [3600, 10800, 43200] as const;
+// PostgreSQL integer storage bound, independent of the old gameplay limit.
+export const PROCESSING_MAX_LOTS = 2_147_483_647;
+export function processingLotsForDuration(durationSeconds:number,workMs:number,workerCount:number):number {
+  if (!Number.isSafeInteger(durationSeconds)||durationSeconds<=0||!Number.isSafeInteger(workMs)||workMs<=0
+    ||!Number.isInteger(workerCount)||workerCount<1||workerCount>3) throw new RangeError('Invalid production duration');
+  const lots=Math.floor(durationSeconds*1000/Math.ceil(workMs/workerCount));
+  if (!Number.isSafeInteger(lots)||lots<1||lots>PROCESSING_MAX_LOTS) throw new RangeError('Invalid production lot count');
+  return lots;
+}
+
 export const ProcessingRecipeSchema = Type.Object({
   version: Type.Integer({ minimum: 1 }), inputResource: Type.String(), inputAmount: Type.Integer({ minimum: 1 }),
   outputResource: Type.String(), outputAmount: Type.Integer({ minimum: 1 }),
@@ -22,7 +33,9 @@ export type ProcessingOrder = Static<typeof ProcessingOrderSchema>;
 const command = { commandId: Type.String({ format: 'uuid' }) };
 export const ProcessingCommandSchema = Type.Union([
   Type.Object({ ...command, action: Type.Literal('start'), buildingId: Type.String({ format: 'uuid' }),
-    lots: Type.Integer({ minimum: 1, maximum: 20 }), workerCount: Type.Integer({ minimum: 1, maximum: 3 }) }, { additionalProperties: false }),
+    lots: Type.Integer({ minimum: 1, maximum: PROCESSING_MAX_LOTS }), workerCount: Type.Integer({ minimum: 1, maximum: 3 }) }, { additionalProperties: false }),
+  Type.Object({ ...command, action: Type.Literal('start'), buildingId: Type.String({ format: 'uuid' }),
+    durationSeconds: Type.Union(PROCESSING_DURATIONS_SECONDS.map(n=>Type.Literal(n))), workerCount: Type.Integer({ minimum: 1, maximum: 3 }) }, { additionalProperties: false }),
   Type.Object({ ...command, action: Type.Literal('resume'), orderId: Type.String({ format: 'uuid' }),
     workerCount: Type.Integer({ minimum: 1, maximum: 3 }) }, { additionalProperties: false }),
   Type.Object({ ...command, action: Type.Union([Type.Literal('pause'), Type.Literal('cancel')]),

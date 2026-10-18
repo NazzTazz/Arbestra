@@ -15,9 +15,11 @@ import {buildInfrastructurePresentation} from './infrastructure-factory';
 import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
 import {createRockSurface,rockOutcropElevation} from './rock-surface';
 import { buildResourcePresentation, isResourceRecipe } from './resource-factory';
+import {buildWorkerPresentation} from './worker-figure';
 
 /** Uses the same generators as the village. The result is centred on its footprint. */
 export function buildPresentation(kit: TimberThatch, code: string, level = 1, phase: 'finished' | 'works' = 'finished'): Mesh {
+  if(/^workers:[1-3]$/.test(code))return buildWorkerPresentation(kit.scene,Number(code.slice(-1)));
   const resource = code.startsWith('resource:') ? code.slice(9) : '';
   if (isResourceRecipe(resource)) return buildResourcePresentation(kit, resource);
   if(code.startsWith('infra:')) {const kind=code.slice(6);return buildInfrastructurePresentation(kit.scene,{fixture:kind==='brazier'?'brazier':kind==='workshop'?'crossing':'elbow',width:4,length:1,material:['border','workshop','brazier'].includes(kind)?'earth':kind, border:kind==='border',quarterTurns:0,preview:kind==='none'});}

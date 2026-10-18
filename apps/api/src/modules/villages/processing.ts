@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Selectable, type Transaction } from 'kysely';
 import type { ProcessingCommand, ProcessingOrder, ProcessingPreview } from '@arbestra/contracts';
+import {PROCESSING_DURATIONS_SECONDS,PROCESSING_MAX_LOTS,processingLotsForDuration} from '@arbestra/contracts';
 import type { Database, ProcessingOrdersTable } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers } from '../population/work.js';
@@ -41,8 +42,8 @@ export async function previewProcessing(tx: Transaction<Database>, ctx: Context,
     .where('villageId', '=', ctx.villageId).where('buildingId', '=', buildingId).where('status', 'not in', terminal).executeTakeFirst();
   const busy = existing && (existing.id !== orderId || !['paused','blocked'].includes(existing.status));
   if (orderId && existing?.id !== orderId) throw new HttpError(404,'ORDER_NOT_FOUND','Ordre introuvable dans cet atelier.');
-  return { valid: !busy && !ready.reason,
-    message: busy ? 'Un ordre est déjà ouvert dans cet atelier.' : ready.reason === 'missing-input' ? 'Matière brute insuffisante.'
+  return { valid: !busy && ready.reason !== 'missing-workers',
+    message: busy ? 'Un ordre est déjà ouvert dans cet atelier.' : ready.reason === 'missing-input' ? 'La production sera en attente de matière brute.'
       : ready.reason === 'missing-workers' ? 'Habitants disponibles et aptes insuffisants.' : null,
     durationMs: ready.durationMs, inputAmount: ready.recipe.inputAmount, outputAmount: ready.recipe.outputAmount };
 }
@@ -81,14 +82,24 @@ export async function commandProcessing(tx: Transaction<Database>, ctx: Context,
     return;
   }
   if (command.action === 'start') {
-    if (!Number.isInteger(command.lots) || command.lots < 1 || command.lots > 20)
-      throw new HttpError(400, 'INVALID_LOTS', 'Choisissez entre 1 et 20 lots.');
+    let lots:number;
+    if ('durationSeconds' in command) {
+      if (!(PROCESSING_DURATIONS_SECONDS as readonly number[]).includes(command.durationSeconds))
+        throw new HttpError(400,'INVALID_DURATION','Choisissez une durée de production disponible.');
+      const recipe=await workshop(tx,ctx,command.buildingId);
+      if(!Number.isInteger(command.workerCount)||command.workerCount<1||command.workerCount>recipe.workerCap)
+        throw new HttpError(409,'WORKER_CAP',`Cet atelier dispose de ${recipe.workerCap} poste(s).`);
+      lots=processingLotsForDuration(command.durationSeconds,recipe.workMs,command.workerCount);
+    } else lots=command.lots;
+    if (!Number.isInteger(lots) || lots < 1 || lots > PROCESSING_MAX_LOTS)
+      throw new HttpError(400, 'INVALID_LOTS', 'Le nombre de lots doit être un entier positif représentable.');
     const preview = await previewProcessing(tx, ctx, command.buildingId, command.workerCount);
     if (!preview.valid) throw new HttpError(409, 'PROCESSING_UNAVAILABLE', preview.message!);
     const order = await tx.insertInto('processingOrders').values({ worldId: ctx.worldId, villageId: ctx.villageId,
-      buildingId: command.buildingId, status: 'running', blockedReason: null, requestedLots: command.lots,
+      buildingId: command.buildingId, status: 'running', blockedReason: null, requestedLots: lots,
       workerCount: command.workerCount, workerIds: '[]', createdAt: ctx.through, finishedAt: null }).returningAll().executeTakeFirstOrThrow();
-    if (!await startLot(tx, ctx, order)) throw new Error('Processing admission changed under village lock');
+    // A stock shortage preserves the plan; startLot records the waiting state without spending or assigning.
+    await startLot(tx, ctx, order);
   } else {
     const order = await tx.selectFrom('processingOrders').selectAll().where('worldId', '=', ctx.worldId)
       .where('villageId', '=', ctx.villageId).where('id', '=', command.orderId).executeTakeFirst();

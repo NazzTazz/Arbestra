@@ -132,7 +132,7 @@ function render(){canvas.dataset.ready='false';canvas.dataset.generation=String(
     const meshes=root.getChildMeshes().filter(mesh=>mesh.getTotalVertices()>0);
     canvas.dataset.vertices=String(meshes.reduce((count,mesh)=>count+mesh.getTotalVertices(),0));canvas.dataset.meshes=String(meshes.length);
     canvas.dataset.resource=code;
-    document.getElementById('budget')!.textContent={stone:'Fragments irréguliers de pierre.', 'cut-stone':'Blocs taillés, arêtes légèrement biseautées.',wood:'Troncs avec écorce et départs de branches.',logs:'Rondins avec écorce, coupés et ébranchés.',timber:'Planches et madrier sciés, grain et bois de bout visibles.'}[code];
+    document.getElementById('budget')!.textContent={stone:'Fragments irréguliers de pierre.', 'cut-stone':'Blocs taillés, arêtes légèrement biseautées.',wood:'Troncs avec écorce et départs de branches.',logs:'Rondins avec écorce, coupés et ébranchés.',timber:'Planches et madrier sciés, grain et bois de bout visibles.',carrot:'Carottes et fanes en bouquet.'}[code];
     const bounds=root.getHierarchyBoundingVectors(true),extent=bounds.max.subtract(bounds.min);
     camera.lowerRadiusLimit=1.5;camera.radius=Math.max(3,Math.max(extent.x,extent.y,extent.z)*1.7);camera.setTarget(bounds.min.add(bounds.max).scale(.5),false,false,true);return;
   }

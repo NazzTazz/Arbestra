@@ -10,6 +10,7 @@ import { WorkerTraffic, WORKER_STEP, WORKER_REBUILD_MS, WORKER_CLEARANCE, pathLe
   type TrafficActor, type WorkerPoint, type WorkerRole } from './worker-motion';
 import { worksiteLayout, worksiteConnector, type WorksiteLayout } from './worksite-layout';
 import {idleTour,idleTourPhase,type IdleLeg,type IdleVisit} from './idle-tour';
+import {buildWorkerFigure} from './worker-figure';
 
 interface Materials { skin:StandardMaterial[]; clothes:StandardMaterial[]; hair:StandardMaterial[]; pants:StandardMaterial; timber:StandardMaterial; stone:StandardMaterial; }
 export interface WorkerHooks {
@@ -23,7 +24,7 @@ export interface WorkerHooks {
   localPath?:(path:TravelCell[])=>Vector3[];
   leisurePath?:(buildingId:string,path:TravelCell[])=>Vector3[];
 }
-interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idle'|'survey'; count:number;
+interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idle'|'survey'|'trade'; count:number;
   featureId:string|null; path:TravelCell[]; target:TravelCell; startedAt:number; completesAt:number; transportMs:number;
   stops?:GardenHarvestStop[];returnPath?:TravelCell[];leisure?:IdleLeg[]; }
 type Phase='outbound'|'install'|'rotate'|'work'|'load'|'inbound'|'inside'|'done';
@@ -89,6 +90,11 @@ export class VillageWorkers {
       missions.push({ id:activity.id, key:`${identity}:${activity.id}`, resource:'survey', count:1, featureId:null,
         path, target:path[path.length-1]!, startedAt:Date.parse(activity.startedAt), completesAt:Date.parse(activity.completesAt),
         transportMs:travelDuration(path,state.world) });
+    }
+    for (const journey of state.village.market?.journeys ?? []) {
+      missions.push({ id: journey.id, key: `${state.world.id}:trade:${journey.id}`, resource: 'trade', count: journey.workerCount,
+        featureId: null, path: journey.path, target: journey.path.at(-1)!, startedAt: Date.parse(journey.startedAt),
+        completesAt: Date.parse(journey.returnsAt), transportMs: Date.parse(journey.arrivesAt) - Date.parse(journey.startedAt) });
     }
     missions.push(...this.#idleMissions(state));
     this.#latest.clear();for(const m of missions)this.#latest.set(m.key,m);
@@ -162,15 +168,15 @@ export class VillageWorkers {
   #point(p:WorkerPoint,width=.8):WorkerPoint{return {x:p.x,z:p.z,width,key:this.hooks.key(p)};}
   #route(m:Mission,stop=0){if(m.leisure)return m.leisure[stop]!.path.map(p=>this.#point(p,p.width));
     const path=m.stops?.[stop]?.path??m.path;
-    const vectors=stop>0?(this.hooks.localPath??this.hooks.path)(path):this.hooks.path(path);
+    const vectors=stop>0||m.resource==='trade'?(this.hooks.localPath??this.hooks.path)(path):this.hooks.path(path);
     const passage=m.resource==='wood'||m.resource==='stone'?workerPassagePath(vectors):vectors;
     const p=passage.map((v,i)=>this.#point(v,stop===0&&i<2?.5:this.hooks.width?.(v)??.8));
     if(!p.length)p.push(this.#point(this.hooks.project(m.target)));
-    if(m.resource!=='garden'&&m.resource!=='survey'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
+    if(m.resource!=='garden'&&m.resource!=='survey'&&m.resource!=='trade'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
       if(length>.95){b.x-=(b.x-a.x)/length*.95;b.z-=(b.z-a.z)/length*.95;b.key=this.hooks.key(b);}}
     return p;
   }
-  #layout(m:Mission,route:WorkerPoint[],stop=0){if(m.resource==='idle'||m.resource==='survey'){const end=route[route.length-1]!;return {stations:[{...end,role:'walk' as const,facing:0,pair:-1}],approach:end,variant:'front' as const};}
+  #layout(m:Mission,route:WorkerPoint[],stop=0){if(m.resource==='idle'||m.resource==='survey'||m.resource==='trade'){const end=route[route.length-1]!;return {stations:Array.from({length:m.count},()=>({...end,role:'walk' as const,facing:0,pair:-1})),approach:end,variant:'front' as const};}
     const target=this.hooks.project(m.stops?.[stop]??m.target),last=route[Math.max(0,route.length-2)]??target;
     const available=(p:WorkerPoint,r:number,allowRoads=false)=>this.hooks.free(p,r,m.featureId,allowRoads)
       &&![...this.#groups.values()].some(g=>g.mission.id!==m.id&&g.layout.stations.some(s=>Math.hypot(p.x-s.x,p.z-s.z)<r+.27));
@@ -196,13 +202,9 @@ export class VillageWorkers {
     const m=group.mission,appearance=workerAppearance(m.key,index),root=new TransformNode(`worker-${m.id}-${index}`,this.scene);
     const meshes:Mesh[]=[],skin=this.materials.skin[appearance.skin]!,clothes=this.materials.clothes[appearance.clothes]!,hair=this.materials.hair[appearance.hair]!;
     const box=(name:string,w:number,h:number,d:number,x:number,y:number,z:number,mat:StandardMaterial,parent=root)=>{const mesh=this.#box(`${root.name}-${name}`,w,h,d,x,y,z,mat,parent);meshes.push(mesh);return mesh;};
-    box('body',.24,.27,.15,0,.15,0,clothes);box('head',.15,.15,.15,0,.36,0,skin);
+    const limbs=buildWorkerFigure(root,box,{skin,clothes,hair,pants:this.materials.pants});
     const populationId = m.resource === 'idle' ? m.id.split(':')[3]! : m.id;
-    for (const mesh of meshes) mesh.metadata = { populationId, representativeId:`${m.id}:${index}`, populationActivity: m.resource === 'idle' ? 'idle' : 'working', populationKind: m.resource === 'survey' ? 'science' : m.resource };
-    box('hair',.16,.045,.16,0,.45,0,hair);box('face',.055,.035,.012,0,.34,.08,hair);
-    const limbs:TransformNode[]=[];
-    for(const side of [-1,1]){const arm=new TransformNode(`${root.name}-arm`,this.scene);arm.parent=root;arm.position.set(side*.16,.27,0);box('arm',.075,.22,.075,0,-.11,0,clothes,arm);limbs.push(arm);}
-    for(const side of [-1,1]){const leg=new TransformNode(`${root.name}-leg`,this.scene);leg.parent=root;leg.position.set(side*.065,.015,0);box('leg',.085,.21,.09,0,-.105,0,this.materials.pants,leg);limbs.push(leg);}
+    for (const mesh of meshes.slice(0,2)) mesh.metadata = { populationId, representativeId:`${m.id}:${index}`, populationActivity: m.resource === 'idle' ? 'idle' : 'working', populationKind: m.resource === 'survey' ? 'science' : m.resource };
     const role=group.layout.stations[index]!.role,tool=new TransformNode(`${root.name}-tool`,this.scene);tool.parent=limbs[1]!;
     box('handle',.035,.32,.035,0,-.18,.03,this.materials.timber,tool);
     box('tool-head',role==='pick'?.3:.15,.07,.05,.04,-.33,.03,this.materials.stone,tool);
@@ -216,10 +218,21 @@ export class VillageWorkers {
       waitingSince:null,startAt,done:false};
     const person:Person={root,dispose:()=>root.dispose(false,false),actor,index,role,phase:'outbound',phaseAt:startAt,arrivedAt:0,
       limbs,tool,cargo,meshes,angle:0,fade:0,visible:false,walk:index*.9,last:{...actor.position},previous:{...actor.position},working:false,connectorRetry:0,retireAt:null,harvestProgress:null,cohortId:this.#cohort(m,index)?.id??null,valid:true};
-    this.#reconstructPerson(person,group,now);return person;
+    this.#reconstructPerson(person,group,now);
+    if(m.resource==='trade'){person.previous={...person.actor.position};person.last={...person.actor.position};}
+    return person;
   }
   #reconstructPerson(p:Person,g:Group,now:number) {
     const m=g.mission,outEnd=m.startedAt+m.transportMs,backStart=m.completesAt-m.transportMs;
+    if (m.resource === 'trade') {
+      const returning = now >= outEnd, path = returning ? [...g.route].reverse() : g.route;
+      const progress = Math.max(0,Math.min(1,(now-(returning?outEnd:m.startedAt))/m.transportMs));
+      p.phase=now>=m.completesAt?'done':returning?'inbound':'outbound';
+      p.actor.path=path;p.actor.direction=returning?-1:1;p.actor.visible=now>=m.startedAt&&now<m.completesAt;
+      p.actor.distance=Math.max(0,pathLength(path)*progress-p.index*.35);
+      p.actor.position=sampleWorkerPath(path,p.actor.distance);p.actor.speed=pathLength(path)/(m.transportMs/1000);
+      p.actor.startAt=now;p.actor.done=p.phase==='done';p.working=false;return;
+    }
     p.harvestProgress=null;p.actor.waitingSince=null;p.actor.done=false;p.actor.visible=false;p.actor.member=p.index%2;p.actor.formation=0;p.actor.lateral=0;p.visible=false;p.fade=0;
     if(m.leisure){const current=idleTourPhase(m.leisure,now,m.key);g.stop=current.leg;g.route=this.#route(m,g.stop);g.layout=this.#layout(m,g.route,g.stop);
       p.phase=current.inside?'inside':'outbound';p.phaseAt=current.nextAt;p.working=false;p.actor.path=g.route;p.actor.speed=.75;p.actor.direction=1;
@@ -270,7 +283,7 @@ export class VillageWorkers {
   }
   #props(g:Group){
     const m=g.mission;
-    if(m.resource==='garden'||m.resource==='idle'||m.resource==='survey')return;
+    if(m.resource==='garden'||m.resource==='idle'||m.resource==='survey'||m.resource==='trade')return;
     const sawPairs=new Map<number,WorkerPoint[]>();
     for(const s of g.layout.stations)if(s.role==='saw'&&(g.layout.variant!=='compact'||s.pair===0)){const points=sawPairs.get(s.pair)??[];points.push(s.workAt??s);sawPairs.set(s.pair,points);}
     for(const [pair,points]of sawPairs){if(points.length<2)continue;const a=points[0]!,b=points[1]!,x=(a.x+b.x)/2,z=(a.z+b.z)/2;
@@ -351,6 +364,12 @@ export class VillageWorkers {
   }
   #transition(p:Person,g:Group,now:number){
     const station=g.layout.stations[p.index]!,m=g.mission;
+    if (m.resource === 'trade') {
+      this.#reconstructPerson(p,g,now);
+      p.actor.visible = now >= m.startedAt && now < m.completesAt;
+      if (now >= m.completesAt) { p.phase='done'; p.actor.visible=false; }
+      p.cargo.setEnabled(p.actor.visible); return;
+    }
     if(g.layout.variant==='compact'&&p.phase==='outbound'&&!p.actor.visible){
       // A compact site cannot accept the whole road formation at once. Admit
       // one arrival at a time, filling each distinct work post before its queue.
@@ -470,7 +489,8 @@ export class VillageWorkers {
     while(this.#accumulator>=WORKER_STEP&&steps++<4){
       const actors:TrafficActor[]=[],stationary:WorkerPoint[]=[];
       for(const g of this.#groups.values())for(const p of g.people){p.previous={...p.actor.position};if(this.hooks.ground(p.actor.position)!==null)this.#transition(p,g,now);if(['outbound','install','rotate','inbound'].includes(p.phase)||p.phase==='work'&&p.role==='carry'&&g.layout.variant!=='blocked'&&g.layout.variant!=='compact')actors.push(p.actor);else if(p.phase==='work'||p.phase==='load')stationary.push(p.actor.position);}
-      this.#traffic.step(actors,now,WORKER_STEP,stationary,p=>this.hooks.ground(p)!==null);this.#accumulator-=WORKER_STEP;
+      const tradeIds=new Set([...this.#groups.values()].filter(g=>g.mission.resource==='trade').map(g=>g.mission.id));
+      this.#traffic.step(actors.filter(a=>!tradeIds.has(a.mission)),now,WORKER_STEP,stationary,p=>this.hooks.ground(p)!==null);this.#accumulator-=WORKER_STEP;
     }
     for(const [key,g]of this.#groups){
       if(g.people.every(p=>p.phase==='done')){this.#finished.add(g.mission.id);this.#disposeGroup(g);this.#groups.delete(key);this.#graphDirty=true;if(this.#latest.get(key)?.id===g.mission.id)this.#latest.delete(key);continue;}
@@ -518,7 +538,7 @@ export class VillageWorkers {
       if(g.mission.count===1)role=cycle<6_000?'pick':cycle<10_000?'break':'carry';
       else if(g.mission.count===2&&p.role==='break')role=cycle<8_000?'break':'carry';
     }else if(working&&g.mission.resource==='wood'&&g.mission.count<=2&&cycle>=8_000)role='wood-chop';
-    const loaded=p.phase==='load'||p.phase==='inbound'||g.stop>0&&g.mission.resource==='garden'||working&&role==='carry'&&(p.role!=='carry'||p.actor.distance>1.25);
+    const loaded=g.mission.resource==='trade'||p.phase==='load'||p.phase==='inbound'||g.stop>0&&g.mission.resource==='garden'||working&&role==='carry'&&(p.role!=='carry'||p.actor.distance>1.25);
     p.cargo.setEnabled(loaded&&g.mission.resource!=='survey');p.tool.setEnabled(working&&role!=='saw'&&role!=='carry'&&role!=='walk');
     if(!animateLimbs)return;
     const [left,right,legL,legR]=p.limbs;

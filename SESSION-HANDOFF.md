@@ -1,3 +1,91 @@
+# Publication marché et ateliers — 18 octobre 2026
+
+Tristan a accepté le résultat visuel et demandé explicitement commit, push et tags alpha/staging. La publication regroupe les changements de session : marché joueurs/Oracle et transport visible (044), accès HDV/scierie/tailleur/université en Vue libre, stabilité des actualisations du marché, production par durée et attente sans stock (045). Les deux fichiers utilisateur `%SystemDrive%/` et `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` restent hors Git. Base de départ `main` / `d107ff2`, distant vérifié synchronisé avant publication. Les mentions historiques « à valider par Tristan » ci-dessous sont levées par son acceptation actuelle.
+
+Vérification de publication : lint complet et build complet des cinq projets verts ; avertissement historique gros chunks conservé. **81 tests distincts / 8 fichiers vérifiés** : 73 hors Oracle historique verts dans le passage groupé, puis les 8 Oracle historiques verts isolément avec `--hookTimeout 60000`. Le premier passage groupé avait 5 expirations du hook de remise en place Oracle à 10 s pendant la compilation, sans assertion métier atteinte ; aucune modification applicative pour la reprise. Les 20 cas transformation, y compris l’attente et la concurrence, ont cette fois terminé ensemble avec succès. PNG présents dans le build monde, fixtures de recette absentes de ses entrées.
+
+Publication en cours : tags immuables prévus `staging-2026.10.18.1` puis `alpha-2026.10.18.1`, sur le même commit applicatif. Les workflows exécutent sauvegarde puis migrations avant bascule ; aucun seed/reset distant. Résultats et liens à compléter après exécution.
+
+---
+
+# Productions : attente sans stock et fiche sans clignotement — 18 octobre 2026
+
+Demandé par Tristan et implémenté : suppression du texte « Par lot… Débit au démarrage… », du message « Vérification des moyens… » et de son espace réservé. La fiche ne lance plus de devis périodique et le bouton Produire est directement disponible. La commande serveur conserve les validations d’atelier, capacité, exclusivité et habitants ; une pénurie de matière crée désormais l’ordre `blocked` / `missing-input`, sans lot, débit, mobilisation ni notification. Le devis existant indique aussi que cette intention est admissible en attente. Reprise explicite après réapprovisionnement conservée. Les icônes futures au-dessus des artisans (« Inactif », « Rupture de stocks ») sont notées dans la spec et ne sont pas implémentées ici.
+
+Régression constatée rouge avant correction : commande sans pierre rejetée. Après correction, 19 cas de la suite transformation verts ; le cas concurrent attendait encore un rejet désormais obsolète. Attendu corrigé et cas relancé avec succès séparément : attente PostgreSQL forcée, deux intentions admises, un seul lot et une seule notification, seconde intention en attente sans second débit. Soit 20 cas vérifiés sur deux passages, pas une suite intégralement verte en un passage. Le nouveau cas prouve aussi zéro affectation/débit, rejeu sans doublon, refus d’un second ordre dans le même atelier, réapprovisionnement puis reprise et premier crédit exact. Base cible vérifiée `127.0.0.1:5432/arbestra_test`.
+
+Deux parcours navigateur verts (ordinateur/Pixel 7) sur composants réels isolés : aucun texte retiré, aucune requête de devis même avec route indisponible, bouton actif, calculs et commande transmis correctement, disposition tactile conservée. Captures relues ; callback simulé, aucun échange économique réel revendiqué par ces parcours. Lint ciblé, typage API/monde et build contrats verts. API dev relancée avec la correction, `/api/health` à 200 ; aucune migration ni remise à zéro de développement. Vite temporaire 5274 arrêté. Branche `main`, changements non commités, index vide, aucun push/déploiement distant. Travaux précédents et fichiers utilisateur préservés.
+
+---
+
+# Fiches de production compactées — 18 octobre 2026
+
+À la demande de Tristan : image de la ressource, puis une rangée de trois durées et une rangée de trois effectifs, sans cadre de regroupement. Les groupes restent nommés pour les lecteurs d’écran et les indisponibilités sont conservées sur chaque bouton. Quantité, durée calculée et besoin brut réunis sous les choix dans un récapitulatif sans encadré ; image et espacements réduits, largeur disponible utilisée. Aucune modification économique.
+
+Deux parcours navigateur achevés avec succès, ordinateur et Pixel 7 : trois boutons de même largeur et alignés sur chaque rangée, cibles tactiles d’au moins 48 px, absence de bordure de groupe, ordre image/durées/effectifs/récapitulatif et hauteur compacte mesurés. Calculs, capacités et commande transmise restent vérifiés par la fixture des composants réels, avec devis simulé. Captures ordinateur/mobile relues ; appréciation visuelle finale réservée à Tristan. Lint ciblé, typage du client monde et contrôle de whitespace verts. Vite temporaire 5274 arrêté, services dev conservés. Branche `main`, travail non commité ; aucun push ni déploiement.
+
+---
+
+# Productions par durée prêtes pour la recette visuelle de Tristan — 18 octobre 2026
+
+Tristan a autorisé l’implémentation jusqu’à **sa propre recette visuelle finale**. Implémentation et contrôles techniques achevés ; apparence finale **à valider par Tristan** en développement, Vue libre → clic Scierie/Tailleur. [Spec courante](docs/SPEC-ECONOMIE-MATIERES-TRANSFORMATION.md).
+
+Fiche commune : grande matière factory, durées tactiles 1 h / 3 h / 12 h, boutons 1/2/3 habitants selon les postes (scierie 1/2/3 par niveau, tailleur 3 au niveau 1), quantité et besoin brut recalculés immédiatement, durée restante et progression. Trois PNG transparents 384 × 240 dans `apps/world-web/public/thumbnails/workers-{1,2,3}.png`, générés depuis le même corps et la même palette que les habitants du village (`worker-figure.ts`). Échelle individuelle/caméra communes ; images statiques utilisées par le cache de miniatures. Format RGBA et présence de pixels transparents/opaques vérifiés sur les trois exports.
+
+Le serveur convertit la durée en lots ; les anciens appels par lots restent compatibles. La migration conservatrice 045 retire les deux contraintes de 20 (quantité demandée et numéro du lot) en gardant leur positivité. Borne technique d’entier PostgreSQL uniquement. Recettes, débit/crédit par lot, reçus idempotents, horodatages, verrous et notifications conservés. Une attente n’expire pas la commande ; reprise explicite conservée, sans nouvelle mécanique automatique. Changer l’effectif à la reprise conserve la quantité restante et ajuste le travail restant prévu.
+
+**Preuves courantes : 50 tests ciblés / 3 fichiers verts** : 19 intégration transformation, 29 personnages, 2 contrat/calcul. Preuves métier : commande de 216 lots calculée serveur, admission physique du lot 21, rejeu sans second débit, attente de plus de 12 h puis reprise avec avancement conservé, capacité du bâtiment, suite connexe énergie/rollback/concurrence/ordre temporel verte. Premier passage perturbé par les hooks de préparation à 10 s sur poste chargé ; hooks locaux bornés à 60 s, puis suite DB complète verte dans un processus distinct. Les 31 tests purs ont aussi terminé dans un processus vert distinct. Validation Fastify réelle du schéma : durée et anciens lots préservés, durée non supportée rejetée. **Deux parcours navigateur verts, desktop et Pixel 7**, sur les composants réels isolés : niveaux 1/2/3, tailleur, boutons verrouillés, calculs, absence de champs numériques, commande transmise au callback, absence d’erreur JS/débordement horizontal. Réponses de devis simulées dans cette recette UI ; pas d’échange économique réel revendiqué par ces tests. Captures disponibles sous `test-results/market-browser/production-duration-*` ; elles ne remplacent pas la validation visuelle de Tristan.
+
+Builds contrats/API/monde, typage des cinq projets du workspace, lint des fichiers concernés et contrôle Git de whitespace verts. Avertissement historique gros chunks conservé ; aucune suite globale ni certification de charge revendiquée. Fixture de recette et scripts d’export exclus du build de production ; HTML temporaire d’export supprimé.
+
+**Environnements :** 045 validée sur `127.0.0.1:5432/arbestra_test`, puis appliquée sur le développement local `127.0.0.1:5432/arbestra` pour rendre la recette possible. Aucun seed/reset de développement. Fixture partagée de test restaurée après les tests DB. API dev redémarrée (port 3000), santé directe et via lobby 5173 à 200 ; frontends 5173/5174 conservés. Navigateur de recette et Vite temporaire 5274 arrêtés. Branche `main`, changements non commités, aucun push/déploiement distant. Travaux précédents et deux chemins utilisateur non suivis préservés.
+
+---
+
+# Marché : actualisations sans déplacement de la fiche — 18 octobre 2026
+
+Irritant signalé par Tristan corrigé : « Préparation du marché… » reste dans un statut accessible de hauteur fixe sous le titre. La mention « Aucune offre » conserve son emplacement pendant une requête (texte masqué), au lieu de retirer puis réinsérer une ligne. Aucune modification des requêtes, des commandes ou des règles économiques.
+
+Régression navigateur `tests/e2e/market-layout.spec.ts` : déplacement d’environ 40 px du titre Oracle reproduit avant correction, après stabilisation des miniatures et du positionnement initial. Quatre cas verts, deux desktop puis deux Pixel 7 tactiles : listes vide/remplie, onglets Consulter/Mes offres, trois actualisations avec réponses retenues par cas et par onglet, soit 24 cycles. Hauteur/position de la fiche, hauteur défilante et positions des titres identiques avant/pendant/après chaque requête. Aucun message d’erreur JavaScript ; captures desktop et mobile relues. Le dernier passage tactile suit la correction du bouton de simulation de la fixture, initialement recouvert par la fiche ; aucun changement applicatif entre les recettes desktop et tactiles.
+
+Les composants réels `MarketPanel` et `WorldContextMenu` sont montés dans `apps/world-web/tests/market-layout.html`/`.tsx`, fixture servie par Vite et absente des entrées du build de production. Réponses réseau simulées ; aucune base utilisée, aucun login ni échange économique revendiqué pour cette recette. Navigateur et serveur de recette 5274 arrêtés, services dev conservés. Compilation/typage du client et lint ciblé verts ; avertissement historique sur la taille des chunks conservé. Branche `main`, travail non commité, aucun push ni déploiement ; travaux précédents et fichiers utilisateur préservés.
+
+---
+
+# Bâtiments accessibles en Vue libre — 18 octobre 2026
+
+Demande de Tristan implémentée : clic/toucher sur l’hôtel de ville → fiche et marché ; scierie/tailleur de pierre → fabrication ; université → arbre des connaissances de l’université sélectionnée. Le joueur reste en Vue libre et les commandes scientifiques sont autorisées depuis ce panneau avec les validations serveur existantes. Les gardes de sélection Babylon et le routage/panneautage React sont raccordés ; seuil de déplacement de 8 px et navigation conservés. Aucun changement serveur ni migration pour cette tranche.
+
+Régression navigateur `tests/e2e/free-view-buildings.spec.ts` : blocage du marché reproduit avant correction, puis parcours complet vert sur Chrome desktop et Pixel 7 tactile, exécutés séparément après ajustement du cadrage mobile. Les quatre sélections sont de vrais clics/touchers canvas ; seul le cadrage utilise le hook caméra E2E existant. Marché, deux fabrications avec bouton actif, connaissances, fermeture/retour au marché et maintien en Vue libre vérifiés, sans erreur JavaScript. Captures desktop et mobile de l’arbre relues. Une attente de deux images a ensuite été ajoutée au helper de cadrage du test pour éviter des coordonnées de projection anciennes ; aucun changement applicatif après ces recettes. Typage du client et lint ciblé verts ; compilation de production du client verte ; avertissement historique sur la taille des chunks conservé.
+
+Recettes limitées à des mondes privés dans `127.0.0.1:5432/arbestra_test`, supprimés en fin de parcours ; contrôle final sans résidu des recettes interrompues. Aucun reset ni modification de la base de développement pour cette tranche. Services temporaires 3100/5273/5274 arrêtés, services de développement conservés. Branche `main`, changements non commités ; pas de push ni déploiement. Spec HUD et index d’architecture actualisés ; travaux du marché et deux chemins utilisateur préservés.
+
+---
+
+# Correction du login en développement — 18 octobre 2026
+
+Après signalement de Tristan, API absente du port 3000 et base locale `127.0.0.1:5432/arbestra` restée à 043. API redémarrée ; absence de `population_cohorts.trade_journey_id` reproduite par une lecture SQL (erreur PostgreSQL `42703`). Migration additive `044_player_market` appliquée avec succès en développement, sans seed ni reset. Identités des comptes et villages conservées ; tables/colonne du marché relues avec succès. Projection de session après login vérifiée sur un compte existant en lecture seule. HTTP health direct et via lobby 5173 : 200 ; endpoint login avec identifiants volontairement inexistants : 401 `INVALID_CREDENTIALS` attendu, sans 5xx. Aucun vrai mot de passe utilisateur utilisé et connexion utilisateur complète non revendiquée. API laissée active sur 3000 ; services frontend existants conservés. Aucun changement applicatif supplémentaire, commit, push ou déploiement distant. Les mentions « développement non migré » ci-dessous décrivent l’état antérieur à cette correction.
+
+---
+
+# Marché joueurs et parcours tactile — validation locale du 18 octobre 2026
+
+[Spec courante](docs/SPEC-MARCHE-JOUEURS.md). Base `main` / `d107ff2`, changements non commités. Implémentation et validation locale terminées.
+
+**Résultat :** trois onglets, publication orientée besoin, une ressource contre une ressource, quantités tactiles 50 à 10 000 avec boutons moins/plus, Tout mon stock et miniatures factory dont carottes. Réservation dès publication, restitution si annulation avant acceptation, engagement entier par un seul joueur. L’acceptant mobilise `ceil(max(aller,retour)/250)` habitants pour tout l’aller-retour, à une case/seconde entre les accès des hôtels de ville. Crédit à l’aller chez l’auteur, contrepartie et libération au retour chez l’acceptant ; porteurs visibles. Priorité joueur dix minutes, reprise Oracle éligible instantanée, étals Oracle permanents à confirmation explicite. Paramètre de trajet libellé aller simple ; autres choix de réalisation séparés des validations produit dans la spec.
+
+**Économie :** migration additive 044, reçus idempotents, annonces/convois/livraisons locales, affectation exclusive des cohortes, réveils SSE. Deux villages verrouillés dans l’ordre canonique avant les gisements, union des gisements préparée et borne commune post-verrou. Une transition locale ne prend pas un autre village. `trade.wake` finalise seulement sa tâche ; commandes/réconciliations ne modifient pas les notifications préexistantes. Anciens échanges 034 conservés. Passages engagés protégés contre construction, équipements bloquants et nouvelle implantation.
+
+**Preuves : 90 tests distincts / 10 fichiers verts**, détail dans la spec ; 24 Oracle historique/transformations terminés ensemble avec succès. Entrelacements forcés et attentes PostgreSQL observées pour double acceptation et course Oracle, rollbacks après écritures prouvées (y compris curseurs/marqueurs), trajet réel, UUID canoniques et erreur de préparation temporaire sans débit. **Deux E2E verts, desktop et Pixel 7 tactile**, vrai clic hôtel, publication, annulation, achat Oracle et échange avec second village jusqu’au retour réel et à la libération du porteur ; figure activée dans le canvas, pas d’erreur JS ni débordement horizontal. Mondes privés de recette 128 × 128 et fixtures métier 64 × 64.
+
+**Finition visuelle :** superposition de la palette d’exploitation corrigée après constat navigateur. Dernier contrôle `agent-browser` du composant réel isolé après alignement des actions et retour en haut à chaque étape : quatre étapes, boutons mobiles 157 × 48 px, tirette passant réellement à 20 minutes, captures desktop 1280 px et mobile 393 px relues. Ce dernier contrôle vérifie les contrôles et le rendu ; les échanges réels sont couverts par les E2E ci-dessus. Artefacts ignorés sous `test-results/market-*`, fixture HTML retirée et navigateur fermé.
+
+Builds contrats/API/monde, typage des cinq projets du workspace et lint des sources verts ; derniers fichiers modifiés revérifiés. Warning gros chunks monde conservé, pas de suite globale ni certification de charge/p95/endurance.
+
+**Environnements :** 044 appliquée exclusivement à `127.0.0.1:5432/arbestra_test`. Nettoyage sélectif de deux mondes et quatre comptes laissés par des recettes interrompues, puis aucun résidu privé ; fixture partagée de test restaurée après les suites. API/lobby/monde de recette 3100/5273/5274 et navigateurs arrêtés ; services de développement préexistants conservés. Base de développement non migrée : appliquer 044 avant d’utiliser ce code contre elle. Aucune opération staging/alpha/production, commit ou push. Les deux chemins utilisateur non suivis restent préservés : `%SystemDrive%/` et l’export `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md`.
+
+---
+
 # Publication NOC — staging et alpha déployés — 17 octobre 2026
 
 Autorisation explicite de Tristan : commit, push et déploiement staging puis alpha. Commits poussés : `db78b2d` (trace de réparation Number/Yume), `74d33e2` (observation complète et correction du blocage), `d14ab1a` (workflow de contrôle public indépendant, sans mutation). Les fichiers utilisateur `%SystemDrive%/` et l’export de session restent hors Git. Lint complet et 31 tests complémentaires / 6 fichiers verts, en plus des 75 cas décrits ci-dessous ; aucun changement applicatif depuis leur validation.

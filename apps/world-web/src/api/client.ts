@@ -15,6 +15,17 @@ import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResp
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
 import type { MarketCommand, MarketRequest, MarketPreview } from '@arbestra/contracts';
+import type { TradeCommand, TradePage, TradePreview } from '@arbestra/contracts';
+const tradeUrl = (slug: string, villageId: string) => `/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/market`;
+export function commandPlayerMarket(slug: string, villageId: string, command: TradeCommand): Promise<TimedVillageState> {
+  return requestState(tradeUrl(slug, villageId) + '/trades', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(command) });
+}
+export async function browseMarket(slug: string, villageId: string, mine: boolean, cursor?: string, signal?: AbortSignal): Promise<TradePage> {
+  return parseResponse(await fetch(tradeUrl(slug, villageId) + '/offers?mine=' + mine + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''), { credentials: 'same-origin', ...(signal ? { signal } : {}) }));
+}
+export async function previewTrade(slug: string, villageId: string, offerId: string): Promise<TradePreview> {
+  return parseResponse(await fetch(tradeUrl(slug, villageId) + '/trade-preview', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ offerId }) }));
+}
 export function commandMarket(slug:string,villageId:string,command:MarketCommand):Promise<TimedVillageState> {
   return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/market`,
     {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(command)});

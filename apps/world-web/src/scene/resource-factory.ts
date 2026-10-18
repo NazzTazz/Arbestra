@@ -14,6 +14,7 @@ export const RESOURCE_RECIPES = [
   { code: 'wood', label: 'Bois brut' },
   { code: 'logs', label: 'Rondins' },
   { code: 'timber', label: 'Bois d’œuvre' },
+  { code: 'carrot', label: 'Carottes' },
 ] as const;
 export type ResourceRecipeCode = typeof RESOURCE_RECIPES[number]['code'];
 export function isResourceRecipe(code: string): code is ResourceRecipeCode {
@@ -63,6 +64,20 @@ export function buildResourcePresentation(kit: TimberThatch, code: ResourceRecip
     }
     const beam = piece('sawn-timber-beam', 2.1, .25, .25, kit.wood);
     beam.rotation.set(Math.PI / 2, -.17, 0); beam.position.set(.12, .43, -.06);
+  } else if (code === 'carrot') {
+    const orange = new StandardMaterial('resource-carrot-orange', scene); orange.diffuseColor = Color3.FromHexString('#e7802e'); orange.specularColor = Color3.Black();
+    const green = new StandardMaterial('resource-carrot-leaves', scene); green.diffuseColor = Color3.FromHexString('#508638'); green.specularColor = Color3.Black();
+    owned.push(orange, green);
+    for (let i = 0; i < 5; i++) {
+      const carrot = new Mesh(`resource-carrot-${i}`, scene); carrot.parent = root;
+      carrot.position.set((i % 3 - 1) * .42, .32 + Math.floor(i / 3) * .25, (i % 2) * .22); carrot.rotation.set(Math.PI / 2, (i - 2) * .17, 0);
+      const body = MeshBuilder.CreateCylinder(`carrot-body-${i}`, { height: 1.3, diameterTop: .3, diameterBottom: .025, tessellation: 8 }, scene);
+      body.parent = carrot; body.material = orange;
+      for (let j = 0; j < 3; j++) {
+        const leaf = MeshBuilder.CreateBox(`carrot-leaf-${i}-${j}`, { width: .09, height: .52, depth: .04 }, scene);
+        leaf.parent = carrot; leaf.position.set((j - 1) * .1, .86, 0); leaf.rotation.z = (j - 1) * -.4; leaf.material = green;
+      }
+    }
   } else {
     const textured = (name: string, draw: (context: CanvasRenderingContext2D) => void) => {
       const material = new StandardMaterial(name, scene);

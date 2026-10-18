@@ -3,6 +3,13 @@ import type { Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
+
+export async function wakeTrade(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
+  const offer = await transaction.selectFrom('tradeOffers').select('villageId').where('worldId', '=', task.worldId).where('id', '=', task.subjectId).executeTakeFirst();
+  const delivery = offer ? undefined : await transaction.selectFrom('tradeDeliveries').select('villageId').where('worldId', '=', task.worldId).where('id', '=', task.subjectId).executeTakeFirst();
+  const villageId = offer?.villageId ?? delivery?.villageId;
+  if (villageId) await beginVillageEconomy(transaction, task.worldId, villageId);
+}
 import { COMPLETE_GARDEN_HARVEST_TASK } from '../population/garden-harvest.js';
 import { COMPLETE_STONE_EXTRACTION_TASK } from '../deposits/stone-extractions.js';
 import { WAKE_EXTRACTION_WORKSITE_TASK } from '../deposits/worksites.js';

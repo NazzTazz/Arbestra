@@ -47,9 +47,9 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     await page.mouse.click(roof.x, roof.y);
     const panel = page.getByRole('region', { name: 'Fabrication de matières' });
     await expect(panel).toBeVisible();
-    await panel.getByLabel('Nombre de lots').fill('2');
-    await expect(panel.getByRole('button', { name: 'Fabriquer', exact: true })).toBeEnabled();
-    await panel.getByRole('button', { name: 'Fabriquer', exact: true }).click();
+    await panel.getByRole('button', { name: '1 h', exact: true }).click();
+    await expect(panel.getByRole('button', { name: 'Produire', exact: true })).toBeEnabled();
+    await panel.getByRole('button', { name: 'Produire', exact: true }).click();
     await panel.getByRole('button', { name: 'Pause après ce lot', exact: true }).click();
     await expect(panel.getByRole('status')).toContainText('Pause après ce lot');
     expect(Number((await db.selectFrom('villageResources').select('amount').where('villageId', '=', ids.village)
@@ -57,7 +57,7 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     // Échéance accélérée uniquement dans la base de test ; le rendement reste réel.
     await db.updateTable('processingLots').set({ completesAt: new Date(Date.now()-1000) })
       .where('worldId', '=', ids.world).where('villageId', '=', ids.village).where('completedAt', 'is', null).execute();
-    await expect(panel).toContainText('En pause · 1/2 lots achevés', { timeout: 15_000 });
+    await expect(panel).toContainText('En pause · 1/6 lots achevés', { timeout: 15_000 });
     await expect(panel.getByRole('button', { name: 'Reprendre', exact: true })).toBeDisabled();
     expect(Number((await db.selectFrom('villageResources').select('amount').where('villageId', '=', ids.village)
       .where('resourceCode', '=', 'cut-stone').executeTakeFirstOrThrow()).amount)).toBe(20);
