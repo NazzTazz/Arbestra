@@ -6,6 +6,21 @@ import {canWalkSpawnSegment} from './spawn-access.js';
 const field=(blocked:(x:number,y:number)=>boolean=()=>false):RouteField=>({worldId:'w',contextId:'r',traversalConstraintsId:'none',width:96,height:32,accesses:[],connector:()=>true,sample:(x,y)=>({elevation:1,dry:true,blocked:blocked(x,y)})});
 const query=(a={cellX:1,cellY:8},b={cellX:60,cellY:8}):RouteQuery=>({worldId:'w',contextId:'r',policyVersion:ROUTE_POLICY_VERSION,movementProfileId:'pedestrian-v1',traversalConstraintsId:'none',starts:[{kind:'point',...a}],goals:[{kind:'point',...b}],limits:{maxNodes:262144,maxDurationMs:5000}});
 describe('pure full-route navigation',()=>{
+ it.each([[false,false],[true,false],[false,true],[true,true]])('joins a distant hall through a fine doorway near the endpoint, reverse=%s, seam=%s',(reverse,seam)=>{
+  const shift=seam?262:0,wrap=(x:number)=>(x%512+512)%512;
+  const f={...field((px,y)=>{const x=wrap(px-shift);return(
+   (x>248.9&&x<249.1&&y>99&&y<102&&!(y>100.18&&y<100.58))||
+   (x>251.9&&x<252.1&&y>99&&y<102)||
+   (((y>98.9&&y<99.1)||(y>101.9&&y<102.1))&&x>248.9&&x<252.1));}),width:512,height:256};
+  const a={cellX:wrap(10+shift),cellY:100},b={cellX:wrap(250.5+shift),cellY:100.375};
+  const q=query(reverse?b:a,reverse?a:b);q.coarseFirst=true;q.limits.maxNodes=1024;
+  const result=planRoute(f,q,()=>0);expect(result.kind).toBe('found');
+  expect(result.visited).toBeLessThanOrEqual(q.limits.maxNodes);
+  if(result.kind!=='found')return;
+  expect(result.path[0]).toEqual(reverse?b:a);expect(result.path.at(-1)).toEqual(reverse?a:b);
+  for(let i=1;i<result.path.length;i++)expect(canWalkSpawnSegment(f,
+   {x:result.path[i-1]!.cellX,y:result.path[i-1]!.cellY},{x:result.path[i]!.cellX,y:result.path[i]!.cellY})).toBe(true);
+ });
  it('finds a long hall-to-hall detour within a bounded search instead of exhausting the fine lattice',()=>{
   const f={...field((x,y)=>x>190&&x<210&&y>60&&y<140),width:512,height:256};
   const q=query({cellX:150,cellY:100},{cellX:250,cellY:100});q.coarseFirst=true;q.limits.maxNodes=20000;

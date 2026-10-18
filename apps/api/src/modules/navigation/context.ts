@@ -3,6 +3,7 @@ import {buildingAccesses,type BuildingAccessState,type InfrastructurePlan,type G
 import type {Database} from '../../database/schema.js';
 import {HttpError} from '../../errors.js';
 import {RC1_CANONICAL_CHECKSUM} from '../onboarding/spawn-compute-protocol.js';
+import {navigationVersions} from './route-cache.js';
 export interface NavigationData {
  worldId:string;contextId:string;traversalConstraintsId:string;width:number;height:number;
  artifact?:string|undefined;sourceId:string;terraces:SpawnTerrace[];treeEdits:Array<{cellX:number;cellY:number;initialAmount:number;variantSeed:number;removed:number[];grove:boolean}>;
@@ -15,7 +16,7 @@ export async function navigationRevision(db:Kysely<Database>,worldId:string):Pro
  const r=await sql<{n:string}>`select count(*)::text n from village_sync_changes where world_id=${worldId} and navigation_changed`.execute(db);
  return r.rows[0]!.n;
 }
-export async function loadNavigationContext(db:Kysely<Database>,worldId:string,knownSources:ReadonlySet<string>,knownContexts:ReadonlySet<string>){
+export async function loadNavigationContext(db:Kysely<Database>,worldId:string,knownSources:ReadonlySet<string>,knownContexts:ReadonlySet<string>,persistent=false){
  return db.transaction().setIsolationLevel('repeatable read').execute(async tx=>{
   await sql`set transaction read only`.execute(tx);
   await sql`set local statement_timeout='5s'`.execute(tx);
@@ -23,11 +24,12 @@ export async function loadNavigationContext(db:Kysely<Database>,worldId:string,k
   const world=await tx.selectFrom('worlds').select(['generationVersion','generationStatus','widthCells','heightCells','chunkSize','seed']).where('id','=',worldId).executeTakeFirstOrThrow();
   if(world.generationStatus!=='ready')throw new HttpError(409,'WORLD_NOT_READY','Terrain indisponible.');
   const revision=await navigationRevision(tx,worldId);
+  const manifest=persistent?await navigationVersions(tx,worldId):undefined;
   const identity=world.generationVersion===3?await tx.selectFrom('worldGenerationCandidates').select(['checksum',sql<string>`xmin::text || ':' || ctid::text`.as('version')]).where('worldId','=',worldId).executeTakeFirst():null;
   if(world.generationVersion===3&&(!identity||identity.checksum!==RC1_CANONICAL_CHECKSUM||world.widthCells!==512||world.heightCells!==256))throw new HttpError(409,'WORLD_NOT_READY','Géographie RC1 incohérente.');
   const sourceId=identity?identity.checksum+':'+world.seed+':'+identity.version:'legacy:'+worldId+':'+revision;
   const contextId=worldId+':'+revision+':'+(identity?.version??'legacy');
-  if(knownContexts.has(contextId))return{contextId,revision,sourceId,data:undefined};
+  if(knownContexts.has(contextId))return{contextId,revision,sourceId,manifest,data:undefined};
   const occupancies=await tx.selectFrom('worldCellOccupancies').select(['cellX','cellY','buildingId','role']).where('worldId','=',worldId).where('buildingId','is not',null).execute();
   const buildings=await tx.selectFrom('buildings').select(['id','buildingType','visualLayout','quarterTurns']).where('worldId','=',worldId).execute();
   const byId=new Map(buildings.map(b=>[b.id,b]));
@@ -48,7 +50,7 @@ export async function loadNavigationContext(db:Kysely<Database>,worldId:string,k
     .select(['treeIndices','removedIndices','cleared','initialAmount','woodlandDeposits.cellX','woodlandDeposits.cellY','variantSeed']).where('worldRc1Resources.worldId','=',worldId).execute();
    treeEdits=edits.map(r=>({cellX:r.cellX??0,cellY:r.cellY??0,initialAmount:Number(r.initialAmount??0),variantSeed:r.variantSeed??3,removed:r.cleared?r.treeIndices:r.removedIndices,grove:!r.treeIndices.length&&!r.cleared}));
   }else legacy={chunkSize:world.chunkSize,chunks:await tx.selectFrom('worldChunks').select(['chunkX','chunkY','terrainCodes','elevations']).where('worldId','=',worldId).execute()};
-  return{contextId,revision,sourceId,data:{worldId,contextId,sourceId,traversalConstraintsId:'none',width:world.widthCells,height:world.heightCells,artifact,legacy,terraces,treeEdits,occupancies,accesses,plans} satisfies NavigationData};
+  return{contextId,revision,sourceId,manifest,data:{worldId,contextId,sourceId,traversalConstraintsId:'none',width:world.widthCells,height:world.heightCells,artifact,legacy,terraces,treeEdits,occupancies,accesses,plans} satisfies NavigationData};
  });
 }
 export type NavigationArtifact=GeneratedLandscape;

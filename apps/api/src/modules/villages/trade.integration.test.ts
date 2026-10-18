@@ -255,6 +255,14 @@ it('prepares a real hall-to-hall path and replays an accepted command without a 
     await compute.start();
     await commandPlayerMarket(db, ids.account, slug, ids.village, publication());
     const command = { action: 'accept' as const, commandId: randomUUID(), offerId: (await offer()).id };
+    const initial=await prepareTrade(db,account,slug,visitor,command.offerId,compute);
+    await compute.close();
+    const restarted=createDatabase(testDatabaseUrl());
+    try{
+      const noSearch={available:0,run:async()=>{throw Error('A durable hit must not boot or search a worker');},close:async()=>{}};
+      const restored=await prepareTrade(restarted,account,slug,visitor,command.offerId,noSearch);
+      expect(restored.path).toEqual(initial.path);expect(restored.travelMs).toBe(initial.travelMs);
+    }finally{await restarted.destroy();}
     const result = await commandPlayerMarket(db, account, slug, visitor.toUpperCase(), command, compute);
     expect(result.village.market?.journeys).toHaveLength(1);
     expect(result.village.population.cohorts!.filter(c => c.assignmentKind === 'trade').reduce((n, c) => n + c.memberCount, 0)).toBe(2);
@@ -265,6 +273,22 @@ it('prepares a real hall-to-hall path and replays an accepted command without a 
     expect(await amount(visitor, 'stone')).toBe(1750);
     expect(await db.selectFrom('tradeJourneys').selectAll().where('offerId', '=', command.offerId).execute()).toHaveLength(1);
   } finally { await compute.close(); }
+});
+
+it('rejects a changed local certificate before debiting a prepared real route',async()=>{
+  const compute=new NavigationCompute();
+  try{
+    await compute.start();await commandPlayerMarket(db,ids.account,slug,ids.village,publication());
+    const o=await offer(),plan=await prepareTrade(db,account,slug,visitor,o.id,compute);
+    expect(plan.certificate).toBeDefined();
+    await db.transaction().execute(async tx=>{
+      await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:'+ids.world},0))`.execute(tx);
+      await tx.updateTable('worldChunks').set({elevations:Array(1024).fill(2)}).where('worldId','=',ids.world).where('chunkX','=',1).where('chunkY','=',1).execute();
+    });
+    await expect(lock([ids.village,visitor],(tx,at)=>acceptTrade(tx,{worldId:ids.world,villageId:visitor,through:at},o.id,plan))).rejects.toMatchObject({code:'TRADE_ROUTE_CHANGED'});
+    expect(await amount(visitor,'stone')).toBe(2000);
+    expect(await db.selectFrom('tradeJourneys').select('id').where('worldId','=',ids.world).execute()).toHaveLength(0);
+  }finally{await compute.close();}
 });
 
 it('returns a retryable preparation error without admitting or debiting when navigation is interrupted',async()=>{

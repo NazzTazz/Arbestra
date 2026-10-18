@@ -1,6 +1,8 @@
 import {canWalkSpawnSegment,type SpawnAccessField} from './spawn-access.js';
 import {spawnDelta} from './spawn-map.js';
 import type {TravelCell} from './travel-paths.js';
+import type {ChunkCrossing, HierarchicalRouteStats} from './hierarchical-route.js';
+import type {ChunkNavigationMesh} from './chunk-navigation-mesh.js';
 
 export const ROUTE_POLICY_VERSION = 'rc1-pedestrian-1';
 export type RouteEndpoint = {kind:'point';cellX:number;cellY:number}|{kind:'access';accessId:string};
@@ -9,6 +11,9 @@ export interface RouteQuery {
  starts:RouteEndpoint[];goals:RouteEndpoint[];limits:{maxNodes:number;maxDurationMs:number};
  /** Long commercial searches prefer a certified cell lattice before fine passages. */
  coarseFirst?:boolean;
+ hierarchy?:{chunkSize:number;crossings:ChunkCrossing[];meshes?:ChunkNavigationMesh[];searchBudgetMs?:number;previousPath?:TravelCell[]};
+ /** Bounded second attempt when a commercial witness exceeds the announced duration. */
+ preferShortest?:boolean;
 }
 export interface RouteAccess {id:string;path:TravelCell[]}
 export interface RouteField extends SpawnAccessField {
@@ -17,9 +22,11 @@ export interface RouteField extends SpawnAccessField {
  connector:(access:RouteAccess)=>boolean;
  minimumCost?:number;
  cost?:(a:TravelCell,b:TravelCell)=>number;
+ /** Optional server-owned cache of certified physical segments; never used for access exemptions. */
+ walk?:(a:TravelCell,b:TravelCell)=>boolean;
 }
 export type RouteResult =
- | {kind:'found';contextId:string;policyVersion:string;movementProfileId:string;traversalConstraintsId:string;path:TravelCell[];length:number;cost:number;visited:number}
+ | {kind:'found';contextId:string;policyVersion:string;movementProfileId:string;traversalConstraintsId:string;path:TravelCell[];length:number;cost:number;visited:number;hierarchy?:{crossings:ChunkCrossing[];stats:HierarchicalRouteStats;meshes?:ChunkNavigationMesh[];meshHits?:number;meshChecks?:number}}
  | {kind:'unreachable';reason:'endpoints';visited:number}
  | {kind:'budget-exceeded';visited:number}
  | {kind:'context-unavailable';visited:number};
@@ -50,7 +57,7 @@ function searchRoute(field:RouteField,q:RouteQuery,now:()=>number,spacing:1|8):R
  if(q.limits.maxDurationMs<=0||q.limits.maxNodes<1)return{kind:'budget-exceeded',visited:0};
  const started=now(),w=field.width*8,h=field.height*8,queue=new Heap(),best=new Map<number,number>(),closed=new Set<number>();
  const point=(x:number,y:number):TravelCell=>({cellX:wrap(x,w)/8,cellY:wrap(y,h)/8});
- const walk=(a:TravelCell,b:TravelCell)=>canWalkSpawnSegment(field,{x:a.cellX,y:a.cellY},{x:b.cellX,y:b.cellY});
+ const walk=(a:TravelCell,b:TravelCell)=>field.walk?.(a,b)??canWalkSpawnSegment(field,{x:a.cellX,y:a.cellY},{x:b.cellX,y:b.cellY});
  const resolve=(end:RouteEndpoint):TravelCell[]|null=>{
   if(end.kind==='access'){const access=field.accesses.find(a=>a.id===end.accessId);return access&&field.connector(access)?access.path:null;}
   if(!Number.isFinite(end.cellX)||!Number.isFinite(end.cellY)||end.cellX<0||end.cellY<0||end.cellX>=field.width||end.cellY>=field.height)return null;
@@ -61,7 +68,11 @@ function searchRoute(field:RouteField,q:RouteQuery,now:()=>number,spacing:1|8):R
  if(!goals.length||!starts.length)return{kind:'unreachable',reason:'endpoints',visited:0};
  // Commercial routing needs a valid witness, not a globally cheapest path.
  const heuristic=(x:number,y:number)=>Math.min(...goals.map(p=>{const to=p[0]!;return (spacing===8?2:1)*(field.minimumCost??(field.cost?.7:1))*(Math.abs(spawnDelta(to.cellX,x/8,field.width))+Math.abs(spawnDelta(to.cellY,y/8,field.height)));}));
- const connect=(p:TravelCell)=>{const paths:TravelCell[][]=[];for(const x of new Set([Math.floor(p.cellX*8/spacing)*spacing,Math.ceil(p.cellX*8/spacing)*spacing]))for(const y of new Set([Math.floor(p.cellY*8/spacing)*spacing,Math.ceil(p.cellY*8/spacing)*spacing])){
+ // A doorway can reach the cell lattice only through a subcell passage. Keep
+ // refinement local to the endpoints instead of searching the whole fine world.
+ const attachments=[...starts.map(p=>p.at(-1)!),...goals.map(p=>p[0]!)];
+ const nearEndpoint=(p:TravelCell)=>attachments.some(a=>Math.abs(spawnDelta(p.cellX,a.cellX,field.width))<=3&&Math.abs(spawnDelta(p.cellY,a.cellY,field.height))<=3);
+ const connect=(p:TravelCell)=>{const paths:TravelCell[][]=[];for(const snap of spacing===8?[8,1]:[1])for(const x of new Set([Math.floor(p.cellX*8/snap)*snap,Math.ceil(p.cellX*8/snap)*snap]))for(const y of new Set([Math.floor(p.cellY*8/snap)*snap,Math.ceil(p.cellY*8/snap)*snap])){
   const end=point(x,y);for(const bend of [{cellX:p.cellX,cellY:end.cellY},{cellX:end.cellX,cellY:p.cellY}])if(walk(p,bend)&&walk(bend,end))paths.push([p,bend,end]);
  }return paths;};
  for(const prefix of starts)for(const link of connect(prefix.at(-1)!)){
@@ -82,12 +93,12 @@ function searchRoute(field:RouteField,q:RouteQuery,now:()=>number,spacing:1|8):R
    if(path.length>8192)return{kind:'budget-exceeded',visited};
    return{kind:'found',contextId:q.contextId,policyVersion:q.policyVersion,movementProfileId:q.movementProfileId,traversalConstraintsId:q.traversalConstraintsId,path,length:routeLength(path,field),cost:current.g+routeLength(tail,field),visited};
   }
-  const a=point(current.x,current.y),centred=current.x%8===0&&current.y%8===0;
+  const a=point(current.x,current.y),centred=current.x%8===0&&current.y%8===0,localFine=spacing===8&&nearEndpoint(a);
   for(const [dx,dy]of [[1,0],[0,1],[-1,0],[0,-1]] as const){
    const long=point(current.x+dx*8,current.y+dy*8);
    // Long edges accelerate the centre lattice; fine edges remain available for
    // off-centre destinations and side entrances even when a long edge is clear.
-   for(const step of spacing===8?[8]:centred&&walk(a,long)?[8,1]:[1]){
+   for(const step of spacing===8?(centred?(localFine?[8,1]:[8]):localFine?[1]:[]):centred&&walk(a,long)?[8,1]:[1]){
    const x=wrap(current.x+dx*step,w),y=wrap(current.y+dy*step,h),id=y*w+x,b=point(x,y);
    if(closed.has(id)||!walk(a,b))continue;
    const cost=field.cost?.(a,b)??routeLength([a,b],field),g=current.g+cost;

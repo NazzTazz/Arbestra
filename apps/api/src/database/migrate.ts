@@ -47,6 +47,7 @@ import * as logHouseRawWoodMigration from './migrations/033_log_house_raw_wood.j
 import * as oracleMarketMigration from './migrations/034_oracle_market.js';
 import * as playerMarketMigration from './migrations/044_player_market.js';
 import * as processingDurationMigration from './migrations/045_processing_duration.js';
+import * as navigationCacheMigration from './migrations/046_navigation_cache.js';
 
 import * as worldGeneratorMigration from './migrations/035_world_generator.js';
 import * as worldGeneratorRecipeMigration from './migrations/036_world_generator_recipe.js';
@@ -100,6 +101,7 @@ const migrationProvider: MigrationProvider = {
       '043_population_growth': populationGrowthMigration,
       '044_player_market': playerMarketMigration,
       '045_processing_duration': processingDurationMigration,
+      '046_navigation_cache': navigationCacheMigration,
     };
   },
 };

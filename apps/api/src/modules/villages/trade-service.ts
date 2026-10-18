@@ -1,16 +1,24 @@
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
-import { ROUTE_POLICY_VERSION, marketWorkers, travelDuration, type TradeCommand, type TradePreview, type TravelCell } from '@arbestra/contracts';
+import { ROUTE_POLICY_VERSION, marketWorkers, travelDuration, type TradeCommand, type TradePreview, type TravelCell, type RouteResult } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { ownedVillage, state } from './service.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
 import { navigationRevision, loadNavigationContext } from '../navigation/context.js';
+import {certificateValid, hallRouteKey, navigationVersions, publishHallRoute, readChunkMeshes, readCrossings, readHallRoute, routeDependencies, touchHallRoute, type NavigationVersions, type RouteCertificate} from '../navigation/route-cache.js';
 import type { NavigationExecutor } from '../navigation/compute.js';
+import {SharedCalculation} from '../navigation/shared-calculation.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts } from '../population/work.js';
 import { assertMarket, cancelTrade, directOracle, publishTrade, readTradeOffers, tradeDebit, tradeWake, type TradeContext } from './trade-economy.js';
 
-type PreparedTrade = { worldId: string; villageId: string; destinationVillageId: string; revision: string; path: TravelCell[]; travelMs: number };
+type PreparedTrade = { worldId: string; villageId: string; destinationVillageId: string; revision: string; path: TravelCell[]; travelMs: number; certificate?: RouteCertificate };
+type Calculation={result:RouteResult;revision:string;certificate:RouteCertificate|undefined};
+const calculations=new WeakMap<Kysely<Database>,WeakMap<NavigationExecutor,SharedCalculation<Calculation>>>();
+function sharedCalculation(db:Kysely<Database>,compute:NavigationExecutor){
+  let executors=calculations.get(db);if(!executors){executors=new WeakMap();calculations.set(db,executors);}
+  let shared=executors.get(compute);if(!shared){shared=new SharedCalculation<Calculation>();executors.set(compute,shared);}return shared;
+}
 export async function prepareTrade(db: Kysely<Database>, accountId: string, slug: string, villageId: string, offerId: string, compute: NavigationExecutor): Promise<PreparedTrade> {
   villageId=villageId.toLowerCase();
   const { village, offer } = await db.transaction().execute(async tx => {
@@ -22,25 +30,57 @@ export async function prepareTrade(db: Kysely<Database>, accountId: string, slug
   });
   const halls = await db.selectFrom('buildings').select(['id', 'villageId']).where('worldId', '=', village.worldId)
     .where('villageId', 'in', [villageId, offer.villageId]).where('buildingType', '=', 'town-hall').execute();
-  let revision = '';
-  const result = await compute.run(async known => {
+  const persistent = process.env.NAVIGATION_HIERARCHICAL !== '0';
+  const key = hallRouteKey(halls.find(h=>h.villageId===villageId)?.id??villageId,halls.find(h=>h.villageId===offer.villageId)?.id??offer.villageId);
+  let previousPath:TravelCell[]|undefined;
+  if(persistent){
+    const {cached,valid}=await db.transaction().setIsolationLevel('repeatable read').execute(async tx=>{
+      const manifest=await navigationVersions(tx,village.worldId),cached=await readHallRoute(tx,manifest,key,db,true);
+      return{cached,valid:cached?certificateValid(manifest,cached.certificate):false};
+    });
+    if(cached){
+      await touchHallRoute(db,village.worldId,key);
+      const travelMs=Math.max(1,travelDuration(cached.path,village));
+      if(valid&&travelMs<=offer.maxTravelSeconds*1000)return{worldId:village.worldId,villageId,destinationVillageId:offer.villageId,revision:'',path:cached.path,travelMs,certificate:cached.certificate};
+      if(travelMs<=offer.maxTravelSeconds*1000)previousPath=cached.path;
+    }
+  }
+  const began=performance.now();
+  const calculate=(shortest=false,maxDurationMs=30000)=>sharedCalculation(db,compute).run(village.worldId+':'+key+':'+persistent+':'+shortest,async()=>{
+   let revision = '';
+   let manifest:NavigationVersions|undefined;
+   const result = await compute.run(async known => {
     // Require an access manifest even when the CPU lane has a warm context.
-    const context = await loadNavigationContext(db, village.worldId, known.sources, new Set());
+    const context = await loadNavigationContext(db, village.worldId, known.sources, new Set(),persistent);
     revision = context.revision;
+    manifest=context.manifest;
     const endpoints = (id: string) => context.data!.accesses.filter(a => a.buildingId === halls.find(h => h.villageId === id)?.id)
       .map(a => ({ kind: 'access' as const, accessId: a.id }));
     return { query: { worldId: village.worldId, contextId: context.contextId, policyVersion: ROUTE_POLICY_VERSION,
       movementProfileId: 'pedestrian-v1', traversalConstraintsId: 'none', coarseFirst: true, starts: endpoints(villageId), goals: endpoints(offer.villageId),
-      limits: { maxNodes: 262144, maxDurationMs: 30000 } }, data: context.data! };
+      ...(manifest&&!shortest?{hierarchy:{chunkSize:manifest.chunkSize,crossings:await readCrossings(db,manifest),meshes:await readChunkMeshes(db,manifest),...(previousPath?{previousPath}:{})}}:{}),preferShortest:shortest,
+      limits: { maxNodes: 262144, maxDurationMs } }, data: context.data! };
+   });
+   const certificate=manifest&&result.kind==='found'?{namespace:manifest.namespace,dependencies:routeDependencies(manifest,result.path)}:undefined;
+   if(manifest&&certificate&&result.kind==='found'&&!await publishHallRoute(db,manifest,key,{path:result.path,cost:result.cost,certificate},result.hierarchy?.crossings??[],result.hierarchy?.meshes??[]))
+     throw new HttpError(409,'TRADE_ROUTE_CHANGED','Le terrain a changé. Vérifiez à nouveau le trajet.');
+   return{result,revision,certificate};
   }).catch(error => {
     if (error instanceof HttpError) throw error;
     throw new HttpError(503, 'TRADE_PREPARATION_BUSY', 'La préparation du trajet est occupée. Réessayez.');
   });
+  let {result,revision,certificate}=await calculate();
+  if(result.kind==='found'&&travelDuration(result.path,village)>offer.maxTravelSeconds*1000){
+    const remaining=30000-(performance.now()-began);
+    if(remaining<=0)throw new HttpError(503,'TRADE_PREPARATION_BUSY','Le calcul du trajet est temporairement indisponible. Réessayez.');
+    const improved=await calculate(true,remaining);
+    if(improved.result.kind!=='found'||travelDuration(improved.result.path,village)<travelDuration(result.path,village))({result,revision,certificate}=improved);
+  }
   if (result.kind === 'budget-exceeded' || result.kind === 'context-unavailable') throw new HttpError(503, 'TRADE_PREPARATION_BUSY', 'Le calcul du trajet est temporairement indisponible. Réessayez.');
   if (result.kind !== 'found' || !result.path.length) throw new HttpError(409, 'TRADE_ROUTE', 'Aucun trajet commercial praticable trouvé.');
   const travelMs = Math.max(1, travelDuration(result.path, village));
   if (travelMs > offer.maxTravelSeconds * 1000) throw new HttpError(409, 'TRADE_DISTANCE', 'Le trajet dépasse le maximum fixé par cette annonce.');
-  return { worldId: village.worldId, villageId, destinationVillageId: offer.villageId, revision, path: result.path, travelMs };
+  return { worldId: village.worldId, villageId, destinationVillageId: offer.villageId, revision, path: result.path, travelMs, ...(certificate?{certificate}:{}) };
 }
 
 /** Both village rows are already owned in canonical order. All shared deposits
@@ -60,7 +100,7 @@ export async function acceptTrade(tx: Transaction<Database>, ctx: TradeContext, 
   if (!offer || offer.status !== 'open') throw new HttpError(409, 'TRADE_CLOSED', 'Cette annonce a déjà été acceptée ou annulée.');
   if (offer.villageId !== prepared.destinationVillageId || prepared.worldId !== ctx.worldId || prepared.villageId !== ctx.villageId || offer.villageId === ctx.villageId)
     throw new HttpError(409, 'TRADE_CHANGED', 'L’annonce a changé.');
-  if (await navigationRevision(tx, ctx.worldId) !== prepared.revision) throw new HttpError(409, 'TRADE_ROUTE_CHANGED', 'Le terrain a changé. Vérifiez à nouveau le trajet.');
+  if (prepared.certificate?!certificateValid(await navigationVersions(tx,ctx.worldId),prepared.certificate):await navigationRevision(tx, ctx.worldId) !== prepared.revision) throw new HttpError(409, 'TRADE_ROUTE_CHANGED', 'Le terrain a changé. Vérifiez à nouveau le trajet.');
   if (prepared.travelMs > offer.maxTravelSeconds * 1000) throw new HttpError(409, 'TRADE_DISTANCE', 'Trajet trop long.');
   const workerCount = marketWorkers(offer.requestedAmount, offer.offeredAmount);
   const cohorts = eligibleWorkers(await materializeCohorts(tx, ctx.worldId, ctx.villageId, ctx.through), prepared.travelMs * 2);

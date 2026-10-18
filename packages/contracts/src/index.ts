@@ -46,6 +46,8 @@ export * from './deposit-range.js';
 export * from './woodland-layout.js';
 
 export * from './route-planner.js';
+export * from './hierarchical-route.js';
+export * from './chunk-navigation-mesh.js';
 export * from './expeditions.js';
 export * from './operations.js';
 export * from './dev-timing.js';

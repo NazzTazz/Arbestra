@@ -66,7 +66,7 @@ describe.sequential('infrastructure authoritative commands',()=>{
     await expect(infrastructureCommand(db,accountId,'aube',villageId,{...r,expected:{...r.expected!,stoneDebit:0}})).rejects.toMatchObject({code:'QUOTE_CHANGED'});expect(await stocks()).toEqual(before);
     await db.updateTable('villageResources').set({amount:'0'}).where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','stone').execute();
     await expect(infrastructureCommand(db,accountId,'aube',villageId,r)).rejects.toMatchObject({code:'INSUFFICIENT_RESOURCES'});
-    expect((await readInfrastructure(db,worldId,villageId)).revision).toBe(0);expect(await db.selectFrom('infrastructureReceipts').select('commandId').execute()).toHaveLength(0);
+    expect((await readInfrastructure(db,worldId,villageId)).revision).toBe(0);expect(await db.selectFrom('infrastructureReceipts').select('commandId').where('worldId','=',worldId).where('villageId','=',villageId).execute()).toHaveLength(0);
     await db.updateTable('villageResources').set({amount:'10'}).where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','stone').execute();
     await infrastructureCommand(db,accountId,'aube',villageId,r);const money=await stocks();
     await expect(infrastructureCommand(db,accountId,'aube',villageId,{...r,revision:1})).rejects.toMatchObject({code:'COMMAND_REUSED'});expect(await stocks()).toEqual(money);
@@ -88,7 +88,7 @@ describe.sequential('infrastructure authoritative commands',()=>{
       expect(await tx.selectFrom('infrastructureReceipts').select('commandId').where('commandId','=',r.commandId).execute()).toHaveLength(1);
       const stone=await tx.selectFrom('villageResources').select('amount').where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','stone').executeTakeFirstOrThrow();
       expect(BigInt(stone.amount)).toBe(BigInt(before.find(r=>r.resourceCode==='stone')!.amount)-1n);observed=true;throw failure;
-    })).rejects.toBe(failure);expect(observed).toBe(true);expect(await stocks()).toEqual(before);expect((await readInfrastructure(db,worldId,villageId)).revision).toBe(0);expect(await db.selectFrom('infrastructureReceipts').select('commandId').execute()).toHaveLength(0);
+    })).rejects.toBe(failure);expect(observed).toBe(true);expect(await stocks()).toEqual(before);expect((await readInfrastructure(db,worldId,villageId)).revision).toBe(0);expect(await db.selectFrom('infrastructureReceipts').select('commandId').where('worldId','=',worldId).where('villageId','=',villageId).execute()).toHaveLength(0);
   });
   it('protects a manual corridor from a new building and rejects a forged free automatic brazier',async()=>{
     const s=await snapshot(),r=await freeRoad(s),placed=await infrastructureCommand(db,accountId,'aube',villageId,r);if(r.operation.kind!=='road')throw new Error('fixture');const p=r.operation.stroke.points[0]!,before=await stocks();

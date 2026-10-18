@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {beforeAll,afterAll,it,expect} from 'vitest';
-import {buildSpawnAccessNetwork,canWalkSpawnSegment,ROUTE_POLICY_VERSION,spawnDelta,type GeneratedLandscape,type RouteQuery} from '@arbestra/contracts';
+import {buildSpawnAccessNetwork,canWalkSpawnSegment,planHierarchicalRoute,ROUTE_POLICY_VERSION,spawnDelta,type GeneratedLandscape,type RouteQuery} from '@arbestra/contracts';
 import {createDatabase} from '../../database/connection.js';
 import {testDatabaseUrl} from '../../database/test-environment.js';
 import {migrateToLatest} from '../../database/migrate.js';
@@ -41,4 +41,19 @@ it('reaches a distant RC1 destination and certifies every segment against curren
   for(let j=1;j<result.path.length;j++)expect(canWalkSpawnSegment(ground.navigation,{x:result.path[j-1]!.cellX,y:result.path[j-1]!.cellY},{x:result.path[j]!.cellX,y:result.path[j]!.cellY})).toBe(true);
  }
  console.info(JSON.stringify({rc1Route:{start,goal,coldMs:timings[0],warmMs:timings.slice(1)}}));
+},120000);
+
+it('measures a hierarchical route on the authoritative RC1 substrate',async()=>{
+ const ground=await readRc1Ground(db,world);
+ const field={...ground.navigation,worldId:world,contextId:'benchmark',traversalConstraintsId:'none',accesses:[],connector:()=>false};
+ const start={x:140,y:20};
+ const network=buildSpawnAccessNetwork(ground.navigation,[[start]],60,4000);
+ const witness=network.routes.find(r=>Math.abs(spawnDelta(r.point.x,start.x,512))+Math.abs(spawnDelta(r.point.y,start.y,256))>34);
+ expect(witness).toBeDefined();
+ const q:RouteQuery={worldId:world,contextId:'benchmark',policyVersion:ROUTE_POLICY_VERSION,movementProfileId:'pedestrian-v1',traversalConstraintsId:'none',
+  starts:[{kind:'point',cellX:start.x,cellY:start.y}],goals:[{kind:'point',cellX:witness!.point.x,cellY:witness!.point.y}],coarseFirst:true,limits:{maxNodes:262144,maxDurationMs:30000}};
+ const began=performance.now(),out=planHierarchicalRoute(field,q,32);
+ console.info(JSON.stringify({hierarchicalRC1:{ms:performance.now()-began,kind:out.result.kind,visited:out.result.visited,...out.stats}}));
+ expect(out.result.kind).toBe('found');
+ if(out.result.kind==='found')for(let i=1;i<out.result.path.length;i++)expect(canWalkSpawnSegment(ground.navigation,{x:out.result.path[i-1]!.cellX,y:out.result.path[i-1]!.cellY},{x:out.result.path[i]!.cellX,y:out.result.path[i]!.cellY})).toBe(true);
 },120000);

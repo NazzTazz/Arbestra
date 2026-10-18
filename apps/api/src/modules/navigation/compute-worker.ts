@@ -1,6 +1,6 @@
 import {parentPort} from 'node:worker_threads';
 import {canWalkSpawnSegment,createSpawnTerrainField,editedRc1Field,woodlandTrees,woodlandPassage,infrastructurePlanSurface,
- planRoute,routeLength,spawnDelta,buildTravelNetwork,type TravelGround,type RouteField,type GeneratedLandscape,type WoodlandTree,type RouteQuery} from '@arbestra/contracts';
+ planRoute,planHierarchicalRoute,ChunkNavigationCache,routeLength,spawnDelta,buildTravelNetwork,type TravelGround,type RouteField,type GeneratedLandscape,type WoodlandTree,type RouteQuery} from '@arbestra/contracts';
 import {artifactChecksum} from '../world-generator/artifact.js';
 import type {NavigationData} from './context.js';
 import type {NetworkJob} from './network-job.js';
@@ -80,10 +80,18 @@ parentPort!.on('message',(job:{id:string;query?:RouteQuery;data?:NavigationData;
    parentPort!.postMessage({id:job.id,network,contexts:[...contexts.keys()],sources:[...sources.keys()]});return;
   }
   if(job.data){const field=build(job.data,stage);contexts.set(job.data.contextId,field);while(contexts.size>2)contexts.delete(contexts.keys().next().value!);}
-  stage('search');const q=job.query!;if(!q)throw Error('Requête navigation manquante');const key=JSON.stringify([q.worldId,q.contextId,q.policyVersion,q.movementProfileId,q.traversalConstraintsId,q.starts,q.goals,q.coarseFirst??false]);
-  const base=contexts.get(q.contextId),field=base?.forGoals?.(q.goals)??base,cached=routes.get(key);
-  const result=field?(cached?{...cached,visited:0}:planRoute(field,{...q,limits:{...q.limits,maxDurationMs:Math.max(0,Math.min(q.limits.maxDurationMs,q.coarseFirst?30000:5000)-(performance.now()-began))}})):{kind:'context-unavailable' as const,visited:0};
-  if(result.kind==='found'){routes.set(key,result);while(routes.size>64||[...routes.values()].reduce((n,r)=>n+r.path.length,0)>65536)routes.delete(routes.keys().next().value!);}
+  stage('search');const q=job.query!;if(!q)throw Error('Requête navigation manquante');const key=JSON.stringify([q.worldId,q.contextId,q.policyVersion,q.movementProfileId,q.traversalConstraintsId,q.starts,q.goals,q.coarseFirst??false,q.hierarchy?.chunkSize,q.preferShortest??false]);
+  const base=contexts.get(q.contextId),ordinary=base?.forGoals?.(q.goals)??base;
+  const field=q.preferShortest&&ordinary?{...ordinary,minimumCost:1,cost:(a:import('@arbestra/contracts').TravelCell,b:import('@arbestra/contracts').TravelCell)=>routeLength([a,b],ordinary)}:ordinary,cached=routes.get(key);
+  const bounded={...q,limits:{...q.limits,maxDurationMs:Math.max(0,Math.min(q.limits.maxDurationMs,q.coarseFirst?30000:5000)-(performance.now()-began))}};
+  const mesh=field&&!cached&&q.hierarchy?new ChunkNavigationCache(field,q.hierarchy.chunkSize,q.hierarchy.meshes):undefined;
+  const indexed=mesh&&field?{...field,walk:mesh.walk}:field;
+  const hierarchical=indexed&&!cached&&q.hierarchy?planHierarchicalRoute(indexed,{...bounded,hierarchy:{...q.hierarchy,searchBudgetMs:q.hierarchy.searchBudgetMs??(q.hierarchy.meshes?.length?250:0)}},q.hierarchy.chunkSize,q.hierarchy.crossings):undefined;
+  const result=indexed?(cached?{...cached,visited:0}:hierarchical?(hierarchical.result.kind==='found'?{...hierarchical.result,hierarchy:{crossings:hierarchical.crossings,stats:hierarchical.stats,meshes:mesh?.changed()??[],meshHits:mesh?.hits??0,meshChecks:mesh?.checks??0}}:hierarchical.result):planRoute(indexed,bounded)):{kind:'context-unavailable' as const,visited:0};
+  if(result.kind==='found'){
+   routes.set(key,{...result,...(result.hierarchy?{hierarchy:{...result.hierarchy,crossings:[],meshes:[]}}:{})});
+   while(routes.size>64||[...routes.values()].reduce((n,r)=>n+r.path.length,0)>65536)routes.delete(routes.keys().next().value!);
+  }
   for(const [k,r]of routes)if(!contexts.has(r.contextId))routes.delete(k);
   while(sources.size>2)sources.delete(sources.keys().next().value!);
   parentPort!.postMessage({id:job.id,result,contexts:[...contexts.keys()],sources:[...sources.keys()]});
