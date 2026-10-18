@@ -39,6 +39,15 @@ export function pathLength(path: readonly WorkerPoint[]) {
 export function workerPassagePath<T extends WorkerPoint>(path: readonly T[]): T[] {
   const result:T[]=[],indices=new Map<string,number>();
   for(const point of path){
+    // A fine connector may retrace part of its final segment when it joins the
+    // coarse grid. Remove only that collinear spur: the retained segment is
+    // entirely contained in the committed passage, without cutting a corner.
+    while(result.length>=2){
+      const a=result[result.length-2]!,b=result[result.length-1]!;
+      const dx=b.x-a.x,dz=b.z-a.z,ex=point.x-b.x,ez=point.z-b.z;
+      if(Math.abs(dx*ez-dz*ex)>1e-9||dx*ex+dz*ez>=0)break;
+      result.pop();indices.delete(`${b.x}:${b.z}`);
+    }
     const key=`${point.x}:${point.z}`,prior=indices.get(key);
     if(prior!==undefined){
       while(result.length>prior+1){const removed=result.pop()!;indices.delete(`${removed.x}:${removed.z}`);}

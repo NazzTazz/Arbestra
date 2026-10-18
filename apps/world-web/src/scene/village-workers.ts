@@ -24,7 +24,7 @@ export interface WorkerHooks {
   localPath?:(path:TravelCell[])=>Vector3[];
   leisurePath?:(buildingId:string,path:TravelCell[])=>Vector3[];
 }
-interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idle'|'survey'|'trade'; count:number;
+interface Mission { id:string; key:string; resource:'wood'|'stone'|'garden'|'idle'|'survey'|'trade'|'leveling'; count:number;
   featureId:string|null; path:TravelCell[]; target:TravelCell; startedAt:number; completesAt:number; transportMs:number;
   stops?:GardenHarvestStop[];returnPath?:TravelCell[];leisure?:IdleLeg[]; }
 type Phase='outbound'|'install'|'rotate'|'work'|'load'|'inbound'|'inside'|'done';
@@ -95,6 +95,11 @@ export class VillageWorkers {
       missions.push({ id: journey.id, key: `${state.world.id}:trade:${journey.id}`, resource: 'trade', count: journey.workerCount,
         featureId: null, path: journey.path, target: journey.path.at(-1)!, startedAt: Date.parse(journey.startedAt),
         completesAt: Date.parse(journey.returnsAt), transportMs: Date.parse(journey.arrivesAt) - Date.parse(journey.startedAt) });
+    }
+    for (const job of state.village.levelingJobs ?? []) {
+      missions.push({id:job.id,key:`${identity}:leveling:${job.id}`,resource:'leveling',count:job.workerCount,
+        featureId:job.featureId,path:job.path,target:job.path.at(-1)!,
+        startedAt:Date.parse(job.startedAt),completesAt:Date.parse(job.completesAt),transportMs:job.transportMs});
     }
     missions.push(...this.#idleMissions(state));
     this.#latest.clear();for(const m of missions)this.#latest.set(m.key,m);
@@ -169,10 +174,10 @@ export class VillageWorkers {
   #route(m:Mission,stop=0){if(m.leisure)return m.leisure[stop]!.path.map(p=>this.#point(p,p.width));
     const path=m.stops?.[stop]?.path??m.path;
     const vectors=stop>0||m.resource==='trade'?(this.hooks.localPath??this.hooks.path)(path):this.hooks.path(path);
-    const passage=m.resource==='wood'||m.resource==='stone'?workerPassagePath(vectors):vectors;
+    const passage=m.resource==='wood'||m.resource==='stone'||m.resource==='leveling'?workerPassagePath(vectors):vectors;
     const p=passage.map((v,i)=>this.#point(v,stop===0&&i<2?.5:this.hooks.width?.(v)??.8));
     if(!p.length)p.push(this.#point(this.hooks.project(m.target)));
-    if(m.resource!=='garden'&&m.resource!=='survey'&&m.resource!=='trade'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
+    if(m.resource!=='garden'&&m.resource!=='survey'&&m.resource!=='trade'&&m.resource!=='leveling'&&p.length>1){const a=p[p.length-2]!,b=p[p.length-1]!,length=Math.hypot(b.x-a.x,b.z-a.z);
       if(length>.95){b.x-=(b.x-a.x)/length*.95;b.z-=(b.z-a.z)/length*.95;b.key=this.hooks.key(b);}}
     return p;
   }
@@ -180,11 +185,11 @@ export class VillageWorkers {
     const target=this.hooks.project(m.stops?.[stop]??m.target),last=route[Math.max(0,route.length-2)]??target;
     const available=(p:WorkerPoint,r:number,allowRoads=false)=>this.hooks.free(p,r,m.featureId,allowRoads)
       &&![...this.#groups.values()].some(g=>g.mission.id!==m.id&&g.layout.stations.some(s=>Math.hypot(p.x-s.x,p.z-s.z)<r+.27));
-    const layout=worksiteLayout(m.resource,m.count,target,last,available);
+    const layout=worksiteLayout(m.resource==='leveling'?'stone':m.resource,m.count,target,last,available);
     // Prefer posts outside traffic. A road crossing a nearly cleared woodland
     // remains walkable; it must not make every valid physical post impossible.
     return layout.variant==='blocked'&&m.resource!=='garden'
-      ?worksiteLayout(m.resource,m.count,target,last,(p,r)=>available(p,r,true)):layout;}
+      ?worksiteLayout(m.resource==='leveling'?'stone':m.resource,m.count,target,last,(p,r)=>available(p,r,true)):layout;}
   #create(mission:Mission,now:number):Group {
     const stop=mission.stops?Math.max(0,mission.stops.findIndex(s=>now<mission.startedAt+s.workEndsAfterMs)):0;
     const route=this.#route(mission,stop),layout=this.#layout(mission,route,stop),root=new TransformNode(`worksite-${mission.id}`,this.scene);
@@ -358,6 +363,10 @@ export class VillageWorkers {
       // teammate just outside the old fixed 1.5 m connector threshold.
       distance=Math.max(1.5,...g.layout.stations.flatMap(s=>s.workAt?[s,s.workAt]:[s])
         .map(s=>Math.hypot(s.x-target.x,s.z-target.z)+WORKER_CLEARANCE));
+      // Terrassiers work beside the reserved pad, potentially at the final
+      // road bend. Leave before the traffic gate's one-metre exit clearance
+      // sees a teammate already working there.
+      if(g.mission.resource==='leveling')distance+=1;
       this.#installationDistances.set(g.layout,distance);
     }
     return distance;
@@ -400,7 +409,7 @@ export class VillageWorkers {
       }
       return;
     }
-    const roadArrival=p.actor.done||(['wood','stone'].includes(m.resource)&&p.actor.visible
+    const roadArrival=p.actor.done||(['wood','stone','leveling'].includes(m.resource)&&p.actor.visible
       &&pathLength(p.actor.path)-p.actor.distance+(p.actor.member??0)*.5*Math.cos((p.actor.formation??0)*Math.PI/2)<=this.#installationDistance(g));
     if(p.phase==='outbound'&&roadArrival&&now>=p.connectorRetry){
       const from={...p.actor.position},target=this.hooks.project(m.target);
@@ -410,7 +419,7 @@ export class VillageWorkers {
       p.phase='install';p.phaseAt=now;p.arrivedAt=now;p.harvestProgress=0;p.actor.waitingSince=null;p.actor.path=connector;
       p.actor.distance=0;p.actor.done=false;p.actor.member=0;p.actor.formation=0;p.actor.startAt=now;p.actor.rank=100+p.index;p.actor.speed=1.6;}
     else if((p.phase==='install'||p.phase==='rotate')&&p.actor.done){p.phase='work';p.phaseAt=now;}
-    if((p.phase==='install'||p.phase==='rotate')&&['wood','stone'].includes(m.resource)
+    if((p.phase==='install'||p.phase==='rotate')&&['wood','stone','leveling'].includes(m.resource)
       &&p.actor.waitingSince!==null&&now-p.actor.waitingSince>=1500&&now>=p.connectorRetry){
       p.connectorRetry=now+1500;
       const goal=p.actor.path.at(-1)!,connector=worksiteConnector(p.actor.position,goal,this.hooks.project(m.target),
@@ -539,7 +548,7 @@ export class VillageWorkers {
       else if(g.mission.count===2&&p.role==='break')role=cycle<8_000?'break':'carry';
     }else if(working&&g.mission.resource==='wood'&&g.mission.count<=2&&cycle>=8_000)role='wood-chop';
     const loaded=g.mission.resource==='trade'||p.phase==='load'||p.phase==='inbound'||g.stop>0&&g.mission.resource==='garden'||working&&role==='carry'&&(p.role!=='carry'||p.actor.distance>1.25);
-    p.cargo.setEnabled(loaded&&g.mission.resource!=='survey');p.tool.setEnabled(working&&role!=='saw'&&role!=='carry'&&role!=='walk');
+    p.cargo.setEnabled(loaded&&g.mission.resource!=='survey'&&g.mission.resource!=='leveling');p.tool.setEnabled(working&&role!=='saw'&&role!=='carry'&&role!=='walk');
     if(!animateLimbs)return;
     const [left,right,legL,legR]=p.limbs;
     const swing=moving?Math.sin(p.walk)*.55:0;left!.rotation.set(swing,0,0);right!.rotation.set(-swing,0,0);
@@ -576,7 +585,7 @@ export class VillageWorkers {
         :`${m.resource==='garden'?'Jardin':m.resource==='wood'?'Bosquet':m.resource==='stone'?'Gisement de pierre':'Relevé'} · ${target.cellX}, ${target.cellY}`;
       return {id,cohortId:p.cohortId,presence:this.#presence(p),waiting:p.actor.waitingSince!==null,name:names[hash%names.length]!,cohortSize:cohort?.memberCount??null,energy:cohort?.energy??null,
         qualifications:cohort?[cohort.cartographer?'Cartographe':'Aucune qualification spécialisée']:['Non renseignées'],
-        destination,mode:m.resource==='idle'?'Balade':m.resource==='wood'||m.resource==='stone'?'Chantier':m.resource==='garden'?'Mission de récolte':'Mission de reconnaissance'};
+        destination,mode:m.resource==='idle'?'Balade':m.resource==='wood'||m.resource==='stone'||m.resource==='leveling'?'Chantier':m.resource==='garden'?'Mission de récolte':'Mission de reconnaissance'};
     }return null;
   }
   populationPosition(id: string) {

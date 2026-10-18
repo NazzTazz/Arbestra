@@ -162,7 +162,7 @@ export class TerrainRenderer {
     });
     for (const f of chunk.features.filter(f => f.type !== 'woodland' && wantedFeature(f))) {
       const { x, y } = featureCenter(f);
-      add(`feature:${f.id}`, JSON.stringify(f), false, 1, x, y, () => this.feature(f));
+      add(`feature:${f.id}${f.type === 'leveling-site' ? `:${f.cellX}:${f.cellY}` : ''}`, JSON.stringify(f), false, 1, x, y, () => this.feature(f));
     }
     const woods = chunk.features.filter(f => f.type === 'woodland' && wantedFeature(f)).sort((a, b) => a.cellY - b.cellY || a.cellX - b.cellX || a.id.localeCompare(b.id));
     for (let i = 0; i < woods.length; i++) {
@@ -170,7 +170,7 @@ export class TerrainRenderer {
       const { x, y } = featureCenter(batch[0]!);
       add(`woodland:${batch[0]!.id}`, JSON.stringify(batch), false, 1, x, y, () => this.woodland(batch));
     }
-    const featureKeys = new Set(chunk.features.map(f => `${f.type === 'woodland' ? 'woodland' : 'feature'}:${f.id}`));
+    const featureKeys = new Set(chunk.features.map(f => `${f.type === 'woodland' ? 'woodland' : 'feature'}:${f.id}${f.type === 'leveling-site' ? `:${f.cellX}:${f.cellY}` : ''}`));
     // Camera masks control new work, not the lifetime of already built tiles.
     // Whole residents are still evicted under the same hard chunk cap.
     for (const [key, u] of resident.units) if ((key.startsWith('feature:') || key.startsWith('woodland:')) && !featureKeys.has(key)) {

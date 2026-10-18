@@ -253,6 +253,7 @@ export interface PopulationCohortsTable {
   extractionId: string | null;
   scienceActivityId: ColumnType<string | null, string | null | undefined, string | null>;
   processingLotId: ColumnType<string | null, string | null | undefined, string | null>;
+  levelingJobId: ColumnType<string | null, string | null | undefined, string | null>;
   tradeJourneyId: ColumnType<string | null, string | null | undefined, string | null>;
   cartographer: ColumnType<boolean, boolean | undefined, boolean>;
   restBuildingId: ColumnType<string|null,string|null|undefined,string|null>;
@@ -399,6 +400,13 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  levelingJobs: {
+    id: Generated<string>; worldId: string; villageId: string; featureId: string; commandId: string;
+    request: JSONColumnType<import('@arbestra/contracts').LevelingCommand>;
+    quote: JSONColumnType<import('@arbestra/contracts').LevelingQuote>;
+    path: JSONColumnType<TravelCell[]>; workerCount: number;
+    startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;
+  };
   tradeOffers: {
     id: Generated<string>; worldId: string; villageId: string;
     requestedResource: string; requestedAmount: number; offeredResource: string; offeredAmount: number;

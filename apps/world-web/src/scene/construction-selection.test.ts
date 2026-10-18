@@ -10,6 +10,19 @@ const world: VillageState['world'] = {
 const at = (cellX: number, cellY: number): Cell => ({ cellX, cellY });
 
 describe('construction selection', () => {
+  it('requires leveling for a gently sloping university even when every cell is individually buildable', () => {
+    const cells = rectangleCells({ first: at(2046, 1022), last: at(2, 3) }, world, true).cells;
+    const state = { world, cells: cells.map(c => ({ ...c, canBuild: true })), region: {
+      originCellX: 2046, originCellY: 1022, width: 5, height: 6,
+      elevations: cells.map((_, i) => 25 + Math.floor(i / 5)),
+    } } as VillageState;
+    const area = previewArea(state, { first: at(2046, 1022), last: at(2, 3) }, true, undefined, 'university');
+    expect(area.error).toBe('Cette emprise doit être nivelée avant de construire.');
+    expect(area.needsLeveling).toBe(true);
+    expect(area.obstacleCells).toEqual([]);
+    state.region.elevations.fill(25);
+    expect(previewArea(state, { first: at(2046, 1022), last: at(2, 3) }, true, undefined, 'university').error).toBeNull();
+  });
   it('selects the small rectangle across both torus seams and bounds large selections before allocating', () => {
     const area = rectangleCells({ first: at(2047, 1023), last: at(0, 0) }, world, true);
     expect(area.count).toBe(4);

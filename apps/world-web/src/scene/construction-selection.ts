@@ -1,9 +1,9 @@
-import {fixedBuildingFootprint} from '@arbestra/contracts';
+import {fixedBuildingFootprint, isBuildingFootprintFlat} from '@arbestra/contracts';
 import type { VillageState } from '@arbestra/contracts';
 
 export interface Cell { cellX: number; cellY: number }
 export interface CellRange { first: Cell; last: Cell }
-export interface AreaPreview { cells: Cell[]; count: number; error: string | null; newCells?: Cell[]; existingCells?: Cell[]; obstacleCells?: Cell[] }
+export interface AreaPreview { cells: Cell[]; count: number; error: string | null; needsLeveling?: boolean; newCells?: Cell[]; existingCells?: Cell[]; obstacleCells?: Cell[] }
 export const MAX_SELECTION_CELLS = 100;
 export const cellKey = (cell: Cell): string => `${cell.cellX}:${cell.cellY}`;
 function fixedRange(type:'university'|'stonemason',anchor:Cell,turns:number):CellRange {
@@ -54,7 +54,7 @@ export function rectangleCells(range: CellRange, world: Pick<VillageState['world
   return { cells, count, error: null };
 }
 
-export function previewArea(state: VillageState, range: CellRange, spatial: boolean, extensionBuildingId?: string): AreaPreview {
+export function previewArea(state: VillageState, range: CellRange, spatial: boolean, extensionBuildingId?: string, buildingType?: string): AreaPreview {
   const preview = rectangleCells(range, state.world, spatial);
   if (preview.error) return preview;
   const free = new Set(state.cells.filter((cell) => cell.canBuild).map(cellKey));
@@ -71,7 +71,17 @@ export function previewArea(state: VillageState, range: CellRange, spatial: bool
       return { ...result, error: 'La zone doit partager un côté avec le Jardin actif.' };
     return result;
   }
-  return previewCells(preview.cells,cell=>free.has(cellKey(cell)));
+  const result = previewCells(preview.cells,cell=>free.has(cellKey(cell)));
+  if (!result.error && (buildingType === 'university' || buildingType === 'stonemason')) {
+    const heights = result.cells.map(c => {
+      const x = normalize(c.cellX - state.region.originCellX, state.world.widthCells);
+      const y = normalize(c.cellY - state.region.originCellY, state.world.heightCells);
+      return x < state.region.width && y < state.region.height ? state.region.elevations[y * state.region.width + x]! : NaN;
+    });
+    if (heights.some(h => !Number.isFinite(h))) return { ...result, error: 'Terrain en cours de chargement.' };
+    if (!isBuildingFootprintFlat(heights)) return { ...result, needsLeveling: true, error: 'Cette emprise doit être nivelée avant de construire.' };
+  }
+  return result;
 }
 
 /** Shared preview for rectangular buildings and compound starter footprints. */

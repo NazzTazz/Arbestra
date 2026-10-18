@@ -32,6 +32,36 @@ function fixture(free:WorkerHooks['free']=()=>true){
   return {scene,material,view,setGround:(value:number|null)=>{ground=value;},rebase:(x:number)=>{shift=x;view.shift(x,0);},dispose:()=>{view.dispose();scene.dispose();engine.dispose();}};
 }
 
+it('takes three leveling inhabitants through the fine doorstep connector without a permanent queue',()=>{
+  const f=fixture();try {
+    const path=[[59,194.584],[59,194.125],[59.125,194.125],[59.25,194.125],[59.375,194.125],[59.5,194.125],[60,194.125],[60,194],[60,195],[60,196],[60,197],[59.375,197],[59.25,197],[59.125,197],[59,197]].map(([cellX,cellY])=>({cellX:cellX!,cellY:cellY!}));
+    const state={world:{id:'world'},village:{id:'village',worksites:[],extractions:[],levelingJobs:[{
+      id:'leveling',featureId:'site',buildingType:'university',cells:[{cellX:59,cellY:198}],height:.25,workerCount:3,
+      path,transportMs:7000,startedAt:new Date(epoch).toISOString(),completesAt:new Date(epoch+80000).toISOString(),
+    }]},cells:[]} as unknown as VillageState;
+    f.view.sync(state,epoch);
+    for(let t=0;t<50000;t+=33)f.view.animate(epoch+t,true);
+    expect(f.view.metrics.layouts[0]!.phases,JSON.stringify(f.view.figures.map(p=>p.root.position.asArray()))).toEqual(['work','work','work']);
+  }finally{f.dispose();}
+});
+
+it('shows the assigned leveling inhabitants working and removes them on the authoritative completion',()=>{
+  const f=fixture();try {
+    const state={world:{id:'world'},village:{id:'village',worksites:[],extractions:[],levelingJobs:[{
+      id:'leveling',featureId:'site',buildingType:'university',cells:[{cellX:0,cellY:9}],height:.25,workerCount:2,
+      path:[{cellX:0,cellY:0},{cellX:0,cellY:8}],transportMs:8000,
+      startedAt:new Date(epoch).toISOString(),completesAt:new Date(epoch+80000).toISOString(),
+    }]},cells:[]} as unknown as VillageState;
+    f.view.sync(state,epoch+20000);f.view.animate(epoch+20000,true);f.view.animate(epoch+20016,true);
+    expect(f.view.figures).toHaveLength(2);
+    expect(f.view.figures.every(p=>p.root.isEnabled())).toBe(true);
+    expect(f.view.metrics.layouts[0]).toMatchObject({resource:'leveling',phases:['work','work']});
+    f.view.sync({...state,village:{...state.village,levelingJobs:[]}},epoch+80000);
+    for(let t=80000;t<92000;t+=33)f.view.animate(epoch+t,true);
+    expect(f.view.figures.filter(p=>p.root.isEnabled())).toHaveLength(0);
+  }finally{f.dispose();}
+});
+
 it('shows every trade porter on both legs after reload and removes them at the authoritative return',()=>{
   const f=fixture();try {
     const state={world:{id:'world'},village:{id:'village',worksites:[],extractions:[],market:{journeys:[{

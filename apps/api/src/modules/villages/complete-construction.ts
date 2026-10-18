@@ -96,3 +96,8 @@ export async function wakeExtractionWorksite(transaction: Transaction<Database>,
   const economy = await beginVillageEconomy(transaction, task.worldId, site.villageId);
   await admitVillageWorksites(transaction, economy);
 }
+
+export async function completeLeveling(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
+  const job = await transaction.selectFrom('levelingJobs').select('villageId').where('worldId', '=', task.worldId).where('id', '=', task.subjectId).executeTakeFirst();
+  if (job) await beginVillageEconomy(transaction, task.worldId, job.villageId, undefined, [], [], true);
+}

@@ -129,6 +129,7 @@ export class BabylonVillageScene {
   readonly #previewMeshes: Mesh[] = [];
   readonly #pendingHarvestMeshes: Mesh[] = [];
   readonly #pendingHarvestMaterial: StandardMaterial;
+  readonly #levelingAreaMaterial: StandardMaterial;
   readonly #invalidAreaMaterial: StandardMaterial;
   readonly #resizeObserver: ResizeObserver;
   readonly #siteMaterial: StandardMaterial;
@@ -654,6 +655,9 @@ export class BabylonVillageScene {
 
     this.#siteMaterial = this.#material('available-site', '#647442', 0);
     this.#candidateMaterial = this.#material('extension-candidate', '#39ff14', 1, '#39ff14');
+    this.#levelingAreaMaterial = this.#material('leveling-area', '#ffb52e', 1, '#ffb52e');
+    this.#levelingAreaMaterial.disableLighting = true;
+    this.#levelingAreaMaterial.backFaceCulling = false;
     this.#invalidAreaMaterial = this.#material('invalid-area', '#ff2020', 1, '#ff2020');
     this.#candidateMaterial.disableLighting = true;
     this.#invalidAreaMaterial.disableLighting = true;
@@ -1383,7 +1387,7 @@ export class BabylonVillageScene {
         p.z,
       );
       mesh.material = obstacles.has(cellKey(cell)) ? this.#invalidAreaMaterial
-        : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
+        : preview?.needsLeveling ? this.#levelingAreaMaterial : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
       mesh.isPickable = false;
       this.#previewMeshes.push(mesh);
     }
@@ -1603,6 +1607,13 @@ export class BabylonVillageScene {
     const ground = this.#store!.ground(feature.cellX, feature.cellY);
     if (!ground) return [];
     const { x, z } = this.#space!.project(feature);
+    if (feature.type === 'leveling-site') {
+      const border = this.#createConstructionBorder(`leveling-site-${feature.id}-${cellKey(feature)}`, TILE_SIZE - .08);
+      border.position.set(x, ground.height + .08, z); border.material = this.#levelingAreaMaterial; border.isPickable = false;
+      const stake = MeshBuilder.CreateBox(`leveling-stake-${feature.id}-${cellKey(feature)}`, {width:.07,depth:.07,height:.45}, this.#scene);
+      stake.position.set(x - TILE_SIZE * .4, ground.height + .225, z - TILE_SIZE * .4); stake.material = this.#trunkMaterial; stake.isPickable = false;
+      return [border, stake];
+    }
     const seed = Math.abs(feature.variantSeed), scenery: Mesh[] = [];
     if(feature.rc1?.rocks.length){
       if(feature.deposit?.state==='depleted')return [];

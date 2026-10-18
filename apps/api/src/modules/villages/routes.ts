@@ -1,3 +1,5 @@
+import {LevelingRequestSchema, LevelingCommandSchema, LevelingPreviewSchema, type LevelingRequest, type LevelingCommand} from '@arbestra/contracts';
+import {previewLeveling, commandLeveling} from './leveling.js';
 import {observationCommitted} from '../admin/observation-actions.js';
 import {receiveExpedition,readExpeditionReceipts} from '../science/expeditions.js';
 import {ExpeditionReceiptSchema,type ExpeditionIntent} from '@arbestra/contracts';
@@ -81,6 +83,20 @@ export async function registerVillageRoutes(
     const minimum = (await villageSyncRevision(db, result.worldId)).revision;
     return projections.commandResponse(accountId, worldSlug, result, base, minimum);
   };
+  app.post('/api/worlds/:worldSlug/villages/:villageId/leveling/preview', {
+    schema: { params: VillageParametersSchema, body: LevelingRequestSchema, response: {200: LevelingPreviewSchema} },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const {worldSlug,villageId} = request.params as {worldSlug:string;villageId:string};
+    return previewLeveling(db, account.id, worldSlug, villageId, request.body as LevelingRequest);
+  });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/leveling', {
+    schema: { params: VillageParametersSchema, body: LevelingCommandSchema, response: {200: VillageStateSchema} },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const {worldSlug,villageId} = request.params as {worldSlug:string;villageId:string};
+    return commandLeveling(db, account.id, worldSlug, villageId, request.body as LevelingCommand);
+  });
   const tradeNavigation = navigation as TravelNetworkExecutor & NavigationExecutor;
   app.get('/api/worlds/:worldSlug/villages/:villageId/market/offers', {
     schema: { params: VillageParametersSchema, querystring: Type.Object({ mine: Type.Optional(Type.Boolean()), cursor: Type.Optional(Type.String({ format: 'uuid' })) }), response: { 200: TradePageSchema } },

@@ -4,7 +4,8 @@ import { advanceEnergy, canWorkFor, type EnergyState } from './energy.js';
 import {allocateRestHousing} from './housing.js';
 
 type Cohort = Selectable<PopulationCohortsTable>;
-type Assignment = { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: null; tradeJourneyId: string }
+type Assignment = { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: null; tradeJourneyId: null; levelingJobId: string }
+  | { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: null; tradeJourneyId: string }
   | { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: string }
   | { harvestId: string; extractionId: null; scienceActivityId?: null }
   | { harvestId: null; extractionId: string; scienceActivityId?: null }
@@ -15,8 +16,8 @@ export function energyState(cohort: Cohort): EnergyState {
     restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt };
 }
 
-export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'> & { scienceActivityId?: string | null; processingLotId?: string | null; tradeJourneyId?: string | null }): boolean {
-  return cohort.harvestId === null && cohort.extractionId === null && !cohort.scienceActivityId && !cohort.processingLotId && !cohort.tradeJourneyId;
+export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'> & { scienceActivityId?: string | null; processingLotId?: string | null; tradeJourneyId?: string | null; levelingJobId?: string | null }): boolean {
+  return cohort.harvestId === null && cohort.extractionId === null && !cohort.scienceActivityId && !cohort.processingLotId && !cohort.tradeJourneyId && !cohort.levelingJobId;
 }
 
 /** The village lock and chronological reconciliation protect every cursor. */
@@ -103,7 +104,7 @@ export async function releaseWorkers(tx: Transaction<Database>, workers: Cohort[
   for (const cohort of workers) {
     const empty = cohort.energy === 0 && cohort.energyProgress === 0;
     await tx.updateTable('populationCohorts').set({ activity: empty ? 'resting' : 'idle',
-      restingSince: empty ? through : null, harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: null,tradeJourneyId:null,restBuildingId:null })
+      restingSince: empty ? through : null, harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: null,tradeJourneyId:null,levelingJobId:null,restBuildingId:null })
       .where('worldId', '=', cohort.worldId).where('id', '=', cohort.id).execute();
   }
 }

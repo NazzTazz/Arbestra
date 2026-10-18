@@ -1,3 +1,4 @@
+import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
 import * as harvestSubmissionsMigration from './migrations/040_harvest_submissions.js';
@@ -102,6 +103,7 @@ const migrationProvider: MigrationProvider = {
       '044_player_market': playerMarketMigration,
       '045_processing_duration': processingDurationMigration,
       '046_navigation_cache': navigationCacheMigration,
+      '047_leveling': levelingMigration,
     };
   },
 };

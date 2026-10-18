@@ -2,6 +2,12 @@
 
 Décision du 10 octobre 2026 : portée commune bois/pierre portée à **16 cases** depuis les cellules de bâtiments terminés (Chebyshev torique), sans exemption starter ; accès RC1 sec et praticable requis. Le planificateur des mini-gisements et les détails/commandes utilisent `withinDepositRange`. [Preuves et limites RC1](../IMPLEMENTATION-INSTALLATION-RC1.md).
 
+## Nivellement préalable (047)
+
+Les emprises sèches libres de l’Université et du Tailleur peuvent réserver un chantier distinct, avec 1 à 3 habitants et fatigue habituelle. Le travail coûte 5 minutes par case et quart d’unité déplacé, divisé par l’effectif ; pelouse/terre ne débite ni ne crédite de pierre. La hauteur moyenne équilibre les volumes. Après travail et retour, la transition `leveling` applique les terrasses et libère l’équipe atomiquement ; la construction reste manuelle. Demande, devis et échéances sont durables et le rejeu exact est idempotent.
+
+Un chantier actif impose le verrou de navigation exclusif dans `beginVillageEconomy`, après le village et avant les gisements et la borne temporelle. Le commerce détermine ce besoin pour ses deux villages déjà verrouillés avant de prendre leur borne commune. La fin s’entrelace avec les autres transitions par échéance/ID/type ; seule la tâche acquise `leveling.complete` est acquittée par le scheduler. [Périmètre et protections](../SPEC-NIVELLEMENT-PLACEMENT.md).
+
 ## Marché joueurs et interface tactile (044)
 
 Les annonces réservent immédiatement la quantité offerte. Annulation avant acceptation : restitution intégrale ; acceptation entière par un seul village. L’acceptant fournit `ceil(max(aller,retour)/250)` habitants éligibles pour la boucle complète. Chemin piéton entre accès des hôtels de ville, torique, une case/seconde ; crédit chez l’auteur à l’arrivée, contrepartie chez l’acceptant et libération des porteurs au retour. Les convois actifs protègent leurs passages contre construction, équipements bloquants et nouvelle implantation, sans devenir des obstacles piétons.

@@ -1,3 +1,4 @@
+import {hasActiveLeveling, completeLevelingAt} from './leveling.js';
 import { devTime } from '../operations/dev-timing.js';
 import {advancePopulationGrowth} from '../population/growth.js';
 import { sql, type Transaction } from 'kysely';
@@ -19,6 +20,7 @@ export interface VillageEconomy {
 }
 
 type DueTransition =
+  | { id: string; through: Date; type: 'leveling' }
   | { id: string; through: Date; type: 'construction' }
   | { id: string; through: Date; type: 'expansion' }
   | { id: string; through: Date; type: 'harvest' }
@@ -42,6 +44,7 @@ export async function beginVillageEconomy(
     .forUpdate().executeTakeFirstOrThrow());
   // Readers may admit trips, including automatic worksite relaunches. Acquire
   // before deposits; a spatial writer must never upgrade a shared lock later.
+  navigationWrite ||= await hasActiveLeveling(transaction, worldId, lockedPeers);
   const navigationKey=`infrastructure:${worldId}`;
   await devTime('navigation_lock', async () => {
     if(navigationWrite)await sql`select pg_advisory_xact_lock(hashtextextended(${navigationKey},0))`.execute(transaction);
@@ -100,7 +103,7 @@ export async function reconcileVillageEconomy(
   transaction: Transaction<Database>, economy: VillageEconomy,
 ): Promise<void> {
   return devTime('reconcile', async () => {
-  const [constructions, expansions, harvests, extractions, science, processing, market, tradeOffers, tradeDeliveries] = await Promise.all([
+  const [constructions, expansions, harvests, extractions, science, processing, market, tradeOffers, tradeDeliveries, leveling] = await Promise.all([
     transaction.selectFrom('buildings').select(['id', 'constructionCompletesAt'])
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('status', '=', 'under-construction').where('constructionCompletesAt', '<=', economy.through).execute(),
@@ -123,8 +126,10 @@ export async function reconcileVillageEconomy(
       .where('villageId', '=', economy.villageId).where('status', '=', 'open').where('oracleEligible', '=', true).where('oracleAt', '<=', economy.through).execute(),
     transaction.selectFrom('tradeDeliveries').select(['id', 'dueAt']).where('worldId', '=', economy.worldId)
       .where('villageId', '=', economy.villageId).where('completedAt', 'is', null).where('dueAt', '<=', economy.through).execute(),
+    transaction.selectFrom('levelingJobs').select(['id','completesAt']).where('worldId','=',economy.worldId).where('villageId','=',economy.villageId).where('completedAt','is',null).where('completesAt','<=',economy.through).execute(),
   ]);
   const due: DueTransition[] = [
+    ...leveling.map(j => ({id:j.id,through:j.completesAt,type:'leveling' as const})),
     ...constructions.flatMap((building) => building.constructionCompletesAt
       ? [{ id: building.id, through: building.constructionCompletesAt, type: 'construction' as const }] : []),
     ...expansions.map((expansion) => ({ id: expansion.id, through: expansion.completesAt, type: 'expansion' as const })),
@@ -140,7 +145,9 @@ export async function reconcileVillageEconomy(
   while (due.length) {
     const transition = due.shift()!;
     await advancePopulationGrowth(transaction,economy.worldId,economy.villageId,transition.through);
-    if (transition.type === 'construction')
+    if (transition.type === 'leveling')
+      await completeLevelingAt(transaction, economy, transition.id, transition.through);
+    else if (transition.type === 'construction')
       await completeConstructionAt(transaction, economy, transition.id, transition.through);
     else if (transition.type === 'expansion')
       await completeExpansionAt(transaction, economy, transition.id, transition.through);

@@ -1,3 +1,4 @@
+import {LevelingJobSchema} from './leveling.js';
 import {Rc1FeatureGeometrySchema} from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { ScienceStateSchema } from './science.js';
@@ -237,7 +238,7 @@ export const VillageStateSchema = Type.Object({
         restingSince:Type.Union([Type.String({format:'date-time'}),Type.Null()]),
         energy: Type.Optional(Type.Integer({minimum:0,maximum:10})),
         assignmentId: Type.Optional(Type.Union([Type.String({format:'uuid'}),Type.Null()])),
-        assignmentKind: Type.Optional(Type.Union([Type.Literal('garden'),Type.Literal('extraction'),Type.Literal('science'),Type.Literal('processing'),Type.Literal('trade'),Type.Null()])),
+        assignmentKind: Type.Optional(Type.Union([Type.Literal('garden'),Type.Literal('extraction'),Type.Literal('science'),Type.Literal('processing'),Type.Literal('trade'), Type.Literal('leveling'),Type.Null()])),
         cartographer: Type.Optional(Type.Boolean())}))),
       restHousing:Type.Optional(Type.Array(Type.Object({buildingId:Type.String({format:'uuid'}),capacity:Type.Integer({minimum:0}),restingCount:Type.Integer({minimum:0})}))),
       restingWithoutHousing:Type.Optional(Type.Integer({minimum:0})),
@@ -246,6 +247,7 @@ export const VillageStateSchema = Type.Object({
     extractions: Type.Array(ExtractionSchema),
     worksites: Type.Array(ExtractionWorksiteSchema),
     exploitationOrders: Type.Optional(Type.Array(ExploitationOrderSchema)),
+    levelingJobs: Type.Optional(Type.Array(LevelingJobSchema)),
     processingOrders: Type.Optional(Type.Array(ProcessingOrderSchema)),
     market: Type.Optional(MarketStateSchema),
   }),

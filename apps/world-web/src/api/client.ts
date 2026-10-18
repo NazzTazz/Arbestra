@@ -305,3 +305,14 @@ export async function setFactoryEnabled(worldSlug:string,enabled:boolean,village
   await parseResponse(response);return getVillage(worldSlug,villageId);
 }
 import { timedFetch as fetch, timedJson } from '../dev/statistics';
+
+export async function previewLeveling(slug: string, villageId: string, request: import('@arbestra/contracts').LevelingRequest, signal?: AbortSignal): Promise<import('@arbestra/contracts').LevelingPreview> {
+  return parseResponse(await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/leveling/preview`, {
+    method: 'POST', credentials: 'same-origin', headers: {'content-type': 'application/json'}, body: JSON.stringify(request), signal: signal ?? null,
+  }));
+}
+export function commandLeveling(slug: string, villageId: string, command: import('@arbestra/contracts').LevelingCommand): Promise<TimedVillageState> {
+  return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/leveling`, {
+    method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(command),
+  });
+}

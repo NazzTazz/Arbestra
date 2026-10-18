@@ -35,6 +35,21 @@ it('removes only closed visual detours without inventing a shortcut or mutating 
   expect(workerPassagePath([{x:0,z:0},{x:16,z:0},{x:32,z:0}])).toHaveLength(3);
 });
 
+it('removes a partial collinear retrace while preserving the committed corridor and endpoints',()=>{
+  const path=[{x:0,z:0},{x:1,z:0},{x:1,z:-.125},{x:1,z:1},{x:1,z:3}];
+  const before=JSON.stringify(path),passage=workerPassagePath(path);
+  expect(passage).toEqual([path[0],path[1],path[3],path[4]]);
+  expect(JSON.stringify(path)).toBe(before);
+  for(let i=1;i<passage.length;i++)for(let n=0;n<=100;n++){
+    const a=passage[i-1]!,b=passage[i]!,p={x:a.x+(b.x-a.x)*n/100,z:a.z+(b.z-a.z)*n/100};
+    expect(path.slice(1).some((q,j)=>{
+      const r=path[j]!,dx=q.x-r.x,dz=q.z-r.z;
+      const t=((p.x-r.x)*dx+(p.z-r.z)*dz)/(dx*dx+dz*dz);
+      return t>=-1e-9&&t<=1+1e-9&&Math.hypot(p.x-r.x-dx*t,p.z-r.z-dz*t)<1e-9;
+    })).toBe(true);
+  }
+});
+
 it('sweeps three crop rows in alternating directions and stays inside the plot',()=>{
   const centre={x:17,z:-9},rows=[-.64,0,.64],directions:number[][]=[[],[],[]];
   let previous=gardenHarvestPoint(centre,0);

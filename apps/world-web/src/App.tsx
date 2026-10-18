@@ -1,3 +1,5 @@
+import {LevelingPanel} from './ui/LevelingPanel';
+import type {LevelingRequest} from '@arbestra/contracts';
 import {useObservationPublisher} from './observation';
 import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
 import {useExpeditions} from './ui/use-expeditions';
@@ -84,6 +86,7 @@ function gardenReady(garden: Garden, serverNow: number): number {
 export function App({starter}:{starter?:StarterController} = {}) {
   const beforeTownHall=starter?.beforeTownHall??false;
   const starterActive=Boolean(starter?.active);
+  const [leveling, setLeveling] = useState<Omit<LevelingRequest, 'workerCount'> | null>(null);
   const [state, setState] = useState<VillageState | null>(starter?.state??null);
   const observationActive=useObservationPublisher(starterActive?null:state);
   const stateRef = useRef<VillageState | null>(starter?.state??null);
@@ -449,7 +452,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const spatial = definition?.progressionMode === 'spatial';
   const area = useMemo(() => state && selection && context?.action !== 'upgrade' ? previewArea(state, construction?.type === 'university'
     ? campusRange(selection.last,quarterTurns)
-    : construction?.type === 'stonemason' ? stonemasonRange(selection.last,quarterTurns) : selection, spatial || construction?.type === 'university' || construction?.type === 'stonemason', extensionId) : null, [state, selection, spatial, extensionId, construction?.type, context?.action,quarterTurns]);
+    : construction?.type === 'stonemason' ? stonemasonRange(selection.last,quarterTurns) : selection, spatial || construction?.type === 'university' || construction?.type === 'stonemason', extensionId, construction?.type ?? undefined) : null, [state, selection, spatial, extensionId, construction?.type, context?.action,quarterTurns]);
   const highlightedSiteIds = useMemo(() => {
     if (!state || !construction?.buildingId) return [];
     const active = state.cells.filter((cell) => cell.footprint?.buildingId === construction.buildingId && cell.footprint?.state === 'active');
@@ -520,7 +523,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (!initialReady) return;
+      if (!initialReady || leveling) return;
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || actionInFlight.current && !(event.key === 'Escape' && exploitationActive.current)) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable || target?.closest('input, textarea, select')) return;
@@ -569,7 +572,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   },[representativeId]);
 
   function handleAreaGesture(first: Cell, last: Cell, commit: boolean) {
-    if (paletteCollapsed || modeRef.current !== 'construction' || terrainView !== 'village' || actionInFlight.current || arrivalActive
+    if (leveling || paletteCollapsed || modeRef.current !== 'construction' || terrainView !== 'village' || actionInFlight.current || arrivalActive
       || constructionIntentState === 'uncertain') return;
     if (!construction || construction.action === 'upgrade' || !construction.type || construction.action === 'extend' && !construction.buildingId) return;
     setError(null);
@@ -593,7 +596,11 @@ export function App({starter}:{starter?:StarterController} = {}) {
     const buildingId = intent.action === 'extend' ? intent.buildingId : undefined;
     const nextArea = previewArea(state, construction.type === 'university'
       ? campusRange(last,quarterTurns)
-      : construction.type === 'stonemason' ? stonemasonRange(last,quarterTurns) : nextSelection, Boolean(spatial || construction.type === 'university' || construction.type === 'stonemason'), buildingId);
+      : construction.type === 'stonemason' ? stonemasonRange(last,quarterTurns) : nextSelection, Boolean(spatial || construction.type === 'university' || construction.type === 'stonemason'), buildingId, construction.type);
+    if (nextArea.needsLeveling && (construction.type === 'university' || construction.type === 'stonemason')) {
+      setLeveling({buildingType: construction.type, anchor: {...last}, quarterTurns});
+      return;
+    }
     const currentLevel = buildingId ? state.cells.find(cell => cell.building?.id === buildingId)?.building?.level ?? 1 : 1;
     const currentDefinition = state.buildingTypes.find(item => item.code === construction.type);
     const nextCosts = constructionCosts(currentDefinition?.levels.find(item => item.level === currentLevel),houseVariant)
@@ -987,6 +994,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
       infrastructure={<InfrastructureTools state={sceneState??state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onConfirmation={applyInfrastructureConfirmation} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
       onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
+    {leveling && <LevelingPanel slug={state.world.slug} villageId={state.village.id} request={leveling} onSnapshot={applySnapshot} onClose={() => setLeveling(null)} onStarted={() => { setLeveling(null); clearPreview(); pushNotification('Chantier de nivellement lancé. Vous pourrez construire à sa fin.'); }}/>}
     {workshop&&<section className="factory-workshop" aria-label="Atelier"><button onClick={()=>setWorkshop(null)}>Retour au village</button>{state.factoryEnabled?<iframe title={`Atelier ${workshop}`} src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}/>:<p>L’accès aux ateliers a été désactivé.</p>}</section>}
   </main>{!initialReady && <WorldLoading worldName={state.world.name} message="Préparation de la scène"
     progress={initialProgress?.key === sceneKey ? initialProgress.progress : undefined}

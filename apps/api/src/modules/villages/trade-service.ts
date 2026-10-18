@@ -1,3 +1,4 @@
+import {hasActiveLeveling} from './leveling.js';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { ROUTE_POLICY_VERSION, marketWorkers, travelDuration, type TradeCommand, type TradePreview, type TravelCell, type RouteResult } from '@arbestra/contracts';
@@ -88,9 +89,11 @@ export async function prepareTrade(db: Kysely<Database>, accountId: string, slug
 export async function beginTradePair(tx: Transaction<Database>, worldId: string, ids: string[]) {
   const sorted = [...new Set(ids.map(id => id.toLowerCase()))].sort();
   for (const id of sorted) await tx.selectFrom('villages').select('id').where('worldId', '=', worldId).where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
-  await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
+  const navigationWrite = await hasActiveLeveling(tx, worldId, sorted);
+  if (navigationWrite) await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
+  else await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
   const through = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
-  for (const id of sorted) await beginVillageEconomy(tx, worldId, id, undefined, [], [], false, sorted, through);
+  for (const id of sorted) await beginVillageEconomy(tx, worldId, id, undefined, [], [], navigationWrite, sorted, through);
   return through;
 }
 

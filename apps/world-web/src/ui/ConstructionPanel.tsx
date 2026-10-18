@@ -65,6 +65,7 @@ export function ConstructionPanel({ starter, houseVariant, construction, definit
         {construction.action === 'extend' && gardenWorkerNeed !== null && <small>{gardenWorkerNeed} parcelles après extension</small>}
       </div>}
       {status && <div className={`construction-live-summary${problem ? ' is-invalid' : ''}`} role="status">{status}</div>}
+      {area?.needsLeveling && <p>Cliquez sur l’emprise pour préparer le terrain.</p>}
       {(intentState === 'uncertain' || intentState === 'error') && <div className="intent-buttons"><button type="button" disabled={pending} onClick={onRetry}>{intentState === 'uncertain' ? 'Vérifier la même commande' : 'Réessayer'}</button>{intentState === 'error' && <button type="button" disabled={pending} onClick={onClearError}>Effacer l’erreur</button>}</div>}
     </aside>}
     {domain==='infrastructure'?infrastructure:<><nav className="construction-categories" aria-label="Familles de bâtiments">{groups.map(group => <button type="button" key={group} aria-pressed={category === group} onClick={() => { setCategory(group); if(collapsed)onToggle(); }}>{group}</button>)}</nav>

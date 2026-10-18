@@ -26,6 +26,20 @@ function harness(initial:VillageState=state()) {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('keeps every cell of a leveling site and refreshes its ground after completion', async () => {
+    const initial = state(), site = {id:'site',type:'leveling-site',variantSeed:0,deposit:null};
+    initial.region.features = [{...site,cellX:1,cellY:1},{...site,cellX:2,cellY:1}];
+    const h = harness(initial); h.demand(); h.advance(100);
+    await h.settle(0,{...chunk(),features:initial.region.features});
+    expect(h.store.chunk('0:0')!.features).toHaveLength(2);
+    expect(h.store.naturalFeatures()).toHaveLength(2);
+    h.store.observe({...initial,region:{...initial.region,features:[],elevations:[9]}});
+    h.advance(100);
+    expect(h.requests[1]!.updatesOnly).toBe(true);
+    await h.settle(1);
+    expect(h.store.chunk('0:0')!.features).toEqual([]);
+    expect(h.store.naturalFeatures()).toEqual([]);
+  });
   it('can begin the initial fixed-camera transfer without waiting for motion coalescing', async () => {
     const h = harness();
     h.store.demandChunks([{key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0}], true);

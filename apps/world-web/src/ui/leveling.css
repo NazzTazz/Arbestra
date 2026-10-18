@@ -1,0 +1,13 @@
+.leveling-backdrop { position: fixed; inset: 0; z-index: 160; display: grid; place-items: center; background: #06110cb3; padding: 16px; }
+.leveling-panel { width: min(460px, 100%); box-sizing: border-box; max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid #cba968; border-radius: 16px; background: #14231c; color: #f2ead7; box-shadow: 0 16px 60px #0009; }
+.leveling-panel h2 { margin: 4px 0 12px; }
+.leveling-panel > p { color: #c5cebe; }
+.leveling-quote { min-height: 180px; }
+.leveling-quote > p { display: flex; justify-content: space-between; gap: 12px; }
+.leveling-quote .leveling-status { min-height: 3.2em; color: #e8c582; }
+.leveling-panel button { min-height: 48px; border: 1px solid #718c72; border-radius: 8px; background: #263b2e; color: #f2ead7; cursor: pointer; }
+.leveling-panel button:disabled { opacity: .6; cursor: default; }
+.leveling-panel .production-workers { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.leveling-panel .building-thumbnail { position: relative; display: block; width: 100%; height: 70px; }
+.leveling-panel .building-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
+@media (max-width: 520px) { .leveling-panel { padding: 16px; } .leveling-panel .production-workers strong { font-size: 12px; } }

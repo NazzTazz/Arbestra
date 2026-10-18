@@ -40,6 +40,7 @@ export * from './rc1-runtime.js';
 export * from './rc1-field.js';
 
 export * from './building-footprint.js';
+export * from './leveling.js';
 
 export * from './deposit-range.js';
 

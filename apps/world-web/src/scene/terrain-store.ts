@@ -1,3 +1,4 @@
+import {terrainFeatureKey} from '@arbestra/contracts';
 import { clientTime } from '../dev/statistics';
 import {rc1Height} from './rc1-terrain';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainResponse, TerrainUpdatesChunk, TerrainUpdatesResponse, VillageState } from '@arbestra/contracts';
@@ -85,14 +86,20 @@ export class TerrainStore {
     const before=this.#snapshot.region,after=state.region;
     if(before.originCellX!==after.originCellX||before.originCellY!==after.originCellY||before.width!==after.width||before.height!==after.height
       ||!sameNumbers(before.terrainCodes,after.terrainCodes)||!sameNumbers(before.elevations,after.elevations))this.#snapshotGroundRevision=++this.#groundRevision;
+    if (!sameNumbers(before.elevations,after.elevations)) {
+      for (const cell of state.cells) this.invalidate(this.key(cell.cellX,cell.cellY));
+    }
     this.#snapshot = state;
     const own = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`));
     for (const key of new Set([...own, ...this.#own])) if (own.has(key) !== this.#own.has(key)) {
       const [x, y] = key.split(':').map(Number); this.invalidate(this.key(x!, y!));
     }
     this.#own = own;
+    const siteKeys = new Set(state.region.features.filter(f => f.type === 'leveling-site').map(terrainFeatureKey));
+    for (const [id, f] of this.#features) if (f.type === 'leveling-site' && !siteKeys.has(id)) { this.#features.delete(id); this.invalidate(this.key(f.cellX, f.cellY)); }
     for (const f of state.region.features) {
-      this.#features.set(f.id, f); if (f.deposit) this.deposit(f.deposit);
+      if (f.type === 'leveling-site' && !this.#features.has(terrainFeatureKey(f))) this.invalidate(this.key(f.cellX, f.cellY));
+      this.#features.set(terrainFeatureKey(f), f); if (f.deposit) this.deposit(f.deposit);
     }
     // A server-confirmed disappearance ends the mission, never a local timer.
     const missions = new Map<string, string>();
@@ -185,16 +192,16 @@ export class TerrainStore {
   }
   chunk(key: string): TerrainChunk | undefined {
     const entry = this.entries.get(key), chunk = entry?.chunk; if (!chunk) return;
-    const features = new Map(chunk.features.map((f) => [f.id, f]));
-    if (entry!.freshAt === -Infinity) for (const f of this.#features.values()) if (this.key(f.cellX, f.cellY) === key) features.set(f.id, f);
+    const features = new Map(chunk.features.map((f) => [terrainFeatureKey(f), f]));
+    if (entry!.freshAt === -Infinity) for (const f of this.#features.values()) if (this.key(f.cellX, f.cellY) === key) features.set(terrainFeatureKey(f), f);
     const occupied = new Map(chunk.occupiedCells.map((c) => [`${c.cellX}:${c.cellY}`, c]));
     for (const k of this.#own) { const [cellX, cellY] = k.split(':').map(Number); if (this.key(cellX!, cellY!) === key) occupied.set(k, { cellX: cellX!, cellY: cellY! }); }
     return { ...chunk, features: [...features.values()].map((f) => ({ ...f, deposit: this.revisions.get(f.id) ?? f.deposit })), occupiedCells: [...occupied.values()] };
   }
   naturalFeatures():NaturalFeature[]{
-    const features=new Map(this.#snapshot.region.features.map(f=>[f.id,f]));
+    const features=new Map(this.#snapshot.region.features.map(f=>[terrainFeatureKey(f),f]));
     // Navigation uses all known cached chunks, not only the current viewport.
-    for(const key of this.entries.keys())for(const f of this.chunk(key)?.features??[])features.set(f.id,f);
+    for(const key of this.entries.keys())for(const f of this.chunk(key)?.features??[])features.set(terrainFeatureKey(f),f);
     return [...features.values()].map(f=>({...f,deposit:this.revisions.get(f.id)??f.deposit}));
   }
   ground(x: number, y: number): { code: number; height: number } | null {

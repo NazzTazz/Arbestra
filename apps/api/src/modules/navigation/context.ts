@@ -38,7 +38,11 @@ export async function loadNavigationContext(db:Kysely<Database>,worldId:string,k
   const emitted=new Set<string>();for(const c of state.cells)if(c.building){if(emitted.has(c.building.id))c.building=null;else emitted.add(c.building.id);}
   const plans=(await tx.selectFrom('villageInfrastructure').select('plan').where('worldId','=',worldId).execute()).map(r=>r.plan);
   const accesses=buildings.flatMap(b=>buildingAccesses(state,b.id).map(a=>({id:b.id+':'+a.id,buildingId:b.id,path:[a.position,a.outside]})));
-  const terraces=await tx.selectFrom('worldSpawnTerraces').select(['cellX','cellY','height']).where('worldId','=',worldId).execute();
+  // Site reservations block new commercial routes until the terrain change commits.
+ const sites=await tx.selectFrom('worldCellOccupancies as o').innerJoin('worldFeatures as f',j=>j.onRef('f.worldId','=','o.worldId').onRef('f.id','=','o.featureId'))
+  .select(['o.cellX','o.cellY','o.featureId']).where('o.worldId','=',worldId).where('f.featureTypeCode','=','leveling-site').execute();
+ occupancies.push(...sites.map(c=>({cellX:c.cellX,cellY:c.cellY,buildingId:c.featureId,role:'body' as const})));
+ const terraces=await tx.selectFrom('worldSpawnTerraces').select(['cellX','cellY','height']).where('worldId','=',worldId).execute();
   let artifact:string|undefined;
   let treeEdits:NavigationData['treeEdits']=[];
   let legacy:NavigationData['legacy'];

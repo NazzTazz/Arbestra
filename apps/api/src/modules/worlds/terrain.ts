@@ -125,7 +125,7 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
         features: [...new Map(features.filter(inside).map((f) => {
           const remainingAmount = f.remainingAmount === null ? null : safeAmount(f.remainingAmount);
           const reservedAmount = f.reservedAmount === null ? 0 : safeAmount(f.reservedAmount);
-          return [f.id, { ...(geometry.has(f.id)?{rc1:geometry.get(f.id)}:{}), id: f.id, type: f.featureTypeCode, cellX: f.cellX, cellY: f.cellY, variantSeed: f.variantSeed,
+          return [f.featureTypeCode === 'leveling-site' ? `${f.id}:${f.cellX}:${f.cellY}` : f.id, { ...(geometry.has(f.id)?{rc1:geometry.get(f.id)}:{}), id: f.id, type: f.featureTypeCode, cellX: f.cellX, cellY: f.cellY, variantSeed: f.variantSeed,
             deposit: !known(f) || remainingAmount === null ? null : { featureId: f.id, resourceCode: f.resourceCode!, blocksCell: f.blocksCell!, cleared: f.cleared ?? false, cellX: f.cellX, cellY: f.cellY,
               initialAmount: safeAmount(f.initialAmount!), remainingAmount, reservedAmount, availableAmount: remainingAmount - reservedAmount,
               state: f.cleared || remainingAmount === 0 ? 'depleted' as const : 'available' as const, revision: safeAmount(f.revision!), updatedAt: f.updatedAt!.toISOString() } }] as const;

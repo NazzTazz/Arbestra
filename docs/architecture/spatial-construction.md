@@ -4,6 +4,8 @@ Statut : **implémenté dans le worktree**. Preuves serveur et navigateur du 30 
 
 ## Principe
 
+Le [nivellement préalable](../SPEC-NIVELLEMENT-PLACEMENT.md) corrige l’aperçu des emprises fixes Université/Tailleur et ajoute un chantier distinct sur les sols secs libres RC1. La planéité de l’emprise entière est partagée avec le serveur. Les occupations temporaires protègent le terrain jusqu’à sa fin autoritaire, puis le joueur construit manuellement.
+
 Depuis 029, une construction de maison peut fournir `houseVariant: stone | logs | beams` (défaut API `stone`). Les deux chemins de commande, cellule et sélection spatiale, persistent respectivement `stone-house`, `log-house` ou `beam-house` dans `visual_layout`, avec la même emprise et les mêmes coûts actuels. Le matériau est inclus dans le reçu idempotent ; une amélioration conserve la recette et l'orientation. Aucun stock de bois transformé ni déblocage d'ère n'est créé dans cette passe. Le rendu compilé et sa génération sont décrits dans la [spec factory](../SPEC-FACTORY-BATIMENTS.md).
 
 Depuis la tranche Infrastructure (028), le placement accepte `quarterTurns` (0 à 3, défaut legacy 0). Ghost, vraie emprise rectangulaire, accès et rendu utilisent la même transformation ; une amélioration conserve l'orientation. Une voie manuelle ou un équipement doit être retiré/déplacé avant de réserver son emplacement pour un nouveau bâtiment. L'invariant est revalidé au serveur, y compris pour les plans voisins du même monde ; les trajets engagés sont protégés. La touche R ne modifie pas la seule apparence du mesh. Voir la [spec Infrastructure](../SPEC-INFRASTRUCTURE-VOIRIE-ATELIER.md).
