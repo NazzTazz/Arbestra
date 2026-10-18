@@ -1,6 +1,6 @@
 # Extension progressive du village — 18 octobre 2026
 
-**Recette Tristan validée, commit et push autorisés.** Base `main` / `809c85b`. Tristan confirme la portée de **8 cases** autour des emprises terminées et la suppression du plafond fixe autour du départ. [Spec](docs/SPEC-EXTENSION-VILLAGE.md). Aucun déploiement alpha/staging demandé dans cette clôture ; les deux fichiers personnels non suivis sont préservés. Suite demandée : terrain à sommets partagés, à cadrer séparément de cette livraison.
+**Clôturée et poussée sur `main` : `50955d41af03d6e1e15404f890fa306df3cd891a`.** Recette Tristan validée ; SHA distant vérifié. Tristan confirme la portée de **8 cases** autour des emprises terminées et la suppression du plafond fixe autour du départ. [Spec](docs/SPEC-EXTENSION-VILLAGE.md). Aucun déploiement alpha/staging demandé dans cette clôture ; les deux chemins personnels non suivis sont préservés. Suite : [terrain à sommets partagés](docs/SPEC-TERRAIN-SOMMETS-PARTAGES.md), proposition technique rédigée après lecture du code, non implémentée. Commencer par l’audit de compatibilité des plateformes existantes ; aucune conversion de monde effectuée.
 
 La projection terrain suit les emprises du village avec une marge de 16 cases, sur des intervalles circulaires sans doublons aux coutures. Le 64 × 64 initial reste un minimum de présentation. Dimensions propagées aux ressources, hauteurs, navigation et nivellement ; les commandes RC1 consultent le terrain réel sans faire du rectangle une frontière d’autorité. La connaissance locale suit les bâtiments terminés dans le rayon d’exploitation existant de 16 cases. La construction reste à 8, sur toute l’emprise, avec les protections et occupations existantes. Le kit de départ partage ce rayon.
 
@@ -10,7 +10,7 @@ Régression PostgreSQL constatée rouge : à +40 cases de l’ancre, malgré un 
 
 **Navigateur (skill agent-browser) :** connexion locale, ouverture de Les Bosses, mode Constructions et grille chargés avec la nouvelle API ; capture relue `test-results/reach-eight-grid.png`. Aucune construction ni modification du village effectuée. Session dédiée fermée. La construction à +40 et le devis éloigné sont vérifiés par intégration serveur, pas revendiqués comme clic navigateur. La projection reste dense et son coût croît avec l’étendue du village ; pas de nouvelle projection clairsemée dans cette tranche.
 
-API locale relancée sur la compilation finale, PID 30724 / session exec 24910, port 3000. Frontends préexistants conservés. Aucune migration nécessaire ; fichiers de tranche non commités, index vide, alpha/staging inchangés.
+API locale relancée sur la compilation finale, PID 30724 / session exec 24910, port 3000. Frontends préexistants conservés. Aucune migration nécessaire ; tranche applicative commitée et poussée, alpha/staging inchangés. Les résultats de tests ci-dessus précèdent le commit ; la clôture documentaire ne relance pas ces suites.
 
 ---
 

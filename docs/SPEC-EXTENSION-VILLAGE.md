@@ -1,6 +1,6 @@
 # Extension progressive du village
 
-Décision Tristan du 18 octobre 2026, base `809c85b`. Implémentation, validations locales et recette de Tristan achevées. Commit et push demandés ; aucun déploiement alpha/staging demandé dans cette clôture.
+Décision Tristan du 18 octobre 2026, base `809c85b`. Tranche clôturée : implémentation, validations locales et recette de Tristan achevées ; commit `50955d4` poussé sur `main`, SHA distant vérifié. Aucun déploiement alpha/staging demandé dans cette clôture.
 
 La construction reste progressive, avec une portée de **8 cases** (distance maximale sur les deux axes du tore) depuis chaque case d’un bâtiment terminé. Toute l’emprise du nouveau bâtiment doit être à portée. Les extensions encore en chantier ne donnent pas de portée supplémentaire ; le HDV en amélioration conserve sa portée. Le kit de départ partage ce rayon.
 
