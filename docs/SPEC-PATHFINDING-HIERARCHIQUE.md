@@ -2,7 +2,7 @@
 
 Date : 18 octobre 2026. Base relue : `main`, `5de7b09` (application `a641cd6`).
 
-Statut : **implémentation validée et activée en développement**, autorisée explicitement par Tristan le 18 octobre après rédaction de cette spec. Aucun changement de règle de transport. Migration 046 appliquée localement ; aucun commit ni déploiement distant. Les mesures et limites de validation sont consignées dans le handoff ; les objectifs de performance ci-dessous ne sont pas des garanties de production.
+Statut : **implémentation validée localement et déployée en staging et alpha**, autorisée explicitement par Tristan le 18 octobre après rédaction de cette spec. Aucun changement de règle de transport. Commit `20f8f2a`, tags `staging-2026.10.18.3` et `alpha-2026.10.18.3` ; migration 046 appliquée dans les deux environnements et contrôles publics verts. Preuves dans le [suivi de déploiement](DEPLOIEMENT-VPS.md). Les mesures et limites de validation sont consignées dans le handoff ; les objectifs de performance ci-dessous ne sont pas des garanties de production.
 
 ## Résultat attendu et périmètre
 

@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Pathfinding commercial et cache durable du 18 octobre 2026
+
+Release **`20f8f2abdccb8e98139a81c2b9e6157f1f8b6267` déployée dans les deux environnements** : `staging-2026.10.18.3` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39142607278), puis `alpha-2026.10.18.3` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39142776283). Cache durable HDV–HDV, index physique par chunk, réparation locale et raccord fin des accès. Migration additive 046 réussie, trois services actifs et SHA de release confirmé dans chaque journal. Sauvegarde pré-migration par le contrôleur existant ; aucun seed/reset ni modification de configuration opérateur.
+
+Contrôles publics indépendants verts en [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39142746232) et [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39142915426). Validations métier et navigateur locales, puis confirmation utilisateur sur l'échange Test commerce. Aucun échange économique distant ni mesure de charge ajouté pendant cette publication ; mesures et limites dans la [spec](SPEC-PATHFINDING-HIERARCHIQUE.md) et le handoff.
+
 ## Correctif des devis commerciaux du 18 octobre 2026
 
 Release **`a641cd640c547e203f81ee65f133b08012acbf97` déployée dans les deux environnements** : `staging-2026.10.18.2` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39127081661), puis `alpha-2026.10.18.2` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39127268070). Correction du budget de recherche des trajets commerciaux lointains et conservation du code `TRADE_PREPARATION_BUSY` dans le NOC. Aucun changement de migration ni de configuration opérateur. Trois services actifs et SHA de release confirmés.
