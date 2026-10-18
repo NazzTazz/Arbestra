@@ -6,6 +6,23 @@ import {canWalkSpawnSegment} from './spawn-access.js';
 const field=(blocked:(x:number,y:number)=>boolean=()=>false):RouteField=>({worldId:'w',contextId:'r',traversalConstraintsId:'none',width:96,height:32,accesses:[],connector:()=>true,sample:(x,y)=>({elevation:1,dry:true,blocked:blocked(x,y)})});
 const query=(a={cellX:1,cellY:8},b={cellX:60,cellY:8}):RouteQuery=>({worldId:'w',contextId:'r',policyVersion:ROUTE_POLICY_VERSION,movementProfileId:'pedestrian-v1',traversalConstraintsId:'none',starts:[{kind:'point',...a}],goals:[{kind:'point',...b}],limits:{maxNodes:262144,maxDurationMs:5000}});
 describe('pure full-route navigation',()=>{
+ it('finds a long hall-to-hall detour within a bounded search instead of exhausting the fine lattice',()=>{
+  const f={...field((x,y)=>x>190&&x<210&&y>60&&y<140),width:512,height:256};
+  const q=query({cellX:150,cellY:100},{cellX:250,cellY:100});q.coarseFirst=true;q.limits.maxNodes=20000;
+  const r=planRoute(f,q,()=>0);expect(r.kind).toBe('found');
+  if(r.kind==='found'){
+   expect(r.path[0]).toEqual({cellX:150,cellY:100});expect(r.path.at(-1)).toEqual({cellX:250,cellY:100});
+   for(let i=1;i<r.path.length;i++)expect(canWalkSpawnSegment(f,{x:r.path[i-1]!.cellX,y:r.path[i-1]!.cellY},{x:r.path[i]!.cellX,y:r.path[i]!.cellY})).toBe(true);
+  }
+ });
+ it('retains fine passages and shares the commercial node budget across both searches',()=>{
+  const q=query({cellX:15,cellY:8},{cellX:25,cellY:8});q.coarseFirst=true;
+  const f=field((x,y)=>x>19.8&&x<20.2&&!(y>8.18&&y<8.58));
+  const r=planRoute(f,q,()=>0);expect(r.kind).toBe('found');
+  if(r.kind==='found')for(let i=1;i<r.path.length;i++)expect(canWalkSpawnSegment(f,{x:r.path[i-1]!.cellX,y:r.path[i-1]!.cellY},{x:r.path[i]!.cellX,y:r.path[i]!.cellY})).toBe(true);
+  const bounded={...q,limits:{...q.limits,maxNodes:1024}};
+  const limited=planRoute(f,bounded,()=>0);expect(limited.visited).toBeLessThanOrEqual(1024);
+ });
  it('reaches a distant goal by detouring around a rock beyond the local refinement',()=>{
   const f=field((x,y)=>x>39.5&&x<40.5&&y>6&&y<10),q=query({cellX:10,cellY:8},{cellX:55,cellY:8}),r=planRoute(f,q);
   expect(canWalkSpawnSegment(f,{x:10,y:8},{x:55,y:8})).toBe(false);

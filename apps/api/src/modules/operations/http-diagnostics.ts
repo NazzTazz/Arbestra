@@ -15,6 +15,7 @@ const sites = new Set(['http.error-handler', 'http.on-error', 'http.finalize', '
 const categories: Record<string, HttpRequestObservation['errorCategory']> = {
   INTERNAL_ERROR: 'internal', ADMIN_BUSY: 'application', ADMIN_DATA_UNAVAILABLE: 'application',
   OBSERVATION_BUSY:'application',OBSERVATION_RATE:'application',OBSERVATION_LIMIT:'application',
+  TRADE_PREPARATION_BUSY:'application',
   VALIDATION_ERROR: 'application', HTTP_SERVER_RESPONSE: 'unknown', CONNECTION_INTERRUPTED: 'transport',
 };
 const consoleRoutes = new Set(['session', 'overview', 'infrastructure', 'worlds', 'worlds/:id', 'accounts', 'accounts/:id',

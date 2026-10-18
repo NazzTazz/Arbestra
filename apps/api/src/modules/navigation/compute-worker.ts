@@ -80,9 +80,9 @@ parentPort!.on('message',(job:{id:string;query?:RouteQuery;data?:NavigationData;
    parentPort!.postMessage({id:job.id,network,contexts:[...contexts.keys()],sources:[...sources.keys()]});return;
   }
   if(job.data){const field=build(job.data,stage);contexts.set(job.data.contextId,field);while(contexts.size>2)contexts.delete(contexts.keys().next().value!);}
-  stage('search');const q=job.query!;if(!q)throw Error('Requête navigation manquante');const key=JSON.stringify([q.worldId,q.contextId,q.policyVersion,q.movementProfileId,q.traversalConstraintsId,q.starts,q.goals]);
+  stage('search');const q=job.query!;if(!q)throw Error('Requête navigation manquante');const key=JSON.stringify([q.worldId,q.contextId,q.policyVersion,q.movementProfileId,q.traversalConstraintsId,q.starts,q.goals,q.coarseFirst??false]);
   const base=contexts.get(q.contextId),field=base?.forGoals?.(q.goals)??base,cached=routes.get(key);
-  const result=field?(cached?{...cached,visited:0}:planRoute(field,{...q,limits:{...q.limits,maxDurationMs:Math.max(0,Math.min(q.limits.maxDurationMs,5000)-(performance.now()-began))}})):{kind:'context-unavailable' as const,visited:0};
+  const result=field?(cached?{...cached,visited:0}:planRoute(field,{...q,limits:{...q.limits,maxDurationMs:Math.max(0,Math.min(q.limits.maxDurationMs,q.coarseFirst?30000:5000)-(performance.now()-began))}})):{kind:'context-unavailable' as const,visited:0};
   if(result.kind==='found'){routes.set(key,result);while(routes.size>64||[...routes.values()].reduce((n,r)=>n+r.path.length,0)>65536)routes.delete(routes.keys().next().value!);}
   for(const [k,r]of routes)if(!contexts.has(r.contextId))routes.delete(k);
   while(sources.size>2)sources.delete(sources.keys().next().value!);

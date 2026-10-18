@@ -30,8 +30,8 @@ export async function prepareTrade(db: Kysely<Database>, accountId: string, slug
     const endpoints = (id: string) => context.data!.accesses.filter(a => a.buildingId === halls.find(h => h.villageId === id)?.id)
       .map(a => ({ kind: 'access' as const, accessId: a.id }));
     return { query: { worldId: village.worldId, contextId: context.contextId, policyVersion: ROUTE_POLICY_VERSION,
-      movementProfileId: 'pedestrian-v1', traversalConstraintsId: 'none', starts: endpoints(villageId), goals: endpoints(offer.villageId),
-      limits: { maxNodes: 262144, maxDurationMs: 5000 } }, data: context.data! };
+      movementProfileId: 'pedestrian-v1', traversalConstraintsId: 'none', coarseFirst: true, starts: endpoints(villageId), goals: endpoints(offer.villageId),
+      limits: { maxNodes: 262144, maxDurationMs: 30000 } }, data: context.data! };
   }).catch(error => {
     if (error instanceof HttpError) throw error;
     throw new HttpError(503, 'TRADE_PREPARATION_BUSY', 'La préparation du trajet est occupée. Réessayez.');

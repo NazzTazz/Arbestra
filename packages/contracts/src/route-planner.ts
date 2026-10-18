@@ -7,6 +7,8 @@ export type RouteEndpoint = {kind:'point';cellX:number;cellY:number}|{kind:'acce
 export interface RouteQuery {
  worldId:string;contextId:string;policyVersion:string;movementProfileId:string;traversalConstraintsId:string;
  starts:RouteEndpoint[];goals:RouteEndpoint[];limits:{maxNodes:number;maxDurationMs:number};
+ /** Long commercial searches prefer a certified cell lattice before fine passages. */
+ coarseFirst?:boolean;
 }
 export interface RouteAccess {id:string;path:TravelCell[]}
 export interface RouteField extends SpawnAccessField {
@@ -35,6 +37,14 @@ export function routeLength(path:readonly TravelCell[],world:{width:number;heigh
 }
 /** Pure bounded A*. Success is a swept witness; an incomplete lattice never proves no physical path. */
 export function planRoute(field:RouteField,q:RouteQuery,now:()=>number=()=>performance.now()):RouteResult{
+ if(!q.coarseFirst||q.limits.maxNodes<1024||q.limits.maxDurationMs<=0)return searchRoute(field,q,now,1);
+ const began=now();
+ const coarse=searchRoute(field,{...q,limits:{maxNodes:Math.min(65536,Math.floor(q.limits.maxNodes/2)),maxDurationMs:q.limits.maxDurationMs*3/4}},now,8);
+ if(coarse.kind!=='budget-exceeded')return coarse;
+ const fine=searchRoute(field,{...q,limits:{maxNodes:q.limits.maxNodes-coarse.visited,maxDurationMs:Math.max(0,q.limits.maxDurationMs-(now()-began))}},now,1);
+ return {...fine,visited:fine.visited+coarse.visited};
+}
+function searchRoute(field:RouteField,q:RouteQuery,now:()=>number,spacing:1|8):RouteResult{
  if(q.worldId!==field.worldId||q.contextId!==field.contextId||q.traversalConstraintsId!==field.traversalConstraintsId
   ||q.policyVersion!==ROUTE_POLICY_VERSION||q.movementProfileId!=='pedestrian-v1'||!q.starts.length||!q.goals.length)return{kind:'context-unavailable',visited:0};
  if(q.limits.maxDurationMs<=0||q.limits.maxNodes<1)return{kind:'budget-exceeded',visited:0};
@@ -49,8 +59,9 @@ export function planRoute(field:RouteField,q:RouteQuery,now:()=>number=()=>perfo
  const goals=q.goals.flatMap(e=>{const path=resolve(e);return path?[path.slice().reverse()]:[];});
  const starts=q.starts.flatMap(e=>{const path=resolve(e);return path?[path]:[];});
  if(!goals.length||!starts.length)return{kind:'unreachable',reason:'endpoints',visited:0};
- const heuristic=(x:number,y:number)=>Math.min(...goals.map(p=>{const to=p[0]!;return (field.minimumCost??(field.cost?.7:1))*(Math.abs(spawnDelta(to.cellX,x/8,field.width))+Math.abs(spawnDelta(to.cellY,y/8,field.height)));}));
- const connect=(p:TravelCell)=>{const paths:TravelCell[][]=[];for(const x of new Set([Math.floor(p.cellX*8),Math.ceil(p.cellX*8)]))for(const y of new Set([Math.floor(p.cellY*8),Math.ceil(p.cellY*8)])){
+ // Commercial routing needs a valid witness, not a globally cheapest path.
+ const heuristic=(x:number,y:number)=>Math.min(...goals.map(p=>{const to=p[0]!;return (spacing===8?2:1)*(field.minimumCost??(field.cost?.7:1))*(Math.abs(spawnDelta(to.cellX,x/8,field.width))+Math.abs(spawnDelta(to.cellY,y/8,field.height)));}));
+ const connect=(p:TravelCell)=>{const paths:TravelCell[][]=[];for(const x of new Set([Math.floor(p.cellX*8/spacing)*spacing,Math.ceil(p.cellX*8/spacing)*spacing]))for(const y of new Set([Math.floor(p.cellY*8/spacing)*spacing,Math.ceil(p.cellY*8/spacing)*spacing])){
   const end=point(x,y);for(const bend of [{cellX:p.cellX,cellY:end.cellY},{cellX:end.cellX,cellY:p.cellY}])if(walk(p,bend)&&walk(bend,end))paths.push([p,bend,end]);
  }return paths;};
  for(const prefix of starts)for(const link of connect(prefix.at(-1)!)){
@@ -76,7 +87,7 @@ export function planRoute(field:RouteField,q:RouteQuery,now:()=>number=()=>perfo
    const long=point(current.x+dx*8,current.y+dy*8);
    // Long edges accelerate the centre lattice; fine edges remain available for
    // off-centre destinations and side entrances even when a long edge is clear.
-   for(const step of centred&&walk(a,long)?[8,1]:[1]){
+   for(const step of spacing===8?[8]:centred&&walk(a,long)?[8,1]:[1]){
    const x=wrap(current.x+dx*step,w),y=wrap(current.y+dy*step,h),id=y*w+x,b=point(x,y);
    if(closed.has(id)||!walk(a,b))continue;
    const cost=field.cost?.(a,b)??routeLength([a,b],field),g=current.g+cost;

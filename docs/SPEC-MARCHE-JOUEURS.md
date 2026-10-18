@@ -20,6 +20,8 @@ Les quantités utilisent de grands boutons tactiles aux paliers **50, 100, 250, 
 
 ## Transport joueur : décisions du 18 octobre
 
+Le devis commercial privilégie un témoin de passage sur la grille de centres de cases, certifié segment par segment avec les règles physiques existantes, puis conserve la recherche au huitième de case pour les passages fins. Cette première recherche est dirigée vers le but ; elle ne garantit pas le trajet globalement le moins coûteux. La durée annoncée et le contrôle du maximum portent toujours sur le chemin réellement certifié. Budget commercial total borné à 30 s, 262 144 nœuds au total entre les deux recherches, watchdog à 31 s ; les autres calculs restent à leur budget précédent. Le résultat est réutilisé uniquement pour le même contexte de navigation, les mêmes accès et la même stratégie. À froid, un trajet lointain peut donc prendre plusieurs secondes ; une saturation reste une erreur réessayable `TRADE_PREPARATION_BUSY`, conservée comme telle dans le NOC.
+
 - Trajet d’hôtel de ville à hôtel de ville, à **1 case par seconde**.
 - Mobilisation de **1 habitant pour 250 ressources** transportées ; l’effectif doit couvrir les ressources à faire transiter à l’aller et au retour.
 - Les villageois sont **visibles pendant leur déplacement**. Leur représentation suit la mission serveur ; l’animation ne déclenche aucun transfert économique.

@@ -5,6 +5,7 @@ import type { HttpRequestObservation } from '@arbestra/contracts';
 import { loadConfig } from '../../config.js';
 import { annotateHttpRequest, instrumentHttp, OperationsTelemetry } from './telemetry.js';
 import { createHttpLogging, type DiagnosticLogSink, safeErrorLog, safeRequestLog } from './http-logging.js';
+import {safeHttpAnnotation} from './http-diagnostics.js';
 
 const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 const sample = (): HttpRequestObservation => ({
@@ -29,6 +30,14 @@ async function drain(diagnostics: { snapshot(): { queuedLines: number } }) {
 }
 
 describe('safe HTTP logging', () => {
+  it('preserves retryable commercial preparation as an application error rather than INTERNAL_ERROR',async()=>{
+    const annotation=safeHttpAnnotation('TRADE_PREPARATION_BUSY','http.on-error');
+    expect(annotation).toMatchObject({safeCode:'TRADE_PREPARATION_BUSY',errorCategory:'application'});
+    const lines:string[]=[],h=await harness((line,done)=>{lines.push(line);done();});
+    try{h.diagnostics.write({...sample(),...annotation!});await drain(h.diagnostics);
+      expect(JSON.parse(lines[0]!)).toMatchObject({safeCode:'TRADE_PREPARATION_BUSY',errorCategory:'application',statusCode:503});
+    }finally{await h.close();}
+  });
   it('retains controlled observation audit identities while stripping secrets',async()=>{
     const lines:string[]=[],h=await harness((line,done)=>{lines.push(line);done();});const actorId=randomUUID(),worldId=randomUUID(),villageId=randomUUID(),observationId=randomUUID();
     try{h.app.log.info({event:'admin.observation_closed',actorId,worldId,villageId,observationId,reason:'authorization_revoked',password:'secret-observation-password',cookie:'secret-observation-cookie'},'unsafe secret-observation-message');await drain(h.diagnostics);

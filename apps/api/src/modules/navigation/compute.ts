@@ -65,7 +65,7 @@ export class NavigationCompute implements NavigationExecutor,TravelNetworkExecut
   try{
    await this.ensureWorker(lane);if(this.closed)throw Error('Navigation fermée');
    const job=await load(lane);if(this.closed)throw Error('Navigation fermée');
-   return await this.dispatch(lane,job,'route',6000) as RouteResult;
+   return await this.dispatch(lane,job,'route',job.query.coarseFirst?31000:6000) as RouteResult;
   }finally{lane.busy=false;this.drain();}
  }
  private dispatch(lane:Lane,job:{query:RouteQuery;data?:NavigationData}|{network:NetworkJob;observation?:SharedArrayBuffer},kind:Work['kind'],timeout:number){

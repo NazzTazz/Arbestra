@@ -1,3 +1,13 @@
+# Incident aperçu commercial alpha — 18 octobre 2026
+
+Capture de Tristan : quatre POST `market/trade-preview` à 503. Références retrouvées dans le journal alpha, entre 11:56 et 11:58 UTC. Reproduction en PostgreSQL imposé en lecture seule, sans session, offre, stock ni monde créé : contexte RC1 et accès HDV présents ; recherche initiale arrêtée à 5 s avec `budget-exceeded`, même à chaud. Cas diagnostiqué entre accès proches de (444,22) et (215,171). Un chemin terrestre existe : environ 438 s de marche ; la recherche à froid demande davantage de temps que le budget initial.
+
+Correction validée localement : mode commercial `coarseFirst`, grille de cases dirigée vers le but puis repli fin avec budgets cumulés ; certification physique inchangée et aucune garantie nouvelle de trajet optimal. Budget commercial 30 s / 262 144 nœuds, watchdog 31 s ; autres routes inchangées. Cache séparé par stratégie. Diagnostic NOC : code contrôlé `TRADE_PREPARATION_BUSY` conservé en catégorie applicative, au lieu d’être remplacé par `INTERNAL_ERROR`. Régression synthétique rouge avant correction sur un long détour borné, puis verte. Prototype retenu mesuré dans un worker temporaire sur la géographie alpha réelle, toujours sans écritures : succès en 20,7 s à froid, 0,25 s à chaud, trajet 438,104 s. Mesures ponctuelles, aucune certification de charge. Variantes de recherche explorées dans les scripts ignorés, non retenues dans le code applicatif ; la release alpha reste inchangée pendant ces mesures.
+
+**63 tests / 7 fichiers verts** dans un processus achevé : 12 calcul de routes (dont détours, maillage fin et budget cumulé), 11 pool/workers, 1 navigation RC1 certifiée froide/chaude, 15 commerce/intégrité, 24 diagnostics HTTP/journalisation. Build contrats/API et lint ciblé verts. Aucune migration, crédit ou acceptation de commerce effectuée pour diagnostiquer alpha. Publication du correctif en cours ; compléter les nouveaux tags après succès. Les fichiers personnels non suivis restent préservés.
+
+---
+
 # Publication marché et ateliers — 18 octobre 2026
 
 Tristan a accepté le résultat visuel et demandé explicitement commit, push et tags alpha/staging. La publication regroupe les changements de session : marché joueurs/Oracle et transport visible (044), accès HDV/scierie/tailleur/université en Vue libre, stabilité des actualisations du marché, production par durée et attente sans stock (045). Les deux fichiers utilisateur `%SystemDrive%/` et `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` restent hors Git. Base de départ `main` / `d107ff2`, distant vérifié synchronisé avant publication. Les mentions historiques « à valider par Tristan » ci-dessous sont levées par son acceptation actuelle.

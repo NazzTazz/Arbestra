@@ -8,7 +8,7 @@ export const HttpRequestReferenceSchema = Type.Object({ instanceId: Id, requestI
 export type HttpRequestReference = Static<typeof HttpRequestReferenceSchema>;
 export const HttpDiagnosticReasonSchema = Type.Union([Type.Literal('server_error'), Type.Literal('slow'), Type.Literal('aborted')]);
 export const HttpDiagnosticMethodSchema = Type.Union((['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT', 'TRACE', 'OTHER'] as const).map(value => Type.Literal(value)));
-export const HttpDiagnosticCodeSchema = Type.Union((['INTERNAL_ERROR', 'ADMIN_BUSY', 'ADMIN_DATA_UNAVAILABLE', 'OBSERVATION_BUSY', 'OBSERVATION_RATE', 'OBSERVATION_LIMIT', 'VALIDATION_ERROR', 'HTTP_SERVER_RESPONSE', 'CONNECTION_INTERRUPTED'] as const).map(value => Type.Literal(value)));
+export const HttpDiagnosticCodeSchema = Type.Union((['INTERNAL_ERROR', 'ADMIN_BUSY', 'ADMIN_DATA_UNAVAILABLE', 'OBSERVATION_BUSY', 'OBSERVATION_RATE', 'OBSERVATION_LIMIT', 'TRADE_PREPARATION_BUSY', 'VALIDATION_ERROR', 'HTTP_SERVER_RESPONSE', 'CONNECTION_INTERRUPTED'] as const).map(value => Type.Literal(value)));
 export const HttpCaptureSiteSchema = Type.Union((['http.error-handler', 'http.on-error', 'http.finalize', 'admin.read'] as const).map(value => Type.Literal(value)));
 export const HttpRequestObservationSchema = Type.Object({
   instanceId: Id, requestId: Id, sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
