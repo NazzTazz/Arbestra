@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Publication marché et ateliers du 18 octobre 2026
+
+Release **`bd95b870ef4d6da089d538f9fba78e6c52dd0e2c` déployée dans les deux environnements** : `staging-2026.10.18.1` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39123247402), puis `alpha-2026.10.18.1` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39123484116). Marché entre joueurs, transport visible, accès aux bâtiments en Vue libre et productions artisanales par durée. Migrations 044 et 045 appliquées avec succès, trois services actifs et SHA de release confirmé dans chaque log. Sauvegarde pré-migration par le contrôleur existant ; aucun seed/reset ni modification de configuration opérateur.
+
+Contrôles publics indépendants verts en [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39123373893) et en [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39123605667). Les trois PNG d’habitants sont également accessibles en HTTPS dans chaque environnement. Aucun parcours authentifié ni échange économique distant ajouté pour cette publication ; validations métier et navigateur locales, limites et état Git dans le handoff.
+
 ## Publication NOC du 17 octobre 2026
 
 Release applicative **`74d33e2e193b9f068bec11aef6a07a6f4e3e9b62` déployée dans les deux environnements** : `staging-2026.10.17.1` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39040381712), `alpha-2026.10.17.1` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39042854587). Liens `current`, trois services par environnement et catalogues des sauvegardes vérifiés. `WORLD_ORIGIN` ajouté aux deux environnements avec sauvegarde root des configurations ; aucun bootstrap ni seed relancé, aucune nouvelle migration applicative.
