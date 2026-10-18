@@ -1,6 +1,6 @@
 # Nivellement préalable à la construction
 
-Décisions Tristan du 18 octobre 2026. Implémentation et vérifications locales achevées ; recette utilisateur acceptée pour débloquer les joueurs, publication alpha et staging autorisée. Le parcours pourra encore être amélioré.
+Décisions Tristan du 18 octobre 2026. Implémentation et vérifications locales achevées ; recette utilisateur acceptée pour débloquer les joueurs. Publiée sur alpha et staging sous les tags `alpha-2026.10.18.5` et `staging-2026.10.18.5` (commit `2674375`), migration et contrôles publics réussis. Le parcours pourra encore être amélioré.
 
 ## Périmètre validé
 
