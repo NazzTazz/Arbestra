@@ -11,7 +11,7 @@ const artifact=JSON.parse(readFileSync(new URL('../../../../world-web/public/stu
 type Edit={treeIndices:number[];removedIndices:number[];cleared:boolean;remainingAmount:string|null;initialAmount:string|null;cellX:number|null;cellY:number|null;variantSeed:number|null};
 function smallForest(){const data=structuredClone(artifact);delete data.geography!.geology;data.geography!.study={id:'t1',base:.75,chains:[],hollows:[]};data.stoneSites=[];data.forest!.trees=data.forest!.trees.slice(0,2);return data;}
 function fixture(data=smallForest()){
- const world={widthCells:512,heightCells:256,chunkSize:32,seed:String(data.seed)},field=createSpawnTerrainField(data);
+ const world={terrainModel:'terraces' as const,widthCells:512,heightCells:256,chunkSize:32,seed:String(data.seed)},field=createSpawnTerrainField(data);
  source.mockResolvedValue({world,data,field});
  const rows={terraces:[] as SpawnTerrace[],edits:[] as Edit[],reads:[] as string[]};
  const db={selectFrom(table:string){rows.reads.push(table);const q={select(){return q;},leftJoinLateral(){return q;},where(){return q;},orderBy(){return q;},async execute(){return structuredClone(table==='worldSpawnTerraces'?rows.terraces:rows.edits);}};return q;}} as unknown as Kysely<Database>;
@@ -47,7 +47,7 @@ describe('RC1 ground geometry cache without database',()=>{
   expect((await readRc1Ground(f.db,'cache-pure-main')).navigation).toBe(grove.navigation);
   f.rows.edits[1]!.variantSeed=3;expect((await readRc1Ground(f.db,'cache-pure-main')).navigation.revision).not.toBe(grove.navigation.revision);
   const other=await readRc1Ground(f.db,'cache-pure-other');expect(other.field).not.toBe(grove.field);
-  const replacement=structuredClone(f.data);source.mockResolvedValue({world:{widthCells:512,heightCells:256,chunkSize:32,seed:String(replacement.seed)},data:replacement,field:createSpawnTerrainField(replacement)});
+  const replacement=structuredClone(f.data);source.mockResolvedValue({world:{terrainModel:'terraces',widthCells:512,heightCells:256,chunkSize:32,seed:String(replacement.seed)},data:replacement,field:createSpawnTerrainField(replacement)});
   expect((await readRc1Ground(f.db,'cache-pure-other')).field).not.toBe(other.field);
   const rejection=Error('changed artifact rejected by source');source.mockRejectedValueOnce(rejection);await expect(readRc1Ground(f.db,'cache-pure-other')).rejects.toBe(rejection);
  });

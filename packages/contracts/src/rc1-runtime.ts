@@ -1,6 +1,7 @@
-﻿import {Type,type Static} from '@sinclair/typebox';
+import {Type,type Static} from '@sinclair/typebox';
 // Immutable RC1 relief, sampled every half cell. Heights use canonical cell units.
 export const Rc1GroundSchema=Type.Object({
+ model:Type.Optional(Type.Literal('vertices')),
  stride:Type.Integer({minimum:1}),heights:Type.Array(Type.Number()),water:Type.Array(Type.Number()),
  terraces:Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer(),height:Type.Number()})),
 });

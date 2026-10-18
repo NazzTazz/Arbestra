@@ -8,6 +8,9 @@ export const LevelingRequestSchema = Type.Object({
   workerCount: Type.Integer({ minimum: 1, maximum: 3 }),
 }, { additionalProperties: false });
 export const LevelingQuoteSchema = Type.Object({
+  model: Type.Optional(Type.Literal('vertices')),
+  vertices: Type.Optional(Type.Array(Type.Object({vertexX:Type.Integer(),vertexY:Type.Integer(),height:Type.Number()}))),
+  affectedCells: Type.Optional(Type.Array(Cell)),
   height: Type.Number(), cells: Type.Array(Cell), workMs: Type.Integer({ minimum: 1 }),
   transportMs: Type.Integer({ minimum: 0 }), durationMs: Type.Integer({ minimum: 1 }),
   stoneDebit: Type.Integer({ minimum: 0 }), stoneCredit: Type.Integer({ minimum: 0 }),
@@ -33,7 +36,9 @@ export type LevelingPreview = Static<typeof LevelingPreviewSchema>;
 export type LevelingCommand = Static<typeof LevelingCommandSchema>;
 export type LevelingJob = Static<typeof LevelingJobSchema>;
 
-/** Five minutes of labour per quarter unit moved, shared by the team.
+export const LEVELING_WORK_MS_PER_QUARTER = 60_000;
+
+/** One minute of labour per quarter unit moved, shared by the team.
  * Equal-area samples balance cut and fill. Rounding only the final duration
  * avoids charging an entire quarter for arbitrarily small relief. */
 export function levelingWork(samples: readonly (readonly number[])[], workers: number) {
@@ -42,7 +47,7 @@ export function levelingWork(samples: readonly (readonly number[])[], workers: n
   const mean = (values: readonly number[]) => values.reduce((n, h) => n + h, 0) / values.length;
   const height = mean(samples.map(mean));
   const volume = samples.reduce((n, s) => n + mean(s.map(h => Math.abs(h - height))), 0);
-  return { height, workMs: Math.max(1, Math.ceil(volume / .25 * 300_000 / workers)) };
+  return { height, workMs: Math.max(1, Math.ceil(volume / .25 * LEVELING_WORK_MS_PER_QUARTER / workers)) };
 }
 
 /** Elevations in village snapshots are hundredths of a terrain unit. */

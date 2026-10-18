@@ -263,6 +263,7 @@ export const VillageStateSchema = Type.Object({
     width: Type.Integer({ minimum: 1 }), height: Type.Integer({ minimum: 1 }),
     terrainCodes: Type.Array(Type.Integer({ minimum: 1 })),
     elevations: Type.Array(Type.Integer()),
+    vertexHeights: Type.Optional(Type.Array(Type.Number())),
     features: Type.Array(NaturalFeatureSchema),
   }),
   cells: Type.Array(VillageCellSchema),

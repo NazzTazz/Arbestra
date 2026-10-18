@@ -6,7 +6,7 @@ Décisions Tristan du 18 octobre 2026. Implémentation et vérifications locales
 
 L’Université et le Tailleur de pierre proposent un chantier lorsque leur emprise est libre mais non plane. La hauteur cible automatique équilibre déblais et remblais. Après les travaux, le joueur construit manuellement.
 
-Barème confirmé : **5 minutes de travail d’un habitant par case et par quart d’unité de hauteur déplacé**, divisé par l’effectif, avec la fatigue habituelle. Pelouse/terre : aucune pierre consommée ni produite. Pour les autres sols, Tristan indique 100 pierres brutes excavées/remblayées par case.
+Barème confirmé, révisé par Tristan le 19 octobre 2026 : **1 minute de travail d’un habitant par case et par quart d’unité de hauteur déplacé**, divisée par l’effectif, avec la fatigue habituelle. Cette réduction remplace les cinq minutes de la version publiée ; elle est disponible localement, pas encore déployée. Pelouse/terre : aucune pierre consommée ni produite. Pour les autres sols, Tristan indique 100 pierres brutes excavées/remblayées par case.
 
 RC1 expose les sols secs libres comme pelouse/terre ; les rochers sont des obstacles/gisements à extraire, pas une seconde catégorie de sol constructible. Cette tranche prépare les emprises libres sèches sans débit/crédit de pierre. Le barème des autres sols est conservé pour une tranche qui les rendra modifiables ; il n’est pas implémenté ici. Arbres, gisements, eau, voies et équipements restent hors emprise. Pas d’outil libre, de modification hydraulique ni de construction automatique.
 

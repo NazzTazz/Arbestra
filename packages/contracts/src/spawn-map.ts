@@ -1,3 +1,4 @@
+import type {TerrainVertex} from './terrain-vertices.js';
 import type { SpawnTerrace } from './spawn-installation.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { illumination, TAU } from './cosmology.js';
@@ -25,6 +26,7 @@ export interface SpawnMap {
   terrainRevision: number; landscape: GeneratedLandscape; surfaces: SpawnSurface[]; villages: SpawnVillage[];
   readiness: 'terrain-only';
   territories?: SpawnTerritory[];
+  vertices?: TerrainVertex[];
   terraces?: SpawnTerrace[]; removedTreeIndices?: number[];
 }
 export interface SpawnTerrainResult {
@@ -38,7 +40,7 @@ const terrainReasonSchema = Type.Union([Type.Literal('water'), Type.Literal('roc
 export const SpawnTerrainResultSchema = Type.Object({ point: SpawnPointSchema, quarterTurns: Type.Integer(), referenceHeight: Type.Number(),
   terrainCompatible: Type.Boolean(), reasons: Type.Array(Type.Union([terrainReasonSchema, Type.Literal('neighbor'), Type.Literal('territory')])),
   incompatible: Type.Array(Type.Object({ x: Type.Integer(), y: Type.Integer(), reason: terrainReasonSchema })), readiness: Type.Literal('terrain-only') });
-export const SpawnMapSchema = Type.Object({ terraces:Type.Optional(Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer(),height:Type.Number()}))), removedTreeIndices:Type.Optional(Type.Array(Type.Integer({minimum:0}))), worldId: Type.String(), worldSlug: Type.String(), worldName: Type.String(), artifactChecksum: Type.String(),
+export const SpawnMapSchema = Type.Object({ vertices:Type.Optional(Type.Array(Type.Object({vertexX:Type.Integer(),vertexY:Type.Integer(),height:Type.Number()}))), terraces:Type.Optional(Type.Array(Type.Object({cellX:Type.Integer(),cellY:Type.Integer(),height:Type.Number()}))), removedTreeIndices:Type.Optional(Type.Array(Type.Integer({minimum:0}))), worldId: Type.String(), worldSlug: Type.String(), worldName: Type.String(), artifactChecksum: Type.String(),
   terrainRevision: Type.Integer(), landscape: Type.Unsafe<GeneratedLandscape>(Type.Any()), surfaces: Type.Array(surfaceSchema), territories: Type.Optional(Type.Array(SpawnTerritorySchema)),
   villages: Type.Array(Type.Object({ id: Type.String(), x: Type.Integer(), y: Type.Integer(), playerName: Type.String(), population: Type.Integer() })), readiness: Type.Literal('terrain-only') });
 export const SpawnAtlasSchema = Type.Omit(SpawnMapSchema, ['landscape']);

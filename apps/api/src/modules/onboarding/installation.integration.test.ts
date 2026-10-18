@@ -28,6 +28,7 @@ import type {GeneratedLandscape,SpawnPoseRequest} from '@arbestra/contracts';
 const url=testDatabaseUrl(),target=new URL(url);
 if(target.hostname!=='127.0.0.1'||target.pathname!=='/arbestra_test')throw Error('Unexpected installation test database');
 const db=createDatabase(url),compute=new SpawnCompute(),accountId=randomUUID(),worlds:string[]=[],extraAccounts:string[]=[];
+let auditedRun:Promise<void>|undefined;
 const artifact=JSON.parse(readFileSync(new URL('../../../../world-web/public/studies/t1-alpha512-rc1.json',import.meta.url),'utf8')) as GeneratedLandscape;
 async function fixture(){const id=randomUUID(),slug='install-'+id;worlds.push(id);
  await db.insertInto('worlds').values({id,slug,name:'Installation RC1 test',topology:'torus',widthCells:512,heightCells:256,chunkSize:32,seed:4109,generationStatus:'ready',generationVersion:3,isOpen:true,generatedAt:new Date()}).execute();
@@ -37,7 +38,7 @@ async function fixture(){const id=randomUUID(),slug='install-'+id;worlds.push(id
 }
 describe('effective RC1 installation on isolated worlds',()=>{
  beforeAll(async()=>{await migrateToLatest(url);await db.insertInto('accounts').values({id:accountId,email:accountId+'@installation.test',passwordHash:'fixture'}).execute();},120000);
- afterAll(async()=>{await compute.close();if(worlds.length){await db.deleteFrom('populationCohorts').where('worldId','in',worlds).execute();await db.deleteFrom('woodlandDeposits').where('worldId','in',worlds).execute();await db.deleteFrom('stoneDeposits').where('worldId','in',worlds).execute();await db.deleteFrom('worlds').where('id','in',worlds).execute();}await db.deleteFrom('accounts').where('id','in',[accountId,...extraAccounts]).execute();await db.destroy();},60000);
+ afterAll(async()=>{await compute.close();await auditedRun?.catch(()=>undefined);if(worlds.length){await db.deleteFrom('populationCohorts').where('worldId','in',worlds).execute();await db.deleteFrom('woodlandDeposits').where('worldId','in',worlds).execute();await db.deleteFrom('stoneDeposits').where('worldId','in',worlds).execute();await db.deleteFrom('worlds').where('id','in',worlds).execute();}await db.deleteFrom('accounts').where('id','in',[accountId,...extraAccounts]).execute();await db.destroy();},120000);
  it('atomically places the compact kit, credits once, projects 2000 per natural stone site and preserves the signed source',async()=>{
   const f=await fixture(),installed=await installVillage(db,compute,accountId,f.slug,f.input);
   expect(installed.remaining).toEqual([]);
@@ -82,7 +83,8 @@ describe('effective RC1 installation on isolated worlds',()=>{
   await expect(installVillage(db,compute,accountId,f.slug,{...f.input,point:{x:141,y:20}})).rejects.toMatchObject({code:'COMMAND_CONFLICT'});
   expect((await db.selectFrom('worldGenerationCandidates').select('artifact').where('worldId','=',f.id).executeTakeFirstOrThrow()).artifact).toEqual(artifact);
  },180000);
- it('refuses the audited rock footprint before any ordinary construction effects',async()=>{
+ // Includes full first-world resource projection, measured separately from the bounded CPU worker.
+ it('refuses the audited rock footprint before any ordinary construction effects',()=>auditedRun=(async()=>{
   const f=await fixture();const installed=await installVillage(db,compute,accountId,f.slug,{...f.input,mode:'manual',point:{x:189,y:246}});
   const read=async()=>({resources:await db.selectFrom('villageResources').selectAll().where('worldId','=',f.id).orderBy('resourceCode').execute(),occupancy:await db.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',f.id).orderBy('cellX').orderBy('cellY').execute(),buildings:await db.selectFrom('buildings').selectAll().where('worldId','=',f.id).orderBy('id').execute(),tasks:await db.selectFrom('scheduledTasks').selectAll().where('worldId','=',f.id).orderBy('id').execute()});
   const before=await read();
@@ -98,7 +100,7 @@ describe('effective RC1 installation on isolated worlds',()=>{
   expect(await db.selectFrom('infrastructureReceipts').selectAll().where('worldId','=',f.id).execute()).toEqual([]);
   expect((await db.selectFrom('villageInfrastructure').select('plan').where('worldId','=',f.id).executeTakeFirstOrThrow()).plan.equipment).toEqual([]);
   expect(await read()).toEqual(before);
- },120000);
+ })(),300000);
 
  it('accepts harvest gestures without preview, aggregates server missions and credits only their return',async()=>{
   const f=await fixture(),installed=await installVillage(db,compute,accountId,f.slug,f.input);

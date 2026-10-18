@@ -58,7 +58,8 @@ export async function spawnSnapshot(tx:Kysely<Database>,slug:string,privateState
       throw new HttpError(409, 'SPAWN_MAP_NOT_READY', 'Cette carte d’arrivée n’est pas disponible.');
     const resourceState=await readRc1Resources(tx,world.id);
     const terraces=await tx.selectFrom('worldSpawnTerraces').select(['cellX','cellY','height']).where('worldId','=',world.id).execute();
-    return { resources:resourceState.length?resourceState:undefined, map: { terraces,removedTreeIndices:resourceState.flatMap(r=>r.removedIndices),worldId: world.id, worldSlug: world.slug, worldName: world.name, artifactChecksum: RC1_CANONICAL_CHECKSUM,
+    const vertices=world.terrainModel==='vertices'?await tx.selectFrom('worldTerrainVertices').select(['vertexX','vertexY','height']).where('worldId','=',world.id).execute():undefined;
+    return { resources:resourceState.length?resourceState:undefined, map: { ...(vertices?{vertices}:{}),terraces,removedTreeIndices:resourceState.flatMap(r=>r.removedIndices),worldId: world.id, worldSlug: world.slug, worldName: world.name, artifactChecksum: RC1_CANONICAL_CHECKSUM,
       terrainRevision: SPAWN_TERRAIN_REVISION, surfaces, villages: await spawnVillages(tx, world.id),
       territories: await tx.selectFrom('villageSpawnTerritories').select(['villageId', 'points']).where('worldId', '=', world.id).orderBy('villageId').execute(), readiness: 'terrain-only' },
       artifactJSON: candidate.artifactText, seed: Number(world.seed),

@@ -49,10 +49,11 @@ async function levelsFor(tx: Transaction<Database>, worldId: string, accountId: 
   return levels;
 }
 
-async function evidence(tx: Transaction<Database>, worldId: string, accountId: string) {
+async function evidence(tx: Transaction<Database>, worldId: string, accountId: string,
+  knownScience?: { solarReport: unknown; observationsSince: Date | null }) {
   const places = await tx.selectFrom('sciencePlaces').select(['cellX', 'cellY']).where('worldId', '=', worldId)
     .where('accountId', '=', accountId).where('surveyed', '=', true).execute();
-  const science = await tx.selectFrom('playerScience').select(['solarReport', 'observationsSince'])
+  const science = knownScience ?? await tx.selectFrom('playerScience').select(['solarReport', 'observationsSince'])
     .where('worldId', '=', worldId).where('accountId', '=', accountId).executeTakeFirstOrThrow();
   return { places: places.length, solar: science.solarReport !== null, since: science.observationsSince };
 }
@@ -373,9 +374,9 @@ export async function scienceSnapshot(tx: Transaction<Database>, economy: Villag
   const owner = readOnly ? await context(tx, economy) : null;
   const { accountId, science } = owner ? { accountId: owner.ownerAccountId,
     science: await tx.selectFrom('playerScience').selectAll().where('worldId','=',economy.worldId)
-      .where('accountId','=',owner.ownerAccountId).executeTakeFirstOrThrow() } : await lockScience(tx, economy);
+      .where('accountId','=',owner.ownerAccountId).executeTakeFirst() ?? { solarReport: null, observationsSince: null } } : await lockScience(tx, economy);
   const levels = await levelsFor(tx, economy.worldId, accountId);
-  const facts = await evidence(tx, economy.worldId, accountId);
+  const facts = await evidence(tx, economy.worldId, accountId, science);
   const programs = await tx.selectFrom('sciencePrograms').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId).execute();
   const activities = await tx.selectFrom('scienceActivities').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId)
     .where('status', '=', 'in-progress').orderBy('startedAt').execute();

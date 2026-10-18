@@ -357,7 +357,7 @@ export class BabylonVillageScene {
   #cameraFocus:{from:Cell;to:Cell;at:number;duration:number;radius:number;height:number}|null=null;
   #lastCameraRadius: number | null = null;
   #initialCameraFramed = false;
-  #e2eCells: Array<{ id: string; x: number; z: number }> = [];
+  #e2eCells: Array<{ id: string; x: number; z: number; cellX:number; cellY:number }> = [];
   #e2eFeatures: Array<{ id: string; x: number; z: number }> = [];
   #worldWidthUnits = 2048 * TILE_SIZE;
   #worldHeightUnits = 1024 * TILE_SIZE;
@@ -946,7 +946,7 @@ export class BabylonVillageScene {
           return [{id:site.building.id,x:point.x/this.#engine.getRenderWidth(),y:point.y/this.#engine.getRenderHeight()}];
         })??[]);
         this.#canvas.dataset.cellScreens = JSON.stringify(this.#e2eCells.map((cell) => {
-          const point = Vector3.Project(new Vector3(cell.x, 0.075, cell.z), Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
+          const point = Vector3.Project(new Vector3(cell.x, (this.#store?.ground(cell.cellX,cell.cellY)?.height??0)+.075, cell.z), Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
           return { id: cell.id, x: point.x / this.#engine.getRenderWidth(), y: point.y / this.#engine.getRenderHeight() };
         }));
         const renderedFeatures = new Map<string, { id: string; x: number; z: number }>();
@@ -1055,7 +1055,7 @@ export class BabylonVillageScene {
     state = { ...state, cells: state.cells.map(c => ({ ...c, ...this.#space!.projectFrom(c, this.#villageAnchor) })) };
 
     if (import.meta.env.MODE === 'e2e') {
-      this.#e2eCells = state.cells.map(({ id, x, z }) => ({ id, x, z }));
+      this.#e2eCells = state.cells.map(({ id, x, z, cellX, cellY }) => ({ id, x, z, cellX, cellY }));
 
     }
     if (!this.#initialCameraFramed) {
@@ -1386,6 +1386,13 @@ export class BabylonVillageScene {
         (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.15,
         p.z,
       );
+      if(this.#state?.region.vertexHeights){
+        const data=mesh.getVerticesData('position');
+        if(data){for(let i=0;i<data.length;i+=3){
+          const ground=this.#store?.ground(cell.cellX+data[i]!/TILE_SIZE,cell.cellY+data[i+2]!/TILE_SIZE);
+          if(ground)data[i+1]=data[i+1]!+ground.height+.15-mesh.position.y;
+        }mesh.setVerticesData('position',data);}
+      }
       mesh.material = obstacles.has(cellKey(cell)) ? this.#invalidAreaMaterial
         : preview?.needsLeveling ? this.#levelingAreaMaterial : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
       mesh.isPickable = false;
@@ -1884,7 +1891,7 @@ export class BabylonVillageScene {
       const b = `${to.x}:${to.z}`;
       const key = a < b ? `${a}|${b}` : `${b}|${a}`;
       const previous = segments.get(key);
-      if (previous) from.y = to.y = Math.max(from.y, previous[0].y);
+      if (previous && !state.region.vertexHeights) from.y = to.y = Math.max(from.y, previous[0].y);
       segments.set(key, [from, to]);
     };
     const half = TILE_SIZE / 2;
@@ -1901,10 +1908,14 @@ export class BabylonVillageScene {
       const northEast = new Vector3(cell.x + half, y, cell.z - half);
       const southEast = new Vector3(cell.x + half, y, cell.z + half);
       const southWest = new Vector3(cell.x - half, y, cell.z + half);
+      if(state.region.vertexHeights){
+        for(const [corner,dx,dy] of [[northWest,0,0],[northEast,1,0],[southEast,1,1],[southWest,0,1]] as const)
+          corner.y=state.region.vertexHeights[(regionY+dy)*(state.region.width+1)+regionX+dx]!*TILE_SIZE+.06;
+      }
       {
         const first = areaPositions.length / 3;
         for (const corner of [northWest, northEast, southEast, southWest]) {
-          areaPositions.push(corner.x, y - 0.01, corner.z);
+          areaPositions.push(corner.x, corner.y - 0.01, corner.z);
         }
         areaIndices.push(first, first + 2, first + 1, first, first + 3, first + 2);
       }

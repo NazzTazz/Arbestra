@@ -86,6 +86,7 @@ function gardenReady(garden: Garden, serverNow: number): number {
 export function App({starter}:{starter?:StarterController} = {}) {
   const beforeTownHall=starter?.beforeTownHall??false;
   const starterActive=Boolean(starter?.active);
+  const [levelingPreview, setLevelingPreview] = useState<import('@arbestra/contracts').LevelingPreview | null>(null);
   const [leveling, setLeveling] = useState<Omit<LevelingRequest, 'workerCount'> | null>(null);
   const [state, setState] = useState<VillageState | null>(starter?.state??null);
   const observationActive=useObservationPublisher(starterActive?null:state);
@@ -914,7 +915,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={starterActive?'starter':construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
       constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={starterActive?worldMode==='construction'&&!paletteCollapsed&&!starter!.pending:!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
         && (construction?.action !== 'extend' || Boolean(construction.buildingId)) && !pendingAction && terrainView === 'village'}
-      preview={!paletteCollapsed && worldMode === 'construction' ? starterActive?starter!.preview:area : null} previewInvalid={starterActive?Boolean(starter!.preview.error):Boolean(selectionError)} onAreaGesture={starterActive?(_first,last,commit)=>starter!.onGesture(last,commit):handleAreaGesture}
+      preview={!paletteCollapsed && worldMode === 'construction' ? starterActive?starter!.preview:leveling&&levelingPreview?{cells:levelingPreview.quote.affectedCells??levelingPreview.quote.cells,count:(levelingPreview.quote.affectedCells??levelingPreview.quote.cells).length,error:null,needsLeveling:true}:area : null} previewInvalid={starterActive?Boolean(starter!.preview.error):Boolean(selectionError)} onAreaGesture={starterActive?(_first,last,commit)=>starter!.onGesture(last,commit):handleAreaGesture}
       onGardenHarvest={(cell,fresh,previewOnly)=>uncertainRequest.current?collectExploitation(cell,fresh,previewOnly):harvest.collect(cell,fresh,previewOnly)} onWorldGestureCancelled={cancelWorldGesture} onSiteSelected={(id, anchor, inspect) => {
         if(modeRef.current==='population'&&id.startsWith('representative:')){
           closePanels();setPopulationFocus(null);const personId=id.slice(15);
@@ -994,7 +995,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
       infrastructure={<InfrastructureTools state={sceneState??state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onConfirmation={applyInfrastructureConfirmation} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
       onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
-    {leveling && <LevelingPanel slug={state.world.slug} villageId={state.village.id} request={leveling} onSnapshot={applySnapshot} onClose={() => setLeveling(null)} onStarted={() => { setLeveling(null); clearPreview(); pushNotification('Chantier de nivellement lancé. Vous pourrez construire à sa fin.'); }}/>}
+    {leveling && <LevelingPanel slug={state.world.slug} villageId={state.village.id} request={leveling} onPreview={setLevelingPreview} onSnapshot={applySnapshot} onClose={() => {setLeveling(null);setLevelingPreview(null);}} onStarted={() => { setLeveling(null);setLevelingPreview(null); clearPreview(); pushNotification('Chantier de nivellement lancé. Vous pourrez construire à sa fin.'); }}/>}
     {workshop&&<section className="factory-workshop" aria-label="Atelier"><button onClick={()=>setWorkshop(null)}>Retour au village</button>{state.factoryEnabled?<iframe title={`Atelier ${workshop}`} src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}/>:<p>L’accès aux ateliers a été désactivé.</p>}</section>}
   </main>{!initialReady && <WorldLoading worldName={state.world.name} message="Préparation de la scène"
     progress={initialProgress?.key === sceneKey ? initialProgress.progress : undefined}

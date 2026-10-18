@@ -34,7 +34,7 @@ function build(data:NavigationData,stage:(name:string)=>void):NavigationField{
   const absent=new Set(data.treeEdits.flatMap(e=>e.removed));
   const trees:WoodlandTree[]=(source.data.forest?.trees??[]).flatMap((t,i)=>absent.has(i)?[]:[{x:t.x,y:t.y,scale:t.crown*t.size,heightScale:t.size,rotation:0}]);
   for(const e of data.treeEdits)if(e.grove)trees.push(...woodlandTrees({cellX:e.cellX,cellY:e.cellY,variantSeed:e.variantSeed,rc1:{trees:[],rocks:[]},deposit:{remainingAmount:e.initialAmount,initialAmount:e.initialAmount,cleared:false}}));
-  const field=editedRc1Field(source.data,source.field,data.terraces,[...absent]),trunks=woodlandPassage(trees,world);
+  const field=editedRc1Field(source.data,source.field,data.terraces,[...absent],data.vertices),trunks=woodlandPassage(trees,world);
   terrain=(x,y)=>{const s=field.sample(x,y);return{elevation:s.elevation,dry:s.elevation>Math.max(0,s.surface)+1e-6,blocked:field.intersectsRock({x,y,halfWidth:0,halfHeight:0})||trunks.blocked(x,y)};};
  }
  const occupancy=new Map(data.occupancies.map(c=>[c.cellX+':'+c.cellY,c.buildingId]));

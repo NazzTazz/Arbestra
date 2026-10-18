@@ -44,9 +44,9 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
   const requested = parseTerrainChunks(raw);
   return db.transaction().setIsolationLevel('repeatable read').execute(async (tx) => {
     await sql`set transaction read only`.execute(tx);
-    const world = preparation?await tx.selectFrom('worlds').select(['id','generationVersion','generationStatus','widthCells','heightCells','chunkSize']).where('slug','=',slug).where('generationVersion','=',3).where('isOpen','=',true).executeTakeFirst():await tx.selectFrom('worlds').innerJoin('villages', 'villages.worldId', 'worlds.id')
+    const world = preparation?await tx.selectFrom('worlds').select(['id','generationVersion','generationStatus','terrainModel','widthCells','heightCells','chunkSize']).where('slug','=',slug).where('generationVersion','=',3).where('isOpen','=',true).executeTakeFirst():await tx.selectFrom('worlds').innerJoin('villages', 'villages.worldId', 'worlds.id')
       .innerJoin('worldMemberships', (join) => join.onRef('worldMemberships.worldId', '=', 'worlds.id').on('worldMemberships.accountId', '=', accountId))
-      .select(['worlds.id', 'worlds.generationVersion', 'worlds.generationStatus', 'worlds.widthCells', 'worlds.heightCells', 'worlds.chunkSize'])
+      .select(['worlds.id', 'worlds.generationVersion', 'worlds.generationStatus', 'worlds.terrainModel', 'worlds.widthCells', 'worlds.heightCells', 'worlds.chunkSize'])
       .where('worlds.slug', '=', slug).where('villages.ownerAccountId', '=', accountId).executeTakeFirst();
     if (!world) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.');
     const { id: worldId, chunkSize: size, widthCells: width, heightCells: height } = world;
@@ -59,7 +59,7 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
     })).values()];
     // A mutable refresh needs verified source geometry for visible features and
     // current local terraces, not the world's navigation field or height patches.
-    const editsSource=world.generationVersion===3&&mutableRc1Only?await readRc1Source(tx,worldId):null;
+    const editsSource=world.generationVersion===3&&mutableRc1Only&&world.terrainModel!=='vertices'?await readRc1Source(tx,worldId):null;
     const terraces=editsSource?await tx.selectFrom('worldSpawnTerraces').select(['cellX','cellY','height']).where('worldId','=',worldId)
       .where(eb=>eb.or(wanted.map(c=>eb.and([
         eb('cellX','>=',c.chunkX*size),eb('cellX','<',(c.chunkX+1)*size),
@@ -94,7 +94,7 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
       }
     }
     const sourceData=rc1?.data??editsSource?.data;
-    const geometry=sourceData?await rc1FeatureGeometry(tx,worldId,sourceData,[...new Set(features.map(f=>f.id))]):new Map();
+    const geometry=sourceData?await rc1FeatureGeometry(tx,worldId,sourceData,[...new Set(features.map(f=>f.id))],rc1?.field):new Map();
     if(preparation&&rc1&&features.some(f=>!f.initialAmount)){
       const groups=rc1ResourceGroups(rc1.data,rc1.field);
       for(const f of features){const g=groups.find(g=>g.cellX===f.cellX&&g.cellY===f.cellY&&(g.kind==='wood')===(f.featureTypeCode==='woodland'));if(g)geometry.set(f.id,{trees:g.treeIndices.filter(i=>!rc1.terraces.some(t=>Math.abs(rc1.data.forest!.trees[i]!.x-t.cellX)<=.5&&Math.abs(rc1.data.forest!.trees[i]!.y-t.cellY)<=.5)).map(i=>rc1.data.forest!.trees[i]!),rocks:g.sourceKey.startsWith('stone:')?rc1.data.stoneSites?.find(s=>String(s.id)===g.sourceKey.slice(6))?.rocks??[]:[]});}

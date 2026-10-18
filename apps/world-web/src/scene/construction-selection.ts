@@ -1,4 +1,4 @@
-import {fixedBuildingFootprint, isBuildingFootprintFlat} from '@arbestra/contracts';
+import {footprintVertices,fixedBuildingFootprint, isBuildingFootprintFlat} from '@arbestra/contracts';
 import type { VillageState } from '@arbestra/contracts';
 
 export interface Cell { cellX: number; cellY: number }
@@ -73,7 +73,10 @@ export function previewArea(state: VillageState, range: CellRange, spatial: bool
   }
   const result = previewCells(preview.cells,cell=>free.has(cellKey(cell)));
   if (!result.error && (buildingType === 'university' || buildingType === 'stonemason')) {
-    const heights = result.cells.map(c => {
+    const heights = state.region.vertexHeights ? footprintVertices(result.cells,state.world).map(v=>{
+      const x=normalize(v.vertexX-state.region.originCellX,state.world.widthCells),y=normalize(v.vertexY-state.region.originCellY,state.world.heightCells);
+      return x<=state.region.width&&y<=state.region.height?state.region.vertexHeights![y*(state.region.width+1)+x]!*100:NaN;
+    }) : result.cells.map(c => {
       const x = normalize(c.cellX - state.region.originCellX, state.world.widthCells);
       const y = normalize(c.cellY - state.region.originCellY, state.world.heightCells);
       return x < state.region.width && y < state.region.height ? state.region.elevations[y * state.region.width + x]! : NaN;

@@ -1,5 +1,7 @@
 # Architecture autoritaire
 
+**Recette acceptée, publication alpha/staging en cours :** [terrain à sommets partagés](../SPEC-TERRAIN-SOMMETS-PARTAGES.md). Modèle RC1 versionné par monde, coins persistés et surface commune au serveur/rendu. Migration 048 additive ; monde local `recette-sommets` pour recette, anciens mondes conservés sans conversion implicite. Nivellement réduit à une minute par case et quart de hauteur déplacé, divisée par l’effectif.
+
 **Implémentée et vérifiée localement :** [extension progressive du village](../SPEC-EXTENSION-VILLAGE.md), portée de 8 cases, terrain et connaissance locale suivant les emprises au-delà de la zone initiale. Non déployée.
 
 **Déployé sur alpha et staging :** [nivellement préalable au placement](../SPEC-NIVELLEMENT-PLACEMENT.md), aperçu commun client/serveur et chantier avec habitants sur les emprises sèches libres RC1. Migration 047 appliquée ; tags `alpha-2026.10.18.5` et `staging-2026.10.18.5`.

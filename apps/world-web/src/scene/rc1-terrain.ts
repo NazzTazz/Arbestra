@@ -1,4 +1,4 @@
-﻿import {RC1_WORLD,type TerrainChunk} from '@arbestra/contracts';
+import {triangleHeight,RC1_WORLD,type TerrainChunk} from '@arbestra/contracts';
 import {Mesh} from '@babylonjs/core/Meshes/mesh';
 import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
 import type {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
@@ -11,12 +11,13 @@ export function rc1Height(chunk:Pick<TerrainChunk,'originCellX'|'originCellY'|'r
  const {widthCells:w,heightCells:h}=RC1_WORLD;
  const cellX=((Math.round(x)%w)+w)%w,cellY=((Math.round(y)%h)+h)%h;
  const terrace=p.terraces.find(t=>t.cellX===cellX&&t.cellY===cellY);if(terrace)return terrace.height*2.5;
- const a=(x-chunk.originCellX+.5)*2,b=(y-chunk.originCellY+.5)*2,ix=Math.max(0,Math.min(p.stride-2,Math.floor(a))),iy=Math.max(0,Math.min(p.stride-2,Math.floor(b))),u=a-ix,v=b-iy;
+ const resolution=p.model==='vertices'?1:2;
+ const a=(x-chunk.originCellX+.5)*resolution,b=(y-chunk.originCellY+.5)*resolution,ix=Math.max(0,Math.min(p.stride-2,Math.floor(a))),iy=Math.max(0,Math.min(p.stride-2,Math.floor(b))),u=a-ix,v=b-iy;
  const at=(dx:number,dy:number)=>p.heights[(iy+dy)*p.stride+ix+dx]!;
- return (u>=v?at(0,0)*(1-u)+at(1,0)*(u-v)+at(1,1)*v:at(0,0)*(1-v)+at(1,1)*u+at(0,1)*(v-u))*2.5;
+ return triangleHeight(at(0,0),at(1,0),at(1,1),at(0,1),u,v)*2.5;
 }
 export function buildRc1TerrainUnit(scene:Scene,chunk:TerrainChunk,offsetX:number,offsetY:number,space:WorldSpace,groundMaterial:StandardMaterial,waterMaterial:StandardMaterial):Mesh[]{
- const patch=chunk.rc1!,size=(patch.stride-1)/2,unit=TERRAIN_STREAMING.renderUnitCells,origin=space.project({cellX:chunk.originCellX,cellY:chunk.originCellY});
+ const patch=chunk.rc1!,resolution=patch.model==='vertices'?1:2,size=(patch.stride-1)/resolution,unit=TERRAIN_STREAMING.renderUnitCells,origin=space.project({cellX:chunk.originCellX,cellY:chunk.originCellY});
  const positions:number[]=[],indices:number[]=[],colors:number[]=[],waterPositions:number[]=[],waterIndices:number[]=[],uvs:number[]=[],groundUvs:number[]=[];
  const terrace=new Map(patch.terraces.map(t=>[t.cellX+':'+t.cellY,t.height]));
  type V={x:number;y:number;h:number;w:number};
@@ -27,8 +28,8 @@ export function buildRc1TerrainUnit(scene:Scene,chunk:TerrainChunk,offsetX:numbe
  };
  for(let y=offsetY;y<Math.min(size,offsetY+unit);y++)for(let x=offsetX;x<Math.min(size,offsetX+unit);x++){
   const level=terrace.get((chunk.originCellX+x)+':'+(chunk.originCellY+y));
-  const vertex=(dx:number,dy:number):V=>({x:x-.5+dx/2,y:y-.5+dy/2,h:level??patch.heights[(y*2+dy)*patch.stride+x*2+dx]!,w:patch.water[(y*2+dy)*patch.stride+x*2+dx]!});
-  for(let sy=0;sy<2;sy++)for(let sx=0;sx<2;sx++)for(const vs of [[vertex(sx,sy),vertex(sx+1,sy),vertex(sx+1,sy+1)],[vertex(sx,sy),vertex(sx+1,sy+1),vertex(sx,sy+1)]]){
+  const vertex=(dx:number,dy:number):V=>({x:x-.5+dx/resolution,y:y-.5+dy/resolution,h:level??patch.heights[(y*resolution+dy)*patch.stride+x*resolution+dx]!,w:patch.water[(y*resolution+dy)*patch.stride+x*resolution+dx]!});
+  for(let sy=0;sy<resolution;sy++)for(let sx=0;sx<resolution;sx++)for(const vs of [[vertex(sx,sy),vertex(sx+1,sy),vertex(sx+1,sy+1)],[vertex(sx,sy),vertex(sx+1,sy+1),vertex(sx,sy+1)]]){
    triangle(vs,false,grassVariant(chunk.originCellX+x,chunk.originCellY+y),x,y);const wet:V[]=[];for(let i=0;i<3;i++){const a=vs[i]!,b=vs[(i+1)%3]!,da=a.w-a.h,db=b.w-b.h;if(da>0)wet.push(a);if((da>0)!==(db>0)){const t=da/(da-db);wet.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,h:a.h+(b.h-a.h)*t,w:a.w+(b.w-a.w)*t});}}
    for(let i=1;i<wet.length-1;i++)triangle([wet[0]!,wet[i]!,wet[i+1]!],true);
   }

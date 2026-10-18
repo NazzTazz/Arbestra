@@ -11,6 +11,7 @@ export interface AccountsTable {
 }
 
 export interface WorldsTable {
+  terrainModel: Generated<'terraces'|'vertices'>;
   id: Generated<string>;
   slug: string;
   name: string;
@@ -432,6 +433,7 @@ export interface Database {
     kit:JSONColumnType<import('@arbestra/contracts').StarterKit>;remaining:JSONColumnType<string[]>;
     anchorX:number;anchorY:number;quarterTurns:number;referenceHeight:number;createdAt:Generated<Timestamp>};
   starterPoseReceipts:{worldId:string;villageId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').StarterPoseRequest>;buildingId:string};
+  worldTerrainVertices:{worldId:string;vertexX:number;vertexY:number;height:number};
   worldSpawnTerraces:{worldId:string;villageId:string;cellX:number;cellY:number;height:number};
   worldRc1Resources:{worldId:string;featureId:string;sourceKey:string;treeIndices:JSONColumnType<number[]>;removedIndices:JSONColumnType<number[]>};
   worldAtlasPresentations: { worldId: string; title: string; slogan: string };

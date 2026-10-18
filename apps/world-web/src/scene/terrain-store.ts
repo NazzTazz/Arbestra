@@ -1,4 +1,4 @@
-import {terrainFeatureKey} from '@arbestra/contracts';
+import {triangleHeight,terrainFeatureKey} from '@arbestra/contracts';
 import { clientTime } from '../dev/statistics';
 import {rc1Height} from './rc1-terrain';
 import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainResponse, TerrainUpdatesChunk, TerrainUpdatesResponse, VillageState } from '@arbestra/contracts';
@@ -18,7 +18,7 @@ function sameChunkGround(a:TerrainChunk|undefined,b:TerrainChunk):boolean{
  if(!a||a.originCellX!==b.originCellX||a.originCellY!==b.originCellY||!sameNumbers(a.terrainCodes,b.terrainCodes)||!sameNumbers(a.elevations,b.elevations))return false;
  if(a.rc1===b.rc1)return true;if(!a.rc1||!b.rc1)return false;
  const before=a.rc1,after=b.rc1;
- return before.stride===after.stride&&sameNumbers(before.heights,after.heights)&&sameNumbers(before.water,after.water)
+ return before.model===after.model&&before.stride===after.stride&&sameNumbers(before.heights,after.heights)&&sameNumbers(before.water,after.water)
   &&before.terraces.length===after.terraces.length&&before.terraces.every((terrace,index)=>{const next=after.terraces[index]!;return terrace.cellX===next.cellX&&terrace.cellY===next.cellY&&terrace.height===next.height;});
 }
 export class TerrainStore {
@@ -85,8 +85,8 @@ export class TerrainStore {
   observe(state: VillageState): void {
     const before=this.#snapshot.region,after=state.region;
     if(before.originCellX!==after.originCellX||before.originCellY!==after.originCellY||before.width!==after.width||before.height!==after.height
-      ||!sameNumbers(before.terrainCodes,after.terrainCodes)||!sameNumbers(before.elevations,after.elevations))this.#snapshotGroundRevision=++this.#groundRevision;
-    if (!sameNumbers(before.elevations,after.elevations)) {
+      ||!sameNumbers(before.terrainCodes,after.terrainCodes)||!sameNumbers(before.elevations,after.elevations)||!sameNumbers(before.vertexHeights??[],after.vertexHeights??[]))this.#snapshotGroundRevision=++this.#groundRevision;
+    if (!sameNumbers(before.elevations,after.elevations)||!sameNumbers(before.vertexHeights??[],after.vertexHeights??[])) {
       for (const cell of state.cells) this.invalidate(this.key(cell.cellX,cell.cellY));
     }
     this.#snapshot = state;
@@ -166,7 +166,7 @@ export class TerrainStore {
             e.freshAt = -Infinity; continue;
           }
           for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
-          const signature = JSON.stringify([chunk.features, chunk.occupiedCells,chunk.rc1Edits?.terraces??chunk.rc1?.terraces]);
+          const signature = JSON.stringify([chunk.features, chunk.occupiedCells,chunk.rc1?.model==='vertices'?chunk.rc1:chunk.rc1Edits?.terraces??chunk.rc1?.terraces]);
           if (!e.chunk || signature !== e.mutableSignature) this.changed.add(ticket.key);
           if (e.chunk) {
             if(chunk.rc1Edits&&!e.chunk.rc1)throw new Error('RC1 edits without substrate');
@@ -213,6 +213,11 @@ export class TerrainStore {
     if(chunk?.rc1){const height=rc1Height(chunk,x+(continuousX-Math.round(continuousX)),y+(continuousY-Math.round(continuousY)))!;const i=(y-chunk.originCellY+1)*(s+2)+x-chunk.originCellX+1;return {height,code:chunk.terrainCodes[i]??1};}
     if (chunk) { const index = (y - chunk.originCellY + 1) * (s + 2) + x - chunk.originCellX + 1; code = chunk.terrainCodes[index]; elevation = chunk.elevations[index]; }
     else { const r = this.#snapshot.region, lx = normalize(x - r.originCellX, w), ly = normalize(y - r.originCellY, h);
+      if(r.vertexHeights&&lx<r.width&&ly<r.height){
+        const u=continuousX-Math.round(continuousX)+.5,v=continuousY-Math.round(continuousY)+.5,stride=r.width+1;
+        const at=(dx:number,dy:number)=>r.vertexHeights![(ly+dy)*stride+lx+dx]!;
+        return {code:r.terrainCodes[ly*r.width+lx]??1,height:triangleHeight(at(0,0),at(1,0),at(1,1),at(0,1),u,v)*2.5};
+      }
       if (lx < r.width && ly < r.height) { code = r.terrainCodes[ly * r.width + lx]; elevation = r.elevations[ly * r.width + lx]; } }
     return code === undefined || elevation === undefined ? null : { code, height: code === 2 ? -0.75 : elevation * 0.025 };
   }

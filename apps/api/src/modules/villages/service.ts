@@ -1,6 +1,6 @@
 import {levelingSnapshot} from './leveling.js';
 import {villageTerrainRegion} from './terrain-region.js';
-import {isBuildingFootprintFlat} from '@arbestra/contracts';
+import {footprintVertices,isBuildingFootprintFlat} from '@arbestra/contracts';
 import {observationVillage} from '../admin/observation-actions.js';
 import { devTime, devTimeSync } from '../operations/dev-timing.js';
 import {fixedBuildingFootprint,withinBuildReach,BUILD_REACH as BUILD_RADIUS} from '@arbestra/contracts';
@@ -189,6 +189,9 @@ async function catalog(
   }));
 }
 
+function footprintHeights(ground: Snapshot,cells: readonly SpatialCell[],world: {widthCells:number;heightCells:number}) {
+  return ground.rc1?.field.geometry ? footprintVertices(cells,world).map(v=>ground.rc1!.field.geometry!.height(v.vertexX,v.vertexY)*100) : cells.map(c=>ground.elevationAt(c.cellX,c.cellY)??NaN);
+}
 interface Snapshot {
   rc1?: Awaited<ReturnType<typeof readRc1Ground>>;
   originCellX: number;
@@ -834,6 +837,7 @@ export async function state(
       height: ground.height,
       terrainCodes: ground.terrainCodes,
       elevations: ground.elevations,
+      ...(ground.rc1?.field.geometry?{vertexHeights:Array.from({length:(ground.width+1)*(ground.height+1)},(_,i)=>ground.rc1!.field.geometry!.height(ground.originCellX+i%(ground.width+1),ground.originCellY+Math.floor(i/(ground.width+1))))}:{}),
       features: features.map((feature) => ({
         id: feature.id,
         type: feature.featureTypeCode,
@@ -1237,7 +1241,7 @@ async function ensureUniversityCampus(tx: Transaction<Database>, village: OwnedV
   const added = cells.filter(c => !occupied.has(worldCellKey(c.cellX, c.cellY)));
   if (!added.length) return;
   const ground = await snapshot(tx, village);
-  const heights = cells.map(c => ground.elevationAt(c.cellX,c.cellY) ?? NaN);
+  const heights = footprintHeights(ground,cells,village);
   if (!isBuildingFootprintFlat(heights))
     throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
   await assertBuildableCells(tx,village,added);
@@ -1430,7 +1434,7 @@ export async function constructBuildingArea<Mode extends ConstructionReplyMode =
       if (selection.cells.length !== 30 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
         throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'L’Université occupe 5 × 6 cases autour de son ancre.');
       const ground = await snapshot(tx, village);
-      const heights = selection.cells.map(c => ground.elevationAt(c.cellX,c.cellY) ?? NaN);
+      const heights = footprintHeights(ground,selection.cells,village);
       if (!isBuildingFootprintFlat(heights))
         throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
     } else if (item.code === 'stonemason') {
@@ -1438,7 +1442,7 @@ export async function constructBuildingArea<Mode extends ConstructionReplyMode =
       if (selection.cells.length !== 4 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX,c.cellY))))
         throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Le tailleur occupe 2 × 2 cases.');
       const ground = await snapshot(tx, village);
-      const heights = selection.cells.map(c => ground.elevationAt(c.cellX,c.cellY) ?? NaN);
+      const heights = footprintHeights(ground,selection.cells,village);
       if (!isBuildingFootprintFlat(heights))
         throw new HttpError(409, 'UNEVEN_TERRAIN', 'Le tailleur demande une emprise plane.');
     } else if (item.code !== 'garden' && selection.cells.length !== 1)

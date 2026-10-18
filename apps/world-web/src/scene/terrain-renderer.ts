@@ -150,7 +150,7 @@ export class TerrainRenderer {
         return inside({cellX:cellX!, cellY:cellY!});
       }));
       // RC1 ground reads its immutable patch and terraces, never road decorations.
-      const groundSignature = JSON.stringify(chunk.rc1 ? [chunk.rc1.terraces]
+      const groundSignature = JSON.stringify(chunk.rc1 ? [chunk.rc1.model,chunk.rc1.terraces,...(chunk.rc1.model==='vertices'?[chunk.rc1.heights,chunk.rc1.water]:[])]
         : [null,this.#infrastructureRevision,[...roads].sort(([a], [b]) => a.localeCompare(b))]);
       add(`ground:${x}:${y}`, groundSignature, true, inside(focus) ? -2 : 0, cx, cy,
         () => buildTerrainUnit(this.scene, chunk, x, y, this.space, this.groundMaterial, this.waterMaterial, roads,this.#infrastructure));

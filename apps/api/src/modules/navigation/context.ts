@@ -5,6 +5,7 @@ import {HttpError} from '../../errors.js';
 import {RC1_CANONICAL_CHECKSUM} from '../onboarding/spawn-compute-protocol.js';
 import {navigationVersions} from './route-cache.js';
 export interface NavigationData {
+ vertices?:import('@arbestra/contracts').TerrainVertex[];
  worldId:string;contextId:string;traversalConstraintsId:string;width:number;height:number;
  artifact?:string|undefined;sourceId:string;terraces:SpawnTerrace[];treeEdits:Array<{cellX:number;cellY:number;initialAmount:number;variantSeed:number;removed:number[];grove:boolean}>;
  legacy?:{chunkSize:number;chunks:Array<{chunkX:number;chunkY:number;terrainCodes:number[];elevations:number[]}>}|undefined;
@@ -21,7 +22,7 @@ export async function loadNavigationContext(db:Kysely<Database>,worldId:string,k
   await sql`set transaction read only`.execute(tx);
   await sql`set local statement_timeout='5s'`.execute(tx);
   await sql`set local transaction_timeout='6s'`.execute(tx);
-  const world=await tx.selectFrom('worlds').select(['generationVersion','generationStatus','widthCells','heightCells','chunkSize','seed']).where('id','=',worldId).executeTakeFirstOrThrow();
+  const world=await tx.selectFrom('worlds').select(['generationVersion','generationStatus','widthCells','heightCells','chunkSize','seed','terrainModel']).where('id','=',worldId).executeTakeFirstOrThrow();
   if(world.generationStatus!=='ready')throw new HttpError(409,'WORLD_NOT_READY','Terrain indisponible.');
   const revision=await navigationRevision(tx,worldId);
   const manifest=persistent?await navigationVersions(tx,worldId):undefined;
@@ -42,6 +43,7 @@ export async function loadNavigationContext(db:Kysely<Database>,worldId:string,k
  const sites=await tx.selectFrom('worldCellOccupancies as o').innerJoin('worldFeatures as f',j=>j.onRef('f.worldId','=','o.worldId').onRef('f.id','=','o.featureId'))
   .select(['o.cellX','o.cellY','o.featureId']).where('o.worldId','=',worldId).where('f.featureTypeCode','=','leveling-site').execute();
  occupancies.push(...sites.map(c=>({cellX:c.cellX,cellY:c.cellY,buildingId:c.featureId,role:'body' as const})));
+ const vertices=world.terrainModel==='vertices'?await tx.selectFrom('worldTerrainVertices').select(['vertexX','vertexY','height']).where('worldId','=',worldId).orderBy('vertexX').orderBy('vertexY').execute():undefined;
  const terraces=await tx.selectFrom('worldSpawnTerraces').select(['cellX','cellY','height']).where('worldId','=',worldId).execute();
   let artifact:string|undefined;
   let treeEdits:NavigationData['treeEdits']=[];
@@ -54,7 +56,7 @@ export async function loadNavigationContext(db:Kysely<Database>,worldId:string,k
     .select(['treeIndices','removedIndices','cleared','initialAmount','woodlandDeposits.cellX','woodlandDeposits.cellY','variantSeed']).where('worldRc1Resources.worldId','=',worldId).execute();
    treeEdits=edits.map(r=>({cellX:r.cellX??0,cellY:r.cellY??0,initialAmount:Number(r.initialAmount??0),variantSeed:r.variantSeed??3,removed:r.cleared?r.treeIndices:r.removedIndices,grove:!r.treeIndices.length&&!r.cleared}));
   }else legacy={chunkSize:world.chunkSize,chunks:await tx.selectFrom('worldChunks').select(['chunkX','chunkY','terrainCodes','elevations']).where('worldId','=',worldId).execute()};
-  return{contextId,revision,sourceId,manifest,data:{worldId,contextId,sourceId,traversalConstraintsId:'none',width:world.widthCells,height:world.heightCells,artifact,legacy,terraces,treeEdits,occupancies,accesses,plans} satisfies NavigationData};
+  return{contextId,revision,sourceId,manifest,data:{worldId,contextId,sourceId,traversalConstraintsId:'none',width:world.widthCells,height:world.heightCells,artifact,legacy,...(vertices?{vertices}:{}),terraces,treeEdits,occupancies,accesses,plans} satisfies NavigationData};
  });
 }
 export type NavigationArtifact=GeneratedLandscape;

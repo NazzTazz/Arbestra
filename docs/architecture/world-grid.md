@@ -1,5 +1,11 @@
 # Monde et grille
 
+## Variante RC1 à sommets partagés
+
+La [tranche à sommets partagés](../SPEC-TERRAIN-SOMMETS-PARTAGES.md) ajoute `worlds.terrain_model`, par défaut `terraces` pour préserver les mondes existants. Sur un monde `vertices`, `(vertex_x,vertex_y)` désigne le coin `(x−0,5,y−0,5)` ; la clé persistante est `(world_id,vertex_x,vertex_y)`, canonique sur le tore. Les surcharges de `world_terrain_vertices` remplacent les hauteurs du substrat signé. Deux triangles par case, de diagonale 00→11, portent le même échantillonnage dans les contrats, la navigation serveur et le mesh Babylon. Grille, placement, picking et figurants suivent cette surface.
+
+Un chunk de 32 cases transmet 33 × 33 hauteurs avec `rc1.model = vertices`. Les écritures de sommets invalident tous les chunks incidents, y compris sur les deux coutures ; le changement de modèle invalide l’époque de navigation. La conversion est explicite et refuse les conflits de plateformes et contrats engagés. Le monde local de recette est activé séparément ; aucune bascule implicite des mondes en production. Les paragraphes historiques ci-dessous décrivent aussi les modèles précédents, qui demeurent disponibles.
+
 Chaque monde est une grille rectangulaire finie et torique. La configuration initiale est `2048 × 1024` cellules, découpable en chunks `32 × 32`.
 
 Une cellule métier est identifiée par `(world_id, cell_x, cell_y)`, avec coordonnées entières canoniques :

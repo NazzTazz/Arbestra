@@ -1,3 +1,4 @@
+import {flattenVertexTerrain} from '../worlds/terrain-vertices.js';
 import {advancePopulationGrowth} from '../population/growth.js';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
@@ -32,6 +33,7 @@ async function insertElement(tx:Transaction<Database>,worldId:string,villageId:s
  return id;
 }
 async function flatten(tx:Transaction<Database>,worldId:string,villageId:string,cells:readonly {cellX:number;cellY:number}[],height:number){
+ if(await flattenVertexTerrain(tx,worldId,cells,height))return;
  await tx.insertInto('worldSpawnTerraces').values(cells.map(c=>({cellX:c.cellX,cellY:c.cellY,worldId,villageId,height}))).execute();
 }
 export async function installVillage(db:Kysely<Database>,compute:Pick<SpawnCompute,'run'>,accountId:string,slug:string,input:SpawnPoseRequest):Promise<StarterInstallation>{

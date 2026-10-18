@@ -26,7 +26,7 @@ parentPort!.on('message', (job: SpawnJob) => {
   try {
     const map = { ...snapshot.map, landscape: cached.landscape };
     const result = job.kind === 'element' ? planElement(map,job.input,snapshot.spatial,cached.field) : job.kind === 'installation' ? planInstallation(map,job.input,snapshot.spatial,cached.field,snapshot.resources) : job.kind === 'map' ? map : job.kind === 'terrain'
-      ? createSpawnTerrainInspector(map.landscape, editedRc1Field(map.landscape,cached.field,map.terraces??[],map.removedTreeIndices??[]))(job.input.point, map.surfaces, job.input.quarterTurns, map.villages, false, snapshot.spatial.protectedSurfaces, map.territories)
+      ? createSpawnTerrainInspector(map.landscape, editedRc1Field(map.landscape,cached.field,map.terraces??[],map.removedTreeIndices??[],map.vertices))(job.input.point, map.surfaces, job.input.quarterTurns, map.villages, false, snapshot.spatial.protectedSurfaces, map.territories)
       : (()=>{const p=planInstallation(map,{...job.input,commandId:'00000000-0000-4000-8000-000000000000',kitVersion:STARTER_KIT.version,mode:'grouped',playerName:'Inspection',villageName:'Inspection'},snapshot.spatial,cached.field,snapshot.resources,false);
         return {terrain:p.terrain,readiness:'terrain-only' as const,accessRevision:1,naturalProjection:snapshot.resources?'ready' as const:'planned' as const,woodAssumption:'evaluated' as const,poorInResources:p.poorInResources,planningStatus:p.status,visited:0,plannedStone:p.supplements.filter(s=>s.kind!=='wood').reduce((n,s)=>n+s.amount,0),plannedWood:p.supplements.filter(s=>s.kind==='wood').reduce((n,s)=>n+s.amount,0),cleaning:{referenceHeight:p.cleaning.referenceHeight,treesToRemove:p.cleaning.removedTreeIndices.length,woodCredit:0 as const}};
       })();

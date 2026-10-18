@@ -17,7 +17,7 @@ const rowVersion = sql<string>`xmin::text || ':' || ctid::text`.as('rowVersion')
 /** Only immutable, checksum-verified geography is cached. No local edits live here. */
 export async function readRc1Source(db: Kysely<Database>, worldId: string) {
   return devTime('rc1_source', async () => {
-  const world = await db.selectFrom('worlds').select(['widthCells', 'heightCells', 'chunkSize', 'seed'])
+  const world = await db.selectFrom('worlds').select(['widthCells', 'heightCells', 'chunkSize', 'seed', 'terrainModel'])
     .where('id', '=', worldId).executeTakeFirstOrThrow();
   if (world.widthCells !== RC1_WORLD.widthCells || world.heightCells !== RC1_WORLD.heightCells || world.chunkSize !== RC1_WORLD.chunkSize)
     throw new HttpError(409, 'WORLD_NOT_READY', 'Dimensions RC1 incohérentes.');
