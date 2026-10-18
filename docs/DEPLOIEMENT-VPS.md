@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Correctif des devis commerciaux du 18 octobre 2026
+
+Release **`a641cd640c547e203f81ee65f133b08012acbf97` déployée dans les deux environnements** : `staging-2026.10.18.2` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39127081661), puis `alpha-2026.10.18.2` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39127268070). Correction du budget de recherche des trajets commerciaux lointains et conservation du code `TRADE_PREPARATION_BUSY` dans le NOC. Aucun changement de migration ni de configuration opérateur. Trois services actifs et SHA de release confirmés.
+
+Contrôles publics indépendants verts en [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39127215044) et [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39127408119). Calcul alpha réel vérifié avec les modules déployés, PostgreSQL imposé en lecture seule et worker isolé : trajet trouvé en 20,736 s à froid puis 0,311 s à chaud ; aucune acceptation d’offre ni session de diagnostic créée. Cette mesure ponctuelle ne garantit pas la latence sous charge. Preuves et limites dans le handoff.
+
 ## Publication marché et ateliers du 18 octobre 2026
 
 Release **`bd95b870ef4d6da089d538f9fba78e6c52dd0e2c` déployée dans les deux environnements** : `staging-2026.10.18.1` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39123247402), puis `alpha-2026.10.18.1` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39123484116). Marché entre joueurs, transport visible, accès aux bâtiments en Vue libre et productions artisanales par durée. Migrations 044 et 045 appliquées avec succès, trois services actifs et SHA de release confirmé dans chaque log. Sauvegarde pré-migration par le contrôleur existant ; aucun seed/reset ni modification de configuration opérateur.
