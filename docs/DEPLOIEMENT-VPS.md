@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Attente du worker pour les devis commerciaux — 18 octobre 2026
+
+Release **`6f44bd1fb138558b6abaae823a2faa7a8be91863` déployée** : `staging-2026.10.18.4` / [workflow staging](https://github.com/NazzTazz/Arbestra/actions/runs/39145978408), puis `alpha-2026.10.18.4` / [workflow alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39146175131), tous deux réussis. Le marché rejoint la file bornée des projections lorsque le worker est occupé au lieu d'échouer immédiatement. Aucun changement de migration ou configuration ; trois services actifs et SHA vérifié dans chaque environnement.
+
+55 tests locaux verts, build API et lint ciblé verts. Contrôles publics [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39146134574) et [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39146351865) verts. Sonde avec les modules alpha publiés et les données Pinkystan–Catmark, worker isolé volontairement occupé, PostgreSQL en lecture seule : demande mise en attente puis trajet trouvé en 21,421 s. Aucun échange distant accepté, aucune ressource modifiée ; cette sonde ne remplace pas une nouvelle tentative HTTP utilisateur sur le worker partagé vivant. Détails et limites dans le handoff.
+
 ## Pathfinding commercial et cache durable du 18 octobre 2026
 
 Release **`20f8f2abdccb8e98139a81c2b9e6157f1f8b6267` déployée dans les deux environnements** : `staging-2026.10.18.3` / [workflow staging réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39142607278), puis `alpha-2026.10.18.3` / [workflow alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39142776283). Cache durable HDV–HDV, index physique par chunk, réparation locale et raccord fin des accès. Migration additive 046 réussie, trois services actifs et SHA de release confirmé dans chaque journal. Sauvegarde pré-migration par le contrôleur existant ; aucun seed/reset ni modification de configuration opérateur.
