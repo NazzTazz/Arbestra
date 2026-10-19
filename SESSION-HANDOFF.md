@@ -1,3 +1,31 @@
+# Publication HUD et coffre HDV — 19 octobre 2026
+
+**Commit, push et publication alpha/staging demandés par Tristan.** Les deux tranches ci-dessous sont incluses dans cette release, sans migration ni modification des données distantes. Tags prévus `staging-2026.10.19.3` et `alpha-2026.10.19.3` sur le même commit applicatif. Les preuves locales ci-dessous précèdent cette publication ; aucune nouvelle campagne applicative pour la seule clôture Git. Déploiements et contrôles publics à suivre avant clôture. Les deux chemins personnels non suivis sont exclus.
+
+---
+
+# Coffre HDV en Vue libre — 19 octobre 2026
+
+**Correctif local vérifié, prêt pour recette Tristan.** Base `main` / `9bd43e6`, modifications HUD précédentes conservées. La fiche HDV expose la fouille en Vue libre, mais `App.discoverSupplies()` conservait la garde historique `modeRef.current !== 'exploitation'` : le clic retournait silencieusement avant toute requête. La garde autorise désormais Exploitation et Exploration (Vue libre). Commande et unicité restent portées par le serveur existant ; aucune migration.
+
+Régression ajoutée au scénario navigateur Vue libre existant : coffre non réclamé de 2 000 carottes dans un HDV 2, ouverture de « Hôtel de ville et réserves », clic réel/tactile, compteur 2 000 → 4 000, quantité SQL, date de réclamation et accomplissement unique contrôlés. Défaut reproduit avant correction : clic effectué, compteur 4 000 absent, aucune requête `discover-supplies` dans la trace. Trace conservée sous `test-results/supplies-before-trace.zip` (ignorée).
+
+**Validation finale terminée :** les deux parcours complets ordinateur/mobile passent avec Chrome/D3D11 (`2 passed`, processus terminé avec succès, 5 minutes). Ils couvrent le coffre et ses assertions SQL, puis marché, scierie, tailleur, arbre des connaissances et retour au marché, sans erreur JavaScript. Les premiers essais avaient rencontré des attentes de rendu/cadrage avant le coffre : le test attend désormais la disparition du chargement et vingt secondes pour les projections de bâtiments, avec fermeture de l’indice Oracle s’il est ouvert. Une ancienne assertion sensible à la casse du titre « Bois d’œuvre » a également été corrigée avant la relance finale. Typecheck monde et lint ciblé verts ; pas de suite globale revendiquée. Configuration de recette locale sous `test-results/supplies-playwright.config.ts` ignoré. Toutes les fixtures visent `127.0.0.1/arbestra_test`, aucun reset de développement. Aucun commit/push ni déploiement ; chemins personnels non suivis préservés.
+
+---
+
+# Mouvements de ressources dans le HUD — 19 octobre 2026
+
+**Implémentés et vérifiés localement, prêts pour recette Tristan.** Base `main` / `9bd43e6`. Tristan demande de remplacer les notifications génériques de livraison par les variations signées au-dessus des compteurs, dépenses comprises. [Décision et portée](docs/SPEC-GUI-HUD-MODES.md). Aucun commit/push ni déploiement pour cette tranche ; les deux chemins personnels non suivis sont préservés.
+
+App détecte les différences nettes des cinq stocks après acceptation de la projection HTTP/SSE. Aucun effet initial, de devis, d’autre contexte ou de doublon ; aucun crédit client. Le HUD reprend les couleurs récolte et un échappement de 2,4 secondes avec contour noir. Gains et dépenses partagent le même effet. Trois lignes par ressource ; les rafales regroupent les montants sans perdre leur somme, fonction pure compatible avec le rejeu des updaters React StrictMode. Disparition par fin d’animation, sans timer permanent ni polling. Les messages « Récolte livrée » et bois/pierre livrés sont retirés ; les autres notifications restent en place. Observation sans animation. Sur téléphone, identité du village masquée sous 520 px pour donner la largeur aux cinq compteurs ; effets voisins décalés. Mouvement réduit : fondu lisible sans déplacement, malgré la règle CSS globale de durée réduite.
+
+**Preuves terminées :** 14 tests ciblés verts (7 variations/rafales/contexte, 7 synchronisation village), contrats compilés, typecheck monde et lint ciblé verts. Build monde final terminé avec succès (avertissement habituel de taille des chunks Vite), aucune suite globale revendiquée. Le calcul voit les différences nettes entre projections ; il ne reconstruit pas les opérations individuelles qu’une trame serveur regroupe.
+
+**Navigateur via skill agent-browser :** recette isolée du vrai composant Hud et du hook, sous StrictMode, clics +652 bois, −25 bois d’œuvre/−10 pierres taillées, +80 carottes, +125 pierres, +20 taillées. Signes/couleurs/ancrages vérifiés, captures relues `test-results/resource-feedback-desktop.png` et `resource-feedback-mobile.png`. Hauteur de barre 38 px, labels hors flux, écran 390 px sans chevauchement après ajustement. Cinq retours rapprochés donnent un compteur +50 et trois labels dont la somme vaut 50 ; fin d’animation supprime les labels, projection identique n’en recrée aucun. Préférence mouvement réduit vérifiée : `resource-fade`, 2,4 secondes, opacité lisible. Aucune erreur JavaScript observée. Puis connexion et ouverture réelle de Les Collines (`recette-sommets`) : cinq compteurs, zéro effet au chargement, scène prête et sans erreur. Aucun lancement réel de récolte ou construction effectué pour cette recette ; les mouvements ont été simulés uniquement dans la page isolée, retirée du client après contrôle et conservée sous `test-results/` ignoré. Capture du village réel `resource-feedback-real-village.png`. Session dédiée fermée, services dev conservés.
+
+---
+
 # Conversion du monde alpha — 19 octobre 2026
 
 **Conversion effectuée et vérifiée.** Le monde alpha existant utilise les sommets partagés, ses six comptes et six villages sont conservés. Activation transactionnelle sous arrêt API/générateur, après sauvegarde `/var/backups/arbestra/alpha-terrain-vertices-20261018T230439.dump` (archive PostgreSQL inventoriée avec succès). Empreintes identiques de 72 tables avant/après, dans la transaction avant commit ; seules les données de géométrie et d’invalidation attendues sont exclues, ainsi que les métadonnées de migration. Les quatre contrats d’extraction engagés sont inchangés. Services redémarrés et actifs.

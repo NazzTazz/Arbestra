@@ -34,6 +34,7 @@ import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, exp
 import { campusRange, stonemasonRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
+import {useResourceFeedback} from './ui/use-resource-feedback';
 import { WorldModeNavigation, type ActiveWorldMode } from './ui/world-mode';
 import { WorldModeBar } from './ui/WorldModeBar';
 import { ExploitationPalette, type ExploitationIntentState, type ExploitationSettings } from './ui/ExploitationPanel';
@@ -138,6 +139,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [selection, setSelection] = useState<CellRange | null>(null);
   const touchOrigin = useRef<Cell | null>(null);
   const [notifications, setNotifications] = useState<GameNotification[]>([]);
+  const resourceFeedback=useResourceFeedback();
+  const showResourceChanges=resourceFeedback.showChanges;
   const notificationId = useRef(0);
   const notificationTimers = useRef<number[]>([]);
   const [populationCount, setPopulationCount] = useState(1);
@@ -201,11 +204,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
       }
       const priorAccomplishments = new Set(previous.village.accomplishments.map((item) => item.code));
       if (snapshot.state.village.accomplishments.some(item => item.code === 'cat-eyes' && !priorAccomplishments.has(item.code))) setOracleCat(true);
-      const delivered = new Map(previous.village.worksites.map(site => [site.id, site.deliveredAmount]));
-      for (const site of snapshot.state.village.worksites) {
-        const gain = site.deliveredAmount - (delivered.get(site.id) ?? site.deliveredAmount);
-        if (gain > 0) pushNotification(`+${gain} ${site.resourceCode === 'wood' ? 'bois' : 'pierre'} livrés`);
-      }
       if (snapshot.state.village.accomplishments.some((item) => item.code === 'town-hall-supplies' && !priorAccomplishments.has(item.code)))
         pushNotification("Oracle — Un coffre, 2 000 carottes, et personne n'avait regardé. Admirable.");
       if (snapshot.state.village.accomplishments.some((item) => item.code === 'first-harvest' && !priorAccomplishments.has(item.code)))
@@ -216,15 +214,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
       for (const cell of snapshot.state.cells) {
         if (cell.building?.status === 'completed' && prior.get(cell.building.id)?.status === 'under-construction') pushNotification('Construction terminée');
       }
-      const activeHarvestIds = new Set(snapshot.state.cells.flatMap((cell) => [
-        ...(cell.building?.garden?.harvest ? [cell.building.garden.harvest.id] : []),
-        ...(cell.building?.garden?.plots.flatMap((plot) => plot.harvest ? [plot.harvest.id] : []) ?? []),
-      ]));
-      if (previous.cells.some((cell) => cell.building?.garden && (
-        cell.building.garden.harvest && !activeHarvestIds.has(cell.building.garden.harvest.id)
-        || cell.building.garden.plots.some((plot) => plot.harvest && !activeHarvestIds.has(plot.harvest.id)))))
-        pushNotification('Récolte livrée');
     }
+    showResourceChanges(previous,snapshot.state);
     const presentation=currentInfrastructurePresentation(snapshot.state,infrastructurePresentationRef.current);
     if(presentation!==infrastructurePresentationRef.current){infrastructurePresentationRef.current=presentation;setInfrastructurePresentation(presentation);}
     stateRef.current = snapshot.state;
@@ -233,7 +224,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     setServerOffsetMs(snapshot.serverOffsetMs);
     offsetRef.current = snapshot.serverOffsetMs;
       });
-}, [pushNotification]);
+}, [pushNotification,showResourceChanges]);
 
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
@@ -857,7 +848,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   function runPopulation(action: 'feed' | 'rest') { if (!state || modeRef.current !== 'population' || arrivalActive) return; const intent = populationIntent.current?.action === action && populationIntent.current.count === populationCount ? populationIntent.current : { action, count: populationCount, id: randomUUID() }; populationIntent.current = intent; void runAction(() => action === 'feed' ? feedPopulation(worldSlug, state.village.id, intent.count, intent.id) : restPopulation(worldSlug, state.village.id, intent.count, intent.id), action === 'feed' ? `${intent.count} habitant(s) ont mangé` : `${intent.count} habitant(s) au repos`).then((ok) => { if (ok) populationIntent.current = null; }); }
   async function discoverSupplies(buildingId: string) {
     const currentState = stateRef.current;
-    if (actionInFlight.current || !currentState || modeRef.current !== 'exploitation' || arrivalActive) return;
+    if (actionInFlight.current || !currentState || !['exploitation', 'exploration'].includes(modeRef.current) || arrivalActive) return;
     actionInFlight.current = true; setPendingAction(true); setError(null);
     try {
       const result = await discoverOrRefreshSupplies(worldSlug, currentState.village.id, buildingId);
@@ -962,7 +953,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
-    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} resourceFeedback={resourceFeedback.items} onResourceFeedbackEnd={resourceFeedback.dismiss} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
     {showScience && (worldMode === 'population' || worldMode === 'exploration') && terrainView === 'village' && state.science && <SciencePanel key={selectedBuilding?.type === 'university' ? selectedBuilding.id : 'knowledge'} expeditions={expeditions.entries} target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (!['population', 'exploration'].includes(modeRef.current) || arrivalActive) return; if(command.action==='survey'||command.action==='explore'){expeditions.submit(command);return;} void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}

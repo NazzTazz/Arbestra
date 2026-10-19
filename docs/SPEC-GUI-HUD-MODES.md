@@ -1,6 +1,18 @@
+# Mouvements de ressources dans le HUD — décision du 19 octobre 2026
+
+Les variations de stock confirmées s’affichent au-dessus du compteur concerné : `+652` au retour d’une coupe, `−25` bois d’œuvre et `−10` pierres taillées pour une maison en pierre. Même échappement ascendant que les retours de récolte, couleur propre à chaque ressource, contour noir, puis disparition après 2,4 secondes. Les cinq ressources du HUD sont couvertes, gains et dépenses compris : récoltes, fabrication, construction, échanges, réservations ou remboursements dès leur apparition dans le stock autoritaire.
+
+Le déclenchement intervient après acceptation d’un snapshot ou d’une trame HTTP/SSE. L’état initial et un changement de contexte ne produisent aucun gain fictif ; les devis ne déclenchent rien. Les variations sont les différences nettes entre deux stocks affichés confirmés, sans reconstituer un journal des opérations regroupées par le serveur. Un doublon de projection ne rejoue pas l’effet. Les rafales sont regroupées sur trois lignes par ressource, en conservant leur somme. Le HUD et les compteurs ne changent pas de hauteur pendant l’animation ; les effets ne capturent pas les clics.
+
+Supprimer les messages génériques « Récolte livrée » et « +quantité bois/pierre livrés ». Conserver les notifications métier distinctes et les messages de l’Oracle. Le mode observation n’anime pas les stocks du village suivi. Sur téléphone, la barre privilégie les cinq compteurs et masque l’identité du village sous 520 px ; les effets voisins sont décalés. Avec une préférence de mouvement réduit, afficher un simple fondu lisible, sans déplacement.
+
+Implémentation et preuves locales dans le handoff ; aucune modification économique ni nouvelle API.
+
 # Accès aux bâtiments en vue libre — décision du 18 octobre 2026
 
 Le clic ou toucher sur l’hôtel de ville ouvre sa fiche et le marché, sur la scierie ou le tailleur de pierre ouvre la fabrication, et sur l’université ouvre directement l’arbre des connaissances. Le joueur reste en Vue libre ; les commandes de ces panneaux conservent les validations serveur existantes. Les déplacements de caméra ne déclenchent pas l’ouverture d’un panneau. Cette décision remplace l’interdiction historique d’inspection métier en Exploration ci-dessous pour ces quatre bâtiments.
+
+Correctif du 19 octobre : « Fouiller les réserves » exécute la même commande serveur depuis la fiche HDV en Vue libre et en Exploitation. La garde client de cette action doit accepter les deux modes, comme la fiche qui l’expose. La fouille crédite le coffre et inscrit l’accomplissement une seule fois selon les règles serveur existantes.
 
 # Récolte par intention — décision du 10 octobre 2026
 
