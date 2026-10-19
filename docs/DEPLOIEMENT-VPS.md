@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Halos et fluidité du rendu — 19 octobre 2026
+
+Release **`72531dbd720c5428fa84e1d55afae6ad73bc9607` déployée** : `staging-2026.10.19.4` / [workflow staging](https://github.com/NazzTazz/Arbestra/actions/runs/39269202331), puis `alpha-2026.10.19.4` / [workflow alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39269723533), tous deux réussis. Halos fins ancrés au relief, index des collisions des habitants, arrêt des recherches vers un poste occupé et horloge du HUD isolée. Trois services actifs et SHA de release confirmés dans chaque journal. Aucune nouvelle migration ni modification de configuration.
+
+Contrôles publics indépendants verts en [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39269548659) et [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39270057020). Vérifications locales, mesures de performance et limites de recette dans le [handoff](../SESSION-HANDOFF.md). Aucun parcours authentifié distant ajouté lors de cette publication ; la réussite des contrôles publics ne certifie pas une cadence constante de rendu.
+
 ## Attente du worker pour les devis commerciaux — 18 octobre 2026
 
 Release **`6f44bd1fb138558b6abaae823a2faa7a8be91863` déployée** : `staging-2026.10.18.4` / [workflow staging](https://github.com/NazzTazz/Arbestra/actions/runs/39145978408), puis `alpha-2026.10.18.4` / [workflow alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39146175131), tous deux réussis. Le marché rejoint la file bornée des projections lorsque le worker est occupé au lieu d'échouer immédiatement. Aucun changement de migration ou configuration ; trois services actifs et SHA vérifié dans chaque environnement.

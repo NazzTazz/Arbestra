@@ -1,6 +1,13 @@
 # Publication halos et fluidité — 19 octobre 2026
 
-Tristan autorise le commit, le push et le déploiement sur alpha et staging. Publication en cours depuis `main` / `68d42bb` : halos fins sur le relief, index des obstacles visuels et équipements, arrêt des recherches vers un poste occupé, horloge du HUD isolée. Tags prévus `staging-2026.10.19.4` puis `alpha-2026.10.19.4` sur le même commit applicatif. Vérifications locales déjà terminées dans les entrées ci-dessous ; aucune nouvelle migration. Les fichiers personnels non suivis sont exclus. Les résultats des déploiements et contrôles publics seront consignés après leur achèvement.
+**Déployé sur staging et alpha**, à la demande de Tristan. Commit applicatif **`72531dbd720c5428fa84e1d55afae6ad73bc9607`**, poussé sur `main` : halos fins sur le relief, index des obstacles visuels et équipements, arrêt des recherches vers un poste occupé, horloge du HUD isolée. Les deux tags immuables `staging-2026.10.19.4` et `alpha-2026.10.19.4` ciblent ce même commit, vérifié sur le distant.
+
+- Staging : [déploiement réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39269202331), trois services actifs et `DEPLOYED staging 72531db…` confirmés ; [six contrôles publics verts](https://github.com/NazzTazz/Arbestra/actions/runs/39269548659).
+- Alpha, après staging vérifié : [déploiement réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39269723533), trois services actifs et `DEPLOYED alpha 72531db…` confirmés ; [contrôles publics verts](https://github.com/NazzTazz/Arbestra/actions/runs/39270057020).
+
+Les workflows ont compilé tous les clients et l'API puis suivi la procédure de sauvegarde/déploiement existante. Aucune nouvelle migration, aucun seed/reset ni modification de configuration. Les contrôles publics couvrent TLS, lobby, client monde, santé API et barrières d'accès NOC/admin/observation. Vérifications locales documentées ci-dessous conservées : aucun nouveau test applicatif ou parcours authentifié distant revendiqué pour cette publication. La recette joueur de fluidité et les pointes résiduelles restent distinctes de la réussite du déploiement.
+
+Publication applicative commitée/poussée ; compte rendu de clôture suivi par un commit documentaire. Seuls les deux chemins personnels non suivis restent hors Git (`%SystemDrive%/` et le fichier de session local), inchangés. Services de développement conservés.
 
 ---
 
