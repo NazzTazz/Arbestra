@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Optimisations serveur et chantiers — 19 octobre 2026
+
+Release **`14c6bed932f373e28f3fc38fd385e1652a3aaabb` déployée** : `staging-2026.10.19.5` / [workflow staging](https://github.com/NazzTazz/Arbestra/actions/runs/39289553238), puis `alpha-2026.10.19.5` / [workflow alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39289943898), tous deux réussis. Progression géographique des chantiers, lectures groupées, caches géométriques bornés et raffinement individuel dans les workers partagés. Trois services actifs et SHA de release confirmés pour chaque environnement. Aucune nouvelle migration ni modification de configuration.
+
+Contrôles publics indépendants verts en [staging](https://github.com/NazzTazz/Arbestra/actions/runs/39289853988) et [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39290266776). Vérifications métier et mesures locales dans le [handoff](../SESSION-HANDOFF.md). Certaines nouvelles destinations restent coûteuses à froid sur le terrain historique de développement ; aucune garantie de latence métier alpha ni nouvelle recette authentifiée distante n'est déduite de ces contrôles publics.
+
 ## Halos et fluidité du rendu — 19 octobre 2026
 
 Release **`72531dbd720c5428fa84e1d55afae6ad73bc9607` déployée** : `staging-2026.10.19.4` / [workflow staging](https://github.com/NazzTazz/Arbestra/actions/runs/39269202331), puis `alpha-2026.10.19.4` / [workflow alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39269723533), tous deux réussis. Halos fins ancrés au relief, index des collisions des habitants, arrêt des recherches vers un poste occupé et horloge du HUD isolée. Trois services actifs et SHA de release confirmés dans chaque journal. Aucune nouvelle migration ni modification de configuration.

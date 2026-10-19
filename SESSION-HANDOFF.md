@@ -1,6 +1,13 @@
 # Publication des optimisations serveur — 19 octobre 2026
 
-**Publication en cours**, autorisée par Tristan : « commit push deploy ». Périmètre : progression des chantiers, lectures groupées, caches géométriques et raffinement dans les workers. Publication prévue du même commit sur staging puis alpha, avec tags immuables `staging-2026.10.19.5` et `alpha-2026.10.19.5` après vérification de leur disponibilité. Aucun nouveau schéma ni changement de configuration. Les validations et limites des trajets froids ci-dessous restent applicables ; les résultats de déploiement seront consignés à la clôture.
+**Déployé sur staging puis alpha**, à la demande de Tristan : « commit push deploy ». Commit applicatif **`14c6bed932f373e28f3fc38fd385e1652a3aaabb`**, poussé sur `main` : progression des chantiers, lectures groupées, caches géométriques et raffinement dans les workers. Les tags immuables `staging-2026.10.19.5` et `alpha-2026.10.19.5` pointent sur ce même commit, vérifié sur le distant.
+
+- Staging : [déploiement réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39289553238), trois services actifs et `DEPLOYED staging 14c6bed…` confirmés ; [six contrôles publics verts](https://github.com/NazzTazz/Arbestra/actions/runs/39289853988).
+- Alpha, après staging vérifié : [déploiement réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39289943898), trois services actifs et `DEPLOYED alpha 14c6bed…` confirmés ; [six contrôles publics verts](https://github.com/NazzTazz/Arbestra/actions/runs/39290266776).
+
+Les workflows ont compilé tous les clients et l'API, puis exécuté le contrôleur de sauvegarde/déploiement existant. Aucune nouvelle migration, aucun seed/reset ni changement de configuration. Contrôles publics : TLS, lobbies/clients, santé API, barrières NOC/admin/observation. Aucun nouveau parcours authentifié ni benchmark distant revendiqué : les mesures locales et limites des trajets froids ci-dessous restent applicables. Les contrôles publics ne prouvent pas une latence métier sous charge.
+
+Publication applicative commitée/poussée ; clôture documentaire dans un commit séparé. Les deux chemins personnels non suivis (`%SystemDrive%/` et le fichier de session local) restent préservés, les diagnostics ignorés restent hors Git. Services locaux conservés.
 
 ---
 
