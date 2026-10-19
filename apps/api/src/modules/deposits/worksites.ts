@@ -10,12 +10,19 @@ import { consumeInitialWorkers, worksiteOrderBudget } from '../villages/exploita
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
 import { clearWoodland } from './woodland.js';
 import { readExtractions, readStoneDeposit, startStoneExtraction, stoneDepositDetails, stoneExtractionDuration } from './stone-extractions.js';
+import { wrappedDelta } from '../worlds/coordinates.js';
 
 export const WAKE_EXTRACTION_WORKSITE_TASK = 'deposit.worksite.wake';
 const WAIT_MS = 60_000;
 const MAX_ACTIVE_WORKSITES = 8;
 
-export async function readWorksites(tx: Transaction<Database>, worldId: string, villageId: string): Promise<ExtractionWorksite[]> {
+/** Squared geographic distance, independent of transport cost and toric seams. */
+export function worksiteTargetDistance(target: TravelCell, origin: TravelCell, world: { widthCells: number; heightCells: number }): number {
+  return wrappedDelta(target.cellX, origin.cellX, world.widthCells) ** 2
+    + wrappedDelta(target.cellY, origin.cellY, world.heightCells) ** 2;
+}
+
+export async function readWorksites(tx: Transaction<Database>, worldId: string, villageId: string,extractions?:Awaited<ReturnType<typeof readExtractions>>): Promise<ExtractionWorksite[]> {
   const rows = await tx.selectFrom('extractionWorksites').selectAll().where('worldId', '=', worldId)
     .where('villageId', '=', villageId).orderBy('createdAt', 'desc').limit(32).execute();
   if(!rows.length)return [];
@@ -26,7 +33,7 @@ export async function readWorksites(tx: Transaction<Database>, worldId: string, 
       .select(['extractionWorksiteTargets.worksiteId','extractionWorksiteTargets.featureId','extractionWorksiteTargets.status','extractionWorksiteTargets.reason','resourceDeposits.cellX','resourceDeposits.cellY'])
       .where('extractionWorksiteTargets.worldId','=',worldId).where('extractionWorksiteTargets.villageId','=',villageId)
       .where('extractionWorksiteTargets.worksiteId','in',ids).orderBy('extractionWorksiteTargets.worksiteId').orderBy('ordinal').execute(),
-    readExtractions(tx,worldId,villageId,ids),
+    extractions??readExtractions(tx,worldId,villageId,ids),
   ]);
   const grouped=new Map<string,ExtractionWorksite['targets']>(),missions=new Map(active.map(r=>[r.worksiteId,r.extraction]));
   for(const {worksiteId,...target} of targets){const group=grouped.get(worksiteId)??[];group.push(target);grouped.set(worksiteId,group);}
@@ -111,7 +118,7 @@ async function scheduleWake(tx: Transaction<Database>, site: { id: string; world
 }
 
 async function completeTarget(tx: Transaction<Database>, site: { id: string }, featureId: string, through: Date,
-  status: 'completed' | 'external', reason: string) {
+  status: 'completed' | 'external' | 'abandoned', reason: string) {
   await tx.updateTable('extractionWorksiteTargets').set({ status, reason, completedAt: through })
     .where('worksiteId', '=', site.id).where('featureId', '=', featureId).where('status', '=', 'pending').execute();
 }
@@ -134,16 +141,28 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
         .where('worksiteId', '=', site.id).where('status', '=', 'pending').execute();
       continue;
     }
-    const targets = await tx.selectFrom('extractionWorksiteTargets').selectAll().where('worksiteId', '=', site.id)
-      .where('status', '=', 'pending').orderBy('ordinal').limit(64).execute();
+    const targets = await tx.selectFrom('extractionWorksiteTargets as t')
+      .innerJoin('resourceDeposits as d', join => join.onRef('d.worldId', '=', 't.worldId').onRef('d.featureId', '=', 't.featureId'))
+      .selectAll('t').select(['d.cellX', 'd.cellY']).where('t.worldId', '=', economy.worldId).where('t.worksiteId', '=', site.id)
+      .where('t.status', '=', 'pending').orderBy('t.ordinal').limit(64).execute();
     if (!targets.length) {
       await tx.updateTable('extractionWorksites').set({ status: 'completed', waitReason: null, nextWakeAt: null, updatedAt: economy.through.toISOString() })
         .where('id', '=', site.id).execute();
       continue;
     }
-    const candidates: Array<{ featureId: string; amount: number; path: TravelCell[]; transportMs: number }> = [];
+    // Persisted deliveries keep the progression stable across rest, pause and restart.
+    // The anchor changes only after real work, never after skipping an obstacle.
+    const previous = await tx.selectFrom('depositExtractions as e').innerJoin('resourceDeposits as d', join => join
+      .onRef('d.worldId', '=', 'e.worldId').onRef('d.featureId', '=', 'e.featureId'))
+      .select(['d.cellX', 'd.cellY']).where('e.worldId', '=', economy.worldId).where('e.worksiteId', '=', site.id)
+      .where('e.status', '=', 'completed').orderBy('e.completesAt', 'desc').orderBy('e.id', 'desc').limit(1).executeTakeFirst();
+    const origin = previous ?? await tx.selectFrom('villages').select(['anchorCellX as cellX', 'anchorCellY as cellY'])
+      .where('worldId', '=', economy.worldId).where('id', '=', economy.villageId).executeTakeFirstOrThrow();
+    targets.sort((a, b) => worksiteTargetDistance(a, origin, village) - worksiteTargetDistance(b, origin, village)
+      || a.ordinal - b.ordinal || a.featureId.localeCompare(b.featureId));
+    let next: { featureId: string; amount: number; path: TravelCell[]; transportMs: number } | undefined;
     let waitingStock = false, waitingAccess = false;
-    let waitingTarget: { featureId: string; transportMs: number } | null = null;
+    let waitingTarget: { featureId: string } | null = null;
     for (const target of targets) {
       const deposit = await readStoneDeposit(tx, economy.worldId, target.featureId);
       if (deposit.resourceCode !== site.resourceCode || (site.resourceCode === 'wood' && deposit.cleared && !target.thresholdReachedAt)) {
@@ -161,22 +180,29 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
         await completeTarget(tx, site, target.featureId, economy.through, 'completed', 'goal-reached');
         continue;
       }
-      const path = await pathFor(target.featureId);
-      if (!path) { waitingAccess = true; continue; }
+      // A reservation is temporary, not a failed access. No route is needed until stock is free.
+      if (deposit.availableAmount < 1) {
+        waitingStock = true;
+        waitingTarget ??= { featureId: target.featureId };
+        continue;
+      }
+      let path: TravelCell[] | undefined;
+      try { path = await pathFor(target.featureId); }
+      catch (error) {
+        if (!(error instanceof HttpError && error.code === 'DESTINATION_UNREACHABLE')) throw error;
+      }
+      if (!path) {
+        await completeTarget(tx, site, target.featureId, economy.through, 'abandoned', 'unreachable');
+        continue;
+      }
       // Keep the contract's integer milliseconds throughout admission. A trip
       // through seconds can turn 4052 into 4051.9999999999995 and abort the
       // village transaction when PostgreSQL stores transport_ms as an integer.
       const transportMs = travelDuration(path, village);
-      if (deposit.availableAmount < 1) {
-        waitingStock = true;
-        if (!waitingTarget || transportMs < waitingTarget.transportMs)
-          waitingTarget = { featureId: target.featureId, transportMs };
-        continue;
-      }
-      candidates.push({ featureId: target.featureId, amount: Math.min(100, deposit.availableAmount),
-        path, transportMs });
+      next = { featureId: target.featureId, amount: Math.min(100, deposit.availableAmount), path, transportMs };
+      break;
     }
-    if (!candidates.length) {
+    if (!next) {
       const remaining = await tx.selectFrom('extractionWorksiteTargets').select('featureId')
         .where('worksiteId', '=', site.id).where('status', '=', 'pending').execute();
       if (!remaining.length) {
@@ -198,8 +224,6 @@ export async function admitWorksites(tx: Transaction<Database>, economy: Village
       }
       continue;
     }
-    candidates.sort((a, b) => a.transportMs - b.transportMs || a.featureId.localeCompare(b.featureId));
-    const next = candidates[0]!;
     await tx.updateTable('extractionWorksiteTargets').set({ admittedAt: economy.through })
       .where('worksiteId', '=', site.id).where('featureId', '=', next.featureId).where('admittedAt', 'is', null).execute();
     const transportMs = next.transportMs;

@@ -9,10 +9,12 @@ import {readRc1Source} from '../worlds/rc1-source.js';
 import {villageSyncRevision} from './sync-revision.js';
 import { VillageReadReconciliations } from './read-reconciliation.js';
 import {networkJob,networkState,type NetworkJob,type TravelNetworkExecutor} from '../navigation/network-job.js';
+import {transactionRefiner} from '../navigation/transaction-refinement.js';
 import {naturalFeaturesQuery} from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
+import {jsonArrayFrom} from 'kysely/helpers/postgres';
 import type {
   BuildingType,
   BuildingTypeDefinition,
@@ -47,6 +49,7 @@ import {
   materializeVillageResource,
   projectGardenPlots,
   projectVillageResource,
+  projectVillageResources,
 } from './economy.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
@@ -64,7 +67,7 @@ import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/d
 import { knownGeography } from '../science/knowledge.js';
 import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
 import { startStoneExtraction, stoneDepositDetails, readExtraction,readExtractions, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
-import { admitWorksites, changeWorksite, createWorksite, readWorksites } from '../deposits/worksites.js';
+import { admitWorksites, changeWorksite, createWorksite, readWorksites, worksiteTargetDistance } from '../deposits/worksites.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
 import { commandProcessing, previewProcessing, processingSnapshot } from './processing.js';
 import { commandMarket, previewMarket, marketSnapshot } from './market.js';
@@ -138,14 +141,14 @@ export async function ownedVillage(
 async function catalog(
   tx: Transaction<Database>,
 ): Promise<BuildingTypeDefinition[]> {
-  const [types, levels, costs, production, recipes, variantCosts] = await Promise.all([
-    tx.selectFrom('buildingTypes').selectAll().execute(),
-    tx.selectFrom('buildingTypeLevels').selectAll().execute(),
-    tx.selectFrom('buildingLevelCosts').selectAll().execute(),
-    tx.selectFrom('buildingLevelProduction').selectAll().execute(),
-    tx.selectFrom('processingRecipes').selectAll().execute(),
-    tx.selectFrom('buildingVariantCosts').selectAll().execute(),
-  ]);
+  const {types,levels,costs,production,recipes,variantCosts}=await tx.selectNoFrom([
+    jsonArrayFrom(tx.selectFrom('buildingTypes').selectAll()).as('types'),
+    jsonArrayFrom(tx.selectFrom('buildingTypeLevels').selectAll()).as('levels'),
+    jsonArrayFrom(tx.selectFrom('buildingLevelCosts').selectAll()).as('costs'),
+    jsonArrayFrom(tx.selectFrom('buildingLevelProduction').selectAll()).as('production'),
+    jsonArrayFrom(tx.selectFrom('processingRecipes').selectAll()).as('recipes'),
+    jsonArrayFrom(tx.selectFrom('buildingVariantCosts').selectAll()).as('variantCosts'),
+  ]).executeTakeFirstOrThrow();
   return types.map((type) => ({
     code: type.code as BuildingType,
     displayName: type.displayName,
@@ -206,14 +209,15 @@ interface Snapshot {
 async function snapshot(
   tx: Transaction<Database>,
   village: OwnedVillage,
+  existing?:{footprints?:readonly TravelCell[];ground?:Awaited<ReturnType<typeof readRc1Ground>>|undefined},
 ): Promise<Snapshot> {
   return devTime('snapshot_ground', async () => {
-  const footprints = await tx.selectFrom('worldCellOccupancies as o')
+  const footprints = existing?.footprints ?? await tx.selectFrom('worldCellOccupancies as o')
     .innerJoin('buildings as b',j=>j.onRef('b.worldId','=','o.worldId').onRef('b.id','=','o.buildingId'))
     .select(['o.cellX','o.cellY']).where('o.worldId','=',village.worldId).where('b.villageId','=',village.villageId).execute();
   const {originCellX,originCellY,width,height} = villageTerrainRegion(village,footprints);
   if(village.generationVersion===3){
-    const ground=await readRc1Ground(tx,village.worldId),terrainCodes:number[]=[],elevations:number[]=[];
+    const ground=existing?.ground??await readRc1Ground(tx,village.worldId),terrainCodes:number[]=[],elevations:number[]=[];
     for(let y=0;y<height;y++)for(let x=0;x<width;x++){const c=ground.cell(originCellX+x,originCellY+y);terrainCodes.push(c.code);elevations.push(c.elevation);}
     return {rc1:ground,originCellX,originCellY,width,height,terrainCodes,elevations,
       terrainAt(x,y){return ground.cell(x,y).code;},elevationAt(x,y){return ground.cell(x,y).elevation;}};
@@ -290,12 +294,23 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
   const deposit = await tx.selectFrom('resourceDeposits').select(['cellX', 'cellY', 'remainingAmount', 'resourceCode'])
     .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
   if (!deposit || Number(deposit.remainingAmount) <= 0) return undefined;
-  const recognized = await recognizedDepositRoute(tx, village.worldId, village.villageId, deposit);
-  if (recognized) return refineVillagePath(tx,village,recognized,featureId);
-  if (await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit)) return undefined;
+  // Most local targets have no reported expedition. Check that fact once
+  // before loading the player's science and historical route. Permissions are
+  // still read on every call; a cached physical path grants no remote access.
+  if (await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit)) {
+    const recognized = await recognizedDepositRoute(tx, village.worldId, village.villageId, deposit);
+    return recognized ? refineVillagePath(tx,village,recognized,featureId) : undefined;
+  }
   if (visiblePath) return refineVillagePath(tx,village,visiblePath,featureId);
   const dx = wrappedDelta(deposit.cellX, village.anchorCellX, village.widthCells);
   const dy = wrappedDelta(deposit.cellY, village.anchorCellY, village.heightCells);
+  // For a destination inside the minimum local window, refinement never uses
+  // the coarse legs: it starts at the real door and searches this same region.
+  // Skip the otherwise discarded coarse network, keeping all access checks.
+  if(village.generationVersion===3&&dx>=-32&&dx<32&&dy>=-32&&dy<32){
+    try{return await refineVillagePath(tx,village,[{cellX:village.anchorCellX,cellY:village.anchorCellY},{cellX:deposit.cellX,cellY:deposit.cellY}],featureId);}
+    catch(error){if(error instanceof HttpError&&error.code==='DESTINATION_UNREACHABLE')return undefined;throw error;}
+  }
   // World-reach commands can target arbitrarily remote cells. Keep this case bounded
   // until long-distance navigation has a chunk-level planner.
   if (Math.abs(dx) + Math.abs(dy) > 128) {
@@ -322,7 +337,7 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
     wanted.set(`${chunkX}:${chunkY}`, { chunkX, chunkY });
   }
   const [chunks, occupied] = await Promise.all([
-    tx.selectFrom('worldChunks').select(['chunkX', 'chunkY', 'terrainCodes'])
+    village.generationVersion===3?Promise.resolve([]):tx.selectFrom('worldChunks').select(['chunkX', 'chunkY', 'terrainCodes'])
       .where('worldId', '=', village.worldId)
       .where((eb) => eb.or([...wanted.values()].map(({ chunkX, chunkY }) => eb.and([
         eb('chunkX', '=', chunkX), eb('chunkY', '=', chunkY),
@@ -347,7 +362,7 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
     cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
   } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
   const path=buildTravelNetwork(routeState, [featureId],rc1?.navigation).find((route) => route.id === featureId)?.cells;
-  if(path)return refineVillagePath(tx,village,path,featureId);
+  if(path)return refineVillagePath(tx,village,path,featureId,rc1??undefined);
   // Coarse centres can be blocked by the hall's own footprint or RC1 trunks
   // while the real door and sub-cell passages remain accessible. Let the
   // existing bounded local planner certify access before declaring failure.
@@ -355,25 +370,30 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
     try{return await refineVillagePath(tx,village,[
       {cellX:village.anchorCellX,cellY:village.anchorCellY},
       {cellX:deposit.cellX,cellY:deposit.cellY},
-    ],featureId);}
+    ],featureId,rc1??undefined);}
     catch(error){if(error instanceof HttpError&&error.code==='DESTINATION_UNREACHABLE')return undefined;throw error;}
   }
   return undefined;
 }
 
-export async function refineVillagePath(tx:Transaction<Database>,village:Pick<OwnedVillage,'worldId'|'villageId'|'anchorCellX'|'anchorCellY'|'widthCells'|'heightCells'|'chunkSize'|'generationVersion'>,path:TravelCell[],id:string):Promise<TravelCell[]>{
-  const full=village as OwnedVillage,ground=await snapshot(tx,full),features=await featuresInSnapshot(tx,full,ground);
+export async function refineVillagePath(tx:Transaction<Database>,village:Pick<OwnedVillage,'worldId'|'villageId'|'anchorCellX'|'anchorCellY'|'widthCells'|'heightCells'|'chunkSize'|'generationVersion'>,path:TravelCell[],id:string,existingGround?:Awaited<ReturnType<typeof readRc1Ground>>):Promise<TravelCell[]>{
+  const full=village as OwnedVillage,ground=await snapshot(tx,full,{ground:existingGround}),features=await featuresInSnapshot(tx,full,ground,Boolean(ground.rc1));
   const rows=await tx.selectFrom('worldCellOccupancies').leftJoin('buildings',join=>join.onRef('buildings.id','=','worldCellOccupancies.buildingId').onRef('buildings.worldId','=','worldCellOccupancies.worldId'))
     .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY','worldCellOccupancies.role','buildings.id','buildings.villageId','buildings.buildingType','buildings.visualLayout','buildings.quarterTurns'])
-    .where('worldCellOccupancies.worldId','=',village.worldId).where('worldCellOccupancies.buildingId','is not',null).execute();
-  const context={world:village,village:{anchorCellX:village.anchorCellX,anchorCellY:village.anchorCellY,
+    .where('worldCellOccupancies.worldId','=',village.worldId).where('worldCellOccupancies.buildingId','is not',null)
+    .where(sql<boolean>`mod(world_cell_occupancies.cell_x-${ground.originCellX}+${village.widthCells},${village.widthCells}) < ${ground.width}`)
+    .where(sql<boolean>`mod(world_cell_occupancies.cell_y-${ground.originCellY}+${village.heightCells},${village.heightCells}) < ${ground.height}`).execute();
+  const context={world:{...village,id:village.worldId},village:{anchorCellX:village.anchorCellX,anchorCellY:village.anchorCellY,
     townHallBuildingId:rows.find(r=>r.villageId===village.villageId&&r.buildingType==='town-hall')?.id},
     region:{originCellX:ground.originCellX,originCellY:ground.originCellY,width:ground.width,height:ground.height,terrainCodes:ground.terrainCodes,
       features:features.map(f=>({...f,type:f.featureTypeCode,deposit:{blocksCell:f.blocksCell,cleared:f.cleared,state:f.featureTypeCode!=='leveling-site'&&Number(f.remainingAmount)===0?'depleted':'available'}}))},
     cells:rows.map(r=>({cellX:r.cellX,cellY:r.cellY,footprint:{buildingId:r.id},building:r.role==='anchor'?{id:r.id,type:r.buildingType,visualLayout:r.visualLayout,quarterTurns:r.visualLayout?.quarterTurns??r.quarterTurns}:null})),
     infrastructure:await readNavigationInfrastructure(tx,village)} as unknown as Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>;
   const rc1=ground.rc1;
-  const route=refineTravelRoute(context,{id,kind:'stone',cells:path,destination:path.at(-1)!},new Set(),undefined,rc1?.navigation);
+  const executor=transactionRefiner(tx),input={id,kind:'stone' as const,cells:path,destination:path.at(-1)!};
+  const route=executor?(await executor.refine(async known=>({...networkJob(networkState(context),rc1??undefined,known),refinement:input})))[0]
+    :refineTravelRoute(context,input,new Set(),undefined,rc1?.navigation,undefined,
+    {onLimit:()=>{throw new HttpError(503,'NAVIGATION_BUSY','Calcul du trajet interrompu. Réessayez.');}});
   if(!route)throw new HttpError(409,'DESTINATION_UNREACHABLE','Aucun accès praticable depuis le village.');return route.cells;
 }
 
@@ -412,13 +432,14 @@ async function featuresInSnapshot(
   tx: Transaction<Database>,
   village: OwnedVillage,
   ground: Snapshot,
+  excludeWoodlands=false,
 ) {
   return devTime('features', async () => {
   const endX = ground.originCellX + ground.width;
   const endY = ground.originCellY + ground.height;
   const xs=endX<=village.widthCells?[[ground.originCellX,endX]]:[[ground.originCellX,village.widthCells],[0,endX-village.widthCells]];
   const ys=endY<=village.heightCells?[[ground.originCellY,endY]]:[[ground.originCellY,village.heightCells],[0,endY-village.heightCells]];
-  return naturalFeaturesQuery(tx,village.worldId,xs.flatMap(([minX,maxX])=>ys.map(([minY,maxY])=>({minX:minX!,maxX:maxX!,minY:minY!,maxY:maxY!})))).execute();
+  return naturalFeaturesQuery(tx,village.worldId,xs.flatMap(([minX,maxX])=>ys.map(([minY,maxY])=>({minX:minX!,maxX:maxX!,minY:minY!,maxY:maxY!}))),excludeWoodlands).execute();
   });
 }
 function protectedCell(
@@ -486,21 +507,21 @@ export async function readVillageObservation(db: Kysely<Database>, accountId: st
   // Parse/check immutable geography before starting the bounded transaction.
   // The snapshot revalidates its row identity and reads every mutable edit.
   if (village.generationVersion === 3) await readRc1Source(db, village.worldId);
-  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
-    state(tx, accountId, worldSlug, economy, false, true, 'observation'));
+  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy, currentVillage) =>
+    state(tx, accountId, worldSlug, economy, false, true, 'observation',currentVillage));
 }
 
 export async function readVillageProjection(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
   compute?:TravelNetworkExecutor) {
   // The low-level inline reader remains usable by transactional integration
   // callers. Every application HTTP/SSE projection injects the shared CPU pool.
-  if(!compute)return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
-    state(tx, accountId, worldSlug, economy, false, true));
+  if(!compute)return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy, village) =>
+    state(tx, accountId, worldSlug, economy, false, true,undefined,village));
   let projected:VillageState|undefined;
   const routes=await compute.network(async known=>{
     let captured:{input:NetworkJob['state'];ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined}|undefined;
-    projected=await withVillageProjection(db,accountId,worldSlug,villageId,(tx,economy)=>
-      state(tx,accountId,worldSlug,economy,false,true,(input,ground)=>{captured={input,ground};}));
+    projected=await withVillageProjection(db,accountId,worldSlug,villageId,(tx,economy,village)=>
+      state(tx,accountId,worldSlug,economy,false,true,(input,ground)=>{captured={input,ground};},village));
     // All data comes from that one MVCC snapshot. SQL is finished before worker
     // transfer/search, and the result does not acquire a newer revision or H.
     if(!captured)throw Error('Missing navigation projection');
@@ -652,11 +673,12 @@ export async function state(
   admit = true,
   readOnly = false,
   deferNavigation?: 'observation' | ((input:NetworkJob['state'],ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined)=>void),
+  projectionVillage?:OwnedVillage,
 ): Promise<VillageState> {
   return devTime('snapshot', async () => {
   if(deferNavigation&&!readOnly)throw Error('Deferred navigation requires a read-only projection');
   if(readOnly&&!existingEconomy)throw Error('Read-only projection requires an explicit clock/context');
-  const village = await ownedVillage(tx, accountId, worldSlug, existingEconomy?.villageId);
+  const village = readOnly&&projectionVillage?projectionVillage:await ownedVillage(tx, accountId, worldSlug, existingEconomy?.villageId);
   // Prepare immutable geography before the economy lock. snapshot() revalidates
   // its identity and reads current local edits after the lock is acquired.
   if (!existingEconomy && village.generationVersion === 3) await readRc1Source(tx, village.worldId);
@@ -666,6 +688,7 @@ export async function state(
   if (!readOnly) await finalizeVillageEconomy(tx, economy, village, admit);
   const at = economy.through;
   const syncBefore = await villageSyncRevision(tx, village.worldId);
+  const occupancies=readVillageOccupancies(tx,village);
   const [
     ground,
     resourcesRows,
@@ -675,24 +698,10 @@ export async function state(
     hiddenSupplyRows,
     accomplishmentRows,
   ] = await devTime('snapshot_reads', () => Promise.all([
-    snapshot(tx, village),
-    tx
-      .selectFrom('villageResources')
-      .innerJoin(
-        'resourceTypes',
-        'resourceTypes.code',
-        'villageResources.resourceCode',
-      )
-      .select([
-        'villageResources.resourceCode',
-        'resourceTypes.displayName',
-        'resourceTypes.iconKey',
-      ])
-      .where('villageResources.worldId', '=', village.worldId)
-      .where('villageResources.villageId', '=', village.villageId)
-      .execute(),
+    occupancies.then(footprints=>snapshot(tx,village,{footprints})),
+    projectVillageResources(tx,village.worldId,village.villageId,at),
     catalog(tx),
-    readVillageOccupancies(tx, village),
+    occupancies,
     clearings(tx, village.worldId),
     tx.selectFrom('buildingHiddenSupplies').select(['buildingId', 'claimedAt'])
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).execute(),
@@ -700,26 +709,13 @@ export async function state(
       .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
       .orderBy('completedAt').orderBy('code').execute(),
   ]));
-  const resources = await devTime('resources', () => Promise.all(
-    resourcesRows.map(async (row) => {
-      const projected = await projectVillageResource(
-        tx,
-        village.worldId,
-        village.villageId,
-        row.resourceCode,
-        at,
-      );
-      safeAmount(projected.amount);
+  const resources = resourcesRows.map((row) => {
+      safeAmount(row.amount);
       return {
-        code: row.resourceCode,
-        displayName: row.displayName,
-        iconKey: row.iconKey,
-        ...projected,
-        productionUpdatedAt:
-          projected.productionUpdatedAt?.toISOString() ?? null,
+        ...row,
+        productionUpdatedAt: row.productionUpdatedAt?.toISOString() ?? null,
       };
-    }),
-  ));
+    });
   const [cohorts, housingRows, harvestRows, extractionRows, projectedPlots, growth] = await devTime('population', () => Promise.all([
     readOnly ? tx.selectFrom('populationCohorts').selectAll().where('worldId','=',village.worldId)
       .where('villageId','=',village.villageId).orderBy('id').execute() : reconcileRestHousing(tx,village.worldId,village.villageId,at),
@@ -822,8 +818,8 @@ export async function state(
       population,
       accomplishments: accomplishmentRows.map((item) => ({ code: item.code, completedAt: item.completedAt.toISOString() })),
       extractions: extractionRows.map(row=>row.extraction),
-      worksites: await readWorksites(tx, village.worldId, village.villageId),
-      exploitationOrders: await readExploitationOrders(tx, economy),
+      worksites: await readWorksites(tx, village.worldId, village.villageId,extractionRows),
+      exploitationOrders: await readExploitationOrders(tx, economy,{gardens:harvestRows,extractions:extractionRows}),
       levelingJobs: await levelingSnapshot(tx, economy),
       processingOrders: await processingSnapshot(tx, economy),
       market: await marketSnapshot(tx, economy),
@@ -967,7 +963,7 @@ export async function state(
     villageState.travelRoutes.push({ id: extraction.featureId, kind: 'wood',
       destination: { cellX: extraction.cellX, cellY: extraction.cellY }, cells: extraction.path });
   }
-  const syncAfter = await villageSyncRevision(tx, village.worldId);
+  const syncAfter = readOnly&&projectionVillage ? syncBefore : await villageSyncRevision(tx, village.worldId);
   // A concurrent world commit can invalidate READ COMMITTED assembly. The
   // HTTP adapter replaces such a snapshot after commit with a coherent reader.
   if (syncBefore.others === syncAfter.others) villageState.syncRevision = syncAfter.revision;
@@ -1884,10 +1880,19 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
     preview.gardens = []; preview.estimates.carrot = 0;
   }
   preview.gardenReturnMs = plan?.durationMs ?? null;
+  // Selection and workforce estimation share exactly the same routes in this
+  // preparation. No geometry is changed before the preparation returns.
+  const paths = new Map<string, TravelCell[] | undefined>();
+  const pathFor = async (id: string) => {
+    if (!paths.has(id)) paths.set(id, await stoneTravelPath(tx, village, id));
+    return paths.get(id);
+  };
   for (const family of ['wood', 'stone'] as const) {
     if (!request[family].length) continue;
     const selection = await prepareWorksiteSelection(tx, village, economy, { commandId: request.commandId,
-      mode: family === 'wood' ? request.woodMode : 'extract', workerCap: Math.min(10, request.workerCap), featureIds: request[family] });
+      mode: family === 'wood' ? request.woodMode : 'extract', workerCap: Math.min(10, request.workerCap), featureIds: request[family] }, pathFor);
+    const origin = { cellX: village.anchorCellX, cellY: village.anchorCellY };
+    selection.included.sort((a, b) => worksiteTargetDistance(a, origin, village) - worksiteTargetDistance(b, origin, village));
     preview[family] = selection.included.map(i => i.featureId);
     preview.excluded.push(...selection.excluded.map(i => ({ key: i.featureId, reason: i.reason })));
     for (const id of preview[family]) {
@@ -1902,13 +1907,11 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
   const lots: Partial<Record<'wood' | 'stone', { id: string; amount: number; transportMs: number }>> = {};
   for (const family of ['wood', 'stone'] as const) for (const id of preview[family]) {
     const deposit = await readStoneDeposit(tx, village.worldId, id);
-    const path = await stoneTravelPath(tx, village, id);
     const amount = Math.min(100, deposit.availableAmount,
       Math.max(0, deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)));
-    const transportMs = path ? travelDuration(path, village) : Infinity;
-    const previous = lots[family];
-    if (path && amount > 0 && (!previous || transportMs < previous.transportMs || transportMs === previous.transportMs && id < previous.id))
-      lots[family] = { id, amount, transportMs };
+    if (amount < 1) continue;
+    const path = await pathFor(id);
+    if (path) { lots[family] = { id, amount, transportMs: travelDuration(path, village) }; break; }
   }
   const cohorts = await tx.selectFrom('populationCohorts').selectAll().where('worldId', '=', village.worldId)
     .where('villageId', '=', village.villageId).orderBy('id').execute();
@@ -1942,7 +1945,7 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
   preview.workforce.autoWorkerCap = used;
   preview.workforce.reason = preview.workforce.structuralMax === 0 ? 'no-targets'
     : used === 0 ? request.cohortId ? 'cohort-unavailable' : 'no-eligible-workers' : null;
-  return { preview, plan, population: snapshot.village.population };
+  return { preview, plan, population: snapshot.village.population, lots };
 }
 
 export async function previewVillageExploitation(db: Kysely<Database>, accountId: string, worldSlug: string,
@@ -1978,12 +1981,10 @@ export async function startVillageExploitation(db: Kysely<Database>, accountId: 
     if (request.cohortId && !initial) throw new HttpError(409, 'EXPLOITATION_COHORT_CHANGED', 'La cohorte choisie n’est plus disponible.');
     if (initial) {
       const durations = prepared.plan ? [prepared.plan.durationMs] : [];
-      for (const family of ['wood', 'stone'] as const) for (const id of request[family]) {
-        const deposit = await readStoneDeposit(tx, village.worldId, id);
-        const path = await stoneTravelPath(tx, village, id);
-        const amount = Math.min(100, deposit.availableAmount, Math.max(0, deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)));
+      for (const family of ['wood', 'stone'] as const) {
+        const lot = prepared.lots[family];
         const count = Math.min(10, request.workerCap, initial.memberCount, request.activityCaps?.[family] ?? 10);
-        if (path && amount > 0 && count > 0) durations.push(stoneExtractionDuration(count, amount) + 2 * travelDuration(path, village));
+        if (lot && count > 0) durations.push(stoneExtractionDuration(count, lot.amount) + 2 * lot.transportMs);
       }
       const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
       if (!durations.some(duration => eligibleWorkers(cohorts, duration).some(c => c.id === initial.id)))
@@ -2031,7 +2032,7 @@ export async function startVillageWorksite(db: Kysely<Database>, accountId: stri
 }
 
 export async function prepareWorksiteSelection(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
-  request: StartExtractionWorksiteRequest): Promise<ExtractionWorksiteSelection> {
+  request: StartExtractionWorksiteRequest, pathFor = (id: string) => stoneTravelPath(tx, village, id)): Promise<ExtractionWorksiteSelection> {
   const included: ExtractionWorksiteSelection['included'] = [], excluded: ExtractionWorksiteSelection['excluded'] = [];
   const seen = new Set<string>();
   for (const rawId of request.featureIds) {
@@ -2059,9 +2060,11 @@ export async function prepareWorksiteSelection(tx: Transaction<Database>, villag
       .where('worldId', '=', economy.worldId).where('villageId', '=', economy.villageId)
       .where('featureId', '=', featureId).where('status', '=', 'pending').executeTakeFirst();
     if (existing) { excluded.push({ featureId, reason: 'already-assigned' }); continue; }
-    if (!(request.mode === 'clear' && details.deposit.canClear)
-      && !await stoneTravelPath(tx, village, featureId)) {
-      excluded.push({ featureId, reason: 'unreachable' }); continue;
+    if (!(request.mode === 'clear' && details.deposit.canClear)) {
+      let path: TravelCell[] | undefined;
+      try { path = await pathFor(featureId); }
+      catch (error) { if (!(error instanceof HttpError && error.code === 'DESTINATION_UNREACHABLE')) throw error; }
+      if (!path) { excluded.push({ featureId, reason: 'unreachable' }); continue; }
     }
     included.push({ featureId, cellX: details.deposit.cellX, cellY: details.deposit.cellY });
   }

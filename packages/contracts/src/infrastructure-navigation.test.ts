@@ -11,6 +11,44 @@ const world={widthCells:64,heightCells:64};
 const state=()=>({world,village:{anchorCellX:10,anchorCellY:10},region:{originCellX:0,originCellY:0,width:64,height:64,terrainCodes:Array(4096).fill(1),features:[]},cells:[{cellX:10,cellY:10,footprint:{buildingId:'hall',state:'active'},building:{id:'hall',type:'town-hall',quarterTurns:0}}],travelRoutes:[],infrastructure:emptyInfrastructure()}) as unknown as VillageState;
 const road=(points:RoadStroke['points'],width=4,border=false):RoadStroke=>({id:'r',points,width,border,operation:'paint',material:'stone-1'});
 describe('infrastructure spatial guarantees',()=>{
+  it('bounds the refined route cache and keeps economic or lighting-only updates out of its key',()=>{
+    const s=state();s.world={...s.world,id:'refined-bound'};
+    const route:TravelRoute={id:'first',kind:'stone',destination:{cellX:12,cellY:10},cells:[{cellX:10,cellY:10},{cellX:12,cellY:10}]},check=vi.fn();
+    const first=refineTravelRoute(s,route,undefined,undefined,undefined,check);
+    s.infrastructure!.revision++;s.infrastructure!.stoneReserve=123;s.infrastructure!.manualLighting=['cosmetic'];
+    check.mockClear();expect(refineTravelRoute(s,route,undefined,undefined,undefined,check)).toEqual(first);expect(check).toHaveBeenCalledTimes(1);
+    for(let i=0;i<65;i++)refineTravelRoute(s,{...route,id:'evict-'+i});
+    check.mockClear();expect(refineTravelRoute(s,route,undefined,undefined,undefined,check)).toEqual(first);expect(check.mock.calls.length).toBeGreaterThan(1);
+    for(let i=0;i<4;i++)refineTravelRoute({...s,world:{...s.world,id:'other-world-'+i}},route);
+    check.mockClear();expect(refineTravelRoute(s,route,undefined,undefined,undefined,check)).toEqual(first);expect(check.mock.calls.length).toBeGreaterThan(1);
+  });
+  it('reuses refined routes with isolated results and invalidates physical edits, across the toric seam',()=>{
+    const s=state();s.world={...s.world,id:'refined-cache-regression'};
+    s.village.anchorCellX=0;s.cells[0]!.cellX=0;
+    const route:TravelRoute={id:'target',kind:'stone',destination:{cellX:62,cellY:10},cells:[{cellX:0,cellY:10},{cellX:62,cellY:10}]};
+    const check=vi.fn(),first=refineTravelRoute(s,route,undefined,undefined,undefined,check)!;
+    expect(first).not.toBeNull();expect(check.mock.calls.length).toBeGreaterThan(1);
+    const expected=structuredClone(first);first.cells[0]!.cellX=999;
+    check.mockClear();expect(refineTravelRoute(s,route,undefined,undefined,undefined,check)).toEqual(expected);
+    expect(check.mock.calls.length,'a cached physical route does not search again').toBeLessThanOrEqual(1);
+    s.region.terrainCodes.fill(2);expect(refineTravelRoute(s,route)).toBeNull();
+    s.region.terrainCodes.fill(1);expect(refineTravelRoute(s,route)).toEqual(expected);
+    const outside=buildingAccesses(s,'hall')[0]!.outside;
+    s.infrastructure!.equipment=[{id:'blocker',quarterTurns:0,version:1,x:outside.cellX*8,y:outside.cellY*8}];
+    expect(refineTravelRoute(s,route)).toBeNull();
+    s.infrastructure!.equipment=[];expect(refineTravelRoute(s,route)).toEqual(expected);
+    const ground={width:64,height:64,revision:'cache-ground-dry',sample:()=>({dry:true,blocked:false,elevation:0})};
+    expect(refineTravelRoute(s,route,undefined,undefined,ground)).not.toBeNull();
+    expect(refineTravelRoute(s,route,undefined,undefined,{...ground,revision:'cache-ground-flooded',sample:()=>({dry:false,blocked:false,elevation:0})})).toBeNull();
+  });
+  it('distinguishes a search limit from an exhausted inaccessible search',()=>{
+    const s=state(),route:TravelRoute={id:'target',kind:'stone',destination:{cellX:16,cellY:10},cells:[{cellX:10,cellY:10},{cellX:16,cellY:10}]};
+    const interrupted=new Error('search limit'),onLimit=()=>{throw interrupted;};
+    expect(()=>refineTravelRoute(s,route,undefined,undefined,undefined,undefined,{maxVisited:1,onLimit})).toThrow(interrupted);
+    expect(refineTravelRoute(s,route,undefined,undefined,undefined,undefined,{onLimit})).not.toBeNull();
+    s.region.terrainCodes.fill(2);
+    expect(refineTravelRoute(s,route,undefined,undefined,undefined,undefined,{onLimit})).toBeNull();
+  });
   it('does not discard a reachable multi-cell building because its anchor is enclosed by its own footprint',()=>{
     const s=state();s.world={...s.world,id:'enclosed-building',widthCells:512,heightCells:256};
     for(let y=9;y<=11;y++)for(let x=13;x<=15;x++)s.cells.push({cellX:x,cellY:y,footprint:{buildingId:'campus',state:'active'},building:x===14&&y===10?{id:'campus',type:'university',quarterTurns:0}:null} as VillageState['cells'][number]);

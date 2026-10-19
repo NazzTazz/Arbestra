@@ -16,6 +16,15 @@ function flat() {
   return data;
 }
 describe('RC1 terrain diagnostic substrate', () => {
+  it('evicts the oldest terrain sample without flushing recent reusable geography', () => {
+    const field = createSpawnTerrainField(flat()), first = field.sample(0, 0);
+    for (let i = 1; i < 100_000; i++) field.sample(i % 512, Math.floor(i / 512));
+    const recent = field.sample(99_999 % 512, Math.floor(99_999 / 512));
+    field.sample(100_000 % 512, Math.floor(100_000 / 512));
+    expect(field.sample(99_999 % 512, Math.floor(99_999 / 512))).toBe(recent);
+    const refreshed = field.sample(0, 0);
+    expect(refreshed).not.toBe(first); expect(refreshed).toEqual(first);
+  });
   it('keeps indexed collisions identical to direct geometry, including epsilon, long passages and both seams', () => {
     const surfaces = Array.from({ length: 180 }, (_, i) => ({ x: (i * 23.125) % 512, y: (i * 19.3125) % 256, halfWidth: i % 3 ? .03125 : 15.5, halfHeight: i % 5 ? .5 : 4 }));
     surfaces.push({ x: 0, y: 0, halfWidth: .5, halfHeight: .5 });

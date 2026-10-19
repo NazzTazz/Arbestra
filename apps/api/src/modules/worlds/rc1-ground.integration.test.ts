@@ -45,7 +45,8 @@ describe('RC1 verified source cache on isolated worlds', () => {
     expect(bodies()).toBe(1);
     await db.transaction().execute(tx => readRc1Ground(tx, worlds[0]!));
     expect(bodies()).toBe(1);
-    expect(queries.filter(q => q.includes('xmin::text'))).toHaveLength(3); // Two identities and the initial body.
+    expect(queries.filter(q => q.includes('as "row_version"'))).toHaveLength(3); // Two identities and the initial body.
+    expect(queries.filter(q=>q.includes('left join lateral')&&q.includes('"world_rc1_resources"'))).toHaveLength(1);
     await readRc1Ground(db, worlds[1]!);
     expect(bodies()).toBe(2); // Another world's row must be verified independently.
     const tree = artifact.forest!.trees[0]!, surface = {...tree, halfWidth: 0, halfHeight: 0};
@@ -61,6 +62,50 @@ describe('RC1 verified source cache on isolated worlds', () => {
     expect(other.terraces).toEqual([]);
     expect(other.field.intersectsTree(surface)).toBe(true);
     expect(bodies()).toBe(2);
+  });
+
+  it('observes two terrain edits in one transaction and restores the committed geometry after rollback',async()=>{
+    const before=await readRc1Ground(db,worlds[0]!),height=before.field.sample(140,20).elevation;
+    const rollback=Error('GROUND_EDITS_ROLLBACK');
+    await expect(db.transaction().execute(async tx=>{
+      for(const offset of [.25,.5]){
+        await tx.insertInto('worldSpawnTerraces').values({worldId:worlds[0]!,villageId,cellX:140,cellY:20,height:height+offset})
+          .onConflict(oc=>oc.columns(['worldId','cellX','cellY']).doUpdateSet({height:height+offset})).execute();
+        expect((await readRc1Ground(tx,worlds[0]!)).field.sample(140,20).elevation).toBe(height+offset);
+      }
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect((await readRc1Ground(db,worlds[0]!)).field.sample(140,20).elevation).toBe(height);
+  });
+
+  it('keeps an older repeatable-read view when a newer geometry has already warmed the shared cache',async()=>{
+    const before=await readRc1Ground(db,worlds[0]!),height=before.field.sample(140,20).elevation;
+    try{
+      await db.transaction().setIsolationLevel('repeatable read').execute(async tx=>{
+        expect((await readRc1Ground(tx,worlds[0]!)).field.sample(140,20).elevation).toBe(height);
+        // The old reader has established its MVCC snapshot. Commit the change
+        // through another connection before returning to that reader.
+        await db.updateTable('worldSpawnTerraces').set({height:height+.75}).where('worldId','=',worlds[0]!).where('cellX','=',140).where('cellY','=',20).execute();
+        expect((await readRc1Ground(db,worlds[0]!)).field.sample(140,20).elevation).toBe(height+.75);
+        expect((await readRc1Ground(tx,worlds[0]!)).field.sample(140,20).elevation).toBe(height);
+      });
+    }finally{await db.updateTable('worldSpawnTerraces').set({height}).where('worldId','=',worlds[0]!).where('cellX','=',140).where('cellY','=',20).execute();}
+  });
+
+  it('keeps ordinary stock changes out of the geometry cache but invalidates the physical woodland threshold',async()=>{
+    const rollback=Error('GROUND_THRESHOLD_ROLLBACK'),tree=artifact.forest!.trees[0]!,surface={...tree,halfWidth:0,halfHeight:0};
+    await expect(db.transaction().execute(async tx=>{
+      await tx.updateTable('worldRc1Resources').set({removedIndices:sql`'[]'::jsonb`}).where('worldId','=',worlds[0]!).where('featureId','=',featureId).execute();
+      await tx.insertInto('woodlandDeposits').values({worldId:worlds[0]!,featureId,cellX:140,cellY:20,initialAmount:1000,remainingAmount:900,reservedAmount:0,revision:1,updatedAt:new Date(),regrowthUpdatedAt:new Date()}).execute();
+      const first=await readRc1Ground(tx,worlds[0]!);expect(first.field.intersectsTree(surface)).toBe(true);
+      await tx.updateTable('woodlandDeposits').set({remainingAmount:800}).where('worldId','=',worlds[0]!).where('featureId','=',featureId).execute();
+      queries.length=0;expect((await readRc1Ground(tx,worlds[0]!)).field).toBe(first.field);
+      expect(queries.some(q=>q.includes('left join lateral')&&q.includes('"world_rc1_resources"'))).toBe(false);
+      await tx.updateTable('woodlandDeposits').set({remainingAmount:100}).where('worldId','=',worlds[0]!).where('featureId','=',featureId).execute();
+      expect((await readRc1Ground(tx,worlds[0]!)).field.intersectsTree(surface)).toBe(false);
+      throw rollback;
+    })).rejects.toBe(rollback);
+    expect((await readRc1Ground(db,worlds[0]!)).navigation.sample(tree.x,tree.y).blocked).toBe(false);
   });
 
   it('serves negotiated mutable RC1 edits without repeating the substrate and keeps legacy compatibility',async()=>{

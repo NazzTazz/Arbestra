@@ -115,6 +115,27 @@ export async function projectVillageResource(
   };
 }
 
+/** One snapshot query for the HUD, with the same numeric rounding as the
+ * individual authoritative reader. No stock or production result is cached. */
+export async function projectVillageResources(transaction:Transaction<Database>,worldId:string,villageId:string,through:Date){
+ const result=await sql<{code:string;displayName:string;iconKey:string;amount:string;productionPerHour:string;productionUpdatedAt:Date|null}>`
+  select r.resource_code as code, t.display_name, t.icon_key,
+   (r.amount + case when f.production_updated_at is null or f.remainder is null or p.rate=0 then 0
+    else floor(f.remainder + p.rate * extract(epoch from (greatest(${through}::timestamptz,f.production_updated_at)-f.production_updated_at))/3600) end)::text as amount,
+   p.rate::text as production_per_hour,
+   case when f.production_updated_at is null then null else ${through}::timestamptz end as production_updated_at
+  from village_resources r join resource_types t on t.code=r.resource_code
+  join villages v on v.world_id=r.world_id and v.id=r.village_id
+  left join village_resource_flows f on f.world_id=r.world_id and f.village_id=r.village_id and f.resource_code=r.resource_code
+  cross join lateral (select case when f.production_updated_at is null or (r.resource_code='wood' and v.economy_activated_at is not null) then 0
+   else f.base_rate_per_hour + coalesce((select sum(bp.rate_per_hour) from buildings b
+    join building_level_production bp on bp.building_type_code=b.building_type and bp.level=b.level and bp.resource_code=r.resource_code
+    where b.world_id=r.world_id and b.village_id=r.village_id and (b.status='completed' or b.target_level is not null)),0) end as rate) p
+  where r.world_id=${worldId} and r.village_id=${villageId}
+ `.execute(transaction);
+ return result.rows.map(row=>({...row,amount:Number(row.amount),productionPerHour:Number(row.productionPerHour)}));
+}
+
 export async function materializeVillageResource(
   transaction: Transaction<Database>,
   worldId: string,

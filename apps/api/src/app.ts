@@ -1,4 +1,5 @@
 import {NavigationCompute} from './modules/navigation/compute.js';
+import {bindTransactionRefiner} from './modules/navigation/transaction-refinement.js';
 import {ObservationHub} from './modules/admin/observation-hub.js';
 import {registerObservationRoutes} from './modules/admin/observation-routes.js';
 import {instrumentObservationActions} from './modules/admin/observation-actions.js';
@@ -84,6 +85,8 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   app.addHook('preClose',()=>wakeups.close());
   const navigation=new NavigationCompute(config.expeditionWorkerCount);
   try{await navigation.start();}catch(error){await navigation.close();await wakeups.close();throw error;}
+  const unbindRefiner=bindTransactionRefiner(db,navigation);
+  app.addHook('onClose',async()=>{unbindRefiner();});
   let expeditionErrorAt: string | null = null;
   const coordinator=new ExpeditionCoordinator(db,navigation,()=>{expeditionErrorAt=new Date().toISOString();operations.event('EXPEDITION_PREPARATION_INTERRUPTED','Une préparation d’expédition a été interrompue.','error');app.log.warn({code:'EXPEDITION_PREPARATION_INTERRUPTED'},'Expedition preparation interrupted');});
   const stopExpeditions=config.expeditionWorkerEnabled===false?()=>coordinator.close():coordinator.start();

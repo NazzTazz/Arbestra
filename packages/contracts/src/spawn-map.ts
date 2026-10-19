@@ -75,7 +75,7 @@ export function createSpawnTerrainField(data: GeneratedLandscape) {
     x = wrapClimate(x, data.width); y = wrapClimate(y, data.height);
     const key = `${x}:${y}`;
     let result = samples.get(key);
-    if (!result) { result = sampleWorldGeography(g, x, y); if (samples.size >= 100_000) samples.clear(); samples.set(key, result); }
+    if (!result) { result = sampleWorldGeography(g, x, y); if (samples.size >= 100_000) samples.delete(samples.keys().next().value!); samples.set(key, result); }
     return result;
   };
   // Immutable geometry: reuse the same envelope and trigonometry at every

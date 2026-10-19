@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { travelDuration } from '@arbestra/contracts';
 import { sql, type Transaction } from 'kysely';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Database } from '../../database/schema.js';
 import { createDatabase } from '../../database/connection.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
@@ -11,9 +11,10 @@ import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { completeStoneExtractionAt } from './stone-extractions.js';
 import { materializeWoodland } from './woodland.js';
 import { admitWorksites, changeWorksite, createWorksite } from './worksites.js';
-import { previewVillageWorksite, startVillageWorksite } from '../villages/service.js';
+import { ownedVillage, prepareWorksiteSelection, previewVillageWorksite, startVillageWorksite } from '../villages/service.js';
 import { wakeExtractionWorksite } from '../villages/complete-construction.js';
 import { buildApp } from '../../app.js';
+import { HttpError } from '../../errors.js';
 
 const url = testDatabaseUrl(), db = createDatabase(url);
 const worldId = DEVELOPMENT_IDS.world, villageId = DEVELOPMENT_IDS.village;
@@ -48,6 +49,143 @@ const village = { widthCells: 2048, heightCells: 1024 };
 const path = async () => [{ cellX: 1024, cellY: 512 }, { cellX: 1024, cellY: 513 }, { cellX: 1023, cellY: 514 }];
 const current = (tx: Transaction<Database>, worksiteId: string) => tx.selectFrom('depositExtractions').selectAll()
   .where('worksiteId', '=', worksiteId).where('status', '=', 'in-progress').executeTakeFirst();
+
+async function addTarget(tx: Transaction<Database>, t: Date, cellX: number, cellY: number) {
+  const id = randomUUID();
+  await tx.insertInto('worldFeatures').values({ id, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 3 }).execute();
+  await tx.insertInto('woodlandDeposits').values({ worldId, featureId: id, cellX, cellY, initialAmount: 300,
+    remainingAmount: 100, reservedAmount: 0, revision: 1, updatedAt: t, regrowthUpdatedAt: t }).execute();
+  await tx.insertInto('worldCellOccupancies').values({ worldId, featureId: id, cellX, cellY, buildingId: null, role: 'body' }).execute();
+  return id;
+}
+
+it('advances from the last harvested target and stops searching after the first accessible candidate', async () => {
+  await fixture(async (tx, first, t) => {
+    const nearPrevious = await addTarget(tx, t, 1022, 515), nearHall = await addTarget(tx, t, 1027, 512);
+    await tx.updateTable('woodlandDeposits').set({ remainingAmount: 100 }).where('featureId', '=', first).execute();
+    const economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2,
+      featureIds: [nearHall, nearPrevious, first] });
+    const calls: string[] = [];
+    const route = async (feature: string) => {
+      calls.push(feature);
+      return [{ cellX: 1024, cellY: 512 }, feature === nearPrevious ? { cellX: 1022, cellY: 515 }
+        : feature === nearHall ? { cellX: 1027, cellY: 512 } : { cellX: 1023, cellY: 514 }];
+    };
+    await admitWorksites(tx, economy, village, route);
+    expect(calls).toEqual([first]);
+    const lot = (await current(tx, id))!;
+    expect(lot.featureId).toBe(first);
+    await completeStoneExtractionAt(tx, worldId, villageId, lot.id, lot.completesAt);
+    await changeWorksite(tx, { ...economy, through: lot.completesAt }, id, { commandId: randomUUID(), action: 'pause' });
+    await changeWorksite(tx, { ...economy, through: lot.completesAt }, id, { commandId: randomUUID(), action: 'resume' });
+    calls.length = 0;
+    await admitWorksites(tx, { ...economy, through: lot.completesAt }, village, route);
+    expect(calls).toEqual([nearPrevious]);
+    expect((await current(tx, id))?.featureId).toBe(nearPrevious);
+  });
+});
+
+it('removes an unreachable target then launches the next, but preserves targets on technical failure', async () => {
+  await fixture(async (tx, first, t) => {
+    const next = await addTarget(tx, t, 1027, 512), economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [next, first] });
+    const unavailable = new HttpError(503, 'NAVIGATION_BUSY', 'busy');
+    await expect(admitWorksites(tx, economy, village, async () => { throw unavailable; })).rejects.toBe(unavailable);
+    expect((await tx.selectFrom('extractionWorksiteTargets').select('status').where('worksiteId', '=', id).execute())
+      .every(row => row.status === 'pending')).toBe(true);
+    const calls: string[] = [];
+    await admitWorksites(tx, economy, village, async feature => {
+      calls.push(feature);
+      if (feature === first) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'unreachable');
+      return [{ cellX: 1024, cellY: 512 }, { cellX: 1027, cellY: 512 }];
+    });
+    expect(calls).toEqual([first, next]);
+    expect((await current(tx, id))?.featureId).toBe(next);
+    expect(await tx.selectFrom('extractionWorksiteTargets').select(['status', 'reason']).where('worksiteId', '=', id)
+      .where('featureId', '=', first).executeTakeFirst()).toEqual({ status: 'abandoned', reason: 'unreachable' });
+  });
+});
+
+it('ranks the first target across the toric seam', async () => {
+  await fixture(async (tx, _first, t) => {
+    await tx.updateTable('villages').set({ anchorCellX: 2047, anchorCellY: 514 }).where('id', '=', villageId).execute();
+    await tx.updateTable('worldCellOccupancies').set({ cellX: 2047, cellY: 514 })
+      .where('worldId', '=', worldId).where('buildingId', '=', DEVELOPMENT_IDS.townHall).execute();
+    const across = await addTarget(tx, t, 0, 514), direct = await addTarget(tx, t, 2044, 514);
+    const economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [direct, across] });
+    const calls: string[] = [];
+    await admitWorksites(tx, economy, village, async feature => {
+      calls.push(feature); return [{ cellX: 2047, cellY: 514 }, { cellX: 0, cellY: 514 }];
+    });
+    expect(calls).toEqual([across]);
+    expect((await current(tx, id))?.featureId).toBe(across);
+  });
+});
+
+it('waits for reserved stock without routing or removing the target', async () => {
+  await fixture(async (tx, first, t) => {
+    await tx.updateTable('woodlandDeposits').set({ reservedAmount: 300 }).where('featureId', '=', first).execute();
+    const economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [first] });
+    await admitWorksites(tx, economy, village, async () => { throw Error('Reserved stock must not require routing'); });
+    expect(await current(tx, id)).toBeUndefined();
+    expect(await tx.selectFrom('extractionWorksites').select(['status', 'waitReason']).where('id', '=', id).executeTakeFirst())
+      .toEqual({ status: 'running', waitReason: 'stock-reserved' });
+    expect((await tx.selectFrom('extractionWorksiteTargets').select('status').where('worksiteId', '=', id).executeTakeFirst())?.status).toBe('pending');
+  });
+});
+
+it('finishes the queue when every remaining target has no path', async () => {
+  await fixture(async (tx, first, t) => {
+    const economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [first] });
+    await admitWorksites(tx, economy, village, async () => undefined);
+    expect((await tx.selectFrom('extractionWorksites').select('status').where('id', '=', id).executeTakeFirst())?.status).toBe('completed');
+    expect((await tx.selectFrom('extractionWorksiteTargets').select(['status', 'reason']).where('worksiteId', '=', id).executeTakeFirst()))
+      .toEqual({ status: 'abandoned', reason: 'unreachable' });
+    expect(await current(tx, id)).toBeUndefined();
+  });
+});
+
+it('rolls back an earlier exclusion if the next route fails technically', async () => {
+  await fixture(async (tx, first, t) => {
+    const next = await addTarget(tx, t, 1027, 512), economy = { worldId, villageId, through: t };
+    const id = await createWorksite(tx, economy, { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [first, next] });
+    const before = await tx.selectFrom('extractionWorksiteTargets').selectAll().where('worksiteId', '=', id).orderBy('ordinal').execute();
+    const failure = new HttpError(503, 'NAVIGATION_BUSY', 'search interrupted');
+    let observedExclusion = false;
+    await sql`savepoint interrupted_worksite`.execute(tx);
+    try {
+      await expect(admitWorksites(tx, economy, village, async feature => {
+        if (feature === first) return undefined;
+        observedExclusion = (await tx.selectFrom('extractionWorksiteTargets').select('status')
+          .where('worksiteId', '=', id).where('featureId', '=', first).executeTakeFirst())?.status === 'abandoned';
+        throw failure;
+      })).rejects.toBe(failure);
+      expect(observedExclusion).toBe(true);
+    } finally {
+      await sql`rollback to savepoint interrupted_worksite`.execute(tx);
+      await sql`release savepoint interrupted_worksite`.execute(tx);
+    }
+    expect(await tx.selectFrom('extractionWorksiteTargets').selectAll().where('worksiteId', '=', id).orderBy('ordinal').execute()).toEqual(before);
+    expect(await current(tx, id)).toBeUndefined();
+  });
+});
+
+it('excludes a genuinely unreachable initial selection but propagates an interrupted search', async () => {
+  await fixture(async (tx, first, through) => {
+    const owner = await ownedVillage(tx, DEVELOPMENT_IDS.account, 'aube', villageId);
+    const request = { commandId: randomUUID(), mode: 'cut' as const, workerCap: 2, featureIds: [first] };
+    expect(await prepareWorksiteSelection(tx, owner, { worldId, villageId, through }, request,
+      async () => { throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'no path'); }))
+      .toEqual({ included: [], excluded: [{ featureId: first, reason: 'unreachable' }] });
+    const interrupted = new HttpError(503, 'NAVIGATION_BUSY', 'interrupted');
+    await expect(prepareWorksiteSelection(tx, owner, { worldId, villageId, through }, request,
+      async () => { throw interrupted; })).rejects.toBe(interrupted);
+  });
+});
 
 it('admits and resumes a worksite with an exact 4052 ms sub-cell journey', async () => {
   await fixture(async (tx, featureId, t) => {
@@ -277,8 +415,12 @@ it('concentrates a woodland crew on the nearest bosquet before starting the next
   });
 });
 
-it('serves the authenticated preview and worksite commands through the JSON contract', async () => {
+describe('HTTP worksite contract',()=>{
   const featureId = randomUUID();
+  let app:Awaited<ReturnType<typeof buildApp>>|undefined;
+  // Boot/cleanup have their own hook deadlines. The command sequence below
+  // keeps its existing 40 s limit, even with persistent CPU workers at startup.
+  beforeAll(async()=>{
   const t = new Date();
   await db.insertInto('worldFeatures').values({ id: featureId, worldId, featureTypeCode: 'woodland',
     state: 'available', variantSeed: 4 }).execute();
@@ -287,10 +429,21 @@ it('serves the authenticated preview and worksite commands through the JSON cont
     updatedAt: t, regrowthUpdatedAt: t }).execute();
   await db.insertInto('worldCellOccupancies').values({ worldId, featureId, cellX: 1023, cellY: 514,
     buildingId: null, role: 'body' }).execute();
-  const app = await buildApp({ databaseUrl: url, host: '127.0.0.1', port: 0, isProduction: false,
+  app = await buildApp({ databaseUrl: url, host: '127.0.0.1', port: 0, isProduction: false,
     cookieName: 'test_session', sessionTtlDays: 1, constructionDurationOverrideMs: 0,
     scheduledTaskPollIntervalMs: 250 }, db);
-  try {
+  });
+  afterAll(async()=>{
+    await app?.close();
+    await resetE2eState(url);
+    await db.transaction().execute(async tx => {
+      await tx.deleteFrom('worldCellOccupancies').where('worldId', '=', worldId).where('featureId', '=', featureId).execute();
+      await tx.deleteFrom('woodlandDeposits').where('worldId', '=', worldId).where('featureId', '=', featureId).execute();
+      await tx.deleteFrom('worldFeatures').where('worldId', '=', worldId).where('id', '=', featureId).execute();
+    });
+  });
+  it('serves the authenticated preview and worksite commands through the JSON contract', async () => {
+    if(!app)throw Error('HTTP fixture did not start');
     const login = await app.inject({ method: 'POST', url: '/api/auth/login',
       payload: { email: 'player@arbestra.local', password: 'arbestra' } });
     expect(login.statusCode).toBe(200);
@@ -308,13 +461,5 @@ it('serves the authenticated preview and worksite commands through the JSON cont
       payload: { commandId: randomUUID(), action: 'pause' } });
     expect(paused.statusCode, paused.body).toBe(200);
     expect(paused.json().worksite.status).toBe('paused');
-  } finally {
-    await app.close();
-    await resetE2eState(url);
-    await db.transaction().execute(async tx => {
-      await tx.deleteFrom('worldCellOccupancies').where('worldId', '=', worldId).where('featureId', '=', featureId).execute();
-      await tx.deleteFrom('woodlandDeposits').where('worldId', '=', worldId).where('featureId', '=', featureId).execute();
-      await tx.deleteFrom('worldFeatures').where('worldId', '=', worldId).where('id', '=', featureId).execute();
-    });
-  }
-}, 40000);
+  }, 40000);
+});

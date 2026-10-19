@@ -375,9 +375,13 @@ export async function scienceSnapshot(tx: Transaction<Database>, economy: Villag
   const { accountId, science } = owner ? { accountId: owner.ownerAccountId,
     science: await tx.selectFrom('playerScience').selectAll().where('worldId','=',economy.worldId)
       .where('accountId','=',owner.ownerAccountId).executeTakeFirst() ?? { solarReport: null, observationsSince: null } } : await lockScience(tx, economy);
-  const levels = await levelsFor(tx, economy.worldId, accountId);
-  const facts = await evidence(tx, economy.worldId, accountId, science);
   const programs = await tx.selectFrom('sciencePrograms').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId).execute();
+  const levels:Mastery={mathematics:0,geography:0,astronomy:0};
+  for(const p of programs)if(p.acquiredAt)levels[p.discipline]=Math.max(levels[p.discipline],p.level);
+  const places=await tx.selectFrom('sciencePlaces').select([
+    sql<number>`count(*) filter (where surveyed)::integer`.as('count'),sql<Date|null>`max(observed_at)`.as('at'),
+  ]).where('worldId','=',economy.worldId).where('accountId','=',accountId).executeTakeFirstOrThrow();
+  const facts={places:places.count,solar:science.solarReport!==null,since:science.observationsSince};
   const activities = await tx.selectFrom('scienceActivities').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId)
     .where('status', '=', 'in-progress').orderBy('startedAt').execute();
   const campuses = await tx.selectFrom('buildings').innerJoin('villages', 'villages.id', 'buildings.villageId').select(['buildings.id', 'buildings.villageId', 'buildings.level'])
@@ -386,9 +390,8 @@ export async function scienceSnapshot(tx: Transaction<Database>, economy: Villag
   const cohorts = await tx.selectFrom('populationCohorts').innerJoin('villages', 'villages.id', 'populationCohorts.villageId').select('memberCount')
     .where('populationCohorts.worldId', '=', economy.worldId).where('villages.worldId', '=', economy.worldId).where('villages.ownerAccountId', '=', accountId).where('cartographer', '=', true).execute();
   const reports = await tx.selectFrom('scienceVillageReports').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId).orderBy('observedAt', 'desc').execute();
-  const revision = await tx.selectFrom('sciencePlaces').select(sql<Date | null>`max(observed_at)`.as('at')).where('worldId', '=', economy.worldId).where('accountId', '=', accountId).executeTakeFirstOrThrow();
   return { serverTime: economy.through.toISOString(), levels, ...knowledgeProfile(levels, facts.places),
-    geographyRevision: revision.at?.getTime() ?? 0,
+    geographyRevision: places.at?.getTime() ?? 0,
     programs: SCIENCE_PROGRAMS.filter(p => programVisible(p, levels)).map(definition => {
       const program = programs.find(p => p.code === definition.code), active = activities.some(a => a.programCode === definition.code);
       const needs = needsFor(definition, facts);

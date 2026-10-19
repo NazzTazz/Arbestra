@@ -262,16 +262,54 @@ function prepareRefinement(state:TravelNetworkState,ground?:TravelGround,geometr
  const roadNodes=[...surface.values()].filter(p=>p.manual&&p.x%2===0&&p.y%2===0).map(p=>({cellX:p.x/2,cellY:p.y/2}));
  const blocked=new Set(state.cells.filter(c=>c.footprint).map(key));
  for(const f of state.region.features)if(!(ground?.woodedCells&&f.type==='woodland')&&f.deposit?.blocksCell!==false&&!f.deposit?.cleared&&f.deposit?.state!=='depleted')blocked.add(key(f));
- const occupiedEquipment=state.infrastructure!.equipment;
+ const equipmentBins=new Map<string,Array<{x:number;y:number}>>();
+ for(const e of state.infrastructure!.equipment){
+  const point={x:e.x/8,y:e.y/8};
+  for(let y=Math.floor(point.y-.125);y<=Math.floor(point.y+.125);y++)for(let x=Math.floor(point.x-.125);x<=Math.floor(point.x+.125);x++){
+   const k=wrap(x,world.widthCells)+':'+wrap(y,world.heightCells),bin=equipmentBins.get(k)??[];bin.push(point);equipmentBins.set(k,bin);
+  }
+ }
  const fineCells=new Set<string>(ground?.woodedCells?.map(key));
  const markFine=(x:number,y:number)=>fineCells.add(wrap(Math.floor(x+.5),world.widthCells)+':'+wrap(Math.floor(y+.5),world.heightCells));
  for(const p of surface.values())if(p.manual)markFine((p.x+.5)/16,(p.y+.5)/16);
  for(const k of curbPixels){const [x,y]=k.split(':').map(Number);markFine((x!+.5)/16,(y!+.5)/16);}
- for(const e of occupiedEquipment)for(const dx of [-.25,0,.25])for(const dy of [-.25,0,.25])markFine(e.x/8+dx,e.y/8+dy);
- return {surface,curbPixels,roadNodes,walk,blocked,occupiedEquipment,fineCells};
+ for(const e of state.infrastructure!.equipment)for(const dx of [-.25,0,.25])for(const dy of [-.25,0,.25])markFine(e.x/8+dx,e.y/8+dy);
+ return {surface,curbPixels,roadNodes,walk,blocked,equipmentBins,fineCells};
 }
-export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround,checkpoint?:()=>void):TravelRoute|null{
+
+// Four geometry contexts, at most 64 routes / 16384 points per context. Keys
+// describe physical inputs, never economic quantities, permissions or time.
+type RefinementCache={prepared:ReturnType<typeof prepareRefinement>;routes:Map<string,TravelCell[]>;points:number};
+const refinementCaches=new Map<string,RefinementCache>();
+function refinementCache(state:TravelNetworkState,ground?:TravelGround):RefinementCache|undefined{
+ const {world,village,region}=state;
+ const signature=JSON.stringify([world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
+  ground&&[ground.revision,ground.width,ground.height,ground.woodedCells],region.originCellX,region.originCellY,region.width,region.height,region.terrainCodes,
+  [...region.features].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>[f.id,f.type,f.cellX,f.cellY,f.deposit?.state,f.deposit?.blocksCell,f.deposit?.cleared]),
+  [...state.cells].sort((a,b)=>a.cellX-b.cellX||a.cellY-b.cellY).map(c=>[c.cellX,c.cellY,c.footprint?.buildingId,Boolean(c.footprint),c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.accesses,c.building.visualLayout]]),
+  state.infrastructure&&[state.infrastructure.roads,state.infrastructure.inheritedRoads,state.infrastructure.inheritedCells,
+    [...state.infrastructure.equipment].sort((a,b)=>a.x-b.x||a.y-b.y).map(e=>[e.x,e.y])]]);
+ if(signature.length>1048576)return undefined;
+ let entry=refinementCaches.get(signature);
+ if(entry)refinementCaches.delete(signature);
+ else entry={prepared:prepareRefinement(state,ground),routes:new Map(),points:0};
+ // Oversized scenes can still be searched, but must not retain large rasters
+ // in addition to the caller's live scene. The returned context is ephemeral.
+ if(entry.prepared.surface.size>65536||entry.prepared.curbPixels.size>65536||entry.prepared.fineCells.size>65536
+   ||entry.prepared.blocked.size>65536||entry.prepared.equipmentBins.size>65536)return entry;
+ refinementCaches.set(signature,entry);
+ while(refinementCaches.size>4)refinementCaches.delete(refinementCaches.keys().next().value!);
+ return entry;
+}
+export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,guide:ReadonlySet<string>=new Set(),prepared?:ReturnType<typeof prepareRefinement>,ground?:TravelGround,checkpoint?:()=>void,
+  search?: { maxVisited?: number; onLimit?: () => void }):TravelRoute|null{
+  checkpoint?.();
   if(!state.infrastructure||!route.cells.length)return route;
+  // Explicit search budgets are used by diagnostics and must still be honored.
+  const cache=prepared||search?.maxVisited!==undefined?undefined:refinementCache(state,ground);
+  const routeKey=cache?JSON.stringify([route.id,route.kind,route.destination,route.cells,[...guide].sort()]):'';
+  const cached=cache?.routes.get(routeKey);
+  if(cached){cache!.routes.delete(routeKey);cache!.routes.set(routeKey,cached);return {...route,version:2,cells:cached.map(p=>({...p}))};}
   const anchor=state.cells.find(c=>c.cellX===state.village.anchorCellX&&c.cellY===state.village.anchorCellY);
   const hallId=state.village.townHallBuildingId??anchor?.footprint?.buildingId??anchor?.building?.id;
   const hall=state.cells.find(c=>c.building?.id===hallId&&c.building?.type==='town-hall');if(!hall?.building)return route;
@@ -279,22 +317,28 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
   const world=state.world,w=world.widthCells*8,h=world.heightCells*8;
   const local=(p:TravelCell)=>wrap(p.cellX-state.region.originCellX,world.widthCells)<state.region.width&&wrap(p.cellY-state.region.originCellY,world.heightCells)<state.region.height;
   const lastLocal=route.cells.findLastIndex(local),destination=local(route.destination)?route.destination:route.cells[lastLocal];if(!destination)return route;
-  const {surface,curbPixels,roadNodes,walk,blocked,occupiedEquipment,fineCells}=prepared??prepareRefinement(state,ground);
+  const {surface,curbPixels,roadNodes,walk,blocked,equipmentBins,fineCells}=prepared??cache?.prepared??prepareRefinement(state,ground);
   // Shared obstacles and fine cells are immutable; only destination portals vary.
   const destinationFine=new Set<string>();
   const markFine=(x:number,y:number)=>destinationFine.add(wrap(Math.floor(x+.5),world.widthCells)+':'+wrap(Math.floor(y+.5),world.heightCells));
   for(const a of [...starts,...ends])markFine(a.outside.cellX,a.outside.cellY);
   markFine(destination.cellX,destination.cellY);
   const fine=(p:TravelCell)=>{const k=wrap(Math.floor(p.cellX/8+.5),world.widthCells)+':'+wrap(Math.floor(p.cellY/8+.5),world.heightCells);return fineCells.has(k)||destinationFine.has(k);};
+  const landCache=new Map<number,boolean>();
   const land=(p:TravelCell,accessBuilding?:string)=>{
+    const latticeX=p.cellX*8,latticeY=p.cellY*8,latticeKey=latticeY*w+latticeX;
+    const memo=!accessBuilding&&Number.isInteger(latticeX)&&Number.isInteger(latticeY);
+    const prior=memo?landCache.get(latticeKey):undefined;if(prior!==undefined)return prior;
     const cx=wrap(Math.floor(p.cellX+.5),world.widthCells),cy=wrap(Math.floor(p.cellY+.5),world.heightCells);
     const xx=wrap(cx-state.region.originCellX,world.widthCells),yy=wrap(cy-state.region.originCellY,world.heightCells);
-    return xx<state.region.width&&yy<state.region.height&&state.region.terrainCodes[yy*state.region.width+xx]===1
+    const result=xx<state.region.width&&yy<state.region.height&&state.region.terrainCodes[yy*state.region.width+xx]===1
       &&(!blocked.has(`${cx}:${cy}`)||Boolean(accessBuilding&&state.cells.some(c=>c.cellX===cx&&c.cellY===cy&&c.footprint?.buildingId===accessBuilding))||cx===route.destination.cellX&&cy===route.destination.cellY&&route.kind!=='building')
       &&!infrastructureBarrierAt(curbPixels,p,world)
-      &&!occupiedEquipment.some(e=>Math.abs(delta(e.x/8,p.cellX,world.widthCells))<.125&&Math.abs(delta(e.y/8,p.cellY,world.heightCells))<.125);
+      &&!(equipmentBins.get(wrap(Math.floor(p.cellX),world.widthCells)+':'+wrap(Math.floor(p.cellY),world.heightCells))??[])
+        .some(e=>Math.abs(delta(e.x,p.cellX,world.widthCells))<.125&&Math.abs(delta(e.y,p.cellY,world.heightCells))<.125);
+    if(memo)landCache.set(latticeKey,result);return result;
   };
-  let best:TravelCell[]|null=null;
+  let best:TravelCell[]|null=null, limited=false;
   // Door connections are part of the physical path too. Do not jump over an
   // obstacle between the threshold and the first fine-grid node.
   const accessClear=(access:typeof starts[number],buildingId:string)=>{
@@ -335,13 +379,18 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
         }
       }return options;
     };
-    const pending=new StepQueue(),seen=new Map<string,number>();pending.push({cell:from,cost:0,score:estimate(from),direction:-1,steps:0});
+    const nodeKey=(p:TravelCell)=>p.cellY*w+p.cellX;
+    const pending=new StepQueue(),seen=new Map<number,number>();pending.push({cell:from,cost:0,score:estimate(from),direction:-1,steps:0});
     let found:Step|undefined,visited=0;
-    while(pending.length&&visited++<65_536){checkpoint?.();const cur=pending.pop();if(cur.cost>(seen.get(key(cur.cell))??Infinity))continue;
-      if(key(cur.cell)===key(to)){found=cur;break;}
+    while(pending.length&&visited++<(search?.maxVisited??65_536)){checkpoint?.();const cur=pending.pop();if(cur.cost>(seen.get(nodeKey(cur.cell))??Infinity))continue;
+      if(nodeKey(cur.cell)===nodeKey(to)){found=cur;break;}
       if(cur.steps+distance(cur.cell,to)>distance(from,to)+128)continue;
       for(const via of neighbours(cur.cell)){
         const cell=via.at(-1)!;let cost=cur.cost,steps=cur.steps,previous=cur.cell,valid=true;
+        // Even the cheapest possible edge cannot improve this already-known
+        // node: avoid rechecking every eighth-cell on that alternative.
+        let minimum=cost,origin=cur.cell;for(const end of via){minimum+=distance(origin,end)*.7;origin=end;}
+        if(minimum>=(seen.get(nodeKey(cell))??Infinity))continue;
         for(const end of via){
           const dx=delta(end.cellX,previous.cellX,w),dy=delta(end.cellY,previous.cellY,h),n=Math.abs(dx)+Math.abs(dy);
           for(let i=1;i<=n;i++){
@@ -354,15 +403,20 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
           }
           if(!valid)break;previous=end;
         }
-        if(!valid||steps+distance(cell,to)>distance(from,to)+128||cost>=(seen.get(key(cell))??Infinity))continue;seen.set(key(cell),cost);
+        if(!valid||steps+distance(cell,to)>distance(from,to)+128||cost>=(seen.get(nodeKey(cell))??Infinity))continue;seen.set(nodeKey(cell),cost);
         pending.push({cell,via,cost,score:cost+estimate(cell)+distance(cell,to)*1e-7,direction:0,steps,previous:cur});
       }
     }
-    if(!found)continue;
+    if(!found){limited ||= pending.length>0;continue;}
     const legs:TravelCell[][]=[];for(let c:Step|undefined=found;c;c=c.previous)legs.push(c.via??[c.cell]);
     const cells=legs.reverse().flat().map(p=>({cellX:p.cellX/8,cellY:p.cellY/8})).filter((p,i,list)=>!i||key(p)!==key(list[i-1]!));
     const path=[start.position,...cells,...(end?[end.position]:[]),...(!local(route.destination)?route.cells.slice(lastLocal+1):[])];
     if(!best||travelDuration(path,world)<travelDuration(best,world))best=path;
+  }
+  if(!best&&limited)search?.onLimit?.();
+  if(best&&cache&&routeKey.length<=16384&&best.length<=16384){
+    cache.routes.set(routeKey,best.map(p=>({...p})));cache.points+=best.length;
+    while(cache.routes.size>64||cache.points>16384){const oldest=cache.routes.keys().next().value!;cache.points-=cache.routes.get(oldest)!.length;cache.routes.delete(oldest);}
   }
   return best?{...route,cells:best,version:2}:null;
 }

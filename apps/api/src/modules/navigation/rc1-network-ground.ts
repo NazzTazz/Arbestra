@@ -23,8 +23,8 @@ export function rc1NetworkGround(data: GeneratedLandscape, base: ReturnType<type
   return {width: edits.width, height: edits.height, revision: edits.worldId + ':' + revision, woodedCells: trunks.cells,
     sample(x, y) {
       const key = x + ':' + y, prior = samples.get(key); if (prior) return prior;
-      const v = field.sample(x, y), result = {elevation: v.elevation, dry: v.elevation > Math.max(0, v.surface) + 1e-6,
+      const v = field.physicalSample(x, y), result = {elevation: v.elevation, dry: v.elevation > Math.max(0, v.surface) + 1e-6,
         blocked: field.intersectsRock({x, y, halfWidth: 0, halfHeight: 0}) || trunks.blocked(x, y)};
-      if (samples.size >= 32768) samples.clear(); samples.set(key, result); return result;
+      if (samples.size >= 32768) samples.delete(samples.keys().next().value!); samples.set(key, result); return result;
     }};
 }

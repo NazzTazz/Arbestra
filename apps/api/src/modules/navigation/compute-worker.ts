@@ -1,6 +1,6 @@
 import {parentPort} from 'node:worker_threads';
 import {canWalkSpawnSegment,createSpawnTerrainField,editedRc1Field,woodlandTrees,woodlandPassage,infrastructurePlanSurface,
- planRoute,planHierarchicalRoute,ChunkNavigationCache,routeLength,spawnDelta,buildTravelNetwork,type TravelGround,type RouteField,type GeneratedLandscape,type WoodlandTree,type RouteQuery} from '@arbestra/contracts';
+ planRoute,planHierarchicalRoute,ChunkNavigationCache,routeLength,spawnDelta,buildTravelNetwork,refineTravelRoute,type TravelGround,type RouteField,type GeneratedLandscape,type WoodlandTree,type RouteQuery} from '@arbestra/contracts';
 import {artifactChecksum} from '../world-generator/artifact.js';
 import type {NavigationData} from './context.js';
 import type {NetworkJob} from './network-job.js';
@@ -35,7 +35,7 @@ function build(data:NavigationData,stage:(name:string)=>void):NavigationField{
   const trees:WoodlandTree[]=(source.data.forest?.trees??[]).flatMap((t,i)=>absent.has(i)?[]:[{x:t.x,y:t.y,scale:t.crown*t.size,heightScale:t.size,rotation:0}]);
   for(const e of data.treeEdits)if(e.grove)trees.push(...woodlandTrees({cellX:e.cellX,cellY:e.cellY,variantSeed:e.variantSeed,rc1:{trees:[],rocks:[]},deposit:{remainingAmount:e.initialAmount,initialAmount:e.initialAmount,cleared:false}}));
   const field=editedRc1Field(source.data,source.field,data.terraces,[...absent],data.vertices),trunks=woodlandPassage(trees,world);
-  terrain=(x,y)=>{const s=field.sample(x,y);return{elevation:s.elevation,dry:s.elevation>Math.max(0,s.surface)+1e-6,blocked:field.intersectsRock({x,y,halfWidth:0,halfHeight:0})||trunks.blocked(x,y)};};
+  terrain=(x,y)=>{const s=field.physicalSample(x,y);return{elevation:s.elevation,dry:s.elevation>Math.max(0,s.surface)+1e-6,blocked:field.intersectsRock({x,y,halfWidth:0,halfHeight:0})||trunks.blocked(x,y)};};
  }
  const occupancy=new Map(data.occupancies.map(c=>[c.cellX+':'+c.cellY,c.buildingId]));
  const equipment=data.plans.flatMap(p=>p.equipment),surface=new Map(data.plans.flatMap(p=>[...infrastructurePlanSurface(p,world)]));
@@ -75,7 +75,11 @@ parentPort!.on('message',(job:{id:string;query?:RouteQuery;data?:NavigationData;
     if(!ground){stage('network-ground');ground=rc1NetworkGround(source.data,source.field,edits);
      if(key.length<=131072){networkGrounds.set(key,ground);while(networkGrounds.size>4)networkGrounds.delete(networkGrounds.keys().next().value!);}}
    }
-   checkpoint();stage('network-search');const network=buildTravelNetwork(state,[],ground,checkpoint);
+   checkpoint();stage('network-search');
+   const refinement=job.network.refinement;
+   const route=refinement?refineTravelRoute(state,refinement,new Set(),undefined,ground,checkpoint,
+    {onLimit:()=>{throw Error('Refinement search budget exhausted');}}):undefined;
+   const network=refinement?(route?[route]:[]):buildTravelNetwork(state,[],ground,checkpoint);
    while(sources.size>2)sources.delete(sources.keys().next().value!);
    parentPort!.postMessage({id:job.id,network,contexts:[...contexts.keys()],sources:[...sources.keys()]});return;
   }

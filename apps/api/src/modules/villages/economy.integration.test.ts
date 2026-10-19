@@ -16,7 +16,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { COMPLETE_CONSTRUCTION_TASK, COMPLETE_EXPANSION_TASK, completeConstruction, completeExpansion } from './complete-construction.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
-import { materializeVillageResource } from './economy.js';
+import { materializeVillageResource,projectVillageResource,projectVillageResources } from './economy.js';
 import { constructBuilding, constructBuildingArea, expandGarden, getVillageState, harvestGarden, upgradeBuilding } from './service.js';
 
 const databaseUrl = testDatabaseUrl();
@@ -71,6 +71,25 @@ describe.sequential('economy with PostgreSQL', () => {
     await db.updateTable('villageResources').set({amount:2000}).where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','in',['timber','cut-stone']).execute();
   });
   afterAll(async () => { await db?.destroy(); });
+
+  it('projects all resource balances in one read with identical numeric rounding, legacy production and current stocks',async()=>{
+    const through=new Date('2030-01-01T12:00:00.000Z'),rollback=Error('RESOURCE_BATCH_ROLLBACK');
+    await expect(db.transaction().execute(async tx=>{
+      await tx.updateTable('villages').set({economyActivatedAt:null}).where('id','=',DEVELOPMENT_IDS.village).execute();
+      await tx.updateTable('villageResourceFlows').set({baseRatePerHour:17,remainder:'0.999999',productionUpdatedAt:new Date(through.getTime()-1001)})
+        .where('worldId','=',DEVELOPMENT_IDS.world).where('villageId','=',DEVELOPMENT_IDS.village).execute();
+      for(const time of [through,new Date(through.getTime()-2000)]){
+        const rows=await projectVillageResources(tx,DEVELOPMENT_IDS.world,DEVELOPMENT_IDS.village,time);
+        expect(rows.length).toBeGreaterThan(1);
+        for(const row of rows){const single=await projectVillageResource(tx,DEVELOPMENT_IDS.world,DEVELOPMENT_IDS.village,row.code,time);
+          expect({amount:row.amount,productionPerHour:row.productionPerHour,productionUpdatedAt:row.productionUpdatedAt}).toEqual(single);}
+      }
+      await tx.updateTable('villages').set({economyActivatedAt:through}).where('id','=',DEVELOPMENT_IDS.village).execute();
+      await tx.updateTable('villageResources').set({amount:123}).where('villageId','=',DEVELOPMENT_IDS.village).where('resourceCode','=','wood').execute();
+      expect((await projectVillageResources(tx,DEVELOPMENT_IDS.world,DEVELOPMENT_IDS.village,through)).find(r=>r.code==='wood')).toMatchObject({amount:123,productionPerHour:0});
+      throw rollback;
+    })).rejects.toBe(rollback);
+  });
 
   async function build(type: 'sawmill' | 'garden' | 'dwelling', cell: { cellX: number; cellY: number }): Promise<VillageState> {
     return constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, cell.cellX, cell.cellY, type, 10_000);

@@ -4,6 +4,7 @@ import type {Rc1NetworkEdits} from './rc1-network-ground.js';
 
 export interface NetworkJob {
   state: TravelNetworkState;
+  refinement?: TravelRoute;
   ground?: {sourceId: string; artifact?: string; edits: Rc1NetworkEdits};
 }
 export type NetworkLoader = (known: {sources: ReadonlySet<string>}) => Promise<NetworkJob>;
@@ -29,7 +30,7 @@ export function networkState(s: TravelNetworkState): TravelNetworkState {
     ...(s.infrastructure ? {infrastructure: s.infrastructure} : {})};
 }
 
-/** Called after the read transaction committed. A worker caches only verified geography. */
+/** Geometry captured by the caller's transaction. Workers never read the database. */
 export function networkJob(state: TravelNetworkState, ground: {data: GeneratedLandscape; navigationEdits: Rc1NetworkEdits} | undefined,
   known: {sources: ReadonlySet<string>}): NetworkJob {
   if (!ground) return {state};

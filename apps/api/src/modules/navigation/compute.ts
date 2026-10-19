@@ -104,6 +104,24 @@ export class NavigationCompute implements NavigationExecutor,TravelNetworkExecut
   }catch(error){if(error instanceof HttpError)throw error;throw new HttpError(503,'NAVIGATION_UNAVAILABLE','Calcul des trajets interrompu. Réessayez.');}
   finally{lane.busy=false;this.drain();}
  }
+ /** A command already holds SQL locks: never queue it behind a lane whose
+  * loader might itself need a database connection. Saturation rolls back and
+  * retries through the caller's existing command/scheduler error handling. */
+ async refine(load:NetworkLoader):Promise<TravelRoute[]>{
+  this.preemptObservation();
+  if(this.closed)throw new HttpError(503,'NAVIGATION_UNAVAILABLE','Calcul des trajets indisponible.');
+  const lane=this.waiting.length?undefined:this.lanes.find(l=>!l.busy&&!l.boot);
+  if(!lane)throw new HttpError(503,'NAVIGATION_BUSY','Calcul des trajets occupé. Réessayez.');
+  lane.busy=true;
+  try{
+   await this.ensureWorker(lane);
+   if(this.closed)throw Error('Navigation fermée');
+   const network=await load(lane);
+   if(this.closed)throw Error('Navigation fermée');
+   return await this.dispatch(lane,{network},'network',this.networkLimits.computeMs) as TravelRoute[];
+  }catch(error){if(error instanceof HttpError)throw error;throw new HttpError(503,'NAVIGATION_UNAVAILABLE','Calcul du trajet interrompu. Réessayez.');}
+  finally{lane.busy=false;this.drain();}
+ }
  private async fail(lane:Lane,message?:string){
   if(!this.closed)this.lastErrorAt=new Date().toISOString();
   const boot=lane.boot;lane.boot=undefined;if(boot){clearTimeout(boot.timer);boot.reject(Error(message??'Démarrage navigation interrompu'));}

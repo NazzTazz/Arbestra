@@ -1,6 +1,6 @@
 import {expect,it,vi} from 'vitest';
 import {Worker} from 'node:worker_threads';
-import {buildTravelNetwork,ROUTE_POLICY_VERSION,type TravelNetworkState,type RouteQuery} from '@arbestra/contracts';
+import {buildTravelNetwork,refineTravelRoute,emptyInfrastructure,ROUTE_POLICY_VERSION,type TravelNetworkState,type RouteQuery,type TravelRoute} from '@arbestra/contracts';
 import {NavigationCompute} from './compute.js';
 import {networkState} from './network-job.js';
 
@@ -41,6 +41,35 @@ const routeQuery:RouteQuery={worldId:'world',contextId:'legacy',policyVersion:RO
  starts:[{kind:'point',cellX:2,cellY:2}],goals:[{kind:'point',cellX:4,cellY:2}],limits:{maxNodes:1000,maxDurationMs:1000}};
 const routeJob={query:routeQuery,data:{worldId:'world',contextId:'legacy',traversalConstraintsId:'none',width:16,height:16,sourceId:'legacy',
  terraces:[],treeEdits:[],occupancies:[],accesses:[],plans:[],legacy:{chunkSize:16,chunks:[{chunkX:0,chunkY:0,terrainCodes:Array(256).fill(1),elevations:Array(256).fill(1)}]}}};
+
+it('refines an individual route in the worker with identical geometry and fresh cached outputs',async()=>{
+ const compute=new NavigationCompute();
+ const geometry:TravelNetworkState={...state,infrastructure:emptyInfrastructure(),cells:[...state.cells,
+  {cellX:2,cellY:3,footprint:{buildingId:'hall'},building:{id:'hall',type:'town-hall',quarterTurns:0}}]};
+ const refinement:TravelRoute={id:'target',kind:'stone',cells:[{cellX:2,cellY:3},{cellX:5,cellY:3}],destination:{cellX:5,cellY:3}};
+ try{
+  const expected=refineTravelRoute(geometry,refinement,new Set());expect(expected?.cells.length).toBeGreaterThan(2);
+  expect(expected?.version).toBe(2);
+  const first=await compute.refine(async()=>({state:geometry,refinement}));expect(first).toEqual([expected]);first[0]!.cells.length=0;
+  expect(await compute.refine(async()=>({state:geometry,refinement}))).toEqual([expected]);
+  const flooded={...geometry,region:{...state.region,terrainCodes:Array(256).fill(2)}};
+  expect(await compute.refine(async()=>({state:flooded,refinement}))).toEqual([]);
+ }finally{await compute.close();}
+});
+
+it('never queues a locked transaction behind another lane loader',async()=>{
+ const compute=new NavigationCompute(),entered=gate(),release=gate();const jobs:Promise<unknown>[]=[];
+ try{
+  await compute.start();
+  const held=compute.network(async()=>{entered.release();await release.promise;return{state};});jobs.push(held);
+  await bounded(entered.promise);
+  const load=vi.fn(async()=>({state}));
+  await expect(compute.refine(load)).rejects.toMatchObject({statusCode:503,code:'NAVIGATION_BUSY'});
+  expect(load).not.toHaveBeenCalled();expect(compute.observation.waiting).toBe(0);
+  release.release();await held;
+  expect(await compute.refine(load)).toEqual(buildTravelNetwork(state));
+ }finally{release.release();await Promise.allSettled(jobs);await compute.close();}
+});
 
 it('runs the same detour in the shared worker and reuses it without leaking result mutations',async()=>{
  const compute=new NavigationCompute();
