@@ -1,6 +1,8 @@
 # Publication HUD et coffre HDV — 19 octobre 2026
 
-**Commit, push et publication alpha/staging demandés par Tristan.** Les deux tranches ci-dessous sont incluses dans cette release, sans migration ni modification des données distantes. Tags prévus `staging-2026.10.19.3` et `alpha-2026.10.19.3` sur le même commit applicatif. Les preuves locales ci-dessous précèdent cette publication ; aucune nouvelle campagne applicative pour la seule clôture Git. Déploiements et contrôles publics à suivre avant clôture. Les deux chemins personnels non suivis sont exclus.
+**Publication terminée à la demande de Tristan.** Commit applicatif `2b811ee7798c8f3caff452754259b0d5902c4941` poussé sur `main`, tags annotés `staging-2026.10.19.3` et `alpha-2026.10.19.3` poussés et vérifiés sur ce même commit. Les deux tranches ci-dessous sont incluses, sans nouvelle migration ni opération sur les données joueurs. Les preuves locales et leurs mentions « aucun commit/déploiement » ci-dessous décrivent l’état avant cette publication ; aucune nouvelle campagne applicative pour la seule clôture Git.
+
+Builds complets et déploiements réussis : [staging 39242667460](https://github.com/NazzTazz/Arbestra/actions/runs/39242667460), [alpha 39242933825](https://github.com/NazzTazz/Arbestra/actions/runs/39242933825). Journaux `DEPLOYED` au SHA attendu, trois services actifs sur chaque environnement. Six contrôles publics indépendants verts par environnement : [staging 39242925997](https://github.com/NazzTazz/Arbestra/actions/runs/39242925997), [alpha 39243176051](https://github.com/NazzTazz/Arbestra/actions/runs/39243176051) : TLS, lobby/jeu, santé API et frontières d’accès NOC/admin/observation. Aucun coffre joueur fouillé en production pour ces contrôles ; parcours métier ordinateur/mobile validé localement comme détaillé ci-dessous. Bilan documentaire poussé séparément, tags applicatifs inchangés. Les deux chemins personnels non suivis sont préservés et exclus des commits.
 
 ---
 

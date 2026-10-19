@@ -6,7 +6,7 @@ Le déclenchement intervient après acceptation d’un snapshot ou d’une trame
 
 Supprimer les messages génériques « Récolte livrée » et « +quantité bois/pierre livrés ». Conserver les notifications métier distinctes et les messages de l’Oracle. Le mode observation n’anime pas les stocks du village suivi. Sur téléphone, la barre privilégie les cinq compteurs et masque l’identité du village sous 520 px ; les effets voisins sont décalés. Avec une préférence de mouvement réduit, afficher un simple fondu lisible, sans déplacement.
 
-Implémentation et preuves locales dans le handoff ; aucune modification économique ni nouvelle API.
+Implémentation et preuves locales dans le handoff ; aucune modification économique ni nouvelle API. Publié le 19 octobre sur alpha et staging avec le correctif du coffre HDV, tags `alpha-2026.10.19.3` et `staging-2026.10.19.3` ; références et contrôles de déploiement dans [le handoff](../SESSION-HANDOFF.md).
 
 # Accès aux bâtiments en vue libre — décision du 18 octobre 2026
 
