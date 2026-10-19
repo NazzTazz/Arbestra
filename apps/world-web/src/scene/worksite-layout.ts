@@ -5,6 +5,9 @@ export interface WorksiteLayout { stations:WorkStation[]; approach:WorkerPoint; 
 
 /** Small bounded presentation connectors, never a replacement for the server path. */
 export function worksiteConnector(from:WorkerPoint,to:WorkerPoint,target:WorkerPoint,free:(p:WorkerPoint,r:number)=>boolean,posts:readonly WorkerPoint[]=[]):WorkerPoint[]|null {
+  // Every candidate, including A*, must enter this exact endpoint. An occupied
+  // post cannot be reached by exploring more aisles; retry when it becomes free.
+  if (!free(to, .2)) return null;
   const candidates:WorkerPoint[][]=[[from,to]];
   for(const side of [-1,1]){
     candidates.push([from,{x:target.x+side*1.6,z:from.z},{x:target.x+side*1.6,z:to.z},to]);

@@ -80,6 +80,8 @@ import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
+import {ResourceHalos,type ResourceHaloCell} from './resource-halos';
+import {WorkerObstacles} from './worker-obstacles';
 
 const TOWN_HALL_DOOR_Z = -1.1;
 import { buildingPlan, recipeFor, entranceConnector, planForSite, resolveMurets, transformPoint, type BuildingPlan } from './building-plan';
@@ -127,8 +129,7 @@ export class BabylonVillageScene {
   readonly #onGardenHarvest: (cell: Cell | null, newGesture: boolean, previewOnly?: boolean) => void;
   readonly #onWorldGestureCancelled: () => void;
   readonly #previewMeshes: Mesh[] = [];
-  readonly #pendingHarvestMeshes: Mesh[] = [];
-  readonly #pendingHarvestMaterial: StandardMaterial;
+  readonly #resourceHalos: ResourceHalos;
   readonly #levelingAreaMaterial: StandardMaterial;
   readonly #invalidAreaMaterial: StandardMaterial;
   readonly #resizeObserver: ResizeObserver;
@@ -310,9 +311,7 @@ export class BabylonVillageScene {
   #infrastructurePoint(event:PointerEvent):SubPoint|null{const p=this.#gridPointAtPointer(event);return p&&this.#space?{x:wrapCoordinate(Math.round(p.cellX*8),this.#space.width*8),y:wrapCoordinate(Math.round(p.cellY*8),this.#space.height*8)}:null;}
   #populationFocus: string | null = null;
   #populationFilter = 'all';
-  readonly #resourceMarkers = new Map<string, Mesh>();
   #resourceOverlayAt = 0;
-  #resourceOverlayMaterial: StandardMaterial | null = null;
   #showTravel = false;
   #selectedRoute: string | null = null;
   #projectionVersion = -1;
@@ -694,6 +693,7 @@ export class BabylonVillageScene {
     let workerObstacles:{state:VillageState;version:number;
       routes:Array<{destination:TravelCell;points:ReturnType<WorldSpace['path']>}>}|null=null;
     let workerWidths:{state:VillageState;widths:Map<string,number>}|null=null;
+    const workerSpatial=new WorkerObstacles();
     this.#workers = new VillageWorkers(this.#scene, {
       skin: WORKER_COLOURS.skin.map((color,i) => this.#material(`worker-skin-${i}`,color)),
       clothes: WORKER_COLOURS.clothes.map((color,i) => this.#material(`worker-clothes-${i}`,color)),
@@ -719,24 +719,23 @@ export class BabylonVillageScene {
       },
       free: (point,radius,featureId,allowRoads=false) => {
         if (!this.#space || !this.#store || !this.#state) return false;
+        workerSpatial.update(this.#state);
         for (const [dx,dz] of [[0,0],[-radius,-radius],[radius,radius],[-radius,radius],[radius,-radius]]) {
           const cell=this.#space.inverse(point.x+dx!,point.z+dz!),x=Math.round(cell.cellX)%this.#space.width,y=Math.round(cell.cellY)%this.#space.height;
           const ground=this.#store.ground(x,y);
           if (!ground || ground.code!==1) return false;
           if(infrastructureBarrierAt(this.#infrastructureBarriers,cell,this.#state.world))return false;
-          if (this.#state.cells.some(c=>c.cellX===x&&c.cellY===y&&Boolean(c.footprint||c.building))) return false;
-          if (this.#state.region.features.some(f=>f.cellX===x&&f.cellY===y&&f.id!==featureId&&f.deposit?.blocksCell!==false&&f.deposit?.cleared!==true)) return false;
+          if (workerSpatial.blocked(x,y,featureId)) return false;
         }
-        const own=this.#state.region.features.find(f=>f.id===featureId);
+        const own=workerSpatial.feature(featureId);
         if(own){const centre=this.#space.project(own);if(Math.hypot(point.x-centre.x,point.z-centre.z)<.42+radius*.3)return false;}
         if(workerObstacles?.state!==this.#state||workerObstacles.version!==this.#space.version){
           const routes=villageRoadDisplayRoutes(this.#state);
           workerObstacles={state:this.#state,version:this.#space.version,
             routes:routes.map(r=>({destination:r.destination,points:this.#space!.path(r.cells)}))};
         }
-        for(const equipment of this.#infrastructureEquipment){
-          const p=this.#space.project({cellX:equipment.x/8,cellY:equipment.y/8});if(Math.hypot(point.x-p.x,point.z-p.z)<radius+.23)return false;
-        }
+        workerSpatial.updateEquipment(this.#infrastructureEquipment,this.#space);
+        if(workerSpatial.equipmentBlocked(point,radius))return false;
         if(!allowRoads)for(const route of workerObstacles.routes){
           if(own&&route.destination.cellX===own.cellX&&route.destination.cellY===own.cellY)continue;
           const path=route.points;
@@ -776,8 +775,7 @@ export class BabylonVillageScene {
     });
     this.#clouds = new CloudTransition(this.#engine);
     for (const material of this.#scene.materials) material.freeze();
-    this.#pendingHarvestMaterial = this.#material('harvest-pending', '#f2cf68', 1, '#f2cf68');
-    this.#pendingHarvestMaterial.disableLighting = true;
+    this.#resourceHalos = new ResourceHalos(this.#scene);
 
     this.#selectionMarker = MeshBuilder.CreateBox('selection-marker', { width: 2.64, depth: 2.64, height: 0.035 }, this.#scene);
     this.#selectionMarker.position.y = 0.12;
@@ -883,6 +881,8 @@ export class BabylonVillageScene {
       frame?.mark('visibility');
       const workerServerNow = Date.now() - this.#serverOffsetMs;
       this.#updateResourceOverlay(now);
+      if(this.#space&&this.#store)this.#resourceHalos.update(now,this.#space,this.#store,
+        this.#worldMode==='exploitation'&&this.#mode==='village',1-(this.#camera.radius-110)/50);
       if (import.meta.env.DEV&&now-this.#workerDebugAt>500) {this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);this.#workerDebugAt=now;}
       this.#weather?.update(Date.now() + this.#cosmologyServerOffsetMs);
       this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
@@ -961,7 +961,7 @@ export class BabylonVillageScene {
         }));
         this.#canvas.dataset.camera = JSON.stringify([this.#camera.alpha, this.#camera.beta, this.#camera.radius, this.#camera.target.x, this.#camera.target.z]);
         this.#canvas.dataset.cameraLimits = JSON.stringify([this.#camera.lowerBetaLimit, this.#camera.upperBetaLimit]);
-        this.#canvas.dataset.renderedPendingHarvests = String(this.#pendingHarvestMeshes.length);
+        this.#canvas.dataset.renderedPendingHarvests = String(this.#resourceHalos.pendingCount);
         this.#canvas.dataset.debugTravelPaths = String(this.#travelLines?.getTotalVertices() ?? 0);
         this.#canvas.dataset.workerPositions = JSON.stringify([
           ...this.#workers.figures,
@@ -1018,6 +1018,7 @@ export class BabylonVillageScene {
     this.#villageAnchor = { cellX: state.village.anchorCellX, cellY: state.village.anchorCellY };
     if (!this.#space || this.#store?.world.id !== state.world.id || this.#store.world.generationVersion !== state.world.generationVersion) {
       this.#cameraFocus=null;
+      this.#resourceHalos.clear();
       this.#renderer?.dispose(); this.#store?.dispose();
       this.#endFlyover();
       this.#overviewAbort?.abort(); this.#overviewAbort = new AbortController();
@@ -1257,32 +1258,19 @@ export class BabylonVillageScene {
 
   #updateResourceOverlay(now: number): void {
     if (this.#worldMode !== 'exploitation' || this.#mode !== 'village') {
-      if (this.#resourceMarkers.size) { for (const mesh of this.#resourceMarkers.values()) mesh.dispose(false, false); this.#resourceMarkers.clear(); }
       return;
     }
     if (!this.#space || !this.#store || now < this.#resourceOverlayAt) return;
     this.#resourceOverlayAt = now + 700;
-    const cells = new Map<string, Cell>();
-    for (const key of this.#harvestableSites) { const [cellX, cellY] = key.split(':').map(Number); cells.set(key, { cellX: cellX!, cellY: cellY! }); }
+    const cells = new Map<string, ResourceHaloCell>();
+    for (const key of this.#harvestableSites) { const [cellX, cellY] = key.split(':').map(Number); cells.set(key, { cellX: cellX!, cellY: cellY!,garden:true,resource:'carrot' }); }
     for (const demand of this.#store.demand.filter(d => d.visible)) for (const f of this.#store.chunk(demand.key)?.features ?? [])
-      if (f.deposit && !f.deposit.cleared && f.deposit.availableAmount > 0) cells.set(cellKey(f), f);
+      if (f.deposit && !f.deposit.cleared && f.deposit.availableAmount > 0) cells.set(cellKey(f), {...f,resource:f.deposit.resourceCode});
     const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
     const visible = [...cells.values()].filter(c => this.#renderer?.rendered(c.cellX, c.cellY) && (this.#store!.ground(c.cellX, c.cellY)?.code ?? 0) > 0)
       .sort((a, b) => Math.abs(delta(a.cellX, target.cellX, this.#store!.world.widthCells)) + Math.abs(delta(a.cellY, target.cellY, this.#store!.world.heightCells))
         - Math.abs(delta(b.cellX, target.cellX, this.#store!.world.widthCells)) - Math.abs(delta(b.cellY, target.cellY, this.#store!.world.heightCells))).slice(0, 128);
-    const retained = new Set(visible.map(cellKey));
-    this.#resourceOverlayMaterial ??= this.#material('exploitables-accent', '#b7dac0', .3, '#354d3b');
-    for (const c of visible) {
-      const key = cellKey(c); let marker = this.#resourceMarkers.get(key);
-      if (!marker) {
-        marker = MeshBuilder.CreateTorus(`exploitable-${key}`, { diameter: 2.0, thickness: .05, tessellation: 16 }, this.#scene);
-        marker.material = this.#resourceOverlayMaterial; marker.isPickable = false;
-        this.#resourceMarkers.set(key, marker);
-      }
-      const p = this.#space.project(c); marker.position.set(p.x, this.#store.ground(c.cellX, c.cellY)!.height + .18, p.z);
-      marker.visibility = Math.max(0, 1 - (this.#camera.radius - 110) / 50);
-    }
-    for (const [key, mesh] of this.#resourceMarkers) if (!retained.has(key)) { mesh.dispose(false, false); this.#resourceMarkers.delete(key); }
+    this.#resourceHalos.setAvailable(visible);
   }
 
   public setPopulationFocus(focus: string | null, filter: string): void {
@@ -1473,22 +1461,8 @@ export class BabylonVillageScene {
   }
 
   public updateHarvestPending(cells: Cell[]): void {
-    for (const mesh of this.#pendingHarvestMeshes.splice(0)) mesh.dispose(false, false);
-    for (const cell of cells) {
-      const marker = MeshBuilder.CreateTorus(`harvest-pending-${cellKey(cell)}`, { diameter: 2.05, thickness: 0.16, tessellation: 24 }, this.#scene);
-      const p = this.#space!.projectFrom(cell, this.#villageAnchor);
-      marker.position.set(
-        p.x,
-        0.25,
-        p.z,
-      );
-      marker.material = this.#pendingHarvestMaterial;
-      // Render the interaction overlay above the textured ground, including
-      // the reduced-resolution renderer used on slower devices.
-      marker.renderingGroupId = 1;
-      marker.isPickable = false;
-      this.#pendingHarvestMeshes.push(marker);
-    }
+    this.#resourceHalos.setPending(cells.map(cell=>({...cell,garden:this.#gardenStages.has(cellKey(cell)),
+      resource:this.#gardenStages.has(cellKey(cell))?'carrot':this.featuresAt(cell).find(f=>f.deposit)?.deposit?.resourceCode})));
   }
 
   #clearSelection(): void {
@@ -2256,9 +2230,8 @@ export class BabylonVillageScene {
     this.#camera.position.x -= shift.x; this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
     this.#inhabitantCamera.shift(shift.x,shift.z);
-    for (const mesh of this.#resourceMarkers.values()) { mesh.position.x -= shift.x; mesh.position.z -= shift.z; }
     this.#resourceOverlayAt = 0;
-    for (const mesh of [...this.#villageMeshes, ...this.#previewMeshes, ...this.#pendingHarvestMeshes,
+    for (const mesh of [...this.#villageMeshes, ...this.#previewMeshes,
       this.#selectionMarker, this.#constructionGhost, this.#buildableGrid, this.#buildableArea].filter((m): m is Mesh => m !== null)) {
       mesh.position.x -= villageShift.x; mesh.position.z -= villageShift.z; mesh.computeWorldMatrix(true);
       refreshStaticHierarchy(mesh);
@@ -2774,6 +2747,7 @@ export class BabylonVillageScene {
     this.#resizeObserver.disconnect();
     this.#inhabitantCamera.dispose();
     this.#workers.dispose();
+    this.#resourceHalos.dispose();
     this.#scene.dispose();
     this.#engine.dispose();
     this.#canvas.width = 0;

@@ -13,6 +13,28 @@ import { Particle } from '@babylonjs/core/Particles/particle';
 import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { bindBrazierLights, brazierBlocks, roadCorners, VillageBraziers } from './village-braziers';
 import type { TravelRoute } from '@arbestra/contracts';
+import { BrazierMeshIndex } from './brazier-mesh-index';
+
+it('does not query fallback light receivers during the day, including after a night', () => {
+  vi.stubGlobal('OffscreenCanvas',class{constructor(public width:number,public height:number){} getContext(){return {putImageData(){}};}});
+  vi.stubGlobal('ImageData',class{data:Uint8ClampedArray;constructor(width:number,height:number){this.data=new Uint8ClampedArray(width*height*4);}});
+  const engine = new NullEngine(), scene = new Scene(engine), braziers = new VillageBraziers(scene);
+  const nearby = vi.spyOn(BrazierMeshIndex.prototype, 'nearby');
+  try {
+    MeshBuilder.CreateBox('receiver', {}, scene);
+    braziers.updatePoints([{ id: 'fire', x: 0, y: 0, z: 0, seed: .4 }]);
+    for (let now = 1000; now <= 5000; now += 1000) braziers.animate(now, false, 1);
+    expect(nearby).not.toHaveBeenCalled();
+    braziers.animate(6000, true, 1);
+    expect(nearby).toHaveBeenCalledTimes(1);
+    for (let now = 7000; now <= 12000; now += 1000) braziers.animate(now, false, 1);
+    expect(nearby).toHaveBeenCalledTimes(1);
+    expect(scene.getLightByName('brazier-light-0')!.isEnabled()).toBe(false);
+    expect(scene.getLightByName('brazier-light-0')!.intensity).toBe(0);
+    braziers.animate(13000, true, 1);
+    expect(nearby).toHaveBeenCalledTimes(2);
+  } finally { nearby.mockRestore(); braziers.dispose(); scene.dispose(); engine.dispose(); vi.unstubAllGlobals(); }
+});
 
 it('illuminates receivers with every brazier group within the material light budget and preserves independent lifetimes',()=>{
   vi.stubGlobal('OffscreenCanvas',class{constructor(public width:number,public height:number){} getContext(){return {putImageData(){}};}});

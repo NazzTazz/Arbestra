@@ -1,5 +1,7 @@
 # Mouvements de ressources dans le HUD — décision du 19 octobre 2026
 
+Correctif de fluidité du 19 octobre : la projection temporelle du bois se rafraîchit dans le HUD, uniquement en présence d'une production. L'horloge ne provoque plus un rendu global par seconde en vue libre ou exploitation sans fiche ouverte. Les fiches avec durées et les devis de construction conservent leur rafraîchissement. Le format français des compteurs réutilise un formateur partagé. La projection reste visuelle : seuls les états serveur acceptés déclenchent les mouvements de ressources.
+
 Les variations de stock confirmées s’affichent au-dessus du compteur concerné : `+652` au retour d’une coupe, `−25` bois d’œuvre et `−10` pierres taillées pour une maison en pierre. Même échappement ascendant que les retours de récolte, couleur propre à chaque ressource, contour noir, puis disparition après 2,4 secondes. Les cinq ressources du HUD sont couvertes, gains et dépenses compris : récoltes, fabrication, construction, échanges, réservations ou remboursements dès leur apparition dans le stock autoritaire.
 
 Le déclenchement intervient après acceptation d’un snapshot ou d’une trame HTTP/SSE. L’état initial et un changement de contexte ne produisent aucun gain fictif ; les devis ne déclenchent rien. Les variations sont les différences nettes entre deux stocks affichés confirmés, sans reconstituer un journal des opérations regroupées par le serveur. Un doublon de projection ne rejoue pas l’effet. Les rafales sont regroupées sur trois lignes par ressource, en conservant leur somme. Le HUD et les compteurs ne changent pas de hauteur pendant l’animation ; les effets ne capturent pas les clics.
@@ -7,6 +9,14 @@ Le déclenchement intervient après acceptation d’un snapshot ou d’une trame
 Supprimer les messages génériques « Récolte livrée » et « +quantité bois/pierre livrés ». Conserver les notifications métier distinctes et les messages de l’Oracle. Le mode observation n’anime pas les stocks du village suivi. Sur téléphone, la barre privilégie les cinq compteurs et masque l’identité du village sous 520 px ; les effets voisins sont décalés. Avec une préférence de mouvement réduit, afficher un simple fondu lisible, sans déplacement.
 
 Implémentation et preuves locales dans le handoff ; aucune modification économique ni nouvelle API. Publié le 19 octobre sur alpha et staging avec le correctif du coffre HDV, tags `alpha-2026.10.19.3` et `staging-2026.10.19.3` ; références et contrôles de déploiement dans [le handoff](../SESSION-HANDOFF.md).
+
+# Halos de récolte — décision du 19 octobre 2026
+
+Les repères des ressources exploitables sont des traits circulaires très fins aux bords adoucis : gris pour la pierre, bruns pour le bois, orange pour les carottes. À la sélection, le même halo passe progressivement de sa couleur au blanc en **500 ms**, puis son opacité décroît jusqu’à zéro pendant **1 000 ms**. La séquence s’achève même si le reçu serveur arrive plus tôt ; les mises à jour de la même sélection ne la rejouent pas et une attente réseau ne maintient pas le halo affiché. Sans sélection en attente, une ressource toujours disponible peut retrouver son repère discret après cette séquence. Les ajouts au balayage réutilisent les repères existants.
+
+Les halos épousent la surface triangulée réelle du terrain, avec un léger décalage évitant le scintillement. Les jardins suivent leur surface cultivée plane surélevée. Aucun placement à une altitude absolue constante ; aucune hauteur inventée pendant le chargement. Les révisions du sol et les changements d’origine torique sont pris en compte. Le relief et les bâtiments peuvent masquer le halo naturellement. Repères non cliquables, estompés au dézoom et hors du mode Exploitation.
+
+Rendu procédural partagé et filtré, sans image externe ni post-traitement de bloom global. Cette tranche est graphique et conserve les règles économiques de récolte. Statut et preuves dans [le handoff](../SESSION-HANDOFF.md).
 
 # Accès aux bâtiments en vue libre — décision du 18 octobre 2026
 

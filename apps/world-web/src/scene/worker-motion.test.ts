@@ -178,6 +178,15 @@ describe('worksite representation',()=>{
     expect(path).not.toBeNull();expect(path!.length).toBeGreaterThan(2);
     expect(worksiteConnector({x:0,z:-1},{x:0,z:1},{x:0,z:0},()=>false)).toBeNull();
   });
+  it('waits at an occupied destination without exploring every aisle on each retry', () => {
+    const destination = { x: 4, z: 0 }, posts = Array.from({ length: 8 }, (_, i) => ({ x: i * .6, z: 1 + i * .3 }));
+    let checks = 0;
+    const free = (p: WorkerPoint) => { checks++; return Math.hypot(p.x - destination.x, p.z - destination.z) > .3; };
+    expect(worksiteConnector({ x: 0, z: 0 }, destination, { x: 2, z: 0 }, free, posts)).toBeNull();
+    expect(checks).toBe(1);
+    // The next retry must see a newly freed destination, without a stale failure cache.
+    expect(worksiteConnector({ x: 0, z: 0 }, destination, { x: 2, z: 0 }, () => true, posts)).toEqual([{ x: 0, z: 0 }, destination]);
+  });
 });
 
 it('takes both members around the reported right angle all the way to the doorway',()=>{

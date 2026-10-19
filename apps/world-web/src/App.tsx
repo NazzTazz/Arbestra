@@ -34,6 +34,8 @@ import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, exp
 import { campusRange, stonemasonRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
+import { usePresentationClock } from './ui/use-presentation-clock';
+import { projectedWood } from './ui/resource-counter';
 import {useResourceFeedback} from './ui/use-resource-feedback';
 import { WorldModeNavigation, type ActiveWorldMode } from './ui/world-mode';
 import { WorldModeBar } from './ui/WorldModeBar';
@@ -77,6 +79,7 @@ type ConstructionIntentState = 'idle' | 'submitting' | 'error' | 'uncertain';
 
 const pendingExploitationKey = (villageId: string) => `arbestra:pending-exploitation:${worldSlug}:${villageId}`;
 const pendingConstructionKey = (villageId: string) => `arbestra:pending-construction:${worldSlug}:${villageId}`;
+const NO_PENDING_HARVESTS: Cell[] = [];
 
 
 function gardenReady(garden: Garden, serverNow: number): number {
@@ -116,7 +119,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
-  const [now, setNow] = useState(Date.now());
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
   const [showPopulation, setShowPopulation] = useState(false);
@@ -386,7 +388,11 @@ export function App({starter}:{starter?:StarterController} = {}) {
       }
     } catch { /* A malformed session hint is ignored; server state remains authoritative. */ }
   }, [state?.village.id, pushNotification]);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1_000); return () => window.clearInterval(timer); }, []);
+  // Idle exploration/exploitation needs no application-wide one-second render.
+  // The wood counter owns its clock; visible countdowns and quotes retain theirs.
+  const livePanelClock = Boolean(menuAnchor && selectedSiteId || showScience || showWorksites
+    || worldMode === 'construction' && !paletteCollapsed);
+  const now = usePresentationClock(livePanelClock);
 
   useEffect(() => {
     if (!initialReady || needsLogin || beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
@@ -453,7 +459,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const level = extensionId ? state?.cells.find((cell) => cell.building?.id === extensionId)?.building?.level ?? 1 : 1;
   const costs = constructionCosts(definition?.levels.find((item) => item.level === level),houseVariant).map((cost) => ({ ...cost, amount: cost.amount * (spatial ? area?.count ?? 0 : 1) }));
   const serverNow = now + serverOffsetMs;
-  const displayedWood = state ? Math.floor(state.village.wood + state.village.woodProductionPerHour * Math.max(0, serverNow - Date.parse(state.serverTime)) / 3_600_000) : 0;
+  const displayedWood = state ? projectedWood(state.village, state.serverTime, serverNow) : 0;
   const affordable = costs.every((cost) => cost.amount <= (cost.resourceCode === 'wood' ? displayedWood : state?.village.resources.find((resource) => resource.code === cost.resourceCode)?.amount ?? 0));
   const selectionError = area?.error ?? (area && !affordable ? 'Ressources insuffisantes.' : null);
   const existingGardenCells = extensionId ? state?.cells.filter((cell) => cell.footprint?.buildingId === extensionId && cell.footprint?.state === 'active').length ?? 0 : 0;
@@ -901,7 +907,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     {initialReady&&!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
     <Suspense fallback={null}><VillageScene onInitialLoad={progress => setInitialProgress({key: sceneKey, progress})} preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={sceneState??state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
-      pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : []} highlightedSiteIds={highlightedSiteIds}
+      pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : NO_PENDING_HARVESTS} highlightedSiteIds={highlightedSiteIds}
       constructionMode={!paletteCollapsed && !workshop && worldMode === 'construction' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={starterActive?'starter':construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
       constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={starterActive?worldMode==='construction'&&!paletteCollapsed&&!starter!.pending:!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
@@ -953,7 +959,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
-    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} notifications={notifications} resourceFeedback={resourceFeedback.items} onResourceFeedbackEnd={resourceFeedback.dismiss} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} serverOffsetMs={serverOffsetMs} notifications={notifications} resourceFeedback={resourceFeedback.items} onResourceFeedbackEnd={resourceFeedback.dismiss} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
     {showScience && (worldMode === 'population' || worldMode === 'exploration') && terrainView === 'village' && state.science && <SciencePanel key={selectedBuilding?.type === 'university' ? selectedBuilding.id : 'knowledge'} expeditions={expeditions.entries} target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (!['population', 'exploration'].includes(modeRef.current) || arrivalActive) return; if(command.action==='survey'||command.action==='explore'){expeditions.submit(command);return;} void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
