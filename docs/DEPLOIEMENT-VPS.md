@@ -9,6 +9,12 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
+## Terraformation et jardins — staging uniquement, 20 octobre 2026
+
+Release **`8f31f55870a42a51c98848235a7253ec9eceb279` déployée en staging** : tag `staging-2026.10.20.1`, [workflow réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39401794254). Pinceau de terraformation, devis avec tolérance de durée de 10 %, protection des nouvelles fondations sur les flancs et accès aux jardins enclavés. Migration 049 (effectif jusqu’à 50) via la procédure existante de sauvegarde/migration ; trois services actifs et SHA de release confirmés. Aucun seed/reset, conversion de monde ou changement de configuration.
+
+[Six contrôles publics staging verts](https://github.com/NazzTazz/Arbestra/actions/runs/39402101523). Recette utilisateur positive et preuves locales dans le [handoff](../SESSION-HANDOFF.md) ; aucun nouveau parcours métier authentifié distant réalisé lors de la publication. **Alpha conservé sur `14c6bed…`**, sans nouveau tag ou lancement de déploiement, conformément à la demande.
+
 ## Optimisations serveur et chantiers — 19 octobre 2026
 
 Release **`14c6bed932f373e28f3fc38fd385e1652a3aaabb` déployée** : `staging-2026.10.19.5` / [workflow staging](https://github.com/NazzTazz/Arbestra/actions/runs/39289553238), puis `alpha-2026.10.19.5` / [workflow alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39289943898), tous deux réussis. Progression géographique des chantiers, lectures groupées, caches géométriques bornés et raffinement individuel dans les workers partagés. Trois services actifs et SHA de release confirmés pour chaque environnement. Aucune nouvelle migration ni modification de configuration.
