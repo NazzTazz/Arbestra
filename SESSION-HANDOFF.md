@@ -1,3 +1,11 @@
+# Incident alpha Petibonom — 20 octobre 2026, Astra
+
+**Hotfix validé sur le VPS dans un processus isolé ; publication en cours.** Base alpha `14c6bed`, branche dédiée, sans terraformation de staging ni HUD. Deux caches de terrain passent à une éviction FIFO circulaire, capacités et résultats inchangés. [Diagnostic et preuves](docs/INCIDENT-ALPHA-PETIBONOM-2026-10-20.md).
+
+Reproduction sur géométrie réelle : 48 019 → 22 057 ms, 131 trajets strictement identiques. 54 tests ciblés, builds contracts/API et lint ciblé terminés avec succès. Le worker local dépasse encore 30 s ; contre-vérification réelle sur VPS, données de Petibonom en lecture seule, limites inchangées : 11 038 ms à froid puis 468 ms. Aucun changement manuel des villages. Ne pas annoncer le rétablissement live avant vérification du déploiement.
+
+---
+
 # Publication des optimisations serveur — 19 octobre 2026
 
 **Publication en cours**, autorisée par Tristan : « commit push deploy ». Périmètre : progression des chantiers, lectures groupées, caches géométriques et raffinement dans les workers. Publication prévue du même commit sur staging puis alpha, avec tags immuables `staging-2026.10.19.5` et `alpha-2026.10.19.5` après vérification de leur disponibilité. Aucun nouveau schéma ni changement de configuration. Les validations et limites des trajets froids ci-dessous restent applicables ; les résultats de déploiement seront consignés à la clôture.

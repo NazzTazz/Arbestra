@@ -71,11 +71,24 @@ export function createSpawnTerrainField(data: GeneratedLandscape) {
   if (!data.geography || data.altitudeCellRatio !== .25) throw Error('RC1 geography required');
   const g = { ...data.geography, ...(data.geography.study ? { study: { ...data.geography.study, waterLevel: 0 } } : {}) };
   const samples = new Map<string, ReturnType<typeof sampleWorldGeography>>();
+  // Retain FIFO semantics without restarting an iterator over deleted Map slots
+  // for every terrain sample once this long-lived field reaches capacity.
+  const sampleKeys: string[] = [];
+  let oldestSample = 0;
   const sample = (x: number, y: number) => {
     x = wrapClimate(x, data.width); y = wrapClimate(y, data.height);
     const key = `${x}:${y}`;
     let result = samples.get(key);
-    if (!result) { result = sampleWorldGeography(g, x, y); if (samples.size >= 100_000) samples.delete(samples.keys().next().value!); samples.set(key, result); }
+    if (!result) {
+      result = sampleWorldGeography(g, x, y);
+      if (sampleKeys.length < 100_000) sampleKeys.push(key);
+      else {
+        samples.delete(sampleKeys[oldestSample]!);
+        sampleKeys[oldestSample] = key;
+        oldestSample = (oldestSample + 1) % sampleKeys.length;
+      }
+      samples.set(key, result);
+    }
     return result;
   };
   // Immutable geometry: reuse the same envelope and trigonometry at every
