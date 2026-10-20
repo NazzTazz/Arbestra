@@ -11,6 +11,29 @@ const world={widthCells:64,heightCells:64};
 const state=()=>({world,village:{anchorCellX:10,anchorCellY:10},region:{originCellX:0,originCellY:0,width:64,height:64,terrainCodes:Array(4096).fill(1),features:[]},cells:[{cellX:10,cellY:10,footprint:{buildingId:'hall',state:'active'},building:{id:'hall',type:'town-hall',quarterTurns:0}}],travelRoutes:[],infrastructure:emptyInfrastructure()}) as unknown as VillageState;
 const road=(points:RoadStroke['points'],width=4,border=false):RoadStroke=>({id:'r',points,width,border,operation:'paint',material:'stone-1'});
 describe('infrastructure spatial guarantees',()=>{
+  it.each([[false,false],[true,false],[false,true],[true,true]])('reaches the centre of a garden through unselected completed plots (refined: %s, seam: %s)',(refined,seam)=>{
+    const s=state();s.world={...s.world,id:'garden-centre-'+refined+'-'+seam};
+    if(!refined)delete s.infrastructure;
+    const x=(value:number)=>(value+(seam?50:0))%64,centreX=x(14);
+    s.cells[0]!.cellX=x(10);s.village.anchorCellX=x(10);
+    const plots=Array.from({length:9},(_,i)=>({cellX:x(13+i%3),cellY:9+Math.floor(i/3)}));
+    s.cells.push(...plots.map((p,i)=>({...p,footprint:{buildingId:'garden',buildingType:'garden',state:'active',role:i===0?'anchor':'extension'},
+      building:i===0?{id:'garden',type:'garden',quarterTurns:0,garden:{plots}}:null})) as VillageState['cells']);
+    const centre=()=>buildTravelNetwork(s).find(r=>r.kind==='garden'&&r.destination.cellX===centreX&&r.destination.cellY===10);
+    expect(centre()?.cells.length).toBeGreaterThan(1);
+    // Closing just the surrounding plots must invalidate both caches, even
+    // though the garden id, its destination and its plot list are unchanged.
+    for(const c of s.cells)if(c.footprint?.buildingId==='garden'&&(c.cellX!==centreX||c.cellY!==10))c.footprint.state='reserved';
+    expect(centre()).toBeUndefined();
+    for(const c of s.cells)if(c.footprint?.buildingId==='garden')c.footprint.state='active';
+    expect(centre()).toBeDefined();
+    if(refined){
+      const route=centre()!;
+      expect(refineTravelRoute(s,route)).not.toBeNull();
+      for(const c of s.cells)if(c.footprint?.buildingId==='garden'&&(c.cellX!==centreX||c.cellY!==10))c.footprint.buildingType='dwelling';
+      expect(refineTravelRoute(s,route)).toBeNull();
+    }
+  });
   it('bounds the refined route cache and keeps economic or lighting-only updates out of its key',()=>{
     const s=state();s.world={...s.world,id:'refined-bound'};
     const route:TravelRoute={id:'first',kind:'stone',destination:{cellX:12,cellY:10},cells:[{cellX:10,cellY:10},{cellX:12,cellY:10}]},check=vi.fn();

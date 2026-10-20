@@ -195,6 +195,10 @@ async function catalog(
 function footprintHeights(ground: Snapshot,cells: readonly SpatialCell[],world: {widthCells:number;heightCells:number}) {
   return ground.rc1?.field.geometry ? footprintVertices(cells,world).map(v=>ground.rc1!.field.geometry!.height(v.vertexX,v.vertexY)*100) : cells.map(c=>ground.elevationAt(c.cellX,c.cellY)??NaN);
 }
+function assertFlatVertexFoundation(ground:Snapshot|undefined,cells:readonly SpatialCell[],world:{widthCells:number;heightCells:number}){
+  if(ground?.rc1?.field.geometry&&!isBuildingFootprintFlat(footprintHeights(ground,cells,world)))
+    throw new HttpError(409,'UNEVEN_TERRAIN','Construction impossible sur une pente. Préparez une surface plane avec la terraformation.');
+}
 interface Snapshot {
   rc1?: Awaited<ReturnType<typeof readRc1Ground>>;
   originCellX: number;
@@ -379,7 +383,7 @@ export async function stoneTravelPath(tx: Transaction<Database>, village: OwnedV
 export async function refineVillagePath(tx:Transaction<Database>,village:Pick<OwnedVillage,'worldId'|'villageId'|'anchorCellX'|'anchorCellY'|'widthCells'|'heightCells'|'chunkSize'|'generationVersion'>,path:TravelCell[],id:string,existingGround?:Awaited<ReturnType<typeof readRc1Ground>>):Promise<TravelCell[]>{
   const full=village as OwnedVillage,ground=await snapshot(tx,full,{ground:existingGround}),features=await featuresInSnapshot(tx,full,ground,Boolean(ground.rc1));
   const rows=await tx.selectFrom('worldCellOccupancies').leftJoin('buildings',join=>join.onRef('buildings.id','=','worldCellOccupancies.buildingId').onRef('buildings.worldId','=','worldCellOccupancies.worldId'))
-    .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY','worldCellOccupancies.role','buildings.id','buildings.villageId','buildings.buildingType','buildings.visualLayout','buildings.quarterTurns'])
+    .select(['worldCellOccupancies.cellX','worldCellOccupancies.cellY','worldCellOccupancies.role','worldCellOccupancies.pendingExpansionId','buildings.id','buildings.villageId','buildings.buildingType','buildings.status','buildings.visualLayout','buildings.quarterTurns'])
     .where('worldCellOccupancies.worldId','=',village.worldId).where('worldCellOccupancies.buildingId','is not',null)
     .where(sql<boolean>`mod(world_cell_occupancies.cell_x-${ground.originCellX}+${village.widthCells},${village.widthCells}) < ${ground.width}`)
     .where(sql<boolean>`mod(world_cell_occupancies.cell_y-${ground.originCellY}+${village.heightCells},${village.heightCells}) < ${ground.height}`).execute();
@@ -387,7 +391,8 @@ export async function refineVillagePath(tx:Transaction<Database>,village:Pick<Ow
     townHallBuildingId:rows.find(r=>r.villageId===village.villageId&&r.buildingType==='town-hall')?.id},
     region:{originCellX:ground.originCellX,originCellY:ground.originCellY,width:ground.width,height:ground.height,terrainCodes:ground.terrainCodes,
       features:features.map(f=>({...f,type:f.featureTypeCode,deposit:{blocksCell:f.blocksCell,cleared:f.cleared,state:f.featureTypeCode!=='leveling-site'&&Number(f.remainingAmount)===0?'depleted':'available'}}))},
-    cells:rows.map(r=>({cellX:r.cellX,cellY:r.cellY,footprint:{buildingId:r.id},building:r.role==='anchor'?{id:r.id,type:r.buildingType,visualLayout:r.visualLayout,quarterTurns:r.visualLayout?.quarterTurns??r.quarterTurns}:null})),
+    cells:rows.map(r=>({cellX:r.cellX,cellY:r.cellY,footprint:{buildingId:r.id,buildingType:r.buildingType,
+      state:r.status==='under-construction'||r.pendingExpansionId!==null?'reserved':'active'},building:r.role==='anchor'?{id:r.id,type:r.buildingType,visualLayout:r.visualLayout,quarterTurns:r.visualLayout?.quarterTurns??r.quarterTurns}:null})),
     infrastructure:await readNavigationInfrastructure(tx,village)} as unknown as Pick<VillageState,'world'|'village'|'region'|'cells'|'infrastructure'>;
   const rc1=ground.rc1;
   const executor=transactionRefiner(tx),input={id,kind:'stone' as const,cells:path,destination:path.at(-1)!};
@@ -1080,6 +1085,7 @@ export async function assertBuildableCells(tx:Transaction<Database>,village:Owne
     if(protectedCell(cellX,cellY,protectedRows,village))throw new HttpError(409,'CLEARING_PROTECTED','Cette clairière est protégée.');
     if(!withinBuildReach({cellX,cellY},sources,village))throw new HttpError(409,'OUTSIDE_VILLAGE_REACH','Cette case est trop éloignée de votre village.');
   }
+  return ground;
 }
 async function reserve(
   tx: Transaction<Database>,
@@ -1210,9 +1216,9 @@ export async function configureTownHallFactory(db:Kysely<Database>,accountId:str
     const anchor=cells.find(c=>c.role==='anchor')!;
     if(hall.visualLayout){if(cells.some(c=>c.cellX===x&&c.cellY===y)){preview={buildingId:hall.id,cells,layout:hall.visualLayout,alreadyConfigured:true};if(!apply)throw previewRollback;return preview;}throw new HttpError(409,'LAYOUT_ALREADY_SET','Implantation déjà configurée.');}
     if(cells.length!==1||toroidalManhattan(anchor.cellX,anchor.cellY,x,y,village.widthCells,village.heightCells)!==1)throw new HttpError(409,'INVALID_FOOTPRINT','Une cellule voisine est requise.');
-    await assertBuildable(tx,village,x,y);
-    const ground=await snapshot(tx,village);
-    const elevation=(cx:number,cy:number)=>ground.elevationAt(cx,cy) ?? NaN;
+    const ground=await assertBuildable(tx,village,x,y);
+    assertFlatVertexFoundation(ground,[{cellX:x,cellY:y}],village);
+    const elevation=(cx:number,cy:number)=>ground?.elevationAt(cx,cy) ?? NaN;
     if(Math.abs(elevation(x,y)-elevation(anchor.cellX,anchor.cellY))>1)throw new HttpError(409,'UNEVEN_TERRAIN','Emprise trop inclinée.');
     const quarterTurns=x===anchor.cellX?0:1;
     const layout={recipe:'town-hall' as const,version:1 as const,quarterTurns,entranceFace,offset:[0,0] as [number,number]};
@@ -1351,7 +1357,8 @@ export async function constructBuilding<Mode extends ConstructionReplyMode = 'sn
           'Limite atteinte pour ce bâtiment.',
         );
     }
-    await assertBuildable(tx, village, x, y);
+    const ground=await assertBuildable(tx, village, x, y);
+    if(item.code!=='garden')assertFlatVertexFoundation(ground,[{cellX:x,cellY:y}],village);
     assertAcceptedCosts(item.costs, expectedCosts);
     await debit(tx, village.worldId, village.villageId, item.costs, at);
     const completesAt = new Date(
@@ -1450,7 +1457,8 @@ export async function constructBuildingArea<Mode extends ConstructionReplyMode =
         .where('buildingType', '=', buildingType).executeTakeFirstOrThrow();
       if (count.count >= item.instanceLimitPerVillage) throw new HttpError(409, 'BUILDING_LIMIT_REACHED', 'Limite atteinte pour ce bâtiment.');
     }
-    await assertBuildableCells(tx,village,selection.cells);
+    const ground=await assertBuildableCells(tx,village,selection.cells);
+    if(item.code!=='garden')assertFlatVertexFoundation(ground,selection.cells,village);
     const actualCosts = scaledCosts(item.costs, item.code === 'garden' ? selection.cells.length : 1);
     assertAcceptedCosts(actualCosts, expectedCosts);
     await debit(tx, village.worldId, village.villageId, actualCosts, at);

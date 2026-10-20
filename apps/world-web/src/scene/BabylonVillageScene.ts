@@ -20,6 +20,7 @@ import { buildUniversityMonuments } from './university-factory';
 import { clonePreviewMaterial, bakedPlanKey, loadBakedBuilding, buildingAssets } from './building-assets';
 import {buildInfrastructurePresentation} from './infrastructure-factory';
 import {InfrastructureRenderer,type InfrastructureGesture} from './infrastructure-renderer';
+import {TerraformPreview,type TerraformVisual} from './terraform-preview';
 import {selectEquipment} from './equipment-selection';
 import {infrastructureSurface,infrastructurePlanSurface,wrapCoordinate,type InfrastructureOperation,type SubPoint} from '@arbestra/contracts';
 import { sciencePreview } from '../api/client';
@@ -266,7 +267,19 @@ export class BabylonVillageScene {
   #store: TerrainStore | null = null;
   #renderer: TerrainRenderer | null = null;
   #state: VillageState | null = null;
-  #worldMode: 'exploration' | 'exploitation' | 'population' | 'construction' = 'exploration';
+  #worldMode: 'exploration' | 'exploitation' | 'population' | 'construction' | 'terraform' = 'exploration';
+  #terraformRenderer:TerraformPreview|null=null;
+  #terraformVisual:TerraformVisual|null=null;
+  public terraformPreview(value:TerraformVisual|null){
+    this.#terraformVisual=value;
+    if(!this.#space)return;
+    this.#terraformRenderer??=new TerraformPreview(this.#scene);
+    this.#terraformRenderer.update(value,this.#space);
+    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.terraformSelection=JSON.stringify(value?{
+      origin:value.origin,cells:value.quote.cells,triangles:this.#scene.meshes.filter(m=>m.name==='terraform-future-ground').reduce((n,m)=>n+m.getTotalIndices()/3,0),at:performance.now(),
+    }:null);
+  }
+  public terrainVertexHeight(x:number,y:number){return this.#store?.vertexHeight(x,y)??null;}
   #infrastructureRenderer:InfrastructureRenderer|null=null;
   #infrastructurePreview:InfrastructureRenderer|null=null;
   #infrastructureHandler:((gesture:InfrastructureGesture)=>void)|null=null;
@@ -366,6 +379,7 @@ export class BabylonVillageScene {
     if(event.button===2&&this.#starterManual&&this.#worldMode==='construction'){event.preventDefault();event.stopImmediatePropagation();this.#starterManual();return;}
     if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation&&(event.button===0||event.button===2)){
       event.preventDefault();event.stopImmediatePropagation();
+      if(this.#worldMode==='terraform'&&(!event.isPrimary||this.#infrastructureDown))return;
       if(event.button===2)this.#infrastructureHandler({kind:'right',point:this.#infrastructurePoint(event)});
       else{this.#infrastructureDown={x:event.clientX,y:event.clientY,pointerId:event.pointerId};this.#canvas.setPointerCapture(event.pointerId);this.#infrastructureHandler({kind:'down',point:this.#infrastructurePoint(event)});}return;
     }
@@ -411,6 +425,7 @@ export class BabylonVillageScene {
 
   readonly #handlePointerMove = (event: PointerEvent): void => {
     if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation){
+      if(this.#worldMode==='terraform'&&(!event.isPrimary||this.#infrastructureDown&&this.#infrastructureDown.pointerId!==event.pointerId))return;
       event.stopImmediatePropagation();this.#infrastructureHoverEvent=event;
       // At most one terrain ray and one HUD update per display frame.
       if(!this.#infrastructureHoverFrame)this.#infrastructureHoverFrame=requestAnimationFrame(()=>{
@@ -456,6 +471,7 @@ export class BabylonVillageScene {
   };
 
   readonly #handlePointerUp = (event: PointerEvent): void => {
+    if(this.#worldMode==='terraform'&&this.#infrastructureDown&&this.#infrastructureDown.pointerId!==event.pointerId)return;
     if(this.#infrastructureHandler&&this.#infrastructureDown){event.preventDefault();event.stopImmediatePropagation();const d=this.#infrastructureDown;this.#infrastructureDown=null;
       const bounds=this.#canvas.getBoundingClientRect();
       const picked=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,mesh=>mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&typeof mesh.metadata?.equipmentId==='string');
@@ -1238,7 +1254,7 @@ export class BabylonVillageScene {
     const pos=this.#space.project(p);this.#camera.target.copyFromFloats(pos.x,p.altitude,pos.z);this.#camera.alpha=p.alpha;this.#camera.beta=p.beta;this.#camera.radius=p.radius*2.5;this.#camera.fov=p.fov;
     this.#camera.inertialAlphaOffset=this.#camera.inertialBetaOffset=this.#camera.inertialRadiusOffset=this.#camera.inertialPanningX=this.#camera.inertialPanningY=0;
   }
-  public setWorldMode(mode: 'exploration' | 'exploitation' | 'population' | 'construction'): void {
+  public setWorldMode(mode: 'exploration' | 'exploitation' | 'population' | 'construction' | 'terraform'): void {
     if(this.transport.readOnly&&mode!=='exploration')return;
     if (mode !== 'exploration') this.setVillageSolarPreview(null);
     if (mode === this.#worldMode) return;
@@ -2223,6 +2239,7 @@ export class BabylonVillageScene {
     const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
     const priorVillage = this.#space.project(this.#villageAnchor);
     const shift = this.#space.rebase(target, this.#store.world.chunkSize);
+    if(shift)this.#terraformRenderer?.update(this.#terraformVisual,this.#space);
     if (!shift) return;
     const nextVillage = this.#space.project(this.#villageAnchor);
     const villageShift = { x: priorVillage.x - nextVillage.x, z: priorVillage.z - nextVillage.z };
@@ -2720,6 +2737,7 @@ export class BabylonVillageScene {
   }
 
   public dispose(): void {
+    this.#terraformRenderer?.dispose();
     cancelAnimationFrame(this.#infrastructureHoverFrame);this.#infrastructureHoverFrame=0;this.#infrastructureHoverEvent=null;
     this.#infrastructureRenderer?.dispose();this.#infrastructurePreview?.dispose();this.#infrastructureGhost?.dispose(false,false);
     for(const job of this.#buildingJobs)job.steps.return(job.parent);

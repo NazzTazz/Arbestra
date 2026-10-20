@@ -41,6 +41,7 @@ export * from './rc1-field.js';
 
 export * from './building-footprint.js';
 export * from './leveling.js';
+export * from './terraforming.js';
 
 export * from './deposit-range.js';
 

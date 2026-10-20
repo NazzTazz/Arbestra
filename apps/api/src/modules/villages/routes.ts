@@ -1,5 +1,6 @@
 import {LevelingRequestSchema, LevelingCommandSchema, LevelingPreviewSchema, type LevelingRequest, type LevelingCommand} from '@arbestra/contracts';
-import {previewLeveling, commandLeveling} from './leveling.js';
+import {previewLeveling, commandLeveling, commandTerraform} from './leveling.js';
+import {TerraformCommandSchema,TerraformChangedSchema,type TerraformCommand} from '@arbestra/contracts';
 import {observationCommitted} from '../admin/observation-actions.js';
 import {receiveExpedition,readExpeditionReceipts} from '../science/expeditions.js';
 import {ExpeditionReceiptSchema,type ExpeditionIntent} from '@arbestra/contracts';
@@ -89,6 +90,15 @@ export async function registerVillageRoutes(
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const {worldSlug,villageId} = request.params as {worldSlug:string;villageId:string};
     return previewLeveling(db, account.id, worldSlug, villageId, request.body as LevelingRequest);
+  });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/terraform', {
+    schema:{params:VillageParametersSchema,body:TerraformCommandSchema,response:{200:Type.Union([
+      TerraformChangedSchema,Type.Object({status:Type.Literal('started'),state:VillageStateSchema}),
+    ])}},
+  },async request=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);
+    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    return commandTerraform(db,account.id,worldSlug,villageId,request.body as TerraformCommand);
   });
   app.post('/api/worlds/:worldSlug/villages/:villageId/leveling', {
     schema: { params: VillageParametersSchema, body: LevelingCommandSchema, response: {200: VillageStateSchema} },

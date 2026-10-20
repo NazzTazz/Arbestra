@@ -1,5 +1,5 @@
 import { sql, type Kysely, type Transaction } from 'kysely';
-import { pathIntersectsBox, travelDuration } from '@arbestra/contracts';
+import { pathPassageIntersectsBox, travelDuration } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { randomUUID } from 'node:crypto';
 import { up as migrateGardenPlots } from '../../database/migrations/015_garden_plots.js';
@@ -9,7 +9,7 @@ import { createDatabase } from '../../database/connection.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
-import { constructBuildingArea, expandGarden, getVillageState, harvestGarden } from './service.js';
+import { constructBuildingArea, expandGarden, getVillageState, harvestGarden, harvestGardenSelection } from './service.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { projectGardenPlot } from './economy.js';
 
@@ -29,6 +29,29 @@ async function gardenRows(source: Kysely<Database> = db) {
 function inside(tx: Transaction<Database>): Kysely<Database> {
   return { transaction: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }) } as unknown as Kysely<Database>;
 }
+
+it('harvests only the enclosed centre of nine garden plots and preserves its unselected neighbours', async () => {
+  const origin = DEVELOPMENT_CELLS.garden;
+  const cells = Array.from({ length: 9 }, (_, i) => ({ cellX: origin.cellX + i % 3, cellY: origin.cellY + Math.floor(i / 3) }));
+  await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden', origin, cells, 0);
+  await db.updateTable('gardenPlots').set({ storedAmount: 13, remainder: 0, productionUpdatedAt: new Date() })
+    .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+  const commandId = randomUUID(), centre = cells[4]!;
+  const result = await harvestGardenSelection(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, [centre], commandId);
+  const plots = result.cells.flatMap(c => c.building?.garden?.plots ?? []);
+  const selected = plots.find(p => p.cellX === centre.cellX && p.cellY === centre.cellY)!;
+  expect(selected.harvest?.path.length).toBeGreaterThan(1);
+  expect(plots.filter(p => p.harvest)).toHaveLength(1);
+  const harvest = await db.selectFrom('gardenHarvests').selectAll().where('id', '=', selected.harvest!.id).executeTakeFirstOrThrow();
+  expect(harvest.workerCount).toBe(1);
+  expect(harvest.stops).toHaveLength(1);
+  expect(Number(harvest.reservedCarrots)).toBe(13);
+  const neighbours = await db.selectFrom('gardenPlots').select(['cellX', 'cellY', 'storedAmount'])
+    .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+  expect(neighbours.filter(p => p.cellX !== centre.cellX || p.cellY !== centre.cellY).map(p => Number(p.storedAmount))).toEqual(Array(8).fill(13));
+  await harvestGardenSelection(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, [centre], commandId);
+  expect(await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute()).toHaveLength(1);
+});
 function gate() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => { resolve = done; });
@@ -236,9 +259,11 @@ it('preserves both departures and both extensions when Gardens fuse and old rece
       .where('buildingId', '=', ids[index]!).executeTakeFirstOrThrow();
     const start = work.pathCells![0]!;
     const path = [start, { cellX: start.cellX, cellY: left.cellY + 1 },
-      { cellX: cell.cellX + .5, cellY: left.cellY + 1 }, { cellX: cell.cellX + .5, cellY: cell.cellY }];
+      { cellX: cell.cellX, cellY: left.cellY + 1 }, { cellX: cell.cellX, cellY: cell.cellY }];
     const world = { widthCells: 2048, heightCells: 1024 };
-    expect(pathIntersectsBox(path, { cellX: left.cellX + 1, cellY: left.cellY }, .499, .499, world)).toBe(false);
+    // Preserve the whole pedestrian band, not merely its centre line: an
+    // endpoint on the plot edge overlaps the future bridge's clearance.
+    expect(pathPassageIntersectsBox(path, { cellX: left.cellX + 1, cellY: left.cellY }, .5, .5, world)).toBe(false);
     const transportMs = travelDuration(path, world);
     await db.updateTable('gardenHarvests').set({ pathCells: sql`${JSON.stringify(path)}::jsonb`, transportMs,
       completesAt: new Date(work.startedAt.getTime() + 60_000 + transportMs * 2) })

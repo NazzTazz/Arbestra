@@ -316,3 +316,14 @@ export function commandLeveling(slug: string, villageId: string, command: import
     method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(command),
   });
 }
+
+export async function commandTerraform(slug:string,villageId:string,command:import('@arbestra/contracts').TerraformCommand):Promise<
+  {status:'changed';preview:import('@arbestra/contracts').LevelingPreview}|{status:'started';snapshot:TimedVillageState}>{
+  const sentAt=Date.now(),requestGeneration=villageRequestGeneration();
+  const response=await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/terraform`,{
+    method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(command),signal:AbortSignal.timeout(60000),
+  });
+  const receivedAt=Date.now(),result=await parseResponse<{status:'changed';preview:import('@arbestra/contracts').LevelingPreview}|{status:'started';state:VillageState}>(response);
+  return result.status==='changed'?result:{status:'started',snapshot:{state:result.state,requestGeneration,
+    serverOffsetMs:Date.parse(result.state.serverTime)-(sentAt+receivedAt)/2}};
+}

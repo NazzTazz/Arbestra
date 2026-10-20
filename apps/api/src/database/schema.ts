@@ -403,7 +403,7 @@ export interface SessionsTable {
 export interface Database {
   levelingJobs: {
     id: Generated<string>; worldId: string; villageId: string; featureId: string; commandId: string;
-    request: JSONColumnType<import('@arbestra/contracts').LevelingCommand>;
+    request: JSONColumnType<import('@arbestra/contracts').LevelingCommand|import('@arbestra/contracts').TerraformCommand>;
     quote: JSONColumnType<import('@arbestra/contracts').LevelingQuote>;
     path: JSONColumnType<TravelCell[]>; workerCount: number;
     startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;

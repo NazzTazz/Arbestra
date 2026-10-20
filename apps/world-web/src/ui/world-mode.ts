@@ -1,4 +1,4 @@
-export type WorldMode = 'exploration' | 'exploitation' | 'population' | 'construction' | 'amenagement' | 'army';
+export type WorldMode = 'exploration' | 'exploitation' | 'population' | 'construction' | 'terraform' | 'amenagement' | 'army';
 export type ActiveWorldMode = Exclude<WorldMode, 'amenagement' | 'army'>;
 export const WORLD_MODES: Array<{ id: WorldMode; label: string; icon: string; available: boolean }> = [
   { id: 'exploration', label: 'Vue libre', icon: '⌖', available: true },

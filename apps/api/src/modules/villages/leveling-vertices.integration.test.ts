@@ -2,15 +2,15 @@ import {sql} from 'kysely';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { fixedBuildingFootprint, type GeneratedLandscape, type LevelingCommand, type LevelingRequest } from '@arbestra/contracts';
+import { terraformQuote,type TerraformCommand,type TerraformRequest,fixedBuildingFootprint, type GeneratedLandscape, type LevelingCommand, type LevelingRequest } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-map.js';
-import { previewLeveling, commandLeveling, COMPLETE_LEVELING_TASK } from './leveling.js';
+import { previewLeveling, commandLeveling, commandTerraform, COMPLETE_LEVELING_TASK } from './leveling.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from './reconcile-economy.js';
 import { navigationRevision, loadNavigationContext } from '../navigation/context.js';
-import { constructBuildingArea, getVillageState } from './service.js';
+import { constructBuilding, constructBuildingArea, getVillageState } from './service.js';
 import { spawnSpatialState } from '../onboarding/spawn-state.js';
 import {activateTerrainVertices} from '../worlds/terrain-vertices.js';
 import {readRc1Ground} from '../worlds/rc1-ground.js';
@@ -73,6 +73,68 @@ afterAll(async () => {
   await db.deleteFrom('accounts').where('id', '=', accountId).execute();
   await db.destroy();
 }, 60000);
+
+it('rejects single-cell foundations on a sculpted flank on both command routes without spending or reserving',async()=>{
+  const cell={cellX:62,cellY:192},corner={vertexX:63,vertexY:192};
+  await db.updateTable('worldTerrainVertices').set({height:8}).where('worldId','=',worldId).where('vertexX','=',corner.vertexX).where('vertexY','=',corner.vertexY).execute();
+  const rows=async()=>Promise.all(['buildings','villageResources','worldCellOccupancies','buildingCommandReceipts','populationCohorts','scheduledTasks'].map(table=>
+    sql`select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),'[]') as data from ${sql.table(table.replace(/[A-Z]/g,c=>'_'+c.toLowerCase()))} t where world_id=${worldId}`.execute(db).then(r=>r.rows)));
+  try{
+    const ground=await readRc1Ground(db,worldId);expect(ground.field.geometry!.height(corner.vertexX,corner.vertexY)).toBe(8);
+    const before=await rows();
+    await expect(constructBuilding(db,accountId,slug,villageId,cell.cellX,cell.cellY,'dwelling',600000,randomUUID())).rejects.toMatchObject({code:'UNEVEN_TERRAIN'});
+    expect(await rows()).toEqual(before);
+    await expect(constructBuildingArea(db,accountId,slug,villageId,'sawmill',cell,[cell],600000,randomUUID())).rejects.toMatchObject({code:'UNEVEN_TERRAIN'});
+    expect(await rows()).toEqual(before);
+  }finally{
+    await db.updateTable('worldTerrainVertices').set({height:.25}).where('worldId','=',worldId).where('vertexX','=',corner.vertexX).where('vertexY','=',corner.vertexY).execute();
+  }
+},120000);
+
+it('certifies a local free-terrain quote without reserving on mismatch, admits 50 workers once and persists the chosen height',async()=>{
+  await db.updateTable('populationCohorts').set({memberCount:60}).where('worldId','=',worldId).execute();
+  const ground=await readRc1Ground(db,worldId),r:TerraformRequest={buildingType:'terrain',anchor:{cellX:62,cellY:192},quarterTurns:0,
+    cells:[{cellX:62,cellY:192},{cellX:63,cellY:192}],height:.5,workerCount:50};
+  const expected=terraformQuote(r,{widthCells:512,heightCells:256},ground.field.geometry!.height,0);
+  const command:TerraformCommand={...r,commandId:randomUUID(),expected:{...expected,stoneDebit:99}};
+  const rows=async()=>Promise.all(['levelingJobs','populationCohorts','worldCellOccupancies','worldTerrainVertices','villageResources','scheduledTasks'].map(table=>
+    sql`select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),'[]') as data from ${sql.table(table.replace(/[A-Z]/g,c=>'_'+c.toLowerCase()))} t where world_id=${worldId}`.execute(db).then(result=>result.rows)));
+  const before=await rows();
+  const adjusted=await commandTerraform(db,accountId,slug,villageId,command);
+  expect(adjusted.status).toBe('changed');expect(await rows()).toEqual(before);
+  if(adjusted.status!=='changed')throw Error('Expected corrected quote');
+  expect(adjusted.preview.quote.workMs).toBe(expected.workMs);expect(adjusted.preview.quote.vertices).toEqual(expected.vertices);
+  expect(adjusted.preview.quote.stoneDebit).toBe(0);expect(adjusted.preview.quote.transportMs).toBeGreaterThan(0);
+  // Only the estimated round-trip differs, within 10% of the client's total.
+  const serverQuote=adjusted.preview.quote;
+  const transportMs=serverQuote.transportMs-Math.min(serverQuote.transportMs,Math.floor(serverQuote.durationMs/40));
+  const accepted={...command,expected:{...serverQuote,transportMs,durationMs:serverQuote.workMs+2*transportMs}};
+  expect(serverQuote.durationMs).toBeGreaterThan(accepted.expected.durationMs);
+  expect(serverQuote.durationMs).toBeLessThanOrEqual(accepted.expected.durationMs*1.1);
+  const result=await commandTerraform(db,accountId,slug,villageId,accepted);expect(result.status).toBe('started');
+  const job=await db.selectFrom('levelingJobs').selectAll().where('worldId','=',worldId).executeTakeFirstOrThrow();
+  expect(job.workerCount).toBe(50);expect(job.request.buildingType).toBe('terrain');
+  expect(job.quote).toEqual(serverQuote);
+  expect(job.completesAt.getTime()-job.startedAt.getTime()).toBe(serverQuote.durationMs);
+  expect(result.status==='started'&&result.state.village.levelingJobs?.some(j=>j.id===job.id)).toBe(true);
+  expect(await db.selectFrom('worldCellOccupancies').select('cellX').where('worldId','=',worldId).where('featureId','=',job.featureId).execute()).toHaveLength(expected.affectedCells!.length);
+  await commandTerraform(db,accountId,slug,villageId,accepted);
+  expect(await db.selectFrom('levelingJobs').select('id').where('worldId','=',worldId).execute()).toHaveLength(1);
+  await expect(commandTerraform(db,accountId,slug,villageId,{...accepted,height:.75})).rejects.toMatchObject({code:'COMMAND_REUSED'});
+  await expect(commandTerraform(db,randomUUID(),slug,villageId,accepted)).rejects.toMatchObject({code:'VILLAGE_NOT_FOUND'});
+  await db.transaction().execute(async tx=>{
+    const ctx=await beginVillageEconomy(tx,worldId,villageId);
+    await reconcileVillageEconomy(tx,{...ctx,through:job.completesAt});
+    await reconcileVillageEconomy(tx,{...ctx,through:job.completesAt});
+  });
+  const after=await readRc1Ground(db,worldId);
+  for(const v of expected.vertices!)expect(after.field.geometry!.height(v.vertexX,v.vertexY)).toBe(.5);
+  expect(await db.selectFrom('populationCohorts').select('id').where('levelingJobId','=',job.id).execute()).toHaveLength(0);
+  // Leave the shared historical-leveling fixture exactly as it was geometrically.
+  for(const v of expected.vertices!)await db.updateTable('worldTerrainVertices').set({height:ground.field.geometry!.height(v.vertexX,v.vertexY)}).where('worldId','=',worldId).where('vertexX','=',v.vertexX).where('vertexY','=',v.vertexY).execute();
+  await db.deleteFrom('scheduledTasks').where('worldId','=',worldId).where('subjectId','=',job.id).execute();
+  await db.deleteFrom('levelingJobs').where('worldId','=',worldId).where('id','=',job.id).execute();
+},120000);
 
 it('previews a remote campus outside the original region using its actual terrain and building accesses', async () => {
   // The village anchor is a presentation origin; the physical hall keeps its own identity and access.

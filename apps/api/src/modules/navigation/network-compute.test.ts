@@ -42,6 +42,24 @@ const routeQuery:RouteQuery={worldId:'world',contextId:'legacy',policyVersion:RO
 const routeJob={query:routeQuery,data:{worldId:'world',contextId:'legacy',traversalConstraintsId:'none',width:16,height:16,sourceId:'legacy',
  terraces:[],treeEdits:[],occupancies:[],accesses:[],plans:[],legacy:{chunkSize:16,chunks:[{chunkX:0,chunkY:0,terrainCodes:Array(256).fill(1),elevations:Array(256).fill(1)}]}}};
 
+it('keeps completed gardens walkable through the worker projection and invalidates a reserved ring',async()=>{
+ const compute=new NavigationCompute();
+ const plots=Array.from({length:9},(_,i)=>({cellX:5+i%3,cellY:2+Math.floor(i/3)}));
+ const geometry:TravelNetworkState={...state,infrastructure:emptyInfrastructure(),cells:[
+  {cellX:2,cellY:3,footprint:{buildingId:'hall'},building:{id:'hall',type:'town-hall',quarterTurns:0}},
+  ...plots.map((p,i)=>({...p,footprint:{buildingId:'garden',buildingType:'garden' as const,state:'active' as const},
+   building:i===0?{id:'garden',type:'garden' as const,quarterTurns:0,garden:{plots}}:null}))]};
+ const refinement:TravelRoute={id:'centre',kind:'garden',destination:plots[4]!,cells:[{cellX:2,cellY:3},plots[4]!]};
+ try{
+  const load=async()=>({state:networkState(geometry),refinement});
+  const expected=refineTravelRoute(geometry,refinement);expect(expected).not.toBeNull();
+  expect(await compute.refine(load)).toEqual([expected]);
+  expect((await compute.network(async()=>({state:networkState(geometry)}))).some(r=>r.kind==='garden'&&r.destination.cellX===6&&r.destination.cellY===3)).toBe(true);
+  for(const c of geometry.cells)if(c.footprint?.buildingId==='garden'&&(c.cellX!==6||c.cellY!==3))c.footprint.state='reserved';
+  expect(await compute.refine(load)).toEqual([]);
+ }finally{await compute.close();}
+});
+
 it('refines an individual route in the worker with identical geometry and fresh cached outputs',async()=>{
  const compute=new NavigationCompute();
  const geometry:TravelNetworkState={...state,infrastructure:emptyInfrastructure(),cells:[...state.cells,

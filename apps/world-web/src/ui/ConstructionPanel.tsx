@@ -25,8 +25,8 @@ export function ConstructionPanel({ starter, houseVariant, construction, definit
   area: AreaPreview | null; costs: Array<{ resourceCode: string; amount: number }>;
   upgrade: UpgradePreview | null; error: string | null; pending: boolean; gardenWorkerNeed: number | null;
   intentState: 'idle' | 'submitting' | 'error' | 'uncertain'; collapsed: boolean;
-  onToggle: () => void; onChoose: (type: string,variant?:'stone'|'logs'|'beams') => void; onDomainChange: (domain:'buildings'|'infrastructure') => void;
-  domain:'buildings'|'infrastructure'; infrastructure:ReactNode; factoryEnabled:boolean; onWorkshop:()=>void;
+  onToggle: () => void; onChoose: (type: string,variant?:'stone'|'logs'|'beams') => void; onDomainChange: (domain:'buildings'|'infrastructure'|'terrain') => void;
+  domain:'buildings'|'infrastructure'|'terrain'; infrastructure:ReactNode; factoryEnabled:boolean; onWorkshop:()=>void;
   onRetry: () => void; onClearError: () => void;
 }) {
   const [category, setCategory] = useState('Habitat');
@@ -52,10 +52,10 @@ export function ConstructionPanel({ starter, houseVariant, construction, definit
   return <>
     <section className={`command-palette construction-palette${collapsed ? ' is-collapsed' : ''}`} aria-label="Palette de construction">
       <div className="construction-families" role="group" aria-label="Domaines de construction">
-        {(['buildings','infrastructure'] as const).map(item=><button key={item} type="button" disabled={locked}
-          aria-label={item==='buildings'?'Bâtiments':'Infrastructure'} title={item==='buildings'?'Bâtiments':'Infrastructure'}
+        {(['buildings','infrastructure','terrain'] as const).map(item=><button key={item} type="button" disabled={locked}
+          aria-label={item==='buildings'?'Bâtiments':item==='terrain'?'Terraformation':'Infrastructure'} title={item==='buildings'?'Bâtiments':item==='terrain'?'Terraformation':'Infrastructure'}
           aria-pressed={domain===item} onClick={()=>{if(item!==domain)onDomainChange(item);if(collapsed)onToggle();}}>
-          <BuildingThumbnail code={item==='buildings'?'dwelling':'infrastructure-symbol'}/>
+          {item==='terrain'?<span aria-hidden="true" style={{fontSize:36}}>▱</span>:<BuildingThumbnail code={item==='buildings'?'dwelling':'infrastructure-symbol'}/>}
         </button>)}
       </div>
     </section>
@@ -68,7 +68,7 @@ export function ConstructionPanel({ starter, houseVariant, construction, definit
       {area?.needsLeveling && <p>Cliquez sur l’emprise pour préparer le terrain.</p>}
       {(intentState === 'uncertain' || intentState === 'error') && <div className="intent-buttons"><button type="button" disabled={pending} onClick={onRetry}>{intentState === 'uncertain' ? 'Vérifier la même commande' : 'Réessayer'}</button>{intentState === 'error' && <button type="button" disabled={pending} onClick={onClearError}>Effacer l’erreur</button>}</div>}
     </aside>}
-    {domain==='infrastructure'?infrastructure:<><nav className="construction-categories" aria-label="Familles de bâtiments">{groups.map(group => <button type="button" key={group} aria-pressed={category === group} onClick={() => { setCategory(group); if(collapsed)onToggle(); }}>{group}</button>)}</nav>
+    {domain==='terrain'?null:domain==='infrastructure'?infrastructure:<><nav className="construction-categories" aria-label="Familles de bâtiments">{groups.map(group => <button type="button" key={group} aria-pressed={category === group} onClick={() => { setCategory(group); if(collapsed)onToggle(); }}>{group}</button>)}</nav>
     {!collapsed && <section className="construction-showroom" aria-label={`Modèles · ${category}`}>
       {definitions.filter(item => categoryOf(item.code) === category).flatMap(item => (item.code==='dwelling'?(['logs','beams','stone'] as const):[null]).map(variant => {
         const initial = item.levels.find(entry => entry.level === 1), unavailable = !item.buildable || !initial;

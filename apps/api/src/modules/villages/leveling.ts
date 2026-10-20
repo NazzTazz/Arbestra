@@ -3,9 +3,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type Kysely, type Transaction } from 'kysely';
 import {
+  terraformCells, terraformQuote, type TerraformRequest, type TerraformCommand,
   vertexLeveling, footprintVertices, vertexKey, fixedBuildingFootprint, isBuildingFootprintFlat, levelingWork, buildTravelNetwork, refineTravelRoute,
   travelDuration, pathPassageIntersectsBox, spawnDelta,
-  type LevelingRequest, type LevelingCommand, type LevelingPreview, type LevelingJob, type VillageState,
+  type LevelingRequest, type LevelingCommand, type LevelingPreview, type LevelingQuote, type LevelingJob, type VillageState,
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -28,19 +29,24 @@ export async function hasActiveLeveling(tx: Transaction<Database>, worldId: stri
     .where('villageId', 'in', villages).where('completedAt', 'is', null).limit(1).executeTakeFirst();
 }
 
-async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageEconomy, accountId: string, request: LevelingRequest) {
+async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageEconomy, accountId: string, request: LevelingRequest|TerraformRequest) {
   if (v.generationVersion !== 3) throw new HttpError(409, 'LEVELING_UNAVAILABLE', 'Le nivellement est disponible sur les mondes RC1.');
   if (request.anchor.cellX >= v.widthCells || request.anchor.cellY >= v.heightCells)
     throw new HttpError(400, 'INVALID_COORDINATES', 'Coordonnées non canoniques.');
-  const cells = fixedBuildingFootprint(request.buildingType, request.anchor, request.quarterTurns, v);
+  const free=request.buildingType==='terrain';
+  let cells: Array<{cellX:number;cellY:number}>;
+  try{cells=free?terraformCells(request,v):fixedBuildingFootprint(request.buildingType, request.anchor, request.quarterTurns, v);}
+  catch{throw new HttpError(400,'INVALID_TERRAFORM_SELECTION','Sélection ou hauteur invalide.');}
   // Same rights, reach, water, trees, deposits, roads and engaged passages as construction.
   await assertBuildableCells(tx, v, cells);
   const ground = await readRc1Ground(tx, v.worldId);
   const geometry=ground.field.geometry;
-  if (isBuildingFootprintFlat(geometry?footprintVertices(cells,v).map(p=>geometry.height(p.vertexX,p.vertexY)*100):cells.map(c => ground.cell(c.cellX, c.cellY).elevation)))
+  if(free&&!geometry)throw new HttpError(409,'LEVELING_UNAVAILABLE','Ce monde doit utiliser le terrain à sommets partagés.');
+  if (!free&&isBuildingFootprintFlat(geometry?footprintVertices(cells,v).map(p=>geometry.height(p.vertexX,p.vertexY)*100):cells.map(c => ground.cell(c.cellX, c.cellY).elevation)))
     throw new HttpError(409, 'ALREADY_LEVEL', 'Cette emprise est déjà plane. Vous pouvez construire.');
   const samples = cells.map(c => Array.from({ length: 64 }, (_, i) => ground.field.sample(c.cellX - .5 + (i % 8 + .5) / 8, c.cellY - .5 + (Math.floor(i / 8) + .5) / 8).elevation));
-  const vertexPlan=geometry?vertexLeveling(cells,v,geometry.height,request.workerCount):undefined;
+  const vertexPlan=geometry?vertexLeveling(cells,v,geometry.height,request.workerCount,free?request.height:undefined):undefined;
+  if(free&&vertexPlan!.volume<1e-9)throw new HttpError(409,'ALREADY_LEVEL','Le terrain est déjà à cette hauteur.');
   const affectedCells=vertexPlan?.affectedCells??cells;
   if(vertexPlan)await assertBuildableCells(tx,v,affectedCells);
   const { height, workMs } = vertexPlan??levelingWork(samples, request.workerCount);
@@ -86,12 +92,12 @@ async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageE
   const existing = new Set(buildTravelNetwork(current, [], ground.navigation).filter(r => r.kind === 'building').map(r => r.id));
   const during = new Set(buildTravelNetwork(reserved, [], ground.navigation).filter(r => r.kind === 'building').map(r => r.id));
   if ([...existing].some(id => !during.has(id))) throw new HttpError(409, 'LEVELING_ACCESS', 'Ce chantier bloquerait l’accès d’un bâtiment.');
-  const futureState = { ...current, cells: current.cells.map(c => selected.has(key(c)) ? { ...c,
+  const futureState = free?current:{ ...current, cells: current.cells.map(c => selected.has(key(c)) ? { ...c,
     footprint: { buildingId: siteId }, building: c.cellX === request.anchor.cellX && c.cellY === request.anchor.cellY
       ? { id: siteId, type: request.buildingType, quarterTurns: request.quarterTurns } : null,
   } : c) } as unknown as VillageState;
   const after = buildTravelNetwork(futureState, [], future);
-  if (!after.some(r => r.id === siteId) || [...existing].some(id => !after.some(r => r.id === id)))
+  if ((!free&&!after.some(r => r.id === siteId)) || [...existing].some(id => !after.some(r => r.id === id)))
     throw new HttpError(409, 'LEVELING_ACCESS', 'La hauteur proposée ne permet pas un accès praticable aux bâtiments.');
   const affected=new Set(affectedCells.map(key));
   const candidates = [...new Map(affectedCells.flatMap(c => [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ cellX: wrap(c.cellX + dx!, v.widthCells), cellY: wrap(c.cellY + dy!, v.heightCells) }))).map(c => [key(c), c])).values()]
@@ -109,7 +115,7 @@ async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageE
   const signature = createHash('sha256').update(JSON.stringify([request, samples, path, height,vertexPlan?affectedCells.map(c=>cellGroundSignature(c)):null])).digest('hex');
   // RC1 free dry ground is grass/soil. Rock deposits must be extracted first;
   // no artificial stone credits are minted by raising/lowering ordinary soil.
-  const quote = { ...(vertexPlan?{model:'vertices' as const,vertices:vertexPlan.vertices,affectedCells}:{}),height, cells, workMs, transportMs, durationMs, stoneDebit: 0, stoneCredit: 0, signature };
+  const quote = free?terraformQuote(request,v,geometry!.height,transportMs):{ ...(vertexPlan?{model:'vertices' as const,vertices:vertexPlan.vertices,affectedCells}:{}),height, cells, workMs, transportMs, durationMs, stoneDebit: 0, stoneCredit: 0, signature };
   const workers = eligibleWorkers(await materializeCohorts(tx, v.worldId, v.villageId, ctx.through), durationMs);
   const availableWorkers = workers.reduce((n, c) => n + c.memberCount, 0), valid = availableWorkers >= request.workerCount;
   const preview: LevelingPreview = { quote, availableWorkers, valid, message: valid ? null : 'Habitants disponibles et assez reposés insuffisants pour ce chantier.' };
@@ -123,7 +129,22 @@ export async function previewLeveling(db: Kysely<Database>, accountId: string, s
     return (await prepare(tx, v, ctx, accountId, request)).preview;
   });
 }
-export async function commandLeveling(db: Kysely<Database>, accountId: string, slug: string, villageId: string, command: LevelingCommand) {
+class ChangedTerraformQuote extends Error {
+  constructor(readonly preview:LevelingPreview){super('Terrain quote changed');}
+}
+/** Only estimated travel may vary; persist the authoritative quote on admission. */
+export function terraformQuoteMatchesExpected(actual: LevelingQuote, expected: LevelingQuote): boolean {
+  return Math.abs(actual.durationMs - expected.durationMs) * 10 <= expected.durationMs
+    && isDeepStrictEqual(actual, { ...expected, transportMs: actual.transportMs, durationMs: actual.durationMs });
+}
+export function commandLeveling(db:Kysely<Database>,accountId:string,slug:string,villageId:string,command:LevelingCommand){
+  return admitLeveling(db,accountId,slug,villageId,command);
+}
+export async function commandTerraform(db:Kysely<Database>,accountId:string,slug:string,villageId:string,command:TerraformCommand){
+  try{return {status:'started' as const,state:await admitLeveling(db,accountId,slug,villageId,command)};}
+  catch(error){if(error instanceof ChangedTerraformQuote)return {status:'changed' as const,preview:error.preview};throw error;}
+}
+async function admitLeveling(db: Kysely<Database>, accountId: string, slug: string, villageId: string, command: LevelingCommand|TerraformCommand) {
   return db.transaction().execute(async tx => {
     const v = await ownedVillage(tx, accountId, slug, villageId);
     const ctx = await beginVillageEconomy(tx, v.worldId, v.villageId, undefined, [], [], true);
@@ -133,7 +154,15 @@ export async function commandLeveling(db: Kysely<Database>, accountId: string, s
     } else {
       const { commandId, expected, ...request } = command;
       const { preview, workers, path } = await prepare(tx, v, ctx, accountId, request);
-      if (!isDeepStrictEqual(preview.quote, expected)) throw new HttpError(409, 'QUOTE_CHANGED', 'Le terrain ou le trajet a changé. Reprenez le devis.');
+      const quoteMatches = request.buildingType === 'terrain'
+        ? terraformQuoteMatchesExpected(preview.quote, expected)
+        : isDeepStrictEqual(preview.quote, expected);
+      if (!quoteMatches) {
+        // Throw through the transaction before returning a corrected quote: no
+        // reconciliation, reservation or worker assignment commits on mismatch.
+        if(request.buildingType==='terrain')throw new ChangedTerraformQuote(preview);
+        throw new HttpError(409, 'QUOTE_CHANGED', 'Le terrain ou le trajet a changé. Reprenez le devis.');
+      }
       if (!preview.valid) throw new HttpError(409, 'LEVELING_WORKERS', preview.message!);
       const featureId = randomUUID(), completesAt = new Date(ctx.through.getTime() + preview.quote.durationMs);
       await tx.insertInto('worldFeatures').values({ id: featureId, worldId: v.worldId, featureTypeCode: 'leveling-site', state: 'reserved', variantSeed: 0 }).execute();

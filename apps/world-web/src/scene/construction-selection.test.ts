@@ -10,6 +10,18 @@ const world: VillageState['world'] = {
 const at = (cellX: number, cellY: number): Cell => ({ cellX, cellY });
 
 describe('construction selection', () => {
+  it('rejects a house or sawmill on a sculpted flank but permits the flat summit and gardens following the soil',()=>{
+    const vertexHeights=[.5,8,.5,8],cell=at(10,10),range={first:cell,last:cell};
+    const state={world,cells:[{...cell,canBuild:true}],region:{originCellX:10,originCellY:10,width:1,height:1,elevations:[425],vertexHeights}} as VillageState;
+    for(const type of ['dwelling','sawmill','town-hall']){
+      const area=previewArea(state,range,false,undefined,type);expect(area.error).toEqual(expect.any(String));expect(area.needsLeveling).not.toBe(true);
+    }
+    expect(previewArea(state,range,true,undefined,'garden').error).toBeNull();
+    vertexHeights.fill(8);
+    for(const type of ['dwelling','sawmill'])expect(previewArea(state,range,false,undefined,type).error).toBeNull();
+    vertexHeights[3]=NaN;
+    expect(previewArea(state,range,false,undefined,'dwelling').error).not.toBeNull();
+  });
   it('checks interior shared corners even when the legacy centre heights are flat',()=>{
     const range={first:at(10,10),last:at(14,15)},cells=rectangleCells(range,world,true).cells;
     const vertexHeights=Array(42).fill(.25);vertexHeights[14]=.4;

@@ -72,7 +72,8 @@ export function previewArea(state: VillageState, range: CellRange, spatial: bool
     return result;
   }
   const result = previewCells(preview.cells,cell=>free.has(cellKey(cell)));
-  if (!result.error && (buildingType === 'university' || buildingType === 'stonemason')) {
+  const offersLeveling=buildingType==='university'||buildingType==='stonemason';
+  if (!result.error && (offersLeveling||buildingType&&buildingType!=='garden'&&state.region.vertexHeights)) {
     const heights = state.region.vertexHeights ? footprintVertices(result.cells,state.world).map(v=>{
       const x=normalize(v.vertexX-state.region.originCellX,state.world.widthCells),y=normalize(v.vertexY-state.region.originCellY,state.world.heightCells);
       return x<=state.region.width&&y<=state.region.height?state.region.vertexHeights![y*(state.region.width+1)+x]!*100:NaN;
@@ -82,7 +83,9 @@ export function previewArea(state: VillageState, range: CellRange, spatial: bool
       return x < state.region.width && y < state.region.height ? state.region.elevations[y * state.region.width + x]! : NaN;
     });
     if (heights.some(h => !Number.isFinite(h))) return { ...result, error: 'Terrain en cours de chargement.' };
-    if (!isBuildingFootprintFlat(heights)) return { ...result, needsLeveling: true, error: 'Cette emprise doit être nivelée avant de construire.' };
+    if (!isBuildingFootprintFlat(heights)) return offersLeveling
+      ? { ...result, needsLeveling: true, error: 'Cette emprise doit être nivelée avant de construire.' }
+      : { ...result, error: 'Construction impossible sur une pente. Préparez une surface plane avec la terraformation.' };
   }
   return result;
 }

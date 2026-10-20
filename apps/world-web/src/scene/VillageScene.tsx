@@ -59,7 +59,7 @@ interface VillageSceneProps {
   onEyesFound?: () => void;
   onViewChanged?: (mode: TerrainViewMode) => void;
 }
-export interface TerrainHandle { focusCell:(cell:Cell)=>void; viewCenter:()=>Cell|null; naturalFeatures:()=>NaturalFeature[]; ready:()=>boolean; infrastructureTool:(handler:((gesture:InfrastructureGesture)=>void)|null)=>void; infrastructurePreview:(operation:InfrastructureOperation|null,invalid?:boolean,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>)=>void; equipmentAt:(point:SubPoint,pickedId?:string)=>{id:string;version:number;position:SubPoint;quarterTurns:number}|null; selectRepresentative:(id:string|null)=>void; representativeInfo:(id:string)=>RepresentativeInfo|null; projectRepresentative:(id:string)=>ScreenAnchor|null; representativeCamera:(mode:'pov'|'follow'|'village')=>void; representativeCameraMode:()=>InhabitantCameraMode; cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
+export interface TerrainHandle { terrainVertexHeight:(x:number,y:number)=>number|null; terraformPreview:(value:import('./terraform-preview').TerraformVisual|null)=>void; focusCell:(cell:Cell)=>void; viewCenter:()=>Cell|null; naturalFeatures:()=>NaturalFeature[]; ready:()=>boolean; infrastructureTool:(handler:((gesture:InfrastructureGesture)=>void)|null)=>void; infrastructurePreview:(operation:InfrastructureOperation|null,invalid?:boolean,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>)=>void; equipmentAt:(point:SubPoint,pickedId?:string)=>{id:string;version:number;position:SubPoint;quarterTurns:number}|null; selectRepresentative:(id:string|null)=>void; representativeInfo:(id:string)=>RepresentativeInfo|null; projectRepresentative:(id:string)=>ScreenAnchor|null; representativeCamera:(mode:'pov'|'follow'|'village')=>void; representativeCameraMode:()=>InhabitantCameraMode; cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
 
 export function VillageScene({ transport, observationPose, onManualCamera, onInitialLoad, preparing=false, starterGhost=null, onStarterManual, worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
   const [arrival, setArrival] = useState<VillageArrival | null>(null);
@@ -136,6 +136,8 @@ export function VillageScene({ transport, observationPose, onManualCamera, onIni
     projectPopulation: id => sceneRef.current?.projectPopulation(id) ?? null,
     showVillage: () => sceneRef.current?.showVillage(), projectCell: cell => sceneRef.current?.projectCell(cell) ?? null,
     focusCell:cell=>sceneRef.current?.focusCell(cell),viewCenter:()=>sceneRef.current?.viewCenter()??null,naturalFeatures:()=>sceneRef.current?.naturalFeatures()??[],
+    terrainVertexHeight:(x,y)=>sceneRef.current?.terrainVertexHeight(x,y)??null,
+    terraformPreview:value=>sceneRef.current?.terraformPreview(value),
     setWorldMode: mode => sceneRef.current?.setWorldMode(mode) }), []);
   useEffect(() => { sceneRef.current?.setWorldMode(worldMode); }, [worldMode, state.world.id, BabylonVillageScene]);
   useEffect(() => { sceneRef.current?.setNoclip(noclip); }, [noclip,state.world.id,BabylonVillageScene]);
@@ -152,6 +154,7 @@ export function VillageScene({ transport, observationPose, onManualCamera, onIni
   useEffect(() => { sceneRef.current?.setCosmologyServerOffset(serverOffsetMs); }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
 
   const keyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if(worldMode==='terraform'&&['+','-','=','_','ArrowUp','ArrowDown'].includes(event.key))return;
     onManualCamera?.();
     if (event.key === 'Escape' && viewMode === 'world') { sceneRef.current?.showRegion(); event.preventDefault(); }
     if (event.key === '+' || event.key === '=') {

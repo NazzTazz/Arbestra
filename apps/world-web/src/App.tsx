@@ -1,4 +1,5 @@
 import {LevelingPanel} from './ui/LevelingPanel';
+import {TerraformPanel} from './ui/TerraformPanel';
 import type {LevelingRequest} from '@arbestra/contracts';
 import {useObservationPublisher} from './observation';
 import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
@@ -132,7 +133,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [showScience, setShowScience] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ScreenAnchor | null>(null);
   const [construction, setConstruction] = useState<ConstructionChoice | null>(starter?{action:'build',type:null}:null);
-  const [constructionDomain,setConstructionDomain]=useState<'buildings'|'infrastructure'>('buildings');
+  const [constructionDomain,setConstructionDomain]=useState<'buildings'|'infrastructure'|'terrain'>('buildings');
   const [quarterTurns,setQuarterTurns]=useState(0);
   const [houseVariant,setHouseVariant]=useState<'stone'|'logs'|'beams'>('logs');
   const [workshop,setWorkshop]=useState<'buildings'|'infrastructure'|null>(null);
@@ -660,14 +661,14 @@ export function App({starter}:{starter?:StarterController} = {}) {
     setPaletteCollapsed(value=>!value);
   }
   function chooseMode(mode: ActiveWorldMode, toggleActive = false) {
-    if(beforeTownHall && (mode==='population'||mode==='exploitation'))return;
+    if(beforeTownHall && (mode==='population'||mode==='exploitation'||mode==='terraform'))return;
     if(toggleActive && mode===modeRef.current){toggleHud();return;}
     if (mode !== 'exploitation') setExploitationSettings(current => ({ ...current, woodMode: 'cut' }));
     cancelDraft(); closePanels(); setShowScience(false); setShowWorksites(false); setPopulationFocus(null); setPopulationFilter('all');
     if (modeNavigation.current.choose(mode)) { terrainRef.current?.showVillage(); return; }
     modeRef.current = mode; setWorldMode(mode); terrainRef.current?.setWorldMode(mode);
     setPaletteCollapsed(mode==='exploration');
-    if (mode === 'construction') setConstruction({ action: 'build', type: null });
+    if (mode === 'construction') {setConstructionDomain('buildings');setConstruction({ action: 'build', type: null });}
     if (mode === 'population') { setShowPopulation(true); setMenuAnchor(populationAnchor()); }
     if (mode === 'exploitation' && uncertainRequest.current) {
       setMixedRequest(uncertainRequest.current); setMixedUncertain(true); setExploitationIntentState('uncertain');
@@ -908,7 +909,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     <Suspense fallback={null}><VillageScene onInitialLoad={progress => setInitialProgress({key: sceneKey, progress})} preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={sceneState??state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
       pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : NO_PENDING_HARVESTS} highlightedSiteIds={highlightedSiteIds}
-      constructionMode={!paletteCollapsed && !workshop && worldMode === 'construction' && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
+      constructionMode={!paletteCollapsed && !workshop && (worldMode === 'construction'||worldMode === 'terraform') && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmologyDebug={cosmologyDebug} devOpen={showDev} constructionAction={worldMode === 'construction' ? construction?.action ?? null : null} constructionType={starterActive?'starter':construction?.type ?? null} onBuildingHover={setHoveredBuildingId} paletteOpen={!paletteCollapsed}
       constructionQuarterTurns={quarterTurns} constructionHouseVariant={houseVariant} selectingArea={starterActive?worldMode==='construction'&&!paletteCollapsed&&!starter!.pending:!paletteCollapsed && !workshop && constructionDomain==='buildings' && worldMode === 'construction' && Boolean(construction?.type) && construction?.action !== 'upgrade'
         && (construction?.action !== 'extend' || Boolean(construction.buildingId)) && !pendingAction && terrainView === 'village'}
@@ -986,12 +987,13 @@ export function App({starter}:{starter?:StarterController} = {}) {
     }} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {starterActive&&worldMode==='construction'&&<div hidden={paletteCollapsed}><ConstructionPanel starter={{choices:starter!.choices,selected:starter!.selected,onChoose:starter!.onChoose}} houseVariant="logs" construction={{action:'build',type:starter!.selected}} definitions={[]} area={starter!.preview} costs={[]} error={starter!.error??starter!.preview.error} pending={starter!.pending} gardenWorkerNeed={null} upgrade={null} intentState={starter!.uncertain?'uncertain':starter!.pending?'submitting':'idle'} collapsed={paletteCollapsed} onToggle={()=>setPaletteCollapsed(v=>!v)} onChoose={()=>{}} onDomainChange={()=>{}} domain="buildings" infrastructure={null} factoryEnabled={false} onWorkshop={()=>{}} onRetry={starter!.onRetry} onClearError={()=>{}}/>{starter!.names}</div>}
     {starter&&!starterActive&&starter.choices.some(c=>c.key)&&worldMode==='construction'&&<button className="starter-resume" onClick={()=>{starter.onChoose(starter.choices.find(c=>c.key)!.key);setPaletteCollapsed(false);}}>Kit initial restant</button>}
-    {!starterActive && terrainView === 'village' && worldMode === 'construction' && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
+    {!starterActive && terrainView === 'village' && (worldMode === 'construction'||worldMode === 'terraform') && contextualConstruction ? <div hidden={paletteCollapsed}><ConstructionPanel houseVariant={houseVariant} upgrade={upgrade} construction={contextualConstruction} definitions={state.buildingTypes} area={area} costs={costs} error={selectionError ?? error} pending={pendingAction} gardenWorkerNeed={gardenWorkerNeed}
       intentState={constructionIntentState} onRetry={retryConstruction} onClearError={clearConstructionError}
       collapsed={paletteCollapsed} onToggle={() => setPaletteCollapsed(value => !value)} onChoose={(type,variant) => { clearConstructionError(); clearPreview(); if(variant)setHouseVariant(variant);setConstruction({ action: 'build', type }); }}
-      domain={constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
-      infrastructure={<InfrastructureTools state={sceneState??state} scene={terrainRef} active={constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onConfirmation={applyInfrastructureConfirmation} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
-      onDomainChange={domain => { clearPreview(); clearConstructionError(); setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
+      domain={worldMode==='terraform'?'terrain':constructionDomain} factoryEnabled={import.meta.env.DEV&&Boolean(state.factoryEnabled)} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('buildings');}}
+      infrastructure={<InfrastructureTools state={sceneState??state} scene={terrainRef} active={worldMode==='construction'&&constructionDomain==='infrastructure'&&!paletteCollapsed&&!showDev&&!workshop&&!arrivalActive} onSnapshot={applySnapshot} onConfirmation={applyInfrastructureConfirmation} onWorkshop={()=>{clearPreview();cancelWorldGesture();setWorkshop('infrastructure');}}/>}
+      onDomainChange={domain => { clearPreview(); clearConstructionError(); chooseMode(domain==='terrain'?'terraform':'construction');setConstructionDomain(domain);setConstruction({action:'build',type:null}); }} /></div> : null}
+    {worldMode==='terraform'&&terrainView==='village'&&!arrivalActive&&!beforeTownHall&&!showDev&&<TerraformPanel state={state} scene={terrainRef} onSnapshot={applySnapshot} onStarted={()=>pushNotification('Chantier de terraformation lancé.')}/>}
     {leveling && <LevelingPanel slug={state.world.slug} villageId={state.village.id} request={leveling} onPreview={setLevelingPreview} onSnapshot={applySnapshot} onClose={() => {setLeveling(null);setLevelingPreview(null);}} onStarted={() => { setLeveling(null);setLevelingPreview(null); clearPreview(); pushNotification('Chantier de nivellement lancé. Vous pourrez construire à sa fin.'); }}/>}
     {workshop&&<section className="factory-workshop" aria-label="Atelier"><button onClick={()=>setWorkshop(null)}>Retour au village</button>{state.factoryEnabled?<iframe title={`Atelier ${workshop}`} src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}/>:<p>L’accès aux ateliers a été désactivé.</p>}</section>}
   </main>{!initialReady && <WorldLoading worldName={state.world.name} message="Préparation de la scène"

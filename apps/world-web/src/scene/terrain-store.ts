@@ -204,6 +204,22 @@ export class TerrainStore {
     for(const key of this.entries.keys())for(const f of this.chunk(key)?.features??[])features.set(terrainFeatureKey(f),f);
     return [...features.values()].map(f=>({...f,deposit:this.revisions.get(f.id)??f.deposit}));
   }
+  /** Exact rendered corner in terrain units, including retained chunk borders. No I/O. */
+  vertexHeight(x:number,y:number):number|null{
+    const {widthCells:w,heightCells:h,chunkSize:s}=this.world;
+    x=normalize(x,w);y=normalize(y,h);
+    for(const cy of y%s===0?[y,normalize(y-1,h)]:[y])for(const cx of x%s===0?[x,normalize(x-1,w)]:[x]){
+      const chunk=this.entries.get(this.key(cx,cy))?.chunk;
+      if(!chunk?.rc1)continue;
+      const dx=normalize(x-chunk.originCellX,w),dy=normalize(y-chunk.originCellY,h);
+      if(dx>s||dy>s)continue;
+      const value=rc1Height(chunk,chunk.originCellX+dx-.5,chunk.originCellY+dy-.5);
+      if(value!==null&&Number.isFinite(value))return value/2.5;
+    }
+    const r=this.#snapshot.region,dx=normalize(x-r.originCellX,w),dy=normalize(y-r.originCellY,h);
+    const value=dx<=r.width&&dy<=r.height?r.vertexHeights?.[dy*(r.width+1)+dx]:undefined;
+    return value!==undefined&&Number.isFinite(value)?value:null;
+  }
   ground(x: number, y: number): { code: number; height: number } | null {
     const { widthCells: w, heightCells: h, chunkSize: s } = this.world;
     const continuousX=x, continuousY=y;

@@ -1,5 +1,7 @@
 # Architecture autoritaire
 
+**Implémentée et vérifiée localement, recette utilisateur à faire :** [terraformation libre](../SPEC-TERRAFORMATION-LIBRE.md), pinceau de hauteur au quart de case, devis local et admission autoritaire réutilisant les chantiers de nivellement. Migration 049 additive pour les équipes jusqu’à 50 habitants, appliquée en test et développement uniquement. Preuves et limites dans le handoff courant.
+
 **Déployé et activé sur alpha/staging, release `51755ac` :** [terrain à sommets partagés](../SPEC-TERRAIN-SOMMETS-PARTAGES.md). Modèle RC1 versionné par monde, coins persistés et surface commune au serveur/rendu. Migration 048 additive ; monde alpha converti sous sauvegarde avec conservation des six villages, appuis structurels et économie, staging vide activé avec son compte conservé. Aucun autre monde converti implicitement. Nivellement réduit à une minute par case et quart de hauteur déplacé, divisée par l’effectif. Preuves et limites de recette dans le handoff.
 
 **Déployée avec la release `317cc93` :** [extension progressive du village](../SPEC-EXTENSION-VILLAGE.md), portée de 8 cases, terrain et connaissance locale suivant les emprises au-delà de la zone initiale.

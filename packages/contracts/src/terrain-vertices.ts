@@ -59,13 +59,14 @@ export function absoluteTriangleVolume(heights: readonly [number,number,number])
   }
   return total;
 }
-export function vertexLeveling(cells: readonly Cell[], world: SpatialDimensions, heightAt: (x:number,y:number)=>number, workers:number) {
-  if(!cells.length || !Number.isInteger(workers) || workers<1 || workers>3)throw Error('Invalid leveling footprint/team');
+export function vertexLeveling(cells: readonly Cell[], world: SpatialDimensions, heightAt: (x:number,y:number)=>number, workers:number, targetHeight?:number) {
+  if(!cells.length || !Number.isInteger(workers) || workers<1 || workers>(targetHeight===undefined?3:50) || targetHeight!==undefined&&!Number.isFinite(targetHeight))throw Error('Invalid leveling footprint/team');
   const points=footprintVertices(cells,world), selected=new Set(points.map(vertexKey)), affectedCells=vertexCells(points,world);
   const triangles=affectedCells.flatMap(c=>{const vs=cellVertices(c,world);return [[vs[0]!,vs[1]!,vs[2]!],[vs[0]!,vs[2]!,vs[3]!]];});
   let sum=0,weight=0;
   for(const t of triangles)for(const v of t)if(selected.has(vertexKey(v))){sum+=heightAt(v.vertexX,v.vertexY);weight++;}
-  const height=terrainHeightPrecision(sum/weight);
+  if(!Number.isFinite(sum))throw Error('Terrain heights unavailable');
+  const height=terrainHeightPrecision(targetHeight??sum/weight);
   let volume=0;
   for(const t of triangles)volume+=absoluteTriangleVolume(t.map(v=>selected.has(vertexKey(v))?height-heightAt(v.vertexX,v.vertexY):0) as [number,number,number]);
   return {height,vertices:points.map(v=>({...v,height})),affectedCells,volume,workMs:Math.max(1,Math.ceil(volume/.25*LEVELING_WORK_MS_PER_QUARTER/workers))};

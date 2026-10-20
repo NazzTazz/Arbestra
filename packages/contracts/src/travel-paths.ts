@@ -21,7 +21,8 @@ export interface TravelNetworkState extends Omit<BuildingAccessState, 'cells'> {
       deposit: Pick<NonNullable<VillageState['region']['features'][number]['deposit']>, 'state' | 'blocksCell' | 'cleared'> | null;
     }>;
   };
-  cells: ReadonlyArray<Omit<BuildingAccessState['cells'][number], 'building'> & {
+  cells: ReadonlyArray<Omit<BuildingAccessState['cells'][number], 'building' | 'footprint'> & {
+    footprint: ({ buildingId: string } & Partial<Pick<NonNullable<VillageState['cells'][number]['footprint']>, 'buildingType' | 'state'>>) | null;
     building: (NonNullable<BuildingAccessState['cells'][number]['building']> & {
       garden?: { plots: readonly TravelCell[] } | null;
     }) | null;
@@ -37,6 +38,10 @@ export interface TravelRoute {
 }
 
 const key = ({ cellX, cellY }: TravelCell): string => `${cellX}:${cellY}`;
+/** A completed garden is walkable ground; reservations remain obstacles. */
+export function blocksTravelFootprint(footprint: TravelNetworkState['cells'][number]['footprint']): boolean {
+  return !!footprint && !(footprint.buildingType === 'garden' && footprint.state === 'active');
+}
 const wrap = (value: number, size: number): number => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number): number => {
   const direct = value - origin;
@@ -165,7 +170,7 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
   const walk=passageInspector(ground,world);
   const hall = state.cells.find(c=>c.building && (village.townHallBuildingId ? c.building.id===village.townHallBuildingId : c.building.type==='town-hall'));
   const start = hall ? {cellX:hall.cellX,cellY:hall.cellY} : { cellX: village.anchorCellX, cellY: village.anchorCellY };
-  const blocked = new Set(state.cells.filter((cell) => cell.footprint).map(key));
+  const blocked = new Set(state.cells.filter((cell) => blocksTravelFootprint(cell.footprint)).map(key));
   for (const feature of region.features) {
     if (feature.type === 'woodland' && (ground?.woodedCells || feature.deposit?.blocksCell === false || feature.deposit?.cleared)) continue;
     if (feature.type !== 'stone_outcrop' || feature.deposit?.state !== 'depleted') blocked.add(key(feature));
@@ -260,7 +265,7 @@ export function travelDuration(path:readonly TravelCell[],world?:{widthCells:num
 function prepareRefinement(state:TravelNetworkState,ground?:TravelGround,geometry?:ReturnType<typeof navigationGeometry>,walk=passageInspector(ground,state.world)){
  const {surface,curbPixels}=geometry??navigationGeometry(state),world=state.world;
  const roadNodes=[...surface.values()].filter(p=>p.manual&&p.x%2===0&&p.y%2===0).map(p=>({cellX:p.x/2,cellY:p.y/2}));
- const blocked=new Set(state.cells.filter(c=>c.footprint).map(key));
+ const blocked=new Set(state.cells.filter(c=>blocksTravelFootprint(c.footprint)).map(key));
  for(const f of state.region.features)if(!(ground?.woodedCells&&f.type==='woodland')&&f.deposit?.blocksCell!==false&&!f.deposit?.cleared&&f.deposit?.state!=='depleted')blocked.add(key(f));
  const equipmentBins=new Map<string,Array<{x:number;y:number}>>();
  for(const e of state.infrastructure!.equipment){
@@ -286,7 +291,7 @@ function refinementCache(state:TravelNetworkState,ground?:TravelGround):Refineme
  const signature=JSON.stringify([world.id,world.widthCells,world.heightCells,village.anchorCellX,village.anchorCellY,village.townHallBuildingId,
   ground&&[ground.revision,ground.width,ground.height,ground.woodedCells],region.originCellX,region.originCellY,region.width,region.height,region.terrainCodes,
   [...region.features].sort((a,b)=>a.id.localeCompare(b.id)).map(f=>[f.id,f.type,f.cellX,f.cellY,f.deposit?.state,f.deposit?.blocksCell,f.deposit?.cleared]),
-  [...state.cells].sort((a,b)=>a.cellX-b.cellX||a.cellY-b.cellY).map(c=>[c.cellX,c.cellY,c.footprint?.buildingId,Boolean(c.footprint),c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.accesses,c.building.visualLayout]]),
+  [...state.cells].sort((a,b)=>a.cellX-b.cellX||a.cellY-b.cellY).map(c=>[c.cellX,c.cellY,c.footprint?.buildingId,blocksTravelFootprint(c.footprint),c.building&&[c.building.id,c.building.type,c.building.quarterTurns,c.building.accesses,c.building.visualLayout]]),
   state.infrastructure&&[state.infrastructure.roads,state.infrastructure.inheritedRoads,state.infrastructure.inheritedCells,
     [...state.infrastructure.equipment].sort((a,b)=>a.x-b.x||a.y-b.y).map(e=>[e.x,e.y])]]);
  if(signature.length>1048576)return undefined;

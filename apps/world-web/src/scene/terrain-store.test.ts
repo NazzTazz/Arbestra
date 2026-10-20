@@ -26,6 +26,21 @@ function harness(initial:VillageState=state()) {
   return { store, requests, advance, demand, settle };
 }
 describe('terrain cache authority and lifecycle', () => {
+  it('starts a terrain brush from visible cached corners outside the village snapshot without another request',async()=>{
+    const initial=state();initial.world={...initial.world,generationVersion:3,widthCells:512,heightCells:256};
+    const h=harness(initial);h.demand(1);h.advance(100);
+    const heights=Array.from({length:33**2},(_,i)=>.25+(i%33)/4);
+    await h.settle(0,{...chunk(1),rc1:{model:'vertices',stride:33,heights,water:Array(33**2).fill(0),terraces:[]}});
+    expect(h.store.vertexHeight(33,1)).toBe(.5);
+    expect(h.store.vertexHeight(34,1)).toBe(.75);
+    expect(h.store.vertexHeight(33,2)).toBe(.5);
+    expect(h.store.vertexHeight(34,2)).toBe(.75);
+    expect(h.store.vertexHeight(64,1)).toBe(8.25); // retained edge, next chunk absent
+    expect(h.requests).toHaveLength(1);
+    const seam=harness(initial);seam.store.demandChunks([{key:'15:7',chunkX:15,chunkY:7,visible:true,distance:0}]);seam.advance(100);
+    await seam.settle(0,{...chunk(15,7),rc1:{model:'vertices',stride:33,heights,water:Array(33**2).fill(0),terraces:[]}});
+    expect(seam.store.vertexHeight(0,0)).toBe(8.25);expect(seam.requests).toHaveLength(1);
+  });
   it('keeps every cell of a leveling site and refreshes its ground after completion', async () => {
     const initial = state(), site = {id:'site',type:'leveling-site',variantSeed:0,deposit:null};
     initial.region.features = [{...site,cellX:1,cellY:1},{...site,cellX:2,cellY:1}];

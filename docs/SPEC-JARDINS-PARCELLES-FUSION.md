@@ -1,5 +1,9 @@
 # Jardins — récolte par parcelle, fusion et agrandissement tolérant
 
+## Correctif d'accès — 19 octobre 2026
+
+Les emprises de Jardin **actives** sont traversables pour les trajets locaux du village, même si leurs parcelles ne sont pas sélectionnées pour la récolte. Une parcelle centrale dans un bloc de 3 × 3 doit ainsi être accessible directement, sans sélectionner d'abord la périphérie. Traverser une parcelle ne réserve ni ne récolte ses carottes. Les emprises réservées par une construction ou une extension restent bloquantes, ainsi que les obstacles physiques du terrain et des aménagements. La règle est commune au réseau de chemins et à son raffinement dans les workers ; les caches distinguent les emprises actives et réservées. Les missions déjà engagées conservent leur trajet et leur échéance.
+
 ## Amendement validé — tournées de récolte, 2 octobre 2026
 
 Cet amendement remplace les anciennes règles de départ par parcelle ci-dessous. Un geste de sélection multiple crée **une mission avec un seul villageois** au relâchement du pointeur. Il sort de l'hôtel de ville, visite les parcelles dans l'ordre du geste, travaille 60 secondes sur chacune, puis rapporte toute la récolte en un seul retour. Le transport prend une seconde par case sur le réseau de chemins existant, avec passage direct entre les parcelles sélectionnées qui partagent un côté, couture torique incluse. Aucun retour intermédiaire ni crédit anticipé. Un clic simple crée la même mission avec une seule parcelle ; un geste annulé ne lance rien.

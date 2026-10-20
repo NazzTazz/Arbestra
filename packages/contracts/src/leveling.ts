@@ -25,7 +25,7 @@ export const LevelingCommandSchema = Type.Object({
 }, { additionalProperties: false });
 export const LevelingJobSchema = Type.Object({
   id: Type.String({ format: 'uuid' }), featureId: Type.String({ format: 'uuid' }),
-  buildingType: LevelingRequestSchema.properties.buildingType,
+  buildingType: Type.Union([LevelingRequestSchema.properties.buildingType,Type.Literal('terrain')]),
   cells: Type.Array(Cell), height: Type.Number(), workerCount: Type.Integer(),
   path: Type.Array(Point), transportMs: Type.Integer(), startedAt: Type.String({ format: 'date-time' }),
   completesAt: Type.String({ format: 'date-time' }),
