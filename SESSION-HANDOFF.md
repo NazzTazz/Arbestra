@@ -1,8 +1,10 @@
 # Incident alpha Petibonom — 20 octobre 2026, Astra
 
-**Hotfix validé sur le VPS dans un processus isolé ; publication en cours.** Base alpha `14c6bed`, branche dédiée, sans terraformation de staging ni HUD. Deux caches de terrain passent à une éviction FIFO circulaire, capacités et résultats inchangés. [Diagnostic et preuves](docs/INCIDENT-ALPHA-PETIBONOM-2026-10-20.md).
+**Hotfix déployé en alpha ; lecture serveur complète de Petibonom vérifiée, retour navigateur du joueur attendu.** Commit applicatif `6283fb835293b9098730d37df8fdcefd3dca79cc`, tag `alpha-2026.10.20.1`, branche `hotfix/alpha-petibonom-navigation`, base alpha `14c6bed`. Sans terraformation de staging ni HUD. Deux caches de terrain passent à une éviction FIFO circulaire, capacités et résultats inchangés. [Diagnostic et preuves](docs/INCIDENT-ALPHA-PETIBONOM-2026-10-20.md).
 
-Reproduction sur géométrie réelle : 48 019 → 22 057 ms, 131 trajets strictement identiques. 54 tests ciblés, builds contracts/API et lint ciblé terminés avec succès. Le worker local dépasse encore 30 s ; contre-vérification réelle sur VPS, données de Petibonom en lecture seule, limites inchangées : 11 038 ms à froid puis 468 ms. Aucun changement manuel des villages. Ne pas annoncer le rétablissement live avant vérification du déploiement.
+Reproduction sur géométrie réelle : 48 019 → 22 057 ms, 131 trajets strictement identiques. 54 tests ciblés, builds contracts/API et lint ciblé terminés avec succès. Le worker local dépasse encore 30 s ; contre-vérification réelle sur VPS, données de Petibonom en lecture seule, limites inchangées : 11 038 ms à froid puis 468 ms.
+
+[Déploiement terminé](https://github.com/NazzTazz/Arbestra/actions/runs/39472131445), build complet CI et trois services actifs ; [six contrôles publics réussis](https://github.com/NazzTazz/Arbestra/actions/runs/39472485694). Release courante vérifiée sur le VPS. `getVillageState` complet de Petibonom, réveil économique normal inclus, réussi en **11 708 ms**, 131 trajets, 110 habitants. Vérification dans un processus dédié avec les modules déployés, sans session HTTP joueur ni concurrence avec son pool ; pas de parcours navigateur revendiqué. Aucun changement manuel des données. Six récoltes d'un autre village restent en reprises de navigation : sujet distinct ouvert, aucune tâche supprimée. Branche/tag distants vérifiés, staging conservé. Les modifications HUD du worktree principal restent non commitées.
 
 ---
 

@@ -1,6 +1,6 @@
 # Petibonom : chargement interrompu en alpha
 
-Correctif d'urgence du 20 octobre 2026, préparé depuis la release alpha `14c6bed932f373e28f3fc38fd385e1652a3aaabb`. Publication et contrôle du service à consigner après déploiement. La terraformation de staging et le HUD Population/Exploitation ne font pas partie de ce correctif.
+Correctif d'urgence du 20 octobre 2026, préparé depuis la release alpha `14c6bed932f373e28f3fc38fd385e1652a3aaabb`. **Déployé en alpha**, commit `6283fb835293b9098730d37df8fdcefd3dca79cc`, tag `alpha-2026.10.20.1`, branche `hotfix/alpha-petibonom-navigation`. La terraformation de staging et le HUD Population/Exploitation ne font pas partie de ce correctif.
 
 ## Diagnostic et changement
 
@@ -16,14 +16,18 @@ Deux caches bornés évinçaient leur plus ancienne entrée en recréant `Map.ke
 - Calcul réel avant/après sur la même capture : **48 019 → 22 057 ms**, **131 trajets / 7 312 points**, sortie strictement identique. Mesures locales ponctuelles, pas un percentile ni un budget garanti.
 - SHA-256 de l'entrée : `59cabce906aa2cc060a30245b7131176e07c6396715e5f8590b561594cde8b8a` ; sortie avant et après : `abb31b6a6a5014258c0da566f1261493b4fa1b49eabc6a71bd9cb8c81a5d0ac9`.
 - **54 tests réussis**, processus terminé : `network-compute` (15), `rc1-network-ground` (1), `spawn-map` (14), `infrastructure-navigation` (24). Les tests vérifient la géographie après plusieurs tours d'éviction, la réutilisation torique, les passages et le comportement du worker partagé.
-- Builds contracts/API réussis. Les tests de résultat ne sont pas présentés comme des régressions rouges : le dépassement initial est reproduit par la capture et son profil CPU.
+- Builds contracts/API et lint ciblé réussis. Les tests de résultat ne sont pas présentés comme des régressions rouges : le dépassement initial est reproduit par la capture et son profil CPU.
 - Le worker avec les limites de production a encore dépassé 30 s sur le poste Windows. Ce résultat n'est pas écarté ni présenté comme vert.
 - **Contre-vérification sur le VPS**, processus temporaire isolé à priorité réduite, copie des modules compilés et deux correctifs seulement, base en lecture seule : `readVillageProjection` réel de Petibonom, `NavigationCompute` inchangé, **11 038 ms à froid puis 468 ms**, **131 trajets**. Aucun service live remplacé pour cet essai. La copie temporaire est supprimée en fin de diagnostic.
 
 ## Limites et suivi
 
-La projection serveur n'est pas un parcours navigateur du joueur : authentification, réconciliation préalable et chargement des tuiles restent à vérifier après publication. Une seule mesure ne certifie pas la tenue sous charge simultanée.
+[Déploiement alpha réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39472131445), build complet dans le workflow et procédure habituelle de sauvegarde/déploiement, sans nouvelle migration. Répertoire courant vérifié : `6283fb835293b9098730d37df8fdcefd3dca79cc-20261020T180927323459`. Trois services actifs. [Six contrôles publics réussis](https://github.com/NazzTazz/Arbestra/actions/runs/39472485694).
 
-Six notifications de récolte d'un autre village ont également été observées en nombreuses reprises sur erreur de navigation. Elles n'ont été ni supprimées ni modifiées ; surveiller leur évolution après le correctif, car elles partagent le worker. La correction distincte d'accès aux jardins de staging n'est pas incluse dans ce hotfix.
+Sur la release déployée, **`getVillageState` complet réussi en 11 708 ms** pour Petibonom : 3 270 cellules, 131 trajets, 110 habitants. Cette vérification inclut le réveil économique ordinaire du GET joueur et le vrai raffinement worker, sans nouvelle commande ni modification manuelle. Un premier passage avait terminé la lecture mais échoué dans l'affichage du rapport (`population.total` au lieu de `village.population.total`) ; la mesure publiée provient du second passage, terminé avec code 0.
+
+La vérification appelle le service dans un processus dédié, pas via la session HTTP du joueur ni le pool partagé du service live. Le rendu navigateur, le chargement des tuiles et la tenue sous charge simultanée restent à confirmer. Une demande de nouvel essai a été transmise à Tristan pour Number ; aucun retour joueur acquis à cette clôture.
+
+Six notifications de récolte d'un autre village restent en reprises sur erreur de navigation après publication (jusqu'à 611 tentatives observées). Elles n'ont été ni supprimées ni modifiées. Ce sujet reste ouvert, car elles partagent le worker live ; ne pas déclarer toutes les erreurs de navigation résolues. La correction distincte d'accès aux jardins de staging n'est pas incluse dans ce hotfix.
 
 Artefacts de diagnostic locaux ignorés : `test-results/alpha-number-incident/` (capture compressée, profils CPU, sorties et scripts). Ne pas committer la géométrie capturée ni les secrets d'accès.

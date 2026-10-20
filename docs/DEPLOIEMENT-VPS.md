@@ -1,5 +1,7 @@
 # Déploiements natifs OVH : alpha et staging
 
+**20 octobre 2026 — hotfix alpha Petibonom :** release `6283fb8`, tag `alpha-2026.10.20.1`, branche `hotfix/alpha-petibonom-navigation`, issue directement de l'ancienne alpha `14c6bed`. [Déploiement](https://github.com/NazzTazz/Arbestra/actions/runs/39472131445) et [six contrôles publics](https://github.com/NazzTazz/Arbestra/actions/runs/39472485694) réussis. Correction limitée aux caches de terrain, aucune nouvelle migration ni publication du HUD ou de la terraformation de staging. Lecture serveur complète de Petibonom vérifiée en 11,7 s ; retour navigateur joueur attendu. [Rapport et limites](INCIDENT-ALPHA-PETIBONOM-2026-10-20.md).
+
 Deux installations indépendantes partagent le VPS et sa passerelle Caddy existante. Aucune image Docker Arbestra, aucune base dans un conteneur. Les projets déjà présents ne sont pas déplacés. PostgreSQL 17 et Node 24.22.0 tournent sur l'hôte ; le build est effectué sur GitHub, avec pnpm 10.15.1 et le lockfile.
 
 | Environnement GitHub | Lobby | Jeu | NOC | Tag |
