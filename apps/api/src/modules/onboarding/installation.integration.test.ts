@@ -137,7 +137,10 @@ describe('effective RC1 installation on isolated worlds',()=>{
    const at2=performance.now(),second=await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,{...command,commandId:randomUUID(),wood:[],stone:[stones[1]!.featureId]});
    console.info('HARVEST_RECEIPT_TIMINGS',JSON.stringify({firstMs,followingMs:Math.round(performance.now()-at2),transaction:'isolated outer transaction; no final snapshot'}));
    expect(second.accepted).toHaveLength(1);
-   expect(await tx.selectFrom('exploitationOrders').select('id').where('worldId','=',f.id).execute()).toHaveLength(1);
+   expect(await tx.selectFrom('exploitationOrders').select('id').where('worldId','=',f.id).execute()).toHaveLength(0);
+   expect(await tx.selectFrom('extractionPools').select(['resourceCode','siteCount','workerCap']).where('worldId','=',f.id).orderBy('resourceCode').execute()).toEqual([
+     {resourceCode:'stone',siteCount:1,workerCap:5},{resourceCode:'wood',siteCount:1,workerCap:5},
+   ]);
    expect(await tx.selectFrom('extractionWorksites').select('id').where('worldId','=',f.id).execute()).toHaveLength(2);
    expect(await tx.selectFrom('extractionWorksiteTargets').select('featureId').where('worldId','=',f.id).execute()).toHaveLength(3);
    expect(await acceptHarvestIntent(local,accountId,f.slug,installed.villageId,command)).toEqual(first);

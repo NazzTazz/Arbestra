@@ -1,5 +1,6 @@
 import * as terrainVerticesMigration from './migrations/048_terrain_vertices.js';
 import * as freeTerraformingMigration from './migrations/049_free_terraforming.js';
+import * as hudWorkforceMigration from './migrations/050_hud_workforce.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -108,6 +109,7 @@ const migrationProvider: MigrationProvider = {
       '047_leveling': levelingMigration,
       '048_terrain_vertices': terrainVerticesMigration,
       '049_free_terraforming': freeTerraformingMigration,
+      '050_hud_workforce': hudWorkforceMigration,
     };
   },
 };

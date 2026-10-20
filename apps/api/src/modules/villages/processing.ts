@@ -4,7 +4,7 @@ import type { ProcessingCommand, ProcessingOrder, ProcessingPreview } from '@arb
 import {PROCESSING_DURATIONS_SECONDS,PROCESSING_MAX_LOTS,processingLotsForDuration} from '@arbestra/contracts';
 import type { Database, ProcessingOrdersTable } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers } from '../population/work.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
 import { materializeVillageResource } from './economy.js';
 
 export const COMPLETE_PROCESSING_TASK = 'processing.complete';
@@ -23,14 +23,14 @@ async function workshop(tx: Transaction<Database>, ctx: Context, buildingId: str
   return row;
 }
 
-async function readiness(tx: Transaction<Database>, ctx: Context, buildingId: string, workerCount: number, preferredIds?: string[]) {
+async function readiness(tx: Transaction<Database>, ctx: Context, buildingId: string, workerCount: number, preferredIds?: string[], rotationSource?:string) {
   const recipe = await workshop(tx, ctx, buildingId);
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > recipe.workerCap)
     throw new HttpError(409, 'WORKER_CAP', `Cet atelier dispose de ${recipe.workerCap} poste(s).`);
   const durationMs = Math.ceil(recipe.workMs / workerCount);
   const input = await materializeVillageResource(tx, ctx.worldId, ctx.villageId, recipe.inputResource, ctx.through);
   const cohorts = await materializeCohorts(tx, ctx.worldId, ctx.villageId, ctx.through);
-  const workers = eligibleWorkers(cohorts, durationMs).filter(c => !preferredIds || preferredIds.includes(c.id));
+  const workers = eligibleWorkers(cohorts, durationMs).filter(c => (!preferredIds || preferredIds.includes(c.id))&&(!rotationSource||c.avoidWorksiteId!==rotationSource));
   const reason = input < recipe.inputAmount ? 'missing-input' as const
     : workers.reduce((n, c) => n + c.memberCount, 0) < workerCount ? 'missing-workers' as const : null;
   return { recipe, workers, durationMs, reason };
@@ -49,7 +49,7 @@ export async function previewProcessing(tx: Transaction<Database>, ctx: Context,
 }
 
 async function startLot(tx: Transaction<Database>, ctx: Context, order: Order, sameTeam = false) {
-  const ready = await readiness(tx, ctx, order.buildingId, order.workerCount, sameTeam ? order.workerIds : undefined);
+  const ready = await readiness(tx, ctx, order.buildingId, order.workerCount, sameTeam ? order.workerIds : undefined,order.id);
   if (ready.reason) {
     await tx.updateTable('processingOrders').set({ status: 'blocked', blockedReason: ready.reason })
       .where('worldId', '=', ctx.worldId).where('villageId', '=', ctx.villageId).where('id', '=', order.id).execute();
@@ -64,6 +64,7 @@ async function startLot(tx: Transaction<Database>, ctx: Context, order: Order, s
     outputResource: recipe.outputResource, outputAmount: recipe.outputAmount, workerCount: order.workerCount,
     startedAt: ctx.through, completesAt, completedAt: null }).returning('id').executeTakeFirstOrThrow();
   await assignWorkers(tx, ready.workers, order.workerCount, { harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: lot.id });
+  await clearWorksiteRotation(tx,ctx.worldId,ctx.villageId,order.id);
   const team = await tx.selectFrom('populationCohorts').select('id').where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId).where('processingLotId', '=', lot.id).orderBy('id').execute();
   await tx.updateTable('processingOrders').set({ status: 'running', blockedReason: null, workerIds: JSON.stringify(team.map(c => c.id)) })
@@ -146,7 +147,7 @@ export async function completeProcessingAt(tx: Transaction<Database>, ctx: Conte
   await tx.updateTable('processingOrders').set({ completedLots: order.completedLots, status,
     finishedAt: status === 'completed' || status === 'cancelled' ? at : null }).where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId).where('id', '=', order.id).execute();
-  if (status === 'running') await startLot(tx, { ...ctx, through: at }, order, true);
+  if (status === 'running') await startLot(tx, { ...ctx, through: at }, order, !workers.some(c=>c.pendingRelease!==null));
 }
 
 export async function processingSnapshot(tx: Transaction<Database>, ctx: Context): Promise<ProcessingOrder[]> {

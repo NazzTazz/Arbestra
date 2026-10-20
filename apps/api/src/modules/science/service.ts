@@ -7,7 +7,7 @@ import type { ScienceCommand, ScienceState, TravelCell } from '@arbestra/contrac
 import { combinedPeriod, measureRegime, TAU } from '@arbestra/contracts/cosmology';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers, withoutAssignment, energyState } from '../population/work.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers, withoutAssignment, energyState, clearWorksiteRotation } from '../population/work.js';
 import { beginRest, canWorkFor } from '../population/energy.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
 import { normalizeCell } from '../worlds/coordinates.js';
@@ -212,7 +212,7 @@ async function startActivity(tx: Transaction<Database>, economy: VillageEconomy,
     workers: number; durationMs: number; workMs: number; path?: TravelCell[]; surveys?: TravelCell[] }) {
   const cohorts = await materializeCohorts(tx, economy.worldId, economy.villageId, economy.through);
   const eligible = eligibleWorkers(cohorts, input.durationMs).filter(c => input.kind !== 'survey' && input.kind !== 'exploration' || c.cartographer)
-    .filter(c => input.kind !== 'training' || !c.cartographer);
+    .filter(c => (input.kind !== 'training' || !c.cartographer)&&(!input.buildingId||c.avoidWorksiteId!==input.buildingId));
   if (eligible.reduce((n, c) => n + c.memberCount, 0) < input.workers) return false;
   const completesAt = new Date(economy.through.getTime() + input.durationMs);
   const activity = await tx.insertInto('scienceActivities').values({ worldId: economy.worldId, villageId: economy.villageId, accountId,
@@ -220,6 +220,7 @@ async function startActivity(tx: Transaction<Database>, economy: VillageEconomy,
     workMs: input.workMs, startedAt: economy.through, completesAt, completedAt: null, status: 'in-progress',
     pathCells: sql`${JSON.stringify(input.path ?? [])}::jsonb`, surveyCells: sql`${JSON.stringify(input.surveys ?? [])}::jsonb` }).returning('id').executeTakeFirstOrThrow();
   await assignWorkers(tx, eligible, input.workers, { harvestId: null, extractionId: null, scienceActivityId: activity.id });
+  if(input.buildingId)await clearWorksiteRotation(tx,economy.worldId,economy.villageId,input.buildingId);
   await notify(tx, economy, activity.id, completesAt);
   return activity.id;
 }

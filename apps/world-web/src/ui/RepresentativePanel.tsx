@@ -5,9 +5,9 @@ export function RepresentativePanel({person,view,onView,onClose}:{person:Represe
   onView:(mode:'pov'|'follow'|'village')=>void;onClose:()=>void}) {
   return <section className="representative-panel" aria-label="Habitant sélectionné">
     <header><strong>{person.name}</strong><button type="button" onClick={onClose} aria-label="Fermer la fiche de l’habitant">×</button></header>
-    <small>Représentant visuel{person.cohortSize!==null?` · cohorte de ${person.cohortSize}`:''}</small>
+    <small>{person.cohortSize!==null?`${person.cohortSize} habitants`:'Habitant'}</small>
     <dl>
-      <dt>Énergie de la cohorte</dt><dd>{person.energy!==null?`${person.energy} / 10`:'Non renseignée'}</dd>
+      <dt>Énergie</dt><dd>{person.energy!==null?`${person.energy} / 10`:'Non renseignée'}</dd>
       <dt>Qualifications</dt><dd>{person.qualifications.join(' · ')}</dd>
       <dt>Mode</dt><dd>{person.mode}</dd>
       <dt>Destination</dt><dd>{person.destination}</dd>

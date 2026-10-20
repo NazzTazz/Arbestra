@@ -68,7 +68,7 @@ test('fouille le coffre et ouvre le marché, les ateliers et les connaissances d
     }
     await clickBuilding('university');
     const science=page.getByRole('dialog',{name:'Arbre des connaissances'});await expect(science).toBeVisible();await expect(science).toContainText('Mathématiques');
-    await expect(page.locator('.population-toolbar')).toHaveCount(0);
+    await expect(page.getByRole('region',{name:'Population',exact:true})).toHaveCount(0);
     await page.screenshot({path:testInfo.outputPath('free-view-science.png')});
     await touch(science.getByRole('button',{name:'Fermer les connaissances'}));await expect(science).not.toBeVisible();
     await clickBuilding('town-hall');await expect(page.getByRole('region',{name:'Place de marché'})).toBeVisible();

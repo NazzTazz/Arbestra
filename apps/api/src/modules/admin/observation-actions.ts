@@ -24,7 +24,7 @@ export function observationCommitted(request:FastifyRequest){const action=action
 export function observationCommandKind(route:string):string|null{
  if(!route.startsWith('/api/worlds/:worldSlug/villages/:villageId/')||route.endsWith('/preview'))return null;
  const tail=route.split('/:villageId/')[1]!;
- if(/^(buildings(?:\/:buildingId\/(?:upgrade|expansions|harvest|discover-supplies))?|garden-harvests|harvest-intents|market|processing|infrastructure|exploitation|science|population\/(?:feed|rest)|worksites(?:\/:worksiteId)?|features\/:featureId\/(?:extractions|clear))$/.test(tail))return tail;
+ if(/^(buildings(?:\/:buildingId\/(?:upgrade|expansions|harvest|discover-supplies))?|garden-harvests|harvest-intents|extraction-pools|market|processing|infrastructure|exploitation|science|population\/(?:feed|rest|gestures)|worksites(?:\/:worksiteId)?|features\/:featureId\/(?:extractions|clear))$/.test(tail))return tail;
  return null;
 }
 export function instrumentObservationActions(app:FastifyInstance,hub:ObservationHub){

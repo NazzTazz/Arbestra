@@ -239,6 +239,8 @@ export interface VillagePopulationsTable {
 }
 
 export interface PopulationCohortsTable {
+  pendingRelease: ColumnType<'idle'|'resting'|null,'idle'|'resting'|null|undefined,'idle'|'resting'|null>;
+  avoidWorksiteId: ColumnType<string|null,string|null|undefined,string|null>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -293,6 +295,7 @@ export interface DepositExtractionsTable {
 }
 
 export interface ExtractionWorksitesTable {
+  poolResource: ColumnType<'wood'|'stone'|null,'wood'|'stone'|null|undefined,'wood'|'stone'|null>;
   exploitationOrderId: ColumnType<string | null, string | null | undefined, string | null>;
   id: Generated<string>;
   worldId: string;
@@ -401,6 +404,8 @@ export interface SessionsTable {
 }
 
 export interface Database {
+  extractionPools: { worldId:string; villageId:string; resourceCode:'wood'|'stone'; siteCount:number; workerCap:number };
+  hudWorkforceReceipts: { worldId:string; villageId:string; commandId:string; request:JSONColumnType<Record<string,unknown>>; affected:number; carrots:number };
   levelingJobs: {
     id: Generated<string>; worldId: string; villageId: string; featureId: string; commandId: string;
     request: JSONColumnType<import('@arbestra/contracts').LevelingCommand|import('@arbestra/contracts').TerraformCommand>;

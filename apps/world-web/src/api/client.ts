@@ -327,3 +327,15 @@ export async function commandTerraform(slug:string,villageId:string,command:impo
   return result.status==='changed'?result:{status:'started',snapshot:{state:result.state,requestGeneration,
     serverOffsetMs:Date.parse(result.state.serverTime)-(sentAt+receivedAt)/2}};
 }
+
+import { hudWorkforceConfirmationIsValid, type HudWorkforceIntent } from '@arbestra/contracts';
+export type { HudWorkforceIntent } from '@arbestra/contracts';
+export async function commandHudWorkforce(slug:string,villageId:string,intent:HudWorkforceIntent) {
+  const response=await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/${intent.kind==='pool'?'extraction-pools':'population/gestures'}`,{
+    method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(intent.command),signal:AbortSignal.timeout(15000),
+  });
+  const result=await parseResponse<unknown>(response);
+  if(!hudWorkforceConfirmationIsValid(result)||result.commandId!==intent.command.commandId||result.hud.villageId!==villageId)
+    throw Error('Confirmation de geste invalide.');
+  return result;
+}

@@ -5,7 +5,7 @@ import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers } from '../population/work.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
 import { beginRest, canWorkFor } from '../population/energy.js';
 import { normalizeCell, toroidalChebyshev } from '../worlds/coordinates.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
@@ -162,7 +162,8 @@ export async function startStoneExtraction(
   if (amount < 1 || amount > STONE_EXTRACTION_LOT || amount > available) throw new HttpError(409, 'DEPOSIT_FULLY_COMMITTED', 'Lot indisponible.');
   const durationMs = stoneExtractionDuration(workerCount, worksite ? amount : STONE_EXTRACTION_LOT) + transportMs * 2;
   const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
-  const candidates = eligibleWorkers(cohorts, durationMs).filter(c => !worksite?.preferredCohortId || c.id === worksite.preferredCohortId);
+  const candidates = eligibleWorkers(cohorts, durationMs).filter(c => (!worksite?.preferredCohortId || c.id === worksite.preferredCohortId)
+    && (!worksite||c.avoidWorksiteId!==worksite.id));
   if (candidates.reduce((total, cohort) => total + cohort.memberCount, 0) < workerCount)
     throw new HttpError(409, 'WORKERS_UNAVAILABLE', 'Habitants disponibles et reposés insuffisants.');
   const extraction = await tx.insertInto('depositExtractions').values({ worldId: village.worldId, villageId: village.villageId,
@@ -171,6 +172,7 @@ export async function startStoneExtraction(
     workerCount, reservedAmount: amount,
     transportMs, pathCells: sql`${JSON.stringify(path)}::jsonb` }).returning('id').executeTakeFirstOrThrow();
   await assignWorkers(tx, candidates, workerCount, { harvestId: null, extractionId: extraction.id });
+  if(worksite)await clearWorksiteRotation(tx,village.worldId,village.villageId,worksite.id);
   const reserved = await tx.updateTable(deposit.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits').set({ reservedAmount: sql`reserved_amount + ${amount}::bigint`,
     revision: sql`revision + 1`, updatedAt: sql`statement_timestamp()` }).where('worldId', '=', village.worldId)
     .where('featureId', '=', featureId).where(sql<boolean>`remaining_amount - reserved_amount >= ${amount}::bigint`).executeTakeFirst();
@@ -230,7 +232,7 @@ export async function completeStoneExtractionAt(tx: Transaction<Database>, world
       const nextDuration = stoneExtractionDuration(Math.min(site.workerCap, extraction.workerCount), nextAmount)
         + 2 * extraction.transportMs;
       for (const worker of workers) {
-        if (worker.activity === 'resting' || canWorkFor({ energy: worker.energy, progress: worker.energyProgress,
+        if (worker.pendingRelease!==null||worker.activity === 'resting' || canWorkFor({ energy: worker.energy, progress: worker.energyProgress,
           activity: 'idle', restingSince: null, foodUsedSinceRest: worker.foodUsedSinceRest,
           updatedAt: through }, nextDuration)) continue;
         const rest = beginRest({ energy: worker.energy, progress: worker.energyProgress,

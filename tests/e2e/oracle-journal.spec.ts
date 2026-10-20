@@ -128,8 +128,12 @@ test('une action réussie annule l’indice même après rechargement', async ({
   await page.clock.install({ time: origin });
   await enterWorld(page);
   await page.getByRole('button', { name: 'Gérer les habitants' }).click();
-  await page.getByRole('button', { name: 'Envoyer au repos' }).click();
-  await expect(page.getByText('1 habitant(s) au repos', { exact: true })).toBeVisible();
+  const db=createDatabase(testDatabaseUrl());
+  try{await db.updateTable('populationCohorts').set({energy:8,energyUpdatedAt:new Date()}).where('worldId','=',DEVELOPMENT_IDS.world).where('villageId','=',DEVELOPMENT_IDS.village).execute();}
+  finally{await db.destroy();}
+  await page.getByRole('button', { name: /^Disponibles :/ }).click();
+  await page.getByRole('button', { name: 'Au repos : 0 habitants',exact:true }).click();
+  await expect(page.getByRole('button',{name:'Au repos : 10 habitants',exact:true})).toBeVisible();
   await page.reload();
   await expect(page.getByTestId('village-canvas')).toBeVisible();
   await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000));

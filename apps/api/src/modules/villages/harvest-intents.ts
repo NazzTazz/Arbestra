@@ -1,12 +1,13 @@
 ﻿import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-import {sql,type Kysely} from 'kysely';
+import {type Kysely} from 'kysely';
 import type {HarvestIntent,HarvestReceipt,ExploitationRequest} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
 import {HttpError} from '../../errors.js';
 import {ownedVillage,prepareExploitation,prepareWorksiteSelection} from './service.js';
 import {beginVillageEconomy} from './reconcile-economy.js';
-import {createWorksite,WAKE_EXTRACTION_WORKSITE_TASK} from '../deposits/worksites.js';
+import {WAKE_EXTRACTION_WORKSITE_TASK} from '../deposits/worksites.js';
+import {appendPoolTargets} from '../deposits/extraction-pools.js';
 import {readStoneDeposit} from '../deposits/stone-extractions.js';
 import {materializeCohorts} from '../population/work.js';
 import {normalizeCell} from '../worlds/coordinates.js';
@@ -50,32 +51,13 @@ export async function acceptHarvestIntent(db:Kysely<Database>,accountId:string,w
     }
     let orderId:string|null=null;
     if(receipt.accepted.length){
-      // Only automatic orders belong to this tool. Never append to a manual, paused or stopped order.
-      let existing=await tx.selectFrom('exploitationOrders').selectAll().where('worldId','=',village.worldId).where('villageId','=',villageId)
-        .where(eb=>eb.exists(eb.selectFrom('harvestIntents').select('commandId').whereRef('harvestIntents.orderId','=','exploitationOrders.id').where('harvestIntents.worldId','=',village.worldId).where('harvestIntents.villageId','=',villageId)))
-        .where('deadline','is',null).where('gardenStatus','in',command.gardens.length?['completed']:['pending','active','completed'])
-        .where(eb=>eb.exists(eb.selectFrom('extractionWorksites').select('id').whereRef('exploitationOrderId','=','exploitationOrders.id').where('status','=','running')))
-        .where(eb=>eb.not(eb.exists(eb.selectFrom('extractionWorksites').select('id').whereRef('exploitationOrderId','=','exploitationOrders.id').where('status','in',['paused','stopping','stopped']))))
-        .orderBy('confirmedAt','desc').executeTakeFirst();
-      if(existing){
-        const targets=await tx.selectFrom('extractionWorksiteTargets').innerJoin('extractionWorksites','extractionWorksites.id','extractionWorksiteTargets.worksiteId')
-          .select(['featureId','extractionWorksiteTargets.status','resourceCode']).where('extractionWorksites.worldId','=',village.worldId).where('extractionWorksites.villageId','=',villageId).where('exploitationOrderId','=',existing.id).where('extractionWorksites.status','=','running').execute();
-        if((['wood','stone'] as const).some(family=>targets.filter(t=>t.resourceCode===family&&t.status==='pending').length+command[family].length>64||targets.some(t=>command[family].includes(t.featureId))))existing=undefined;
-      }
-      if(existing){
-        orderId=existing.id;
-        await tx.updateTable('exploitationOrders').set({workerCap:cap,...(gardenPlan?{gardenStatus:'pending' as const,gardenPlan:JSON.stringify(gardenPlan)}:{})}).where('id','=',orderId).where('worldId','=',village.worldId).execute();
-      }else{
-        const order=await tx.insertInto('exploitationOrders').values({worldId:village.worldId,villageId,commandId:request.commandId,request:JSON.stringify(command),workerCap:cap,confirmedAt:economy.through,deadline:null,cohortId:null,initialRemaining:0,gardenStatus:gardenPlan?'pending':'completed',gardenPlan:gardenPlan?JSON.stringify(gardenPlan):null,nextWakeAt:null}).returning('id').executeTakeFirstOrThrow();orderId=order.id;
+      if(gardenPlan){
+        const order=await tx.insertInto('exploitationOrders').values({worldId:village.worldId,villageId,commandId:request.commandId,request:JSON.stringify(command),workerCap:cap,confirmedAt:economy.through,deadline:null,cohortId:null,initialRemaining:0,gardenStatus:'pending',gardenPlan:JSON.stringify(gardenPlan),nextWakeAt:null}).returning('id').executeTakeFirstOrThrow();orderId=order.id;
       }
       for(const family of ['wood','stone'] as const)if(command[family].length){
-        const site=await tx.selectFrom('extractionWorksites').select('id').where('worldId','=',village.worldId).where('villageId','=',villageId).where('exploitationOrderId','=',orderId).where('resourceCode','=',family).where('status','=','running').executeTakeFirst();
-        if(site){
-          const last=await tx.selectFrom('extractionWorksiteTargets').select(sql<number>`coalesce(max(ordinal),-1)::integer`.as('ordinal')).where('worldId','=',village.worldId).where('worksiteId','=',site.id).executeTakeFirstOrThrow();
-          await tx.insertInto('extractionWorksiteTargets').values(command[family].map((featureId,i)=>({worldId:village.worldId,villageId,worksiteId:site.id,featureId,ordinal:last.ordinal+i+1,status:'pending' as const,admittedAt:null,thresholdReachedAt:null,completedAt:null,reason:null}))).execute();
-        }else await createWorksite(tx,economy,{commandId:randomUUID(),mode:family==='wood'?'cut':'extract',workerCap:10,featureIds:command[family]},command[family],orderId);
+        await appendPoolTargets(tx,economy,family,command[family]);
       }
-      await tx.insertInto('scheduledTasks').values({worldId:village.worldId,taskType:WAKE_EXTRACTION_WORKSITE_TASK,subjectId:randomUUID(),payload:{exploitationOrderId:orderId},dueAt:economy.through,availableAt:economy.through,completedAt:null,lastError:null}).execute();
+      if(gardenPlan)await tx.insertInto('scheduledTasks').values({worldId:village.worldId,taskType:WAKE_EXTRACTION_WORKSITE_TASK,subjectId:randomUUID(),payload:{exploitationOrderId:orderId},dueAt:economy.through,availableAt:economy.through,completedAt:null,lastError:null}).execute();
     }
     await tx.insertInto('harvestIntents').values({worldId:village.worldId,villageId,commandId:request.commandId,request:JSON.stringify(request),receipt:JSON.stringify(receipt),orderId,createdAt:economy.through}).execute();
     return receipt;

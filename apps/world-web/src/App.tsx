@@ -31,7 +31,7 @@ import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbest
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
-import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, feedPopulation, getStoneDepositDetails, getVillage, restPopulation, type TimedVillageState, type TimedVillageUpdate, type TimedInfrastructureConfirmation, upgradeBuilding } from './api/client';
+import { ApiError, buildBuilding, changeWorksite, discoverOrRefreshSupplies, expandGarden, getStoneDepositDetails, getVillage, type TimedVillageState, type TimedVillageUpdate, type TimedInfrastructureConfirmation, upgradeBuilding } from './api/client';
 import { campusRange, stonemasonRange, cellKey, previewArea, touchesCell, type Cell, type CellRange } from './scene/construction-selection';
 import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
@@ -46,7 +46,8 @@ import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contrac
 import { type GameNotification } from './ui/NotificationStack';
 import { OracleJournal } from './ui/OracleJournal';
 import { useOracleHint } from './ui/useOracleHint';
-import { BuildingPanel, DepositPanel, PopulationPanel, WorksitePanel } from './ui/PlayerPanels';
+import { BuildingPanel, DepositPanel, WorksitePanel } from './ui/PlayerPanels';
+import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
 import { commandScience } from './api/client';
@@ -122,13 +123,11 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
-  const [showPopulation, setShowPopulation] = useState(false);
   const [populationFocus, setPopulationFocus] = useState<string | null>(null);
   const [representativeId,setRepresentativeId]=useState<string|null>(null);
   const [representative,setRepresentative]=useState<RepresentativeInfo|null>(null);
   const [representativeView,setRepresentativeView]=useState<InhabitantCameraMode>('village');
   const [noclip,setNoclip]=useState(false);
-  const [populationFilter, setPopulationFilter] = useState('all');
   const [showJournal, setShowJournal] = useState(false);
   const [showScience, setShowScience] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ScreenAnchor | null>(null);
@@ -146,7 +145,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const showResourceChanges=resourceFeedback.showChanges;
   const notificationId = useRef(0);
   const notificationTimers = useRef<number[]>([]);
-  const [populationCount, setPopulationCount] = useState(1);
   const [depositDetails, setDepositDetails] = useState<DepositDetails | null>(null);
   const terrainRef = useRef<TerrainHandle>(null);
   const [depositLoading, setDepositLoading] = useState(false);
@@ -164,7 +162,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [oracleProvisions, setOracleProvisions] = useState<{ villageKey: string; message: string } | null>(null);
   const catRequest = useRef(false);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
-  const populationIntent = useRef<{ action: 'feed' | 'rest'; count: number; id: string } | null>(null);
 
   const pushNotification = useCallback((message: string, tone: GameNotification['tone'] = 'default') => {
     const id = notificationId.current++;
@@ -436,13 +433,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
   useEffect(() => {
     if (showGardens && gardenSites.length === 1) { setSelectedSiteId(gardenSites[0]!.id); setShowGardens(false); }
   }, [showGardens, gardenSites]);
-  const buildingAssignmentIds = useMemo(() => {
-    if (!selectedBuilding || !state) return [];
-    const garden = selectedBuilding.garden;
-    return [...new Set([garden?.harvest?.id, ...(garden?.plots.map(p => p.harvest?.id) ?? []),
-      ...(state.science?.activities.filter(a => a.buildingId === selectedBuilding.id).map(a => a.id) ?? []),
-      ...(state.village.processingOrders?.filter(o=>o.buildingId===selectedBuilding.id).map(o=>o.currentLot?.id)??[])].filter((id): id is string => !!id))];
-  }, [selectedBuilding, state]);
   const definition = state?.buildingTypes.find((item) => item.code === construction?.type);
   const context = state && selection && construction?.type
     ? constructionContext(state, construction.type, selection.first, selection.last) : null;
@@ -470,7 +460,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   useEffect(() => { shownUpgrade.current = paletteCollapsed ? null : upgrade; });
   useEffect(() => { presentedArea.current = area ? { cells: area.cells, costs, buildingId: extensionId, quarterTurns, houseVariant } : null; });
 
-  function closePanels() { terrainRef.current?.selectRepresentative(null); setRepresentativeId(null);setRepresentative(null);setRepresentativeView('village'); depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowPopulation(false); setShowJournal(false); setShowGardens(false); setMenuAnchor(null); }
+  function closePanels() { terrainRef.current?.selectRepresentative(null); setRepresentativeId(null);setRepresentative(null);setRepresentativeView('village'); depositRequest.current++; setSelectedSiteId(null); setSelectedFeatureId(null); setDepositDetails(null); setShowJournal(false); setShowGardens(false); setMenuAnchor(null); }
   function clearPreview() { terrainRef.current?.cancelGesture(); setHoveredBuildingId(null); shownUpgrade.current = null; presentedArea.current = null; touchOrigin.current = null; setSelection(null); setError(null); }
   function exitConstruction() { setConstruction(null); clearPreview(); }
   async function runAction(action: () => Promise<TimedVillageUpdate>, success?: string, exit = false): Promise<boolean> {
@@ -533,7 +523,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
         event.preventDefault();
         if (exploitationIntentState === 'uncertain' || constructionIntentState === 'uncertain') { setPaletteCollapsed(true); return; }
         if (harvest.hasDraft() || mixedRequest || selection || mixedGesture.current) { cancelWorldGesture(); return; }
-        if (representativeId || selectedSiteId || selectedFeatureId || showPopulation || showJournal || showScience || showWorksites || showGardens) { closePanels(); setShowScience(false); setShowWorksites(false); return; }
+        if (representativeId || selectedSiteId || selectedFeatureId || showJournal || showScience || showWorksites || showGardens) { closePanels(); setShowScience(false); setShowWorksites(false); return; }
         if (modeRef.current === 'construction' && construction?.type) { clearPreview(); setConstruction({ action: construction.action, type: construction.action === 'extend' ? 'garden' : null }); return; }
         setPaletteCollapsed(true);
       }
@@ -664,12 +654,11 @@ export function App({starter}:{starter?:StarterController} = {}) {
     if(beforeTownHall && (mode==='population'||mode==='exploitation'||mode==='terraform'))return;
     if(toggleActive && mode===modeRef.current){toggleHud();return;}
     if (mode !== 'exploitation') setExploitationSettings(current => ({ ...current, woodMode: 'cut' }));
-    cancelDraft(); closePanels(); setShowScience(false); setShowWorksites(false); setPopulationFocus(null); setPopulationFilter('all');
+    cancelDraft(); closePanels(); setShowScience(false); setShowWorksites(false); setPopulationFocus(null);
     if (modeNavigation.current.choose(mode)) { terrainRef.current?.showVillage(); return; }
     modeRef.current = mode; setWorldMode(mode); terrainRef.current?.setWorldMode(mode);
     setPaletteCollapsed(mode==='exploration');
     if (mode === 'construction') {setConstructionDomain('buildings');setConstruction({ action: 'build', type: null });}
-    if (mode === 'population') { setShowPopulation(true); setMenuAnchor(populationAnchor()); }
     if (mode === 'exploitation' && uncertainRequest.current) {
       setMixedRequest(uncertainRequest.current); setMixedUncertain(true); setExploitationIntentState('uncertain');
     }
@@ -679,7 +668,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
     setTerrainView(view); cancelDraft(); closePanels(); setShowScience(false); setShowWorksites(false);
     const mode = modeNavigation.current.changeView(view); modeRef.current = mode; setWorldMode(mode); terrainRef.current?.setWorldMode(mode);
     if (view === 'village' && mode === 'construction') setConstruction({ action: 'build', type: null });
-    if (view === 'village' && mode === 'population') { setShowPopulation(true); setMenuAnchor(populationAnchor()); }
   }
   function collectExploitation(cell: Cell | null, newGesture = false, previewOnly = false) {
     if (paletteCollapsed || modeRef.current !== 'exploitation' || terrainView !== 'village' || arrivalActive || uncertainRequest.current) return;
@@ -852,7 +840,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
     acceptedExploitation.current.delete(key); presentedExploitation.current = null;
     releasedExploitation.current = null; setMixedRequest(request); setMixedPreview(null); setError(null); setExploitationIntentState('error');
   }
-  function runPopulation(action: 'feed' | 'rest') { if (!state || modeRef.current !== 'population' || arrivalActive) return; const intent = populationIntent.current?.action === action && populationIntent.current.count === populationCount ? populationIntent.current : { action, count: populationCount, id: randomUUID() }; populationIntent.current = intent; void runAction(() => action === 'feed' ? feedPopulation(worldSlug, state.village.id, intent.count, intent.id) : restPopulation(worldSlug, state.village.id, intent.count, intent.id), action === 'feed' ? `${intent.count} habitant(s) ont mangé` : `${intent.count} habitant(s) au repos`).then((ok) => { if (ok) populationIntent.current = null; }); }
   async function discoverSupplies(buildingId: string) {
     const currentState = stateRef.current;
     if (actionInFlight.current || !currentState || !['exploitation', 'exploration'].includes(modeRef.current) || arrivalActive) return;
@@ -906,7 +893,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   if (!state) return <WorldLoading worldName={worldLabel} error={error ?? 'Village indisponible.'} onRetry={() => location.reload()} lobbyUrl={LOBBY_URL}/>;
   return <>{observationActive&&<div role="status" style={{position:'fixed',top:8,left:'50%',transform:'translateX(-50%)',zIndex:1000,padding:'8px 16px',background:'#102924ed',color:'#d4fff2',border:'1px solid #7dbbaa',borderRadius:6}}>Assistance : observation administrative active</div>}<main className="game-shell" data-initial-loading={!initialReady} inert={!initialReady} aria-hidden={!initialReady}>
     {initialReady&&!starter&&state.world.generationVersion===3&&<StarterResume slug={worldSlug} villageId={state.village.id}/>}
-    <Suspense fallback={null}><VillageScene onInitialLoad={progress => setInitialProgress({key: sceneKey, progress})} preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter={populationFilter} populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
+    <Suspense fallback={null}><VillageScene onInitialLoad={progress => setInitialProgress({key: sceneKey, progress})} preparing={beforeTownHall} starterGhost={starterActive&&worldMode==='construction'&&!paletteCollapsed?starter!.ghost:null} onStarterManual={starterActive?starter!.onManual:undefined} worldMode={paletteCollapsed ? 'exploration' : worldMode} noclip={noclip} populationFilter="all" populationFocus={state.village.population.cohorts?.find(c => c.id === populationFocus)?.assignmentId ?? populationFocus}
       onEyesFound={() => void discoverEyes()} onArrivalActive={setArrivalActive} state={sceneState??state} serverOffsetMs={serverOffsetMs} terrainRef={terrainRef}
       pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : NO_PENDING_HARVESTS} highlightedSiteIds={highlightedSiteIds}
       constructionMode={!paletteCollapsed && !workshop && (worldMode === 'construction'||worldMode === 'terraform') && terrainView === 'village'} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
@@ -920,7 +907,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
           terrainRef.current?.selectRepresentative(personId);setRepresentativeId(personId);
           setRepresentative(terrainRef.current?.representativeInfo(personId)??null);setMenuAnchor(anchor);return;
         }
-        if (modeRef.current === 'population' && id.startsWith('population:')) { closePanels(); setPopulationFocus(id.slice(11)); setShowPopulation(true); setMenuAnchor(anchor); return; }
+        if (modeRef.current === 'population' && id.startsWith('population:')) { closePanels(); setPopulationFocus(id.slice(11)); setMenuAnchor(anchor); return; }
         if (modeRef.current === 'construction') { useConstructionTarget(id, anchor, inspect); return; }
         if (modeRef.current === 'exploration') {
           const current = stateRef.current;
@@ -930,7 +917,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
           closePanels(); setError(null); setSelectedSiteId(id); setMenuAnchor(anchor);
           setShowScience(building.type === 'university'); return;
         }
-        closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor); if (modeRef.current === 'population') setShowPopulation(true);
+        closePanels(); setSelectedSiteId(id); setMenuAnchor(anchor);
       }} onFeatureSelected={(id, anchor) => {
         if (modeRef.current === 'exploitation') { closePanels(); setError(null); setSelectedFeatureId(id); setMenuAnchor(anchor); }
       }} onCameraMoved={() => {}} onViewChanged={changeView} /></Suspense>
@@ -946,10 +933,6 @@ export function App({starter}:{starter?:StarterController} = {}) {
       onConfirmClear={() => { if (mixedRequest) void submitExploitation(mixedRequest); }}
       onCancelIntent={cancelWorldGesture}
       onRetry={retryExploitation} onRemoveTarget={removeExploitationTarget} /></div>}
-    {worldMode === 'population' && !paletteCollapsed && terrainView === 'village' && <div className="mode-toolbar population-toolbar">
-      <span>Population {state.village.population.total} · Repos {state.village.population.resting} · Disponibles {state.village.population.available} · Affectés {state.village.population.working}</span>
-      <button type="button" onClick={() => { closePanels(); setShowPopulation(true); setMenuAnchor({ x: window.innerWidth / 2, y: window.innerHeight - 280 }); }}>Habitants et cohortes</button>
-      <button type="button" onClick={() => setShowScience(value => !value)}>Arbre des connaissances</button></div>}
     {oracleProvisions?.villageKey === `${state.world.id}:${state.village.id}` && !arrivalActive &&
       <aside className="oracle-provisions-overlay" role="dialog" aria-labelledby="oracle-provisions-title" aria-describedby="oracle-provisions-message">
         <strong id="oracle-provisions-title">L’Oracle</strong>
@@ -966,10 +949,12 @@ export function App({starter}:{starter?:StarterController} = {}) {
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}
       cosmology={cosmologyDebug} onOpen={open => { setShowDev(open); if (open) cancelWorldGesture(); }} onTravelPaths={setShowTravelPaths}
       onRoute={setSelectedRouteId} onCosmology={setCosmologyDebug} onReset={() => { setStatisticsEnabled(false);setNoclip(false);terrainRef.current?.resetCosmology(); setCosmologyDebug(false); setShowTravelPaths(false); setSelectedRouteId(null); }} />
-    {showWorksites && worldMode === 'exploitation' && terrainView === 'village' && <WorksitePanel orders={state.village.exploitationOrders ?? []} serverNow={serverNow} worksites={state.village.worksites} pending={pendingAction} onAction={commandWorksite} />}
+    <WorkforceHud key={`${state.world.id}:${state.village.id}`} state={state} onConfirmed={markOracleProgress}
+      view={paletteCollapsed||terrainView!=='village'||arrivalActive||beforeTownHall||showDev?null:worldMode==='population'?'population':
+        worldMode==='exploitation'&&exploitationCategory==='exploit'?(showWorksites?'pools':harvest.filter==='wood'||harvest.filter==='stone'?harvest.filter:null):null}/>
+    {showWorksites && worldMode === 'exploitation' && terrainView === 'village' && state.village.worksites.some(s=>!s.poolResource&&['running','paused','stopping'].includes(s.status))&&<details className="legacy-worksites"><summary>Autres chantiers</summary><WorksitePanel orders={state.village.exploitationOrders ?? []} serverNow={serverNow} worksites={state.village.worksites.filter(s=>!s.poolResource)} pending={pendingAction} onAction={commandWorksite}/></details>}
     {menuAnchor && showGardens && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><div><strong>Choisir un Jardin</strong>{gardenSites.map((site, index) => <button type="button" key={site.id} onClick={() => { setShowGardens(false); setSelectedSiteId(site.id); }}>Jardin {index + 1} · {site.cellX}, {site.cellY} · {site.building!.garden!.activeCellCount} parcelle(s)</button>)}</div></WorldContextMenu> : null}
     {representative && menuAnchor && worldMode==='population' && <WorldContextMenu anchor={representativeView==='village'?menuAnchor:{x:window.innerWidth-330,y:110}}><RepresentativePanel person={representative} view={representativeView} onView={mode=>terrainRef.current?.representativeCamera(mode)} onClose={closePanels}/></WorldContextMenu>}
-    {menuAnchor && showPopulation && worldMode === 'population' ? <WorldContextMenu anchor={menuAnchor}><PopulationPanel buildingId={selectedBuilding?.id ?? null} assignmentIds={buildingAssignmentIds} focus={populationFocus} onFocus={(id, filter) => { setPopulationFocus(id); setPopulationFilter(filter); }} population={state.village.population} pending={pendingAction} count={populationCount} onCount={(count) => setPopulationCount(Math.max(1, Math.min(state.village.population.available || 1, count || 1)))} onFeed={() => runPopulation('feed')} onRest={() => runPopulation('rest')} />{error ? <p className="error">{error}</p> : null}</WorldContextMenu> : null}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
     {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration') && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={state.village.processingOrders??[]} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={command=>runAction(()=>commandProcessing(worldSlug,state.village.id,command))}/></WorldContextMenu>}
     {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration' && selectedBuilding.type !== 'university') && !state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="exploitation" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {

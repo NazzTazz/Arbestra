@@ -24,6 +24,14 @@ describe('RC1 terrain diagnostic substrate', () => {
     expect(field.sample(99_999 % 512, Math.floor(99_999 / 512))).toBe(recent);
     const refreshed = field.sample(0, 0);
     expect(refreshed).not.toBe(first); expect(refreshed).toEqual(first);
+    // Multiple full turns, including fractional positions, must preserve the
+    // physical geography and canonical reuse across the torus.
+    for (let i = 0; i < 210_000; i++) field.sample((i % 1024) / 2, Math.floor(i / 1024) / 2);
+    for (const [x, y] of [[0, 0], [15.5, 3], [511.5, 255.5]]) {
+      const value = field.sample(x!, y!);
+      expect(value).toEqual({base:.75,elevation:.75,surface:0,depth:0,rock:0});
+      expect(field.sample(x! + 512, y! - 256)).toBe(value);
+    }
   });
   it('keeps indexed collisions identical to direct geometry, including epsilon, long passages and both seams', () => {
     const surfaces = Array.from({ length: 180 }, (_, i) => ({ x: (i * 23.125) % 512, y: (i * 19.3125) % 256, halfWidth: i % 3 ? .03125 : 15.5, halfHeight: i % 5 ? .5 : 4 }));

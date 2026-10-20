@@ -1,6 +1,7 @@
 import {LevelingJobSchema} from './leveling.js';
 import {Rc1FeatureGeometrySchema} from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
+import { ExtractionPoolSchema } from './hud-workforce.js';
 import { ScienceStateSchema } from './science.js';
 import { ExploitationOrderSchema } from './exploitation.js';
 import {InfrastructurePlanSchema} from './infrastructure.js';
@@ -146,6 +147,7 @@ export const ExtractionWorksiteTargetSchema = Type.Object({
   reason: Type.Union([Type.String(), Type.Null()]),
 });
 export const ExtractionWorksiteSchema = Type.Object({
+  poolResource: Type.Optional(Type.Union([Type.Literal('wood'),Type.Literal('stone'),Type.Null()])),
   id: Type.String({ format: 'uuid' }), resourceCode: Type.Union([Type.Literal('stone'), Type.Literal('wood')]),
   mode: Type.Union([Type.Literal('extract'), Type.Literal('cut'), Type.Literal('clear')]),
   status: Type.Union([Type.Literal('running'), Type.Literal('paused'), Type.Literal('stopping'), Type.Literal('stopped'), Type.Literal('completed')]),
@@ -228,6 +230,7 @@ export const VillageStateSchema = Type.Object({
     woodProductionPerHour: Type.Number({ minimum: 0 }),
     woodProductionUpdatedAt: Type.String({ format: 'date-time' }),
     population: Type.Object({
+      pendingRelease: Type.Optional(Type.Object({ idle: Type.Integer({minimum:0}), resting: Type.Integer({minimum:0}) })),
       total: Type.Integer({ minimum: 0 }), housingCapacity: Type.Integer({ minimum: 0 }),
       growth: Type.Optional(Type.Object({target:Type.Integer({minimum:0}),arrivalIntervalMs:Type.Integer({minimum:1}),
         nextArrivalAt:Type.Union([Type.String({format:'date-time'}),Type.Null()])})),
@@ -246,6 +249,7 @@ export const VillageStateSchema = Type.Object({
     accomplishments: Type.Array(VillageAccomplishmentSchema),
     extractions: Type.Array(ExtractionSchema),
     worksites: Type.Array(ExtractionWorksiteSchema),
+    extractionPools: Type.Optional(Type.Array(ExtractionPoolSchema)),
     exploitationOrders: Type.Optional(Type.Array(ExploitationOrderSchema)),
     levelingJobs: Type.Optional(Type.Array(LevelingJobSchema)),
     processingOrders: Type.Optional(Type.Array(ProcessingOrderSchema)),

@@ -19,9 +19,10 @@ test('un repos court rend les habitants disponibles sans attendre cinq heures', 
     await page.getByRole('button', { name: 'Se connecter' }).click();
     await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
     await page.getByRole('button', { name: 'Gérer les habitants' }).click();
-    await page.getByRole('button', { name: 'Envoyer au repos' }).click();
-    await expect(page.getByText('14 disponibles · 0 au travail · 1 au repos')).toBeVisible();
-    await expect(page.getByText('15 disponibles · 0 au travail · 0 au repos')).toBeVisible({ timeout: 25_000 });
+    await page.getByRole('button', { name: 'Disponibles : 15 habitants', exact:true }).click();
+    await page.getByRole('button', { name: 'Au repos : 0 habitants', exact:true }).click();
+    await expect(page.getByRole('button',{name:'Au repos : 10 habitants',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Disponibles : 15 habitants',exact:true})).toBeVisible({ timeout: 25_000 });
     const cohorts = await db.selectFrom('populationCohorts').select(['foodUsedSinceRest']).where('worldId', '=', DEVELOPMENT_IDS.world)
       .where('villageId', '=', DEVELOPMENT_IDS.village).execute();
     expect(cohorts.every((cohort) => cohort.foodUsedSinceRest === 2)).toBe(true);

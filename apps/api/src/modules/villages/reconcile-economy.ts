@@ -64,7 +64,7 @@ export async function beginVillageEconomy(
     .where('extractionWorksiteTargets.villageId', 'in', lockedPeers).where('extractionWorksiteTargets.status', '=', 'pending')
     // A resume command can admit a new lot in this same transaction. Prelock
     // paused targets before that command, in the same order as running ones.
-    .where('extractionWorksites.status', 'in', ['running', 'paused']).execute();
+    .where(eb=>eb.or([eb('extractionWorksites.status','in',['running','paused']),eb('extractionWorksites.poolResource','is not',null)])).execute();
   const depositIds = [...new Set([...dueDeposits.map((row) => row.featureId), ...worksiteTargets.map(row => row.featureId),
     ...targetFeatureIds.map(id => id.toLowerCase()), ...(depositFeatureId ? [depositFeatureId.toLowerCase()] : [])])]
     .sort(); // Canonical UUID strings have the same order as PostgreSQL UUID bytes.

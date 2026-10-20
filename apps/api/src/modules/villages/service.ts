@@ -68,6 +68,7 @@ import { knownGeography } from '../science/knowledge.js';
 import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
 import { startStoneExtraction, stoneDepositDetails, readExtraction,readExtractions, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
 import { admitWorksites, changeWorksite, createWorksite, readWorksites, worksiteTargetDistance } from '../deposits/worksites.js';
+import { readExtractionPools } from '../deposits/extraction-pools.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
 import { commandProcessing, previewProcessing, processingSnapshot } from './processing.js';
 import { commandMarket, previewMarket, marketSnapshot } from './market.js';
@@ -742,6 +743,7 @@ export async function state(
     } satisfies EnergyState, at),
   }));
   const population = {
+    pendingRelease:{idle:cohorts.filter(c=>c.pendingRelease==='idle').reduce((n,c)=>n+c.memberCount,0),resting:cohorts.filter(c=>c.pendingRelease==='resting').reduce((n,c)=>n+c.memberCount,0)},
     total: projectedCohorts.reduce((total, cohort) => total + cohort.memberCount, 0),
     housingCapacity: housingRows.reduce((total, row) => total + housingCapacity(row.buildingType,row.level), 0),
     growth:{target:Math.floor(housingRows.reduce((total,row)=>total+housingCapacity(row.buildingType,row.level),0)/2),
@@ -824,6 +826,7 @@ export async function state(
       accomplishments: accomplishmentRows.map((item) => ({ code: item.code, completedAt: item.completedAt.toISOString() })),
       extractions: extractionRows.map(row=>row.extraction),
       worksites: await readWorksites(tx, village.worldId, village.villageId,extractionRows),
+      extractionPools: await readExtractionPools(tx,village.worldId,village.villageId),
       exploitationOrders: await readExploitationOrders(tx, economy,{gardens:harvestRows,extractions:extractionRows}),
       levelingJobs: await levelingSnapshot(tx, economy),
       processingOrders: await processingSnapshot(tx, economy),

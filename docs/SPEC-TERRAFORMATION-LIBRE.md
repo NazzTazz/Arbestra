@@ -1,6 +1,6 @@
 # Terraformation libre — 19 octobre 2026
 
-Tranche autorisée par Tristan après discussion. Outil recetté positivement par Tristan le 20 octobre, tolérance de durée de 10 % intégrée et vérifiée. **Déployée en staging uniquement** : release `8f31f55`, tag `staging-2026.10.20.1` ; alpha inchangé. Développée depuis `main` / `d30fcfe`, avec le correctif des jardins publié dans la même release. Preuves dans le [handoff](../SESSION-HANDOFF.md). Cette tranche étend le [nivellement](SPEC-NIVELLEMENT-PLACEMENT.md) sur les mondes RC1 à [sommets partagés](SPEC-TERRAIN-SOMMETS-PARTAGES.md), sans convertir les mondes historiques.
+Tranche autorisée par Tristan après discussion. Outil recetté positivement par Tristan le 20 octobre, tolérance de durée de 10 % intégrée et vérifiée. Première publication en staging : release `8f31f55`, tag `staging-2026.10.20.1`. **Tristan demande ensuite sa publication en alpha avec la version courante et le HUD Population accepté**, le 20 octobre ; la restriction initiale à staging est levée. Résultat des déploiements dans le [handoff](../SESSION-HANDOFF.md). Développée depuis `main` / `d30fcfe`, avec le correctif des jardins publié dans la même release. Cette tranche étend le [nivellement](SPEC-NIVELLEMENT-PLACEMENT.md) sur les mondes RC1 à [sommets partagés](SPEC-TERRAIN-SOMMETS-PARTAGES.md), sans convertir les mondes historiques.
 
 ## Décisions validées
 

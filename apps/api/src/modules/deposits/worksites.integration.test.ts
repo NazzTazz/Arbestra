@@ -19,8 +19,8 @@ import { HttpError } from '../../errors.js';
 const url = testDatabaseUrl(), db = createDatabase(url);
 const worldId = DEVELOPMENT_IDS.world, villageId = DEVELOPMENT_IDS.village;
 const abort = new Error('worksite fixture rollback');
-beforeAll(async () => { await migrateToLatest(url); await resetE2eState(url); });
-afterAll(() => db.destroy());
+beforeAll(async () => { await migrateToLatest(url); await resetE2eState(url); },60000);
+afterAll(() => db.destroy(),60000);
 
 async function fixture(run: (tx: Transaction<Database>, featureId: string, t: Date) => Promise<void>) {
   try {
@@ -432,7 +432,7 @@ describe('HTTP worksite contract',()=>{
   app = await buildApp({ databaseUrl: url, host: '127.0.0.1', port: 0, isProduction: false,
     cookieName: 'test_session', sessionTtlDays: 1, constructionDurationOverrideMs: 0,
     scheduledTaskPollIntervalMs: 250 }, db);
-  });
+  },60000);
   afterAll(async()=>{
     await app?.close();
     await resetE2eState(url);
@@ -441,7 +441,7 @@ describe('HTTP worksite contract',()=>{
       await tx.deleteFrom('woodlandDeposits').where('worldId', '=', worldId).where('featureId', '=', featureId).execute();
       await tx.deleteFrom('worldFeatures').where('worldId', '=', worldId).where('id', '=', featureId).execute();
     });
-  });
+  },60000);
   it('serves the authenticated preview and worksite commands through the JSON contract', async () => {
     if(!app)throw Error('HTTP fixture did not start');
     const login = await app.inject({ method: 'POST', url: '/api/auth/login',

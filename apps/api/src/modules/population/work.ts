@@ -16,6 +16,13 @@ export function energyState(cohort: Cohort): EnergyState {
     restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt };
 }
 
+/** A successful replacement departure makes idle former members eligible again.
+ * Source IDs identify an extraction site, processing order or research campus. */
+export async function clearWorksiteRotation(tx:Transaction<Database>,worldId:string,villageId:string,sourceId:string) {
+  await tx.updateTable('populationCohorts').set({avoidWorksiteId:null}).where('worldId','=',worldId).where('villageId','=',villageId)
+    .where('avoidWorksiteId','=',sourceId).where('activity','=','idle').where('pendingRelease','is',null).execute();
+}
+
 export function withoutAssignment(cohort: Pick<Cohort, 'harvestId' | 'extractionId'> & { scienceActivityId?: string | null; processingLotId?: string | null; tradeJourneyId?: string | null; levelingJobId?: string | null }): boolean {
   return cohort.harvestId === null && cohort.extractionId === null && !cohort.scienceActivityId && !cohort.processingLotId && !cohort.tradeJourneyId && !cohort.levelingJobId;
 }
@@ -28,6 +35,7 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
     const energy = advanceEnergy(energyState(cohort), through);
     const values = { energy: energy.energy, energyProgress: energy.progress, activity: energy.activity,
       restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt,
+      avoidWorksiteId:energy.activity==='resting'?null:cohort.avoidWorksiteId,
       restBuildingId:energy.activity==='resting'&&withoutAssignment(cohort)?cohort.restBuildingId:null };
     Object.assign(cohort, values);
   }
@@ -36,12 +44,12 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
   if (cohorts.length) await sql`
     update population_cohorts c set energy=v.energy, energy_progress=v.energy_progress, activity=v.activity,
       resting_since=v.resting_since, food_used_since_rest=v.food_used_since_rest,
-      energy_updated_at=v.energy_updated_at, rest_building_id=v.rest_building_id
+      energy_updated_at=v.energy_updated_at, rest_building_id=v.rest_building_id, avoid_worksite_id=v.avoid_worksite_id
     from jsonb_to_recordset(${JSON.stringify(cohorts.map(c=>({id:c.id,energy:c.energy,energy_progress:c.energyProgress,
       activity:c.activity,resting_since:c.restingSince,food_used_since_rest:c.foodUsedSinceRest,
-      energy_updated_at:c.energyUpdatedAt,rest_building_id:c.restBuildingId})))}::jsonb)
+      energy_updated_at:c.energyUpdatedAt,rest_building_id:c.restBuildingId,avoid_worksite_id:c.avoidWorksiteId})))}::jsonb)
       as v(id uuid,energy integer,energy_progress integer,activity text,resting_since timestamptz,
-        food_used_since_rest integer,energy_updated_at timestamptz,rest_building_id uuid)
+        food_used_since_rest integer,energy_updated_at timestamptz,rest_building_id uuid,avoid_worksite_id uuid)
     where c.world_id=${worldId} and c.village_id=${villageId} and c.id=v.id
   `.execute(tx);
   return allocateRestHousing(tx,worldId,villageId,cohorts);
@@ -83,7 +91,7 @@ export async function assignWorkers(tx: Transaction<Database>, cohorts: Cohort[]
     if (needed === 0) break;
     const memberCount = Math.min(needed, cohort.memberCount);
     if (memberCount === cohort.memberCount) {
-      await tx.updateTable('populationCohorts').set({ activity: 'working', ...assignment })
+      await tx.updateTable('populationCohorts').set({ activity: 'working', avoidWorksiteId:null, pendingRelease:null, ...assignment })
         .where('worldId', '=', cohort.worldId).where('id', '=', cohort.id).execute();
     } else {
       await tx.updateTable('populationCohorts').set({ memberCount: cohort.memberCount - memberCount })
@@ -103,8 +111,10 @@ export async function releaseWorkers(tx: Transaction<Database>, workers: Cohort[
     throw new Error('Workforce conservation invariant failed');
   for (const cohort of workers) {
     const empty = cohort.energy === 0 && cohort.energyProgress === 0;
-    await tx.updateTable('populationCohorts').set({ activity: empty ? 'resting' : 'idle',
-      restingSince: empty ? through : null, harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: null,tradeJourneyId:null,levelingJobId:null,restBuildingId:null })
+    const rest=empty||cohort.pendingRelease==='resting';
+    await tx.updateTable('populationCohorts').set({ activity: rest ? 'resting' : 'idle', pendingRelease:null,
+      avoidWorksiteId:rest?null:cohort.avoidWorksiteId,
+      restingSince: rest ? through : null, harvestId: null, extractionId: null, scienceActivityId: null, processingLotId: null,tradeJourneyId:null,levelingJobId:null,restBuildingId:null })
       .where('worldId', '=', cohort.worldId).where('id', '=', cohort.id).execute();
   }
 }

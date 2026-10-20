@@ -7,6 +7,8 @@ import {ExpeditionReceiptSchema,type ExpeditionIntent} from '@arbestra/contracts
 import {HarvestIntentSchema,HarvestReceiptSchema,type HarvestIntent} from '@arbestra/contracts';
 import {receiveHarvestIntent,readHarvestReceipts} from './harvest-submissions.js';
 import { Type } from '@sinclair/typebox';
+import { ExtractionPoolCommandSchema, PopulationGestureSchema, HudWorkforceConfirmationSchema, type ExtractionPoolCommand, type PopulationGesture } from '@arbestra/contracts';
+import { commandHudWorkforce } from './hud-workforce.js';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
 import {InfrastructureRequestSchema,type InfrastructureRequest,InfrastructurePreviewSchema,InfrastructureConfirmationSchema} from '@arbestra/contracts';
@@ -77,6 +79,23 @@ export async function registerVillageRoutes(
   projections: VillageSyncProjections,
   navigation: TravelNetworkExecutor,
 ): Promise<void> {
+  const hudResponse=HudWorkforceConfirmationSchema;
+  app.post('/api/worlds/:worldSlug/villages/:villageId/extraction-pools',{
+    schema:{params:VillageParametersSchema,body:ExtractionPoolCommandSchema,response:{200:hudResponse}},
+  },async request=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);
+    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    const result=await commandHudWorkforce(db,account.id,worldSlug,villageId,{kind:'pool',command:request.body as ExtractionPoolCommand});
+    observationCommitted(request);return result;
+  });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/population/gestures',{
+    schema:{params:VillageParametersSchema,body:PopulationGestureSchema,response:{200:hudResponse}},
+  },async request=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);
+    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    const result=await commandHudWorkforce(db,account.id,worldSlug,villageId,{kind:'population',command:request.body as PopulationGesture});
+    observationCommitted(request);return result;
+  });
   const commandResponse = async (accountId: string, worldSlug: string,
     result: VillageState | ConstructionCommit, base: VillageSyncBase | undefined) => {
     if ('cells' in result) return result;

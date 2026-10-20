@@ -78,7 +78,8 @@ test('balayage rapide et retour sur ses pas récoltent chaque parcelle une seule
   try {
     await expect.poll(async () => (await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute()).length, { timeout: 20_000 }).toBe(6);
     await page.getByRole('button', { name: 'Gérer les habitants' }).click();
-    await expect(page.getByText('9 disponibles · 6 au travail · 0 au repos')).toBeVisible();
+    await expect(page.getByRole('button',{name:'Disponibles : 9 habitants',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Actifs : 6 habitants',exact:true})).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('garden-sweep.png') });
   } finally { await db.destroy(); }
 });
@@ -262,7 +263,8 @@ test('chaque parcelle se récolte au clavier sans vider sa voisine', async ({ pa
   await expect(page.getByRole('button', { name: /Parcelle 1024, 512 · en cours/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Parcelle 1024, 513 · 12 carottes/ })).toBeVisible();
   await page.getByRole('button', { name: 'Gérer les habitants' }).click();
-  await expect(page.getByText('14 disponibles · 1 au travail · 0 au repos')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Disponibles : 14 habitants',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Actifs : 1 habitant',exact:true})).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('garden-harvest.png') });
   expect(browserErrors).toEqual([]);
 });
