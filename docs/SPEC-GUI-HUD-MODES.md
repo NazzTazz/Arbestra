@@ -1,6 +1,6 @@
 # Population et équipes d’exploitation — 20 octobre 2026
 
-**HUD Population finalisé et accepté par Tristan le 20 octobre ; commit, push et déploiement demandés sur staging et alpha.** La [contre-recette du 20 octobre](CONTRE-RECETTE-HUD-POPULATION-EXPLOITATION-2026-10-20.md) conserve les défauts reproduits avant correction. Le [handoff courant](../SESSION-HANDOFF.md) distingue les preuves fonctionnelles et visuelles, les réserves de chargement RC1 et le résultat réel des publications. La version courante inclut également la terraformation en alpha, selon la confirmation explicite de Tristan.
+**HUD Population finalisé, accepté par Tristan et déployé en staging et alpha le 20 octobre**, release `a32c1fe`, tags `staging-2026.10.20.2` et `alpha-2026.10.20.2`. La [contre-recette du 20 octobre](CONTRE-RECETTE-HUD-POPULATION-EXPLOITATION-2026-10-20.md) conserve les défauts reproduits avant correction. Le [handoff courant](../SESSION-HANDOFF.md) distingue les preuves fonctionnelles et visuelles, les réserves de chargement RC1 et les contrôles de publication. La version courante inclut également la terraformation en alpha, selon la confirmation explicite de Tristan.
 
 ## Décisions validées dans la discussion
 

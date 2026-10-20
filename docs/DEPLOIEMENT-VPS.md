@@ -1,5 +1,9 @@
 # Déploiements natifs OVH : alpha et staging
 
+**20 octobre 2026 — HUD et mise à jour complète des deux environnements :** release `a32c1fe40e02f0a10cb1e11d26fbceab19934469`, tags `staging-2026.10.20.2` et `alpha-2026.10.20.2`. [Déploiement staging](https://github.com/NazzTazz/Arbestra/actions/runs/39489685116), puis [alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39489994869) réussis, builds complets CI compris. HUD Population accepté, gestes et équipes d’exploitation, correctifs de file et de navigation. **La terraformation est désormais publiée en alpha aussi**, sur confirmation explicite de Tristan.
+
+Migration 050 réussie en staging ; 049 puis 050 en alpha. Sauvegardes pré-migration, liens courants et SHA, trois services actifs par environnement, registre des migrations et assets du HUD vérifiés directement sur le VPS en lecture seule. [Six contrôles publics staging](https://github.com/NazzTazz/Arbestra/actions/runs/39489920267) et [six contrôles publics alpha](https://github.com/NazzTazz/Arbestra/actions/runs/39490301816) verts. Aucun seed/reset distant ni changement de configuration. Recette fonctionnelle finale locale : deux parcours navigateur souris/tactile réussis ; pas de nouvelle session joueur authentifiée distante ni de garantie de latence sous charge. Preuves et limites dans le [handoff](../SESSION-HANDOFF.md).
+
 **20 octobre 2026 — hotfix alpha Petibonom :** release `6283fb8`, tag `alpha-2026.10.20.1`, branche `hotfix/alpha-petibonom-navigation`, issue directement de l'ancienne alpha `14c6bed`. [Déploiement](https://github.com/NazzTazz/Arbestra/actions/runs/39472131445) et [six contrôles publics](https://github.com/NazzTazz/Arbestra/actions/runs/39472485694) réussis. Correction limitée aux caches de terrain, aucune nouvelle migration ni publication du HUD ou de la terraformation de staging. Lecture serveur complète de Petibonom vérifiée en 11,7 s ; retour navigateur joueur attendu. [Rapport et limites](INCIDENT-ALPHA-PETIBONOM-2026-10-20.md).
 
 Deux installations indépendantes partagent le VPS et sa passerelle Caddy existante. Aucune image Docker Arbestra, aucune base dans un conteneur. Les projets déjà présents ne sont pas déplacés. PostgreSQL 17 et Node 24.22.0 tournent sur l'hôte ; le build est effectué sur GitHub, avec pnpm 10.15.1 et le lockfile.
@@ -11,7 +15,7 @@ Deux installations indépendantes partagent le VPS et sa passerelle Caddy exista
 
 Les six enregistrements A doivent pointer vers le VPS. Ne pas publier d'AAAA vers une autre machine. Les comptes, mondes, villages et sessions ne sont jamais copiés automatiquement entre les bases.
 
-## Terraformation et jardins — staging uniquement, 20 octobre 2026
+## Terraformation et jardins — première publication en staging, 20 octobre 2026
 
 Release **`8f31f55870a42a51c98848235a7253ec9eceb279` déployée en staging** : tag `staging-2026.10.20.1`, [workflow réussi](https://github.com/NazzTazz/Arbestra/actions/runs/39401794254). Pinceau de terraformation, devis avec tolérance de durée de 10 %, protection des nouvelles fondations sur les flancs et accès aux jardins enclavés. Migration 049 (effectif jusqu’à 50) via la procédure existante de sauvegarde/migration ; trois services actifs et SHA de release confirmés. Aucun seed/reset, conversion de monde ou changement de configuration.
 
