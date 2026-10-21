@@ -34,6 +34,20 @@ export const VillageCommandResponseSchema = Type.Union([
 ]);
 export type VillageCommandResponse = Static<typeof VillageCommandResponseSchema>;
 export const villageCommandResponseIsValid = (value: unknown): value is VillageCommandResponse => Value.Check(VillageCommandResponseSchema, value);
+
+/** Confirmed construction presentation; never a new canonical village revision. */
+export const ConstructionConfirmationSchema = Type.Object({
+  kind: Type.Literal('construction'),
+  commandId: Type.String({ format: 'uuid' }),
+  worldId: Type.String({ format: 'uuid' }), villageId: Type.String({ format: 'uuid' }),
+  commandTime: Type.String({ format: 'date-time' }), serverTime: Type.String({ format: 'date-time' }),
+  minimumRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  cellsMode: Type.Optional(Type.Literal('patch')),
+  cells: VillageStateSchema.properties.cells,
+  resources: VillageStateSchema.properties.village.properties.resources,
+});
+export type ConstructionConfirmation = Static<typeof ConstructionConfirmationSchema>;
+export const constructionConfirmationIsValid = (value: unknown): value is ConstructionConfirmation => Value.Check(ConstructionConfirmationSchema, value);
 type Change = SynchronizationChange;
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);

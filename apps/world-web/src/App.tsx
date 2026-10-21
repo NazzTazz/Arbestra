@@ -8,6 +8,7 @@ import {useHarvestTool} from './ui/use-harvest-tool';
 import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
 import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
 import {acceptInfrastructurePresentation,currentInfrastructurePresentation,infrastructurePresentationState,type InfrastructurePresentation} from './api/infrastructure-presentation';
+import {acceptConstructionPresentation,currentConstructionPresentation,constructionPresentationState} from './api/construction-presentation';
 import {HarvestFeedbackLayer} from './ui/HarvestFeedback';
 import {ExploitationShowroom,type ExploitationCategory} from './ui/ExploitationShowroom';
 import {nearestExploitationTarget,type ExploitationChoice} from './ui/exploitation-navigation';
@@ -27,7 +28,7 @@ import type { InhabitantCameraMode } from './scene/inhabitant-camera';
 import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
 import { discoverCatEyes } from './api/client';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbestra/contracts';
+import type { BuildingType, ConstructionConfirmation, DepositDetails, Garden, VillageState } from '@arbestra/contracts';
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
@@ -94,8 +95,12 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const starterActive=Boolean(starter?.active);
   const [levelingPreview, setLevelingPreview] = useState<import('@arbestra/contracts').LevelingPreview | null>(null);
   const [leveling, setLeveling] = useState<Omit<LevelingRequest, 'workerCount'> | null>(null);
-  const [state, setState] = useState<VillageState | null>(starter?.state??null);
-  const observationActive=useObservationPublisher(starterActive?null:state);
+  const [canonicalState, setState] = useState<VillageState | null>(starter?.state??null);
+  const [constructionPresentation,setConstructionPresentation]=useState<ConstructionConfirmation|null>(null);
+  const constructionPresentationRef=useRef<ConstructionConfirmation|null>(null);
+  const state=useMemo(()=>constructionPresentationState(canonicalState,constructionPresentation),[canonicalState,constructionPresentation]);
+  const resourceServerTime=canonicalState?(currentConstructionPresentation(canonicalState,constructionPresentation)?.serverTime??canonicalState.serverTime):'';
+  const observationActive=useObservationPublisher(starterActive?null:canonicalState);
   const stateRef = useRef<VillageState | null>(starter?.state??null);
   const synchronization = useRef<VillageSynchronization | null>(null);
   const [infrastructurePresentation,setInfrastructurePresentation]=useState<InfrastructurePresentation|null>(null);
@@ -218,6 +223,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
     showResourceChanges(previous,snapshot.state);
     const presentation=currentInfrastructurePresentation(snapshot.state,infrastructurePresentationRef.current);
     if(presentation!==infrastructurePresentationRef.current){infrastructurePresentationRef.current=presentation;setInfrastructurePresentation(presentation);}
+    const confirmed=currentConstructionPresentation(snapshot.state,constructionPresentationRef.current);
+    if(confirmed!==constructionPresentationRef.current){constructionPresentationRef.current=confirmed;setConstructionPresentation(confirmed);}
     stateRef.current = snapshot.state;
     setState(snapshot.state);
     starterRef.current?.onSnapshot(snapshot.state);
@@ -450,7 +457,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const level = extensionId ? state?.cells.find((cell) => cell.building?.id === extensionId)?.building?.level ?? 1 : 1;
   const costs = constructionCosts(definition?.levels.find((item) => item.level === level),houseVariant).map((cost) => ({ ...cost, amount: cost.amount * (spatial ? area?.count ?? 0 : 1) }));
   const serverNow = now + serverOffsetMs;
-  const displayedWood = state ? projectedWood(state.village, state.serverTime, serverNow) : 0;
+  const displayedWood = state ? projectedWood(state.village, resourceServerTime, serverNow) : 0;
   const affordable = costs.every((cost) => cost.amount <= (cost.resourceCode === 'wood' ? displayedWood : state?.village.resources.find((resource) => resource.code === cost.resourceCode)?.amount ?? 0));
   const selectionError = area?.error ?? (area && !affordable ? 'Ressources insuffisantes.' : null);
   const existingGardenCells = extensionId ? state?.cells.filter((cell) => cell.footprint?.buildingId === extensionId && cell.footprint?.state === 'active').length ?? 0 : 0;
@@ -485,7 +492,14 @@ export function App({starter}:{starter?:StarterController} = {}) {
         : command.kind === 'expand'
           ? await expandGarden(command.worldSlug, command.villageId, command.buildingId, command.cells, command.commandId, command.expectedCosts, syncBase)
           : await upgradeBuilding(command.worldSlug, command.villageId, command.buildingId, command.commandId, command.expectedCosts, command.expectedLevel, syncBase);
-      applySnapshot(snapshot); markOracleProgress(); clearPreview();
+      if ('construction' in snapshot) {
+        const current=stateRef.current;
+        if(current){
+          const confirmed=acceptConstructionPresentation(current,constructionPresentationRef.current,snapshot.construction,snapshot.requestGeneration,villageRequestGeneration());
+          constructionPresentationRef.current=confirmed;setConstructionPresentation(confirmed);
+        }
+      } else applySnapshot(snapshot);
+      markOracleProgress(); clearPreview();
       sessionStorage.removeItem(pendingConstructionKey(command.villageId)); constructionCommand.current = null;
       setConstructionIntentState('idle'); pushNotification(command.success);
     } catch (reason) {
@@ -856,7 +870,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     } finally { actionInFlight.current = false; setPendingAction(false); }
   }
   function useConstructionTarget(siteId: string, anchor: ScreenAnchor, inspect = false) {
-    const current = stateRef.current;
+    const current = constructionPresentationState(stateRef.current,constructionPresentationRef.current);
     if (!current || !construction || modeRef.current !== 'construction' || actionInFlight.current || constructionIntentState === 'uncertain') return;
     const site = current.cells.find(cell => cell.id === siteId);
     const building = site?.building ?? (site?.footprint ? current.cells.find(cell => cell.building?.id === site.footprint?.buildingId)?.building : null);
@@ -943,7 +957,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
       <strong>L'Oracle</strong><p>Je cherche mon chat… Vous ne l'auriez pas aperçu ?</p>
       <button type="button" onClick={() => setOracleCat(false)}>Fermer</button>
     </aside>}
-    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} displayedWood={displayedWood} serverOffsetMs={serverOffsetMs} notifications={notifications} resourceFeedback={resourceFeedback.items} onResourceFeedbackEnd={resourceFeedback.dismiss} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
+    <Hud beforeTownHall={beforeTownHall} devOpen={showDev} devActive={noclip||cosmologyDebug||showTravelPaths||showStatistics} onDev={()=>{setShowDev(value=>!value);cancelWorldGesture();}} state={state} resourceServerTime={resourceServerTime} displayedWood={displayedWood} serverOffsetMs={serverOffsetMs} notifications={notifications} resourceFeedback={resourceFeedback.items} onResourceFeedbackEnd={resourceFeedback.dismiss} onPopulation={() => chooseMode('population')} onJournal={() => { closePanels(); setShowJournal(true); setMenuAnchor(populationAnchor()); }} />
 
     {showScience && (worldMode === 'population' || worldMode === 'exploration') && terrainView === 'village' && state.science && <SciencePanel key={selectedBuilding?.type === 'university' ? selectedBuilding.id : 'knowledge'} expeditions={expeditions.entries} target={selectedFeatureId && depositDetails ? depositDetails.deposit : {cellX:state.village.anchorCellX,cellY:state.village.anchorCellY}} science={state.science} villageId={state.village.id} buildingId={selectedBuilding?.type === 'university' ? selectedBuilding.id : null} pending={pendingAction} serverNow={serverNow} error={error} onClose={() => setShowScience(false)} onCommand={command => { if (!['population', 'exploration'].includes(modeRef.current) || arrivalActive) return; if(command.action==='survey'||command.action==='explore'){expeditions.submit(command);return;} void runAction(() => commandScience(worldSlug, state.village.id, command), 'Université · commande prise en compte'); }} />}
     <DevDrawer onFactory={enabled=>void runAction(()=>setFactoryEnabled(worldSlug,enabled,state.village.id))} noclip={noclip} onNoclip={setNoclip} open={showDev} view={terrainView} state={state} showTravelPaths={showTravelPaths} selectedRouteId={selectedRouteId}

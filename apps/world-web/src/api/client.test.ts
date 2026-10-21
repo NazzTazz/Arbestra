@@ -28,7 +28,7 @@ it('refreshes the village after another tab claimed the supplies, without repeat
   const result = await discoverOrRefreshSupplies('aube', 'village', 'hall');
   expect(result).toMatchObject({ alreadyDiscovered: true, snapshot: { state: snapshot } });
   expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(fetchMock.mock.calls[1]).toEqual(['/api/worlds/aube/village', { credentials: 'same-origin' }]);
+  expect(fetchMock.mock.calls[1]).toEqual(['/api/worlds/aube/village', expect.objectContaining({ credentials: 'same-origin' })]);
 });
 
 it('sends the harvest command as JSON and preserves its id for a retry', async () => {
@@ -60,6 +60,18 @@ it('preserves the server refusal code for the deposit menu', async () => {
 });
 
 const syncFixture=async()=>JSON.parse((await import('node:fs')).readFileSync(new URL('../../../../tests/fixtures/village-sync-state.json',import.meta.url),'utf8'));
+it('negotiates a construction confirmation and validates the command and village before acknowledging it',async()=>{
+ const state=await syncFixture(),commandId=crypto.randomUUID();
+ const confirmation={kind:'construction',worldId:state.world.id,villageId:state.village.id,commandId,
+  commandTime:state.serverTime,serverTime:state.serverTime,minimumRevision:2,cells:state.cells,resources:state.village.resources};
+ const fetchMock=vi.fn().mockImplementation(()=>Promise.resolve(new Response(JSON.stringify(confirmation))));vi.stubGlobal('fetch',fetchMock);
+ const send=()=>buildBuilding(state.world.slug,state.village.id,'dwelling',{cellX:66,cellY:64},[{cellX:66,cellY:64}],commandId);
+ expect(await send()).toMatchObject({construction:confirmation});
+ expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({'x-construction-confirmation':'1'});
+ await send();expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
+ confirmation.commandId=crypto.randomUUID();await expect(send()).rejects.toThrow('Confirmation de construction incohérente');
+ confirmation.commandId=commandId;confirmation.villageId=crypto.randomUUID();await expect(send()).rejects.toThrow('Confirmation de construction incohérente');
+});
 it('requests and parses an authoritative construction frame without changing the command payload',async()=>{
  const {villageFrame}=await import('@arbestra/contracts'),state=await syncFixture(),frame=villageFrame(state,{...state,syncRevision:2,village:{...state.village,wood:75}});
  const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({kind:'frame',commandTime:state.serverTime,serverTime:state.serverTime,frame})));vi.stubGlobal('fetch',fetchMock);

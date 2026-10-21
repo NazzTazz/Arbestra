@@ -5,6 +5,7 @@ import { sql, CamelCasePlugin, PostgresDialect, Kysely, type KyselyPlugin, type 
 import pg from 'pg';
 import type { Database } from '../../database/schema.js';
 import { readWorksites } from '../deposits/worksites.js';
+import { NavigationCompute } from '../navigation/compute.js';
 import { readExtraction, readExtractions } from '../deposits/stone-extractions.js';
 import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
 import { prepareInfrastructureEdit, buildingAccesses, applyInfrastructureConfirmation, type InfrastructureConfirmation, type InfrastructureRequest } from '@arbestra/contracts';
@@ -527,6 +528,49 @@ const snapshot = async (server=app) => {
 };
 const headers=(base:VillageState)=>({'x-village-sync':'1','x-village-revision':String(base.syncRevision),'x-village-server-time':base.serverTime});
 const buildPayload=(x:number)=>({commandId:randomUUID(),buildingType:'dwelling',houseVariant:'logs',anchorCellX:x,anchorCellY:64,cells:[{cellX:x,cellY:64}]});
+it('confirms construction and its stock debit even when display navigation is unavailable',async()=>{
+  const base=await snapshot(),payload=buildPayload(67);
+  const navigation=vi.spyOn(NavigationCompute.prototype,'network').mockRejectedValue(new Error('display navigation deliberately unavailable'));
+  try {
+    const send=()=>app.inject({method:'POST',url:`/api/worlds/${slug}/villages/${villageId}/buildings`,
+      cookies:{arbestra_session:token},headers:{...headers(base),'x-construction-confirmation':'1'},payload});
+    const response=await send();
+    expect(response.statusCode,response.body).toBe(201);
+    const confirmation=response.json();
+    expect(confirmation).toMatchObject({kind:'construction',worldId,villageId,commandId:payload.commandId});
+    expect(confirmation.resources.find((r:{code:string})=>r.code==='wood').amount).toBe(base.village.wood-25);
+    const house=confirmation.cells.find((c:{cellX:number;cellY:number})=>c.cellX===67&&c.cellY===64);
+    expect(house).toMatchObject({canBuild:false,building:{type:'dwelling',status:'under-construction'}});
+    expect(confirmation.minimumRevision).toBe(await revision());
+    expect(confirmation).not.toHaveProperty('syncRevision');
+    expect(confirmation).not.toHaveProperty('travelRoutes');
+    const retry=await send();expect(retry.statusCode,retry.body).toBe(201);
+    const amounts=(resources:Array<{code:string;amount:number}>)=>resources.map(({code,amount})=>({code,amount}));
+    expect(amounts(retry.json().resources)).toEqual(amounts(confirmation.resources));
+    expect(retry.json().cells.find((c:{cellX:number;cellY:number})=>c.cellX===67&&c.cellY===64)?.building?.id).toBe(house.building.id);
+    expect(await db.selectFrom('buildingCommandReceipts').select('commandId').where('worldId','=',worldId).where('commandId','=',payload.commandId).execute()).toHaveLength(1);
+    expect(navigation).not.toHaveBeenCalled();
+  }finally{navigation.mockRestore();}
+},60000);
+it('confirms upgrades and garden extensions without display navigation, preserving reserved footprints',async()=>{
+  await db.updateTable('buildings').set({visualLayout:{recipe:'log-house',version:1,quarterTurns:0,entranceFace:'-z',offset:[0,0]}})
+    .where('worldId','=',worldId).where('id','=',houseId).execute();
+  const garden=await constructBuilding(db,accountId,slug,villageId,64,65,'garden',0,randomUUID());
+  const gardenId=garden.cells.find(c=>c.cellX===64&&c.cellY===65)?.building?.id;
+  expect(gardenId).toBeTruthy();
+  const base=await snapshot(),navigation=vi.spyOn(NavigationCompute.prototype,'network').mockRejectedValue(new Error('display navigation unavailable'));
+  try {
+    const upgrade=await app.inject({method:'POST',url:`/api/worlds/${slug}/villages/${villageId}/buildings/${houseId}/upgrade`,
+      cookies:{arbestra_session:token},headers:{...headers(base),'x-construction-confirmation':'1'},payload:{commandId:randomUUID(),expectedLevel:2}});
+    expect(upgrade.statusCode,upgrade.body).toBe(201);
+    expect(upgrade.json().cells.find((c:{building:{id:string}|null})=>c.building?.id===houseId)?.building).toMatchObject({status:'under-construction',targetLevel:2});
+    const extension=await app.inject({method:'POST',url:`/api/worlds/${slug}/villages/${villageId}/buildings/${gardenId}/expansions`,
+      cookies:{arbestra_session:token},headers:{...headers(base),'x-construction-confirmation':'1'},payload:{commandId:randomUUID(),cells:[{cellX:64,cellY:66}]}});
+    expect(extension.statusCode,extension.body).toBe(201);
+    expect(extension.json().cells.find((c:{cellX:number;cellY:number})=>c.cellX===64&&c.cellY===66)).toMatchObject({canBuild:false,footprint:{buildingId:gardenId,state:'reserved'}});
+    expect(navigation).not.toHaveBeenCalled();
+  }finally{navigation.mockRestore();}
+},60000);
 const build=(payload:ReturnType<typeof buildPayload>,base:VillageState,server=app)=>server.inject({method:'POST',url:`/api/worlds/${slug}/villages/${villageId}/buildings`,cookies:{arbestra_session:token},headers:headers(base),payload});
 function applied(base:VillageState,response:VillageCommandResponse){
   expect(response.kind).toBe('frame');if(response.kind!=='frame')throw Error('Expected frame');
@@ -547,14 +591,14 @@ it('deduplicates incremental HTTP and SSE in either order and retries the same c
   expect(next.cells.find(c=>c.cellX===68&&c.cellY===64)?.building?.id).toBe(local.cells.find(c=>c.cellX===68&&c.cellY===64)?.building?.id);
   expect(await db.selectFrom('buildingCommandReceipts').selectAll().where('worldId','=',worldId).where('commandId','=',payload.commandId).execute()).toHaveLength(1);
 });
-it('includes a due unrelated completion and upgrades in the command frame, with a coherent unknown-base fallback',async()=>{
+it('leaves unrelated completion to its handler while retaining upgrade frames and coherent unknown-base fallback',async()=>{
   await constructBuilding(db,accountId,slug,villageId,67,64,'dwelling',600000,randomUUID(),undefined,0,'logs');
   const base=await snapshot();
   const due=await db.selectFrom('worldCellOccupancies').select('buildingId').where('worldId','=',worldId).where('cellX','=',67).where('cellY','=',64).executeTakeFirstOrThrow();
   await db.updateTable('buildings').set({constructionStartedAt:new Date(Date.now()-2000),constructionCompletesAt:new Date(Date.now()-1000)}).where('id','=',due.buildingId!).execute();
   const response=await build(buildPayload(69),base);expect(response.statusCode,response.body).toBe(201);
   const local=applied(base,response.json<VillageCommandResponse>());
-  expect(local.cells.find(c=>c.building?.id===due.buildingId)?.building?.status).toBe('completed');
+  expect(local.cells.find(c=>c.building?.id===due.buildingId)?.building?.status).toBe('under-construction');
   // The exact projection just sent is also a usable transport base.
   const upgrade=await app.inject({method:'POST',url:`/api/worlds/${slug}/villages/${villageId}/buildings/${due.buildingId}/upgrade`,cookies:{arbestra_session:token},headers:headers(local),payload:{commandId:randomUUID(),expectedLevel:2}});
   expect(upgrade.statusCode,upgrade.body).toBe(201);const upgraded=applied(local,upgrade.json<VillageCommandResponse>());
@@ -571,18 +615,21 @@ it('returns an incremental garden extension using the same transactional finaliz
   expect(next.cells.find(c=>c.cellX===64&&c.cellY===66)?.footprint?.buildingId).toBe(id);
   expect(next.village.wood).toBeLessThan(base.village.wood);
 });
-it('releases the village lock before projecting the incremental construction response',async()=>{
+it.each([false,true])('releases the village lock before publishing the construction response (confirmation=%s)',async confirmation=>{
   let armed=false,readOnly=false,gated=false,expired=false,enter!:()=>void,release!:()=>void;
   const entered=new Promise<void>(r=>{enter=r;}),barrier=new Promise<void>(r=>{release=r;}),queries=new Set<QueryId>();
   const plugin:KyselyPlugin={
     transformQuery(args){const text=JSON.stringify(args.node);if(armed&&text.includes('set transaction read only'))readOnly=true;
-      if(armed&&readOnly&&!gated&&text.includes('village_sync_changes')){gated=true;queries.add(args.queryId);}return args.node;},
+      if(armed&&(confirmation||readOnly)&&!gated&&text.includes('village_sync_changes')){gated=true;queries.add(args.queryId);}return args.node;},
     async transformResult(args){if(queries.delete(args.queryId)){enter();await barrier;}return args.result;},
   };
   const server=await buildApp(config,db.withPlugin(plugin));let pending:ReturnType<typeof build>|undefined;
-  const deadline=setTimeout(()=>{expired=true;release();},30000);
+  let deadline:ReturnType<typeof setTimeout>|undefined;
   try{
-    const base=await snapshot(server);armed=true;pending=build(buildPayload(66),base,server);
+    const base=await snapshot(server);armed=true;
+    deadline=setTimeout(()=>{expired=true;release();},30000);
+    pending=confirmation?server.inject({method:'POST',url:`/api/worlds/${slug}/villages/${villageId}/buildings`,cookies:{arbestra_session:token},
+      headers:{...headers(base),'x-construction-confirmation':'1'},payload:buildPayload(66)}):build(buildPayload(66),base,server);
     await Promise.race([entered,pending.then(()=>{throw Error('Response completed without projection barrier');})]);
     expect(expired).toBe(false);
     const stored=await db.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',worldId).where('cellX','=',66).where('cellY','=',64).execute();
@@ -590,6 +637,7 @@ it('releases the village lock before projecting the incremental construction res
     await db.transaction().execute(async tx=>{await sql`set local lock_timeout='1000ms'`.execute(tx);
       await tx.selectFrom('villages').select('id').where('id','=',villageId).forUpdate().executeTakeFirstOrThrow();
       await tx.updateTable('villages').set({name:'Concurrent command while response is projecting'}).where('id','=',villageId).execute();});
+    expect(expired).toBe(false); // The independent writer finished while the response was still held.
   }finally{clearTimeout(deadline);release();try{if(pending){const response=await pending;expect(response.statusCode,response.body).toBe(201);}}finally{await server.close();}}
   expect(gated).toBe(true);expect((await read()).village.name).toBe('Concurrent command while response is projecting');
 });
@@ -598,12 +646,12 @@ it('rolls back observed commit-mode construction writes and the revision on an e
   async function stored(source:Kysely<Database>){const result:Record<string,unknown>={};for(const table of tables)result[table]=await source.selectFrom(table).selectAll().where('worldId','=',worldId).execute();return result;}
   const before=await stored(db),r=await revision(),commandId=randomUUID(),injected=Error('construction commit-mode after observed finalization');let observed=false;
   await expect(db.transaction().execute(async tx=>{
-    const inside={transaction:()=>({execute:<T>(f:(t:Transaction<Database>)=>Promise<T>)=>f(tx)})} as unknown as Kysely<Database>;
+    const inside={transaction:()=>({execute:<T>(f:(t:Transaction<Database>)=>Promise<T>)=>f(tx)}),getExecutor:()=>tx.getExecutor()} as unknown as Kysely<Database>;
     await constructBuildingArea(inside,accountId,slug,villageId,'dwelling',{cellX:62,cellY:65},[{cellX:62,cellY:65}],0,commandId,undefined,0,'logs','commit');
     expect(await tx.selectFrom('buildingCommandReceipts').selectAll().where('worldId','=',worldId).where('commandId','=',commandId).execute()).toHaveLength(1);
     expect(await tx.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',worldId).where('cellX','=',62).where('cellY','=',65).execute()).toHaveLength(1);
     const created=await tx.selectFrom('buildingCommandReceipts').innerJoin('buildings','buildings.id','buildingCommandReceipts.buildingId').select('buildings.status').where('buildingCommandReceipts.commandId','=',commandId).executeTakeFirstOrThrow();
-    expect(created.status).toBe('completed'); // Zero-duration transition finalized at the command bound.
+    expect(created.status).toBe('under-construction'); // Even zero-duration jobs are completed by their handler.
     expect((await villageSyncRevision(tx,worldId)).revision).toBe(r+1);observed=true;throw injected;
   })).rejects.toBe(injected);
   expect(observed).toBe(true);expect(await revision()).toBe(r);expect(await stored(db)).toEqual(before);

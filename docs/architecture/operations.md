@@ -16,6 +16,8 @@ La console utilise les tables et le rôle PostgreSQL existants. Elle ne crée au
 
 ## Lectures et charge
 
+Le correctif de scheduler du 21 octobre, dont le statut de publication figure dans le [rapport d'incident alpha](../INCIDENT-ALPHA-WORKER-2026-10-21.md), calcule le délai de reprise après l'échec et augmente les délais successifs jusqu'à cinq minutes. Une tâche en erreur conserve intention, échéance et compteur ; seules ses propres erreurs différées ralentissent. Ce délai ne déclare pas une destination inaccessible et ne remplace pas la correction de sa navigation.
+
 `AdminReadService` utilise une transaction `REPEATABLE READ` puis `SET TRANSACTION READ ONLY`. Les lectures ne prennent pas les verrous économiques et n’appellent pas les commandes du village. Les bornes SQL sont `statement_timeout=2s`, `lock_timeout=250ms` et `transaction_timeout=4s` ; elles ne constituent pas une garantie de durée HTTP incluant l’attente du pool, l’authentification et le réseau.
 
 Le cache est propre à l’instance : durée 15 s, 128 clés au maximum, une collecte partagée par clé, quatre collectes distinctes simultanées. Au-delà, la réponse est `503 ADMIN_BUSY`. Une collecte échouée ne devient pas un résultat vide réussi. Les listes de mondes, comptes et villages sont limitées à 100 éléments ; les listes d’activités à 50. Les réponses signalent la troncature ; il n’existe pas encore de pagination générale.

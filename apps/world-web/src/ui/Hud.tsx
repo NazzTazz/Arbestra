@@ -6,9 +6,9 @@ import './resource-feedback.css';
 import { usePresentationClock } from './use-presentation-clock';
 import { formatResourceAmount as format, projectedWood } from './resource-counter';
 
-export function Hud({ readOnly=false,beforeTownHall=false, state, displayedWood, serverOffsetMs, notifications, resourceFeedback=[],onResourceFeedbackEnd, onPopulation, onJournal, devOpen, devActive, onDev }: { readOnly?:boolean;beforeTownHall?:boolean; state: VillageState; displayedWood: number; serverOffsetMs?:number; notifications: GameNotification[]; resourceFeedback?:ResourceFeedback[];onResourceFeedbackEnd?:(id:number)=>void; onPopulation: () => void; onJournal: () => void; devOpen:boolean;devActive:boolean;onDev:()=>void }) {
+export function Hud({ readOnly=false,beforeTownHall=false, state, resourceServerTime=state.serverTime, displayedWood, serverOffsetMs, notifications, resourceFeedback=[],onResourceFeedbackEnd, onPopulation, onJournal, devOpen, devActive, onDev }: { readOnly?:boolean;beforeTownHall?:boolean; state: VillageState; resourceServerTime?:string; displayedWood: number; serverOffsetMs?:number; notifications: GameNotification[]; resourceFeedback?:ResourceFeedback[];onResourceFeedbackEnd?:(id:number)=>void; onPopulation: () => void; onJournal: () => void; devOpen:boolean;devActive:boolean;onDev:()=>void }) {
   const now = usePresentationClock(!readOnly && serverOffsetMs !== undefined && state.village.woodProductionPerHour !== 0);
-  const wood = !readOnly && serverOffsetMs !== undefined ? projectedWood(state.village, state.serverTime, now + serverOffsetMs) : displayedWood;
+  const wood = !readOnly && serverOffsetMs !== undefined ? projectedWood(state.village, resourceServerTime, now + serverOffsetMs) : displayedWood;
   const amounts={...hudResourceAmounts(state.village),wood};
   const population = state.village.population;
   return <header className="top-bar">

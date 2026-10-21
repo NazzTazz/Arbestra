@@ -52,11 +52,15 @@ export async function processNextScheduledTask(
     } catch (error) {
       await sql`rollback to savepoint scheduled_task_handler`.execute(transaction);
       await sql`release savepoint scheduled_task_handler`.execute(transaction);
+      // An expensive failure must leave a real cooldown after it finishes.
+      // Persistent failures back off up to five minutes; their intentions and
+      // original deadlines stay intact, and healthy tasks remain eligible.
+      const delayMs = Math.min(300_000, retryDelayMs * 2 ** Math.min(task.attempts, 20));
       await transaction.updateTable('scheduledTasks')
         .set({
           attempts: sql`attempts + 1`,
           lastError: errorMessage(error),
-          availableAt: sql`transaction_timestamp() + (${retryDelayMs} * interval '1 millisecond')`,
+          availableAt: sql`statement_timestamp() + (${delayMs} * interval '1 millisecond')`,
         })
         .where('id', '=', task.id)
         .executeTakeFirstOrThrow();

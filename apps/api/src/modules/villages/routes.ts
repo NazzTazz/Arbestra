@@ -22,8 +22,9 @@ import { commandPlayerMarket, browsePlayerMarket, previewPlayerTrade } from './t
 import type { NavigationExecutor } from '../navigation/compute.js';
 import {GardenSelectionHarvestRequestSchema,type TravelCell} from '@arbestra/contracts';
 import {harvestGardenSelection} from './service.js';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { VillageCommandResponseSchema, type VillageState, type VillageSyncBase } from '@arbestra/contracts';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { ConstructionConfirmationSchema, VillageCommandResponseSchema, type VillageState, type VillageSyncBase } from '@arbestra/contracts';
+import { readConstructionConfirmation } from './service.js';
 import type { ConstructionCommit } from './service.js';
 import type { VillageSyncProjections } from './sync-projections.js';
 import type {TravelNetworkExecutor} from '../navigation/network-job.js';
@@ -59,6 +60,8 @@ const VillageSyncHeadersSchema = Type.Object({
   'x-village-server-time': Type.Optional(Type.String({ format: 'date-time', maxLength: 48 })),
 }, { additionalProperties: true });
 const InfrastructureHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-infrastructure-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
+const ConstructionHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-construction-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
+const ConstructionMutationResponseSchema=Type.Union([ConstructionConfirmationSchema,VillageMutationResponseSchema]);
 const InfrastructureMutationResponseSchema=Type.Union([InfrastructureConfirmationSchema,VillageCommandResponseSchema,VillageStateSchema]);
 function villageReplyOptions(headers: FastifyRequest['headers']) {
   const replyMode = headers['x-village-sync'] === '1' ? 'commit' as const : 'snapshot' as const;
@@ -102,6 +105,15 @@ export async function registerVillageRoutes(
     // Read after COMMIT: reject shared projections started before this command.
     const minimum = (await villageSyncRevision(db, result.worldId)).revision;
     return projections.commandResponse(accountId, worldSlug, result, base, minimum);
+  };
+  const constructionResponse = async (request: FastifyRequest, reply: FastifyReply, accountId: string, worldSlug: string,
+    result: VillageState | ConstructionCommit, base: VillageSyncBase | undefined) => {
+    if (!('cells' in result) && result.commandId && request.headers['x-construction-confirmation'] === '1') {
+      const confirmed = await readConstructionConfirmation(db, accountId, worldSlug, result);
+      reply.serializer(reply.compileSerializationSchema(ConstructionConfirmationSchema, '201'));
+      return confirmed;
+    }
+    return commandResponse(accountId, worldSlug, result, base);
   };
   app.post('/api/worlds/:worldSlug/villages/:villageId/leveling/preview', {
     schema: { params: VillageParametersSchema, body: LevelingRequestSchema, response: {200: LevelingPreviewSchema} },
@@ -249,7 +261,7 @@ export async function registerVillageRoutes(
     schema: {
       params: VillageParametersSchema,
       body: BuildRequestSchema,
-      headers: VillageSyncHeadersSchema, response: { 201: VillageMutationResponseSchema },
+      headers: ConstructionHeadersSchema, response: { 201: ConstructionMutationResponseSchema },
     },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
@@ -273,11 +285,11 @@ export async function registerVillageRoutes(
       body.quarterTurns, body.houseVariant, options.replyMode,
     ) : await constructBuilding(db, account.id, worldSlug, villageId, body.cellX!, body.cellY!, body.buildingType, config.constructionDurationOverrideMs, body.commandId, body.expectedCosts,body.quarterTurns,body.houseVariant,options.replyMode);
     observationCommitted(request);
-    return reply.status(201).send(await commandResponse(account.id, worldSlug, state, options.base));
+    return reply.status(201).send(await constructionResponse(request, reply, account.id, worldSlug, state, options.base));
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/expansions', {
-    schema: { params: BuildingParametersSchema, body: ExpansionRequestSchema, headers: VillageSyncHeadersSchema, response: { 201: VillageMutationResponseSchema } },
+    schema: { params: BuildingParametersSchema, body: ExpansionRequestSchema, headers: ConstructionHeadersSchema, response: { 201: ConstructionMutationResponseSchema } },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const options = villageReplyOptions(request.headers);
@@ -285,14 +297,14 @@ export async function registerVillageRoutes(
     const { cells, commandId, expectedCosts } = request.body as { cells: Array<{ cellX: number; cellY: number }>; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }> };
     const state = await expandGarden(db, account.id, worldSlug, villageId, buildingId, cells, config.constructionDurationOverrideMs, commandId, expectedCosts, options.replyMode);
     observationCommitted(request);
-    return reply.status(201).send(await commandResponse(account.id, worldSlug, state, options.base));
+    return reply.status(201).send(await constructionResponse(request, reply, account.id, worldSlug, state, options.base));
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/upgrade', {
     schema: {
       params: BuildingParametersSchema,
       body: UpgradeRequestSchema,
-      headers: VillageSyncHeadersSchema, response: { 201: VillageMutationResponseSchema },
+      headers: ConstructionHeadersSchema, response: { 201: ConstructionMutationResponseSchema },
     },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
@@ -312,7 +324,7 @@ export async function registerVillageRoutes(
       (request.body as { expectedLevel?: number }).expectedLevel, options.replyMode,
     );
     observationCommitted(request);
-    return reply.status(201).send(await commandResponse(account.id, worldSlug, state, options.base));
+    return reply.status(201).send(await constructionResponse(request, reply, account.id, worldSlug, state, options.base));
   });
 
   app.post('/api/worlds/:worldSlug/villages/:villageId/garden-harvests', {

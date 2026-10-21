@@ -140,7 +140,8 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     expect(state.village.resources.find(r=>r.code==='cut-stone')?.amount).toBe(0);
     expect(building?.status).toBe('under-construction');
     expect(Date.parse(building!.constructionCompletesAt!) - Date.parse(building!.constructionStartedAt!)).toBe(10_000);
-    expect(Math.abs(Date.parse(state.serverTime) - Date.parse(building!.constructionStartedAt!))).toBeLessThan(10);
+    // Legacy full snapshots are captured after commit; the scoped ACK retains H.
+    expect(Date.parse(state.serverTime)).toBeGreaterThanOrEqual(Date.parse(building!.constructionStartedAt!));
     const task = await db.selectFrom('scheduledTasks').selectAll().where('subjectId', '=', building!.id).executeTakeFirstOrThrow();
     expect(task.worldId).toBe(DEVELOPMENT_IDS.world);
     expect(task.dueAt.getTime()).toBe(Date.parse(building!.constructionCompletesAt!));

@@ -15,13 +15,16 @@ const verified = new WeakMap<object, Map<string, string>>();
 const rowVersion = sql<string>`xmin::text || ':' || ctid::text`.as('rowVersion');
 
 /** Only immutable, checksum-verified geography is cached. No local edits live here. */
-export async function readRc1Source(db: Kysely<Database>, worldId: string) {
+export async function readRc1Source(db: Kysely<Database>, worldId: string, captured?: {
+  world: {widthCells:number;heightCells:number;chunkSize:number;seed:string;terrainModel:'terraces'|'vertices'};
+  identity: {checksum:string|null;rowVersion:string}|null;
+}) {
   return devTime('rc1_source', async () => {
-  const world = await db.selectFrom('worlds').select(['widthCells', 'heightCells', 'chunkSize', 'seed', 'terrainModel'])
+  const world = captured?.world ?? await db.selectFrom('worlds').select(['widthCells', 'heightCells', 'chunkSize', 'seed', 'terrainModel'])
     .where('id', '=', worldId).executeTakeFirstOrThrow();
   if (world.widthCells !== RC1_WORLD.widthCells || world.heightCells !== RC1_WORLD.heightCells || world.chunkSize !== RC1_WORLD.chunkSize)
     throw new HttpError(409, 'WORLD_NOT_READY', 'Dimensions RC1 incohérentes.');
-  const identity = await db.selectFrom('worldGenerationCandidates').select(['checksum', rowVersion])
+  const identity = captured ? captured.identity : await db.selectFrom('worldGenerationCandidates').select(['checksum', rowVersion])
     .where('worldId', '=', worldId).executeTakeFirst();
   if (!identity || identity.checksum !== RC1_CANONICAL_CHECKSUM)
     throw new HttpError(409, 'WORLD_NOT_READY', 'Géographie RC1 indisponible.');

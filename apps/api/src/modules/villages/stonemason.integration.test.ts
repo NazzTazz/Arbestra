@@ -52,7 +52,9 @@ it('constructs four occupied cells, debits the price once and preserves the inst
   const {anchor,state:before}=await freeSquare(),commandId=randomUUID();
   const after=await constructBuilding(db,ids.account,'aube',ids.village,anchor.cellX,anchor.cellY,'stonemason',0,commandId);
   const workshop=after.cells.find(c=>c.building?.type==='stonemason')!.building!;
-  expect(workshop.status).toBe('completed');expect(after.cells.filter(c=>c.footprint?.buildingId===workshop.id)).toHaveLength(4);
+  expect(workshop.status).toBe('under-construction');expect(after.cells.filter(c=>c.footprint?.buildingId===workshop.id)).toHaveLength(4);
+  const settled=await getVillageState(db,ids.account,'aube',ids.village);
+  expect(settled.cells.find(c=>c.building?.id===workshop.id)?.building?.status).toBe('completed');
   expect(after.village.wood).toBe(before.village.wood-50);expect(after.village.resources.find(r=>r.code==='stone')!.amount).toBe(75);
   expect(after.buildingTypes.find(b=>b.code==='stonemason')).toMatchObject({buildable:true,productionMode:'processing'});
   const replay=await constructBuilding(db,ids.account,'aube',ids.village,anchor.cellX,anchor.cellY,'stonemason',0,commandId);

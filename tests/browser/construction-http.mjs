@@ -3,7 +3,7 @@
 /* global window,console,process,MessageEvent,EventTarget,URL,structuredClone */
 import { chromium, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { villageFrame } from '../../packages/contracts/dist/index.js';
+import { villageFrame, constructionConfirmationIsValid } from '../../packages/contracts/dist/index.js';
 const url=new URL(process.env.RC1_BROWSER_URL??'http://localhost:5279/');
 if(url.hostname!=='localhost')throw Error('Local construction fixture only');
 const initial=JSON.parse(readFileSync('tests/fixtures/village-sync-state.json','utf8'));
@@ -21,6 +21,8 @@ try{
  emit(type,data){this.dispatchEvent(new MessageEvent(type,{data:JSON.stringify(data)}));}};});
  await page.route('**/api/**',async route=>{
   const request=route.request(),parsed=new URL(request.url()),path=parsed.pathname;
+  if(!path.startsWith('/api/'))return route.continue();
+  if(path.endsWith('/observation/status'))return route.fulfill({json:{active:false}});
   if(path.endsWith('/village')){reads++;return route.fulfill({json:initial});}
   if(path.endsWith('/terrain')||path.endsWith('/terrain/updates')){
    const chunks=(parsed.searchParams.get('chunks')??'').split(';').filter(Boolean).map(item=>{const [chunkX,chunkY]=item.split(',').map(Number);
@@ -36,7 +38,12 @@ try{
    after.village.wood-=25;after.village.resources[0].amount-=25;
    Object.assign(after.cells[2],{canBuild:false,footprint:{buildingId:'55555555-5555-4555-8555-555555555555',buildingType:'dwelling',role:'anchor',state:'reserved'},
     building:{...after.cells[1].building,id:'55555555-5555-4555-8555-555555555555',visualLayout:{recipe:'log-house',version:1,quarterTurns:0,entranceFace:'-z',offset:[0,0]}}});
-   frame=villageFrame(initial,after);return route.fulfill({json:{kind:'frame',commandId:accepted.commandId,commandTime:after.serverTime,serverTime:after.serverTime,frame}});
+   expect(request.headers()['x-construction-confirmation']).toBe('1');
+   frame=villageFrame(initial,after);
+   const confirmation={kind:'construction',worldId:after.world.id,villageId:after.village.id,commandId:accepted.commandId,
+    commandTime:after.serverTime,serverTime:after.serverTime,minimumRevision:after.syncRevision,cellsMode:'patch',cells:[after.cells[2]],resources:after.village.resources};
+   expect(constructionConfirmationIsValid(confirmation)).toBe(true);
+   return route.fulfill({json:confirmation});
   }
   if(request.method()!=='GET')throw Error('Unexpected mutation '+path);
   return route.fulfill({json:{}});
@@ -58,6 +65,14 @@ try{
  const current=await canvas.evaluate(c=>({same:c===window.__canvas,camera:c.dataset.camera,meshes:JSON.parse(c.dataset.buildingMeshIds),generations:Number(c.dataset.buildingGenerationCount)}));
  expect(current.same).toBe(true);expect(current.camera).toBe(before.camera);expect(current.generations-before.generations).toBe(1);
  for(const item of initial.cells.filter(c=>c.building))expect(current.meshes[item.building.id]).toBe(before.meshes[item.building.id]);
+ // A full projection captured before COMMIT must not erase the confirmed house.
+ await page.evaluate(s=>window.__sources[0].emit('snapshot',s),{...initial,serverTime:'2026-10-10T18:00:00.500Z'});
+ await expect(canvas).toHaveAttribute('data-building-count','3');
+ await page.getByRole('button',{name:'Vue libre',exact:true}).click();
+ await page.getByRole('button',{name:'Vue libre',exact:true}).click();
+ await page.getByRole('button',{name:'Constructions',exact:true}).click();
+ await expect(canvas).toHaveAttribute('data-building-count','3');
+ expect(posts).toBe(1);
  await page.evaluate(f=>window.__sources[0].emit('frame',f),frame);
  await expect(canvas).toHaveAttribute('data-building-generation-count',String(current.generations));
  await page.evaluate(f=>window.__sources[0].emit('frame',f),{...frame,fromRevision:4,toRevision:5});
@@ -69,5 +84,5 @@ try{
  await expect(canvas).toHaveAttribute('data-under-construction-count','1');
  await page.waitForTimeout(300);expect(reads).toBe(1);expect(errors).toEqual([]);
  await page.screenshot({path:'test-results/construction-http-render.png'});
- console.log('CONSTRUCTION_HTTP_RENDER',JSON.stringify({posts,reads,addedMeshes:1,unchangedMeshes:true,cameraRetained:true,httpSseDuplicateIgnored:true,gapRecovered:true}));
+ console.log('CONSTRUCTION_HTTP_RENDER',JSON.stringify({posts,reads,confirmedBeforeSse:true,staleSseRetained:true,modeSwitchRetained:true,addedMeshes:1,unchangedMeshes:true,cameraRetained:true,httpSseDuplicateIgnored:true,gapRecovered:true}));
 }finally{if(errors.length)console.error(errors);await browser.close();}

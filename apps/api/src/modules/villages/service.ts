@@ -1,3 +1,4 @@
+import {placeBuilding} from './construction.js';
 import {levelingSnapshot} from './leveling.js';
 import {villageTerrainRegion} from './terrain-region.js';
 import {footprintVertices,isBuildingFootprintFlat} from '@arbestra/contracts';
@@ -484,7 +485,7 @@ async function finalizeVillageEconomy(tx: Transaction<Database>, economy: Villag
   });
 }
 export type ConstructionReplyMode = 'snapshot' | 'commit';
-export interface ConstructionCommit { worldId: string; villageId: string; through: Date; commandId?: string }
+export interface ConstructionCommit { worldId: string; villageId: string; through: Date; commandId?: string; confirmation?:import('@arbestra/contracts').ConstructionConfirmation }
 export type ConstructionResult<Mode extends ConstructionReplyMode> = Mode extends 'commit' ? ConstructionCommit : VillageState;
 export async function villageCommandResult<Mode extends ConstructionReplyMode>(tx: Transaction<Database>, accountId: string,
   worldSlug: string, village: OwnedVillage, economy: VillageEconomy, mode: Mode, commandId?: string): Promise<ConstructionResult<Mode>> {
@@ -537,6 +538,18 @@ export async function readVillageProjection(db: Kysely<Database>, accountId: str
   if(!projected)throw Error('Missing village projection');
   projected.travelRoutes.unshift(...routes); // Committed woodland paths were captured with the snapshot.
   return projected;
+}
+
+/** Post-commit scoped response. Reuse authoritative cells/stocks without display routing. */
+export async function readConstructionConfirmation(db: Kysely<Database>, accountId: string, worldSlug: string,
+  commit: ConstructionCommit): Promise<import('@arbestra/contracts').ConstructionConfirmation> {
+  if (commit.confirmation) return commit.confirmation;
+  if (!commit.commandId) throw Error('Construction confirmation requires an idempotent command');
+  const projected = await withVillageProjection(db, accountId, worldSlug, commit.villageId, (tx, economy, village) =>
+    state(tx, accountId, worldSlug, economy, false, true, 'construction', village));
+  return { kind: 'construction', commandId: commit.commandId, worldId: commit.worldId, villageId: commit.villageId,
+    commandTime: commit.through.toISOString(), serverTime: projected.serverTime, minimumRevision: projected.syncRevision!,
+    cells: projected.cells, resources: projected.village.resources };
 }
 
 /** The same persisted footprints and garden components serve projection and road validation. */
@@ -678,7 +691,7 @@ export async function state(
   existingEconomy?: VillageEconomy,
   admit = true,
   readOnly = false,
-  deferNavigation?: 'observation' | ((input:NetworkJob['state'],ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined)=>void),
+  deferNavigation?: 'observation' | 'construction' | ((input:NetworkJob['state'],ground:Awaited<ReturnType<typeof readRc1Ground>>|undefined)=>void),
   projectionVillage?:OwnedVillage,
 ): Promise<VillageState> {
   return devTime('snapshot', async () => {
@@ -960,7 +973,7 @@ export async function state(
   };
   villageState.infrastructure=await devTime('infrastructure',()=>readInfrastructure(tx,village.worldId,village.villageId));
   villageState.factoryEnabled=await factoryCapability(tx,village.worldId);
-  if(deferNavigation==='observation') villageState.travelRoutes=[];
+  if(deferNavigation==='observation'||deferNavigation==='construction') villageState.travelRoutes=[];
   else {
     const navigationInfrastructure = await devTime('infrastructure',()=>readNavigationInfrastructure(tx,village,villageState.infrastructure));
     if(deferNavigation){deferNavigation(networkState({...villageState,infrastructure:navigationInfrastructure}),ground.rc1);villageState.travelRoutes=[];}
@@ -1308,181 +1321,29 @@ async function finishBuildingCommand(tx: Transaction<Database>, village: OwnedVi
     .where('villageId', '=', village.villageId).where('commandId', '=', commandId).execute();
 }
 
-export async function constructBuilding<Mode extends ConstructionReplyMode = 'snapshot'>(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  cellX: number,
-  cellY: number,
-  buildingType: BuildingType,
-  durationOverride: number | null,
-  commandId?: string,
-  expectedCosts?: ExpectedCost[],
-  quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
-  replyMode: Mode = 'snapshot' as Mode,
-): Promise<ConstructionResult<Mode>> {
-  if (buildingType === 'university' || buildingType === 'stonemason') {
-    return constructBuildingArea(db,accountId,worldSlug,villageId,buildingType,{cellX,cellY},fixedBuildingFootprint(buildingType,{cellX,cellY},quarterTurns),durationOverride,commandId,expectedCosts,quarterTurns,houseVariant,replyMode);
-  }
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    if (village.villageId !== villageId)
-      throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const x = normalizeCell(cellX, village.widthCells);
-    const y = normalizeCell(cellY, village.heightCells);
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [{ cellX: normalizeCell(cellX, village.widthCells), cellY: normalizeCell(cellY, village.heightCells) }],[],true);
-    const at = economy.through;
-    const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, cellX: x, cellY: y, expectedCosts: canonicalCosts(expectedCosts) };
-    if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
-    const item = await definition(tx, buildingType, 1, houseVariant);
-    if (!item.buildable)
-      throw new HttpError(
-        409,
-        'BUILDING_NOT_BUILDABLE',
-        'Ce bâtiment ne peut pas être construit directement.',
-      );
-    if (item.instanceLimitPerVillage !== null) {
-      await sql`select pg_advisory_xact_lock(hashtextextended(${`${village.worldId}:${village.villageId}:${buildingType}`}, 0))`.execute(
-        tx,
-      );
-      const count = await tx
-        .selectFrom('buildings')
-        .select(sql<number>`count(*)::integer`.as('count'))
-        .where('worldId', '=', village.worldId)
-        .where('villageId', '=', village.villageId)
-        .where('buildingType', '=', buildingType)
-        .executeTakeFirstOrThrow();
-      if (count.count >= item.instanceLimitPerVillage)
-        throw new HttpError(
-          409,
-          'BUILDING_LIMIT_REACHED',
-          'Limite atteinte pour ce bâtiment.',
-        );
-    }
-    const ground=await assertBuildable(tx, village, x, y);
-    if(item.code!=='garden')assertFlatVertexFoundation(ground,[{cellX:x,cellY:y}],village);
-    assertAcceptedCosts(item.costs, expectedCosts);
-    await debit(tx, village.worldId, village.villageId, item.costs, at);
-    const completesAt = new Date(
-      at.getTime() +
-        (durationOverride ?? item.constructionDurationSeconds * 1_000),
-    );
-    const building = await tx
-      .insertInto('buildings')
-      .values({
-        worldId: village.worldId,
-        villageId: village.villageId,
-        buildingType,
-        level: 1,
-        targetLevel: null,
-        status: 'under-construction',
-        constructionStartedAt: at,
-        constructionCompletesAt: completesAt,
-        completedAt: null,
-        quarterTurns, visualLayout: buildingType === 'dwelling' ? {recipe:houseVariant==='logs'?'log-house':houseVariant==='beams'?'beam-house':'stone-house',version:1,quarterTurns,entranceFace:'-z',offset:[0,0]} : null,
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    await reserve(tx, village.worldId, x, y, building.id, 'anchor');
-    if (item.productionMode === 'buffered')
-      await tx
-        .insertInto('buildingResourceBuffers')
-        .values(
-          item.production.map((production) => ({
-            worldId: village.worldId,
-            villageId: village.villageId,
-            buildingId: building.id,
-            resourceCode: production.resourceCode,
-            storedAmount: 0,
-            remainder: 0,
-            productionUpdatedAt: completesAt,
-          })),
-        )
-        .execute();
-    await tx
-      .insertInto('scheduledTasks')
-      .values({
-        worldId: village.worldId,
-        taskType: COMPLETE_CONSTRUCTION_TASK,
-        subjectId: building.id,
-        payload: {},
-        dueAt: completesAt,
-        availableAt: completesAt,
-        lastError: null,
-        completedAt: null,
-      })
-      .execute();
-    await finishBuildingCommand(tx, village, commandId, building.id);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
-  });
+/** Compatibility adapters share the bounded placement command. Only explicit
+ * snapshot callers request the complete read-only presentation afterwards. */
+async function placementResult<Mode extends ConstructionReplyMode>(db:Kysely<Database>,accountId:string,worldSlug:string,
+  confirmed:import('@arbestra/contracts').ConstructionConfirmation,mode:Mode):Promise<ConstructionResult<Mode>> {
+  if(mode==='snapshot')return await readVillageProjection(db,accountId,worldSlug,confirmed.villageId) as ConstructionResult<Mode>;
+  return {worldId:confirmed.worldId,villageId:confirmed.villageId,through:new Date(confirmed.commandTime),
+    commandId:confirmed.commandId,confirmation:confirmed} as ConstructionResult<Mode>;
 }
-/** Construct a spatial building in one atomic selection. Non-spatial buildings
- * are deliberately kept on the existing single-cell command path. */
+export async function constructBuilding<Mode extends ConstructionReplyMode = 'snapshot'>(
+  db:Kysely<Database>,accountId:string,worldSlug:string,villageId:string,cellX:number,cellY:number,buildingType:BuildingType,
+  durationOverride:number|null,commandId?:string,expectedCosts?:ExpectedCost[],quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone',replyMode:Mode='snapshot' as Mode,
+):Promise<ConstructionResult<Mode>> {
+  const fixed=buildingType==='university'||buildingType==='stonemason';
+  const confirmed=await placeBuilding(db,accountId,worldSlug,villageId,{buildingType,anchor:{cellX,cellY},
+    cells:fixed?fixedBuildingFootprint(buildingType,{cellX,cellY},quarterTurns):[{cellX,cellY}],commandId,expectedCosts,quarterTurns,houseVariant,legacy:!fixed},durationOverride);
+  return placementResult(db,accountId,worldSlug,confirmed,replyMode);
+}
 export async function constructBuildingArea<Mode extends ConstructionReplyMode = 'snapshot'>(
-  db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
-  buildingType: BuildingType, anchor: SpatialCell, rawCells: SpatialCell[], durationOverride: number | null,
-  commandId?: string, expectedCosts?: ExpectedCost[], quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
-  replyMode: Mode = 'snapshot' as Mode,
-): Promise<ConstructionResult<Mode>> {
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells).cells,[],true);
-    const at = economy.through;
-    const selection = normalizeSpatialSelection(anchor, rawCells, village.widthCells, village.heightCells);
-    const commandRequest = { ...(houseVariant!=='stone'?{houseVariant}:{}), quarterTurns, buildingType, anchor: selection.anchor, cells: selection.cells, expectedCosts: canonicalCosts(expectedCosts) };
-    if (await claimBuildingCommand(tx, village, commandId, 'construct', commandRequest)) return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
-    const item = await definition(tx, buildingType, 1, houseVariant);
-    if (!item.buildable) throw new HttpError(409, 'BUILDING_NOT_BUILDABLE', 'Ce bâtiment ne peut pas être construit directement.');
-    if (item.code === 'university') {
-      const expected=new Set(fixedBuildingFootprint('university',anchor,quarterTurns,village).map(c=>worldCellKey(c.cellX,c.cellY)));
-      if (selection.cells.length !== 30 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX, c.cellY))))
-        throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'L’Université occupe 5 × 6 cases autour de son ancre.');
-      const ground = await snapshot(tx, village);
-      const heights = footprintHeights(ground,selection.cells,village);
-      if (!isBuildingFootprintFlat(heights))
-        throw new HttpError(409, 'UNEVEN_TERRAIN', 'L’Université demande une emprise plane.');
-    } else if (item.code === 'stonemason') {
-      const expected=new Set(fixedBuildingFootprint('stonemason',anchor,quarterTurns,village).map(c=>worldCellKey(c.cellX,c.cellY)));
-      if (selection.cells.length !== 4 || selection.cells.some(c => !expected.has(worldCellKey(c.cellX,c.cellY))))
-        throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Le tailleur occupe 2 × 2 cases.');
-      const ground = await snapshot(tx, village);
-      const heights = footprintHeights(ground,selection.cells,village);
-      if (!isBuildingFootprintFlat(heights))
-        throw new HttpError(409, 'UNEVEN_TERRAIN', 'Le tailleur demande une emprise plane.');
-    } else if (item.code !== 'garden' && selection.cells.length !== 1)
-      throw new HttpError(400, 'INVALID_BUILDING_FOOTPRINT', 'Ce bâtiment occupe exactement une case.');
-    if (item.instanceLimitPerVillage !== null) {
-      await sql`select pg_advisory_xact_lock(hashtextextended(${`${village.worldId}:${village.villageId}:${buildingType}`}, 0))`.execute(tx);
-      const count = await tx.selectFrom('buildings').select(sql<number>`count(*)::integer`.as('count'))
-        .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId)
-        .where('buildingType', '=', buildingType).executeTakeFirstOrThrow();
-      if (count.count >= item.instanceLimitPerVillage) throw new HttpError(409, 'BUILDING_LIMIT_REACHED', 'Limite atteinte pour ce bâtiment.');
-    }
-    const ground=await assertBuildableCells(tx,village,selection.cells);
-    if(item.code!=='garden')assertFlatVertexFoundation(ground,selection.cells,village);
-    const actualCosts = scaledCosts(item.costs, item.code === 'garden' ? selection.cells.length : 1);
-    assertAcceptedCosts(actualCosts, expectedCosts);
-    await debit(tx, village.worldId, village.villageId, actualCosts, at);
-    const completesAt = new Date(at.getTime() + (durationOverride ?? item.constructionDurationSeconds * 1_000));
-    const building = await tx.insertInto('buildings').values({
-      visualLayout: buildingType==='dwelling'?{recipe:houseVariant==='logs'?'log-house':houseVariant==='beams'?'beam-house':'stone-house',version:1,quarterTurns,entranceFace:'-z',offset:[0,0]}:null,
-      quarterTurns, worldId: village.worldId, villageId: village.villageId, buildingType, level: 1, targetLevel: null,
-      status: 'under-construction', constructionStartedAt: at, constructionCompletesAt: completesAt, completedAt: null,
-    }).returning('id').executeTakeFirstOrThrow();
-    await reserveSelection(tx, village.worldId, building.id, selection.anchor, selection.cells);
-    if (item.productionMode === 'buffered') await tx.insertInto('buildingResourceBuffers').values(item.production.map((production) => ({
-      worldId: village.worldId, villageId: village.villageId, buildingId: building.id,
-      resourceCode: production.resourceCode, storedAmount: 0, remainder: 0, productionUpdatedAt: completesAt,
-    }))).execute();
-    await tx.insertInto('scheduledTasks').values({
-      worldId: village.worldId, taskType: COMPLETE_CONSTRUCTION_TASK, subjectId: building.id,
-      payload: {}, dueAt: completesAt, availableAt: completesAt, lastError: null, completedAt: null,
-    }).execute();
-    await finishBuildingCommand(tx, village, commandId, building.id);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
-  });
+  db:Kysely<Database>,accountId:string,worldSlug:string,villageId:string,buildingType:BuildingType,anchor:SpatialCell,rawCells:SpatialCell[],durationOverride:number|null,
+  commandId?:string,expectedCosts?:ExpectedCost[],quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone',replyMode:Mode='snapshot' as Mode,
+):Promise<ConstructionResult<Mode>> {
+  const confirmed=await placeBuilding(db,accountId,worldSlug,villageId,{buildingType,anchor,cells:rawCells,commandId,expectedCosts,quarterTurns,houseVariant},durationOverride);
+  return placementResult(db,accountId,worldSlug,confirmed,replyMode);
 }
 
 export async function expandGarden<Mode extends ConstructionReplyMode = 'snapshot'>(

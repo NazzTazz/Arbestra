@@ -10,7 +10,7 @@ export async function sendHarvestIntent(slug:string,villageId:string,intent:Harv
 }
 import { randomUUID } from '../random-uuid';
 import { villageRequestGeneration } from './village-sync';
-import { villageCommandResponseIsValid, infrastructureConfirmationIsValid, type InfrastructureConfirmation, type VillageFrame, type VillageSyncBase } from '@arbestra/contracts';
+import { constructionConfirmationIsValid, type ConstructionConfirmation, villageCommandResponseIsValid, infrastructureConfirmationIsValid, type InfrastructureConfirmation, type VillageFrame, type VillageSyncBase } from '@arbestra/contracts';
 import type { CatDiscoveryResponse, BuildingType, DepositDetails, ExtractionResponse, VillageState, TerrainResponse, TerrainUpdatesResponse, TerrainOverview, TerrainVegetationOverview, TerrainVillageOverview, StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest, ExtractionWorksite, ExtractionWorksiteSelection } from '@arbestra/contracts';
 import type { ScienceCommand } from '@arbestra/contracts';
 import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
@@ -120,6 +120,8 @@ export interface TimedVillageState {
 
 export interface TimedVillageFrame { frame: VillageFrame; serverOffsetMs: number; requestGeneration?: number }
 export type TimedVillageUpdate = TimedVillageState | TimedVillageFrame;
+export interface TimedConstructionConfirmation { construction: ConstructionConfirmation; requestGeneration: number }
+export type TimedConstructionUpdate = TimedVillageUpdate | TimedConstructionConfirmation;
 export interface TimedInfrastructureConfirmation {confirmation:InfrastructureConfirmation;requestGeneration:number}
 export type TimedInfrastructureUpdate = TimedVillageUpdate | TimedInfrastructureConfirmation;
 
@@ -137,14 +139,20 @@ function requestState(path: string, init?: RequestInit): Promise<TimedVillageSta
 }
 function requestVillageCommandState(path:string,init:RequestInit,base?:VillageSyncBase,confirmation?:false):Promise<TimedVillageUpdate>;
 function requestVillageCommandState(path:string,init:RequestInit,base:VillageSyncBase|undefined,confirmation:true):Promise<TimedInfrastructureUpdate>;
-async function requestVillageCommandState(path: string, init: RequestInit, base?: VillageSyncBase, confirmation=false): Promise<TimedInfrastructureUpdate> {
+function requestVillageCommandState(path:string,init:RequestInit,base:VillageSyncBase|undefined,confirmation:{commandId:string;villageId:string}):Promise<TimedConstructionUpdate>;
+async function requestVillageCommandState(path: string, init: RequestInit, base?: VillageSyncBase, confirmation:boolean|{commandId:string;villageId:string}=false): Promise<TimedInfrastructureUpdate|TimedConstructionConfirmation> {
   const requestedAt = Date.now(), requestGeneration = villageRequestGeneration();
-  const headers = { ...init.headers, 'x-village-sync': '1', ...(confirmation?{'x-infrastructure-confirmation':'1'}:{}), ...(base ? {
+  const headers = { ...init.headers, 'x-village-sync': '1', ...(confirmation===true?{'x-infrastructure-confirmation':'1'}:{}),
+    ...(typeof confirmation==='object'?{'x-construction-confirmation':'1'}:{}), ...(base ? {
     'x-village-revision': String(base.revision), 'x-village-server-time': base.serverTime,
   } : {}) };
   const response = await fetch(path, { credentials: 'same-origin', ...init, headers, signal: AbortSignal.timeout(15_000) });
   const receivedAt = Date.now(), data = await parseResponse<unknown>(response);
-  if (confirmation&&infrastructureConfirmationIsValid(data)) return {confirmation:data,requestGeneration};
+  if (confirmation===true&&infrastructureConfirmationIsValid(data)) return {confirmation:data,requestGeneration};
+  if (typeof confirmation==='object'&&constructionConfirmationIsValid(data)) {
+    if(data.commandId!==confirmation.commandId||data.villageId!==confirmation.villageId)throw Error('Confirmation de construction incohérente.');
+    return {construction:data,requestGeneration};
+  }
   if (villageCommandResponseIsValid(data)) {
     const timed = { requestGeneration, serverOffsetMs: Date.parse(data.serverTime) - (requestedAt + receivedAt) / 2 };
     return data.kind === 'frame' ? { ...timed, frame: data.frame } : { ...timed, state: data.state };
@@ -193,19 +201,19 @@ export function buildBuilding(
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   quarterTurns = 0, houseVariant: 'stone'|'logs'|'beams' = 'stone',
   syncBase?: VillageSyncBase,
-): Promise<TimedVillageUpdate> {
+): Promise<TimedConstructionUpdate> {
   return requestVillageCommandState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, quarterTurns, houseVariant, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) }, syncBase,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, quarterTurns, houseVariant, buildingType, anchorCellX: anchor.cellX, anchorCellY: anchor.cellY, cells }) }, syncBase, {commandId,villageId},
   );
 }
 
 export function expandGarden(worldSlug: string, villageId: string, buildingId: string, cells: Array<{ cellX: number; cellY: number }>,
   commandId: string = randomUUID(), expectedCosts: Array<{ resourceCode: string; amount: number }> = [], syncBase?: VillageSyncBase,
-): Promise<TimedVillageUpdate> {
+): Promise<TimedConstructionUpdate> {
   return requestVillageCommandState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) }, syncBase,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, cells }) }, syncBase, {commandId,villageId},
   );
 }
 
@@ -217,10 +225,10 @@ export function upgradeBuilding(
   expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
   expectedLevel?: number,
   syncBase?: VillageSyncBase,
-): Promise<TimedVillageUpdate> {
+): Promise<TimedConstructionUpdate> {
   return requestVillageCommandState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/upgrade`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, expectedLevel }) }, syncBase,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ commandId, expectedCosts, expectedLevel }) }, syncBase, {commandId,villageId},
   );
 }
 
