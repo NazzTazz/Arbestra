@@ -45,13 +45,13 @@ describe('pure full-route navigation',()=>{
   expect(r.path.at(-1)).toEqual(q.goals[0]&&{cellX:55,cellY:8});
   for(let i=1;i<r.path.length;i++)expect(canWalkSpawnSegment(f,{x:r.path[i-1]!.cellX,y:r.path[i-1]!.cellY},{x:r.path[i]!.cellX,y:r.path[i]!.cellY})).toBe(true);
  });
- it('retrospectively reproduces the unchecked distant tail of local refinement',()=>{
+ it('certifies distant obstacles in both village refinement and full-route navigation',()=>{
   const f=field((x,y)=>x>47.4&&x<47.6&&y>6&&y<10),start={cellX:10,cellY:8},destination={cellX:55,cellY:8};
   const state:TravelNetworkState={world:{id:'w',widthCells:96,heightCells:32},village:{anchorCellX:10,anchorCellY:8,townHallBuildingId:'hall'},region:{originCellX:0,originCellY:0,width:96,height:32,terrainCodes:Array(96*32).fill(1),features:[]},cells:[{...start,footprint:{buildingId:'hall'},building:{id:'hall',type:'town-hall',quarterTurns:0,visualLayout:null}}],infrastructure:emptyInfrastructure()};
   const cells=Array.from({length:46},(_,i)=>({cellX:10+i,cellY:8}));
-  const old=refineTravelRoute(state,{id:'destination',kind:'stone',destination,cells},new Set(),undefined,{...f,revision:'obstacle-distant'});
-  expect(old).not.toBeNull();expect(old!.cells.at(-1)).toEqual(destination);
-  expect(old!.cells.some((p,i,a)=>i>0&&!canWalkSpawnSegment(f,{x:a[i-1]!.cellX,y:a[i-1]!.cellY},{x:p.cellX,y:p.cellY}))).toBe(true);
+  const refined=refineTravelRoute(state,{id:'destination',kind:'stone',destination,cells},new Set(),undefined,{...f,revision:'obstacle-distant'});
+  expect(refined).not.toBeNull();expect(refined!.cells.at(-1)).toEqual(destination);
+  expect(refined!.cells.every((p,i,a)=>i===0||canWalkSpawnSegment(f,{x:a[i-1]!.cellX,y:a[i-1]!.cellY},{x:p.cellX,y:p.cellY}))).toBe(true);
   const current=planRoute(f,query(start,destination));expect(current.kind).toBe('found');
   if(current.kind==='found')for(let i=1;i<current.path.length;i++)expect(canWalkSpawnSegment(f,{x:current.path[i-1]!.cellX,y:current.path[i-1]!.cellY},{x:current.path[i]!.cellX,y:current.path[i]!.cellY})).toBe(true);
  });

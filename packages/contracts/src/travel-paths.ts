@@ -1,4 +1,5 @@
 import {canWalkSpawnSegment,type SpawnAccessField} from './spawn-access.js';
+import {planRoute,ROUTE_POLICY_VERSION} from './route-planner.js';
 export type TravelGround=SpawnAccessField & {
  /** Identity of sample's heights, water, obstacles and trunks; must change whenever those answers change. World and dimensions are scoped separately. */
  revision:string;
@@ -322,7 +323,8 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
   const world=state.world,w=world.widthCells*8,h=world.heightCells*8;
   const local=(p:TravelCell)=>wrap(p.cellX-state.region.originCellX,world.widthCells)<state.region.width&&wrap(p.cellY-state.region.originCellY,world.heightCells)<state.region.height;
   const lastLocal=route.cells.findLastIndex(local),destination=local(route.destination)?route.destination:route.cells[lastLocal];if(!destination)return route;
-  const {surface,curbPixels,roadNodes,walk,blocked,equipmentBins,fineCells}=prepared??cache?.prepared??prepareRefinement(state,ground);
+  const context=prepared??cache?.prepared??prepareRefinement(state,ground);
+  const {surface,curbPixels,roadNodes,walk,blocked,equipmentBins,fineCells}=context;
   // Shared obstacles and fine cells are immutable; only destination portals vary.
   const destinationFine=new Set<string>();
   const markFine=(x:number,y:number)=>destinationFine.add(wrap(Math.floor(x+.5),world.widthCells)+':'+wrap(Math.floor(y+.5),world.heightCells));
@@ -352,6 +354,61 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
     for(let i=0;i<=steps;i++)if(!land({cellX:wrap(access.position.cellX+dx*i/steps,world.widthCells),cellY:wrap(access.position.cellY+dy*i/steps,world.heightCells)},buildingId))return false;
     return walk(access.position,access.outside);
   };
+  const result=(cells:TravelCell[]|null):TravelRoute|null=>{
+    if(cells&&cache&&routeKey.length<=16384&&cells.length<=16384){
+      cache.routes.set(routeKey,cells.map(p=>({...p})));cache.points+=cells.length;
+      while(cache.routes.size>64||cache.points>16384){const oldest=cache.routes.keys().next().value!;cache.points-=cache.routes.get(oldest)!.length;cache.routes.delete(oldest);}
+    }
+    return cells?{...route,cells,version:2}:null;
+  };
+  const segmentClear=(a:TravelCell,b:TravelCell)=>{
+    checkpoint?.();
+    const dx=delta(b.cellX,a.cellX,world.widthCells),dy=delta(b.cellY,a.cellY,world.heightCells);
+    if(dx&&dy)return false;
+    const n=Math.max(1,Math.ceil((Math.abs(dx)+Math.abs(dy))*16));
+    for(let i=0;i<=n;i++){
+      const p={cellX:wrap(a.cellX+dx*i/n,world.widthCells),cellY:wrap(a.cellY+dy*i/n,world.heightCells)};
+      if(!local(p)||!land(p))return false;
+    }
+    return walk(a,b);
+  };
+  // Long resource routes already carry a coarse witness. Certify its exterior
+  // at the same resolution as A*, then search only the real door connector.
+  // A stale guide is merely a hint: any obstacle falls back to the full search.
+  if(route.kind!=='building'&&route.cells.length>16&&route.cells.length<=1024&&local(route.destination)
+    &&key(route.cells.at(-1)!)===key(route.destination)){
+    const join=8,tail=route.cells.slice(join);
+    let clear=tail.every(p=>Number.isInteger(p.cellX*8)&&Number.isInteger(p.cellY*8)&&local(p)&&land(p));
+    for(let i=1;clear&&i<tail.length;i++){
+      const a=tail[i-1]!,b=tail[i]!,dx=delta(b.cellX,a.cellX,world.widthCells),dy=delta(b.cellY,a.cellY,world.heightCells);
+      // Sparse or diagonal hints cannot skip any unverified exterior terrain.
+      const n=(Math.abs(dx)+Math.abs(dy))*8;
+      if(dx&&dy||n>8||!segmentClear(a,b))clear=false;
+    }
+    if(clear){
+      const connector=refineTravelRoute(state,{...route,destination:tail[0]!,cells:route.cells.slice(0,join+1)},guide,context,ground,checkpoint,
+        {maxVisited:Math.min(2048,search?.maxVisited??2048)});
+      if(connector){
+        const cells=[...connector.cells,...tail.slice(1)];
+        const length=travelDuration(cells,world)/1000,start=cells[0]!;
+        const direct=Math.abs(delta(route.destination.cellX,start.cellX,world.widthCells))+Math.abs(delta(route.destination.cellY,start.cellY,world.heightCells));
+        if(length<=direct+16)return result(cells);
+      }
+    }
+  }
+  // Some coarse centre paths are obstructed although the endpoint has a fine
+  // access. Reuse the bounded physical planner (coarse lattice + local endpoint
+  // refinement) before spending the full village-wide fine search budget.
+  const direct=Math.abs(delta(destination.cellX,hall.cellX,world.widthCells))+Math.abs(delta(destination.cellY,hall.cellY,world.heightCells));
+  if(ground&&route.kind!=='building'&&local(route.destination)&&direct>16){
+    const id='resource-refinement',accesses=starts.map((a,i)=>({id:String(i),path:[a.position,a.outside]}));
+    const witness=planRoute({...ground,worldId:world.id,contextId:id,traversalConstraintsId:id,accesses,
+      connector:a=>accessClear(starts[Number(a.id)]!,hall.building!.id),walk:segmentClear},
+      {worldId:world.id,contextId:id,traversalConstraintsId:id,policyVersion:ROUTE_POLICY_VERSION,movementProfileId:'pedestrian-v1',
+        starts:accesses.map(a=>({kind:'access',accessId:a.id})),goals:[{kind:'point',...destination}],coarseFirst:true,
+        limits:{maxNodes:Math.min(8192,search?.maxVisited??8192),maxDurationMs:1000}});
+    if(witness.kind==='found'&&witness.length<=direct+16)return result(witness.path);
+  }
   for(const start of starts)for(const end of ends.length?ends:[null]){
     if(!accessClear(start,hall.building.id)||end&&!accessClear(end,route.id))continue;
     const from={cellX:wrap(Math.round(start.outside.cellX*8),w),cellY:wrap(Math.round(start.outside.cellY*8),h)};
@@ -419,9 +476,5 @@ export function refineTravelRoute(state:TravelNetworkState,route:TravelRoute,gui
     if(!best||travelDuration(path,world)<travelDuration(best,world))best=path;
   }
   if(!best&&limited)search?.onLimit?.();
-  if(best&&cache&&routeKey.length<=16384&&best.length<=16384){
-    cache.routes.set(routeKey,best.map(p=>({...p})));cache.points+=best.length;
-    while(cache.routes.size>64||cache.points>16384){const oldest=cache.routes.keys().next().value!;cache.points-=cache.routes.get(oldest)!.length;cache.routes.delete(oldest);}
-  }
-  return best?{...route,cells:best,version:2}:null;
+  return result(best);
 }
