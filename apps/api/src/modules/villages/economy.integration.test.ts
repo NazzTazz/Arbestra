@@ -72,6 +72,34 @@ describe.sequential('economy with PostgreSQL', () => {
   });
   afterAll(async () => { await db?.destroy(); });
 
+  it.each(['legacy', 'active', 'no-flow'] as const)('materializes %s stock with exact fractions in one driver call and never rewinds its cursor', async mode => {
+    const worldId=DEVELOPMENT_IDS.world,villageId=DEVELOPMENT_IDS.village;
+    const at=new Date('2030-01-01T12:00:00Z'),through=new Date(at.getTime()+1001);
+    const rollback=Error('RESOURCE_MATERIALIZATION_FIXTURE_ROLLBACK');
+    await expect(db.transaction().execute(async tx=>{
+      await tx.selectFrom('villages').select('id').where('id','=',villageId).forUpdate().execute();
+      await tx.updateTable('villages').set({economyActivatedAt:mode==='legacy'?null:at}).where('id','=',villageId).execute();
+      await tx.updateTable('villageResources').set({amount:123}).where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','wood').execute();
+      await tx.updateTable('villageResourceFlows').set({baseRatePerHour:17,remainder:'0.999999',productionUpdatedAt:at})
+        .where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','wood').execute();
+      if(mode==='no-flow')await tx.deleteFrom('villageResourceFlows').where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','wood').execute();
+      const reference=await projectVillageResource(tx,worldId,villageId,'wood',through);
+      let calls=0;
+      const observed=tx.withPlugin({transformQuery(args){calls++;return args.node;},async transformResult(args){return args.result;}});
+      expect(await materializeVillageResource(observed,worldId,villageId,'wood',through)).toBe(reference.amount);
+      expect(calls).toBe(1);
+      const before=await tx.selectFrom('villageResourceFlows').selectAll().where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','wood').execute();
+      if(mode!=='no-flow'){
+        expect(before[0]!.productionUpdatedAt).toEqual(through);
+        const exact=mode==='legacy'?0.999999+17*1001/3600000:0.999999;
+        expect(Number(before[0]!.remainder)).toBeCloseTo(exact%1,10);
+      }
+      expect(await materializeVillageResource(tx,worldId,villageId,'wood',at)).toBe(reference.amount);
+      expect(await tx.selectFrom('villageResourceFlows').selectAll().where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','=','wood').execute()).toEqual(before);
+      throw rollback;
+    })).rejects.toBe(rollback);
+  });
+
   it('projects all resource balances in one read with identical numeric rounding, legacy production and current stocks',async()=>{
     const through=new Date('2030-01-01T12:00:00.000Z'),rollback=Error('RESOURCE_BATCH_ROLLBACK');
     await expect(db.transaction().execute(async tx=>{
@@ -550,16 +578,17 @@ describe.sequential('economy with PostgreSQL', () => {
     }
   });
 
-  it('returns a completed building for a zero-duration command', async () => {
+  it('defers a zero-duration construction completion until the economic wakeup', async () => {
     const state = await constructBuilding(
       db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
       DEVELOPMENT_CELLS.sawmill.cellX, DEVELOPMENT_CELLS.sawmill.cellY, 'sawmill', 0,
     );
     expect(state.cells.find((cell) => cell.cellX === DEVELOPMENT_CELLS.sawmill.cellX
-      && cell.cellY === DEVELOPMENT_CELLS.sawmill.cellY)?.building?.status).toBe('completed');
+      && cell.cellY === DEVELOPMENT_CELLS.sawmill.cellY)?.building?.status).toBe('under-construction');
     const building = state.cells.find((cell) => cell.building?.type === 'sawmill')?.building;
-    expect(building?.constructionStartedAt).toBe(state.serverTime);
-    expect(building?.constructionCompletesAt).toBe(state.serverTime);
+    expect(building?.constructionStartedAt).toBe(building?.constructionCompletesAt);
+    const completed = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+    expect(completed.cells.find(cell => cell.building?.id === building?.id)?.building?.status).toBe('completed');
   });
 
   it('does not generate passive wood or rewrite its dormant cursor after a long absence', async () => {
@@ -713,7 +742,8 @@ describe.sequential('economy with PostgreSQL', () => {
     await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1024, 512, 'garden', 0);
     const diagonal = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1025, 513, 'garden', 0);
     expect(diagonal.cells.filter((cell) => cell.building?.type === 'garden')).toHaveLength(2);
-    const bridged = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1024, 513, 'garden', 0);
+    await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 1024, 513, 'garden', 0);
+    const bridged = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
     const logical = bridged.cells.filter((cell) => cell.building?.type === 'garden');
     expect(logical).toHaveLength(1);
     expect(logical[0]?.building?.garden?.plots).toHaveLength(3);

@@ -11,6 +11,7 @@ import type { Database } from '../../database/schema.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { discoverBuildingSupplies, discoverBuildingSuppliesInTransaction, feedPopulation, getVillageState, restPopulation } from '../villages/service.js';
+import { materializeCohorts } from './work.js';
 
 const databaseUrl = testDatabaseUrl();
 let db: Kysely<Database>;
@@ -54,6 +55,26 @@ describe.sequential('population with PostgreSQL', () => {
   beforeEach(() => resetE2eState(databaseUrl));
   afterAll(async () => { await db?.destroy(); });
 
+  it('does not rewrite unchanged cohort projections at the same economic bound', async () => {
+    await db.transaction().execute(async tx => {
+      await tx.selectFrom('villages').select('id').where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('id', '=', DEVELOPMENT_IDS.village).forUpdate().executeTakeFirstOrThrow();
+      const { at } = await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow();
+      await tx.updateTable('populationCohorts').set({ energy: 8, energyProgress: 0, activity: 'idle', restingSince: null,
+        foodUsedSinceRest: 0, energyUpdatedAt: new Date(at.getTime() - 1000), restBuildingId: null })
+        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).execute();
+      const first = await materializeCohorts(tx, DEVELOPMENT_IDS.world, DEVELOPMENT_IDS.village, at);
+      expect(first.length).toBeGreaterThan(0);
+      expect(first.every(c => c.energy === 7 && c.energyProgress === 79_190_000 && c.activity === 'idle')).toBe(true);
+      const tuples = () => tx.selectFrom('populationCohorts').select(['id', sql<string>`ctid::text`.as('version')])
+        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).orderBy('id').execute();
+      const before = await tuples();
+      expect(await materializeCohorts(tx, DEVELOPMENT_IDS.world, DEVELOPMENT_IDS.village, at)).toEqual(first);
+      // Equal state must also avoid a new physical row version and its row triggers.
+      expect(await tuples()).toEqual(before);
+    });
+  });
+
   it('rejects a bodyless harvest through HTTP without an internal error', async () => {
     const app = await buildApp({ databaseUrl, host: '127.0.0.1', port: 0, isProduction: false,
       cookieName: 'test_session', sessionTtlDays: 1, constructionDurationOverrideMs: 0,
@@ -73,6 +94,8 @@ describe.sequential('population with PostgreSQL', () => {
         payload: { buildingType: 'garden', ...DEVELOPMENT_CELLS.garden } });
       expect(built.statusCode, built.body).toBe(201);
       const buildingId = built.json().cells.find((cell: { building?: { type: string } }) => cell.building?.type === 'garden').building.id;
+      // Placement acknowledges the building; the normal read wake completes it.
+      await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
       await db.updateTable('gardenPlots').set({ storedAmount: 100 }).where('buildingId', '=', buildingId).execute();
       const harvested = await app.inject({ method: 'POST', url: `${base}/${buildingId}/harvest`, cookies,
         payload: { commandId: feedId, ...DEVELOPMENT_CELLS.garden } });

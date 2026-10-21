@@ -39,6 +39,7 @@ export interface TravelRoute {
 }
 
 const key = ({ cellX, cellY }: TravelCell): string => `${cellX}:${cellY}`;
+const edgeKey = (a: string, b: string): string => a < b ? a + '|' + b : b + '|' + a;
 /** A completed garden is walkable ground; reservations remain obstacles. */
 export function blocksTravelFootprint(footprint: TravelNetworkState['cells'][number]['footprint']): boolean {
   return !!footprint && !(footprint.buildingType === 'garden' && footprint.state === 'active');
@@ -199,10 +200,12 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
   };
   const distance = (a: TravelCell, b: TravelCell): number =>
     Math.abs(delta(a.cellX, b.cellX, world.widthCells)) + Math.abs(delta(a.cellY, b.cellY, world.heightCells));
+  const neighbours = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
   for (const goal of goals) {
     checkpoint?.();
     if (!inside(goal.destination) && goal.kind !== 'stone') continue;
     const maxSteps = distance(start, goal.destination) + 8;
+    const goalKey = key(goal.destination);
     const pending = new StepQueue();
     pending.push({ cell: start, cost: 0, score: distance(start, goal.destination) * 0.7, direction: -1, steps: 0 });
     const best = new Map<string, number>();
@@ -210,22 +213,26 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
     while (pending.length) {
       checkpoint?.();
       const current = pending.pop();
-      const currentKey = `${key(current.cell)}:${current.direction}`;
+      const currentCellKey = key(current.cell), currentKey = `${currentCellKey}:${current.direction}`;
       if (current.cost > (best.get(currentKey) ?? Infinity)) continue;
-      if (key(current.cell) === key(goal.destination)) { found = current; break; }
+      if (currentCellKey === goalKey) { found = current; break; }
       if (current.steps >= maxSteps) continue;
-      const neighbours = [[1, 0], [0, 1], [-1, 0], [0, -1]];
       for (const [direction, [dx, dy]] of neighbours.entries()) {
         const cell = { cellX: wrap(current.cell.cellX + dx!, world.widthCells),
           cellY: wrap(current.cell.cellY + dy!, world.heightCells) };
-        if ((!inside(cell) && key(cell) !== key(goal.destination)) || blocked.has(key(cell)) && key(cell) !== key(goal.destination)) continue;
+        const remaining = distance(cell, goal.destination);
+        // Even an unobstructed cardinal route cannot finish this branch within
+        // the existing detour allowance. Prune before terrain/obstacle checks.
+        if (current.steps + 1 + remaining > maxSteps) continue;
+        const cellKey = key(cell);
+        if ((!inside(cell) && cellKey !== goalKey) || blocked.has(cellKey) && cellKey !== goalKey) continue;
         if(!walk(current.cell,cell))continue;
-        const edge = [key(current.cell), key(cell)].sort().join('|');
+        const edge = edgeKey(currentCellKey, cellKey);
         const cost = current.cost + (shared.has(edge) ? 0.7 : 1) + (current.direction >= 0 && current.direction !== direction ? 0.05 : 0);
-        const stateKey = `${key(cell)}:${direction}`;
+        const stateKey = `${cellKey}:${direction}`;
         if (cost >= (best.get(stateKey) ?? Infinity)) continue;
         best.set(stateKey, cost);
-        pending.push({ cell, cost, score: cost + distance(cell, goal.destination) * 0.7, direction, steps: current.steps + 1, previous: current });
+        pending.push({ cell, cost, score: cost + remaining * 0.7, direction, steps: current.steps + 1, previous: current });
       }
     }
     if (!found) {
@@ -238,7 +245,7 @@ export function buildTravelNetwork(state: TravelNetworkState, woodlandTargets: r
     const cells: TravelCell[] = [];
     for (let cursor: Step | undefined = found; cursor; cursor = cursor.previous) cells.push(cursor.cell);
     cells.reverse();
-    for (let i = 1; i < cells.length; i++) shared.add([key(cells[i - 1]!), key(cells[i]!)].sort().join('|'));
+    for (let i = 1; i < cells.length; i++) shared.add(edgeKey(key(cells[i - 1]!), key(cells[i]!)));
     routes.push({ ...goal, cells });
   }
   // Keep the common network as the guide for local access/obstacle refinement.

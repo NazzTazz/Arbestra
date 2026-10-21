@@ -50,13 +50,15 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
       .where('worlds.slug', '=', slug).where('villages.ownerAccountId', '=', accountId).executeTakeFirst();
     if (!world) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.');
     const { id: worldId, chunkSize: size, widthCells: width, heightCells: height } = world;
-    const knowledge = await knownGeography(tx, worldId, accountId, width, height);
-    const known = (p: { cellX: number; cellY: number }) => !preparation && (preview || knowledge.known(p));
     if (world.generationStatus !== 'ready' || width % size || height % size) throw new HttpError(409, 'WORLD_NOT_READY', 'Terrain indisponible.');
     const wanted = [...new Map(requested.map((c) => {
       const chunkX = normalizeCell(c.chunkX, width / size), chunkY = normalizeCell(c.chunkY, height / size);
       return [`${chunkX}:${chunkY}`, { chunkX, chunkY }] as const;
     })).values()];
+    const knowledge = await knownGeography(tx, worldId, accountId, width, height, wanted.map(c => ({
+      minX: c.chunkX * size, maxX: (c.chunkX + 1) * size, minY: c.chunkY * size, maxY: (c.chunkY + 1) * size,
+    })));
+    const known = (p: { cellX: number; cellY: number }) => !preparation && (preview || knowledge.known(p));
     // A mutable refresh needs verified source geometry for visible features and
     // current local terraces, not the world's navigation field or height patches.
     const editsSource=world.generationVersion===3&&mutableRc1Only&&world.terrainModel!=='vertices'?await readRc1Source(tx,worldId):null;

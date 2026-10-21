@@ -14,8 +14,8 @@ import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { editedRc1Field } from '../onboarding/rc1-field.js';
 import { rc1NetworkGround } from '../navigation/rc1-network-ground.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers } from '../population/work.js';
-import { ownedVillage, state, assertBuildableCells, type OwnedVillage } from './service.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, projectCohorts, releaseWorkers } from '../population/work.js';
+import { ownedVillage, state, assertBuildableCells, withVillageProjection, type OwnedVillage } from './service.js';
 import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { readNavigationInfrastructure } from './infrastructure.js';
 
@@ -29,7 +29,7 @@ export async function hasActiveLeveling(tx: Transaction<Database>, worldId: stri
     .where('villageId', 'in', villages).where('completedAt', 'is', null).limit(1).executeTakeFirst();
 }
 
-async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageEconomy, accountId: string, request: LevelingRequest|TerraformRequest) {
+async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageEconomy, accountId: string, request: LevelingRequest|TerraformRequest, materialize = true) {
   if (v.generationVersion !== 3) throw new HttpError(409, 'LEVELING_UNAVAILABLE', 'Le nivellement est disponible sur les mondes RC1.');
   if (request.anchor.cellX >= v.widthCells || request.anchor.cellY >= v.heightCells)
     throw new HttpError(400, 'INVALID_COORDINATES', 'Coordonnées non canoniques.');
@@ -116,17 +116,15 @@ async function prepare(tx: Transaction<Database>, v: OwnedVillage, ctx: VillageE
   // RC1 free dry ground is grass/soil. Rock deposits must be extracted first;
   // no artificial stone credits are minted by raising/lowering ordinary soil.
   const quote = free?terraformQuote(request,v,geometry!.height,transportMs):{ ...(vertexPlan?{model:'vertices' as const,vertices:vertexPlan.vertices,affectedCells}:{}),height, cells, workMs, transportMs, durationMs, stoneDebit: 0, stoneCredit: 0, signature };
-  const workers = eligibleWorkers(await materializeCohorts(tx, v.worldId, v.villageId, ctx.through), durationMs);
+  const workers = eligibleWorkers(await (materialize ? materializeCohorts : projectCohorts)(tx, v.worldId, v.villageId, ctx.through), durationMs);
   const availableWorkers = workers.reduce((n, c) => n + c.memberCount, 0), valid = availableWorkers >= request.workerCount;
   const preview: LevelingPreview = { quote, availableWorkers, valid, message: valid ? null : 'Habitants disponibles et assez reposés insuffisants pour ce chantier.' };
   return { preview, workers, path };
 }
 
 export async function previewLeveling(db: Kysely<Database>, accountId: string, slug: string, villageId: string, request: LevelingRequest) {
-  return db.transaction().execute(async tx => {
-    const v = await ownedVillage(tx, accountId, slug, villageId);
-    const ctx = await beginVillageEconomy(tx, v.worldId, v.villageId, undefined, [], [], true);
-    return (await prepare(tx, v, ctx, accountId, request)).preview;
+  return withVillageProjection(db, accountId, slug, villageId, async (tx, ctx, v) => {
+    return (await prepare(tx, v, ctx, accountId, request, false)).preview;
   });
 }
 class ChangedTerraformQuote extends Error {

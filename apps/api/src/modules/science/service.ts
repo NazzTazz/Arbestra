@@ -49,13 +49,12 @@ async function levelsFor(tx: Transaction<Database>, worldId: string, accountId: 
   return levels;
 }
 
-async function evidence(tx: Transaction<Database>, worldId: string, accountId: string,
-  knownScience?: { solarReport: unknown; observationsSince: Date | null }) {
-  const places = await tx.selectFrom('sciencePlaces').select(['cellX', 'cellY']).where('worldId', '=', worldId)
-    .where('accountId', '=', accountId).where('surveyed', '=', true).execute();
-  const science = knownScience ?? await tx.selectFrom('playerScience').select(['solarReport', 'observationsSince'])
+async function evidence(tx: Transaction<Database>, worldId: string, accountId: string) {
+  const science = await tx.selectFrom('playerScience').select(['solarReport', 'observationsSince'])
+    .select(eb => eb.selectFrom('sciencePlaces').select(sql<number>`count(*)::integer`.as('count'))
+      .where('worldId', '=', worldId).where('accountId', '=', accountId).where('surveyed', '=', true).as('places'))
     .where('worldId', '=', worldId).where('accountId', '=', accountId).executeTakeFirstOrThrow();
-  return { places: places.length, solar: science.solarReport !== null, since: science.observationsSince };
+  return { places: science.places ?? 0, solar: science.solarReport !== null, since: science.observationsSince };
 }
 function evidenceMet(program: ProgramDefinition, facts: { places: number; solar: boolean }) {
   return program.evidence === 'none' || (program.evidence === 'surveys' ? facts.places >= 2 : facts.solar);
@@ -149,8 +148,9 @@ async function initializeKnowledge(tx: Transaction<Database>, economy: VillageEc
   return { village, accountId };
 }
 
-async function acquireReady(tx: Transaction<Database>, economy: VillageEconomy, accountId: string) {
-  const facts = await evidence(tx, economy.worldId, accountId);
+async function acquireReady(tx: Transaction<Database>, economy: VillageEconomy, accountId: string,
+  knownFacts?: Awaited<ReturnType<typeof evidence>>) {
+  const facts = knownFacts ?? await evidence(tx, economy.worldId, accountId);
   const programs = await tx.selectFrom('sciencePrograms').selectAll().where('worldId', '=', economy.worldId).where('accountId', '=', accountId)
     .where('acquiredAt', 'is', null).where('paused', '=', false).execute();
   for (const row of programs) {
@@ -229,8 +229,9 @@ async function startActivity(tx: Transaction<Database>, economy: VillageEconomy,
  * batches retain their due dates; free centres follow least-recently-started order. */
 export async function admitScience(tx: Transaction<Database>, economy: VillageEconomy) {
   const { accountId } = await initializeKnowledge(tx, economy);
-  await acquireReady(tx, economy, accountId);
-  const levels = await levelsFor(tx, economy.worldId, accountId), facts = await evidence(tx, economy.worldId, accountId);
+  const facts = await evidence(tx, economy.worldId, accountId);
+  await acquireReady(tx, economy, accountId, facts);
+  const levels = await levelsFor(tx, economy.worldId, accountId);
   const astro = SCIENCE_PROGRAMS.find(p => p.code === 'astronomy-1')!;
   if (prerequisitesMet(astro, levels) && facts.solar && !levels.astronomy) {
     await tx.insertInto('sciencePrograms').values({ worldId: economy.worldId, accountId, code: astro.code, discipline: astro.discipline,
@@ -281,9 +282,10 @@ export async function admitScience(tx: Transaction<Database>, economy: VillageEc
     const definition = SCIENCE_PROGRAMS.find(d => d.code === p.code)!;
     return Number(p.workDoneMs) < definition.workRequiredMs * (evidenceMet(definition, facts) ? 1 : .75);
   });
+  if (!pending) return;
   const localActive = await tx.selectFrom('scienceActivities').select('id').where('worldId', '=', economy.worldId)
     .where('villageId', '=', economy.villageId).where('status', '=', 'in-progress').executeTakeFirst();
-  if (pending && !localActive) {
+  if (!localActive) {
     const wake = new Date(Math.floor(economy.through.getTime() / 60_000) * 60_000 + 60_000);
     await tx.insertInto('scheduledTasks').values({ worldId: economy.worldId, taskType: SCIENCE_WAKE_TASK, subjectId: economy.villageId,
       payload: { villageId: economy.villageId }, dueAt: wake, availableAt: wake, completedAt: null, lastError: null })

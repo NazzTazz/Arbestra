@@ -4,13 +4,13 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import { ROUTE_POLICY_VERSION, marketWorkers, travelDuration, type TradeCommand, type TradePreview, type TravelCell, type RouteResult } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { ownedVillage, state } from './service.js';
+import { ownedVillage, state, withVillageProjection } from './service.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
 import { navigationRevision, loadNavigationContext } from '../navigation/context.js';
 import {certificateValid, hallRouteKey, navigationVersions, publishHallRoute, readChunkMeshes, readCrossings, readHallRoute, routeDependencies, touchHallRoute, type NavigationVersions, type RouteCertificate} from '../navigation/route-cache.js';
 import type { NavigationExecutor } from '../navigation/compute.js';
 import {SharedCalculation} from '../navigation/shared-calculation.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts } from '../population/work.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, projectCohorts } from '../population/work.js';
 import { assertMarket, cancelTrade, directOracle, publishTrade, readTradeOffers, tradeDebit, tradeWake, type TradeContext } from './trade-economy.js';
 
 type PreparedTrade = { worldId: string; villageId: string; destinationVillageId: string; revision: string; path: TravelCell[]; travelMs: number; certificate?: RouteCertificate };
@@ -160,9 +160,7 @@ export async function commandPlayerMarket(db: Kysely<Database>, accountId: strin
 }
 export async function browsePlayerMarket(db: Kysely<Database>, accountId: string, slug: string, villageId: string, mine: boolean, cursor?: string) {
   villageId=villageId.toLowerCase();
-  return db.transaction().execute(async tx => {
-    const v = await ownedVillage(tx, accountId, slug, villageId);
-    const ctx = await beginVillageEconomy(tx, v.worldId, villageId);
+  return withVillageProjection(db, accountId, slug, villageId, async (tx, ctx) => {
     await assertMarket(tx, ctx);
     return readTradeOffers(tx, ctx, mine, cursor);
   });
@@ -170,13 +168,11 @@ export async function browsePlayerMarket(db: Kysely<Database>, accountId: string
 export async function previewPlayerTrade(db: Kysely<Database>, accountId: string, slug: string, villageId: string, offerId: string, compute: NavigationExecutor): Promise<TradePreview> {
   villageId=villageId.toLowerCase();
   const prepared = await prepareTrade(db, accountId, slug, villageId, offerId, compute);
-  return db.transaction().execute(async tx => {
-    const v = await ownedVillage(tx, accountId, slug, villageId);
-    const ctx = await beginVillageEconomy(tx, v.worldId, villageId);
+  return withVillageProjection(db, accountId, slug, villageId, async (tx, ctx, v) => {
     await assertMarket(tx, ctx);
     const offer = await tx.selectFrom('tradeOffers').selectAll().where('worldId', '=', v.worldId).where('id', '=', offerId).where('status', '=', 'open').executeTakeFirst();
     if (!offer) throw new HttpError(409, 'TRADE_CLOSED', 'Cette annonce n’est plus disponible.');
-    const cohorts = eligibleWorkers(await materializeCohorts(tx, v.worldId, villageId, ctx.through), prepared.travelMs * 2);
+    const cohorts = eligibleWorkers(await projectCohorts(tx, v.worldId, villageId, ctx.through), prepared.travelMs * 2);
     return { travelMs: prepared.travelMs, workerCount: marketWorkers(offer.requestedAmount, offer.offeredAmount), availableWorkers: cohorts.reduce((n, c) => n + c.memberCount, 0) };
   });
 }

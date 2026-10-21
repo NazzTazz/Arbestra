@@ -99,12 +99,20 @@ export async function registerVillageRoutes(
     const result=await commandHudWorkforce(db,account.id,worldSlug,villageId,{kind:'population',command:request.body as PopulationGesture});
     observationCommitted(request);return result;
   });
-  const commandResponse = async (accountId: string, worldSlug: string,
+  const commandResponse = async (reply: FastifyReply, accountId: string, worldSlug: string,
     result: VillageState | ConstructionCommit, base: VillageSyncBase | undefined) => {
-    if ('cells' in result) return result;
+    if ('cells' in result) {
+      reply.serializer(reply.compileSerializationSchema(VillageStateSchema));
+      return result;
+    }
     // Read after COMMIT: reject shared projections started before this command.
     const minimum = (await villageSyncRevision(db, result.worldId)).revision;
-    return projections.commandResponse(accountId, worldSlug, result, base, minimum);
+    const response = await projections.commandResponse(accountId, worldSlug, result, base, minimum);
+    // The server already selected the envelope. Compiling the whole nested union
+    // makes its lazy validators recompile the village on the first action.
+    const schema = VillageCommandResponseSchema.anyOf[response.kind === 'frame' ? 0 : 1];
+    reply.serializer(reply.compileSerializationSchema(schema));
+    return response;
   };
   const constructionResponse = async (request: FastifyRequest, reply: FastifyReply, accountId: string, worldSlug: string,
     result: VillageState | ConstructionCommit, base: VillageSyncBase | undefined) => {
@@ -113,7 +121,7 @@ export async function registerVillageRoutes(
       reply.serializer(reply.compileSerializationSchema(ConstructionConfirmationSchema, '201'));
       return confirmed;
     }
-    return commandResponse(accountId, worldSlug, result, base);
+    return commandResponse(reply, accountId, worldSlug, result, base);
   };
   app.post('/api/worlds/:worldSlug/villages/:villageId/leveling/preview', {
     schema: { params: VillageParametersSchema, body: LevelingRequestSchema, response: {200: LevelingPreviewSchema} },
@@ -182,18 +190,24 @@ export async function registerVillageRoutes(
     return previewVillageMarket(db, account.id, worldSlug, villageId, request.body as MarketRequest);
   });
   app.post('/api/worlds/:worldSlug/villages/:villageId/market', {
-    schema: { params: VillageParametersSchema, body: MarketCommandSchema, response: { 200: VillageStateSchema } },
-  }, async request => {
+    schema: { params: VillageParametersSchema, headers: VillageSyncHeadersSchema, body: MarketCommandSchema, response: { 200: VillageMutationResponseSchema } },
+  }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-    return commandVillageMarket(db, account.id, worldSlug, villageId, request.body as MarketCommand);
+    const options = villageReplyOptions(request.headers);
+    const result = await commandVillageMarket(db, account.id, worldSlug, villageId, request.body as MarketCommand, options.replyMode);
+    observationCommitted(request);
+    return commandResponse(reply, account.id, worldSlug, result, options.base);
   });
   app.post('/api/worlds/:worldSlug/villages/:villageId/processing', {
-    schema: { params: VillageParametersSchema, body: ProcessingCommandSchema, response: { 200: VillageStateSchema } },
-  }, async request => {
+    schema: { params: VillageParametersSchema, headers: VillageSyncHeadersSchema, body: ProcessingCommandSchema, response: { 200: VillageMutationResponseSchema } },
+  }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-    return commandVillageProcessing(db, account.id, worldSlug, villageId, request.body as ProcessingCommand);
+    const options = villageReplyOptions(request.headers);
+    const result = await commandVillageProcessing(db, account.id, worldSlug, villageId, request.body as ProcessingCommand, options.replyMode);
+    observationCommitted(request);
+    return commandResponse(reply, account.id, worldSlug, result, options.base);
   });
   app.post('/api/worlds/:worldSlug/villages/:villageId/processing/preview', {
     schema: { params: VillageParametersSchema, body: Type.Object({ buildingId: Type.String({format:'uuid'}), workerCount: Type.Integer({minimum:1,maximum:3}),orderId:Type.Optional(Type.String({format:'uuid'})) }, {additionalProperties:false}), response: {200:ProcessingPreviewSchema} },
@@ -210,7 +224,7 @@ export async function registerVillageRoutes(
     const options=villageReplyOptions(request.headers),started=performance.now();
     const result=await infrastructureCommand(db,account.id,worldSlug,villageId,request.body as InfrastructureRequest,request.headers['x-infrastructure-confirmation']==='1'?'confirmation':options.replyMode);
     observationCommitted(request);
-    const committed=performance.now(),response='kind' in result?result:await commandResponse(account.id,worldSlug,result,options.base);
+    const committed=performance.now(),response='kind' in result?result:await commandResponse(reply,account.id,worldSlug,result,options.base);
     reply.header('server-timing',`road_tx;dur=${(committed-started).toFixed(1)}, road_sync;dur=${(performance.now()-committed).toFixed(1)}`);
     // Keep the first compact reply independent of the complete-village union's lazy validator.
     if('kind' in response&&response.kind==='infrastructure-confirmation')reply.serializer(reply.compileSerializationSchema(InfrastructureConfirmationSchema,'200'));
@@ -223,7 +237,7 @@ export async function registerVillageRoutes(
     return (preview ? previewVillageExploitation : startVillageExploitation)(db, account.id, worldSlug, villageId, request.body as ExploitationRequest);
   });
   app.post('/api/worlds/:worldSlug/villages/:villageId/science', {
-    schema: { params: VillageParametersSchema, body: ScienceCommandSchema, response: { 200: Type.Union([VillageStateSchema,ExpeditionReceiptSchema]),202:ExpeditionReceiptSchema } },
+    schema: { params: VillageParametersSchema, headers: VillageSyncHeadersSchema, body: ScienceCommandSchema, response: { 200: Type.Union([VillageMutationResponseSchema,ExpeditionReceiptSchema]),202:ExpeditionReceiptSchema } },
   }, async (request,reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
@@ -233,7 +247,10 @@ export async function registerVillageRoutes(
       const receipt=await receiveExpedition(db,account.id,worldSlug,villageId,command as ExpeditionIntent);
       return reply.status(receipt.status==='pending'?202:200).serializer(reply.compileSerializationSchema(ExpeditionReceiptSchema)).send(receipt);
     }
-    return commandVillageScience(db, account.id, worldSlug, villageId, command);
+    const options = villageReplyOptions(request.headers);
+    const result = await commandVillageScience(db, account.id, worldSlug, villageId, command, options.replyMode);
+    observationCommitted(request);
+    return commandResponse(reply, account.id, worldSlug, result, options.base);
   });
   app.get('/api/worlds/:worldSlug/villages/:villageId/science/expeditions',{schema:{params:VillageParametersSchema,querystring:Type.Object({ids:Type.Optional(Type.String({maxLength:2400})),before:Type.Optional(Type.String({format:'uuid'}))}),response:{200:Type.Array(ExpeditionReceiptSchema)}}},async (request,reply)=>{
     const account=await authenticate(db,request.cookies[config.cookieName]);const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};const {ids,before}=request.query as {ids?:string;before?:string};

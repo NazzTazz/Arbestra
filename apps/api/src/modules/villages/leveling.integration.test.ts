@@ -55,8 +55,18 @@ it('previews a remote campus outside the original region using its actual terrai
     const state=await getVillageState(db,accountId,slug,villageId);
     expect(state.region.width).toBeGreaterThan(64);
     expect(cells.every(c=>state.cells.some(s=>s.cellX===c.cellX&&s.cellY===c.cellY&&s.canBuild))).toBe(true);
+    const dueId = randomUUID(), now = Date.now();
+    await db.insertInto('buildings').values({ id: dueId, worldId, villageId, buildingType: 'dwelling', level: 1,
+      status: 'under-construction', constructionStartedAt: new Date(now - 2000), constructionCompletesAt: new Date(now - 1000) }).execute();
+    const tables = ['buildings', 'populationCohorts', 'villageResources', 'villageResourceFlows', 'scheduledTasks',
+      'villageSyncChanges', 'worldSpawnTerraces', 'levelingJobs'] as const;
+    const stored = () => Promise.all(tables.map(async table => (await db.selectFrom(table).selectAll().where('worldId', '=', worldId).execute())
+      .map(row => JSON.stringify(row)).sort()));
+    const persisted = await stored();
     const preview=await previewLeveling(db,accountId,slug,villageId,request);
     expect(preview.valid).toBe(true);expect(preview.quote.cells).toHaveLength(30);
+    expect(await stored()).toEqual(persisted);
+    await db.deleteFrom('buildings').where('worldId', '=', worldId).where('id', '=', dueId).execute();
   } finally {
     await db.updateTable('villages').set({anchorCellX:59}).where('worldId','=',worldId).where('id','=',villageId).execute();
   }

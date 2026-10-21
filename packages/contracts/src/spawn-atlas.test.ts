@@ -32,7 +32,7 @@ describe('atlas territories and bounded cleaning',()=>{
   });
   it('removes only trees in rotated footprints through a seam without editing source or granting wood',()=>{
     const data=flat(),tree={elevation:.75,size:1,crown:1,shade:1};data.forest={version:1,coverage:1,threshold:1,trees:[{...tree,x:0,y:255},{...tree,x:0,y:253},{...tree,x:1,y:0}]};
-    const before=JSON.stringify(data),plan=planSpawnCleaning(data,{x:0,y:0},[{x:-1,y:0,halfWidth:.5,halfHeight:.5}],1);
+    const before=JSON.stringify(data),plan=planSpawnCleaning(data,{x:0,y:0},[{x:1,y:0,halfWidth:.5,halfHeight:.5}],1);
     expect(plan.removedTreeIndices).toEqual([0]);expect(plan.woodCredit).toBe(0);expect(plan.referenceHeight).toBe(.75);
     expect(plan.surfaces).toEqual([{x:0,y:-1,halfWidth:.5,halfHeight:.5}]);expect(JSON.stringify(data)).toBe(before);
   });

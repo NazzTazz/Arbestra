@@ -9,30 +9,31 @@ import { STARTER_VILLAGE } from './starter-village.js';
 
 export async function availableWorlds(db: Kysely<Database>, accountId: string): Promise<AvailableWorlds> {
   const worlds = await db.selectFrom('worlds').select(['id','slug','name','generationVersion'])
+    .select(eb => [
+      eb.exists(eb.selectFrom('villages').select('id').whereRef('worldId', '=', 'worlds.id')
+        .where('ownerAccountId', '=', accountId)).as('joined'),
+      eb.exists(eb.selectFrom('worldClearings').select('id').whereRef('worldId', '=', 'worlds.id')
+        .where('status', '=', 'protected').where('claimedVillageId', 'is', null)).as('free'),
+    ])
     .where('generationStatus','=','ready').where('isOpen','=',true).orderBy('name').execute();
-  return Promise.all(worlds.map(async world => {
-    const joined = Boolean(await db.selectFrom('villages').select('id').where('worldId','=',world.id).where('ownerAccountId','=',accountId).executeTakeFirst());
-    const free = Boolean(await db.selectFrom('worldClearings').select('id').where('worldId','=',world.id)
-      .where('status','=','protected').where('claimedVillageId','is',null).executeTakeFirst());
+  return worlds.map(world => {
+    const joined = Boolean(world.joined), free = Boolean(world.free);
     return {slug:world.slug,name:world.name,spawnMode:world.generationVersion===3?'atlas' as const:'automatic' as const,joined,canJoin:!joined && (world.generationVersion===3||free)};
-  }));
+  });
 }
 
 async function fits(tx: Transaction<Database>, world: { id: string; widthCells: number; heightCells: number }, placement: ReturnType<typeof placeStarterVillage>) {
-  const chunks = new Map<string, number[]>(), keys = new Map<string, {x:number;y:number}>();
+  const keys = new Map<string, {x:number;y:number}>();
   for (const c of placement.required) keys.set(`${Math.floor(c.cellX/32)}:${Math.floor(c.cellY/32)}`, {x:Math.floor(c.cellX/32),y:Math.floor(c.cellY/32)});
-  const rows = await tx.selectFrom('worldChunks').select(['chunkX','chunkY','terrainCodes']).where('worldId','=',world.id)
+  const rows = await tx.selectFrom('worldChunks').select(['chunkX','chunkY','terrainCodes','elevations']).where('worldId','=',world.id)
     .where(eb=>eb.or([...keys.values()].map(c=>eb.and([eb('chunkX','=',c.x),eb('chunkY','=',c.y)])))).execute();
-  for (const row of rows) chunks.set(`${row.chunkX}:${row.chunkY}`, row.terrainCodes);
-  for (const c of placement.required) if (chunks.get(`${Math.floor(c.cellX/32)}:${Math.floor(c.cellY/32)}`)?.[(c.cellY%32)*32+c.cellX%32] !== 1) return false;
+  const chunks = new Map(rows.map(row => [`${row.chunkX}:${row.chunkY}`, row]));
+  for (const c of placement.required) if (chunks.get(`${Math.floor(c.cellX/32)}:${Math.floor(c.cellY/32)}`)?.terrainCodes[(c.cellY%32)*32+c.cellX%32] !== 1) return false;
   const occupied = await tx.selectFrom('worldCellOccupancies').select('cellX').where('worldId','=',world.id)
     .where(eb=>eb.or(placement.required.map(c=>eb.and([eb('cellX','=',c.cellX),eb('cellY','=',c.cellY)])))).executeTakeFirst();
   if (occupied) return false;
   for (const b of placement.buildings) {
-    const heights = b.cells.map(c=>({c,key:`${Math.floor(c.cellX/32)}:${Math.floor(c.cellY/32)}`}));
-    const elevations = await tx.selectFrom('worldChunks').select(['chunkX','chunkY','elevations']).where('worldId','=',world.id)
-      .where(eb=>eb.or([...new Map(heights.map(h=>[h.key,h.c])).values()].map(c=>eb.and([eb('chunkX','=',Math.floor(c.cellX/32)),eb('chunkY','=',Math.floor(c.cellY/32))])))).execute();
-    const values = b.cells.map(c=>elevations.find(r=>r.chunkX===Math.floor(c.cellX/32)&&r.chunkY===Math.floor(c.cellY/32))!.elevations[(c.cellY%32)*32+c.cellX%32]!);
+    const values = b.cells.map(c => chunks.get(`${Math.floor(c.cellX/32)}:${Math.floor(c.cellY/32)}`)!.elevations[(c.cellY%32)*32+c.cellX%32]!);
     if (Math.max(...values)-Math.min(...values)>1) return false;
   }
   return true;

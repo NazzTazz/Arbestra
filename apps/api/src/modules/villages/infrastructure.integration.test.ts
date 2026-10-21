@@ -202,7 +202,10 @@ describe.sequential('infrastructure authoritative commands',()=>{
     expect(Math.max(...footprint.map(c=>c.cellX))-Math.min(...footprint.map(c=>c.cellX))+1).toBe(6);
     expect(Math.max(...footprint.map(c=>c.cellY))-Math.min(...footprint.map(c=>c.cellY))+1).toBe(5);
     const larger=await upgradeBuilding(db,accountId,'aube',villageId,campus.id,undefined,undefined,0);
-    expect(larger.cells.filter(c=>c.footprint?.buildingId===campus.id).map(c=>[c.cellX,c.cellY])).toEqual(footprint.map(c=>[c.cellX,c.cellY]));
+    // A snapshot has no cell ordering contract; compare the occupied coordinates.
+    const coordinates=(cells:Array<{cellX:number;cellY:number}>)=>cells.map(c=>[c.cellX,c.cellY]).sort((a,b)=>a[0]!-b[0]!||a[1]!-b[1]!);
+    expect(coordinates(footprint)).toEqual(coordinates(shape(candidate!.cellX,candidate!.cellY)));
+    expect(coordinates(larger.cells.filter(c=>c.footprint?.buildingId===campus.id))).toEqual(coordinates(footprint));
     expect(larger.cells.find(c=>c.building?.id===campus.id)!.building!.quarterTurns).toBe(1);
 
   });

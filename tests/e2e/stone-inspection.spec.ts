@@ -29,7 +29,7 @@ test.afterAll(async () => {
   } finally { await db.destroy(); }
 });
 
-test('une inspection lente laisse démarrer une extraction', async ({ page, isMobile }) => {
+test('un geste pierre démarre une extraction sans attendre une inspection', async ({ page, isMobile }, testInfo) => {
   await resetE2eState();
   const db = createDatabase(testDatabaseUrl());
   let featureId = randomUUID();
@@ -67,7 +67,10 @@ test('une inspection lente laisse démarrer une extraction', async ({ page, isMo
   await page.getByRole('button', { name: 'Se connecter' }).click();
   await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
   const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  await expect(canvas).toBeVisible({ timeout: 90_000 });
+  await page.getByRole('button', { name: 'Vue libre', exact: true }).click();
+  await page.getByRole('button', { name: 'Exploitation', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-world-interaction-ready', 'true', { timeout: 40_000 });
   try {
     await expect.poll(() => canvas.evaluate((element, id) =>
       (JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string }>).some((item) => item.id === id), featureId), { timeout: 30000 }).toBe(true);
@@ -75,32 +78,44 @@ test('une inspection lente laisse démarrer une extraction', async ({ page, isMo
     console.log('stone render diagnostics', { streamed, streaming: await canvas.getAttribute('data-terrain-streaming'), features: await canvas.getAttribute('data-feature-screens') });
     throw error;
   }
+  await page.getByRole('region', { name: 'Récolte', exact: true }).getByRole('button', { name: 'Pierre brute', exact: true }).click();
+  if (isMobile) {
+    // Reframe the target above the taller worksite card before the actual touch gesture.
+    await page.mouse.move(60, 400);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.move(60, 130, { steps: 12 });
+    await page.mouse.up({ button: 'right' });
+  }
+  const hideHint = page.getByRole('button', { name: 'Masquer', exact: true });
+  if (await hideHint.isVisible()) await hideHint.click();
+  await expect.poll(() => canvas.evaluate((element, id) => {
+    const feature = (JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string; x: number; y: number }>).find(item => item.id === id)!;
+    const box = element.getBoundingClientRect();
+    return document.elementFromPoint(box.x + box.width * feature.x, box.y + box.height * feature.y)?.getAttribute('data-testid');
+  }, featureId)).toBe('village-canvas');
   const point = await canvas.evaluate((element, id) => {
-    const positions = JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string; x: number; y: number }>;
-    const feature = positions.find((item) => item.id === id);
-    if (!feature) return null;
+    const feature = (JSON.parse(element.dataset.featureScreens ?? '[]') as Array<{ id: string; x: number; y: number }>).find(item => item.id === id)!;
     const box = element.getBoundingClientRect();
     return { x: box.x + box.width * feature.x, y: box.y + box.height * feature.y };
   }, featureId);
-  expect(point).not.toBeNull();
-  if (isMobile) await page.touchscreen.tap(point!.x, point!.y);
-  else await page.mouse.click(point!.x, point!.y);
-  const extract = page.getByRole('button', { name: 'Extraire avec 1 habitant' });
-  await expect(extract).toBeEnabled({ timeout: 20_000 });
-  expect(inspections).toBe(1);
-  const started = page.waitForResponse((response) => response.url().endsWith('/extractions') &&
+  // Current UI submits durable harvest gestures; it no longer offers a direct
+  // "Extraire avec 1 habitant" button in the read-only inspector.
+  const started = page.waitForResponse((response) => response.url().endsWith('/harvest-intents') &&
     response.request().method() === 'POST' && response.ok(), { timeout: 45_000 });
-  await extract.click();
+  if (isMobile) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
   await started;
-  await expect(page.getByText(/Extraction lancée/)).toBeVisible({ timeout: 10_000 });
+  const verify = createDatabase(testDatabaseUrl());
+  try {
+    await expect.poll(async () => (await verify.selectFrom('depositExtractions').select('id')
+      .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
+      .where('featureId', '=', featureId).where('status', '=', 'in-progress').execute()).length, { timeout: 45_000 }).toBe(1);
+  } finally { await verify.destroy(); }
+  expect(inspections).toBe(0);
   await expect(canvas).toHaveAttribute('data-worker-model', 'low-poly');
   await expect.poll(async () => Number(await canvas.getAttribute('data-worker-figures'))).toBeGreaterThan(0);
-  await expect.poll(async () => Number(await canvas.getAttribute('data-worker-vertices'))).toBeLessThan(250);
-  if (!isMobile) {
-    const bounds = await canvas.boundingBox();
-    expect(bounds).not.toBeNull();
-    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
-    for (let step = 0; step < 7; step++) await page.mouse.wheel(0, -1_000);
-    await page.screenshot({ path: 'test-results/worker-low-poly.png' });
-  }
+  const figures = Number(await canvas.getAttribute('data-worker-figures'));
+  // Shared figure: eight body boxes, two tool boxes and one cargo box (24 vertices each).
+  expect(Number(await canvas.getAttribute('data-worker-vertices')) / figures).toBeLessThanOrEqual(264);
+  await page.screenshot({ path: testInfo.outputPath('stone-gesture.png') });
 });

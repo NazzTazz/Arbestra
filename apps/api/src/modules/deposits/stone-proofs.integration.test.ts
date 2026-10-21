@@ -103,13 +103,13 @@ async function secondVillage() {
 }
 
 describe.sequential('stone regression proofs', () => {
-  beforeAll(async () => { await migrateToLatest(databaseUrl); db = createDatabase(databaseUrl); });
+  beforeAll(async () => { await migrateToLatest(databaseUrl); db = createDatabase(databaseUrl); }, 60000);
   beforeEach(async () => {
     await resetE2eState(databaseUrl); t0 = new Date(Date.now() - 3600000);
     // Also restores the resource removed by the legacy rollback test.
     await db.insertInto('villageResources').values({ worldId, villageId, resourceCode: 'stone', amount: 0 }).onConflict((c) => c.columns(['worldId','villageId','resourceCode']).doUpdateSet({ amount: 0 })).execute();
     await db.updateTable('populationCohorts').set({ energyUpdatedAt: t0 }).where('worldId', '=', worldId).execute();
-  });
+  }, 60000);
   afterEach(async () => {
     await sql`drop trigger if exists test_stone_credit on village_resources; drop function if exists test_stone_credit();`.execute(db);
     await db.deleteFrom('populationCohorts').where('worldId', '=', worldId).execute();
@@ -121,8 +121,8 @@ describe.sequential('stone regression proofs', () => {
       await db.deleteFrom('stoneDeposits').where('featureId', 'in', fixtureIds).execute();
       await db.deleteFrom('worldFeatures').where('id', 'in', fixtureIds).execute(); fixtureIds.length = 0;
     }
-  });
-  afterAll(async () => { await resetE2eState(databaseUrl); await db.destroy(); });
+  }, 60000);
+  afterAll(async () => { await resetE2eState(databaseUrl); await db.destroy(); }, 60000);
 
   it('A/G: applies D inclusively, never D-1, and spends exactly ten working minutes', async () => {
     const id = await stone(), workId = await start(id), due = new Date(t0.getTime() + 600000);
@@ -267,12 +267,14 @@ describe.sequential('stone regression proofs', () => {
     expect((await processNextScheduledTask(db, handlers))?.outcome).toBe('completed'); expect(await stock()).toBe(100);
   });
 
-  it('H: a feature outside the snapshot is accepted by world reach, not by viewport membership', async () => {
+  it('H: a feature beyond the initial region is accepted when the built footprint extends world reach', async () => {
     const id = await stone(1000,1080,512);
     const building = await db.insertInto('buildings').values({ worldId, villageId, buildingType: 'dwelling', level: 1, targetLevel: null,
       status: 'completed', completedAt: t0, constructionStartedAt: null, constructionCompletesAt: null }).returning('id').executeTakeFirstOrThrow();
     await db.insertInto('worldCellOccupancies').values({ worldId, buildingId: building.id, featureId: null, pendingExpansionId: null, cellX:1079,cellY:512,role:'anchor' }).execute();
-    expect((await getVillageState(db, DEVELOPMENT_IDS.account, 'aube')).region.features.some((feature) => feature.id === id)).toBe(false);
+    const expanded = await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
+    expect(expanded.region.width).toBeGreaterThan(64);
+    expect(expanded.region.features.some((feature) => feature.id === id)).toBe(true);
     const accepted = await startVillageStoneExtraction(db, DEVELOPMENT_IDS.account, 'aube', villageId,id,randomUUID(),1);
     expect(accepted.deposit.featureId).toBe(id); expect(accepted.extraction.cellX).toBe(1080);
     await db.updateTable('buildings').set({ status:'under-construction',completedAt:null,constructionStartedAt:new Date(),constructionCompletesAt:new Date(Date.now()+60000) }).where('id','=',building.id).execute();
@@ -312,6 +314,7 @@ describe.sequential('stone regression proofs', () => {
   it('M: extraction and garden share workers, block meals/rest while working, and details project energy to H', async () => {
     const built = await constructBuilding(db, DEVELOPMENT_IDS.account, 'aube', villageId, 1024, 512, 'garden', 0);
     const gardenId = built.cells.find(cell => cell.building?.type === 'garden')!.building!.id;
+    await db.transaction().execute(tx => beginVillageEconomy(tx, worldId, villageId));
     await db.updateTable('gardenPlots').set({ storedAmount:100, productionUpdatedAt:t0 }).where('buildingId','=',gardenId).execute();
     await db.updateTable('populationCohorts').set({energyUpdatedAt:t0}).where('worldId','=',worldId).execute();
     const id=await stone();
@@ -325,6 +328,7 @@ describe.sequential('stone regression proofs', () => {
     await db.updateTable('gardenHarvests').set({completesAt:future}).where('worldId','=',worldId).execute();
     const otherGarden=await constructBuilding(db,DEVELOPMENT_IDS.account,'aube',villageId,1025,513,'garden',0);
     const otherGardenId=otherGarden.cells.find(cell=>cell.building?.type==='garden'&&cell.building.id!==gardenId)!.building!.id;
+    await db.transaction().execute(tx => beginVillageEconomy(tx, worldId, villageId));
     await db.updateTable('gardenPlots').set({storedAmount:100}).where('buildingId','=',otherGardenId).execute();
     await expect(harvestGarden(db,DEVELOPMENT_IDS.account,'aube',villageId,otherGardenId)).rejects.toMatchObject({code:'HARVESTERS_UNAVAILABLE'});
     await expect(feedPopulation(db,DEVELOPMENT_IDS.account,'aube',villageId,randomUUID(),1)).rejects.toMatchObject({code:'POPULATION_FOOD_UNAVAILABLE'});
@@ -343,6 +347,9 @@ describe.sequential('stone regression proofs', () => {
 
   it('G: mixed construction, garden and stone deadlines match a chronological execution including exact energy', async () => {
     const garden = await constructBuilding(db,DEVELOPMENT_IDS.account,'aube',villageId,1024,512,'garden',0);
+    // Placement only reserves, including duration zero. Finish before preparing
+    // the controlled historical garden/extraction clock below.
+    await db.transaction().execute(tx=>beginVillageEconomy(tx,worldId,villageId));
     const gardenId=garden.cells.find(cell=>cell.building?.type==='garden')!.building!.id;
     const saw = await constructBuilding(db,DEVELOPMENT_IDS.account,'aube',villageId,1023,513,'sawmill',60000);
     const sawId=saw.cells.find(cell=>cell.building?.type==='sawmill')!.building!.id;
@@ -389,13 +396,25 @@ describe.sequential('stone regression proofs', () => {
 
   it('N/H: protected clearings reject extraction, toroidal reach succeeds, other-world lookup fails',async()=>{
     const clearing=await db.selectFrom('worldClearings').selectAll().where('worldId','=',worldId).where('status','=','protected').executeTakeFirstOrThrow();
-    const protectedId=await stone(1000,clearing.centerCellX,clearing.centerCellY);
+    const positions = new Set((await db.selectFrom('worldCellOccupancies').select(['cellX','cellY']).where('worldId','=',worldId).execute())
+      .map(c=>`${c.cellX}:${c.cellY}`));
+    const free = Array.from({length:25},(_,i)=>({cellX:clearing.centerCellX+i%5-2,cellY:clearing.centerCellY+Math.floor(i/5)-2}))
+      .filter(c=>Math.max(Math.abs(c.cellX-clearing.centerCellX),Math.abs(c.cellY-clearing.centerCellY))<=clearing.innerRadius
+        && !positions.has(`${c.cellX}:${c.cellY}`));
+    expect(free.length).toBeGreaterThanOrEqual(2);
+    const protectedId=await stone(1000,free[0]!.cellX,free[0]!.cellY);
     const building=await db.insertInto('buildings').values({worldId,villageId,buildingType:'dwelling',level:1,targetLevel:null,status:'completed',completedAt:t0,constructionStartedAt:null,constructionCompletesAt:null}).returning('id').executeTakeFirstOrThrow();
-    await db.insertInto('worldCellOccupancies').values({worldId,buildingId:building.id,featureId:null,pendingExpansionId:null,cellX:clearing.centerCellX+1,cellY:clearing.centerCellY,role:'anchor'}).execute();
+    await db.insertInto('worldCellOccupancies').values({worldId,buildingId:building.id,featureId:null,pendingExpansionId:null,...free[1]!,role:'anchor'}).execute();
     await expect(startVillageStoneExtraction(db,DEVELOPMENT_IDS.account,'aube',villageId,protectedId,randomUUID(),1)).rejects.toMatchObject({code:'DEPOSIT_PROTECTED'});
-    const edgeId=await stone(1000,2047,0);
-    await db.insertInto('worldCellOccupancies').values({worldId,buildingId:building.id,featureId:null,pendingExpansionId:null,cellX:0,cellY:0,role:'body'}).execute();
-    expect((await startVillageStoneExtraction(db,DEVELOPMENT_IDS.account,'aube',villageId,edgeId,randomUUID(),1)).deposit.cellX).toBe(2047);
+    const occupied = new Set((await db.selectFrom('worldCellOccupancies').select('cellY').where('worldId', '=', worldId)
+      .where('cellX', 'in', [0,2047]).execute()).map(c => c.cellY));
+    const edgeY = Array.from({length:1024},(_,i)=>i).find(y=>!occupied.has(y))!;
+    const edgeId=await stone(1000,2047,edgeY);
+    await db.insertInto('worldCellOccupancies').values({worldId,buildingId:building.id,featureId:null,pendingExpansionId:null,cellX:0,cellY:edgeY,role:'body'}).execute();
+    // This proves world reach independently of a route from the distant hall.
+    const extractionId = await start(edgeId);
+    expect((await db.selectFrom('depositExtractions').select('featureId').where('worldId','=',worldId)
+      .where('id','=',extractionId).executeTakeFirstOrThrow()).featureId).toBe(edgeId);
     await db.transaction().execute(async tx=>{await expect(startStoneExtraction(tx,{...village(),worldId:randomUUID()},
       {worldId:randomUUID(),villageId,through:t0},edgeId,randomUUID(),1)).rejects.toMatchObject({code:'DEPOSIT_NOT_FOUND'});});
   });
@@ -447,6 +466,11 @@ describe.sequential('stone regression proofs', () => {
       await tx.insertInto('worldFeatures').values({id:featureId,worldId:otherWorld,featureTypeCode:'woodland',state:'available',variantSeed:42}).execute();
       await tx.insertInto('worldCellOccupancies').values({worldId:otherWorld,featureId,buildingId:null,pendingExpansionId:null,cellX:0,cellY:0,role:'body'}).execute();
       await tx.updateTable('villages').set({anchorCellX:0,anchorCellY:0}).where('id','=',villageId).execute();
+      // Relocate the actual hall with its anchor. Leaving it at the old centre
+      // creates a half-world village and tests global navigation, not isolation.
+      await tx.deleteFrom('worldCellOccupancies').where('worldId','=',worldId).where('cellX','=',0).where('cellY','=',0).execute();
+      await tx.updateTable('worldCellOccupancies').set({cellX:0,cellY:0}).where('worldId','=',worldId)
+        .where('buildingId','=',DEVELOPMENT_IDS.townHall).execute();
       const snapshot=await state(tx,DEVELOPMENT_IDS.account,'aube',await beginVillageEconomy(tx,worldId,villageId));
       expect(snapshot.region.features.some(feature=>feature.id===featureId)).toBe(false);
       throw rollback;

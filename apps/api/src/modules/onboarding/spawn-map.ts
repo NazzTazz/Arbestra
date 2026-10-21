@@ -37,11 +37,10 @@ export async function spawnVillages(db: Kysely<Database>, worldId: string): Prom
   const rows = await db.selectFrom('villages').innerJoin('worldMemberships', join => join
     .onRef('worldMemberships.worldId', '=', 'villages.worldId').onRef('worldMemberships.accountId', '=', 'villages.ownerAccountId'))
     .select(['villages.id', 'villages.anchorCellX', 'villages.anchorCellY', 'worldMemberships.playerName'])
+    .select(eb => eb.selectFrom('populationCohorts').select(sql<number>`coalesce(sum(member_count),0)::integer`.as('count'))
+      .whereRef('worldId', '=', 'villages.worldId').whereRef('villageId', '=', 'villages.id').as('population'))
     .where('villages.worldId', '=', worldId).orderBy('villages.id').execute();
-  const cohorts = await db.selectFrom('populationCohorts').select(['villageId', 'memberCount']).where('worldId', '=', worldId).execute();
-  const population = new Map<string, number>();
-  for (const c of cohorts) population.set(c.villageId, (population.get(c.villageId) ?? 0) + c.memberCount);
-  return rows.map(v => ({ id: v.id, x: v.anchorCellX, y: v.anchorCellY, playerName: v.playerName, population: population.get(v.id) ?? 0 }));
+  return rows.map(v => ({ id: v.id, x: v.anchorCellX, y: v.anchorCellY, playerName: v.playerName, population: v.population ?? 0 }));
 }
 
 /** Finish the read-only snapshot before any CPU job is admitted to the worker.

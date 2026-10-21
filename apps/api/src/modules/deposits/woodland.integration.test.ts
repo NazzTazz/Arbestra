@@ -11,7 +11,7 @@ import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { clearWoodland, materializeWoodland, materializeWoodlands } from './woodland.js';
 import { completeStoneExtractionAt, readStoneDeposit, startStoneExtraction } from './stone-extractions.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
-import { getStoneDepositDetails, startVillageStoneExtraction, clearVillageWoodland } from '../villages/service.js';
+import { readVillageDepositDetails, ownedVillage, startVillageStoneExtraction, clearVillageWoodland } from '../villages/service.js';
 import { getTerrainUpdates } from '../worlds/terrain.js';
 import { completeGardenHarvestAt } from '../population/garden-harvest.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts } from '../population/work.js';
@@ -143,9 +143,10 @@ it('a construction on a liberated case stops regrowth without overwriting the bu
 });
 
 it('serves woodland details and starts the existing API service with a real path and resource identity', async () => {
-  await fixture(async (tx, id) => {
+  await fixture(async (tx, id, t) => {
     const source = { transaction: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }) } as unknown as typeof db;
-    const details = await getStoneDepositDetails(source, DEVELOPMENT_IDS.account, 'aube', villageId, id);
+    const owned = await ownedVillage(tx, DEVELOPMENT_IDS.account, 'aube', villageId);
+    const details = await readVillageDepositDetails(tx, DEVELOPMENT_IDS.account, owned, { worldId, villageId, through: t }, id);
     expect(details.deposit).toMatchObject({ resourceCode: 'wood', initialAmount: 300, remainingAmount: 300 });
     expect(details.eligibility.workerOptions[0]?.canStart).toBe(true);
     const result = await startVillageStoneExtraction(source, DEVELOPMENT_IDS.account, 'aube', villageId, id, randomUUID(), 1);

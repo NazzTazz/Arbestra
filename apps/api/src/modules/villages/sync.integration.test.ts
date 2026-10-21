@@ -457,6 +457,7 @@ it('deadline reconciliation commits the economy without assembling a discarded s
   expect(await db.selectFrom('scheduledTasks').selectAll().where('id', '=', task.id).executeTakeFirstOrThrow()).toEqual(task);
   expect(trace.metrics.has('snapshot')).toBe(false);
   expect(trace.metrics.has('navigation')).toBe(false);
+  expect(trace.metrics.get('reconcile')?.count).toBe(1);
 });
 
 it('overlapping read wakeups join one economic transaction after ownership checks', async () => {
@@ -522,6 +523,82 @@ it('returns a construction frame from the client exact HTTP base instead of a fu
 
 const config = { databaseUrl:url,host:'127.0.0.1',port:0,isProduction:false,cookieName:'arbestra_session',sessionTtlDays:30,
   constructionDurationOverrideMs:600000,scheduledTaskPollIntervalMs:250 };
+
+it.each(['market', 'processing', 'science'] as const)('publishes %s frames after commit while another command can lock the village', async family => {
+  const workshopId = randomUUID();
+  await db.updateTable('buildings').set({ level: 2 }).where('id', '=', hallId).execute();
+  await db.insertInto('buildings').values({ id: workshopId, worldId, villageId, buildingType: 'sawmill', level: 1,
+    targetLevel: null, status: 'completed', constructionStartedAt: null, constructionCompletesAt: null, completedAt: new Date() }).execute();
+  await db.insertInto('worldCellOccupancies').values({ worldId, buildingId: workshopId, cellX: 63, cellY: 64, role: 'anchor', featureId: null }).execute();
+  await db.insertInto('populationCohorts').values({ worldId, villageId, originVillageId: villageId, memberCount: 10,
+    activity: 'idle', energy: 10, energyProgress: 0, energyUpdatedAt: new Date(), restingSince: null, foodUsedSinceRest: 0 }).execute();
+  await db.insertInto('sciencePrograms').values({ worldId, accountId, code: 'mathematics-1', discipline: 'mathematics',
+    level: 1, createdAt: new Date(), acquiredAt: null, paused: false, workDoneMs: 0, workerCap: 1 }).execute();
+  let armed = false, readOnly = false, gated = false, expired = false, enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(r => { enter = r; }), barrier = new Promise<void>(r => { release = r; });
+  const queries = new Set<QueryId>();
+  const plugin: KyselyPlugin = {
+    transformQuery(args) {
+      const query = JSON.stringify(args.node);
+      if (armed && query.includes('set transaction read only')) readOnly = true;
+      if (armed && readOnly && !gated && query.includes('village_sync_changes')) { gated = true; queries.add(args.queryId); }
+      return args.node;
+    },
+    async transformResult(args) { if (queries.delete(args.queryId)) { enter(); await barrier; } return args.result; },
+  };
+  const server = await buildApp(config, db.withPlugin(plugin));
+  let pending: ReturnType<typeof build> | undefined, deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const base = await snapshot(server), commandId = randomUUID();
+    const quote = await server.inject({ method: 'POST', url: `/api/worlds/${slug}/villages/${villageId}/market/preview`,
+      cookies: { arbestra_session: token }, payload: { offeredResource: 'wood', requestedResource: 'stone', amount: 100 } });
+    expect(quote.statusCode, quote.body).toBe(200);
+    const payload = family === 'market' ? { commandId, offeredResource: 'wood', requestedResource: 'stone', amount: 100,
+      expectedReceivedAmount: quote.json().receivedAmount } : family === 'processing' ? { commandId, action: 'start',
+      buildingId: workshopId, lots: 2, workerCount: 1 } : { action: 'pause', programCode: 'mathematics-1' };
+    armed = true;
+    deadline = setTimeout(() => { expired = true; release(); }, 30000);
+    pending = server.inject({ method: 'POST', url: `/api/worlds/${slug}/villages/${villageId}/${family}`,
+      cookies: { arbestra_session: token }, headers: headers(base), payload });
+    await Promise.race([entered, pending.then(r => { throw Error(`Response completed without projection barrier: ${r.statusCode}`); })]);
+    expect(expired).toBe(false);
+    // The change is already visible from a separate connection, before reply computation.
+    if (family === 'market') expect(await db.selectFrom('marketExchanges').select('id').where('worldId', '=', worldId).execute()).toHaveLength(1);
+    if (family === 'processing') expect(await db.selectFrom('processingOrders').select('id').where('worldId', '=', worldId).execute()).toHaveLength(1);
+    if (family === 'science') expect((await db.selectFrom('sciencePrograms').select('paused').where('worldId', '=', worldId).executeTakeFirstOrThrow()).paused).toBe(true);
+    await db.transaction().execute(async tx => {
+      await sql`set local lock_timeout='1000ms'`.execute(tx);
+      await tx.selectFrom('villages').select('id').where('worldId', '=', worldId).where('id', '=', villageId).forUpdate().executeTakeFirstOrThrow();
+    });
+    expect(expired).toBe(false); release();
+    const response = await pending;
+    expect(response.statusCode, response.body).toBe(200);
+    const result = response.json<VillageCommandResponse>();
+    expect(result.kind).toBe('frame');
+    if (result.kind !== 'frame') throw Error('Expected incremental reply');
+    const next = applied(base, result);
+    if (family === 'market') expect(next.village.wood).toBe(base.village.wood - 100);
+    if (family === 'processing') expect(next.village.processingOrders).toHaveLength(1);
+    if (family === 'science') expect(next.science!.programs.find(p => p.code === 'mathematics-1')?.status).toBe('paused');
+    expect(applyVillageFrame(next, result.frame).kind).toBe('ignored');
+    const dueId = randomUUID(), now = Date.now();
+    if (family !== 'science') await db.insertInto('buildings').values({ id: dueId, worldId, villageId,
+      buildingType: 'dwelling', level: 1, status: 'under-construction', constructionStartedAt: new Date(now - 2000),
+      constructionCompletesAt: new Date(now - 1000) }).execute();
+    const retry = await server.inject({ method: 'POST', url: `/api/worlds/${slug}/villages/${villageId}/${family}`,
+      cookies: { arbestra_session: token }, headers: headers(next), payload });
+    expect(retry.statusCode, retry.body).toBe(200);
+    const retryResult = retry.json<VillageCommandResponse>();
+    const retried = retryResult.kind === 'snapshot' ? retryResult.state : applied(next, retryResult);
+    expect(retried.village.wood).toBe(next.village.wood);
+    if (family !== 'science') expect((await db.selectFrom('buildings').select('status').where('worldId', '=', worldId)
+      .where('id', '=', dueId).executeTakeFirstOrThrow()).status).toBe('under-construction');
+  } finally {
+    clearTimeout(deadline); release();
+    try { await pending; } finally { await server.close(); }
+  }
+}, 60000);
+
 const snapshot = async (server=app) => {
   const response=await server.inject({url:`/api/worlds/${slug}/village?villageId=${villageId}`,cookies:{arbestra_session:token}});
   expect(response.statusCode).toBe(200);return response.json<VillageState>();

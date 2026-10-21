@@ -61,13 +61,13 @@ import {planGardenTour} from '@arbestra/contracts';
 import {housingCapacity} from '../population/housing.js';
 import {POPULATION_ARRIVAL_INTERVAL_MS} from '../population/growth.js';
 import {reconcileRestHousing} from '../population/work.js';
-import { eligibleWorkers, materializeCohorts, withoutAssignment, workingTeam } from '../population/work.js';
+import { eligibleWorkers, materializeCohorts, projectCohorts, withoutAssignment, workingTeam } from '../population/work.js';
 import { admitScience, scienceSnapshot, scienceCommand } from '../science/service.js';
 import type { ScienceCommand } from '@arbestra/contracts';
 import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/deposit-access.js';
 import { knownGeography } from '../science/knowledge.js';
 import { clearWoodland, claimWoodlandCell } from '../deposits/woodland.js';
-import { startStoneExtraction, stoneDepositDetails, readExtraction,readExtractions, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
+import { startStoneExtraction, stoneDepositDetails, readDepositAccess, readDepositAccessContext, readExtraction,readExtractions, readStoneDeposit, safeAmount, stoneExtractionDuration } from '../deposits/stone-extractions.js';
 import { admitWorksites, changeWorksite, createWorksite, readWorksites, worksiteTargetDistance } from '../deposits/worksites.js';
 import { readExtractionPools } from '../deposits/extraction-pools.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
@@ -473,15 +473,17 @@ function protectedCell(
 }
 
 /** Final writes common to command replies and ordinary snapshots. */
+async function admitVillageWork(tx: Transaction<Database>, economy: VillageEconomy, village: OwnedVillage) {
+  await admitExploitationGardens(tx, economy);
+  await admitWorksites(tx, economy, village, featureId => stoneTravelPath(tx, village, featureId));
+  await admitScience(tx, economy);
+}
+
 async function finalizeVillageEconomy(tx: Transaction<Database>, economy: VillageEconomy, village: OwnedVillage, admit = true) {
   return devTime('admission', async () => {
   // Keep the command bound, including zero-duration transitions and admissions.
   await reconcileVillageEconomy(tx, economy);
-  if (admit) {
-    await admitExploitationGardens(tx, economy);
-    await admitWorksites(tx, economy, village, featureId => stoneTravelPath(tx, village, featureId));
-    await admitScience(tx, economy);
-  }
+  if (admit) await admitVillageWork(tx, economy, village);
   });
 }
 export type ConstructionReplyMode = 'snapshot' | 'commit';
@@ -1157,7 +1159,10 @@ export async function reconcileVillageForRead(db: Kysely<Database>, accountId: s
       const village = await ownedVillage(tx, owner, slug, id);
       if (village.generationVersion === 3) await readRc1Source(tx, village.worldId);
       const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-      return villageCommandResult(tx, owner, slug, village, economy, 'commit');
+      // No command took place after begin: all due transitions are already at H.
+      await devTime('admission', () => admitVillageWork(tx, economy, village));
+      await reconcileRestHousing(tx, village.worldId, village.villageId, economy.through);
+      return economy;
     }));
     readReconciliations.set(db, reconciliations);
   }
@@ -1173,47 +1178,63 @@ export function getVillageState(db: Kysely<Database>, accountId: string, worldSl
   });
 }
 
-export async function commandVillageScience(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: ScienceCommand): Promise<VillageState> {
+export async function commandVillageScience<Mode extends ConstructionReplyMode = 'snapshot'>(db: Kysely<Database>, accountId: string,
+  worldSlug: string, villageId: string, command: ScienceCommand, replyMode: Mode = 'snapshot' as Mode): Promise<ConstructionResult<Mode>> {
   return db.transaction().execute(async tx => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await scienceCommand(tx, economy, command);
-    return state(tx, accountId, worldSlug, economy);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode);
   });
 }
 
-export async function commandVillageProcessing(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: ProcessingCommand): Promise<VillageState> {
+/** Durable receipts are immutable. A retry only needs ownership, request equality
+ * and a fresh read-only transport projection; it must not wake unrelated work. */
+async function replayVillageCommand(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
+  command: MarketCommand | ProcessingCommand, table: 'marketExchanges' | 'processingCommandReceipts'): Promise<ConstructionCommit | undefined> {
+  const village = await ownedVillage(db, accountId, worldSlug, villageId);
+  const previous = await db.selectFrom(table).select(['request', sql<Date>`statement_timestamp()`.as('through')])
+    .where('worldId', '=', village.worldId).where('villageId', '=', villageId).where('commandId', '=', command.commandId).executeTakeFirst();
+  if (!previous) return;
+  if (!isDeepStrictEqual(previous.request, command)) throw new HttpError(409, 'COMMAND_REUSED', 'Identifiant de commande déjà utilisé.');
+  return { worldId: village.worldId, villageId: village.villageId, through: previous.through, commandId: command.commandId };
+}
+
+export async function commandVillageProcessing<Mode extends ConstructionReplyMode = 'snapshot'>(db: Kysely<Database>, accountId: string,
+  worldSlug: string, villageId: string, command: ProcessingCommand, replyMode: Mode = 'snapshot' as Mode): Promise<ConstructionResult<Mode>> {
+  if (replyMode === 'commit') {
+    const replay = await replayVillageCommand(db, accountId, worldSlug, villageId, command, 'processingCommandReceipts');
+    if (replay) return replay as ConstructionResult<Mode>;
+  }
   return db.transaction().execute(async tx => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await commandProcessing(tx, economy, command);
-    return state(tx, accountId, worldSlug, economy);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, command.commandId);
   });
 }
 
-export async function commandVillageMarket(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, command: MarketCommand): Promise<VillageState> {
+export async function commandVillageMarket<Mode extends ConstructionReplyMode = 'snapshot'>(db: Kysely<Database>, accountId: string,
+  worldSlug: string, villageId: string, command: MarketCommand, replyMode: Mode = 'snapshot' as Mode): Promise<ConstructionResult<Mode>> {
+  if (replyMode === 'commit') {
+    const replay = await replayVillageCommand(db, accountId, worldSlug, villageId, command, 'marketExchanges');
+    if (replay) return replay as ConstructionResult<Mode>;
+  }
   return db.transaction().execute(async tx => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await commandMarket(tx, economy, command);
-    return state(tx, accountId, worldSlug, economy);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, command.commandId);
   });
 }
 export async function previewVillageMarket(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, request: MarketRequest) {
-  return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    return previewMarket(tx, economy, request);
-  });
+  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) => previewMarket(tx, economy, request));
 }
 
 export async function previewVillageProcessing(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, buildingId: string, workerCount: number, orderId?: string) {
-  return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    return previewProcessing(tx, economy, buildingId, workerCount, orderId);
-  });
+  return withVillageProjection(db, accountId, worldSlug, villageId,
+    (tx, economy) => previewProcessing(tx, economy, buildingId, workerCount, orderId));
 }
 
 /** Explicit administrative pilot conversion. No catalog upgrade, cost or implicit migration. */
@@ -1666,17 +1687,13 @@ export async function startVillageStoneExtraction(
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
     const previous = await tx.selectFrom('depositExtractions').select('id').where('worldId', '=', village.worldId)
       .where('villageId', '=', village.villageId).where('commandId', '=', commandId).executeTakeFirst();
-    let woodland = false;
     if (!previous) {
       const eligibility = await stoneDepositDetails(tx, village, economy, featureId);
-      woodland = eligibility.deposit.resourceCode === 'wood';
       const reason = eligibility.eligibility.workerOptions[0]?.reasonCode;
       if (reason && reason !== 'WORKERS_UNAVAILABLE')
         throw new HttpError(409, reason, 'Ce gisement ne peut pas être exploité actuellement.');
     }
-    const path = previous ? [] : await stoneTravelPath(tx, village, featureId,
-      woodland ? undefined : (await state(tx, accountId, worldSlug, economy)).travelRoutes
-        .find((route) => route.kind === 'stone' && route.id === featureId)?.cells);
+    const path = previous ? [] : await stoneTravelPath(tx, village, featureId);
     if (!path) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun chemin praticable vers ce gisement.');
     const id = await startStoneExtraction(tx, village, economy, featureId, commandId, workerCount,
       path, travelDuration(path, village));
@@ -1689,20 +1706,20 @@ export async function startVillageStoneExtraction(
 export async function getStoneDepositDetails(
   db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string, featureId: string,
 ) {
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const position = await tx.selectFrom('resourceDeposits').select(['cellX', 'cellY'])
-      .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
-    const knowledge = await knownGeography(tx, village.worldId, accountId, village.widthCells, village.heightCells);
-    if (!position || !knowledge.known(position)) throw new HttpError(404, 'DEPOSIT_NOT_FOUND', 'Gisement inconnu.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, featureId);
-    const woodland = (await readStoneDeposit(tx, village.worldId, featureId)).resourceCode === 'wood';
-    const path = await stoneTravelPath(tx, village, featureId,
-      woodland ? undefined : (await state(tx, accountId, worldSlug, economy)).travelRoutes
-        .find((route) => route.kind === 'stone' && route.id === featureId)?.cells);
-    return stoneDepositDetails(tx, village, economy, featureId, path ? travelDuration(path, village) : 0, Boolean(path));
-  });
+  return withVillageProjection(db, accountId, worldSlug, villageId,
+    (tx, economy, village) => readVillageDepositDetails(tx, accountId, village, economy, featureId));
+}
+
+export async function readVillageDepositDetails(tx: Transaction<Database>, accountId: string, village: OwnedVillage,
+  economy: VillageEconomy, featureId: string) {
+  const position = await tx.selectFrom('resourceDeposits').select(['cellX', 'cellY'])
+    .where('worldId', '=', village.worldId).where('featureId', '=', featureId).executeTakeFirst();
+  if (!position) throw new HttpError(404, 'DEPOSIT_NOT_FOUND', 'Gisement inconnu.');
+  const knowledge = await knownGeography(tx, village.worldId, accountId, village.widthCells, village.heightCells,
+    [{ minX: position.cellX, maxX: position.cellX + 1, minY: position.cellY, maxY: position.cellY + 1 }]);
+  if (!knowledge.known(position)) throw new HttpError(404, 'DEPOSIT_NOT_FOUND', 'Gisement inconnu.');
+  const path = await stoneTravelPath(tx, village, featureId);
+  return stoneDepositDetails(tx, village, economy, featureId, path ? travelDuration(path, village) : 0, Boolean(path));
 }
 
 export async function clearVillageWoodland(db: Kysely<Database>, accountId: string, worldSlug: string,
@@ -1729,12 +1746,16 @@ function canonicalExploitation(request: ExploitationRequest, village: OwnedVilla
 
 export async function prepareExploitation(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
   accountId: string, request: ExploitationRequest) {
-  // Snapshot without admissions: preview never sends idle people to work.
-  const snapshot = await state(tx, accountId, village.worldSlug, economy, false);
+  // Preparation projects eligibility; only the subsequent command assigns work.
+  const snapshot = request.gardens.length ? await state(tx, accountId, village.worldSlug, economy, false, true, undefined, village) : undefined;
+  const projectedCohorts = await projectCohorts(tx, village.worldId, village.villageId, economy.through);
+  const population = { total: projectedCohorts.reduce((n, c) => n + c.memberCount, 0),
+    cohorts: projectedCohorts.map(c => ({ id: c.id, memberCount: c.memberCount, activity: c.activity,
+      assignmentId: c.harvestId ?? c.extractionId ?? c.scienceActivityId ?? c.processingLotId ?? c.tradeJourneyId ?? c.levelingJobId })) };
   const preview: ExploitationPreview = { gardens: [], wood: [], stone: [], excluded: [], gardenReturnMs: null,
     estimates: { carrot: 0, wood: 0, stone: 0 }, workforce: { structuralMax: 0, autoWorkerCap: 0,
       availableNow: 0, allocation: { gardens: 0, wood: 0, stone: 0 }, reason: null } };
-  const plots = snapshot.cells.flatMap(c => c.building?.garden?.plots.map(plot => ({ plot, building: c.building! })) ?? []);
+  const plots = snapshot?.cells.flatMap(c => c.building?.garden?.plots.map(plot => ({ plot, building: c.building! })) ?? []) ?? [];
   const seen = new Set<string>();
   for (const cell of request.gardens) {
     const key = `garden:${cell.cellX}:${cell.cellY}`;
@@ -1745,7 +1766,7 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
     if (reason) preview.excluded.push({ key, reason });
     else { preview.gardens.push(cell); preview.estimates.carrot += p!.plot.storedCarrots; }
   }
-  const plan = preview.gardens.length ? planGardenTour(snapshot.travelRoutes,
+  const plan = preview.gardens.length ? planGardenTour(snapshot!.travelRoutes,
     { cellX: village.anchorCellX, cellY: village.anchorCellY }, preview.gardens, village) : null;
   if (preview.gardens.length && !plan) {
     preview.excluded.push(...preview.gardens.map(p => ({ key: `garden:${p.cellX}:${p.cellY}`, reason: 'unreachable' })));
@@ -1755,6 +1776,11 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
   // Selection and workforce estimation share exactly the same routes in this
   // preparation. No geometry is changed before the preparation returns.
   const paths = new Map<string, TravelCell[] | undefined>();
+  const deposits = new Map<string, Awaited<ReturnType<typeof readStoneDeposit>>>();
+  const depositFor = async (id: string) => {
+    if (!deposits.has(id)) deposits.set(id, await readStoneDeposit(tx, village.worldId, id));
+    return deposits.get(id)!;
+  };
   const pathFor = async (id: string) => {
     if (!paths.has(id)) paths.set(id, await stoneTravelPath(tx, village, id));
     return paths.get(id);
@@ -1768,31 +1794,23 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
     preview[family] = selection.included.map(i => i.featureId);
     preview.excluded.push(...selection.excluded.map(i => ({ key: i.featureId, reason: i.reason })));
     for (const id of preview[family]) {
-      const deposit = await readStoneDeposit(tx, economy.worldId, id);
+      const deposit = await depositFor(id);
       preview.estimates[family] += Math.max(0, Math.floor(deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)));
     }
   }
   const gardenCap = preview.gardens.length ? 1 : 0;
   const woodCap = preview.wood.length ? Math.min(10, request.activityCaps?.wood ?? 10) : 0;
   const stoneCap = preview.stone.length ? Math.min(10, request.activityCaps?.stone ?? 10) : 0;
-  preview.workforce.structuralMax = Math.min(snapshot.village.population.total, gardenCap + woodCap + stoneCap, request.workerCap);
+  preview.workforce.structuralMax = Math.min(population.total, gardenCap + woodCap + stoneCap, request.workerCap);
   const lots: Partial<Record<'wood' | 'stone', { id: string; amount: number; transportMs: number }>> = {};
   for (const family of ['wood', 'stone'] as const) for (const id of preview[family]) {
-    const deposit = await readStoneDeposit(tx, village.worldId, id);
+    const deposit = await depositFor(id);
     const amount = Math.min(100, deposit.availableAmount,
       Math.max(0, deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)));
     if (amount < 1) continue;
     const path = await pathFor(id);
     if (path) { lots[family] = { id, amount, transportMs: travelDuration(path, village) }; break; }
   }
-  const cohorts = await tx.selectFrom('populationCohorts').selectAll().where('worldId', '=', village.worldId)
-    .where('villageId', '=', village.villageId).orderBy('id').execute();
-  const projectedCohorts = cohorts.map(cohort => {
-    const energy = advanceEnergy({ energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
-      restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt }, economy.through);
-    return { ...cohort, energy: energy.energy, energyProgress: energy.progress, activity: energy.activity,
-      restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt };
-  });
   const preferred = projectedCohorts.filter(c => withoutAssignment(c) && c.activity === 'idle' && (!request.cohortId || c.id === request.cohortId));
   preview.workforce.availableNow = preferred.reduce((sum, cohort) => sum + cohort.memberCount, 0);
   // Simulate disjoint first teams on copies: preview never reserves a person.
@@ -1817,17 +1835,18 @@ export async function prepareExploitation(tx: Transaction<Database>, village: Ow
   preview.workforce.autoWorkerCap = used;
   preview.workforce.reason = preview.workforce.structuralMax === 0 ? 'no-targets'
     : used === 0 ? request.cohortId ? 'cohort-unavailable' : 'no-eligible-workers' : null;
-  return { preview, plan, population: snapshot.village.population, lots };
+  return { preview, plan, population, lots };
 }
 
 export async function previewVillageExploitation(db: Kysely<Database>, accountId: string, worldSlug: string,
   villageId: string, rawRequest: ExploitationRequest): Promise<ExploitationPreview> {
-  return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const request = canonicalExploitation(rawRequest, village);
-    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [...request.wood, ...request.stone]);
-    return (await prepareExploitation(tx, village, economy, accountId, request)).preview;
-  });
+  return withVillageProjection(db, accountId, worldSlug, villageId,
+    (tx, economy, village) => previewExploitation(tx, village, economy, accountId, rawRequest));
+}
+
+export async function previewExploitation(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
+  accountId: string, request: ExploitationRequest): Promise<ExploitationPreview> {
+  return (await prepareExploitation(tx, village, economy, accountId, canonicalExploitation(request, village))).preview;
 }
 
 export async function startVillageExploitation(db: Kysely<Database>, accountId: string, worldSlug: string,
@@ -1906,13 +1925,15 @@ export async function startVillageWorksite(db: Kysely<Database>, accountId: stri
 export async function prepareWorksiteSelection(tx: Transaction<Database>, village: OwnedVillage, economy: VillageEconomy,
   request: StartExtractionWorksiteRequest, pathFor = (id: string) => stoneTravelPath(tx, village, id)): Promise<ExtractionWorksiteSelection> {
   const included: ExtractionWorksiteSelection['included'] = [], excluded: ExtractionWorksiteSelection['excluded'] = [];
+  if (!request.featureIds.length) return { included, excluded };
+  const accessContext = await readDepositAccessContext(tx, village);
   const seen = new Set<string>();
   for (const rawId of request.featureIds) {
     const featureId = rawId.toLowerCase();
     if (seen.has(featureId)) { excluded.push({ featureId, reason: 'duplicate' }); continue; }
     seen.add(featureId);
     let details;
-    try { details = await stoneDepositDetails(tx, village, economy, featureId); }
+    try { details = await readDepositAccess(tx, village, featureId, accessContext); }
     catch (error) {
       if (error instanceof HttpError && error.statusCode === 404) { excluded.push({ featureId, reason: 'not-found' }); continue; }
       throw error;
@@ -1945,10 +1966,7 @@ export async function prepareWorksiteSelection(tx: Transaction<Database>, villag
 
 export async function previewVillageWorksite(db: Kysely<Database>, accountId: string, worldSlug: string,
   villageId: string, request: StartExtractionWorksiteRequest): Promise<ExtractionWorksiteSelection> {
-  return db.transaction().execute(async tx => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, [], request.featureIds);
+  return withVillageProjection(db, accountId, worldSlug, villageId, async (tx, economy, village) => {
     return prepareWorksiteSelection(tx, village, economy, request);
   });
 }

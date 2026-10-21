@@ -1,5 +1,5 @@
 import { sql, type Kysely, type Transaction } from 'kysely';
-import { pathPassageIntersectsBox, travelDuration } from '@arbestra/contracts';
+import { pathPassageIntersectsBox, travelDuration, type TravelCell } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { randomUUID } from 'node:crypto';
 import { up as migrateGardenPlots } from '../../database/migrations/015_garden_plots.js';
@@ -20,6 +20,12 @@ beforeAll(() => resetE2eState(databaseUrl));
 beforeEach(() => resetE2eState(databaseUrl));
 afterAll(() => db.destroy());
 
+async function completedGarden(anchor: TravelCell, cells: TravelCell[]) {
+  await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden', anchor, cells, 0);
+  // Construction acknowledges the reservation; plots exist after its due wakeup.
+  return getVillageState(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
+}
+
 async function gardenRows(source: Kysely<Database> = db) {
   const tables = ['buildings', 'buildingExpansions', 'worldCellOccupancies', 'gardenPlots', 'gardenHarvests',
     'populationCohorts', 'villageResources', 'villageResourceFlows', 'buildingResourceBuffers', 'scheduledTasks'] as const;
@@ -33,7 +39,7 @@ function inside(tx: Transaction<Database>): Kysely<Database> {
 it('harvests only the enclosed centre of nine garden plots and preserves its unselected neighbours', async () => {
   const origin = DEVELOPMENT_CELLS.garden;
   const cells = Array.from({ length: 9 }, (_, i) => ({ cellX: origin.cellX + i % 3, cellY: origin.cellY + Math.floor(i / 3) }));
-  await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden', origin, cells, 0);
+  await completedGarden(origin, cells);
   await db.updateTable('gardenPlots').set({ storedAmount: 13, remainder: 0, productionUpdatedAt: new Date() })
     .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
   const commandId = randomUUID(), centre = cells[4]!;
@@ -64,8 +70,7 @@ async function bounded<T>(promise: Promise<T>): Promise<T> {
 }
 
 it('review: rejects overlap with an unfinished initial garden', async () => {
-  const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
-    'garden', DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden], 0);
+  const state = await completedGarden(DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden]);
   const id = state.cells.find((cell) => cell.building?.type === 'garden')!.building!.id;
   await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village,
     'garden', DEVELOPMENT_CELLS.gardenNorth, [DEVELOPMENT_CELLS.gardenNorth], 600_000);
@@ -126,8 +131,7 @@ it('migrates overdue capacity changes chronologically while preserving legacy wo
 });
 
 it.each([false, true])('serializes forced concurrent harvests (distinct plots: %s)', async (distinct) => {
-  const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden',
-    DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth], 0);
+  const state = await completedGarden(DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth]);
   const id = state.cells.find((cell) => cell.building?.garden)!.building!.id;
   await db.updateTable('gardenPlots').set({ storedAmount: 10, remainder: 0, productionUpdatedAt: new Date() }).where('worldId', '=', DEVELOPMENT_IDS.world).execute();
   const held = gate(), entered = gate(), release = gate();
@@ -172,8 +176,7 @@ it.each([false, true])('serializes forced concurrent harvests (distinct plots: %
 });
 
 it('rolls back an accepted plot departure after an identified injected failure', async () => {
-  const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden',
-    DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden], 0);
+  const state = await completedGarden(DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden]);
   const id = state.cells.find((cell) => cell.building?.garden)!.building!.id;
   await db.updateTable('gardenPlots').set({ storedAmount: 13, remainder: 0.25, productionUpdatedAt: new Date() }).where('worldId', '=', DEVELOPMENT_IDS.world).execute();
   const before = await gardenRows(), failure = new Error('injected after plot departure');
@@ -191,8 +194,7 @@ it('rolls back an accepted plot departure after an identified injected failure',
 });
 
 it('credits only the reserved plot at its return deadline and never credits it twice', async () => {
-  const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden',
-    DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth], 0);
+  const state = await completedGarden(DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth]);
   const id = state.cells.find((cell) => cell.building?.garden)!.building!.id;
   await db.updateTable('gardenPlots').set({ storedAmount: 13, remainder: 0.25, productionUpdatedAt: new Date() })
     .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
@@ -223,8 +225,7 @@ it('credits only the reserved plot at its return deadline and never credits it t
 });
 
 it('adds the recorded outward and return travel to a plot harvest without shortening work', async () => {
-  const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden',
-    DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth], 0);
+  const state = await completedGarden(DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth]);
   const garden = state.cells.find((cell) => cell.building?.garden)!.building!;
   await db.updateTable('gardenPlots').set({ storedAmount: 13, productionUpdatedAt: new Date() })
     .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
@@ -243,7 +244,7 @@ it('preserves both departures and both extensions when Gardens fuse and old rece
   const left = DEVELOPMENT_CELLS.garden, right = { cellX: left.cellX + 2, cellY: left.cellY };
   const ids: string[] = [];
   for (const cell of [left, right]) {
-    const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden', cell, [cell], 0);
+    const state = await completedGarden(cell, [cell]);
     ids.push(state.cells.find((item) => item.cellX === cell.cellX && item.cellY === cell.cellY)!.building!.id);
   }
   await db.updateTable('gardenPlots').set({ storedAmount: 10, remainder: 0, productionUpdatedAt: new Date() }).where('worldId', '=', DEVELOPMENT_IDS.world).execute();
@@ -273,7 +274,7 @@ it('preserves both departures and both extensions when Gardens fuse and old rece
   const beforeExpansions = await db.selectFrom('buildingExpansions').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).orderBy('id').execute();
   const beforeNotifications = await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', DEVELOPMENT_IDS.world).orderBy('id').execute();
   const bridge = { cellX: left.cellX + 1, cellY: left.cellY };
-  const fused = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden', bridge, [bridge], 0);
+  const fused = await completedGarden(bridge, [bridge]);
   const garden = fused.cells.find((cell) => cell.building?.garden)!.building!.garden!;
   expect(fused.cells.filter((cell) => cell.building?.garden)).toHaveLength(1);
   expect(garden.expansions).toHaveLength(2);

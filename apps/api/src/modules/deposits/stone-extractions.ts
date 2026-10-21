@@ -5,7 +5,7 @@ import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, projectCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
 import { beginRest, canWorkFor } from '../population/energy.js';
 import { normalizeCell, toroidalChebyshev } from '../worlds/coordinates.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
@@ -28,15 +28,13 @@ export function stoneExtractionDuration(workerCount: number, amount = STONE_EXTR
   return Math.ceil(STONE_EXTRACTION_BASE_MS * amount / (STONE_EXTRACTION_LOT * workerCount));
 }
 
-async function isWithinVillageRange(tx: Transaction<Database>, village: ExtractionVillage, cellX: number, cellY: number): Promise<boolean> {
-  const cells = await tx.selectFrom('worldCellOccupancies').innerJoin('buildings', (join) => join
+async function readRangeFootprints(tx: Transaction<Database>, village: ExtractionVillage) {
+  return tx.selectFrom('worldCellOccupancies').innerJoin('buildings', (join) => join
     .onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId')
     .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'))
     .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
     .where('worldCellOccupancies.worldId', '=', village.worldId).where('buildings.villageId', '=', village.villageId)
     .where('buildings.status', '=', 'completed').where('worldCellOccupancies.pendingExpansionId', 'is', null).execute();
-  return withinDepositRange(cells,{cellX,cellY},village)
-    || await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, { cellX, cellY });
 }
 
 async function isOnStoneBoundary(tx: Transaction<Database>, village: ExtractionVillage, cellX: number, cellY: number): Promise<boolean> {
@@ -50,12 +48,17 @@ async function isOnStoneBoundary(tx: Transaction<Database>, village: ExtractionV
   return neighbours.some((cell) => !occupied.some((stone) => stone.cellX === cell.cellX && stone.cellY === cell.cellY && Number(stone.remainingAmount) > 0));
 }
 
-async function isProtected(tx: Transaction<Database>, village: ExtractionVillage, cellX: number, cellY: number): Promise<boolean> {
-  const clearings = await tx.selectFrom('worldClearings').select(['centerCellX', 'centerCellY', 'innerRadius', 'status'])
+async function readProtectedClearings(tx: Transaction<Database>, village: ExtractionVillage) {
+  return tx.selectFrom('worldClearings').select(['centerCellX', 'centerCellY', 'innerRadius', 'status'])
     .where('worldId', '=', village.worldId).where('status', '=', 'protected').execute();
-  return clearings.some((clearing) => toroidalChebyshev(cellX, cellY, clearing.centerCellX, clearing.centerCellY,
-    village.widthCells, village.heightCells) <= clearing.innerRadius);
 }
+
+/** Reuse only within one selection, before any geometry/economic mutation. */
+export async function readDepositAccessContext(tx: Transaction<Database>, village: ExtractionVillage) {
+  const [footprints, clearings] = await Promise.all([readRangeFootprints(tx, village), readProtectedClearings(tx, village)]);
+  return { footprints, clearings };
+}
+type DepositAccessContext = Awaited<ReturnType<typeof readDepositAccessContext>>;
 
 export function safeAmount(value: string | number): number {
   const amount = Number(value);
@@ -102,10 +105,21 @@ export async function readExtractions(tx:Transaction<Database>,worldId:string,vi
  return (await query.execute()).map(row=>({worksiteId:row.worksiteId,extraction:extractionProjection(row,row)}));
 }
 
-async function access(tx: Transaction<Database>, village: ExtractionVillage, deposit: StoneDeposit) {
-  return { inRange: await isWithinVillageRange(tx, village, deposit.cellX, deposit.cellY),
-    protected: await isProtected(tx, village, deposit.cellX, deposit.cellY),
+async function access(tx: Transaction<Database>, village: ExtractionVillage, deposit: StoneDeposit,
+  context?: DepositAccessContext) {
+  const { footprints, clearings } = context ?? await readDepositAccessContext(tx, village);
+  return { inRange: withinDepositRange(footprints, deposit, village)
+      || await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit),
+    protected: clearings.some(c => toroidalChebyshev(deposit.cellX, deposit.cellY, c.centerCellX, c.centerCellY,
+      village.widthCells, village.heightCells) <= c.innerRadius),
     onBoundary: deposit.resourceCode === 'wood' || await isOnStoneBoundary(tx, village, deposit.cellX, deposit.cellY) };
+}
+
+/** Spatial selection needs access and stock identity, not ten staffing quotes. */
+export async function readDepositAccess(tx: Transaction<Database>, village: ExtractionVillage, featureId: string,
+  context?: DepositAccessContext) {
+  const deposit = await readStoneDeposit(tx, village.worldId, featureId);
+  return { deposit, eligibility: await access(tx, village, deposit, context) };
 }
 
 function refusal(deposit: StoneDeposit, eligibility: Awaited<ReturnType<typeof access>>): string | null {
@@ -116,15 +130,14 @@ function refusal(deposit: StoneDeposit, eligibility: Awaited<ReturnType<typeof a
   return deposit.availableAmount === 0 ? 'DEPOSIT_FULLY_COMMITTED' : null;
 }
 
-/** Caller holds village and target locks, after reconciling that village to H. */
+/** Eligibility projection only; departures revalidate under village/target locks. */
 export async function stoneDepositDetails(tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy, featureId: string, transportMs = 0, pathReachable = true): Promise<DepositDetails> {
-  const deposit = await readStoneDeposit(tx, village.worldId, featureId);
-  const eligibility = await access(tx, village, deposit);
+  const { deposit, eligibility } = await readDepositAccess(tx, village, featureId);
   const reason = refusal(deposit, eligibility);
   const activeWood = deposit.resourceCode === 'wood' && await tx.selectFrom('depositExtractions').select('id')
     .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).where('featureId', '=', featureId)
     .where('status', '=', 'in-progress').executeTakeFirst();
-  const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
+  const cohorts = await projectCohorts(tx, village.worldId, village.villageId, economy.through);
   const workerOptions = Array.from({ length: STONE_EXTRACTION_MAX_WORKERS }, (_, i) => {
     const workerCount = i + 1, durationMs = stoneExtractionDuration(workerCount) + transportMs * 2;
     const availableWorkers = eligibleWorkers(cohorts, durationMs).reduce((sum, row) => sum + row.memberCount, 0);

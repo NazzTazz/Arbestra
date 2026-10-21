@@ -68,7 +68,7 @@ describe('development timing', () => {
     } finally { left.release(); right.release(); await Promise.allSettled([a,b]); await app.close(); }
   });
 
-  it('requires opt-in, excludes other routes and POST, and is disabled in production', async () => {
+  it('requires opt-in, excludes unrelated routes and is disabled in production', async () => {
     for (const production of [false, true]) {
       const app = Fastify(); instrumentDevTimings(app, production);
       for (const method of ['GET','POST'] as const) app.route({ method, url: '/api/worlds/:worldSlug/village', handler: () => devTimeSync('auth', () => ({ ok: true })) });
@@ -78,6 +78,24 @@ describe('development timing', () => {
           const response = await app.inject({ method, url, headers: optIn ? { 'x-arbestra-dev-timing': '1' } : {} });
           expect(response.statusCode).toBe(200);
           expect(Boolean(response.headers['server-timing'])).toBe(!production && optIn && method === 'GET' && url !== '/other');
+        }
+      } finally { await app.close(); }
+    }
+  });
+
+  it('measures opted-in village commands and previews while excluding streams', async () => {
+    for (const production of [false, true]) {
+      const app = Fastify(); instrumentDevTimings(app, production);
+      for (const action of ['processing', 'market/preview', 'population/gestures'])
+        app.post('/api/worlds/:worldSlug/villages/:villageId/' + action, () => devTimeSync('auth', () => ({ ok: true })));
+      app.get('/api/worlds/:worldSlug/villages/:villageId/events', () => ({ ok: true }));
+      try {
+        for (const action of ['processing', 'market/preview', 'population/gestures', 'events']) for (const optIn of [false, true]) {
+          const response = await app.inject({ method: action === 'events' ? 'GET' : 'POST',
+            url: '/api/worlds/test/villages/village/' + action, headers: optIn ? { 'x-arbestra-dev-timing': '1' } : {} });
+          expect(response.statusCode).toBe(200);
+          expect(Boolean(response.headers['server-timing'])).toBe(!production && optIn && action !== 'events');
+          if (response.headers['server-timing']) expect(parseDevServerTiming(String(response.headers['server-timing'])).some(m => m.phase === 'auth')).toBe(true);
         }
       } finally { await app.close(); }
     }

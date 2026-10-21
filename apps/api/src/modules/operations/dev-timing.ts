@@ -79,7 +79,10 @@ export function instrumentDevTimings(app: FastifyInstance, isProduction: boolean
   if (isProduction) return;
   const traces = new WeakMap<FastifyRequest, DevTimingTrace>();
   app.addHook('onRequest', (request, _reply, done) => {
-    if (request.method !== 'GET' || request.headers[DEV_TIMING_HEADER] !== '1' || !routes.has(request.routeOptions.url ?? '')) return done();
+    const route = request.routeOptions.url ?? '';
+    const villageAction = route.startsWith('/api/worlds/:worldSlug/villages/:villageId/') && !route.endsWith('/events')
+      && (request.method === 'GET' || request.method === 'POST');
+    if (request.headers[DEV_TIMING_HEADER] !== '1' || !(villageAction || request.method === 'GET' && routes.has(route))) return done();
     const trace = new DevTimingTrace(); traces.set(request, trace);
     withDevTiming(trace, done);
   });

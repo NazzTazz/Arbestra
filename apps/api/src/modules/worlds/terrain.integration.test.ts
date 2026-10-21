@@ -173,6 +173,23 @@ describe.sequential('read-only streamed terrain', () => {
     expect(reads).toBe(0);
   });
 
+  it('loads recorded knowledge only for the requested canonical chunks, including both sides of a seam', async () => {
+    await db.insertInto('playerScience').values({ worldId: DEVELOPMENT_IDS.world, accountId: DEVELOPMENT_IDS.account,
+      observationsSince: null, solarReport: null }).onConflict(c => c.columns(['worldId','accountId']).doNothing()).execute();
+    await db.insertInto('sciencePlaces').values([[0,0],[2047,1023],[100,100]].map(([cellX,cellY]) => ({
+      worldId: DEVELOPMENT_IDS.world, accountId: DEVELOPMENT_IDS.account, cellX: cellX!, cellY: cellY!,
+      terrainCode: 1, elevation: 0, observedAt: new Date(), surveyed: true, sourceActivityId: null,
+    }))).onConflict(c => c.columns(['worldId','accountId','cellX','cellY']).doNothing()).execute();
+    const ids = new Set<QueryId>(); let rows = 0;
+    const plugin: KyselyPlugin = {
+      transformQuery(args) { if (JSON.stringify(args.node).includes('science_places')) ids.add(args.queryId); return args.node; },
+      async transformResult(args) { if (ids.delete(args.queryId)) rows += args.result.rows.length; return args.result; },
+    };
+    const response = await getTerrainUpdates(db.withPlugin(plugin), DEVELOPMENT_IDS.account, 'aube', '-1,-1;0,0');
+    expect(response.chunks.map(c => [c.chunkX,c.chunkY])).toEqual([[63,31],[0,0]]);
+    expect(rows).toBe(2);
+  });
+
   it('bounds raw input before deduplication, rejects unsafe integers and requires world access', async () => {
     expect(() => parseTerrainChunks(Array(17).fill('0,0').join(';'))).toThrow();
     for (const raw of ['0,0;', '1.2,0', '9007199254740992,0', 'NaN,0']) expect((await request(raw)).statusCode).toBe(400);

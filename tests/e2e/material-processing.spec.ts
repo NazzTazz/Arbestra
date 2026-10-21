@@ -5,7 +5,7 @@ import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { constructBuilding, getVillageState } from '../../apps/api/src/modules/villages/service';
 
-test('le tailleur est inspectable en Exploitation et transforme un lot après sa pause', async ({ page, isMobile }) => {
+test('le tailleur est inspectable en Exploitation et transforme un lot après sa pause', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Picking du toit vérifié avec le cadrage desktop.');
   test.setTimeout(150_000);
   const browserErrors:string[]=[];
@@ -28,7 +28,8 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     await page.getByRole('button', { name: 'Se connecter' }).click();
     await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
     const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 40_000 });
+    // The full seed world renders 71 initial terrain units on cold headless Chromium.
+    await expect(canvas).toBeVisible({ timeout: 90_000 });
     await page.getByRole('button', { name: 'Vue libre', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Exploitation', exact: true })).toBeEnabled({ timeout: 40_000 });
     await page.getByRole('button', { name: 'Exploitation', exact: true }).click();
@@ -49,16 +50,21 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     await expect(panel).toBeVisible();
     await panel.getByRole('button', { name: '1 h', exact: true }).click();
     await expect(panel.getByRole('button', { name: 'Produire', exact: true })).toBeEnabled();
-    await panel.getByRole('button', { name: 'Produire', exact: true }).click();
+    // A real click must reach the workshop even where the harvest showroom overlaps it.
+    await panel.getByRole('button', { name: 'Produire', exact: true }).click({ timeout: 10_000 });
     await panel.getByRole('button', { name: 'Pause après ce lot', exact: true }).click();
-    await expect(panel.getByRole('status')).toContainText('Pause après ce lot');
+    await expect(panel.getByRole('status').filter({ hasText: 'lots achevés' })).toContainText('Pause après ce lot');
+    await page.screenshot({ path: testInfo.outputPath('processing.png') });
     expect(Number((await db.selectFrom('villageResources').select('amount').where('villageId', '=', ids.village)
       .where('resourceCode', '=', 'stone').executeTakeFirstOrThrow()).amount)).toBe(0);
     // Échéance accélérée uniquement dans la base de test ; le rendement reste réel.
     await db.updateTable('processingLots').set({ completesAt: new Date(Date.now()-1000) })
       .where('worldId', '=', ids.world).where('villageId', '=', ids.village).where('completedAt', 'is', null).execute();
     await expect(panel).toContainText('En pause · 1/6 lots achevés', { timeout: 15_000 });
-    await expect(panel.getByRole('button', { name: 'Reprendre', exact: true })).toBeDisabled();
+    await expect(panel.getByRole('button', { name: 'Reprendre', exact: true })).toBeVisible();
+    expect(await db.selectFrom('processingOrders').select(['status', 'completedLots'])
+      .where('worldId', '=', ids.world).where('villageId', '=', ids.village).executeTakeFirstOrThrow())
+      .toEqual({ status: 'paused', completedLots: 1 });
     expect(Number((await db.selectFrom('villageResources').select('amount').where('villageId', '=', ids.village)
       .where('resourceCode', '=', 'cut-stone').executeTakeFirstOrThrow()).amount)).toBe(20);
     expect(browserErrors).toEqual([]);

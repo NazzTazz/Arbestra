@@ -31,6 +31,17 @@ function asNumber(value: string | number): number {
   return Number(value);
 }
 
+/** SQL aliases f=flow and v=village are shared by projection and settlement. */
+function directProductionRate() {
+  return sql<string>`case when f.production_updated_at is null
+      or (f.resource_code='wood' and v.economy_activated_at is not null) then 0
+    else f.base_rate_per_hour + coalesce((select sum(bp.rate_per_hour) from buildings b
+      join building_level_production bp on bp.building_type_code=b.building_type and bp.level=b.level
+        and bp.resource_code=f.resource_code
+      where b.world_id=f.world_id and b.village_id=f.village_id
+        and (b.status='completed' or b.target_level is not null)),0) end`;
+}
+
 async function productionDelta(
   transaction: Transaction<Database>,
   storedRemainder: string,
@@ -51,33 +62,11 @@ export async function villageProductionPerHour(
   villageId: string,
   resourceCode: string,
 ): Promise<number> {
-  if (resourceCode === 'wood') {
-    const village = await transaction.selectFrom('villages').select('economyActivatedAt')
-      .where('worldId', '=', worldId).where('id', '=', villageId).executeTakeFirstOrThrow();
-    if (village.economyActivatedAt) return 0;
-  }
-  const result = await transaction.selectFrom('villageResourceFlows')
-    .leftJoin('buildings', (join) => join
-      .onRef('buildings.worldId', '=', 'villageResourceFlows.worldId')
-      .onRef('buildings.villageId', '=', 'villageResourceFlows.villageId')
-      .on((builder) => builder.or([
-        builder('buildings.status', '=', 'completed'),
-        builder('buildings.targetLevel', 'is not', null),
-      ])))
-    .leftJoin('buildingTypes', (join) => join
-      .onRef('buildingTypes.code', '=', 'buildings.buildingType')
-      .on('buildingTypes.productionMode', '=', 'direct'))
-    .leftJoin('buildingLevelProduction', (join) => join
-      .onRef('buildingLevelProduction.buildingTypeCode', '=', 'buildings.buildingType')
-      .onRef('buildingLevelProduction.level', '=', 'buildings.level')
-      .onRef('buildingLevelProduction.resourceCode', '=', 'villageResourceFlows.resourceCode'))
-    .select(sql<string>`village_resource_flows.base_rate_per_hour + coalesce(sum(building_level_production.rate_per_hour), 0)`.as('rate'))
-    .where('villageResourceFlows.worldId', '=', worldId)
-    .where('villageResourceFlows.villageId', '=', villageId)
-    .where('villageResourceFlows.resourceCode', '=', resourceCode)
-    .groupBy('villageResourceFlows.baseRatePerHour')
-    .executeTakeFirst();
-  return result ? asNumber(result.rate) : 0;
+  const row = await transaction.selectFrom('villageResourceFlows as f')
+    .innerJoin('villages as v', join => join.onRef('v.worldId', '=', 'f.worldId').onRef('v.id', '=', 'f.villageId'))
+    .select(directProductionRate().as('rate')).where('f.worldId', '=', worldId)
+    .where('f.villageId', '=', villageId).where('f.resourceCode', '=', resourceCode).executeTakeFirst();
+  return row ? asNumber(row.rate) : 0;
 }
 
 export async function projectVillageResource(
@@ -127,10 +116,7 @@ export async function projectVillageResources(transaction:Transaction<Database>,
   from village_resources r join resource_types t on t.code=r.resource_code
   join villages v on v.world_id=r.world_id and v.id=r.village_id
   left join village_resource_flows f on f.world_id=r.world_id and f.village_id=r.village_id and f.resource_code=r.resource_code
-  cross join lateral (select case when f.production_updated_at is null or (r.resource_code='wood' and v.economy_activated_at is not null) then 0
-   else f.base_rate_per_hour + coalesce((select sum(bp.rate_per_hour) from buildings b
-    join building_level_production bp on bp.building_type_code=b.building_type and bp.level=b.level and bp.resource_code=r.resource_code
-    where b.world_id=r.world_id and b.village_id=r.village_id and (b.status='completed' or b.target_level is not null)),0) end as rate) p
+  cross join lateral (select ${directProductionRate()} as rate) p
   where r.world_id=${worldId} and r.village_id=${villageId}
  `.execute(transaction);
  return result.rows.map(row=>({...row,amount:Number(row.amount),productionPerHour:Number(row.productionPerHour)}));
@@ -143,32 +129,36 @@ export async function materializeVillageResource(
   resourceCode: string,
   through: Date,
 ): Promise<number> {
-  // Callers that mutate village economy hold the village row before this flow.
-  const flow = await transaction.selectFrom('villageResourceFlows')
-    .select(['remainder', 'productionUpdatedAt'])
-    .where('worldId', '=', worldId)
-    .where('villageId', '=', villageId)
-    .where('resourceCode', '=', resourceCode)
-    .forUpdate()
-    .executeTakeFirst();
-  if (!flow) {
-    const resource = await transaction.selectFrom('villageResources').select('amount')
-      .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', resourceCode)
-      .forUpdate().executeTakeFirstOrThrow();
-    return asNumber(resource.amount);
-  }
-  const rate = await villageProductionPerHour(transaction, worldId, villageId, resourceCode);
-  const effectiveThrough = through.getTime() > flow.productionUpdatedAt.getTime() ? through : flow.productionUpdatedAt;
-  const delta = await productionDelta(transaction, flow.remainder, rate, flow.productionUpdatedAt, effectiveThrough);
-  const resource = await transaction.updateTable('villageResources')
-    .set({ amount: sql`amount + ${delta.wholeUnits}::bigint` })
-    .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', resourceCode)
-    .returning('amount').executeTakeFirstOrThrow();
-  await transaction.updateTable('villageResourceFlows')
-    .set({ remainder: delta.remainder, productionUpdatedAt: effectiveThrough })
-    .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', resourceCode)
-    .executeTakeFirstOrThrow();
-  return asNumber(resource.amount);
+  // The caller owns the village. Materialized CTEs retain flow -> stock lock
+  // order, exact PostgreSQL numeric arithmetic and the post-lock command H.
+  const result = await sql<{amount: string}>`
+    with locked_flow as materialized (
+      select f.*, ${directProductionRate()} as rate
+      from village_resource_flows f join villages v on v.world_id=f.world_id and v.id=f.village_id
+      where f.world_id=${worldId} and f.village_id=${villageId} and f.resource_code=${resourceCode}
+      for update of f
+    ), projected as materialized (
+      select r.amount, f.world_id is not null as has_flow,
+        greatest(${through}::timestamptz,f.production_updated_at) as at,
+        coalesce(f.remainder + f.rate * extract(epoch from
+          (greatest(${through}::timestamptz,f.production_updated_at)-f.production_updated_at))/3600,0) as progress
+      from village_resources r left join locked_flow f
+        on f.world_id=r.world_id and f.village_id=r.village_id and f.resource_code=r.resource_code
+      where r.world_id=${worldId} and r.village_id=${villageId} and r.resource_code=${resourceCode}
+      for update of r
+    ), balance as (
+      update village_resources r set amount=r.amount+floor(p.progress)::bigint from projected p
+      where r.world_id=${worldId} and r.village_id=${villageId} and r.resource_code=${resourceCode}
+        and floor(p.progress)<>0 returning r.amount
+    ), cursor as (
+      update village_resource_flows f set remainder=mod(p.progress,1),production_updated_at=p.at from projected p
+      where f.world_id=${worldId} and f.village_id=${villageId} and f.resource_code=${resourceCode} and p.has_flow
+        and (f.production_updated_at is distinct from p.at or f.remainder is distinct from mod(p.progress,1))
+      returning f.resource_code
+    ) select coalesce((select amount from balance),p.amount)::text as amount from projected p
+  `.execute(transaction);
+  if (!result.rows[0]) throw new Error('Village resource missing');
+  return asNumber(result.rows[0].amount);
 }
 
 async function bufferState(

@@ -11,7 +11,7 @@ import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { completeStoneExtractionAt } from './stone-extractions.js';
 import { materializeWoodland } from './woodland.js';
 import { admitWorksites, changeWorksite, createWorksite } from './worksites.js';
-import { ownedVillage, prepareWorksiteSelection, previewVillageWorksite, startVillageWorksite } from '../villages/service.js';
+import { ownedVillage, prepareWorksiteSelection, startVillageWorksite } from '../villages/service.js';
 import { wakeExtractionWorksite } from '../villages/complete-construction.js';
 import { buildApp } from '../../app.js';
 import { HttpError } from '../../errors.js';
@@ -58,6 +58,32 @@ async function addTarget(tx: Transaction<Database>, t: Date, cellX: number, cell
   await tx.insertInto('worldCellOccupancies').values({ worldId, featureId: id, cellX, cellY, buildingId: null, role: 'body' }).execute();
   return id;
 }
+
+it('shares spatial eligibility reads across a selection without computing unused staffing quotes', async () => {
+  await fixture(async (tx, first, through) => {
+    const second = await addTarget(tx, through, 1022, 515), third = await addTarget(tx, through, 1024, 515);
+    const owned = await ownedVillage(tx, DEVELOPMENT_IDS.account, 'aube', villageId);
+    const reads = new Map<string, number>();
+    const source = tx.withPlugin({
+      transformQuery({ node }) {
+        if (node.kind === 'SelectQueryNode') {
+          const query = JSON.stringify(node);
+          for (const table of ['population_cohorts', 'world_cell_occupancies', 'world_clearings'])
+            if (query.includes('"name":"' + table + '"')) reads.set(table, (reads.get(table) ?? 0) + 1);
+        }
+        return node;
+      },
+      async transformResult({ result }) { return result; },
+    });
+    const selected = await prepareWorksiteSelection(source, owned, { worldId, villageId, through },
+      { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [first, second, third, first] }, path);
+    expect(selected.included.map(d => d.featureId)).toEqual([first, second, third]);
+    expect(selected.excluded).toEqual([{ featureId: first, reason: 'duplicate' }]);
+    expect(reads.get('population_cohorts') ?? 0).toBe(0);
+    expect(reads.get('world_cell_occupancies')).toBe(1);
+    expect(reads.get('world_clearings')).toBe(1);
+  });
+});
 
 it('advances from the last harvested target and stops searching after the first accessible candidate', async () => {
   await fixture(async (tx, first, t) => {
@@ -290,7 +316,8 @@ it('previews exclusions and starts only valid targets with an idempotent command
     const source = { transaction: () => ({ execute: <T>(run: (transaction: Transaction<Database>) => Promise<T>) => run(tx) }) } as unknown as typeof db;
     const missing = randomUUID();
     const order = { commandId: randomUUID(), mode: 'cut' as const, workerCap: 2, featureIds: [featureId, missing] };
-    const preview = await previewVillageWorksite(source, DEVELOPMENT_IDS.account, 'aube', villageId, order);
+    const preview = await prepareWorksiteSelection(tx, await ownedVillage(tx, DEVELOPMENT_IDS.account, 'aube', villageId),
+      { worldId, villageId, through: t }, order);
     expect(preview.included.map(item => item.featureId)).toEqual([featureId]);
     expect(preview.excluded).toEqual([{ featureId: missing, reason: 'not-found' }]);
     const first = await startVillageWorksite(source, DEVELOPMENT_IDS.account, 'aube', villageId, order);

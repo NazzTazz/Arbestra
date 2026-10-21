@@ -76,13 +76,19 @@ it('uses real people and one centre, finishes once, shares mastery between villa
 
 it('constructs one University with a thirty-cell footprint, charges its catalogue cost once, and grants no mastery', async()=>{
   await fixture(async(tx)=>{
-    const inside={transaction:()=>({execute:<T>(run:(tx:Transaction<Database>)=>Promise<T>)=>run(tx)})} as unknown as Kysely<Database>;
+    const inside=new Proxy(tx,{get(target,property){
+      if(property==='transaction')return()=>({execute:<T>(run:(tx:Transaction<Database>)=>Promise<T>)=>run(tx)});
+      const value=Reflect.get(target,property,target);return typeof value==='function'?value.bind(target):value;
+    }}) as Kysely<Database>;
     await tx.updateTable('villageResources').set({amount:1000}).where('worldId','=',ids.world).where('villageId','=',ids.village).where('resourceCode','=','stone').execute();
     const before=await state(tx,ids.account,'aube',await beginVillageEconomy(tx,ids.world,ids.village));
     const free=new Set(before.cells.filter(c=>c.canBuild).map(c=>`${c.cellX}:${c.cellY}`));
     const site=before.cells.find(c=>[-2,-1,0,1,2].every(dx=>[-2,-1,0,1,2,3].every(dy=>free.has(`${c.cellX+dx}:${c.cellY+dy}`))));
     expect(site).toBeDefined();
-    const after=await constructBuilding(inside,ids.account,'aube',ids.village,site!.cellX,site!.cellY,'university',0);
+    const committed=await constructBuilding(inside,ids.account,'aube',ids.village,site!.cellX,site!.cellY,'university',0,
+      undefined,undefined,0,'stone','commit');
+    // Read the uncommitted fixture directly; production projects after COMMIT.
+    const after=await state(tx,ids.account,'aube',committed,false,true);
     const building=after.cells.find(c=>c.cellX===site!.cellX&&c.cellY===site!.cellY)!.building!;
     expect(building.type).toBe('university');
     expect(await tx.selectFrom('worldCellOccupancies').select('cellX').where('worldId','=',ids.world).where('buildingId','=',building.id).execute()).toHaveLength(30);

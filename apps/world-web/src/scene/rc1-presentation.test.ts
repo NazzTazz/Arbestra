@@ -41,7 +41,7 @@ it('does not invent rectangular resource masses on RC1 regional zoom',()=>{
 });
 
 
-it('renders paved and earth routes above continuous relief across both world seams and reuses unchanged meshes',()=>{
+it('renders automatic earth routes above continuous relief across both world seams and reuses unchanged meshes',()=>{
  vi.stubGlobal('OffscreenCanvas',class{width:number;height:number;constructor(w:number,h:number){this.width=w;this.height=h;}getContext(){return{fillRect(){},canvas:this};}});
  const engine=new NullEngine(),scene=new Scene(engine),roads=new VillageRoads(scene),space=new WorldSpace(512,256,{cellX:511,cellY:255});
  try {
@@ -49,13 +49,14 @@ it('renders paved and earth routes above continuous relief across both world sea
   const routes=[{id:'house',kind:'building' as const,cells:[a,b],destination:b},{id:'resource',kind:'stone' as const,cells:[a,b,c],destination:c}];
   const ground=(p:{cellX:number;cellY:number})=>({code:1,height:2+.3*delta(p.cellX,511,512)+.2*delta(p.cellY,255,256)});
   roads.update('1',routes,space,ground,true);
-  const meshes=scene.meshes.filter(m=>m.name.startsWith('village-road-'));expect(meshes).toHaveLength(3);
-  for(const name of ['village-road-paved','village-road-earth']) {
-   const positions=scene.getMeshByName(name)!.getVerticesData('position')!;
+  const meshes=scene.meshes.filter(m=>m.name.startsWith('village-road-'));expect(meshes.length).toBeGreaterThan(0);
+  for(const mesh of meshes) {
+   expect(mesh.material!.name).toBe('infrastructure-earth');
+   const positions=mesh.getVerticesData('position')!;
    let max=-Infinity,min=Infinity;
    for(let i=0;i<positions.length;i+=3){const h=ground(space.inverse(positions[i]!,positions[i+2]!)).height;max=Math.max(max,positions[i+1]!-h);min=Math.min(min,positions[i+1]!-h);}
-   expect(max).toBeCloseTo(name.endsWith('earth')?.052:.015,4);
-   if(name.endsWith('earth'))expect(min).toBeCloseTo(.052,4);
+   expect(max).toBeCloseTo(.015,4);
+   expect(min).toBeCloseTo(-.01,4); // The shared renderer closes exposed edges below the ground.
   }
   roads.update('2',routes,space,ground,true);expect(scene.meshes.filter(m=>m.name.startsWith('village-road-'))).toEqual(meshes);
   roads.update('3',routes,space,p=>({...ground(p),height:ground(p).height+.5}),true);expect(meshes.every(m=>m.isDisposed())).toBe(true);

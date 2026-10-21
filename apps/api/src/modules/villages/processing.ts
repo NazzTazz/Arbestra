@@ -4,8 +4,8 @@ import type { ProcessingCommand, ProcessingOrder, ProcessingPreview } from '@arb
 import {PROCESSING_DURATIONS_SECONDS,PROCESSING_MAX_LOTS,processingLotsForDuration} from '@arbestra/contracts';
 import type { Database, ProcessingOrdersTable } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
-import { materializeVillageResource } from './economy.js';
+import { assignWorkers, eligibleWorkers, materializeCohorts, projectCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
+import { materializeVillageResource, projectVillageResources } from './economy.js';
 
 export const COMPLETE_PROCESSING_TASK = 'processing.complete';
 const terminal = ['completed', 'cancelled'] as const;
@@ -23,13 +23,14 @@ async function workshop(tx: Transaction<Database>, ctx: Context, buildingId: str
   return row;
 }
 
-async function readiness(tx: Transaction<Database>, ctx: Context, buildingId: string, workerCount: number, preferredIds?: string[], rotationSource?:string) {
+async function readiness(tx: Transaction<Database>, ctx: Context, buildingId: string, workerCount: number, preferredIds?: string[], rotationSource?:string, materialize = true) {
   const recipe = await workshop(tx, ctx, buildingId);
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > recipe.workerCap)
     throw new HttpError(409, 'WORKER_CAP', `Cet atelier dispose de ${recipe.workerCap} poste(s).`);
   const durationMs = Math.ceil(recipe.workMs / workerCount);
-  const input = await materializeVillageResource(tx, ctx.worldId, ctx.villageId, recipe.inputResource, ctx.through);
-  const cohorts = await materializeCohorts(tx, ctx.worldId, ctx.villageId, ctx.through);
+  const input = materialize ? await materializeVillageResource(tx, ctx.worldId, ctx.villageId, recipe.inputResource, ctx.through)
+    : (await projectVillageResources(tx, ctx.worldId, ctx.villageId, ctx.through)).find(r => r.code === recipe.inputResource)?.amount ?? 0;
+  const cohorts = await (materialize ? materializeCohorts : projectCohorts)(tx, ctx.worldId, ctx.villageId, ctx.through);
   const workers = eligibleWorkers(cohorts, durationMs).filter(c => (!preferredIds || preferredIds.includes(c.id))&&(!rotationSource||c.avoidWorksiteId!==rotationSource));
   const reason = input < recipe.inputAmount ? 'missing-input' as const
     : workers.reduce((n, c) => n + c.memberCount, 0) < workerCount ? 'missing-workers' as const : null;
@@ -37,7 +38,7 @@ async function readiness(tx: Transaction<Database>, ctx: Context, buildingId: st
 }
 
 export async function previewProcessing(tx: Transaction<Database>, ctx: Context, buildingId: string, workerCount: number, orderId?: string): Promise<ProcessingPreview> {
-  const ready = await readiness(tx, ctx, buildingId, workerCount);
+  const ready = await readiness(tx, ctx, buildingId, workerCount, undefined, undefined, false);
   const existing = await tx.selectFrom('processingOrders').select(['id','status']).where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId).where('buildingId', '=', buildingId).where('status', 'not in', terminal).executeTakeFirst();
   const busy = existing && (existing.id !== orderId || !['paused','blocked'].includes(existing.status));

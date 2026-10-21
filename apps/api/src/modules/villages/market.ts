@@ -3,7 +3,7 @@ import { sql, type Transaction } from 'kysely';
 import { MARKET_DELIVERY_MS, oracleAmount, type MarketRequest, type MarketCommand, type MarketPreview, type MarketState } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { materializeVillageResource } from './economy.js';
+import { materializeVillageResource, projectVillageResources } from './economy.js';
 import { ownTradeOffers, tradeJourneys } from './trade-economy.js';
 
 export const COMPLETE_MARKET_TASK = 'market.deliver';
@@ -23,7 +23,7 @@ async function stockAt(tx: Transaction<Database>, ctx: Context, code: string, at
     .onConflict(c => c.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
   return materializeVillageResource(tx, ctx.worldId, ctx.villageId, code, at);
 }
-export async function previewMarket(tx: Transaction<Database>, ctx: Context, request: MarketRequest): Promise<MarketPreview> {
+export async function previewMarket(tx: Transaction<Database>, ctx: Context, request: MarketRequest, materialize = false): Promise<MarketPreview> {
   const resources = await prices(tx), offer = resources.find(r => r.code === request.offeredResource),
     wanted = resources.find(r => r.code === request.requestedResource);
   const receivedAmount = offer && wanted ? oracleAmount(request.amount, offer.valueUnits, wanted.valueUnits) : 0;
@@ -31,8 +31,11 @@ export async function previewMarket(tx: Transaction<Database>, ctx: Context, req
     : offer.code === wanted.code ? 'Choisissez deux ressources différentes.'
     : receivedAmount < 1 ? 'La quantité offerte ne permet de recevoir aucune unité.' : null;
   if (!message && !await unlocked(tx, ctx)) message = 'Le marché ouvre à l’hôtel de ville niveau 2 achevé.';
-  if (!message && await stockAt(tx, ctx, request.offeredResource) < request.amount)
-    message = 'Stock insuffisant.';
+  if (!message) {
+    const stock = materialize ? await stockAt(tx, ctx, request.offeredResource)
+      : (await projectVillageResources(tx, ctx.worldId, ctx.villageId, ctx.through)).find(r => r.code === request.offeredResource)?.amount ?? 0;
+    if (stock < request.amount) message = 'Stock insuffisant.';
+  }
   return { valid: !message, message, receivedAmount, deliveryMs: MARKET_DELIVERY_MS };
 }
 /** Caller owns the village lock and a post-lock economic timestamp. */
@@ -43,7 +46,7 @@ export async function commandMarket(tx: Transaction<Database>, ctx: Context, com
     if (!isDeepStrictEqual(receipt.request, command)) throw new HttpError(409, 'COMMAND_REUSED', 'Identifiant de commande déjà utilisé.');
     return;
   }
-  const preview = await previewMarket(tx, ctx, command);
+  const preview = await previewMarket(tx, ctx, command, true);
   if (!preview.valid) throw new HttpError(409, 'MARKET_UNAVAILABLE', preview.message!);
   if (command.expectedReceivedAmount !== preview.receivedAmount)
     throw new HttpError(409, 'MARKET_QUOTE_CHANGED', 'Le devis a changé. Vérifiez la quantité reçue.');

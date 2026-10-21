@@ -196,7 +196,7 @@ it('bootstraps a raw-funded scierie and spends its first two lots on a beam dwel
   const mill=built.cells.find(c=>c.building?.type==='sawmill')!.building!;
   expect(await amount('wood')).toBe(1950);
   // Position the completed fixture and its workers at the controlled test clock.
-  await db.updateTable('buildings').set({completedAt:t0}).where('id','=',mill.id).execute();
+  await db.updateTable('buildings').set({status:'completed',constructionStartedAt:t0,constructionCompletesAt:t0,completedAt:t0}).where('id','=',mill.id).execute();
   await db.updateTable('populationCohorts').set({energy:10,energyProgress:0,energyUpdatedAt:t0}).where('villageId','=',ids.village).execute();
   await start(mill.id,2);await reconcile(1200000);
   expect(await amount('wood')).toBe(1900);expect(await amount('timber')).toBe(40);

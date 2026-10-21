@@ -16,6 +16,21 @@ export function energyState(cohort: Cohort): EnergyState {
     restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest, updatedAt: cohort.energyUpdatedAt };
 }
 
+function projectCohort(cohort: Cohort, through: Date): Cohort {
+  const energy = advanceEnergy(energyState(cohort), through);
+  return { ...cohort, energy: energy.energy, energyProgress: energy.progress, activity: energy.activity,
+    restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt,
+    avoidWorksiteId: energy.activity === 'resting' ? null : cohort.avoidWorksiteId,
+    restBuildingId: energy.activity === 'resting' && withoutAssignment(cohort) ? cohort.restBuildingId : null };
+}
+
+/** The same eligibility clock as departures, without assigning beds or writing cursors. */
+export async function projectCohorts(tx: Transaction<Database>, worldId: string, villageId: string, through: Date) {
+  const cohorts = await tx.selectFrom('populationCohorts').selectAll().where('worldId', '=', worldId)
+    .where('villageId', '=', villageId).orderBy('id').execute();
+  return cohorts.map(cohort => projectCohort(cohort, through));
+}
+
 /** A successful replacement departure makes idle former members eligible again.
  * Source IDs identify an extraction site, processing order or research campus. */
 export async function clearWorksiteRotation(tx:Transaction<Database>,worldId:string,villageId:string,sourceId:string) {
@@ -32,12 +47,7 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
   const cohorts = await tx.selectFrom('populationCohorts').selectAll().where('worldId', '=', worldId)
     .where('villageId', '=', villageId).orderBy('id').forUpdate().execute();
   for (const cohort of cohorts) {
-    const energy = advanceEnergy(energyState(cohort), through);
-    const values = { energy: energy.energy, energyProgress: energy.progress, activity: energy.activity,
-      restingSince: energy.restingSince, foodUsedSinceRest: energy.foodUsedSinceRest, energyUpdatedAt: energy.updatedAt,
-      avoidWorksiteId:energy.activity==='resting'?null:cohort.avoidWorksiteId,
-      restBuildingId:energy.activity==='resting'&&withoutAssignment(cohort)?cohort.restBuildingId:null };
-    Object.assign(cohort, values);
+    Object.assign(cohort, projectCohort(cohort, through));
   }
   // All rows were locked in canonical order above. Persist the same per-cohort
   // projections together instead of one round trip per inhabitant group.
@@ -51,6 +61,10 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
       as v(id uuid,energy integer,energy_progress integer,activity text,resting_since timestamptz,
         food_used_since_rest integer,energy_updated_at timestamptz,rest_building_id uuid,avoid_worksite_id uuid)
     where c.world_id=${worldId} and c.village_id=${villageId} and c.id=v.id
+      and (c.energy,c.energy_progress,c.activity,c.resting_since,c.food_used_since_rest,
+        c.energy_updated_at,c.rest_building_id,c.avoid_worksite_id) is distinct from
+        (v.energy,v.energy_progress,v.activity,v.resting_since,v.food_used_since_rest,
+        v.energy_updated_at,v.rest_building_id,v.avoid_worksite_id)
   `.execute(tx);
   return allocateRestHousing(tx,worldId,villageId,cohorts);
 }
