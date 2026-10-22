@@ -84,11 +84,15 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
         .where('resourceCode', '=', 'carrot').execute();
       await transaction.insertInto('villageResources').values({ worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
         resourceCode: 'stone', amount: 0 }).onConflict((conflict) => conflict.columns(['worldId','villageId','resourceCode']).doUpdateSet({ amount:0 })).execute();
+      // Only rows a test changed: each rewritten row is republished to its
+      // spatial scope, and this fixture world spans about 1900 of them.
       await transaction.updateTable('stoneDeposits').set({
         remainingAmount: sql.ref('initialAmount'), reservedAmount: 0, revision: 1, updatedAt: sql`transaction_timestamp()`,
-      }).where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      }).where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where(sql<boolean>`remaining_amount <> initial_amount or reserved_amount <> 0 or revision <> 1`).execute();
       await transaction.updateTable('worldFeatures').set({ state: 'available', updatedAt: sql`transaction_timestamp()` })
-        .where('worldId', '=', DEVELOPMENT_IDS.world).where('featureTypeCode', '=', 'stone_outcrop').execute();
+        .where('worldId', '=', DEVELOPMENT_IDS.world).where('featureTypeCode', '=', 'stone_outcrop')
+        .where('state', '<>', 'available').execute();
       const deposits = await transaction.selectFrom('stoneDeposits').select(['featureId', 'cellX', 'cellY'])
         .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       if (deposits.length > 0) await transaction.insertInto('worldCellOccupancies').values(deposits.map((deposit) => ({

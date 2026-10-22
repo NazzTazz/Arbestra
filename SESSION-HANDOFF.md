@@ -1,3 +1,16 @@
+# Reprise Claude — 22–23 octobre 2026, déploiement staging V2
+
+Tristan a autorisé la modification des scripts de déploiement et le déploiement en staging. `ops/deploy/build.sh` passe `VITE_SYNC_V2=1` en staging (village complet en V2), `0` en alpha. La branche `wip/v2-commandes-bornees` est fusionnée dans `main` pour le tag `staging-*` ; alpha n'est pas redéployé.
+
+Correctifs de performance trouvés par la suite complète avant déploiement :
+- **058** : l'insertion des ~2000 groupes RC1 réexpandait l'artefact du monde (3,5 Mo) une fois par ligne (≈52 ms chacune) ; désormais une fois par instruction et par monde (déclencheur d'instruction à table de transition), et plus du tout pour un groupe supprimé. Première installation RC1 en test : 205 s → 37–41 s (98 s mesurés une fois sur base gonflée). Équivalence des sommets et références spatiales testée (`sync-v2-shared-writers`, 8/8).
+- **Reset e2e** : ne réécrit plus que les gisements/éléments modifiés (32 s → 1 s).
+- Base de test : journal `game_sync_changes` vidé (8,6 Go, aucune purge n'existe).
+
+Validation : lint, typecheck OK ; suite complète 1370 verts / 1 échec + 1 hook en délai, tous deux dus au journal gonflé, puis ces deux fichiers relancés après purge : 15/15. Build avec `VITE_SYNC_V2=1` OK (avant 058).
+
+**Ouvert** : dépendances de lot O(S²) dans `game_sync_publish` (lot à 1856 portées = 150 Mo) et absence de rétention du journal — étude confiée à Astra (prompt fourni à Tristan). Installation RC1 encore ~40 s en test, postes restants non identifiés. Validation navigateur de la pose V2 et recette staging à faire.
+
 # Reprise Claude — 22 octobre 2026 (fin d'après-midi, session autonome)
 
 État en une ligne : branche `wip/v2-commandes-bornees` poussée. Village complet en V2 derrière l'option `arbestra:sync-v2`, sans GET V1 initial, validé ordinateur et mobile ; pose de bâtiment en V2 (validation navigateur de la pose à faire) ; présentation allégée (région versionnée) ; convois publics `traffic` (057) ; mesures 30 répétitions consignées. Migrations 051–057 : appliquées en test seulement — en développement, accord de Tristan reçu mais commande refusée par le classifieur (sauvegarde prête, à lancer par Tristan) ; staging suppose une fusion dans `main` à décider. Aucun déploiement.

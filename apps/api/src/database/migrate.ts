@@ -8,6 +8,7 @@ import * as gameSyncSharedWritersMigration from './migrations/054_game_sync_shar
 import * as gameSyncScopeBackfillMigration from './migrations/055_game_sync_scope_backfill.js';
 import * as villageEconomyCatchupsMigration from './migrations/056_village_economy_catchups.js';
 import * as gameSyncPublicTrafficMigration from './migrations/057_game_sync_public_traffic.js';
+import * as gameSyncRc1BatchVerticesMigration from './migrations/058_game_sync_rc1_batch_vertices.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -124,6 +125,7 @@ const migrationProvider: MigrationProvider = {
       '055_game_sync_scope_backfill': gameSyncScopeBackfillMigration,
       '056_village_economy_catchups': villageEconomyCatchupsMigration,
       '057_game_sync_public_traffic': gameSyncPublicTrafficMigration,
+      '058_game_sync_rc1_batch_vertices': gameSyncRc1BatchVerticesMigration,
     };
   },
 };

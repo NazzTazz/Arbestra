@@ -7,6 +7,7 @@ import { up as foundation } from '../../database/migrations/051_game_sync_founda
 import { up as privateWriters, privateSyncSources, privateSyncIndirectSources } from '../../database/migrations/053_game_sync_private_writers.js';
 import { up as sharedWriters, sharedSyncSources, globalCatalogSyncSources } from '../../database/migrations/054_game_sync_shared_writers.js';
 import { up as backfillScopes } from '../../database/migrations/055_game_sync_scope_backfill.js';
+import { up as rc1BatchVertices } from '../../database/migrations/058_game_sync_rc1_batch_vertices.js';
 
 const url=testDatabaseUrl(),target=new URL(url);
 if(target.hostname!=='127.0.0.1'||target.pathname!=='/arbestra_test')throw Error('Unexpected shared-writer database');
@@ -23,7 +24,7 @@ beforeAll(async()=>{
     values($1,'shared-writer','Fixture','torus',64,64,32,1,'ready')`,[world]);
   await pool.query(`insert into villages(id,world_id,owner_account_id,name,anchor_cell_x,anchor_cell_y)
     values($1,$2,$3,'Fixture',5,5)`,[village,world,owner]);
-  await privateWriters(db);await sharedWriters(db);
+  await privateWriters(db);await sharedWriters(db);await rc1BatchVertices(db);
 },60000);
 afterAll(async()=>{await db.destroy();await admin.query(`drop schema ${schema} cascade`);await admin.end();},30000);
 async function transaction(run:(client:pg.PoolClient)=>Promise<void>){
@@ -114,6 +115,35 @@ it('publishes a grounded feature when its supporting vertex changes in another c
   expect(companions.find(row=>row.scope_key==='0,0')?.changes).toEqual(expect.arrayContaining([{component:'spatialFeatures',key:feature}]));
   await pool.query(`update world_rc1_resources set removed_indices='[0]' where world_id=$1 and feature_id=$2`,[world,feature]);
   expect((await pool.query('select * from game_sync_feature_vertices where world_id=$1 and feature_id=$2',[world,feature])).rowCount).toBe(0);
+});
+it('grounds a multi-row RC1 insert exactly as the whole-world expansion, with the same spatial references',async()=>{
+  const other=randomUUID(),[woods,stone,removed]=[randomUUID(),randomUUID(),randomUUID()];
+  await pool.query(`insert into worlds(id,slug,name,topology,width_cells,height_cells,chunk_size,seed,generation_status)
+    values($1,'rc1-batch','Fixture','torus',64,64,32,1,'ready')`,[other]);
+  await pool.query(`insert into world_generation_candidates(world_id,command_id,owner_account_id,parameters,status,checksum,artifact)
+    values($1,$2,$3,'{}','ready',$4,$5)`,[other,randomUUID(),owner,'b'.repeat(64),JSON.stringify({
+      forest:{trees:[{x:10.4,y:10.6},{x:63.7,y:5},{x:20,y:20}]},stoneSites:[{id:'s1',rocks:[{x:40.2,y:41.8},{x:42,y:40}]}]})]);
+  await pool.query(`insert into woodland_deposits(world_id,feature_id,cell_x,cell_y) values($1,$2,10,10),($1,$3,20,20)`,[other,woods,removed]);
+  await pool.query(`insert into stone_deposits(world_id,feature_id,cell_x,cell_y,initial_amount,remaining_amount) values($1,$2,41,41,10,10)`,[other,stone]);
+  // The journal is ordered by scope, not time: tell new rows by their batch.
+  const seen=new Set((await journal()).map(row=>row.batch_id));
+  await pool.query(`insert into world_rc1_resources(world_id,feature_id,source_key,tree_indices,removed_indices)
+    values($1,$2,'wood:a','[0,1]','[]'),($1,$3,'stone:s1','[]','[]'),($1,$4,'wood:b','[2]','[2]')`,[other,woods,stone,removed]);
+  const vertices=async()=>(await pool.query('select feature_id,vertex_x,vertex_y from game_sync_feature_vertices where world_id=$1 order by 1,2,3',[other])).rows;
+  const batched=await vertices();
+  // Toric wrap (63.7 → 0), rocks by source key, removed trees excluded.
+  expect(batched.filter(row=>row.feature_id===woods)).toHaveLength(8);
+  expect(batched.filter(row=>row.feature_id===stone)).toHaveLength(8);
+  expect(batched.some(row=>row.feature_id===removed)).toBe(false);
+  await pool.query('select game_sync_refresh_world_feature_vertices($1)',[other]);
+  expect(await vertices()).toEqual(batched);
+  const spatial=(await journal()).filter(row=>!seen.has(row.batch_id)&&row.stream_kind==='spatial').flatMap(row=>row.changes);
+  expect(spatial).toEqual(expect.arrayContaining([{component:'spatialFeatures',key:woods},{component:'spatialCells',key:'10,10'},
+    {component:'spatialFeatures',key:stone},{component:'spatialCells',key:'41,41'},{component:'spatialFeatures',key:removed}]));
+  // An empty statement publishes nothing.
+  const after=(await journal()).length;
+  await pool.query(`insert into world_rc1_resources select * from world_rc1_resources where false`);
+  expect((await journal()).length).toBe(after);
 });
 it('backfills every existing scope without replacing epochs and initializes new worlds at terminal publication',async()=>{
   const before=(await pool.query('select * from game_sync_streams order by world_id,stream_kind,scope_key')).rows;
