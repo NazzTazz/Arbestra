@@ -3,7 +3,7 @@ import type { Database } from '../../database/schema.js';
 import type { SyncEntityReference } from './sync-v2-readers.js';
 
 export interface SyncCursor { epoch: string; revision: string }
-export interface SyncScope { kind: 'village' | 'knowledge' | 'spatial' | 'offers' | 'manifest'; key: string }
+export interface SyncScope { kind: 'village' | 'knowledge' | 'spatial' | 'offers' | 'manifest' | 'traffic'; key: string }
 export interface SyncDependency extends SyncScope, SyncCursor { worldId: string }
 interface Counter extends SyncCursor { retainedFrom: string }
 export type JournalSelection = { kind: 'delta'; cursor: SyncCursor; fromRevision: string;

@@ -1,7 +1,7 @@
 import {sql} from 'kysely';
 import {afterAll,beforeAll,expect,it} from 'vitest';
 import {Value} from '@sinclair/typebox/value';
-import {applySyncV2Batch,SyncV2ChangeSchema,villageStateFromSyncV2,type VillageState} from '@arbestra/contracts';
+import {applySyncV2Batch,SyncV2ChangeSchema,villageStateFromSyncV2,type SyncV2Change,type VillageState} from '@arbestra/contracts';
 import {createDatabase} from '../../database/connection.js';
 import {testDatabaseUrl} from '../../database/test-environment.js';
 import {resetE2eState} from '../../database/reset-e2e.js';
@@ -18,9 +18,18 @@ beforeAll(async()=>{
   // The global reset alone takes 26–31 s with the sync triggers active.
   await resetE2eState(url);
   await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values(${ids.world},'village',${ids.village}),
-    (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}) on conflict do nothing`.execute(db);
+    (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}),(${ids.world},'traffic',${ids.world}) on conflict do nothing`.execute(db);
 },180000);
-afterAll(async()=>{await db.destroy();});
+afterAll(async()=>{
+  // resetE2eState keeps foreign villages: remove the convoy fixture's ones.
+  await db.transaction().execute(async tx=>{
+    await tx.deleteFrom('villages').where('worldId','=',ids.world).where('name','like','Voisin %').execute();
+    await tx.deleteFrom('worldMemberships').where('worldId','=',ids.world).where('playerName','like','Voisin %').execute();
+    await tx.deleteFrom('accounts').where('email','like','%@traffic.test').execute();
+    await sql`select game_sync_publish()`.execute(tx);
+  });
+  await db.destroy();
+},60000);
 
 /** Paths whose values differ. Each side's own capture instant becomes "H":
  * two transactions cannot share one statement timestamp. */
@@ -41,7 +50,7 @@ export function differences(left:unknown,right:unknown,leftNow:string,rightNow:s
 async function project():Promise<{historical:unknown;projected:unknown;now:[string,string]}>{
   const historical=await readVillageProjection(db,ids.account,'aube',ids.village);
   const presentation=villagePresentation(historical);
-  const batch=await captureSyncV2(db,ids.account,'aube',ids.village,{protocol:2,generation:1,scopes:[],cursors:[]},{include:['knowledge','manifest']});
+  const batch=await captureSyncV2(db,ids.account,'aube',ids.village,{protocol:2,generation:1,scopes:[],cursors:[]},{include:['knowledge','manifest','traffic']});
   const applied=applySyncV2Batch({worldId:ids.world,villageId:ids.village,generation:1,scopes:new Map(),
     subscribedScopes:new Set(batch.groups.map(group=>`${group.stream.kind}:${group.stream.key}`))},batch);
   if(applied.kind!=='applied'){
@@ -124,8 +133,42 @@ it('keeps parity with harvests, construction, workshop orders and a pending gard
   const ready=garden.garden!.plots.filter(plot=>plot.storedCarrots>=1).slice(0,2);
   expect(ready).toHaveLength(2);
   await harvestGardenSelection(db,ids.account,'aube',ids.village,ready.map(({cellX,cellY})=>({cellX,cellY})),randomUUID());
+  // A convoy between two other villages: public, hence visible here too.
+  const foreign=await db.transaction().execute(async tx=>{
+    const t=(await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
+    const villages:string[]=[];
+    for(const offset of [40,80]){
+      const account=(await tx.insertInto('accounts').values({id:randomUUID(),email:`${randomUUID()}@traffic.test`,passwordHash:'fixture'}).returning('id').executeTakeFirstOrThrow()).id;
+      await tx.insertInto('worldMemberships').values({worldId:ids.world,accountId:account,playerName:'Voisin '+offset}).execute();
+      villages.push((await tx.insertInto('villages').values({id:randomUUID(),worldId:ids.world,ownerAccountId:account,name:'Voisin '+offset,
+        anchorCellX:1024+offset,anchorCellY:512+offset,economyActivatedAt:t}).returning('id').executeTakeFirstOrThrow()).id);
+    }
+    const offer=await tx.insertInto('tradeOffers').values({worldId:ids.world,villageId:villages[1]!,requestedResource:'wood',requestedAmount:10,
+      offeredResource:'stone',offeredAmount:5,maxTravelSeconds:600,status:'accepted',createdAt:t,oracleAt:t,oracleEligible:false}).returning('id').executeTakeFirstOrThrow();
+    const journey=await tx.insertInto('tradeJourneys').values({worldId:ids.world,villageId:villages[0]!,destinationVillageId:villages[1]!,offerId:offer.id,
+      workerCount:2,path:JSON.stringify([{cellX:1064,cellY:552},{cellX:1104.5,cellY:592}]),startedAt:t,
+      arrivesAt:new Date(t.getTime()+600000),returnsAt:new Date(t.getTime()+1200000)}).returning('id').executeTakeFirstOrThrow();
+    await sql`select game_sync_publish()`.execute(tx);
+    return journey.id;
+  });
   const {historical,projected,now}=await project();
   const state=historical as VillageState;
+  expect(state.village.market?.journeys?.some(journey=>journey.id===foreign)).toBe(true);
+  // The public stream never carries the offer or the cargo.
+  const traffic=await captureSyncV2(db,ids.account,'aube',ids.village,{protocol:2,generation:1,scopes:[],cursors:[]},{include:['traffic']});
+  const convoys=traffic.groups.find(group=>group.stream.kind==='traffic')!.changes
+    .find((change):change is Extract<SyncV2Change,{component:'convoys'}>=>change.component==='convoys')!;
+  const convoy=convoys.upsert.find(row=>row.id===foreign)!;
+  expect(Object.keys(convoy).sort()).toEqual(['arrivesAt','destinationVillageId','id','path','returnsAt','startedAt','villageId','workerCount']);
+  // Incremental path: the traffic journal reports the end of that convoy.
+  await db.transaction().execute(async tx=>{
+    await tx.deleteFrom('tradeJourneys').where('id','=',foreign).execute();
+    await sql`select game_sync_publish()`.execute(tx);
+  });
+  const delta=await captureSyncV2(db,ids.account,'aube',ids.village,{protocol:2,generation:1,
+    scopes:[{kind:'traffic',key:ids.world}],cursors:traffic.groups.map(group=>({...group.stream,revision:group.toRevision}))});
+  expect(delta.coverage).toBe('delta');
+  expect(delta.groups.find(group=>group.stream.kind==='traffic')!.changes).toEqual([{component:'convoys',upsert:[],remove:[foreign]}]);
   expect(state.village.processingOrders?.length).toBeGreaterThan(0);
   expect(state.cells.some(cell=>cell.building?.status==='under-construction')).toBe(true);
   expect(state.cells.some(cell=>cell.building?.garden?.plots.some(plot=>plot.harvest))).toBe(true);

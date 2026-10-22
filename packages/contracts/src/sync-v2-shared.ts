@@ -10,7 +10,18 @@ const cell = Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Inte
 export const SYNC_V2_KNOWLEDGE_COMPONENTS = ['knowledgeScience', 'knowledgeCoverage'] as const;
 export const SYNC_V2_MANIFEST_COMPONENTS = ['gameManifest'] as const;
 export const SYNC_V2_OFFER_COMPONENTS = ['offerIndex'] as const;
+/** Public world traffic: observable convoys of every village. */
+export const SYNC_V2_TRAFFIC_COMPONENTS = ['convoys'] as const;
+// Presence, route and timing are observable; offers and cargo are private
+// and must never be added here.
+export const SyncV2PublicConvoySchema = Type.Object({ id: Type.String({ format: 'uuid' }),
+  villageId: Type.String({ format: 'uuid' }), destinationVillageId: Type.String({ format: 'uuid' }),
+  workerCount: Type.Integer({ minimum: 1 }), path: Type.Array(Type.Object({ cellX: Type.Number(), cellY: Type.Number() }, { additionalProperties: false })),
+  startedAt: Type.String({ format: 'date-time' }), arrivesAt: Type.String({ format: 'date-time' }), returnsAt: Type.String({ format: 'date-time' }),
+}, { additionalProperties: false });
 export const SyncV2SharedChangeSchema = Type.Union([
+  Type.Object({ component: Type.Literal('convoys'), upsert: Type.Array(SyncV2PublicConvoySchema, { maxItems: 1024 }),
+    remove: Type.Array(Type.String({ format: 'uuid' }), { maxItems: 1024 }) }, { additionalProperties: false }),
   Type.Object({ component: Type.Literal('knowledgeScience'), upsert: Type.Array(Type.Object({ id: singleton, state: ScienceStateSchema }), { maxItems: 1 }), remove: Type.Array(singleton, { maxItems: 1 }) }, { additionalProperties: false }),
   Type.Object({ component: Type.Literal('knowledgeCoverage'), upsert: Type.Array(Type.Object({ id: singleton,
     anchors: Type.Array(cell, { maxItems: 1024 }), footprints: Type.Array(cell, { maxItems: 65536 }),

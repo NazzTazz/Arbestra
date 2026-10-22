@@ -9,7 +9,7 @@ export class SyncV2HttpError extends Error{
 type Options={publish:(state:SyncV2State,observedAt:string,batch:SyncV2Batch)=>void;expired:()=>void;
   request?:typeof fetch;storage?:Storage;scopes?:SyncV2ReadRequest['scopes'];
   /** Shared scopes keyed by the server; the private stream is implicit. */
-  include?:readonly ('knowledge'|'manifest')[]};
+  include?:readonly ('knowledge'|'manifest'|'traffic')[]};
 
 /** One mounted village owns this transport. Only intentions are persisted:
  * every reload reacquires complete projection values with their cursors. */

@@ -109,6 +109,11 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
         worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, buildingId: DEVELOPMENT_IDS.townHall,
         resourceCode: 'carrot', amount: 2000, claimedAt: null,
       }).execute();
+      // Public streams exist from world creation (055/057) but are only
+      // touched by later writes; restore them if a suite removed them.
+      await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values
+        (${DEVELOPMENT_IDS.world},'manifest',${DEVELOPMENT_IDS.world}),(${DEVELOPMENT_IDS.world},'offers','all'),
+        (${DEVELOPMENT_IDS.world},'traffic',${DEVELOPMENT_IDS.world}) on conflict do nothing`.execute(transaction);
     });
   } finally {
     await db.destroy();

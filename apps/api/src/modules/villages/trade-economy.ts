@@ -120,9 +120,13 @@ export async function ownTradeOffers(tx: Transaction<Database>, ctx: TradeContex
   const rows = await (selected?query.where('t.id','in',selected):query).execute();
   return rows.map(r => ({ ...r, createdAt: r.createdAt.toISOString(), oracleAt: r.oracleAt.toISOString() }));
 }
+/** Public traffic: every active convoy of the world is observable, but only
+ * its journey. The row also links the private offer (hence the cargo): the
+ * V1 stream serializes without a response schema, so never spread the row. */
 export async function tradeJourneys(tx: Transaction<Database>, ctx: TradeContext): Promise<MarketJourney[]> {
   const rows = await tx.selectFrom('tradeJourneys').selectAll().where('worldId', '=', ctx.worldId).where('returnsAt', '>', ctx.through).execute();
-  return rows.map(r => ({ ...r, startedAt: r.startedAt.toISOString(), arrivesAt: r.arrivesAt.toISOString(), returnsAt: r.returnsAt.toISOString() }));
+  return rows.map(r => ({ id: r.id, villageId: r.villageId, destinationVillageId: r.destinationVillageId, workerCount: r.workerCount,
+    path: r.path, startedAt: r.startedAt.toISOString(), arrivesAt: r.arrivesAt.toISOString(), returnsAt: r.returnsAt.toISOString() }));
 }
 
 /** Private V2 representation: only the sender and destination receive these

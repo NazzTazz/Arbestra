@@ -220,10 +220,13 @@ Les intentions déjà asynchrones conservent leur reçu durable et leur FIFO. Au
 | spatial, clé world/chunk canonique | Terrain édité, occupation publique, gisements, voirie/équipements visibles | Abonnements spatiaux autorisés concernés |
 | index d'offres, clé world/filtre de ressource | Changements de présence/état d'offres publiques ; détails privés exclus | Panneau marché concerné |
 | manifeste de configuration versionné | Catalogue/génération/apparences applicables | Clients concernés par ce manifeste |
+| trafic public, clé world | Convois actifs : présence, trajet, horaires, effectif, origine et destination. Offre et cargaison exclues | Tout village du monde, sous les règles de connaissance et de visibilité (un seul point de filtrage côté serveur) |
 
 Le flux privé possède un curseur unique pour préserver l'atomicité économique du village ; ses entrées décrivent les composants et clés précis. Les composants ne créent pas chacun une queue de commandes.
 
 Les catégories exactes de composants sont finies et typées dans packages/contracts : stock par code, cohorte, logement, bâtiment, cellule, parcelle, ordre/lot, équipe/mission, échange/offre/livraison, programme/activité, connaissance, accomplissement, reçu. Les synthèses dérivées touchées sont déclarées explicitement et recalculées uniquement si nécessaire.
+
+**Décision produit du 22 octobre 2026 (Tristan)** : les convois sont des entités publiques et observables du monde ; c'est un invariant de gameplay pour la future dimension militaire (attaque, interception, escorte, sécurisation des convois commerciaux). Leur représentation publique ne dépend pas du flux privé des villages concernés ; seules leurs données commerciales restent privées. Aucune mécanique militaire n'est implémentée à ce stade.
 
 Une entité publiée a un propriétaire de version unique. Par exemple, l'occupation publique appartient au flux spatial et le détail privé d'un bâtiment au flux village ; ce sont deux représentations distinctes reliées par un identifiant, pas deux copies concurrentes d'un même champ.
 

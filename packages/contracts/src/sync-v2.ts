@@ -10,7 +10,7 @@ import { ScienceStateSchema } from './science.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
 import { StarterInstallationSchema } from './spawn-installation.js';
 import { SYNC_V2_SPATIAL_COMPONENTS, SyncV2SpatialChangeSchema } from './sync-v2-spatial.js';
-import { SYNC_V2_KNOWLEDGE_COMPONENTS, SYNC_V2_MANIFEST_COMPONENTS, SYNC_V2_OFFER_COMPONENTS, SyncV2SharedChangeSchema } from './sync-v2-shared.js';
+import { SYNC_V2_KNOWLEDGE_COMPONENTS, SYNC_V2_MANIFEST_COMPONENTS, SYNC_V2_OFFER_COMPONENTS, SYNC_V2_TRAFFIC_COMPONENTS, SyncV2SharedChangeSchema } from './sync-v2-shared.js';
 
 if (!FormatRegistry.Has('uuid')) FormatRegistry.Set('uuid', value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 if (!FormatRegistry.Has('date-time')) FormatRegistry.Set('date-time', value => /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)));
@@ -55,7 +55,7 @@ export const SyncV2ExpansionSchema = Type.Object({ id, buildingId: id, startedAt
 export const SyncV2StreamSchema = Type.Object({
   kind: Type.Union([
     Type.Literal('village'), Type.Literal('knowledge'), Type.Literal('spatial'),
-    Type.Literal('offers'), Type.Literal('manifest'),
+    Type.Literal('offers'), Type.Literal('manifest'), Type.Literal('traffic'),
   ]),
   key: Type.String({ minLength: 1, maxLength: 128 }), epoch: id,
 }, { additionalProperties: false });
@@ -177,7 +177,8 @@ export function applySyncV2Batch(state: SyncV2State, input: unknown):
       : group.stream.kind === 'spatial' ? SYNC_V2_SPATIAL_COMPONENTS
       : group.stream.kind === 'knowledge' ? SYNC_V2_KNOWLEDGE_COMPONENTS
       : group.stream.kind === 'manifest' ? SYNC_V2_MANIFEST_COMPONENTS
-      : group.stream.kind === 'offers' ? SYNC_V2_OFFER_COMPONENTS : [];
+      : group.stream.kind === 'offers' ? SYNC_V2_OFFER_COMPONENTS
+      : group.stream.kind === 'traffic' ? SYNC_V2_TRAFFIC_COMPONENTS : [];
     if (!registry.length || (group.stream.kind === 'village' ? group.stream.key !== state.villageId
       : !state.subscribedScopes?.has(streamKey(group.stream)))) return { kind: 'resync', state };
     if (group.changes.some(change => !registry.includes(change.component))) return { kind: 'resync', state };

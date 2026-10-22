@@ -132,7 +132,7 @@ test('le village suit les flux V2 : atelier, fin de lot et construction extérie
     expect(commands.map(request => request.protocol)).toEqual(['2', '2']);
     const bootstraps = [...requests.values()].filter(request => request.method === 'GET' && request.path.endsWith('/bootstrap'));
     expect(bootstraps).toHaveLength(1);
-    expect(bootstraps[0]!.query).toContain('include=knowledge,manifest');
+    expect(bootstraps[0]!.query).toContain('include=knowledge,manifest,traffic');
     expect([...requests.values()].filter(request => request.path.endsWith('/events'))).toEqual([]);
     expect([...requests.values()].some(request => request.method === 'POST' && request.path.endsWith('/sync/stream'))).toBe(true);
     const firstCommandAt = Math.min(...commands.map(request => request.started));

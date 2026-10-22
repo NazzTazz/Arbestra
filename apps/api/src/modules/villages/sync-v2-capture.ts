@@ -7,8 +7,9 @@ import { readJournalSelection, readSubscribedJournal, type SyncCursor, type Sync
 import { readPrivateScopeSnapshot, readRegisteredPrivateChanges } from './sync-v2-readers.js';
 import { readSpatialChanges, readSpatialScopeSnapshot } from './sync-v2-spatial-readers.js';
 import { readSharedChanges, readSharedScopeSnapshot } from './sync-v2-shared-readers.js';
+import { readTrafficChanges, readTrafficScopeSnapshot } from './sync-v2-traffic-readers.js';
 
-export type SyncV2SharedInclude = 'knowledge' | 'manifest';
+export type SyncV2SharedInclude = 'knowledge' | 'manifest' | 'traffic';
 
 /** `include` resolves server-keyed shared scopes for a bootstrap, whose
  * client does not know the account or world key yet. */
@@ -24,12 +25,13 @@ export async function captureSyncV2(db: Kysely<Database>, accountId: string, wor
     // Only the private stream is implicit. Knowledge, catalog and offers are
     // optional subscriptions: a screen that does not display them must not
     // pay for their snapshot (spec §8.2).
-    const included = { knowledge: { kind: 'knowledge' as const, key: accountId }, manifest: { kind: 'manifest' as const, key: village.worldId } };
+    const included = { knowledge: { kind: 'knowledge' as const, key: accountId }, manifest: { kind: 'manifest' as const, key: village.worldId },
+      traffic: { kind: 'traffic' as const, key: village.worldId } };
     for (const scope of [
       { kind: 'village' as const, key: villageId }, ...(options.include ?? []).map(kind => included[kind]), ...request.scopes,
     ]) {
       if (scope.kind === 'village' && scope.key !== villageId || scope.kind === 'knowledge' && scope.key !== accountId
-        || scope.kind === 'manifest' && scope.key !== village.worldId || scope.kind === 'offers' && scope.key !== 'all')
+        || (scope.kind === 'manifest' || scope.kind === 'traffic') && scope.key !== village.worldId || scope.kind === 'offers' && scope.key !== 'all')
         throw new HttpError(404, 'SYNC_SCOPE_NOT_FOUND', 'Périmètre introuvable.');
       if (scope.kind === 'spatial') {
         if (!/^(0|[1-9][0-9]*),(0|[1-9][0-9]*)$/.test(scope.key)) throw new HttpError(400, 'INVALID_SYNC_SCOPE', 'Chunk invalide.');
@@ -64,7 +66,9 @@ export async function captureSyncV2(db: Kysely<Database>, accountId: string, wor
         const spatial = { ...context, worldSlug, chunkX, chunkY, widthCells: village.widthCells, heightCells: village.heightCells,
           chunkSize: village.chunkSize, generationVersion: village.generationVersion };
         changes = snapshot ? await readSpatialScopeSnapshot(tx, spatial) : await readSpatialChanges(tx, spatial, stream.references);
-      } else changes = snapshot ? await readSharedScopeSnapshot(tx, context, stream.scope) : await readSharedChanges(tx, context, stream.scope, stream.references);
+      } else if (stream.scope.kind === 'traffic') changes = snapshot
+        ? await readTrafficScopeSnapshot(tx, context) : await readTrafficChanges(tx, context, stream.references);
+      else changes = snapshot ? await readSharedScopeSnapshot(tx, context, stream.scope) : await readSharedChanges(tx, context, stream.scope, stream.references);
       groups.push({ stream: { ...stream.scope, epoch: stream.cursor.epoch }, fromRevision: snapshot ? '0' : stream.fromRevision,
         toRevision: stream.cursor.revision, changes });
     }

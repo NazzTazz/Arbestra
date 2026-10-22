@@ -56,7 +56,8 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
       emit();
     };
     const current=new SyncV2Transport(worldSlug,worldId,villageId,{
-      ...(village?{include:['knowledge','manifest'] as const}:{}),expired:()=>expired.current(),
+      // Convoys are public world entities: the traffic stream shows them all.
+      ...(village?{include:['knowledge','manifest','traffic'] as const}:{}),expired:()=>expired.current(),
       publish:(state,observedAt,batch)=>{
         setOrders(processingOrdersV2(state));
         if(!village)return;

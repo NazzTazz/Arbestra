@@ -23,9 +23,10 @@ const byTime = (a: string, b: string) => Date.parse(a) - Date.parse(b);
  * stream is not loaded: the caller keeps its previous state. */
 export function villageStateFromSyncV2(sync: SyncV2State, presentation: VillagePresentation, observedAt: string): VillageState | null {
   const scope = (kind: string) => [...sync.scopes].find(([key]) => key.startsWith(kind + ':'))?.[1];
-  const village = sync.scopes.get(`village:${sync.villageId}`), knowledge = scope('knowledge'), manifest = scope('manifest');
+  const village = sync.scopes.get(`village:${sync.villageId}`), knowledge = scope('knowledge'), manifest = scope('manifest'), traffic = scope('traffic');
   if (!village || !knowledge || !manifest || presentation.worldId !== sync.worldId || presentation.villageId !== sync.villageId) return null;
-  const values = [visibleSyncV2Scope(village), visibleSyncV2Scope(knowledge), visibleSyncV2Scope(manifest)];
+  const values = [visibleSyncV2Scope(village), visibleSyncV2Scope(knowledge), visibleSyncV2Scope(manifest),
+    ...(traffic ? [visibleSyncV2Scope(traffic)] : [])];
   const list = <C extends SyncV2Change['component']>(component: C): Entity<C>[] => {
     const rows: Entity<C>[] = [];
     for (const map of values) for (const [key, value] of map) if (key.startsWith(component + ':')) rows.push(value as Entity<C>);
@@ -113,7 +114,9 @@ export function villageStateFromSyncV2(sync: SyncV2State, presentation: VillageP
     processingOrders: processing,
     market: { ...presentation.market, exchanges,
       offers: list('tradeOffers').sort((a: TradeOffer, b: TradeOffer) => byTime(b.createdAt, a.createdAt)),
-      journeys: list('tradeJourneys').filter((row: MarketJourney) => Date.parse(row.returnsAt) > Date.parse(observedAt)) },
+      // Convoys are public: the world traffic stream when subscribed, else
+      // only the village's own and incoming convoys from its private stream.
+      journeys: (traffic ? list('convoys') : list('tradeJourneys')).filter((row: MarketJourney) => Date.parse(row.returnsAt) > Date.parse(observedAt)) },
   };
   // No stored plan means the empty plan, as for the historical reader.
   return { infrastructure: list('infrastructure')[0]?.plan ?? emptyInfrastructure(), factoryEnabled: game.factoryEnabled,

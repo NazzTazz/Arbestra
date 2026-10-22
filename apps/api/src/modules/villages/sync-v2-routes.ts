@@ -20,8 +20,9 @@ const prefix='/api/worlds/:worldSlug/villages/:villageId';
 /** Registration is not activation: until the complete writer/backfill rollout
  * is recorded, these endpoints fail closed rather than expose partial streams. */
 export async function assertSyncV2Available(db:Kysely<Database>):Promise<void>{
-  const {ready}=(await sql<{ready:boolean}>`select count(*)=4 as ready from kysely_migration where name in
-    ('053_game_sync_private_writers','054_game_sync_shared_writers','055_game_sync_scope_backfill','056_village_economy_catchups')`.execute(db)).rows[0]!;
+  const {ready}=(await sql<{ready:boolean}>`select count(*)=5 as ready from kysely_migration where name in
+    ('053_game_sync_private_writers','054_game_sync_shared_writers','055_game_sync_scope_backfill','056_village_economy_catchups',
+     '057_game_sync_public_traffic')`.execute(db)).rows[0]!;
   if(!ready)throw new HttpError(503,'SYNC_V2_UNAVAILABLE','Synchronisation V2 indisponible.');
 }
 
@@ -41,7 +42,7 @@ export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Databas
   });
   app.get(`${prefix}/bootstrap`,{schema:{params,headers,querystring:Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER}),
     // Optional shared scopes; the private stream is always included.
-    include:Type.Optional(Type.String({pattern:'^(knowledge|manifest)(,(knowledge|manifest))?$'}))}),
+    include:Type.Optional(Type.String({pattern:'^(knowledge|manifest|traffic)(,(knowledge|manifest|traffic)){0,2}$'}))}),
     response:{200:SyncV2BatchSchema}}},async(request,reply)=>{
     const account=await authenticate(db,request.cookies[config.cookieName]);
     await assertSyncV2Available(db);
