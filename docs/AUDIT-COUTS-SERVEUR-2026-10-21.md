@@ -10,6 +10,22 @@ Les devis ne déclenchent plus de rattrapage économique. Les principales écono
 
 **Les commandes historiques ne sont pas toutes ramenées à trois SQL.** Jardin, pierre, anciens chantiers, commerce, améliorations et extensions conservent des transactions et réponses complètes coûteuses. Les parcours négociés marché/atelier/science libèrent leurs verrous avant la projection, mais une trame exige encore une projection serveur. **Rectification après relecture du client :** ce support est livré côté serveur ; `commandMarket`, `commandProcessing` et `commandScience` utilisent encore `requestState()` sans `x-village-sync`, donc la réponse historique complète. Leur raccord au transport négocié reste à faire. Les limites ci-dessous sont distinguées des optimisations réalisées.
 
+## Mesures V2 comparées — 22 octobre 2026 (branche `wip/v2-commandes-bornees`, local)
+
+Même harness, même fixture répétée (3 bâtiments, 30 habitants, monde isolé), **30 itérations mesurées après chauffe** par série, base `127.0.0.1/arbestra_test`. Série V1 : `ARBESTRA_AUDIT_REPEATED=1` ; série V2 : en plus `ARBESTRA_AUDIT_V2=1` (commandes négociées, rejeux exacts, lecture delta induite après chaque commande, bootstrap par monde et présentation à chaque itération). Artefacts ignorés `test-results/server-costs/v1-repeated-2026-10-22.json` et `v2-repeated-2026-10-22.json`, synthèse `node scripts/summarize-command-costs.mjs <fichiers>`.
+
+| Opération (médiane, p95 ms) | V1 | V2 |
+|---|---|---|
+| Démarrer sans matière | 114 (136) ms · 90 appels · 65 Ko | 44 (55) ms · 34 appels · 1,9 Ko |
+| Pause / annulation | 97 (113) ms · 81 appels · 65 Ko | 17 (22–25) ms · 18 appels · 1,0 Ko |
+| Reprise | 115 (128) ms · 93 appels · 65 Ko | 45 (61) ms · 37 appels · 1,9 Ko |
+| Rejeu exact | 93–94 ms · 78 appels · 65 Ko | 9 (12–13) ms · 10 appels · 0,3 Ko |
+| Synchronisation induite par commande | SSE 57–58 ms · 49 appels · 1,7–2,4 Ko | delta 11–17 ms · 11–16 appels · 1,2–2,1 Ko |
+| Synchronisation après un rejeu | SSE 1 ms · 1 appel | delta 8 ms · 8 appels · 0,9 Ko |
+| Premier chargement | (GET village, non répété ici) | bootstrap 82 (101) ms · 75 appels · 16 Ko + présentation 61 (87) ms · 49 appels · 45 Ko |
+
+Lecture : la commande V2 ne projette plus le village (coût proportionnel à la commande), et la synchronisation induite lit les seules clés touchées. Le delta à vide coûte 8 appels (authentification, propriété, journal) contre 1 pour la SSE V1 sur révision inchangée : c'est le coût de chaque relève V2 sans changement, à surveiller pour la cadence de 2 s. Mesures locales Windows, pas une qualification de charge ; la latence navigateur reste mesurée par les parcours Playwright.
+
 ## Méthode reproductible
 
 `apps/api/src/modules/villages/server-costs.integration.test.ts`, activé par `ARBESTRA_SERVER_COST_AUDIT=1`, crée et nettoie son propre monde. `ARBESTRA_AUDIT_LABEL` nomme le fichier JSON ignoré sous `test-results/server-costs/`. Le driver Kysely enregistre chaque SQL sans ses paramètres, sa durée, le contrôle de transaction, le statut HTTP et la taille de réponse. Les phases finales utilisent l'en-tête DEV et son parseur partagé ; les premières traces enveloppaient `inject()` et n'isolaient pas correctement ces phases.

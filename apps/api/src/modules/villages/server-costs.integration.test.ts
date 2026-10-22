@@ -25,6 +25,7 @@ const backlog = process.env.ARBESTRA_AUDIT_BACKLOG === '1';
 const spatial = process.env.ARBESTRA_AUDIT_SPATIAL === '1';
 const socket = process.env.ARBESTRA_AUDIT_SOCKET === '1';
 const receiptsOnly = process.env.ARBESTRA_AUDIT_RECEIPTS === '1';
+const v2 = process.env.ARBESTRA_AUDIT_V2 === '1';
 const url = testDatabaseUrl(), target = new URL(url);
 if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test') throw Error('Unexpected cost audit database');
 class ObservedDialect extends PostgresDialect {
@@ -95,7 +96,7 @@ afterAll(async () => {
       fixture: repeated
         ? `${3 * scale} completed buildings (${spatial ? 3 * scale : 3} placed), 30 initial inhabitants, no deposits; isolated legacy world, no economic worker`
         : 'isolated legacy world; initial phase: 3 completed buildings, 30 inhabitants, no deposits; extended phase adds 3 deposits and a university; no economic worker',
-      scale, backlog, spatial, socket, receiptsOnly, repetitions: repeated ? 30 : 1,
+      scale, backlog, spatial, socket, receiptsOnly, v2, repetitions: repeated ? 30 : 1,
       counting: 'driver calls including transaction control; SQL bodies without parameters; trigger internals excluded; gzip is offline estimate, not negotiated wire compression', samples }, null, 2));
     await app?.close();
     await db.deleteFrom('populationCohorts').where('worldId', '=', worldId).execute();
@@ -213,7 +214,7 @@ it.runIf(enabled && !repeated)('records HTTP reads, previews, commands and retri
   await request('processing incremental confirmed retry', '/processing', cancel, 200, processingHeaders);
 }, 240000);
 
-it.runIf(enabled && repeated && !backlog && !socket && !receiptsOnly)('measures atelier command, exact retry and induced SSE separately after warmup', async () => {
+it.runIf(enabled && repeated && !backlog && !socket && !receiptsOnly && !v2)('measures atelier command, exact retry and induced SSE separately after warmup', async () => {
   // The V1 session and low-level reader compute real deltas. This excludes the
   // socket/auth/deadline loop and navigation worker dispatch; report separately
   // from browser wire traffic, measured by the Playwright scenario.
@@ -250,6 +251,39 @@ it.runIf(enabled && repeated && !backlog && !socket && !receiptsOnly)('measures 
       await sync(prefix + action + ' SSE');
       await request(prefix + action + ' retry', '/processing', payload);
       await sync(prefix + action + ' retry SSE');
+    }
+  }
+}, 900000);
+
+it.runIf(enabled && repeated && v2)('measures the same atelier scenario through V2: commands, exact retries, induced delta reads and first load', async () => {
+  // Same fixture and branches as the V1 scenario above. The induced cost is
+  // one delta read per command (what each open stream performs), not a
+  // whole-village projection; first load is bootstrap plus presentation.
+  const negotiated = { 'x-arbestra-protocol': '2' }, command = { ...negotiated, 'x-arbestra-generation': '1' };
+  type Batch = { groups: Array<{ stream: { kind: string; key: string; epoch: string }; toRevision: string }> };
+  let batch: Batch = await request('warmup V2 bootstrap', `/api/worlds/${slug}/village/bootstrap?generation=1&include=knowledge,manifest,traffic`,
+    undefined, 200, negotiated);
+  await request('warmup V2 presentation', '/presentation', undefined, 200, negotiated);
+  async function delta(name: string) {
+    batch = await request(name, '/sync/read', { protocol: 2, generation: 1,
+      scopes: batch.groups.map(group => ({ kind: group.stream.kind, key: group.stream.key })),
+      cursors: batch.groups.map(group => ({ ...group.stream, revision: group.toRevision })) }, 200, negotiated);
+  }
+  await db.updateTable('villageResources').set({ amount: 0 }).where('worldId', '=', worldId)
+    .where('villageId', '=', villageId).where('resourceCode', '=', 'wood').execute();
+  for (let iteration = 0; iteration <= 30; iteration++) {
+    const prefix = iteration ? 'measured ' : 'warmup ';
+    batch = await request(prefix + 'V2 bootstrap', `/api/worlds/${slug}/village/bootstrap?generation=1&include=knowledge,manifest,traffic`,
+      undefined, 200, negotiated);
+    await request(prefix + 'V2 presentation', '/presentation', undefined, 200, negotiated);
+    const start = { action: 'start', commandId: randomUUID(), buildingId: workshopId, lots: 2, workerCount: 1 };
+    const orderId = (await request(prefix + 'V2 start missing-input', '/processing', start, 200, command)).result.orderId;
+    for (const action of ['pause', 'resume', 'cancel'] as const) {
+      const payload = { commandId: randomUUID(), action, orderId, ...(action === 'resume' ? { workerCount: 1 } : {}) };
+      await request(prefix + 'V2 ' + action, '/processing', payload, 200, command);
+      await delta(prefix + 'V2 ' + action + ' delta');
+      await request(prefix + 'V2 ' + action + ' retry', '/processing', payload, 200, command);
+      await delta(prefix + 'V2 ' + action + ' retry delta');
     }
   }
 }, 900000);
