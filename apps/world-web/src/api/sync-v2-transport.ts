@@ -1,12 +1,12 @@
-import {processingCommandIsValid,processingConfirmationV2IsValid,syncV2BatchIsValid,commandReceiptReadResponseIsValid,
-  type ProcessingCommand,type ProcessingConfirmationV2,type SyncV2State,type SyncV2ReadRequest} from '@arbestra/contracts';
+import {processingCommandIsValid,processingConfirmationV2IsValid,syncV2BatchIsValid,commandReceiptReadResponseIsValid,villagePresentationIsValid,
+  type VillagePresentation,type ProcessingCommand,type ProcessingConfirmationV2,type SyncV2Batch,type SyncV2State,type SyncV2ReadRequest} from '@arbestra/contracts';
 import {SyncV2Session,SyncV2ResyncRequired,SyncV2SessionExpired} from './sync-v2-session';
 
 let nextGeneration=0;
 export class SyncV2HttpError extends Error{
   constructor(readonly status:number,readonly code:string,message:string,readonly retryAfterMs=1000){super(message);}
 }
-type Options={publish:(state:SyncV2State,observedAt:string)=>void;expired:()=>void;
+type Options={publish:(state:SyncV2State,observedAt:string,batch:SyncV2Batch)=>void;expired:()=>void;
   request?:typeof fetch;storage?:Storage;scopes?:SyncV2ReadRequest['scopes'];
   /** Shared scopes keyed by the server; the private stream is implicit. */
   include?:readonly ('knowledge'|'manifest')[]};
@@ -129,6 +129,17 @@ export class SyncV2Transport{
       this.reconnect();
     }}
     return input;
+  }
+  /** Versioned presentation read; null when the given version is current. */
+  async presentation(version?:string):Promise<VillagePresentation|null>{
+    const response=await this.request(this.root+'/presentation',{credentials:'same-origin',signal:this.controller.signal,
+      headers:{'x-arbestra-protocol':'2',...(version?{'if-none-match':`"${version}"`}:{})}});
+    if(response.status===304)return null;
+    if(response.status===401)throw new SyncV2SessionExpired();
+    const data:unknown=await response.json();
+    if(!response.ok)throw new SyncV2HttpError(response.status,(data as {code?:string}).code??'HTTP_ERROR','Présentation indisponible.');
+    if(!villagePresentationIsValid(data)||data.worldId!==this.worldId||data.villageId!==this.villageId)throw Error('Présentation invalide.');
+    return data;
   }
   close(){this.closed=true;this.controller.abort();this.session?.close();if(this.retry)clearTimeout(this.retry);}
 }

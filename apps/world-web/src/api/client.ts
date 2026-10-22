@@ -116,6 +116,8 @@ export interface TimedVillageState {
   state: VillageState;
   serverOffsetMs: number;
   requestGeneration?: number;
+  /** Projected from the V2 streams; never ordered by the V1 revision. */
+  source?: 'v2';
 }
 
 export interface TimedVillageFrame { frame: VillageFrame; serverOffsetMs: number; requestGeneration?: number }

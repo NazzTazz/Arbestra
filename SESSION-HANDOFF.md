@@ -26,6 +26,16 @@ Lecture de présentation (prérequis de (b), serveur seulement, **non commitée*
 - Preuves : `presentation.integration.test.ts` 2/2 code 0 (parité avec le lecteur inline, 304, aucune mutation durable, version stable après changement de stock, nouvelle version après pose) ; routes V2 2/2 ; typecheck API/client et lint code 0. Fixture e2e : 43 Ko (V1 119 Ko).
 - Pas encore : consommation client (adaptateur (b)), fusion logique des Jardins (l'emprise porte l'id logique, le flux privé les ids physiques), `region`/terrain depuis les chunks spatiaux.
 
+Étape (b) — village complet en V2 derrière une option (commits `1f2d537` → suivant) :
+- Flux `knowledge` sans `knowledgePlaces` (aucun écran ne les affiche ; 535 Ko) ; références journalisées ignorées par les lecteurs.
+- Présentation enrichie de `region` (fenêtre terrain + features/gisements) et du marqueur `displaysBuilding` (ancre qui porte le bâtiment logique d'un Jardin fusionné).
+- `villageStateFromSyncV2` (contracts) : `VillageState` historique depuis flux privé/connaissance/catalogue + présentation, règles de présence V1 (20 derniers ordres/échanges terminés, missions en cours). **Oracle** `sync-v2-village-state.integration.test.ts` : 0 écart champ à champ avec la projection V1, y compris Jardins fusionnés, récolte en cours, chantier, ordre d'atelier, extension. Il a révélé un **défaut réel corrigé** : chemins de récolte V2 typés entiers alors que les trajets sont fractionnaires → tout snapshot privé avec récolte en cours était rejeté par les clients.
+- App : `useVillageSyncV2` (un seul transport), option `localStorage['arbestra:sync-v2']='1'` ou `VITE_SYNC_V2=1`, **désactivée par défaut**. En mode V2 : pas de SSE V1, réponses de commandes V1 non appliquées mais suivies d'une lecture delta V2 immédiate, superpositions construction/infrastructure remplacées par cette lecture, présentation relue quand un composant de `VILLAGE_PRESENTATION_COMPONENTS` change (publication retenue jusque-là).
+- Preuves : client 414/414, typecheck/lint code 0 ; e2e `village-sync-v2.spec.ts` Chromium **1 passed** (atelier, fin de lot par le worker, construction extérieure visible, aucune requête `/events`, bootstrap `include=knowledge,manifest`) ; e2e atelier par défaut toujours vert. Sémantique V2 constatée : les lectures ne réveillent plus l'économie, la fin de lot vient du planificateur (le test avance aussi la tâche `processing.complete`).
+- Mesures (un passage, serveur froid) : bootstrap 11,5 Ko / 0,56 s ; présentation 109 Ko / 4,3 s puis 2,1 s ; le GET V1 initial (125 Ko) est **encore chargé** pour le premier affichage.
+- Écarts V1/V2 assumés et à arbitrer : convois des **autres** joueurs absents en V2 (confidentialité), chantiers non plafonnés à 32 (pas d'horodatage de création transmis), marché non couvert par l'oracle (verrouillé sur la fixture).
+- Suite naturelle : supprimer le GET V1 initial en mode V2, alléger la présentation (région/routes ≈ 100 Ko relus à chaque changement structurel), puis mobile et 30 répétitions avant d'activer l'option par défaut.
+
 Ouvert : `knowledgePlaces` doit devenir une lecture paginée/à la demande avant (b) ; mobile, reload navigateur réel et mesures 30 répétitions non faits ; la tranche maintient deux flux longs (SSE V1 + stream V2) jusqu'à (b).
 
 ---

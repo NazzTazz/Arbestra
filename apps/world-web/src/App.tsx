@@ -21,7 +21,7 @@ import { MarketPanel } from './ui/MarketPanel';
 import { commandPlayerMarket } from './api/client';
 import { constructionCosts } from '@arbestra/contracts';
 import { commandProcessing } from './api/client';
-import { processingCommandBuilding, useProcessingV2 } from './api/processing-v2';
+import { processingCommandBuilding, useVillageSyncV2 } from './api/processing-v2';
 import { SyncV2HttpError } from './api/sync-v2-transport';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import {setFactoryEnabled} from './api/client';
@@ -84,6 +84,11 @@ type ConstructionCommand = {
 type ConstructionIntentState = 'idle' | 'submitting' | 'error' | 'uncertain';
 
 const pendingExploitationKey = (villageId: string) => `arbestra:pending-exploitation:${worldSlug}:${villageId}`;
+// Whole-village V2 synchronization is opt-in until its browser validation:
+// localStorage arbestra:sync-v2=1 or VITE_SYNC_V2=1. The workshop already
+// negotiates V2 on its own whenever the server offers it.
+const SYNC_V2_VILLAGE = (() => { try { return localStorage.getItem('arbestra:sync-v2') === '1'; } catch { return false; } })()
+  || import.meta.env.VITE_SYNC_V2 === '1';
 const pendingConstructionKey = (villageId: string) => `arbestra:pending-construction:${worldSlug}:${villageId}`;
 const NO_PENDING_HARVESTS: Cell[] = [];
 
@@ -111,6 +116,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const sceneState=useMemo(()=>state?infrastructurePresentationState(state,infrastructurePresentation):null,[state,infrastructurePresentation]);
   const applyInfrastructureConfirmation=useCallback((update:TimedInfrastructureConfirmation)=>{
     const current=stateRef.current;if(!current)return;
+    // V2 publishes the committed plan itself; no V1-fenced overlay.
+    if(villageV2Ref.current.ready){villageV2Ref.current.refresh();return;}
     const result=acceptInfrastructurePresentation(current,infrastructurePresentationRef.current,update.confirmation,update.requestGeneration,villageRequestGeneration());
     if(result.kind==='resync'){synchronization.current?.reconnect();return;}
     if(result.kind==='applied'){infrastructurePresentationRef.current=result.presentation;setInfrastructurePresentation(result.presentation);}
@@ -126,7 +133,9 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const [needsLogin, setNeedsLogin] = useState(false);
   const expeditions=useExpeditions(worldSlug,state?.world.id,state?.village.id,!needsLogin && initialReady);
   const expireSession=useCallback(()=>setNeedsLogin(true),[]);
-  const processingV2=useProcessingV2(worldSlug,state?.world.id,state?.village.id,initialReady&&!needsLogin&&!beforeTownHall,expireSession);
+  // Set after the V2 hook below: once V2 owns the village, V1 responses only
+  // trigger an immediate V2 delta read instead of replacing the state.
+  const villageV2Ref=useRef<{ready:boolean;refresh:()=>void}>({ready:false,refresh:()=>{}});
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
@@ -197,11 +206,16 @@ export function App({starter}:{starter?:StarterController} = {}) {
       snapshot = { state: result.state, serverOffsetMs: update.serverOffsetMs,
         ...(update.requestGeneration !== undefined ? { requestGeneration: update.requestGeneration } : {}) };
     } else snapshot = update;
+    const fromV2 = 'state' in update && update.source === 'v2';
+    if (!fromV2 && villageV2Ref.current.ready) { villageV2Ref.current.refresh(); return; }
     if (previous && (previous.world.id !== snapshot.state.world.id || previous.village.id !== snapshot.state.village.id)) return;
-    if (previous?.syncRevision !== undefined) {
-      if (snapshot.state.syncRevision === undefined) { synchronization.current?.reconnect(); return; }
+    // The V2 session orders its own states; V1 revisions do not apply to them.
+    if (!fromV2) {
+      if (previous?.syncRevision !== undefined) {
+        if (snapshot.state.syncRevision === undefined) { synchronization.current?.reconnect(); return; }
+      }
+      if (previous && latestVillageSnapshot(previous,snapshot.state)===previous) return;
     }
-    if (previous && latestVillageSnapshot(previous,snapshot.state)===previous) return;
     snapshot = { ...snapshot, state: reconcileVillageSnapshot(previous, snapshot.state) };
     if (previous) {
       if (previous.science && snapshot.state.science) {
@@ -238,6 +252,10 @@ export function App({starter}:{starter?:StarterController} = {}) {
       });
 }, [pushNotification,showResourceChanges]);
 
+  const villageV2Mode = SYNC_V2_VILLAGE && !starterActive;
+  const villageV2 = useVillageSyncV2({ worldSlug, worldId: state?.world.id, villageId: state?.village.id,
+    enabled: initialReady && !needsLogin && !beforeTownHall, village: villageV2Mode, onState: applySnapshot, onExpired: expireSession });
+  villageV2Ref.current = { ready: villageV2Mode && villageV2.villageReady, refresh: villageV2.refresh };
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
     if (!current || catRequest.current || current.village.accomplishments.some(item => item.code === 'cat-eyes')) return;
@@ -366,6 +384,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   const refresh = useCallback(async () => {
     if(beforeTownHall || !initialReady)return;
+    if (villageV2Ref.current.ready) { villageV2Ref.current.refresh(); return; }
     if (synchronization.current) { synchronization.current.reconnect(); return; }
     if (actionInFlight.current) return;
     if (refreshFlight.current) return refreshFlight.current;
@@ -404,8 +423,10 @@ export function App({starter}:{starter?:StarterController} = {}) {
     || worldMode === 'construction' && !paletteCollapsed);
   const now = usePresentationClock(livePanelClock);
 
+  // V1 stream only while V2 does not own the village (or is unavailable).
+  const villageV1Stream = !villageV2Mode || villageV2.status === 'unavailable';
   useEffect(() => {
-    if (!initialReady || needsLogin || beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
+    if (!villageV1Stream || !initialReady || needsLogin || beforeTownHall || !state || state.village.id!==stateRef.current?.village.id) return;
     const stream = new VillageSynchronization(state.world.slug, state.world.id, state.village.id, {
       current: () => stateRef.current,
       onExpeditionReceipt:expeditions.receive, accept: applySnapshot, offset: () => offsetRef.current,
@@ -413,7 +434,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     });
     synchronization.current = stream;
     return () => { stream.close(); if(synchronization.current===stream)synchronization.current=null; };
-  }, [state?.world.id,state?.village.id,beforeTownHall,needsLogin,applySnapshot,expeditions.receive,initialReady]);
+  }, [state?.world.id,state?.village.id,beforeTownHall,needsLogin,applySnapshot,expeditions.receive,initialReady,villageV1Stream]);
   useEffect(() => { const visible = () => { if (document.visibilityState === 'visible') void refresh(); }; document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); return () => { document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); }; }, [refresh]);
 
   const inspectedFeature=selectedFeatureId ? terrainRef.current?.naturalFeatures().find(f=>f.id===selectedFeatureId)
@@ -440,7 +461,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   const selectedSite = useMemo(() => state?.cells.find((cell) => cell.id === selectedSiteId) ?? null, [selectedSiteId, state]);
   const selectedBuilding = useMemo(() => selectedSite?.building ?? (selectedSite?.footprint ? state?.cells.find((cell) => cell.building?.id === selectedSite.footprint?.buildingId)?.building ?? null : null), [selectedSite, state]);
-  const processingOrders = processingV2.status === 'ready' ? processingV2.orders : state?.village.processingOrders ?? [];
+  const processingOrders = villageV2.status === 'ready' ? villageV2.orders : state?.village.processingOrders ?? [];
   const gardenSites = useMemo(() => state?.cells.filter((cell) => cell.building?.garden)
     .sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY) ?? [], [state]);
   useEffect(() => {
@@ -485,10 +506,10 @@ export function App({starter}:{starter?:StarterController} = {}) {
   }
 
   async function runProcessing(command: ProcessingCommand): Promise<boolean> {
-    if (processingV2.status !== 'ready') return runAction(() => commandProcessing(worldSlug, stateRef.current!.village.id, command));
+    if (villageV2.status !== 'ready') return runAction(() => commandProcessing(worldSlug, stateRef.current!.village.id, command));
     if (actionInFlight.current) return false;
     actionInFlight.current = true; setPendingAction(true); setError(null);
-    try { await processingV2.command(command); markOracleProgress(); return true; }
+    try { await villageV2.command(command); markOracleProgress(); return true; }
     catch (reason) {
       // Unknown outcomes keep the same UUID; the panel offers to verify it.
       const message = reason instanceof SyncV2HttpError && reason.code === 'SCOPE_CATCHING_UP'
@@ -513,7 +534,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
         : command.kind === 'expand'
           ? await expandGarden(command.worldSlug, command.villageId, command.buildingId, command.cells, command.commandId, command.expectedCosts, syncBase)
           : await upgradeBuilding(command.worldSlug, command.villageId, command.buildingId, command.commandId, command.expectedCosts, command.expectedLevel, syncBase);
-      if ('construction' in snapshot) {
+      if ('construction' in snapshot && villageV2Ref.current.ready) villageV2Ref.current.refresh();
+      else if ('construction' in snapshot) {
         const current=stateRef.current;
         if(current){
           const confirmed=acceptConstructionPresentation(current,constructionPresentationRef.current,snapshot.construction,snapshot.requestGeneration,villageRequestGeneration());
@@ -991,7 +1013,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     {menuAnchor && showGardens && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><div><strong>Choisir un Jardin</strong>{gardenSites.map((site, index) => <button type="button" key={site.id} onClick={() => { setShowGardens(false); setSelectedSiteId(site.id); }}>Jardin {index + 1} · {site.cellX}, {site.cellY} · {site.building!.garden!.activeCellCount} parcelle(s)</button>)}</div></WorldContextMenu> : null}
     {representative && menuAnchor && worldMode==='population' && <WorldContextMenu anchor={representativeView==='village'?menuAnchor:{x:window.innerWidth-330,y:110}}><RepresentativePanel person={representative} view={representativeView} onView={mode=>terrainRef.current?.representativeCamera(mode)} onClose={closePanels}/></WorldContextMenu>}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
-    {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration') && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={processingOrders} unresolved={processingV2.unresolved.find(command=>processingCommandBuilding(command,processingOrders)===selectedBuilding.id)??null} onDiscard={processingV2.discard} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={runProcessing}/></WorldContextMenu>}
+    {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration') && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={processingOrders} unresolved={villageV2.unresolved.find(command=>processingCommandBuilding(command,processingOrders)===selectedBuilding.id)??null} onDiscard={villageV2.discard} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={runProcessing}/></WorldContextMenu>}
     {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration' && selectedBuilding.type !== 'university') && !state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="exploitation" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {
       closePanels(); harvest.setFilter('gardens'); setExploitationSettings(current => ({ ...current, filter: 'gardens' })); pushNotification('Outil Jardins prêt · glissez sur les parcelles à récolter.');
     }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />

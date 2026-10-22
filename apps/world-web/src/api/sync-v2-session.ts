@@ -15,7 +15,7 @@ export class SyncV2Session {
   private state: SyncV2State;
   private controller: AbortController | null = null;
   private closed = false;
-  constructor(initial: SyncV2State, private readonly publish: (state: SyncV2State, observedAt:string) => void,
+  constructor(initial: SyncV2State, private readonly publish: (state: SyncV2State, observedAt:string, batch:SyncV2Batch) => void,
     private readonly request: typeof fetch = (input, init) => fetch(input, init)) { this.state = initial; }
 
   get snapshot(): SyncV2State { return this.state; }
@@ -29,7 +29,7 @@ export class SyncV2Session {
     if (this.closed) return 'ignored';
     const result = applySyncV2Batch(this.state, input);
     if (result.kind === 'resync') throw new SyncV2ResyncRequired();
-    if (result.kind === 'applied') { this.state = result.state; this.publish(this.state,(input as SyncV2Batch).observedAt); }
+    if (result.kind === 'applied') { this.state = result.state; this.publish(this.state,(input as SyncV2Batch).observedAt,input as SyncV2Batch); }
     return result.kind;
   }
   close(): void { this.closed = true; this.controller?.abort(); this.controller = null; }
