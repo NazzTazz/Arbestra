@@ -1,4 +1,4 @@
-import { sql, type Transaction } from 'kysely';
+import type { Transaction } from 'kysely';
 import type { SyncV2Change } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { scienceSnapshot } from '../science/service.js';

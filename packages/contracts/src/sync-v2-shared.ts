@@ -4,7 +4,6 @@ import { VillageStateSchema } from './villages.js';
 
 const singleton = Type.Literal('*');
 const cell = Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
-const cellKey = Type.String({ pattern: '^[0-9]+,[0-9]+$' });
 // Known places are not part of this projection: no screen displays them and
 // a visited village holds thousands (535 of 546 KB of a former bootstrap).
 // Their journal references are skipped; a paginated read can expose them.
