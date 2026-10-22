@@ -11,10 +11,32 @@ type Options={publish:(state:SyncV2State,observedAt:string,batch:SyncV2Batch)=>v
   /** Shared scopes keyed by the server; the private stream is implicit. */
   include?:readonly ('knowledge'|'manifest'|'traffic')[]};
 
+async function parse(response:Response):Promise<unknown>{
+  const data:unknown=await response.json();
+  if(response.status===401)throw new SyncV2SessionExpired();
+  if(!response.ok){const error=data as {code?:string;message?:string};
+    const seconds=Number(response.headers.get('retry-after')??'1');
+    throw new SyncV2HttpError(response.status,error.code??'HTTP_ERROR',error.message??'Synchronisation indisponible.',
+      Number.isFinite(seconds)?Math.max(0,Math.min(seconds,60))*1000:1000);}
+  return data;
+}
+const includeQuery=(options:Options)=>options.include?.length?`&include=${options.include.join(',')}`:'';
+
 /** One mounted village owns this transport. Only intentions are persisted:
  * every reload reacquires complete projection values with their cursors. */
 export class SyncV2Transport{
-  readonly generation=++nextGeneration;
+  /** First load without the historical village read: the server resolves
+   * the default village, whose id then comes from the snapshot itself. */
+  static async bootstrapWorld(worldSlug:string,options:Options):Promise<SyncV2Transport>{
+    const generation=++nextGeneration,request=options.request??((input,init)=>fetch(input,init));
+    const input=await parse(await request(`/api/worlds/${encodeURIComponent(worldSlug)}/village/bootstrap?generation=${generation}${includeQuery(options)}`,
+      {credentials:'same-origin',headers:{'x-arbestra-protocol':'2','x-arbestra-generation':String(generation)}}));
+    if(!syncV2BatchIsValid(input)||input.coverage!=='scope-snapshot'||input.generation!==generation)throw new SyncV2ResyncRequired();
+    const transport=new SyncV2Transport(worldSlug,input.worldId,input.villageId,options,generation);
+    transport.open(input);
+    return transport;
+  }
+  readonly generation:number;
   private session:SyncV2Session|null=null;
   private closed=false;
   private readonly controller=new AbortController();
@@ -24,33 +46,33 @@ export class SyncV2Transport{
   private readonly request:typeof fetch;
   private readonly storage:Storage|undefined;
   private readonly root:string;
-  constructor(private readonly worldSlug:string,readonly worldId:string,readonly villageId:string,private readonly options:Options){
+  constructor(private readonly worldSlug:string,readonly worldId:string,readonly villageId:string,private options:Options,generation?:number){
+    this.generation=generation??++nextGeneration;
     // Never store the global fetch as a method: browsers reject that receiver.
     this.request=options.request??((input,init)=>fetch(input,init));this.storage=options.storage??globalThis.sessionStorage;
     this.root=`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}`;
   }
   get snapshot(){return this.session?.snapshot;}
   private async json(path:string,init:RequestInit={}):Promise<unknown>{
-    const response=await this.request(this.root+path,{credentials:'same-origin',...init,signal:this.controller.signal,
-      headers:{'content-type':'application/json','x-arbestra-protocol':'2','x-arbestra-generation':String(this.generation),...init.headers}});
-    const data:unknown=await response.json();
-    if(response.status===401)throw new SyncV2SessionExpired();
-    if(!response.ok){const error=data as {code?:string;message?:string};
-      const seconds=Number(response.headers.get('retry-after')??'1');
-      throw new SyncV2HttpError(response.status,error.code??'HTTP_ERROR',error.message??'Synchronisation indisponible.',
-        Number.isFinite(seconds)?Math.max(0,Math.min(seconds,60))*1000:1000);}
-    return data;
+    return parse(await this.request(this.root+path,{credentials:'same-origin',...init,signal:this.controller.signal,
+      headers:{'content-type':'application/json','x-arbestra-protocol':'2','x-arbestra-generation':String(this.generation),...init.headers}}));
   }
+  /** A new owner (the mounted village) takes over an already open session. */
+  rebind(handlers:Pick<Options,'publish'|'expired'>){this.options={...this.options,...handlers};}
   async start(alreadyWoken=false):Promise<void>{
-    const input=await this.json(alreadyWoken?'/sync/read':`/bootstrap?generation=${this.generation}${this.options.include?.length?`&include=${this.options.include.join(',')}`:''}`,alreadyWoken?
+    const input=await this.json(alreadyWoken?'/sync/read':`/bootstrap?generation=${this.generation}${includeQuery(this.options)}`,alreadyWoken?
       {method:'POST',body:JSON.stringify({protocol:2,generation:this.generation,scopes:this.options.scopes??[],cursors:[]})}:{});
     if(this.closed)return;
     if(!syncV2BatchIsValid(input)||input.coverage!=='scope-snapshot'||input.worldId!==this.worldId||input.villageId!==this.villageId
       ||input.generation!==this.generation)throw new SyncV2ResyncRequired();
+    this.open(input);
+  }
+  private open(input:SyncV2Batch){
     // Same per-tab convention as pending constructions: world and village.
     this.pendingKey=`arbestra:pending-processing:${this.worldSlug}:${this.villageId}`;
     this.session=new SyncV2Session({worldId:this.worldId,villageId:this.villageId,generation:this.generation,scopes:new Map(),
-      subscribedScopes:new Set(input.groups.map(group=>`${group.stream.kind}:${group.stream.key}`))},this.options.publish,this.request);
+      subscribedScopes:new Set(input.groups.map(group=>`${group.stream.kind}:${group.stream.key}`))},
+      (state,observedAt,batch)=>this.options.publish(state,observedAt,batch),this.request);
     this.session.apply(input);
     void this.listen();
   }

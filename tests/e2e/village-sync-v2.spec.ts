@@ -130,7 +130,11 @@ test('le village suit les flux V2 : atelier, fin de lot et construction extérie
     expect(commands).toHaveLength(2);
     // Whole village on V2: one bootstrap with the shared scopes, no V1 stream.
     expect(commands.map(request => request.protocol)).toEqual(['2', '2']);
+    // First load from V2: no historical village read at all, one bootstrap
+    // resolving the default village and adopted by the mounted village.
+    expect([...requests.values()].filter(request => request.method === 'GET' && request.path.endsWith('/village'))).toEqual([]);
     const bootstraps = [...requests.values()].filter(request => request.method === 'GET' && request.path.endsWith('/bootstrap'));
+    expect(bootstraps[0]!.path).toBe('/api/worlds/aube/village/bootstrap');
     expect(bootstraps).toHaveLength(1);
     expect(bootstraps[0]!.query).toContain('include=knowledge,manifest,traffic');
     expect([...requests.values()].filter(request => request.path.endsWith('/events'))).toEqual([]);

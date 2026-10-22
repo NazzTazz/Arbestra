@@ -456,6 +456,13 @@
   },
   {
     "method": "GET",
+    "url": "/api/worlds/:worldSlug/village/bootstrap",
+    "actions": [],
+    "lot": "B",
+    "role": "Initial coherent capture resolving the default village, with pre-H legacy economy wakeup"
+  },
+  {
+    "method": "GET",
     "url": "/api/worlds/:worldSlug/villages/:villageId/bootstrap",
     "actions": [],
     "lot": "B",
@@ -698,6 +705,13 @@
     "actions": [],
     "lot": "C",
     "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/presentation",
+    "actions": [],
+    "lot": "B",
+    "role": "Read-only versioned presentation (placement, routes, terrain window, market configuration)"
   },
   {
     "method": "POST",

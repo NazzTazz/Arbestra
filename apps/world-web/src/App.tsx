@@ -22,6 +22,7 @@ import { commandPlayerMarket } from './api/client';
 import { constructionCosts } from '@arbestra/contracts';
 import { commandProcessing } from './api/client';
 import { processingCommandBuilding, useVillageSyncV2 } from './api/processing-v2';
+import { SYNC_V2_VILLAGE } from './api/sync-v2-initial';
 import { SyncV2HttpError } from './api/sync-v2-transport';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import {setFactoryEnabled} from './api/client';
@@ -84,11 +85,6 @@ type ConstructionCommand = {
 type ConstructionIntentState = 'idle' | 'submitting' | 'error' | 'uncertain';
 
 const pendingExploitationKey = (villageId: string) => `arbestra:pending-exploitation:${worldSlug}:${villageId}`;
-// Whole-village V2 synchronization is opt-in until its browser validation:
-// localStorage arbestra:sync-v2=1 or VITE_SYNC_V2=1. The workshop already
-// negotiates V2 on its own whenever the server offers it.
-const SYNC_V2_VILLAGE = (() => { try { return localStorage.getItem('arbestra:sync-v2') === '1'; } catch { return false; } })()
-  || import.meta.env.VITE_SYNC_V2 === '1';
 const pendingConstructionKey = (villageId: string) => `arbestra:pending-construction:${worldSlug}:${villageId}`;
 const NO_PENDING_HARVESTS: Cell[] = [];
 

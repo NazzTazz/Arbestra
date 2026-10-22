@@ -1,4 +1,4 @@
-import type {FastifyInstance} from 'fastify';
+import type {FastifyInstance,FastifyReply,FastifyRequest} from 'fastify';
 import {sql,type Kysely} from 'kysely';
 import {Type} from '@sinclair/typebox';
 import {Value} from '@sinclair/typebox/value';
@@ -40,24 +40,33 @@ export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Databas
     if(request.headers['if-none-match']===etag)return reply.status(304).send();
     return reply.serializer(JSON.stringify).send(presentation);
   });
-  app.get(`${prefix}/bootstrap`,{schema:{params,headers,querystring:Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER}),
+  const bootstrapQuery=Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER}),
     // Optional shared scopes; the private stream is always included.
-    include:Type.Optional(Type.String({pattern:'^(knowledge|manifest|traffic)(,(knowledge|manifest|traffic)){0,2}$'}))}),
-    response:{200:SyncV2BatchSchema}}},async(request,reply)=>{
+    include:Type.Optional(Type.String({pattern:'^(knowledge|manifest|traffic)(,(knowledge|manifest|traffic)){0,2}$'})),
+    villageId:Type.Optional(Type.String({format:'uuid'}))});
+  const bootstrap=async(request:FastifyRequest,reply:FastifyReply,villageId:string|undefined)=>{
     const account=await authenticate(db,request.cookies[config.cookieName]);
     await assertSyncV2Available(db);
-    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    const {worldSlug}=request.params as {worldSlug:string};
     // Explicit pre-H compatibility adapter. It commits before the single MVCC
     // capture of values and cursors, and never constructs a legacy snapshot.
-    await reconcileVillageForRead(db,account.id,worldSlug,villageId);
+    // It also resolves the default village exactly as the historical read.
+    const economy=await reconcileVillageForRead(db,account.id,worldSlug,villageId);
     reply.header('Cache-Control','no-store');
     // Same encoding as the stream. Schema serializers compile component
     // unions lazily, costing seconds on the first bootstrap of a process.
     reply.serializer(JSON.stringify);
     const query=request.query as {generation:number;include?:string};
     const include=[...new Set(query.include?.split(',') as SyncV2SharedInclude[]|undefined)];
-    return captureSyncV2(db,account.id,worldSlug,villageId,{protocol:2,generation:query.generation,scopes:[],cursors:[]},{include});
-  });
+    return captureSyncV2(db,account.id,worldSlug,economy.villageId,{protocol:2,generation:query.generation,scopes:[],cursors:[]},{include});
+  };
+  app.get(`${prefix}/bootstrap`,{schema:{params,headers,querystring:Type.Omit(bootstrapQuery,['villageId']),response:{200:SyncV2BatchSchema}}},
+    (request,reply)=>bootstrap(request,reply,(request.params as {villageId:string}).villageId));
+  // First load without the historical village read: the client does not know
+  // its village id yet, like GET /village (optional villageId selects one).
+  app.get('/api/worlds/:worldSlug/village/bootstrap',{schema:{params:Type.Object({worldSlug:params.properties.worldSlug}),headers,
+    querystring:bootstrapQuery,response:{200:SyncV2BatchSchema}}},
+    (request,reply)=>bootstrap(request,reply,(request.query as {villageId?:string}).villageId));
   for(const operation of ['read','stream'] as const)app.post(`${prefix}/sync/${operation}`,{
     bodyLimit:32768,schema:{params,headers,body:SyncV2ReadRequestSchema,...(operation==='read'?{response:{200:SyncV2BatchSchema}}:{})},
     // Reject unknown fields before Fastify's AJV removes them.

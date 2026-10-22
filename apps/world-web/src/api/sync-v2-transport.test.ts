@@ -89,3 +89,25 @@ it('calls the browser fetch without rebinding it to the transport',async()=>{
     expect(calls[0]).toMatch(/\/bootstrap\?generation=\d+$/);
   }finally{transport.close();vi.unstubAllGlobals();}
 });
+it('opens a world-level bootstrap with the village of the snapshot and hands the session to a new owner',async()=>{
+  const urls:string[]=[];
+  const request:typeof fetch=async(url,init)=>{
+    urls.push(String(url));
+    if(String(url).endsWith('/sync/stream'))return new Response(new ReadableStream(),{headers:{'content-type':'text/event-stream'}});
+    const generation=Number(new Headers(init?.headers).get('x-arbestra-generation'));
+    if(String(url).endsWith('/sync/read'))return json({...bootstrap(generation),coverage:'delta',groups:[
+      {stream:{kind:'village',key:villageId,epoch},fromRevision:'4',toRevision:'5',changes:[]}]});
+    return json(bootstrap(generation));
+  };
+  const first:unknown[]=[],second:unknown[]=[];
+  const transport=await SyncV2Transport.bootstrapWorld('aube',{storage:memory(),request,include:['knowledge'],
+    publish:state=>first.push(state),expired:()=>undefined});
+  try{
+    expect(urls[0]).toMatch(/^\/api\/worlds\/aube\/village\/bootstrap\?generation=\d+&include=knowledge$/);
+    expect([transport.worldId,transport.villageId]).toEqual([worldId,villageId]);
+    expect(first).toHaveLength(1);
+    transport.rebind({publish:state=>second.push(state),expired:()=>undefined});
+    await transport.refresh();
+    expect(first).toHaveLength(1);expect(second).toHaveLength(1);
+  }finally{transport.close();}
+});

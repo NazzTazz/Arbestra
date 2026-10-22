@@ -107,3 +107,14 @@ it('recovers a commit between HTTP capture and the real authenticated SSE socket
   expect(batches[0]!.groups.flatMap(g=>g.changes).filter(c=>c.component==='resources')[0]?.upsert).toMatchObject([{code:'wood',amount:1777}]);
   expect(JSON.stringify(batches)).not.toMatch(/travelRoutes|buildingTypes|villageState/);
 },30000);
+
+it('bootstraps the default village of a world without knowing its id, behind protocol negotiation',async()=>{
+  const url=`/api/worlds/${slug}/village/bootstrap?generation=3&include=traffic`;
+  const response=await app.inject({method:'GET',url,cookies:{session:token},headers:{'x-arbestra-protocol':'2'}});
+  expect(response.statusCode,response.body).toBe(200);
+  const batch=response.json<SyncV2Batch>();
+  expect(batch).toMatchObject({protocol:2,worldId:ids.world,villageId:ids.village,generation:3,coverage:'scope-snapshot'});
+  expect(batch.groups.map(group=>group.stream.kind).sort()).toEqual(['traffic','village']);
+  expect((await app.inject({method:'GET',url,cookies:{session:token}})).statusCode).toBe(400);
+  expect((await app.inject({method:'GET',url,headers:{'x-arbestra-protocol':'2'}})).statusCode).toBe(401);
+},60000);

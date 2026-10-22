@@ -1,9 +1,10 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {visibleSyncV2Scope,villageStateFromSyncV2,VILLAGE_PRESENTATION_COMPONENTS,type ProcessingCommand,type ProcessingOrder,
-  type SyncV2State,type VillagePresentation} from '@arbestra/contracts';
+  type SyncV2Batch,type SyncV2State,type VillagePresentation} from '@arbestra/contracts';
 import type {TimedVillageState} from './client';
 import {SyncV2Transport} from './sync-v2-transport';
 import {SyncV2SessionExpired} from './sync-v2-session';
+import {adoptInitialSyncV2,SYNC_V2_VILLAGE_INCLUDE} from './sync-v2-initial';
 
 /** Newest first, like the historical snapshot. The private stream keeps
  * terminal orders as values, so the latest outcome stays displayable. */
@@ -55,10 +56,8 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
       finally{loading=false;}
       emit();
     };
-    const current=new SyncV2Transport(worldSlug,worldId,villageId,{
-      // Convoys are public world entities: the traffic stream shows them all.
-      ...(village?{include:['knowledge','manifest','traffic'] as const}:{}),expired:()=>expired.current(),
-      publish:(state,observedAt,batch)=>{
+    const handlers={expired:()=>expired.current(),
+      publish:(state:SyncV2State,observedAt:string,batch:SyncV2Batch)=>{
         setOrders(processingOrdersV2(state));
         if(!village)return;
         // An ACK carries its command time, possibly before the last delta.
@@ -67,22 +66,35 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
           (VILLAGE_PRESENTATION_COMPONENTS as readonly string[]).includes(change.component)&&(change.upsert.length>0||change.remove.length>0)));
         // Never show a building without its footprint: wait for the new read.
         if(structural||!presentation)void loadPresentation();else emit();
-      }});
-    transport.current=current;setStatus('starting');setVillageReady(false);
-    void (async()=>{
-      try{await current.start();}
-      catch(error){
-        if(transport.current!==current)return;
-        current.close();transport.current=null;
-        if(error instanceof SyncV2SessionExpired){setStatus('off');expired.current();}
-        else setStatus('unavailable');
-        return;
-      }
-      if(transport.current!==current)return;
-      setStatus('ready');
+      }};
+    // The first village state may already come from V2: adopt that session.
+    const adopted=village?adoptInitialSyncV2(worldId,villageId):null;
+    // Convoys are public world entities: the traffic stream shows them all.
+    const current=adopted?.transport??new SyncV2Transport(worldSlug,worldId,villageId,{...(village?{include:SYNC_V2_VILLAGE_INCLUDE}:{}),...handlers});
+    transport.current=current;setVillageReady(false);
+    const recover=async()=>{
       const list=await current.recover().catch(()=>current.pending());
       if(transport.current===current)setUnresolved(list);
-    })();
+    };
+    if(adopted){
+      current.rebind(handlers);presentation=adopted.presentation;
+      const last=adopted.latest();latest={state:last.state,observedAt:last.observedAt};
+      setOrders(processingOrdersV2(last.state));setStatus('ready');emit();void recover();
+    }else{
+      setStatus('starting');
+      void (async()=>{
+        try{await current.start();}
+        catch(error){
+          if(transport.current!==current)return;
+          current.close();transport.current=null;
+          if(error instanceof SyncV2SessionExpired){setStatus('off');expired.current();}
+          else setStatus('unavailable');
+          return;
+        }
+        if(transport.current!==current)return;
+        setStatus('ready');void recover();
+      })();
+    }
     return ()=>{current.close();if(transport.current===current)transport.current=null;setOrders([]);setUnresolved([]);setVillageReady(false);};
   },[enabled,village,worldSlug,worldId,villageId]);
   const command=useCallback(async(command:ProcessingCommand)=>{
