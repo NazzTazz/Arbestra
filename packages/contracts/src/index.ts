@@ -63,3 +63,4 @@ export * from './sse-reader.js';
 export * from './sync-v2.js';
 export * from './sync-v2-spatial.js';
 export * from './sync-v2-shared.js';
+export * from './village-presentation.js';

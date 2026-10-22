@@ -19,6 +19,13 @@ Allègement du bootstrap (commit suivant `b8132a5`) :
 
 Preuves : capture 5/5 (dont régression bootstrap privé/inclus/reprise), atelier V2 + routes 4/4, client 10/10, typecheck API/client et lint ciblé code 0. Hook `beforeAll` de la capture porté à 120 s : `resetE2eState` seul prend 26–31 s et dépassait 60 s après d'autres suites. E2E atelier Chromium **1 passed** (`serializer-atelier-e2e.log`), un passage, serveur froid : bootstrap **4,2 Ko / 4,1 s** (546 Ko / 21–26 s avant), première commande **2,7 s** (46–66 s avant), seconde 0,36 s ; attente navigateur ≈ 0 (découpage CDP ajouté au spec).
 
+Lecture de présentation (prérequis de (b), serveur seulement, **non commitée**) :
+- `GET …/villages/:id/presentation` (protocole 2, `ETag`/304) : cellules constructibles ou occupées (`canBuild`, emprise), `travelRoutes`, config marché ; `version` = empreinte du contenu, collections triées canoniquement. Contrat `VillagePresentationSchema` dans `packages/contracts/src/village-presentation.ts`.
+- Sélection de `readVillageProjection` (lecture seule MVCC + pool `NavigationCompute`) : aucune règle de placement/routage dupliquée, aucun réveil économique. Coût ≈ GET V1 en SQL, mais lu seulement sur invalidation ; à alléger plus tard avec mesure.
+- `VILLAGE_PRESENTATION_COMPONENTS` : composants du flux privé qui invalident (bâtiments, extensions, extractions, infrastructure, installation, nivellements). Les changements des voisins n'y passent pas : relire aussi à la reconnexion/resynchronisation.
+- Preuves : `presentation.integration.test.ts` 2/2 code 0 (parité avec le lecteur inline, 304, aucune mutation durable, version stable après changement de stock, nouvelle version après pose) ; routes V2 2/2 ; typecheck API/client et lint code 0. Fixture e2e : 43 Ko (V1 119 Ko).
+- Pas encore : consommation client (adaptateur (b)), fusion logique des Jardins (l'emprise porte l'id logique, le flux privé les ids physiques), `region`/terrain depuis les chunks spatiaux.
+
 Ouvert : `knowledgePlaces` doit devenir une lecture paginée/à la demande avant (b) ; mobile, reload navigateur réel et mesures 30 répétitions non faits ; la tranche maintient deux flux longs (SSE V1 + stream V2) jusqu'à (b).
 
 ---

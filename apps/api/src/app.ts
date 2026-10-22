@@ -126,7 +126,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
   await registerVillageRoutes(app, db, config, villageProjections,navigation);
-  await registerSyncV2Routes(app, db, config);
+  await registerSyncV2Routes(app, db, config, navigation);
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app,db,config);
   return app;

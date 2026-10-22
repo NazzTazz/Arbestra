@@ -2,7 +2,7 @@ import type {FastifyInstance} from 'fastify';
 import {sql,type Kysely} from 'kysely';
 import {Type} from '@sinclair/typebox';
 import {Value} from '@sinclair/typebox/value';
-import {SyncV2BatchSchema,SyncV2ReadRequestSchema,type SyncV2ReadRequest} from '@arbestra/contracts';
+import {SyncV2BatchSchema,SyncV2ReadRequestSchema,VillagePresentationSchema,type SyncV2ReadRequest} from '@arbestra/contracts';
 import type {Database} from '../../database/schema.js';
 import type {AppConfig} from '../../config.js';
 import {HttpError} from '../../errors.js';
@@ -10,6 +10,8 @@ import {authenticate} from '../auth/service.js';
 import {reconcileVillageForRead} from './service.js';
 import {captureSyncV2,type SyncV2SharedInclude} from './sync-v2-capture.js';
 import {serveSyncV2Stream} from './sync-v2-stream.js';
+import {readVillagePresentation} from './presentation.js';
+import type {TravelNetworkExecutor} from '../navigation/network-job.js';
 
 const params=Type.Object({worldSlug:Type.String({minLength:1,maxLength:64}),villageId:Type.String({format:'uuid'})});
 const headers=Type.Object({'x-arbestra-protocol':Type.Literal('2')},{additionalProperties:true});
@@ -23,9 +25,20 @@ export async function assertSyncV2Available(db:Kysely<Database>):Promise<void>{
   if(!ready)throw new HttpError(503,'SYNC_V2_UNAVAILABLE','Synchronisation V2 indisponible.');
 }
 
-export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Database>,config:Pick<AppConfig,'cookieName'>){
+export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Database>,config:Pick<AppConfig,'cookieName'>,navigation:TravelNetworkExecutor){
   const streams=new Set<()=>void>();
   app.addHook('preClose',async()=>{for(const close of streams)close();});
+  // Independent of the change journal: a pure read-only projection, refreshed
+  // by the client on invalidation. The ETag spares the transfer, not the work.
+  app.get(`${prefix}/presentation`,{schema:{params,headers,response:{200:VillagePresentationSchema,304:Type.Null()}}},async(request,reply)=>{
+    const account=await authenticate(db,request.cookies[config.cookieName]);
+    const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
+    const presentation=await readVillagePresentation(db,account.id,worldSlug,villageId,navigation);
+    const etag=`"${presentation.version}"`;
+    reply.header('Cache-Control','private, no-cache').header('ETag',etag);
+    if(request.headers['if-none-match']===etag)return reply.status(304).send();
+    return reply.serializer(JSON.stringify).send(presentation);
+  });
   app.get(`${prefix}/bootstrap`,{schema:{params,headers,querystring:Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER}),
     // Optional shared scopes; the private stream is always included.
     include:Type.Optional(Type.String({pattern:'^(knowledge|manifest)(,(knowledge|manifest))?$'}))}),

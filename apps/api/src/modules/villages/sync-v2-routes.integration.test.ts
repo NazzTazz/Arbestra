@@ -11,6 +11,9 @@ import {DEVELOPMENT_IDS as ids} from '../../database/seed.js';
 import {hashSessionToken} from '../../security/sessions.js';
 import {HttpError} from '../../errors.js';
 import {registerSyncV2Routes} from './sync-v2-routes.js';
+import type {TravelNetworkExecutor} from '../navigation/network-job.js';
+
+const unusedNavigation:TravelNetworkExecutor={network:async()=>{throw Error('Presentation is not exercised here');}};
 
 const url=testDatabaseUrl(),target=new URL(url);
 if(target.hostname!=='127.0.0.1'||target.pathname!=='/arbestra_test')throw Error('Unexpected V2 route test database');
@@ -20,7 +23,7 @@ beforeAll(async()=>{
   await db.insertInto('sessions').values({accountId:ids.account,tokenHash:hashSessionToken(token),expiresAt:new Date(Date.now()+3600000)}).execute();
   await app.register(cookie);
   app.setErrorHandler((error,_request,reply)=>{if(error instanceof HttpError)return reply.status(error.statusCode).send({code:error.code});return reply.status(400).send({code:'VALIDATION_ERROR'});});
-  await registerSyncV2Routes(app,db,{cookieName:'session'});await app.ready();
+  await registerSyncV2Routes(app,db,{cookieName:'session'},unusedNavigation);await app.ready();
 },30000);
 afterAll(async()=>{await app.close();await db.deleteFrom('sessions').where('tokenHash','=',hashSessionToken(token)).execute();await db.destroy();});
 it('requires protocol negotiation and authentication and rejects unknown request fields before coercion',async()=>{
@@ -44,7 +47,7 @@ it('fails closed before writer activation, including bootstrap without economic 
   await sql`create table ${sql.id(schema,'kysely_migration')}(name text primary key)`.execute(db);
   await unavailable.register(cookie);
   unavailable.setErrorHandler((error,_request,reply)=>error instanceof HttpError?reply.status(error.statusCode).send({code:error.code}):reply.status(500).send({code:'UNEXPECTED'}));
-  await registerSyncV2Routes(unavailable,unready,{cookieName:'session'});
+  await registerSyncV2Routes(unavailable,unready,{cookieName:'session'},unusedNavigation);
   const before=await db.selectFrom('villages').selectAll().where('id','=',ids.village).executeTakeFirstOrThrow();
   for(const operation of ['read','stream','bootstrap']){
     const response=await unavailable.inject({method:operation==='bootstrap'?'GET':'POST',url:`${prefix}/${operation==='bootstrap'?'bootstrap?generation=0':`sync/${operation}`}`,
