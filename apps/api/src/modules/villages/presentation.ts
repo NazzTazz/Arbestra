@@ -14,7 +14,8 @@ export function villagePresentation(state:VillageState):VillagePresentation{
   const travelRoutes=[...state.travelRoutes].sort((a,b)=>a.kind.localeCompare(b.kind)||a.id.localeCompare(b.id));
   const market=state.village.market;
   if(!market)throw Error('Village projection has no market configuration');
-  const content={cells,travelRoutes,market:{unlocked:market.unlocked,deliveryMs:market.deliveryMs,
+  const region={...state.region,features:[...state.region.features].sort((a,b)=>a.cellY-b.cellY||a.cellX-b.cellX||a.id.localeCompare(b.id))};
+  const content={cells,travelRoutes,region,market:{unlocked:market.unlocked,deliveryMs:market.deliveryMs,
     commissionPercent:market.commissionPercent,resources:market.resources}};
   const version=createHash('sha256').update(JSON.stringify(content)).digest('hex');
   return {protocol:2,worldId:state.world.id,villageId:state.village.id,version,observedAt:state.serverTime,...content};
