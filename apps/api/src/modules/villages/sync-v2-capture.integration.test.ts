@@ -65,8 +65,6 @@ it('captures shared scopes with private data and recovers their atomic changes f
 it('bootstraps only the private stream unless shared scopes are requested',async()=>{
   await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values
     (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}) on conflict do nothing`.execute(db);
-  // Known places are terrain copies of every visited cell: they used to make
-  // up almost all of a bootstrap that the workshop does not display.
   // The historical village read records every visible cell as known.
   await getVillageState(db,ids.account,'aube',ids.village);
   const request={protocol:2 as const,generation:3,scopes:[],cursors:[]};
@@ -74,9 +72,12 @@ it('bootstraps only the private stream unless shared scopes are requested',async
   expect(privateOnly.groups.map(group=>group.stream.kind)).toEqual(['village']);
   const shared=await captureSyncV2(db,ids.account,'aube',ids.village,request,{include:['knowledge','manifest']});
   expect(shared.groups.map(group=>group.stream.kind).sort()).toEqual(['knowledge','manifest','village']);
-  const places=shared.groups.find(group=>group.stream.kind==='knowledge')!.changes.find(change=>change.component==='knowledgePlaces')!;
-  expect(places.upsert.length).toBeGreaterThanOrEqual(256);
-  expect(Buffer.byteLength(JSON.stringify(privateOnly))).toBeLessThan(Buffer.byteLength(JSON.stringify(shared))/4);
+  // Thousands of known places stay out of the knowledge projection.
+  expect(Number((await db.selectFrom('sciencePlaces').select(eb=>eb.fn.countAll().as('count')).where('worldId','=',ids.world)
+    .where('accountId','=',ids.account).executeTakeFirstOrThrow()).count)).toBeGreaterThan(1000);
+  const knowledge=shared.groups.find(group=>group.stream.kind==='knowledge')!;
+  expect(knowledge.changes.map(change=>change.component).sort()).toEqual(['knowledgeCoverage','knowledgeScience']);
+  expect(Buffer.byteLength(JSON.stringify(shared))).toBeLessThan(32*1024);
   // A private-only client resumes without being handed shared snapshots.
   const resumed=await captureSyncV2(db,ids.account,'aube',ids.village,
     {...request,cursors:privateOnly.groups.map(group=>({...group.stream,revision:group.toRevision}))});

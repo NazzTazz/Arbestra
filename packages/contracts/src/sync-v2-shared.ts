@@ -5,14 +5,14 @@ import { VillageStateSchema } from './villages.js';
 const singleton = Type.Literal('*');
 const cell = Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
 const cellKey = Type.String({ pattern: '^[0-9]+,[0-9]+$' });
-export const SYNC_V2_KNOWLEDGE_COMPONENTS = ['knowledgeScience', 'knowledgePlaces', 'knowledgeCoverage'] as const;
+// Known places are not part of this projection: no screen displays them and
+// a visited village holds thousands (535 of 546 KB of a former bootstrap).
+// Their journal references are skipped; a paginated read can expose them.
+export const SYNC_V2_KNOWLEDGE_COMPONENTS = ['knowledgeScience', 'knowledgeCoverage'] as const;
 export const SYNC_V2_MANIFEST_COMPONENTS = ['gameManifest'] as const;
 export const SYNC_V2_OFFER_COMPONENTS = ['offerIndex'] as const;
 export const SyncV2SharedChangeSchema = Type.Union([
   Type.Object({ component: Type.Literal('knowledgeScience'), upsert: Type.Array(Type.Object({ id: singleton, state: ScienceStateSchema }), { maxItems: 1 }), remove: Type.Array(singleton, { maxItems: 1 }) }, { additionalProperties: false }),
-  Type.Object({ component: Type.Literal('knowledgePlaces'), upsert: Type.Array(Type.Object({ id: cellKey, ...cell.properties,
-    terrainCode: Type.Integer(), elevation: Type.Number(), surveyed: Type.Boolean(), observedAt: Type.String({ format: 'date-time' }),
-  }, { additionalProperties: false }), { maxItems: 65536 }), remove: Type.Array(cellKey, { maxItems: 65536 }) }, { additionalProperties: false }),
   Type.Object({ component: Type.Literal('knowledgeCoverage'), upsert: Type.Array(Type.Object({ id: singleton,
     anchors: Type.Array(cell, { maxItems: 1024 }), footprints: Type.Array(cell, { maxItems: 65536 }),
   }, { additionalProperties: false }), { maxItems: 1 }), remove: Type.Array(singleton, { maxItems: 1 }) }, { additionalProperties: false }),

@@ -12,15 +12,7 @@ export async function readSharedScopeSnapshot(tx: Transaction<Database>, context
   const references: SyncEntityReference[] = scope.kind === 'knowledge'
     ? [{ component: 'knowledgeScience', key: '*' }, { component: 'knowledgeCoverage', key: '*' }]
     : [{ component: scope.kind === 'manifest' ? 'gameManifest' : 'offerIndex', key: '*' }];
-  if (scope.kind === 'knowledge') {
-    const places = await tx.selectFrom('sciencePlaces').select(['cellX', 'cellY']).where('worldId', '=', context.worldId)
-      .where('accountId', '=', context.accountId).orderBy('cellX').orderBy('cellY').limit(65537).execute();
-    if (places.length > 65536) throw new RangeError('Knowledge snapshot requires pagination');
-    for (const place of places) references.push({ component: 'knowledgePlaces', key: `${place.cellX},${place.cellY}` });
-  }
   const changes = await readSharedChanges(tx, context, scope, references);
-  if (scope.kind === 'knowledge' && !changes.some(change => change.component === 'knowledgePlaces'))
-    changes.push({ component: 'knowledgePlaces', upsert: [], remove: [] });
   return changes.map(change => ({ ...change, remove: [] }));
 }
 
@@ -29,10 +21,13 @@ export async function readSharedChanges(tx: Transaction<Database>, context: Vill
   const { worldId, villageId, accountId } = context;
   if (scope.kind === 'knowledge' ? scope.key !== accountId : scope.kind === 'manifest' ? scope.key !== worldId
     : scope.kind !== 'offers' || scope.key !== 'all') throw Error('Invalid shared scope');
+  // Writers still journal known places (054); they are outside the knowledge
+  // projection, so their revisions advance the cursor with no change.
+  references = references.filter(reference => reference.component !== 'knowledgePlaces');
   if (!references.length) return [];
   if (references.length > 65538) throw new RangeError('Shared selection too large');
   const selections = new Map<string, Set<string>>();
-  const allowed = scope.kind === 'knowledge' ? ['knowledgeScience', 'knowledgePlaces', 'knowledgeCoverage']
+  const allowed = scope.kind === 'knowledge' ? ['knowledgeScience', 'knowledgeCoverage']
     : scope.kind === 'manifest' ? ['gameManifest'] : ['offerIndex'];
   for (const reference of references) {
     if (!allowed.includes(reference.component)) throw Error('Component outside shared scope');
@@ -44,22 +39,9 @@ export async function readSharedChanges(tx: Transaction<Database>, context: Vill
   }
   const changes: SyncV2Change[] = [];
   for (const [component, keys] of selections) {
-    if (component !== 'knowledgePlaces' && (keys.size !== 1 || !keys.has('*'))) throw Error('Invalid singleton shared key');
+    if (keys.size !== 1 || !keys.has('*')) throw Error('Invalid singleton shared key');
     if (component === 'knowledgeScience') changes.push({ component, upsert: [{ id: '*', state: await scienceSnapshot(tx, context, true) }], remove: [] });
-    else if (component === 'knowledgePlaces') {
-      const cells = [...keys].map(key => {
-        if (!/^[0-9]+,[0-9]+$/.test(key)) throw Error('Invalid knowledge place key');
-        const [cellX, cellY] = key.split(',').map(Number) as [number, number];
-        if (!Number.isSafeInteger(cellX) || !Number.isSafeInteger(cellY)) throw Error('Invalid knowledge place coordinate');
-        return { cellX, cellY };
-      });
-      const rows = (await sql<{ cellX: number; cellY: number; terrainCode: number; elevation: number; surveyed: boolean; observedAt: Date }>`
-        select p.cell_x,p.cell_y,p.terrain_code,p.elevation,p.surveyed,p.observed_at from science_places p
-        join jsonb_to_recordset(${JSON.stringify(cells)}::jsonb) c("cellX" int,"cellY" int) on p.cell_x=c."cellX" and p.cell_y=c."cellY"
-        where p.world_id=${worldId} and p.account_id=${accountId} order by p.cell_x,p.cell_y`.execute(tx)).rows;
-      const upsert = rows.map(row => ({ ...row, id: `${row.cellX},${row.cellY}`, observedAt: row.observedAt.toISOString() }));
-      changes.push({ component, upsert, remove: [...keys].filter(key => !upsert.some(row => row.id === key)) });
-    } else if (component === 'knowledgeCoverage') {
+    else if (component === 'knowledgeCoverage') {
       const [anchors, footprints] = await Promise.all([
         tx.selectFrom('villages').select(['anchorCellX as cellX', 'anchorCellY as cellY'])
           .where('worldId', '=', worldId).where('ownerAccountId', '=', accountId).orderBy('id').execute(),
