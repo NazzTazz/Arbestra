@@ -8,8 +8,12 @@ import { readPrivateScopeSnapshot, readRegisteredPrivateChanges } from './sync-v
 import { readSpatialChanges, readSpatialScopeSnapshot } from './sync-v2-spatial-readers.js';
 import { readSharedChanges, readSharedScopeSnapshot } from './sync-v2-shared-readers.js';
 
+export type SyncV2SharedInclude = 'knowledge' | 'manifest';
+
+/** `include` resolves server-keyed shared scopes for a bootstrap, whose
+ * client does not know the account or world key yet. */
 export async function captureSyncV2(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string,
-  request: SyncV2ReadRequest): Promise<SyncV2Batch> {
+  request: SyncV2ReadRequest, options: { include?: readonly SyncV2SharedInclude[] } = {}): Promise<SyncV2Batch> {
   if (!Number.isSafeInteger(request.generation) || request.generation < 0) throw new HttpError(400, 'INVALID_SYNC_GENERATION', 'Génération invalide.');
   return db.transaction().setIsolationLevel('repeatable read').execute(async tx => {
     await sql`set transaction read only`.execute(tx);
@@ -17,9 +21,12 @@ export async function captureSyncV2(db: Kysely<Database>, accountId: string, wor
     villageId = village.villageId;
     const scopes = new Map<string, SyncScope>();
     const scopeKey = (scope: SyncScope) => `${scope.kind}:${scope.key}`;
+    // Only the private stream is implicit. Knowledge, catalog and offers are
+    // optional subscriptions: a screen that does not display them must not
+    // pay for their snapshot (spec §8.2).
+    const included = { knowledge: { kind: 'knowledge' as const, key: accountId }, manifest: { kind: 'manifest' as const, key: village.worldId } };
     for (const scope of [
-      { kind: 'village' as const, key: villageId }, { kind: 'knowledge' as const, key: accountId },
-      { kind: 'manifest' as const, key: village.worldId }, ...request.scopes,
+      { kind: 'village' as const, key: villageId }, ...(options.include ?? []).map(kind => included[kind]), ...request.scopes,
     ]) {
       if (scope.kind === 'village' && scope.key !== villageId || scope.kind === 'knowledge' && scope.key !== accountId
         || scope.kind === 'manifest' && scope.key !== village.worldId || scope.kind === 'offers' && scope.key !== 'all')

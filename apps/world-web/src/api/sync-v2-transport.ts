@@ -7,7 +7,9 @@ export class SyncV2HttpError extends Error{
   constructor(readonly status:number,readonly code:string,message:string,readonly retryAfterMs=1000){super(message);}
 }
 type Options={publish:(state:SyncV2State,observedAt:string)=>void;expired:()=>void;
-  request?:typeof fetch;storage?:Storage;scopes?:SyncV2ReadRequest['scopes']};
+  request?:typeof fetch;storage?:Storage;scopes?:SyncV2ReadRequest['scopes'];
+  /** Shared scopes keyed by the server; the private stream is implicit. */
+  include?:readonly ('knowledge'|'manifest')[]};
 
 /** One mounted village owns this transport. Only intentions are persisted:
  * every reload reacquires complete projection values with their cursors. */
@@ -22,7 +24,7 @@ export class SyncV2Transport{
   private readonly request:typeof fetch;
   private readonly storage:Storage|undefined;
   private readonly root:string;
-  constructor(worldSlug:string,readonly worldId:string,readonly villageId:string,private readonly options:Options){
+  constructor(private readonly worldSlug:string,readonly worldId:string,readonly villageId:string,private readonly options:Options){
     // Never store the global fetch as a method: browsers reject that receiver.
     this.request=options.request??((input,init)=>fetch(input,init));this.storage=options.storage??globalThis.sessionStorage;
     this.root=`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}`;
@@ -40,14 +42,13 @@ export class SyncV2Transport{
     return data;
   }
   async start(alreadyWoken=false):Promise<void>{
-    const input=await this.json(alreadyWoken?'/sync/read':`/bootstrap?generation=${this.generation}`,alreadyWoken?
+    const input=await this.json(alreadyWoken?'/sync/read':`/bootstrap?generation=${this.generation}${this.options.include?.length?`&include=${this.options.include.join(',')}`:''}`,alreadyWoken?
       {method:'POST',body:JSON.stringify({protocol:2,generation:this.generation,scopes:this.options.scopes??[],cursors:[]})}:{});
     if(this.closed)return;
     if(!syncV2BatchIsValid(input)||input.coverage!=='scope-snapshot'||input.worldId!==this.worldId||input.villageId!==this.villageId
       ||input.generation!==this.generation)throw new SyncV2ResyncRequired();
-    const owner=input.groups.find(group=>group.stream.kind==='knowledge')?.stream.key;
-    if(!owner)throw new SyncV2ResyncRequired();
-    this.pendingKey=`arbestra.processing.v2:${owner}:${this.worldId}:${this.villageId}`;
+    // Same per-tab convention as pending constructions: world and village.
+    this.pendingKey=`arbestra:pending-processing:${this.worldSlug}:${this.villageId}`;
     this.session=new SyncV2Session({worldId:this.worldId,villageId:this.villageId,generation:this.generation,scopes:new Map(),
       subscribedScopes:new Set(input.groups.map(group=>`${group.stream.kind}:${group.stream.key}`))},this.options.publish,this.request);
     this.session.apply(input);

@@ -30,9 +30,16 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
       protocol: event.request.headers['x-arbestra-protocol'] ?? event.request.headers['x-village-sync'] ?? null,
       started: event.timestamp });
   });
+  // Separates browser queueing (connection limit) from server wait time.
+  const timings = new Map<string, { queuedMs: number; serverWaitMs: number }>();
+  network.on('Network.responseReceived', event => {
+    const request = requests.get(event.requestId), timing = event.response.timing;
+    if (request && timing) timings.set(event.requestId, { queuedMs: Math.round((timing.requestTime - request.started) * 1000
+      + Math.max(0, timing.sendStart)), serverWaitMs: Math.round(timing.receiveHeadersEnd - timing.sendEnd) });
+  });
   network.on('Network.loadingFinished', event => {
     const request = requests.get(event.requestId);
-    if (request) traffic.push({ ...request, kind: 'http', wireBytes: event.encodedDataLength,
+    if (request) traffic.push({ ...request, ...timings.get(event.requestId), kind: 'http', wireBytes: event.encodedDataLength,
       durationMs: (event.timestamp - request.started) * 1000 });
   });
   network.on('Network.eventSourceMessageReceived', event => {

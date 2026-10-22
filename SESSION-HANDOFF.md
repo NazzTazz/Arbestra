@@ -11,7 +11,15 @@ Livré en (a) :
 
 Preuves : unitaires client 10/10 code 0 ; typecheck API/client code 0 ; lint ciblé code 0. E2E atelier Chromium **1 passed, code 0** (`v2-react-atelier-e2e-2.log`) : deux commandes en protocole 2, un bootstrap, stream V2, fin de lot vue par delta V2. Le premier essai e2e (avant correction fetch) a échoué sur l'instabilité du bouton « 1 h » ; non reproduit ensuite, cause non établie.
 
-**Bloquant avant toute activation hors test** : dans cet e2e, bootstrap V2 = **546 Ko / 20,9 s**, chargé **en plus** du GET V1 (125 Ko / 7,4 s). Première commande atelier 50 s (seconde 0,35 s), concurrente de lectures terrain lentes : serveur e2e froid, pas une mesure, cause non isolée. Prochaine étape proposée : bootstrap/abonnement limités au flux privé pour la tranche atelier, puis mesure ; ensuite lecture de présentation pour (b). Non fait : mobile, reload navigateur réel, mesures 30 répétitions.
+Allègement du bootstrap (commit suivant `b8132a5`) :
+- Cause mesurée : 535 Ko sur 546 = `knowledgePlaces` (4 096 cases connues, copies terrain/altitude enregistrées par la lecture V1 du village). Capture seule 339 ms ; la durée e2e venait d'ailleurs.
+- **Seul le flux privé est implicite** (spec §8.2). Bootstrap : `include=knowledge,manifest` optionnel ; read/stream : périmètres explicites dans `scopes`. Le transport range les intentions par monde/village (`arbestra:pending-processing:<slug>:<village>`, comme la construction) et ne dépend plus du flux `knowledge`.
+- **Premier appel lent identifié** : `fast-json-stringify` compile paresseusement les unions de composants au premier `stringify` (union confirmation | village : 1 480 ms ; confirmation seule : 400 ms ; mesure isolée). Réponses V2 (confirmation atelier, bootstrap, read) encodées en `JSON.stringify`, comme le stream ; le schéma reste le contrat, vérifié par `Value.Check` dans les tests. Mesure jetable (app neuve) : première commande 6 084 → 97 ms.
+- Reste hors V2 : toute première requête d'un processus API ≈ 4,8 s (même `/api/auth/session`) ; premier bootstrap 3,2 s puis 61 ms, dû à l'adaptateur `reconcileVillageForRead` conservé jusqu'au lot H.
+
+Preuves : capture 5/5 (dont régression bootstrap privé/inclus/reprise), atelier V2 + routes 4/4, client 10/10, typecheck API/client et lint ciblé code 0. Hook `beforeAll` de la capture porté à 120 s : `resetE2eState` seul prend 26–31 s et dépassait 60 s après d'autres suites. E2E atelier Chromium **1 passed** (`serializer-atelier-e2e.log`), un passage, serveur froid : bootstrap **4,2 Ko / 4,1 s** (546 Ko / 21–26 s avant), première commande **2,7 s** (46–66 s avant), seconde 0,36 s ; attente navigateur ≈ 0 (découpage CDP ajouté au spec).
+
+Ouvert : `knowledgePlaces` doit devenir une lecture paginée/à la demande avant (b) ; mobile, reload navigateur réel et mesures 30 répétitions non faits ; la tranche maintient deux flux longs (SSE V1 + stream V2) jusqu'à (b).
 
 ---
 

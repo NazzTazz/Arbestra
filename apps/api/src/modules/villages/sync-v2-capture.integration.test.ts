@@ -9,6 +9,7 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { capturePrivateSync, captureSyncV2 } from './sync-v2-capture.js';
 import { servePrivateSyncStream } from './sync-v2-stream.js';
+import { getVillageState } from './service.js';
 
 const url=testDatabaseUrl(), target=new URL(url);
 if(target.hostname!=='127.0.0.1'||target.pathname!=='/arbestra_test')throw Error('Unexpected capture-test database');
@@ -18,7 +19,8 @@ beforeAll(async()=>{
   await sql`delete from game_sync_streams where world_id=${ids.world}`.execute(db);
   await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values(${ids.world},'village',${ids.village})`.execute(db);
   await db.updateTable('villageResourceFlows').set({baseRatePerHour:0}).where('worldId','=',ids.world).execute();
-},60000);
+// The global reset alone takes 26–31 s with the sync triggers active.
+},120000);
 afterAll(async()=>{
   await sql`delete from game_sync_streams where world_id=${ids.world}`.execute(db);
   await db.destroy();
@@ -28,7 +30,8 @@ it('captures shared scopes with private data and recovers their atomic changes f
   await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values
     (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}),(${ids.world},'offers','all')
     on conflict do nothing`.execute(db);
-  const request = {protocol:2 as const,generation:7,scopes:[{kind:'offers' as const,key:'all'}],cursors:[]};
+  const request = {protocol:2 as const,generation:7,scopes:[{kind:'offers' as const,key:'all'},
+    {kind:'knowledge' as const,key:ids.account},{kind:'manifest' as const,key:ids.world}],cursors:[]};
   const initial=await captureSyncV2(db,ids.account,'aube',ids.village,request);
   const subscribedScopes=new Set(initial.groups.map(group=>`${group.stream.kind}:${group.stream.key}`));
   const applied=applySyncV2Batch({worldId:ids.world,villageId:ids.village,generation:7,scopes:new Map(),subscribedScopes},initial);
@@ -57,6 +60,27 @@ it('captures shared scopes with private data and recovers their atomic changes f
   expect(applySyncV2Batch(next.state,idle).kind).toBe('ignored');
   await expect(captureSyncV2(db,ids.account,'aube',ids.village,{...request,scopes:[{kind:'knowledge',key:randomUUID()}]}))
     .rejects.toMatchObject({code:'SYNC_SCOPE_NOT_FOUND'});
+},60000);
+
+it('bootstraps only the private stream unless shared scopes are requested',async()=>{
+  await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values
+    (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}) on conflict do nothing`.execute(db);
+  // Known places are terrain copies of every visited cell: they used to make
+  // up almost all of a bootstrap that the workshop does not display.
+  // The historical village read records every visible cell as known.
+  await getVillageState(db,ids.account,'aube',ids.village);
+  const request={protocol:2 as const,generation:3,scopes:[],cursors:[]};
+  const privateOnly=await captureSyncV2(db,ids.account,'aube',ids.village,request);
+  expect(privateOnly.groups.map(group=>group.stream.kind)).toEqual(['village']);
+  const shared=await captureSyncV2(db,ids.account,'aube',ids.village,request,{include:['knowledge','manifest']});
+  expect(shared.groups.map(group=>group.stream.kind).sort()).toEqual(['knowledge','manifest','village']);
+  const places=shared.groups.find(group=>group.stream.kind==='knowledge')!.changes.find(change=>change.component==='knowledgePlaces')!;
+  expect(places.upsert.length).toBeGreaterThanOrEqual(256);
+  expect(Buffer.byteLength(JSON.stringify(privateOnly))).toBeLessThan(Buffer.byteLength(JSON.stringify(shared))/4);
+  // A private-only client resumes without being handed shared snapshots.
+  const resumed=await captureSyncV2(db,ids.account,'aube',ids.village,
+    {...request,cursors:privateOnly.groups.map(group=>({...group.stream,revision:group.toRevision}))});
+  expect(resumed.coverage).toBe('delta');expect(resumed.groups.map(group=>group.stream.kind)).toEqual(['village']);
 },60000);
 
 it('recovers a committed change without notification through a pure coherent capture',async()=>{

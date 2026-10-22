@@ -234,7 +234,10 @@ export async function registerVillageRoutes(
       const generation=Number(request.headers['x-arbestra-generation']??'0');
       if(!Number.isSafeInteger(generation))throw new HttpError(400,'INVALID_SYNC_GENERATION','Génération invalide.');
       const result=await commandProcessingV2(db,account.id,worldSlug,villageId,request.body as ProcessingCommand,generation);
-      observationCommitted(request);return result;
+      observationCommitted(request);
+      // Same wire encoding as the V2 stream. fast-json-stringify compiles
+      // the component unions lazily: seconds on the first command of a process.
+      return reply.serializer(JSON.stringify).send(result);
     }
     const options = villageReplyOptions(request.headers);
     const result = await commandVillageProcessing(db, account.id, worldSlug, villageId, request.body as ProcessingCommand, options.replyMode);

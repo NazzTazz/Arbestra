@@ -62,7 +62,7 @@ it('recovers applied receipts after reload, keeps unknown ones and forgets a bus
   const transport=new SyncV2Transport('aube',worldId,villageId,{storage,request,publish:()=>undefined,expired:()=>{throw Error('Unexpected expiration');}});
   try{
     await transport.start(true);
-    const key=`arbestra.processing.v2:${owner}:${worldId}:${villageId}`;
+    const key=`arbestra:pending-processing:aube:${villageId}`;
     storage.setItem(key,JSON.stringify([applied,unknown]));
     expect(await transport.recover()).toEqual([unknown]);
     expect(receiptReads).toEqual([{commands:[{family:'processing',commandId:applied.commandId},{family:'processing',commandId:unknown.commandId}]}]);

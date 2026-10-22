@@ -8,7 +8,7 @@ import type {AppConfig} from '../../config.js';
 import {HttpError} from '../../errors.js';
 import {authenticate} from '../auth/service.js';
 import {reconcileVillageForRead} from './service.js';
-import {captureSyncV2} from './sync-v2-capture.js';
+import {captureSyncV2,type SyncV2SharedInclude} from './sync-v2-capture.js';
 import {serveSyncV2Stream} from './sync-v2-stream.js';
 
 const params=Type.Object({worldSlug:Type.String({minLength:1,maxLength:64}),villageId:Type.String({format:'uuid'})});
@@ -26,7 +26,9 @@ export async function assertSyncV2Available(db:Kysely<Database>):Promise<void>{
 export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Database>,config:Pick<AppConfig,'cookieName'>){
   const streams=new Set<()=>void>();
   app.addHook('preClose',async()=>{for(const close of streams)close();});
-  app.get(`${prefix}/bootstrap`,{schema:{params,headers,querystring:Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER})}),
+  app.get(`${prefix}/bootstrap`,{schema:{params,headers,querystring:Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER}),
+    // Optional shared scopes; the private stream is always included.
+    include:Type.Optional(Type.String({pattern:'^(knowledge|manifest)(,(knowledge|manifest))?$'}))}),
     response:{200:SyncV2BatchSchema}}},async(request,reply)=>{
     const account=await authenticate(db,request.cookies[config.cookieName]);
     await assertSyncV2Available(db);
@@ -35,7 +37,12 @@ export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Databas
     // capture of values and cursors, and never constructs a legacy snapshot.
     await reconcileVillageForRead(db,account.id,worldSlug,villageId);
     reply.header('Cache-Control','no-store');
-    return captureSyncV2(db,account.id,worldSlug,villageId,{protocol:2,generation:(request.query as {generation:number}).generation,scopes:[],cursors:[]});
+    // Same encoding as the stream. Schema serializers compile component
+    // unions lazily, costing seconds on the first bootstrap of a process.
+    reply.serializer(JSON.stringify);
+    const query=request.query as {generation:number;include?:string};
+    const include=[...new Set(query.include?.split(',') as SyncV2SharedInclude[]|undefined)];
+    return captureSyncV2(db,account.id,worldSlug,villageId,{protocol:2,generation:query.generation,scopes:[],cursors:[]},{include});
   });
   for(const operation of ['read','stream'] as const)app.post(`${prefix}/sync/${operation}`,{
     bodyLimit:32768,schema:{params,headers,body:SyncV2ReadRequestSchema,...(operation==='read'?{response:{200:SyncV2BatchSchema}}:{})},
@@ -48,7 +55,7 @@ export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Databas
     const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
     const body=request.body as SyncV2ReadRequest;
     reply.header('Cache-Control','no-store');
-    if(operation==='read')return captureSyncV2(db,account.id,worldSlug,villageId,body);
+    if(operation==='read'){reply.serializer(JSON.stringify);return captureSyncV2(db,account.id,worldSlug,villageId,body);}
     const close=()=>reply.raw.destroy();streams.add(close);
     try{await serveSyncV2Stream(reply,body,async next=>{
       const current=await authenticate(db,token);
