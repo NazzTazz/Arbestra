@@ -1,3 +1,20 @@
+# Reprise Claude — 22 octobre 2026, tranche atelier V2 raccordée à React
+
+Branche locale `wip/v2-commandes-bornees`, commit `6fd78f8` = diff A/B hérité tel quel (non poussé). Travail ci-dessous **non commité** par-dessus. Aucun déploiement ni migration développement. Le dossier parasite `%SystemDrive%/` (caches shell Windows) a été supprimé avec l'accord de Tristan ; `codex-session-*.md` reste non suivi.
+
+Décision de Tristan : étape 1 en deux temps — **(a) tranche atelier fidèle au lot B**, puis **(b) projection complète**. (b) exige d'abord une lecture serveur séparée et versionnée pour `travelRoutes`, `cells[].canBuild` et la config marché, absents de tout flux V2.
+
+Livré en (a) :
+- `api/processing-v2.ts` : sélecteur des ordres visibles (base + ACK), hook `useProcessingV2` (bootstrap, SSE V2, repli V1 si le serveur ne négocie pas V2, expiration). Le reste du village reste en V1.
+- Panneau atelier : ordres et commandes via V2 quand prêt ; intentions à résultat inconnu restaurées après reload via `commands/receipts/read` et proposées avec le même UUID ; « Modifier la demande » oublie l'intention. Refus 4xx retirés des intentions.
+- **Bug réel corrigé** : transport et session stockaient `fetch` comme méthode (`Illegal invocation` navigateur), donc V2 n'avait jamais pu démarrer hors tests unitaires. Régression rouge puis verte.
+
+Preuves : unitaires client 10/10 code 0 ; typecheck API/client code 0 ; lint ciblé code 0. E2E atelier Chromium **1 passed, code 0** (`v2-react-atelier-e2e-2.log`) : deux commandes en protocole 2, un bootstrap, stream V2, fin de lot vue par delta V2. Le premier essai e2e (avant correction fetch) a échoué sur l'instabilité du bouton « 1 h » ; non reproduit ensuite, cause non établie.
+
+**Bloquant avant toute activation hors test** : dans cet e2e, bootstrap V2 = **546 Ko / 20,9 s**, chargé **en plus** du GET V1 (125 Ko / 7,4 s). Première commande atelier 50 s (seconde 0,35 s), concurrente de lectures terrain lentes : serveur e2e froid, pas une mesure, cause non isolée. Prochaine étape proposée : bootstrap/abonnement limités au flux privé pour la tranche atelier, puis mesure ; ensuite lecture de présentation pour (b). Non fait : mobile, reload navigateur réel, mesures 30 répétitions.
+
+---
+
 # Passation courante — 22 octobre 2026, arrêt demandé pour quota
 
 Tristan demande de finir rapidement la tranche en cours et de préparer la reprise après renouvellement du quota. **A/B restent incomplets.** Cette section prévaut sur tous les points historiques ci-dessous. Aucun déploiement, commit, push ni migration de développement. Branche `main`, HEAD `4966379`, modifications non commitées ; conserver la spec documentaire initiale et les fichiers personnels non suivis.

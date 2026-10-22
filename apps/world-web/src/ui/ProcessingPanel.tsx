@@ -9,13 +9,16 @@ const statuses:Record<ProcessingOrder['status'],string>={running:'Fabrication en
 const number=(n:number)=>n.toLocaleString('fr-FR');
 function duration(ms:number){const minutes=Math.ceil(Math.max(0,ms)/60000),hours=Math.floor(minutes/60);return hours?`${hours} h${minutes%60?` ${minutes%60} min`:''}`:`${minutes} min`;}
 
-export function ProcessingPanel({building,recipe,orders,serverNow,pending,error,onCommand}:{
+export function ProcessingPanel({building,recipe,orders,serverNow,pending,error,onCommand,unresolved,onDiscard}:{
   slug:string;villageId:string;building:Building;recipe:ProcessingRecipe;orders:ProcessingOrder[];serverNow:number;revision:string;
   pending:boolean;error:string|null;onCommand:(command:ProcessingCommand)=>Promise<boolean>;
+  /** Intention whose outcome is unknown after a reload or a lost response. */
+  unresolved?:ProcessingCommand|null;onDiscard?:(commandId:string)=>void;
 }){
   const order=orders.find(o=>o.buildingId===building.id&&!['completed','cancelled'].includes(o.status));
   const [seconds,setSeconds]=useState<(typeof PROCESSING_DURATIONS_SECONDS)[number]>(PROCESSING_DURATIONS_SECONDS[0]),[workers,setWorkers]=useState(order?.workerCount??1);
-  const [retry,setRetry]=useState<ProcessingCommand|null>(null);
+  const [retry,setRetry]=useState<ProcessingCommand|null>(unresolved??null);
+  useEffect(()=>{if(unresolved)setRetry(current=>current??unresolved);},[unresolved?.commandId]);
   const busy=Boolean(order?.currentLot),orderId=order?.id,frozen=pending||!!retry;
   const last=order??orders.find(o=>o.buildingId===building.id);
   useEffect(()=>{if(order)setWorkers(order.workerCount);},[orderId,order?.workerCount]);
@@ -38,7 +41,7 @@ export function ProcessingPanel({building,recipe,orders,serverNow,pending,error,
     {!busy&&building.status==='completed'&&<div className="production-actions"><button className="production-primary" type="button" disabled={frozen} onClick={()=>void send(order?{commandId:randomUUID(),action:'resume',orderId:order.id,workerCount:workers}:{commandId:randomUUID(),action:'start',buildingId:building.id,durationSeconds:seconds,workerCount:workers})}>{order?'Reprendre':'Produire'}</button>{order&&<button type="button" disabled={frozen} onClick={()=>void send({commandId:randomUUID(),action:'cancel',orderId:order.id})}>Annuler les lots restants</button>}</div>}
     <small>Durée de travail prévue : les attentes repoussent la fin de la commande.</small>
     {building.status!=='completed'&&<p>Atelier en chantier.</p>}
-    {retry&&!pending&&<div><p>Commande à vérifier ou corriger.</p><button type="button" onClick={()=>void send(retry)}>Vérifier la même commande</button><button type="button" onClick={()=>setRetry(null)}>Modifier la demande</button></div>}
+    {retry&&!pending&&<div><p>Commande à vérifier ou corriger.</p><button type="button" onClick={()=>void send(retry)}>Vérifier la même commande</button><button type="button" onClick={()=>{onDiscard?.(retry.commandId);setRetry(null);}}>Modifier la demande</button></div>}
     {error&&<p className="error" role="alert">{error}</p>}
   </section>;
 }

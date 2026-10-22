@@ -21,6 +21,9 @@ import { MarketPanel } from './ui/MarketPanel';
 import { commandPlayerMarket } from './api/client';
 import { constructionCosts } from '@arbestra/contracts';
 import { commandProcessing } from './api/client';
+import { processingCommandBuilding, useProcessingV2 } from './api/processing-v2';
+import { SyncV2HttpError } from './api/sync-v2-transport';
+import type { ProcessingCommand } from '@arbestra/contracts';
 import {setFactoryEnabled} from './api/client';
 import { InfrastructureTools } from './ui/InfrastructureTools';
 import type { RepresentativeInfo } from './scene/village-workers';
@@ -122,6 +125,8 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const initialReady = initialProgress?.key === sceneKey && initialProgress.progress.phase === 'ready';
   const [needsLogin, setNeedsLogin] = useState(false);
   const expeditions=useExpeditions(worldSlug,state?.world.id,state?.village.id,!needsLogin && initialReady);
+  const expireSession=useCallback(()=>setNeedsLogin(true),[]);
+  const processingV2=useProcessingV2(worldSlug,state?.world.id,state?.village.id,initialReady&&!needsLogin&&!beforeTownHall,expireSession);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
@@ -435,6 +440,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
 
   const selectedSite = useMemo(() => state?.cells.find((cell) => cell.id === selectedSiteId) ?? null, [selectedSiteId, state]);
   const selectedBuilding = useMemo(() => selectedSite?.building ?? (selectedSite?.footprint ? state?.cells.find((cell) => cell.building?.id === selectedSite.footprint?.buildingId)?.building ?? null : null), [selectedSite, state]);
+  const processingOrders = processingV2.status === 'ready' ? processingV2.orders : state?.village.processingOrders ?? [];
   const gardenSites = useMemo(() => state?.cells.filter((cell) => cell.building?.garden)
     .sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY) ?? [], [state]);
   useEffect(() => {
@@ -476,6 +482,21 @@ export function App({starter}:{starter?:StarterController} = {}) {
     try { applySnapshot(await action()); markOracleProgress(); if (exit) exitConstruction(); if (success) pushNotification(success); return true; }
     catch (reason) { const message = reason instanceof Error ? reason.message : 'Action impossible.'; setError(message); pushNotification(message, 'warning'); return false; }
     finally { actionInFlight.current = false; setPendingAction(false); }
+  }
+
+  async function runProcessing(command: ProcessingCommand): Promise<boolean> {
+    if (processingV2.status !== 'ready') return runAction(() => commandProcessing(worldSlug, stateRef.current!.village.id, command));
+    if (actionInFlight.current) return false;
+    actionInFlight.current = true; setPendingAction(true); setError(null);
+    try { await processingV2.command(command); markOracleProgress(); return true; }
+    catch (reason) {
+      // Unknown outcomes keep the same UUID; the panel offers to verify it.
+      const message = reason instanceof SyncV2HttpError && reason.code === 'SCOPE_CATCHING_UP'
+        ? 'Le village rattrape son retard. Vérifiez la même commande dans un instant.'
+        : reason instanceof Error && reason.name === 'AbortError' ? 'Réponse interrompue. Vérifiez la même commande.'
+        : reason instanceof Error ? reason.message : 'Action impossible.';
+      setError(message); pushNotification(message, 'warning'); return false;
+    } finally { actionInFlight.current = false; setPendingAction(false); }
   }
 
   async function executeConstruction(command: ConstructionCommand): Promise<void> {
@@ -970,7 +991,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
     {menuAnchor && showGardens && worldMode === 'exploitation' ? <WorldContextMenu anchor={menuAnchor}><div><strong>Choisir un Jardin</strong>{gardenSites.map((site, index) => <button type="button" key={site.id} onClick={() => { setShowGardens(false); setSelectedSiteId(site.id); }}>Jardin {index + 1} · {site.cellX}, {site.cellY} · {site.building!.garden!.activeCellCount} parcelle(s)</button>)}</div></WorldContextMenu> : null}
     {representative && menuAnchor && worldMode==='population' && <WorldContextMenu anchor={representativeView==='village'?menuAnchor:{x:window.innerWidth-330,y:110}}><RepresentativePanel person={representative} view={representativeView} onView={mode=>terrainRef.current?.representativeCamera(mode)} onClose={closePanels}/></WorldContextMenu>}
     {menuAnchor && showJournal ? <WorldContextMenu anchor={menuAnchor}><OracleJournal accomplishments={state.village.accomplishments} /></WorldContextMenu> : null}
-    {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration') && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={state.village.processingOrders??[]} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={command=>runAction(()=>commandProcessing(worldSlug,state.village.id,command))}/></WorldContextMenu>}
+    {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration') && state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing && <WorldContextMenu anchor={menuAnchor}><ProcessingPanel key={selectedBuilding.id} slug={worldSlug} villageId={state.village.id} building={selectedBuilding} recipe={state.buildingTypes.find(d=>d.code===selectedBuilding.type)!.levels.find(l=>l.level===selectedBuilding.level)!.processing!} orders={processingOrders} unresolved={processingV2.unresolved.find(command=>processingCommandBuilding(command,processingOrders)===selectedBuilding.id)??null} onDiscard={processingV2.discard} serverNow={serverNow} revision={state.serverTime} pending={pendingAction} error={error} onCommand={runProcessing}/></WorldContextMenu>}
     {menuAnchor && selectedBuilding && (worldMode === 'exploitation' || worldMode === 'exploration' && selectedBuilding.type !== 'university') && !state.buildingTypes.find(d=>d.code===selectedBuilding.type)?.levels.find(l=>l.level===selectedBuilding.level)?.processing ? <WorldContextMenu anchor={menuAnchor}><BuildingPanel mode="exploitation" building={selectedBuilding} definition={state.buildingTypes.find((item) => item.code === selectedBuilding.type)!} serverNow={serverNow} pending={pendingAction} pendingHarvestKeys={pendingHarvestKeys} readyCarrots={selectedBuilding.garden ? gardenReady(selectedBuilding.garden, serverNow) : 0} availableWorkers={state.village.population.available} onUpgrade={() => {}} onPrepareGardens={() => {
       closePanels(); harvest.setFilter('gardens'); setExploitationSettings(current => ({ ...current, filter: 'gardens' })); pushNotification('Outil Jardins prêt · glissez sur les parcelles à récolter.');
     }} onDiscover={() => void discoverSupplies(selectedBuilding.id)} />

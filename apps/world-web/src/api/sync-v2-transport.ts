@@ -1,4 +1,4 @@
-import {processingCommandIsValid,processingConfirmationV2IsValid,syncV2BatchIsValid,
+import {processingCommandIsValid,processingConfirmationV2IsValid,syncV2BatchIsValid,commandReceiptReadResponseIsValid,
   type ProcessingCommand,type ProcessingConfirmationV2,type SyncV2State,type SyncV2ReadRequest} from '@arbestra/contracts';
 import {SyncV2Session,SyncV2ResyncRequired,SyncV2SessionExpired} from './sync-v2-session';
 
@@ -23,7 +23,8 @@ export class SyncV2Transport{
   private readonly storage:Storage|undefined;
   private readonly root:string;
   constructor(worldSlug:string,readonly worldId:string,readonly villageId:string,private readonly options:Options){
-    this.request=options.request??fetch;this.storage=options.storage??globalThis.sessionStorage;
+    // Never store the global fetch as a method: browsers reject that receiver.
+    this.request=options.request??((input,init)=>fetch(input,init));this.storage=options.storage??globalThis.sessionStorage;
     this.root=`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}`;
   }
   get snapshot(){return this.session?.snapshot;}
@@ -88,10 +89,36 @@ export class SyncV2Transport{
     if(!remove){if(pending.length>=32)throw Error('Trop de commandes à vérifier.');pending.push(command);}
     if(pending.length)this.storage?.setItem(this.pendingKey,JSON.stringify(pending));else this.storage?.removeItem(this.pendingKey);
   }
+  /** Drops the intention locally only; an already committed command is not
+   * undone and its effects still arrive through the private stream. */
+  forget(commandId:string){
+    const command=this.pending().find(row=>row.commandId===commandId);
+    if(command)this.remember(command,true);
+  }
+  /** After a reload or a lost response: applied receipts are final and
+   * their effects are already in the fresh projection. Absent receipts stay
+   * unknown and are returned for an explicit retry with the same UUID. */
+  async recover():Promise<ProcessingCommand[]>{
+    const pending=this.pending();
+    if(this.closed||!pending.length)return pending;
+    const input=await this.json('/commands/receipts/read',{method:'POST',
+      body:JSON.stringify({commands:pending.map(({commandId})=>({family:'processing',commandId}))})});
+    if(!commandReceiptReadResponseIsValid(input)||input.worldId!==this.worldId||input.villageId!==this.villageId)
+      throw Error('Reçus de commande invalides.');
+    const applied=new Set(input.receipts.filter(receipt=>receipt.family==='processing').map(receipt=>receipt.commandId));
+    for(const command of pending)if(applied.has(command.commandId))this.remember(command,true);
+    return this.pending();
+  }
   async processing(command:ProcessingCommand):Promise<ProcessingConfirmationV2>{
     if(this.closed||!this.session)throw Error('Synchronisation indisponible.');
     this.remember(command);
-    const input=await this.json('/processing',{method:'POST',body:JSON.stringify(command)});
+    let input:unknown;
+    try{input=await this.json('/processing',{method:'POST',body:JSON.stringify(command)});}
+    catch(error){
+      // A business refusal rolled back without mutation: nothing to verify.
+      if(error instanceof SyncV2HttpError&&error.status>=400&&error.status<500)this.remember(command,true);
+      throw error;
+    }
     if(!processingConfirmationV2IsValid(input)||input.commandId!==command.commandId||input.worldId!==this.worldId||input.villageId!==this.villageId)
       throw Error('Confirmation de fabrication invalide.');
     // An applied receipt is final even if its effects need a fresh projection.

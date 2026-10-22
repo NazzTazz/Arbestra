@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 
 const uuid = Type.String({ format: 'uuid' });
 export const CommandReceiptReadSchema = Type.Object({
@@ -20,5 +21,7 @@ export const CommandReceiptSchema = Type.Union([
 export const CommandReceiptReadResponseSchema = Type.Object({ worldId: uuid, villageId: uuid,
   receipts: Type.Array(CommandReceiptSchema, { maxItems: 32 }),
 }, { additionalProperties: false });
+export const commandReceiptReadResponseIsValid = (value: unknown): value is CommandReceiptReadResponse =>
+  Value.Check(CommandReceiptReadResponseSchema, value);
 export type CommandReceiptRead = Static<typeof CommandReceiptReadSchema>;
 export type CommandReceiptReadResponse = Static<typeof CommandReceiptReadResponseSchema>;

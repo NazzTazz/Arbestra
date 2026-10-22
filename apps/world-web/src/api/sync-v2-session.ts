@@ -16,7 +16,7 @@ export class SyncV2Session {
   private controller: AbortController | null = null;
   private closed = false;
   constructor(initial: SyncV2State, private readonly publish: (state: SyncV2State, observedAt:string) => void,
-    private readonly request: typeof fetch = fetch) { this.state = initial; }
+    private readonly request: typeof fetch = (input, init) => fetch(input, init)) { this.state = initial; }
 
   get snapshot(): SyncV2State { return this.state; }
   get cursors(): AppliedSyncCursor[] {

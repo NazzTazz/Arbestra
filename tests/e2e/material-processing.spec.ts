@@ -100,6 +100,10 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     expect(browserErrors).toEqual([]);
     const commands = [...requests.values()].filter(request => request.method === 'POST' && request.path.endsWith('/processing'));
     expect(commands).toHaveLength(2);
+    // Workshop slice of V2: negotiated commands, one bootstrap and its stream.
+    expect(commands.map(request => request.protocol)).toEqual(['2', '2']);
+    expect([...requests.values()].filter(request => request.method === 'GET' && request.path.endsWith('/bootstrap'))).toHaveLength(1);
+    expect([...requests.values()].some(request => request.method === 'POST' && request.path.endsWith('/sync/stream'))).toBe(true);
     const firstCommandAt = Math.min(...commands.map(request => request.started));
     expect([...requests.values()].filter(request => request.method === 'GET' && request.path.endsWith('/village')
       && request.started > firstCommandAt)).toEqual([]);

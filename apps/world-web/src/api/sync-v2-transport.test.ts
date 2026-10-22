@@ -1,4 +1,4 @@
-import {expect,it} from 'vitest';
+import {expect,it,vi} from 'vitest';
 import {SYNC_V2_PRIVATE_COMPONENTS,SYNC_V2_KNOWLEDGE_COMPONENTS,type SyncV2Batch} from '@arbestra/contracts';
 import {SyncV2Transport} from './sync-v2-transport';
 const worldId='11111111-1111-4111-8111-111111111111',villageId='22222222-2222-4222-8222-222222222222';
@@ -42,4 +42,50 @@ it('retains the identical UUID through catch-up and reload, persists no cursors 
     expect(sockets.every(socket=>new Headers(socket.headers).get('x-arbestra-protocol')==='2')).toBe(true);
     expect(published).toHaveLength(2);
   }finally{second.close();}
+});
+it('recovers applied receipts after reload, keeps unknown ones and forgets a business refusal',async()=>{
+  const storage=memory(),receiptReads:unknown[]=[];
+  const applied={commandId:'66666666-6666-4666-8666-666666666666',action:'pause' as const,orderId:epoch};
+  const unknown={commandId:'77777777-7777-4777-8777-777777777777',action:'cancel' as const,orderId:epoch};
+  const refused={commandId:'88888888-8888-4888-8888-888888888888',action:'resume' as const,orderId:epoch,workerCount:1};
+  const request:typeof fetch=async(url,init)=>{
+    if(String(url).endsWith('/sync/stream'))return new Response(new ReadableStream(),{headers:{'content-type':'text/event-stream'}});
+    const generation=Number(new Headers(init?.headers).get('x-arbestra-generation'));
+    if(String(url).endsWith('/sync/read'))return json(bootstrap(generation));
+    if(String(url).endsWith('/commands/receipts/read')){
+      receiptReads.push(JSON.parse(String(init?.body)));
+      return json({worldId,villageId,receipts:[{family:'processing',commandId:applied.commandId,status:'applied',
+        commandTime:'2026-10-22T00:00:01Z',result:{orderId:epoch}}]});
+    }
+    return json({code:'PROCESSING_ORDER_NOT_RUNNING',message:'Commande non active.'},409);
+  };
+  const transport=new SyncV2Transport('aube',worldId,villageId,{storage,request,publish:()=>undefined,expired:()=>{throw Error('Unexpected expiration');}});
+  try{
+    await transport.start(true);
+    const key=`arbestra.processing.v2:${owner}:${worldId}:${villageId}`;
+    storage.setItem(key,JSON.stringify([applied,unknown]));
+    expect(await transport.recover()).toEqual([unknown]);
+    expect(receiptReads).toEqual([{commands:[{family:'processing',commandId:applied.commandId},{family:'processing',commandId:unknown.commandId}]}]);
+    await expect(transport.processing(refused)).rejects.toMatchObject({status:409,code:'PROCESSING_ORDER_NOT_RUNNING'});
+    expect(transport.pending()).toEqual([unknown]);
+    transport.forget(unknown.commandId);
+    expect(transport.pending()).toEqual([]);expect(storage.length).toBe(0);
+    expect(await transport.recover()).toEqual([]);expect(receiptReads).toHaveLength(1);
+  }finally{transport.close();}
+});
+it('calls the browser fetch without rebinding it to the transport',async()=>{
+  // Browsers reject fetch invoked as a method of another object.
+  const calls:string[]=[];
+  vi.stubGlobal('fetch',function(this:unknown,url:RequestInfo|URL,init?:RequestInit){
+    if(this!==undefined&&this!==globalThis)throw new TypeError('Illegal invocation');
+    calls.push(String(url));
+    if(String(url).endsWith('/sync/stream'))return Promise.resolve(new Response(new ReadableStream(),{headers:{'content-type':'text/event-stream'}}));
+    return Promise.resolve(json(bootstrap(Number(new Headers(init?.headers).get('x-arbestra-generation')))));
+  });
+  const transport=new SyncV2Transport('aube',worldId,villageId,{storage:memory(),publish:()=>undefined,expired:()=>undefined});
+  try{
+    await transport.start();
+    await vi.waitFor(()=>expect(calls.some(url=>url.endsWith('/sync/stream'))).toBe(true));
+    expect(calls[0]).toMatch(/\/bootstrap\?generation=\d+$/);
+  }finally{transport.close();vi.unstubAllGlobals();}
 });
