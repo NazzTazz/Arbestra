@@ -115,6 +115,17 @@ export const ProcessingConfirmationV2Schema = Type.Object({
   effects:Type.Optional(SyncV2BatchSchema),
 },{additionalProperties:false});
 export type ProcessingConfirmationV2=Static<typeof ProcessingConfirmationV2Schema>;
+/** Building placement: same envelope as the workshop. A replay carries the
+ * original result without effects; the presentation is reread by the client
+ * because the new footprint is a structural change. */
+export const ConstructionConfirmationV2Schema = Type.Object({
+  protocol:Type.Literal(2),worldId:id,villageId:id,commandId:id,status:Type.Literal('applied'),
+  // Null only when a replayed garden has merged into another logical one.
+  commandTime:time,result:Type.Object({buildingId:Type.Union([id,Type.Null()])},{additionalProperties:false}),
+  effects:Type.Optional(SyncV2BatchSchema),
+},{additionalProperties:false});
+export type ConstructionConfirmationV2=Static<typeof ConstructionConfirmationV2Schema>;
+export const constructionConfirmationV2IsValid=(value:unknown):value is ConstructionConfirmationV2=>Value.Check(ConstructionConfirmationV2Schema,value);
 export const syncV2BatchIsValid=(value:unknown):value is SyncV2Batch=>Value.Check(SyncV2BatchSchema,value);
 export const processingConfirmationV2IsValid=(value:unknown):value is ProcessingConfirmationV2=>Value.Check(ProcessingConfirmationV2Schema,value);
 export const processingCommandIsValid=(value:unknown):value is ProcessingCommand=>Value.Check(ProcessingCommandSchema,value);

@@ -6,8 +6,7 @@ import {beginProcessingCommand,COMMAND_CATCHUP_BUDGET,type ReconciliationBudget}
 import {commandProcessing} from './processing.js';
 import {reconcileRestHousing} from '../population/work.js';
 import {requestEconomyCatchup,ScopeCatchingUp} from './economy-catchup.js';
-import {readRegisteredPrivateChanges,type SyncEntityReference} from './sync-v2-readers.js';
-import type {SyncDependency} from './sync-v2-journal.js';
+import {publishPrivateEffects} from './sync-v2-effects.js';
 
 /** The transaction owns H, receipt, effects and terminal journal publication.
  * An exact retry reads its immutable result without waking the economy. */
@@ -26,17 +25,8 @@ export async function commandProcessingV2(db:Kysely<Database>,accountId:string,w
     if(prepared.replay)return confirmation;
     if(prepared.reconciled)await reconcileRestHousing(tx,village.worldId,villageId,prepared.economy.through);
     // No business writes after this point, including no generic admission.
-    const {published}=(await sql<{published:SyncDependency[]}>`select game_sync_publish() as published`.execute(tx)).rows[0]!;
-    const privateScope=published.find(scope=>scope.worldId===village.worldId&&scope.kind==='village'&&scope.key===villageId);
-    if(privateScope){
-      const {changes:references}=(await sql<{changes:SyncEntityReference[]}>`select changes from game_sync_changes
-        where world_id=${village.worldId} and stream_kind='village' and scope_key=${villageId}
-          and epoch=${privateScope.epoch}::uuid and revision=${privateScope.revision}::bigint`.execute(tx)).rows[0]!;
-      const changes=await readRegisteredPrivateChanges(tx,prepared.economy,references);
-      confirmation.effects={protocol:2,worldId:village.worldId,villageId,generation,coverage:'effects',
-        observedAt:prepared.economy.through.toISOString(),groups:[{stream:{kind:'village',key:villageId,epoch:privateScope.epoch},
-          fromRevision:privateScope.revision,toRevision:privateScope.revision,changes}]};
-    }
+    const effects=await publishPrivateEffects(tx,prepared.economy,generation);
+    if(effects)confirmation.effects=effects;
     return confirmation;
   }).catch(async error=>{
     if(error instanceof ScopeCatchingUp)await requestEconomyCatchup(db,accountId,worldSlug,villageId);

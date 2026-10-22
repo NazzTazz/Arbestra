@@ -11,6 +11,7 @@ import {HttpError} from '../../errors.js';
 import {readRc1Source} from '../worlds/rc1-source.js';
 import {villageSyncRevision} from './sync-revision.js';
 import type {OwnedVillage} from './service.js';
+import type {VillageEconomy} from './reconcile-economy.js';
 import {normalizeCell,wrappedDelta,toroidalChebyshev} from '../worlds/coordinates.js';
 import {normalizeSpatialSelection,type SpatialCell} from './spatial-selection.js';
 import {observationVillage} from '../admin/observation-actions.js';
@@ -188,7 +189,10 @@ function validatePlan(plan:InfrastructurePlan,wanted:Set<string>,v:Village){
 }
 
 /** A placement only debits, reserves and schedules its own construction. */
-export async function placeBuilding(db:Kysely<Database>,accountId:string,slug:string,villageId:string,input:BuildingPlacement,durationOverride:number|null):Promise<ConstructionConfirmation>{
+/** `afterWrites` runs in the transaction after a new placement (never on a
+ * replay): the V2 path publishes its journal and reads its effects there. */
+export async function placeBuilding(db:Kysely<Database>,accountId:string,slug:string,villageId:string,input:BuildingPlacement,durationOverride:number|null,
+  afterWrites?:(tx:Transaction<Database>,economy:VillageEconomy)=>Promise<void>):Promise<ConstructionConfirmation>{
   const p={...input,commandId:input.commandId??randomUUID(),quarterTurns:input.quarterTurns??0,houseVariant:input.houseVariant??'stone'};
   const confirmed=await db.transaction().execute(async tx=>{
     const v=await lockPlacement(tx,accountId,slug,villageId);
@@ -254,6 +258,7 @@ export async function placeBuilding(db:Kysely<Database>,accountId:string,slug:st
       rows=cells.map(c=>({...c,id,buildingType:p.buildingType,level:1,targetLevel:null,status:'under-construction' as const,
         constructionStartedAt:at.toISOString(),constructionCompletesAt:completesAt.toISOString(),completedAt:null,quarterTurns:p.quarterTurns,
         visualLayout:visualLayout as Inputs['replay'][number]['visualLayout'],role:c.cellX===selection.anchor.cellX&&c.cellY===selection.anchor.cellY?'anchor':'extension'}));
+      if(afterWrites)await afterWrites(tx,{worldId:v.worldId,villageId,through:at});
     }
     return {kind:'construction' as const,cellsMode:'patch' as const,worldId:v.worldId,villageId,commandId:p.commandId,
       commandTime:date(data.receipt?.createdAt??at)!,serverTime:at.toISOString(),
@@ -265,6 +270,8 @@ export async function placeBuilding(db:Kysely<Database>,accountId:string,slug:st
         footprint:{buildingId:c.id,buildingType:c.buildingType as BuildingType,role:c.role as 'anchor'|'extension',state:c.status==='completed'||c.targetLevel!==null?'active' as const:'reserved' as const},canBuild:false})),
     };
   });
+  // V2 callers order by their journal, not by this V1 fence (a world count).
+  if(afterWrites)return {...confirmed,minimumRevision:0};
   // Fence after COMMIT: an old coherent SSE projection cannot cover this receipt.
   return {...confirmed,minimumRevision:(await villageSyncRevision(db,confirmed.worldId)).revision};
 }

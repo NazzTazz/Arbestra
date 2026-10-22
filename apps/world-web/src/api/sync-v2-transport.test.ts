@@ -111,3 +111,27 @@ it('opens a world-level bootstrap with the village of the snapshot and hands the
     expect(first).toHaveLength(1);expect(second).toHaveLength(1);
   }finally{transport.close();}
 });
+it('applies a placement ACK through the session and refuses a foreign confirmation',async()=>{
+  const commandId='99999999-9999-4999-8999-999999999999',buildingId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let foreign=false;
+  const request:typeof fetch=async(url,init)=>{
+    if(String(url).endsWith('/sync/stream'))return new Response(new ReadableStream(),{headers:{'content-type':'text/event-stream'}});
+    const generation=Number(new Headers(init?.headers).get('x-arbestra-generation'));
+    if(String(url).endsWith('/sync/read'))return json(bootstrap(generation));
+    expect(new Headers(init?.headers).get('x-arbestra-protocol')).toBe('2');
+    return json({protocol:2,worldId,villageId,commandId:foreign?owner:commandId,status:'applied',commandTime:'2026-10-22T00:00:01.000Z',
+      result:{buildingId},effects:{protocol:2,worldId,villageId,generation,observedAt:'2026-10-22T00:00:01.000Z',coverage:'effects',
+        groups:[{stream:{kind:'village',key:villageId,epoch},fromRevision:'5',toRevision:'5',changes:[{component:'resources',
+          upsert:[{code:'wood',displayName:'Bois',iconKey:'wood',amount:1900,productionPerHour:0,productionUpdatedAt:null}],remove:[]}]}]}},201);
+  };
+  const published:Array<{batch:SyncV2Batch}>=[];
+  const transport=new SyncV2Transport('aube',worldId,villageId,{storage:memory(),request,publish:(_state,_at,batch)=>published.push({batch}),expired:()=>undefined});
+  const body={commandId,buildingType:'dwelling',anchorCellX:1,anchorCellY:1,cells:[{cellX:1,cellY:1}],expectedCosts:[],quarterTurns:0,houseVariant:'logs' as const};
+  try{
+    await transport.start(true);
+    expect(await transport.construct(body)).toMatchObject({result:{buildingId}});
+    expect(published.at(-1)!.batch.coverage).toBe('effects');
+    foreign=true;
+    await expect(transport.construct(body)).rejects.toThrow('Confirmation de construction invalide.');
+  }finally{transport.close();}
+});

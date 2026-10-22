@@ -107,7 +107,12 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
     const current=transport.current;if(!current)return;
     current.forget(commandId);setUnresolved(current.pending());
   },[]);
+  const construct=useCallback((body:Parameters<SyncV2Transport['construct']>[0])=>{
+    const current=transport.current;
+    if(!current)throw Error('Synchronisation indisponible.');
+    return current.construct(body);
+  },[]);
   /** Immediate delta read, e.g. after a command still answered by V1. */
   const refresh=useCallback(()=>{transport.current?.reconnect();},[]);
-  return {status,villageReady,orders,unresolved,command,discard,refresh};
+  return {status,villageReady,orders,unresolved,command,discard,refresh,construct};
 }

@@ -20,6 +20,8 @@ import { CommandReceiptReadSchema, CommandReceiptReadResponseSchema, type Comman
 import { readCommandReceipts } from './command-receipts.js';
 import {ProcessingConfirmationV2Schema} from '@arbestra/contracts';
 import {commandProcessingV2} from './processing-v2.js';
+import {placeBuildingV2} from './construction-v2.js';
+import type {BuildingType} from '@arbestra/contracts';
 import {assertSyncV2Available} from './sync-v2-routes.js';
 import { MarketRequestSchema, MarketCommandSchema, MarketPreviewSchema, type MarketRequest, type MarketCommand } from '@arbestra/contracts';
 import { commandVillageMarket, previewVillageMarket } from './service.js';
@@ -70,7 +72,10 @@ const ProcessingHeadersSchema=Type.Object({...VillageSyncHeadersSchema.propertie
   'x-arbestra-generation':Type.Optional(Type.String({pattern:'^(0|[1-9][0-9]{0,15})$'})),
 },{additionalProperties:true});
 const InfrastructureHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-infrastructure-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
-const ConstructionHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-construction-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
+const ConstructionHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-construction-confirmation':Type.Optional(Type.Literal('1')),
+  'x-arbestra-protocol':Type.Optional(Type.Literal('2')),
+  'x-arbestra-generation':Type.Optional(Type.String({pattern:'^(0|[1-9][0-9]{0,15})$'})),
+},{additionalProperties:true});
 const ConstructionMutationResponseSchema=Type.Union([ConstructionConfirmationSchema,VillageMutationResponseSchema]);
 const InfrastructureMutationResponseSchema=Type.Union([InfrastructureConfirmationSchema,VillageCommandResponseSchema,VillageStateSchema]);
 function villageReplyOptions(headers: FastifyRequest['headers']) {
@@ -323,6 +328,20 @@ export async function registerVillageRoutes(
       villageId: string;
     };
     const body = request.body as {houseVariant?:'stone'|'logs'|'beams'; quarterTurns?:number; commandId?: string; expectedCosts?: Array<{ resourceCode: string; amount: number }>; buildingType: string; anchorCellX?: number; anchorCellY?: number; cells?: Array<{ cellX: number; cellY: number }>; cellX?: number; cellY?: number };
+    if (request.headers['x-arbestra-protocol'] === '2') {
+      // V2 mutations always carry their idempotent identity and the spatial form.
+      if (!body.commandId || !body.cells || body.anchorCellX === undefined || body.anchorCellY === undefined)
+        throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
+      await assertSyncV2Available(db);
+      const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
+      const confirmation = await placeBuildingV2(db, account.id, worldSlug, villageId, { buildingType: body.buildingType as BuildingType,
+        anchor: { cellX: body.anchorCellX, cellY: body.anchorCellY }, cells: body.cells, commandId: body.commandId,
+        expectedCosts: body.expectedCosts, quarterTurns: body.quarterTurns ?? 0, houseVariant: body.houseVariant ?? 'stone' },
+        config.constructionDurationOverrideMs, generation);
+      observationCommitted(request);
+      // Same wire encoding as the V2 stream (see the workshop route).
+      return reply.status(201).serializer(JSON.stringify).send(confirmation);
+    }
     const state = body.cells ? await constructBuildingArea(
       db,
       account.id,

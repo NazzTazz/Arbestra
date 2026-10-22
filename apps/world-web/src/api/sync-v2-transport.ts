@@ -1,5 +1,5 @@
 import {processingCommandIsValid,processingConfirmationV2IsValid,syncV2BatchIsValid,commandReceiptReadResponseIsValid,villagePresentationIsValid,
-  type VillagePresentation,type ProcessingCommand,type ProcessingConfirmationV2,type SyncV2Batch,type SyncV2State,type SyncV2ReadRequest} from '@arbestra/contracts';
+  constructionConfirmationV2IsValid,type ConstructionConfirmationV2,type VillagePresentation,type ProcessingCommand,type ProcessingConfirmationV2,type SyncV2Batch,type SyncV2State,type SyncV2ReadRequest} from '@arbestra/contracts';
 import {SyncV2Session,SyncV2ResyncRequired,SyncV2SessionExpired} from './sync-v2-session';
 
 let nextGeneration=0;
@@ -146,6 +146,20 @@ export class SyncV2Transport{
       throw Error('Confirmation de fabrication invalide.');
     // An applied receipt is final even if its effects need a fresh projection.
     this.remember(command,true);
+    if(!this.closed&&input.effects){try{this.session.apply(input.effects);}catch(error){
+      if(!(error instanceof SyncV2ResyncRequired))throw error;
+      this.reconnect();
+    }}
+    return input;
+  }
+  /** Building placement on the V2 contract. Uncertain outcomes are kept by
+   * the caller's existing construction intent (same UUID on retry). */
+  async construct(body:{commandId:string;buildingType:string;anchorCellX:number;anchorCellY:number;cells:Array<{cellX:number;cellY:number}>;
+    expectedCosts:Array<{resourceCode:string;amount:number}>;quarterTurns:number;houseVariant:'stone'|'logs'|'beams'}):Promise<ConstructionConfirmationV2>{
+    if(this.closed||!this.session)throw Error('Synchronisation indisponible.');
+    const input=await this.json('/buildings',{method:'POST',body:JSON.stringify(body)});
+    if(!constructionConfirmationV2IsValid(input)||input.commandId!==body.commandId||input.worldId!==this.worldId||input.villageId!==this.villageId)
+      throw Error('Confirmation de construction invalide.');
     if(!this.closed&&input.effects){try{this.session.apply(input.effects);}catch(error){
       if(!(error instanceof SyncV2ResyncRequired))throw error;
       this.reconnect();

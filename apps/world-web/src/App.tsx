@@ -131,7 +131,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const expireSession=useCallback(()=>setNeedsLogin(true),[]);
   // Set after the V2 hook below: once V2 owns the village, V1 responses only
   // trigger an immediate V2 delta read instead of replacing the state.
-  const villageV2Ref=useRef<{ready:boolean;refresh:()=>void}>({ready:false,refresh:()=>{}});
+  const villageV2Ref=useRef<{ready:boolean;refresh:()=>void;construct?:ReturnType<typeof useVillageSyncV2>['construct']}>({ready:false,refresh:()=>{}});
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
@@ -251,7 +251,7 @@ export function App({starter}:{starter?:StarterController} = {}) {
   const villageV2Mode = SYNC_V2_VILLAGE && !starterActive;
   const villageV2 = useVillageSyncV2({ worldSlug, worldId: state?.world.id, villageId: state?.village.id,
     enabled: initialReady && !needsLogin && !beforeTownHall, village: villageV2Mode, onState: applySnapshot, onExpired: expireSession });
-  villageV2Ref.current = { ready: villageV2Mode && villageV2.villageReady, refresh: villageV2.refresh };
+  villageV2Ref.current = { ready: villageV2Mode && villageV2.villageReady, refresh: villageV2.refresh, construct: villageV2.construct };
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
     if (!current || catRequest.current || current.village.accomplishments.some(item => item.code === 'cat-eyes')) return;
@@ -525,6 +525,13 @@ export function App({starter}:{starter?:StarterController} = {}) {
       const current = stateRef.current;
       const syncBase = current?.village.id === command.villageId && current.world.slug === command.worldSlug && current.syncRevision !== undefined
         ? { revision: current.syncRevision, serverTime: current.serverTime } : undefined;
+      const v2 = villageV2Ref.current;
+      // Placement on the V2 contract: its ACK effects update the village and
+      // invalidate the presentation; expansion and upgrade remain V1 for now.
+      if (command.kind === 'build' && v2.ready && v2.construct) await v2.construct({ commandId: command.commandId,
+        buildingType: command.buildingType, anchorCellX: command.anchor.cellX, anchorCellY: command.anchor.cellY, cells: command.cells,
+        expectedCosts: command.expectedCosts, quarterTurns: command.quarterTurns ?? 0, houseVariant: command.houseVariant ?? 'stone' });
+      else {
       const snapshot = command.kind === 'build'
         ? await buildBuilding(command.worldSlug, command.villageId, command.buildingType, command.anchor, command.cells, command.commandId, command.expectedCosts,command.quarterTurns,command.houseVariant,syncBase)
         : command.kind === 'expand'
@@ -538,13 +545,14 @@ export function App({starter}:{starter?:StarterController} = {}) {
           constructionPresentationRef.current=confirmed;setConstructionPresentation(confirmed);
         }
       } else applySnapshot(snapshot);
+      }
       markOracleProgress(); clearPreview();
       sessionStorage.removeItem(pendingConstructionKey(command.villageId)); constructionCommand.current = null;
       setConstructionIntentState('idle'); pushNotification(command.success);
     } catch (reason) {
       const message = reason instanceof Error&&reason.name==='TimeoutError'?'Réponse trop longue. Vérifiez la même commande.':reason instanceof Error ? reason.message : 'Commande de construction impossible.';
       setError(message); pushNotification(message, 'warning');
-      if (reason instanceof ApiError && reason.status < 500) {
+      if ((reason instanceof ApiError || reason instanceof SyncV2HttpError) && reason.status < 500) {
         sessionStorage.removeItem(pendingConstructionKey(command.villageId));
         setConstructionIntentState('error');
       } else setConstructionIntentState('uncertain');
