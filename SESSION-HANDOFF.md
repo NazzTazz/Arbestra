@@ -1,3 +1,7 @@
+# Reprise Claude — 22 octobre 2026 (fin d'après-midi, session autonome)
+
+État en une ligne : branche `wip/v2-commandes-bornees` poussée (dernier commit applicatif `c633bef`), village complet synchronisable en V2 derrière l'option `arbestra:sync-v2`, convois publics via le flux `traffic` (057, test uniquement), **arbitrages ouverts dans [docs/ARBITRAGES-OUVERTS-V2.md](docs/ARBITRAGES-OUVERTS-V2.md)**. Aucun déploiement, aucune migration développement, `main` intact. Détails ci-dessous.
+
 # Reprise Claude — 22 octobre 2026, tranche atelier V2 raccordée à React
 
 Branche locale `wip/v2-commandes-bornees`, commit `6fd78f8` = diff A/B hérité tel quel (non poussé). Travail ci-dessous **non commité** par-dessus. Aucun déploiement ni migration développement. Le dossier parasite `%SystemDrive%/` (caches shell Windows) a été supprimé avec l'accord de Tristan ; `codex-session-*.md` reste non suivi.
@@ -40,6 +44,7 @@ Lecture de présentation (prérequis de (b), serveur seulement, **non commitée*
 - **Arbitrages ouverts consignés dans [docs/ARBITRAGES-OUVERTS-V2.md](docs/ARBITRAGES-OUVERTS-V2.md)** (portée de visibilité des convois, champs publics, activation par défaut, rythme visible de l'économie, historique des chantiers), avec recommandation et état réversible du code.
 - Écarts V1/V2 restants : chantiers non plafonnés à 32 (pas d'horodatage de création transmis), marché non couvert par l'oracle (verrouillé sur la fixture).
 - Suite naturelle : supprimer le GET V1 initial en mode V2, alléger la présentation (région/routes ≈ 100 Ko relus à chaque changement structurel), puis mobile et 30 répétitions avant d'activer l'option par défaut.
+- **Plan prêt pour la suppression du GET V1 initial (non commencé, arrêt volontaire pour préserver le quota)** : `initialVillageRead()` (`apps/world-web/src/api/initial-village.ts`, appelé tôt par `main.tsx` puis par `App`) est aujourd'hui la seule source de `worldId/villageId` ; `/api/worlds` ne les expose pas. 1) Route `GET /api/worlds/:slug/village/bootstrap` résolvant le village possédé comme le GET V1 (même `ownedVillage`, même adaptateur `reconcileVillageForRead`), réponse = lot V2 avec `include`. 2) En mode V2, `initialVillageRead` crée le `SyncV2Transport`, attend bootstrap + présentation et renvoie `villageStateFromSyncV2(...)` en `TimedVillageState` `source:'v2'`. 3) `useVillageSyncV2` adopte ce transport déjà démarré (pas de second bootstrap) au lieu d'en créer un. 4) Ne pas toucher le parcours d'installation (`starter`) ni l'observation NOC, qui restent V1. 5) Étendre `village-sync-v2.spec.ts` : aucune requête `GET …/village` dans toute la session.
 
 Ouvert : `knowledgePlaces` doit devenir une lecture paginée/à la demande avant (b) ; mobile, reload navigateur réel et mesures 30 répétitions non faits ; la tranche maintient deux flux longs (SSE V1 + stream V2) jusqu'à (b).
 
