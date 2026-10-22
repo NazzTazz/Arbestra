@@ -27,6 +27,11 @@ async function fixture(run: (tx: Transaction<Database>, featureId: string, t: Da
     await db.transaction().execute(async tx => {
       await tx.selectFrom('villages').select('id').where('worldId', '=', worldId).where('id', '=', villageId)
         .forUpdate().executeTakeFirstOrThrow();
+      // These route fixtures use a 2048x1024 torus centered on (1024,512).
+      // resetE2eState preserves village placement, so do not inherit an
+      // anchor moved by an earlier scenario or a separate local test run.
+      await tx.updateTable('villages').set({ anchorCellX: 1024, anchorCellY: 512 })
+        .where('worldId', '=', worldId).where('id', '=', villageId).execute();
       const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
       const featureId = randomUUID();
       await tx.insertInto('worldFeatures').values({ id: featureId, worldId, featureTypeCode: 'woodland',

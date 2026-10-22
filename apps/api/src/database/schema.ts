@@ -516,6 +516,11 @@ export interface Database {
   villageResourceFlows: VillageResourceFlowsTable;
   buildingResourceBuffers: BuildingResourceBuffersTable;
   scheduledTasks: ScheduledTasksTable;
+  villageEconomyCatchups: {
+    worldId:string; villageId:string; generation:string; targetThrough:Timestamp;
+    completedThrough:Timestamp|null; lastTransitionAt:Timestamp|null; transitions:ColumnType<string,number|string|undefined,number|string>;
+    status:'active'|'complete'; updatedAt:Generated<Timestamp>;
+  };
   villagePopulations: VillagePopulationsTable;
   populationCohorts: PopulationCohortsTable;
   buildingHiddenSupplies: BuildingHiddenSuppliesTable;
@@ -548,4 +553,5 @@ export interface ProcessingLotsTable {
 }
 export interface ProcessingCommandReceiptsTable {
   worldId: string; villageId: string; commandId: string; request: JSONColumnType<Record<string, unknown>, string, string>;
+  orderId: Generated<string | null>; commandTime: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
 }

@@ -1,0 +1,797 @@
+[
+  {
+    "method": "GET",
+    "url": "/api/admin/accounts",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/accounts/:id",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/activities",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/activities/:id",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/http-requests",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/http-requests/:requestId",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/infrastructure",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/observations",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "DELETE",
+    "url": "/api/admin/observations/:id",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/observations/:id",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/observations/:id/events",
+    "actions": [],
+    "lot": "H",
+    "role": "synchronization"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/observations/:id/follow",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/observations/:id/heartbeat",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/observations/:id/snapshot",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/observations/:id/terrain",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/observations/launch",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/overview",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "DELETE",
+    "url": "/api/admin/session",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/session",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/session",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/villages/:id",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/world-generator",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/world-generator",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "DELETE",
+    "url": "/api/admin/world-generator/:id",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/world-generator/:id/open",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/world-generator/:id/preview",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/world-generator/:id/retain",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/admin/world-generator/:id/retry",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/worlds",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/admin/worlds/:id",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "POST",
+    "url": "/api/auth/login",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "POST",
+    "url": "/api/auth/register",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "DELETE",
+    "url": "/api/auth/session",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/auth/session",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "GET",
+    "url": "/api/health",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
+    "method": "DELETE",
+    "url": "/api/observation/:id",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/observation/:id",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/observation/:id/events",
+    "actions": [],
+    "lot": "H",
+    "role": "synchronization"
+  },
+  {
+    "method": "POST",
+    "url": "/api/observation/:id/follow",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/observation/:id/heartbeat",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/observation/:id/snapshot",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/observation/:id/terrain",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/observation/exchange",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "PUT",
+    "url": "/api/worlds/:worldSlug/dev/factory-access",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/factory-access",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/join",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/spawn-atlas",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/spawn-map",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/spawn-map/presentation",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "PUT",
+    "url": "/api/worlds/:worldSlug/spawn-map/presentation",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/spawn-map/resource-check",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/spawn-map/terrain-check",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "DELETE",
+    "url": "/api/worlds/:worldSlug/spawn-map/territory",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "PUT",
+    "url": "/api/worlds/:worldSlug/spawn-map/territory",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/starter",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/starter",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/starter/inspect",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/starter/terrain",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/terrain",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/terrain/overview",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/terrain/overview/vegetation",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/terrain/overview/villages",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/terrain/updates",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/village",
+    "actions": [],
+    "lot": "H",
+    "role": "read"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/bootstrap",
+    "actions": [],
+    "lot": "B",
+    "role": "Initial coherent capture with pre-H legacy economy wakeup"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/buildings",
+    "actions": [],
+    "lot": "B",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/discover-supplies",
+    "actions": [],
+    "lot": "G",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/expansions",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/harvest",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/upgrade",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/commands/receipts/read",
+    "actions": [],
+    "lot": "B",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes",
+    "actions": [],
+    "lot": "G",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/events",
+    "actions": [],
+    "lot": "H",
+    "role": "synchronization"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/exploitation",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/exploitation/preview",
+    "actions": [],
+    "lot": "E",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/extraction-pools",
+    "actions": [
+      "people-down",
+      "people-up",
+      "sites-down",
+      "sites-up"
+    ],
+    "lot": "C",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/features/:featureId",
+    "actions": [],
+    "lot": "E",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/features/:featureId/clear",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/features/:featureId/extractions",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/garden-harvests",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/harvest-intents",
+    "actions": [],
+    "lot": "E",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/harvest-intents",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/infrastructure",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/infrastructure/preview",
+    "actions": [],
+    "lot": "D",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/leveling",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/leveling/preview",
+    "actions": [],
+    "lot": "D",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/market",
+    "actions": [],
+    "lot": "F",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/market/offers",
+    "actions": [],
+    "lot": "F",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/market/preview",
+    "actions": [],
+    "lot": "F",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/market/trade-preview",
+    "actions": [],
+    "lot": "F",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/market/trades",
+    "actions": [
+      "accept",
+      "cancel",
+      "oracle",
+      "publish"
+    ],
+    "lot": "F",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/observation/camera",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/observation/sources",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/observation/status",
+    "actions": [],
+    "lot": "H",
+    "role": "observation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/population/feed",
+    "actions": [],
+    "lot": "C",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/population/gestures",
+    "actions": [
+      "feed",
+      "release",
+      "rest"
+    ],
+    "lot": "C",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/population/rest",
+    "actions": [],
+    "lot": "C",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/processing",
+    "actions": [
+      "cancel",
+      "pause",
+      "resume",
+      "start"
+    ],
+    "lot": "B",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/processing/preview",
+    "actions": [],
+    "lot": "B",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/science",
+    "actions": [
+      "explore",
+      "pause",
+      "recall",
+      "research",
+      "resume",
+      "survey",
+      "train"
+    ],
+    "lot": "G",
+    "role": "mutation"
+  },
+  {
+    "method": "GET",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/science/expeditions",
+    "actions": [],
+    "lot": "G",
+    "role": "read"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/starter",
+    "actions": [],
+    "lot": "H",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/sync/read",
+    "actions": [],
+    "lot": "B",
+    "role": "Read-only targeted synchronization"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/sync/stream",
+    "actions": [],
+    "lot": "B",
+    "role": "Read-only targeted SSE subscription"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/terraform",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/worksites",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/worksites/:worksiteId",
+    "actions": [
+      "pause",
+      "resume",
+      "set-cap",
+      "stop"
+    ],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/worksites/preview",
+    "actions": [],
+    "lot": "E",
+    "role": "read"
+  }
+]

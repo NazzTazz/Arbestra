@@ -35,6 +35,23 @@ let worldId=randomUUID(),villageId=randomUUID(),hallId=randomUUID(),houseId=rand
 const read = () => readVillageProjection(db, accountId, slug, villageId);
 const revision = async () => (await villageSyncRevision(db, worldId)).revision;
 
+it('reads grouped command receipts over HTTP without replaying commands or returning private request payloads', async () => {
+  const commandId = randomUUID(), orderId = randomUUID();
+  const commandTime = new Date('2026-10-21T12:00:00Z');
+  await db.insertInto('processingCommandReceipts').values({ worldId, villageId, commandId, orderId, commandTime,
+    request: JSON.stringify({ action: 'pause', commandId, orderId }) }).execute();
+  const send = (payload: Record<string, unknown>, target = villageId) => app.inject({ method: 'POST',
+    url: `/api/worlds/${slug}/villages/${target}/commands/receipts/read`, cookies: { arbestra_session: token }, payload });
+  const response = await send({ commands: [{ family: 'processing', commandId }, { family: 'processing', commandId: randomUUID() }] });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual({ worldId, villageId, receipts: [{ family: 'processing', commandId,
+    status: 'applied', commandTime: commandTime.toISOString(), result: { orderId } }] });
+  expect((await db.selectFrom('buildings').select('status').where('id', '=', houseId).executeTakeFirstOrThrow()).status).toBe('under-construction');
+  expect((await send({ commands: Array.from({ length: 33 }, () => ({ family: 'processing', commandId })) })).statusCode).toBe(400);
+  expect((await send({ commands: [{ family: 'processing', commandId, injected: true }] })).statusCode).toBe(400);
+  expect((await send({ commands: [{ family: 'processing', commandId }] }, randomUUID())).statusCode).toBe(404);
+});
+
 beforeAll(async () => {
   await migrateToLatest(url);
   await db.insertInto('accounts').values({ id: accountId, email: accountId + '@sync.test', passwordHash: 'fixture' }).execute();

@@ -23,9 +23,12 @@ export function worksiteTargetDistance(target: TravelCell, origin: TravelCell, w
     + wrappedDelta(target.cellY, origin.cellY, world.heightCells) ** 2;
 }
 
-export async function readWorksites(tx: Transaction<Database>, worldId: string, villageId: string,extractions?:Awaited<ReturnType<typeof readExtractions>>): Promise<ExtractionWorksite[]> {
-  const rows = await tx.selectFrom('extractionWorksites').selectAll().where('worldId', '=', worldId)
-    .where('villageId', '=', villageId).orderBy('createdAt', 'desc').limit(32).execute();
+export async function readWorksites(tx: Transaction<Database>, worldId: string, villageId: string,extractions?:Awaited<ReturnType<typeof readExtractions>>,selected?:readonly string[]): Promise<ExtractionWorksite[]> {
+  if(selected?.length===0)return [];
+  if(selected&&selected.length>1024)throw new RangeError('Too many worksite ids');
+  const query = tx.selectFrom('extractionWorksites').selectAll().where('worldId', '=', worldId)
+    .where('villageId', '=', villageId).orderBy('createdAt', 'desc');
+  const rows = await (selected?query.where('id','in',selected):query.limit(32)).execute();
   if(!rows.length)return [];
   const ids=rows.map(r=>r.id),[targets,active]=await Promise.all([
     tx.selectFrom('extractionWorksiteTargets').innerJoin('resourceDeposits',join=>join

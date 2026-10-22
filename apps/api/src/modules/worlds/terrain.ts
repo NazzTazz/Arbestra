@@ -4,7 +4,7 @@ import {rc1ResourceGroups} from '../onboarding/rc1-field.js';
 import {readRc1Ground,rc1FeatureGeometry} from './rc1-ground.js';
 import {readRc1Source} from './rc1-source.js';
 import {naturalFeaturesQuery} from './natural-features.js';
-import { sql, type Kysely } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 import type { TerrainResponse, TerrainUpdatesResponse } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -41,9 +41,18 @@ type TerrainReadResponse = { world: TerrainResponse['world']; chunks: Array<Terr
 
 async function readTerrain(db: Kysely<Database>, accountId: string, slug: string, raw: string, includeGround: boolean, preview: boolean, preparation=false, mutableRc1Only=false): Promise<TerrainReadResponse> {
   return devTime('terrain', async () => {
-  const requested = parseTerrainChunks(raw);
   return db.transaction().setIsolationLevel('repeatable read').execute(async (tx) => {
     await sql`set transaction read only`.execute(tx);
+    return readTerrainProjection(tx, accountId, slug, raw, includeGround, preview, preparation, mutableRc1Only);
+  });
+  });
+}
+
+/** The caller supplies the coherent read-only transaction, allowing journal,
+ * chunk counters and terrain entities to share one MVCC capture. */
+export async function readTerrainProjection(tx: Transaction<Database>, accountId: string, slug: string, raw: string,
+  includeGround: boolean, preview=false, preparation=false, mutableRc1Only=false): Promise<TerrainReadResponse> {
+    const requested = parseTerrainChunks(raw);
     const world = preparation?await tx.selectFrom('worlds').select(['id','generationVersion','generationStatus','terrainModel','widthCells','heightCells','chunkSize']).where('slug','=',slug).where('generationVersion','=',3).where('isOpen','=',true).executeTakeFirst():await tx.selectFrom('worlds').innerJoin('villages', 'villages.worldId', 'worlds.id')
       .innerJoin('worldMemberships', (join) => join.onRef('worldMemberships.worldId', '=', 'worlds.id').on('worldMemberships.accountId', '=', accountId))
       .select(['worlds.id', 'worlds.generationVersion', 'worlds.generationStatus', 'worlds.terrainModel', 'worlds.widthCells', 'worlds.heightCells', 'worlds.chunkSize'])
@@ -133,6 +142,4 @@ async function readTerrain(db: Kysely<Database>, accountId: string, slug: string
               state: f.cleared || remainingAmount === 0 ? 'depleted' as const : 'available' as const, revision: safeAmount(f.revision!), updatedAt: f.updatedAt!.toISOString() } }] as const;
         })).values()] };
     }) }));
-  });
-  });
 }

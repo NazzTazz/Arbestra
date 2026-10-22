@@ -11,6 +11,7 @@ import { operationsFor } from './modules/operations/telemetry.js';
 import { observeScheduler } from './modules/operations/scheduler-observer.js';
 import { SCIENCE_WAKE_TASK } from './modules/science/service.js';
 import { wakeScience } from './modules/science/worker.js';
+import { ECONOMY_CATCHUP_TASK, advanceEconomyCatchup } from './modules/villages/economy-catchup.js';
 import { COMPLETE_PROCESSING_TASK } from './modules/villages/processing.js';
 import { completeProcessing } from './modules/villages/complete-construction.js';
 import { COMPLETE_MARKET_TASK } from './modules/villages/market.js';
@@ -25,7 +26,7 @@ const app = await buildApp(config, db);
 const operations = operationsFor(app);
 const stopWorker = startScheduledTaskWorker(
   db,
-  { [COMPLETE_LEVELING_TASK]:completeLeveling, [TRADE_WAKE_TASK]:wakeTrade, [POPULATION_ARRIVAL_TASK]:arrivePopulation, [HARVEST_SUBMISSION_TASK]:processHarvestSubmission, [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
+  { [ECONOMY_CATCHUP_TASK]:advanceEconomyCatchup, [COMPLETE_LEVELING_TASK]:completeLeveling, [TRADE_WAKE_TASK]:wakeTrade, [POPULATION_ARRIVAL_TASK]:arrivePopulation, [HARVEST_SUBMISSION_TASK]:processHarvestSubmission, [COMPLETE_MARKET_TASK]: deliverMarket, [COMPLETE_PROCESSING_TASK]: completeProcessing, [SCIENCE_WAKE_TASK]: wakeScience, [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion, [COMPLETE_GARDEN_HARVEST_TASK]: completeGardenHarvest, [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction, [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite },
   config.scheduledTaskPollIntervalMs,
   () => app.log.error({ code: 'SCHEDULER_FAILED' }, 'Scheduled task worker failed'),
   operations ? observeScheduler(operations) : undefined,

@@ -7,6 +7,7 @@ import {ExpeditionReceiptSchema,type ExpeditionIntent} from '@arbestra/contracts
 import {HarvestIntentSchema,HarvestReceiptSchema,type HarvestIntent} from '@arbestra/contracts';
 import {receiveHarvestIntent,readHarvestReceipts} from './harvest-submissions.js';
 import { Type } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import { ExtractionPoolCommandSchema, PopulationGestureSchema, HudWorkforceConfirmationSchema, type ExtractionPoolCommand, type PopulationGesture } from '@arbestra/contracts';
 import { commandHudWorkforce } from './hud-workforce.js';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
@@ -15,6 +16,11 @@ import {InfrastructureRequestSchema,type InfrastructureRequest,InfrastructurePre
 import {infrastructureCommand,infrastructurePreview} from './infrastructure.js';
 import { ProcessingCommandSchema, ProcessingPreviewSchema, type ProcessingCommand } from '@arbestra/contracts';
 import { commandVillageProcessing, previewVillageProcessing } from './service.js';
+import { CommandReceiptReadSchema, CommandReceiptReadResponseSchema, type CommandReceiptRead } from '@arbestra/contracts';
+import { readCommandReceipts } from './command-receipts.js';
+import {ProcessingConfirmationV2Schema} from '@arbestra/contracts';
+import {commandProcessingV2} from './processing-v2.js';
+import {assertSyncV2Available} from './sync-v2-routes.js';
 import { MarketRequestSchema, MarketCommandSchema, MarketPreviewSchema, type MarketRequest, type MarketCommand } from '@arbestra/contracts';
 import { commandVillageMarket, previewVillageMarket } from './service.js';
 import { TradeCommandSchema, TradePageSchema, TradePreviewSchema, type TradeCommand } from '@arbestra/contracts';
@@ -59,6 +65,10 @@ const VillageSyncHeadersSchema = Type.Object({
   'x-village-revision': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
   'x-village-server-time': Type.Optional(Type.String({ format: 'date-time', maxLength: 48 })),
 }, { additionalProperties: true });
+const ProcessingHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,
+  'x-arbestra-protocol':Type.Optional(Type.Literal('2')),
+  'x-arbestra-generation':Type.Optional(Type.String({pattern:'^(0|[1-9][0-9]{0,15})$'})),
+},{additionalProperties:true});
 const InfrastructureHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-infrastructure-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
 const ConstructionHeadersSchema=Type.Object({...VillageSyncHeadersSchema.properties,'x-construction-confirmation':Type.Optional(Type.Literal('1'))},{additionalProperties:true});
 const ConstructionMutationResponseSchema=Type.Union([ConstructionConfirmationSchema,VillageMutationResponseSchema]);
@@ -199,11 +209,33 @@ export async function registerVillageRoutes(
     observationCommitted(request);
     return commandResponse(reply, account.id, worldSlug, result, options.base);
   });
+  app.post('/api/worlds/:worldSlug/villages/:villageId/commands/receipts/read', {
+    bodyLimit: 16 * 1024,
+    // Fastify's historical AJV configuration removes additional fields.
+    // This bounded protocol rejects them before that coercion can occur.
+    preValidation: async request => {
+      if (!Value.Check(CommandReceiptReadSchema, request.body))
+        throw new HttpError(400, 'INVALID_RECEIPT_SELECTION', 'Sélection de reçus invalide.');
+    },
+    schema: { params: VillageParametersSchema, body: CommandReceiptReadSchema, response: { 200: CommandReceiptReadResponseSchema } },
+  }, async request => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    return readCommandReceipts(db, account.id, worldSlug, villageId, request.body as CommandReceiptRead);
+  });
   app.post('/api/worlds/:worldSlug/villages/:villageId/processing', {
-    schema: { params: VillageParametersSchema, headers: VillageSyncHeadersSchema, body: ProcessingCommandSchema, response: { 200: VillageMutationResponseSchema } },
+    schema: { params: VillageParametersSchema, headers: ProcessingHeadersSchema, body: ProcessingCommandSchema,
+      response: { 200: Type.Union([ProcessingConfirmationV2Schema,VillageMutationResponseSchema]) } },
   }, async (request, reply) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    if(request.headers['x-arbestra-protocol']==='2'){
+      await assertSyncV2Available(db);
+      const generation=Number(request.headers['x-arbestra-generation']??'0');
+      if(!Number.isSafeInteger(generation))throw new HttpError(400,'INVALID_SYNC_GENERATION','Génération invalide.');
+      const result=await commandProcessingV2(db,account.id,worldSlug,villageId,request.body as ProcessingCommand,generation);
+      observationCommitted(request);return result;
+    }
     const options = villageReplyOptions(request.headers);
     const result = await commandVillageProcessing(db, account.id, worldSlug, villageId, request.body as ProcessingCommand, options.replyMode);
     observationCommitted(request);

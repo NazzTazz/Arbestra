@@ -58,3 +58,8 @@ export * from './observation.js';
 export * from './observation-camera.js';
 export * from './terrain-vertices.js';
 export * from './terrain-conversion.js';
+export * from './command-receipts.js';
+export * from './sse-reader.js';
+export * from './sync-v2.js';
+export * from './sync-v2-spatial.js';
+export * from './sync-v2-shared.js';

@@ -111,13 +111,27 @@ export async function readTradeOffers(tx: Transaction<Database>, ctx: TradeConte
   return { offers: rows.slice(0, 50).map(r => ({ ...r, createdAt: r.createdAt.toISOString(), oracleAt: r.oracleAt.toISOString() })),
     nextCursor: rows.length > 50 ? rows[49]!.id : null };
 }
-export async function ownTradeOffers(tx: Transaction<Database>, ctx: TradeContext): Promise<TradeOffer[]> {
-  const rows = await tx.selectFrom('tradeOffers as t').innerJoin('villages as v', j => j.onRef('v.worldId', '=', 't.worldId').onRef('v.id', '=', 't.villageId'))
+export async function ownTradeOffers(tx: Transaction<Database>, ctx: TradeContext, selected?:readonly string[]): Promise<TradeOffer[]> {
+  if(selected?.length===0)return [];
+  if(selected&&selected.length>1024)throw new RangeError('Too many trade offer ids');
+  const query = tx.selectFrom('tradeOffers as t').innerJoin('villages as v', j => j.onRef('v.worldId', '=', 't.worldId').onRef('v.id', '=', 't.villageId'))
     .selectAll('t').select('v.name as villageName').where('t.worldId', '=', ctx.worldId).where('t.villageId', '=', ctx.villageId)
-    .where('t.status', '=', 'open').orderBy('t.createdAt', 'desc').execute();
+    .where('t.status', '=', 'open').orderBy('t.createdAt', 'desc');
+  const rows = await (selected?query.where('t.id','in',selected):query).execute();
   return rows.map(r => ({ ...r, createdAt: r.createdAt.toISOString(), oracleAt: r.oracleAt.toISOString() }));
 }
 export async function tradeJourneys(tx: Transaction<Database>, ctx: TradeContext): Promise<MarketJourney[]> {
   const rows = await tx.selectFrom('tradeJourneys').selectAll().where('worldId', '=', ctx.worldId).where('returnsAt', '>', ctx.through).execute();
   return rows.map(r => ({ ...r, startedAt: r.startedAt.toISOString(), arrivesAt: r.arrivesAt.toISOString(), returnsAt: r.returnsAt.toISOString() }));
+}
+
+/** Private V2 representation: only the sender and destination receive these
+ * journeys. Expiry remains based on the persisted deadline, not a read write. */
+export async function readPrivateTradeJourneys(tx: Transaction<Database>, ctx: TradeContext, ids:readonly string[]): Promise<MarketJourney[]> {
+  if(!ids.length)return [];
+  if(ids.length>1024)throw new RangeError('Too many journey ids');
+  const rows=await tx.selectFrom('tradeJourneys').selectAll().where('worldId','=',ctx.worldId).where('id','in',ids)
+    .where(eb=>eb.or([eb('villageId','=',ctx.villageId),eb('destinationVillageId','=',ctx.villageId)])).orderBy('id').execute();
+  return rows.map(row=>({id:row.id,villageId:row.villageId,destinationVillageId:row.destinationVillageId,
+    workerCount:row.workerCount,path:row.path,startedAt:row.startedAt.toISOString(),arrivesAt:row.arrivesAt.toISOString(),returnsAt:row.returnsAt.toISOString()}));
 }

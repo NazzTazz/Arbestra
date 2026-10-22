@@ -191,8 +191,11 @@ export async function completeLevelingAt(tx: Transaction<Database>, ctx: Village
   await releaseWorkers(tx, workers, job.workerCount, at);
   await tx.updateTable('levelingJobs').set({ completedAt: at }).where('worldId', '=', ctx.worldId).where('villageId', '=', ctx.villageId).where('id', '=', id).execute();
 }
-export async function levelingSnapshot(tx: Kysely<Database>, ctx: VillageEconomy): Promise<LevelingJob[]> {
-  const jobs = await tx.selectFrom('levelingJobs').selectAll().where('worldId', '=', ctx.worldId).where('villageId', '=', ctx.villageId).where('completedAt', 'is', null).orderBy('id').execute();
+export async function levelingSnapshot(tx: Kysely<Database>, ctx: VillageEconomy, selected?:readonly string[]): Promise<LevelingJob[]> {
+  if(selected?.length===0)return [];
+  if(selected&&selected.length>1024)throw new RangeError('Too many leveling ids');
+  const query = tx.selectFrom('levelingJobs').selectAll().where('worldId', '=', ctx.worldId).where('villageId', '=', ctx.villageId).where('completedAt', 'is', null).orderBy('id');
+  const jobs = await (selected?query.where('id','in',selected):query).execute();
   return jobs.map(j => ({ id: j.id, featureId: j.featureId, buildingType: j.request.buildingType, cells: j.quote.affectedCells??j.quote.cells, height: j.quote.height,
     workerCount: j.workerCount, path: j.path, transportMs: j.quote.transportMs, startedAt: j.startedAt.toISOString(), completesAt: j.completesAt.toISOString() }));
 }

@@ -1,5 +1,7 @@
 # Synchronisation du village
 
+**Évolution proposée, non implémentée :** la [spec de transition complète](../SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md) définit des confirmations communes, un journal de changements ciblés et une reprise par flux, puis le retrait du protocole décrit ici. Elle couvre aussi les travailleurs asynchrones, les données partagées et la compatibilité client. Ce document continue de décrire le fonctionnement actuellement livré.
+
 11 octobre 2026 — implémentée et intégrée ; validation produit distincte. Base relue : `adda2ed0367c6d99bcc98cb60b118c49e26a68a6`. Les preuves et limites sont dans la [contre-recette](../CONTRE-RECETTE-SYNCHRONISATION-VILLAGE-2026-10-11.md).
 
 Extension HTTP construction du 11 octobre, base `06a460e31ab5b1ed3817b3bf98a67ac297ab821d` : [preuves et mesures](../IMPLEMENTATION-CONSTRUCTION-INCREMENTALE-2026-10-11.md).

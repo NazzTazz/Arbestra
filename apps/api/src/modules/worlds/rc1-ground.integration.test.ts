@@ -10,6 +10,8 @@ import {testDatabaseUrl} from '../../database/test-environment.js';
 import {RC1_CANONICAL_CHECKSUM} from '../onboarding/spawn-compute-protocol.js';
 import {readRc1Ground} from './rc1-ground.js';
 import {getTerrain,getTerrainUpdates} from './terrain.js';
+import {readSpatialChanges} from '../villages/sync-v2-spatial-readers.js';
+import {readTerrainProjection} from './terrain.js';
 
 const url = testDatabaseUrl(), target = new URL(url);
 if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test') throw Error('Unexpected RC1 cache test target');
@@ -152,4 +154,43 @@ describe('RC1 verified source cache on isolated worlds', () => {
       throw rollback;
     })).rejects.toBe(rollback);
   });
+  it('keeps selected V2 feature elevations equal to terrain after local vertex edits',async()=>{
+    const rollback=Error('V2_GEOMETRY_ROLLBACK'),worldId=worlds[0]!,tree=artifact.forest!.trees[0]!;
+    await expect(db.transaction().execute(async tx=>{
+      await tx.updateTable('worlds').set({terrainModel:'vertices'}).where('id','=',worldId).execute();
+      await tx.updateTable('worldRc1Resources').set({removedIndices:sql`'[]'::jsonb`}).where('worldId','=',worldId).where('featureId','=',featureId).execute();
+      await tx.insertInto('worldCellOccupancies').values({worldId,cellX:140,cellY:20,featureId,role:'body'}).execute();
+      const x=Math.floor(tree.x+.5),y=Math.floor(tree.y+.5);
+      for(const dx of [0,1])for(const dy of [0,1])await tx.insertInto('worldTerrainVertices').values({worldId,
+        vertexX:((x+dx)%512+512)%512,vertexY:((y+dy)%256+256)%256,height:123}).execute();
+      const historical=await readTerrainProjection(tx,accountId,'rc1-cache-'+worldId,'4,0',true);
+      const expected=historical.chunks[0]!.features.find(feature=>feature.id===featureId)!.rc1!;
+      expect(expected.trees[0]?.elevation).toBe(123);
+      queries.length=0;
+      const changes=await readSpatialChanges(tx,{worldId,worldSlug:'rc1-cache-'+worldId,accountId,
+        widthCells:512,heightCells:256,chunkSize:32,generationVersion:3,chunkX:4,chunkY:0},[{component:'spatialFeatures',key:featureId}]);
+      expect(changes).toMatchObject([{component:'spatialFeatures',upsert:[{id:featureId,locations:[{rc1:expected}]}]}]);
+      expect(queries.some(query=>query.includes('string_agg')||query.includes('left join lateral')&&query.includes('"world_rc1_resources"'))).toBe(false);
+      throw rollback;
+    })).rejects.toBe(rollback);
+  },60000);
+
+  it.each(['legacy','vertices'] as const)('reads selected V2 ground at the torus seam without world geometry aggregation (%s)',async model=>{
+    const rollback=Error('V2_GROUND_ROLLBACK'),worldId=worlds[0]!;
+    await expect(db.transaction().execute(async tx=>{
+      if(model==='vertices'){
+        await tx.updateTable('worlds').set({terrainModel:'vertices'}).where('id','=',worldId).execute();
+        await tx.insertInto('worldTerrainVertices').values({worldId,vertexX:0,vertexY:0,height:123})
+          .onConflict(c=>c.columns(['worldId','vertexX','vertexY']).doUpdateSet({height:123})).execute();
+      }
+      const historical=await readTerrainProjection(tx,accountId,'rc1-cache-'+worldId,'15,7',true);
+      const {features:_features,occupiedCells:_occupied,...expected}=historical.chunks[0]!;void _features;void _occupied;
+      queries.length=0;
+      const changes=await readSpatialChanges(tx,{worldId,worldSlug:'rc1-cache-'+worldId,accountId,
+        widthCells:512,heightCells:256,chunkSize:32,generationVersion:3,chunkX:15,chunkY:7},[{component:'spatialGround',key:'*'}]);
+      expect(changes).toEqual([{component:'spatialGround',upsert:[{id:'*',data:expected}],remove:[]}]);
+      expect(queries.some(query=>query.includes('string_agg')||query.includes('"world_rc1_resources"')||query.includes('"world_cell_occupancies"'))).toBe(false);
+      throw rollback;
+    })).rejects.toBe(rollback);
+  },120000);
 });

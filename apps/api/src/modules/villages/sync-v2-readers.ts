@@ -1,0 +1,227 @@
+import { sql, type Transaction } from 'kysely';
+import { SYNC_V2_PRIVATE_COMPONENTS, type SyncV2Change } from '@arbestra/contracts';
+import type { Database } from '../../database/schema.js';
+import { projectVillageResources, projectGardenPlots } from './economy.js';
+import { readProcessingOrders } from './processing.js';
+import { readCohortProjection, readPopulationProjection } from '../population/projection.js';
+import { housingCapacity } from '../population/housing.js';
+import type { VillageEconomy } from './reconcile-economy.js';
+import { readExtractionPools } from '../deposits/extraction-pools.js';
+import { readExtractions } from '../deposits/stone-extractions.js';
+import { readWorksites } from '../deposits/worksites.js';
+import { readExploitationOrders } from './exploitation-budget.js';
+import { levelingSnapshot } from './leveling.js';
+import { ownTradeOffers, readPrivateTradeJourneys } from './trade-economy.js';
+
+export interface SyncEntityReference { component: string; key: string }
+export const privateReaderComponents = new Set<SyncV2Change['component']>([
+  'resources', 'processingOrders', 'cohorts', 'populationSummary', 'restHousing',
+  'buildings', 'accomplishments', 'extractionPools', 'gardenPlots', 'gardenHarvests', 'buildingExpansions',
+  'extractions', 'worksites', 'exploitationOrders', 'levelingJobs',
+  'marketExchanges', 'tradeOffers', 'tradeJourneys', 'scienceActivities', 'scienceContributions',
+  'identity', 'infrastructure', 'installation',
+]);
+
+/** Enumeration is reserved for an explicit scope snapshot. Ordinary deltas
+ * receive their keys from the durable journal and never enter this path. */
+export async function readPrivateScopeSnapshot(tx: Transaction<Database>, context: VillageEconomy): Promise<SyncV2Change[]> {
+  const { worldId, villageId } = context;
+  const sources = [
+    ['resources', 'village_resources', 'resource_code'], ['processingOrders', 'processing_orders', 'id'],
+    ['cohorts', 'population_cohorts', 'id'], ['restHousing', 'buildings', 'id'], ['buildings', 'buildings', 'id'],
+    ['accomplishments', 'village_accomplishments', 'code'], ['gardenHarvests', 'garden_harvests', 'id'],
+    ['buildingExpansions', 'building_expansions', 'id'], ['extractions', 'deposit_extractions', 'id'],
+    ['worksites', 'extraction_worksites', 'id'], ['exploitationOrders', 'exploitation_orders', 'id'],
+    ['levelingJobs', 'leveling_jobs', 'id'], ['marketExchanges', 'market_exchanges', 'id'],
+    ['tradeOffers', 'trade_offers', 'id'], ['scienceActivities', 'science_activities', 'id'],
+    ['scienceContributions', 'science_contributions', 'building_id'],
+  ] as const;
+  const queries = sources.map(([component, table, column]) => sql`
+    select ${sql.lit(component)}::text as component, ${sql.id(column)}::text as key from ${sql.id(table)}
+    where world_id=${worldId} and village_id=${villageId}`);
+  queries.push(sql`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
+    from garden_plots where world_id=${worldId} and village_id=${villageId}`);
+  queries.push(sql`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
+    where world_id=${worldId} and (village_id=${villageId} or destination_village_id=${villageId})`);
+  const rows = (await sql<SyncEntityReference>`${sql.join(queries, sql` union all `)} limit 4097`.execute(tx)).rows;
+  const references: SyncEntityReference[] = [...rows,
+    { component: 'identity', key: villageId }, { component: 'populationSummary', key: '*' },
+    { component: 'infrastructure', key: '*' }, { component: 'installation', key: '*' },
+    { component: 'extractionPools', key: 'wood' }, { component: 'extractionPools', key: 'stone' },
+  ];
+  if (references.length > 4096) throw new RangeError('Private scope snapshot requires pagination');
+  const changes = await readRegisteredPrivateChanges(tx, context, references);
+  for (const component of SYNC_V2_PRIVATE_COMPONENTS) {
+    if (!changes.some(change => change.component === component)) changes.push({ component, upsert: [], remove: [] });
+  }
+  // A snapshot replaces the entire base; keys of terminal entities need not
+  // survive as tombstones after that replacement.
+  return changes.map(change => ({ ...change, remove: [] }));
+}
+
+/** Called inside the same read-only MVCC capture as the journal/counters.
+ * Unsupported components fail closed: a partial registry must never silently
+ * turn an incomplete projection into a complete private-stream delta. */
+export async function readRegisteredPrivateChanges(tx: Transaction<Database>, context: VillageEconomy,
+  references: readonly SyncEntityReference[]): Promise<SyncV2Change[]> {
+  const selections = new Map<SyncV2Change['component'], Set<string>>();
+  if (references.length > 4096) throw new RangeError('Synchronization selection too large');
+  for (const reference of references) {
+    if (!privateReaderComponents.has(reference.component as SyncV2Change['component']))
+      throw new Error(`Unregistered private synchronization component: ${reference.component}`);
+    const component = reference.component as SyncV2Change['component'];
+    const ids = selections.get(component) ?? new Set<string>();
+    ids.add(reference.key); selections.set(component, ids);
+  }
+  const changes: SyncV2Change[] = [];
+  const { worldId, villageId, through } = context;
+  for (const [component, selected] of selections) {
+    const ids = [...selected].sort();
+    if (component === 'resources') {
+      const rows = await projectVillageResources(tx, worldId, villageId, through, ids);
+      if (rows.some(row => !Number.isSafeInteger(row.amount))) throw new RangeError('Unsafe resource amount');
+      changes.push({ component, upsert: rows.map(row => ({ ...row, productionUpdatedAt: row.productionUpdatedAt?.toISOString() ?? null })),
+        remove: ids.filter(id => !rows.some(row => row.code === id)) });
+    } else if (component === 'processingOrders') {
+      // A completion is an authoritative terminal order, not a deletion.
+      // Presentation may retain its recent history without confusing a lost
+      // entity with a successfully finished command.
+      const rows = await readProcessingOrders(tx, context, ids, true);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'cohorts') {
+      const rows = await readCohortProjection(tx, worldId, villageId, through, ids);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'populationSummary') {
+      if (ids.length !== 1 || ids[0] !== '*') throw Error('Invalid population summary key');
+      const { cohorts: _cohorts, restHousing: _housing, ...summary } = await readPopulationProjection(tx, worldId, villageId, through);
+      void _cohorts; void _housing;
+      changes.push({ component, upsert: [{ id: '*', ...summary }], remove: [] });
+    } else if (component === 'restHousing') {
+      if (ids.length > 1024) throw new RangeError('Too many housing ids');
+      const [homes, cohorts] = await Promise.all([
+        tx.selectFrom('buildings').select(['id', 'buildingType', 'level']).where('worldId', '=', worldId)
+          .where('villageId', '=', villageId).where('id', 'in', ids)
+          .where(eb => eb.or([eb('status', '=', 'completed'), eb('targetLevel', 'is not', null)])).execute(),
+        tx.selectFrom('populationCohorts').select(['restBuildingId', 'memberCount']).where('worldId', '=', worldId)
+          .where('villageId', '=', villageId).where('restBuildingId', 'in', ids).execute(),
+      ]);
+      const rows = homes.filter(home => housingCapacity(home.buildingType, home.level) > 0).map(home => ({ buildingId: home.id,
+        capacity: housingCapacity(home.buildingType, home.level),
+        restingCount: cohorts.filter(cohort => cohort.restBuildingId === home.id).reduce((sum, cohort) => sum + cohort.memberCount, 0),
+      }));
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.buildingId === id)) });
+    } else if (component === 'buildings') {
+      if (ids.length > 1024) throw new RangeError('Too many building ids');
+      const rows = await tx.selectFrom('buildings').selectAll('buildings')
+        .select(sql<boolean>`exists(select 1 from building_hidden_supplies s
+          where s.world_id=buildings.world_id and s.village_id=buildings.village_id and s.building_id=buildings.id and s.claimed_at is null)`.as('hiddenSuppliesAvailable'))
+        .where('worldId', '=', worldId).where('villageId', '=', villageId).where('id', 'in', ids).orderBy('id').execute();
+      changes.push({ component, upsert: rows.map(row => ({ id: row.id, type: row.buildingType, level: row.level,
+        targetLevel: row.targetLevel, status: row.status, constructionStartedAt: row.constructionStartedAt?.toISOString() ?? null,
+        constructionCompletesAt: row.constructionCompletesAt?.toISOString() ?? null, completedAt: row.completedAt?.toISOString() ?? null,
+        hiddenSuppliesAvailable: row.hiddenSuppliesAvailable, visualLayout: row.visualLayout,
+        quarterTurns: row.visualLayout?.quarterTurns ?? row.quarterTurns,
+      })), remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'accomplishments') {
+      if (ids.length > 128) throw new RangeError('Too many accomplishment codes');
+      const rows = await tx.selectFrom('villageAccomplishments').select(['code', 'completedAt']).where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).where('code', 'in', ids).orderBy('code').execute();
+      changes.push({ component, upsert: rows.map(row => ({ code: row.code, completedAt: row.completedAt.toISOString() })),
+        remove: ids.filter(id => !rows.some(row => row.code === id)) });
+    } else if (component === 'extractionPools') {
+      if (ids.some(id => id !== 'wood' && id !== 'stone')) throw Error('Invalid extraction pool key');
+      changes.push({ component, upsert: await readExtractionPools(tx, worldId, villageId, ids as Array<'wood' | 'stone'>), remove: [] });
+    } else if (component === 'extractions') {
+      const rows = (await readExtractions(tx, worldId, villageId, undefined, ids)).map(row => row.extraction);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'worksites') {
+      const rows = await readWorksites(tx, worldId, villageId, undefined, ids);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'exploitationOrders') {
+      const rows = await readExploitationOrders(tx, context, undefined, ids);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'levelingJobs') {
+      const rows = await levelingSnapshot(tx, context, ids);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'tradeOffers') {
+      const rows = await ownTradeOffers(tx, context, ids);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'tradeJourneys') {
+      const rows = await readPrivateTradeJourneys(tx, context, ids);
+      changes.push({ component, upsert: rows, remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'marketExchanges') {
+      if (ids.length > 1024) throw new RangeError('Too many exchange ids');
+      const rows = await tx.selectFrom('marketExchanges').selectAll().where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).where('id', 'in', ids).orderBy('id').execute();
+      changes.push({ component, upsert: rows.map(row => ({ id: row.id, offeredResource: row.offeredResource,
+        requestedResource: row.requestedResource, offeredAmount: Number(row.offeredAmount), receivedAmount: Number(row.receivedAmount),
+        startedAt: row.startedAt.toISOString(), completesAt: row.completesAt.toISOString(), completedAt: row.completedAt?.toISOString() ?? null,
+      })), remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'scienceActivities') {
+      if (ids.length > 1024) throw new RangeError('Too many science activity ids');
+      const rows = await tx.selectFrom('scienceActivities').selectAll().where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).where('id', 'in', ids).where('status', '=', 'in-progress').orderBy('id').execute();
+      changes.push({ component, upsert: rows.map(row => ({ id: row.id, villageId: row.villageId, buildingId: row.buildingId,
+        kind: row.kind, programCode: row.programCode, workerCount: row.workerCount, startedAt: row.startedAt.toISOString(),
+        completesAt: row.completesAt.toISOString(), path: row.pathCells, target: row.surveyCells[0] ?? null,
+      })), remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'scienceContributions') {
+      if (ids.length > 1024) throw new RangeError('Too many science contribution ids');
+      const rows = await tx.selectFrom('scienceContributions').selectAll().where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).where('buildingId', 'in', ids).orderBy('buildingId').execute();
+      changes.push({ component, upsert: rows.map(row => ({ id: row.buildingId, programCode: row.programCode, workerCap: row.workerCap,
+        requestedAt: row.requestedAt.toISOString(), lastStartedAt: row.lastStartedAt?.toISOString() ?? null,
+      })), remove: ids.filter(id => !rows.some(row => row.buildingId === id)) });
+    } else if (component === 'identity') {
+      if (ids.length !== 1 || ids[0] !== villageId) throw Error('Invalid village identity key');
+      const row = await tx.selectFrom('villages').select(['id', 'name', 'anchorCellX', 'anchorCellY'])
+        .where('worldId', '=', worldId).where('id', '=', villageId).executeTakeFirst();
+      changes.push({ component, upsert: row ? [row] : [], remove: row ? [] : ids });
+    } else if (component === 'infrastructure') {
+      if (ids.length !== 1 || ids[0] !== '*') throw Error('Invalid infrastructure key');
+      const row = await tx.selectFrom('villageInfrastructure').select('plan').where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).executeTakeFirst();
+      changes.push({ component, upsert: row ? [{ id: '*', plan: row.plan }] : [], remove: row ? [] : ['*'] });
+    } else if (component === 'installation') {
+      if (ids.length !== 1 || ids[0] !== '*') throw Error('Invalid installation key');
+      const row = await tx.selectFrom('villageStarterInstallations').selectAll().where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).executeTakeFirst();
+      changes.push({ component, upsert: row ? [{ id: '*', villageId, kit: row.kit, remaining: row.remaining,
+        anchor: { x: row.anchorX, y: row.anchorY }, quarterTurns: row.quarterTurns, referenceHeight: row.referenceHeight,
+      }] : [], remove: row ? [] : ['*'] });
+    } else if (component === 'gardenPlots') {
+      const cells = ids.map(id => {
+        if (!/^[0-9]+,[0-9]+$/.test(id)) throw Error('Invalid garden plot key');
+        const [cellX, cellY] = id.split(',').map(Number) as [number, number];
+        if (!Number.isSafeInteger(cellX) || !Number.isSafeInteger(cellY)) throw Error('Invalid garden plot coordinate');
+        return { cellX, cellY };
+      });
+      const rows = await projectGardenPlots(tx, worldId, villageId, through, cells);
+      const upsert = rows.map(({ resourceCode: _resource, ...row }) => {
+        void _resource;
+        return { ...row, id: `${row.cellX},${row.cellY}`, productionUpdatedAt: row.productionUpdatedAt.toISOString() };
+      });
+      changes.push({ component, upsert, remove: ids.filter(id => !upsert.some(row => row.id === id)) });
+    } else if (component === 'gardenHarvests') {
+      if (ids.length > 1024) throw new RangeError('Too many harvest ids');
+      const rows = await tx.selectFrom('gardenHarvests').selectAll().where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).where('id', 'in', ids).where('status', '=', 'in-progress').orderBy('id').execute();
+      changes.push({ component, upsert: rows.map(row => ({ id: row.id, buildingId: row.buildingId, workerCount: row.workerCount,
+        startedAt: row.startedAt.toISOString(), completesAt: row.completesAt.toISOString(), reservedCarrots: Number(row.reservedCarrots),
+        transportMs: row.transportMs, plotCellX: row.plotCellX, plotCellY: row.plotCellY,
+        path: row.pathCells ?? [], returnPath: row.returnPathCells ?? [], stops: row.stops,
+      })), remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    } else if (component === 'buildingExpansions') {
+      if (ids.length > 1024) throw new RangeError('Too many expansion ids');
+      const rows = await tx.selectFrom('buildingExpansions').selectAll().where('worldId', '=', worldId)
+        .where('villageId', '=', villageId).where('id', 'in', ids).where('status', '=', 'under-construction').orderBy('id').execute();
+      const cells = rows.length ? await tx.selectFrom('worldCellOccupancies').select(['pendingExpansionId', 'cellX', 'cellY'])
+        .where('worldId', '=', worldId).where('pendingExpansionId', 'in', rows.map(row => row.id)).orderBy('cellX').orderBy('cellY').execute() : [];
+      changes.push({ component, upsert: rows.map(row => ({ id: row.id, buildingId: row.buildingId,
+        startedAt: row.startedAt.toISOString(), completesAt: row.completesAt.toISOString(),
+        cells: cells.filter(cell => cell.pendingExpansionId === row.id).map(({ cellX, cellY }) => ({ cellX, cellY })),
+      })), remove: ids.filter(id => !rows.some(row => row.id === id)) });
+    }
+  }
+  return changes;
+}

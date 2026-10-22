@@ -106,7 +106,9 @@ export async function projectVillageResource(
 
 /** One snapshot query for the HUD, with the same numeric rounding as the
  * individual authoritative reader. No stock or production result is cached. */
-export async function projectVillageResources(transaction:Transaction<Database>,worldId:string,villageId:string,through:Date){
+export async function projectVillageResources(transaction:Transaction<Database>,worldId:string,villageId:string,through:Date,codes?:readonly string[]){
+ if(codes?.length===0)return [];
+ if(codes&&codes.length>64)throw new RangeError('Too many resource codes');
  const result=await sql<{code:string;displayName:string;iconKey:string;amount:string;productionPerHour:string;productionUpdatedAt:Date|null}>`
   select r.resource_code as code, t.display_name, t.icon_key,
    (r.amount + case when f.production_updated_at is null or f.remainder is null or p.rate=0 then 0
@@ -118,6 +120,7 @@ export async function projectVillageResources(transaction:Transaction<Database>,
   left join village_resource_flows f on f.world_id=r.world_id and f.village_id=r.village_id and f.resource_code=r.resource_code
   cross join lateral (select ${directProductionRate()} as rate) p
   where r.world_id=${worldId} and r.village_id=${villageId}
+    ${codes?sql`and r.resource_code in (${sql.join([...new Set(codes)])})`:sql``}
  `.execute(transaction);
  return result.rows.map(row=>({...row,amount:Number(row.amount),productionPerHour:Number(row.productionPerHour)}));
 }
@@ -293,7 +296,10 @@ export async function projectGardenPlot(
 }
 
 /** Same numeric projection and bound as projectGardenPlot, in one snapshot query. */
-export async function projectGardenPlots(transaction: Transaction<Database>, worldId: string, villageId: string, through: Date): Promise<ProjectedGardenPlot[]> {
+export async function projectGardenPlots(transaction: Transaction<Database>, worldId: string, villageId: string, through: Date,
+  cells?: readonly { cellX: number; cellY: number }[]): Promise<ProjectedGardenPlot[]> {
+  if(cells?.length===0)return [];
+  if(cells&&cells.length>1024)throw new RangeError('Too many garden plots');
   const { rows } = await sql<{buildingId:string;cellX:number;cellY:number;amount:string;capacity:string;productionPerHour:string;productionUpdatedAt:Date}>`
     select g.building_id, g.cell_x, g.cell_y,
       least(coalesce(p.capacity,0), g.stored_amount + floor(g.remainder + p.rate_per_hour *
@@ -303,6 +309,8 @@ export async function projectGardenPlots(transaction: Transaction<Database>, wor
     from garden_plots g join buildings b on b.world_id=g.world_id and b.id=g.building_id
     join building_level_production p on p.building_type_code=b.building_type and p.level=b.level and p.resource_code='carrot'
     where g.world_id=${worldId} and g.village_id=${villageId}
+      ${cells?sql`and (g.cell_x,g.cell_y) in (select c."cellX",c."cellY"
+        from jsonb_to_recordset(${JSON.stringify(cells)}::jsonb) as c("cellX" int,"cellY" int))`:sql``}
     order by g.cell_x,g.cell_y
   `.execute(transaction);
   return rows.map(row=>({...row,resourceCode:'carrot',amount:Number(row.amount),capacity:Number(row.capacity),productionPerHour:Number(row.productionPerHour)}));

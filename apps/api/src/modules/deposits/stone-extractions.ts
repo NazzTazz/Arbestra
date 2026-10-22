@@ -96,12 +96,15 @@ function extractionProjection(row:Selectable<Database['depositExtractions']>,dep
     transportMs: row.transportMs, path: row.pathCells ?? [] };
 }
 /** Batch projection only: no materialization, locks or cached economic data. */
-export async function readExtractions(tx:Transaction<Database>,worldId:string,villageId:string,worksiteIds?:readonly string[]):Promise<Array<{worksiteId:string|null;extraction:Extraction}>> {
+export async function readExtractions(tx:Transaction<Database>,worldId:string,villageId:string,worksiteIds?:readonly string[],extractionIds?:readonly string[]):Promise<Array<{worksiteId:string|null;extraction:Extraction}>> {
+ if(extractionIds&&!extractionIds.length)return [];
+ if(extractionIds&&extractionIds.length>1024)throw new RangeError('Too many extraction ids');
  if(worksiteIds&&!worksiteIds.length)return [];
  let query=tx.selectFrom('depositExtractions').innerJoin('resourceDeposits',j=>j.onRef('resourceDeposits.worldId','=','depositExtractions.worldId').onRef('resourceDeposits.featureId','=','depositExtractions.featureId'))
   .selectAll('depositExtractions').select(['resourceDeposits.cellX','resourceDeposits.cellY'])
   .where('depositExtractions.worldId','=',worldId).where('depositExtractions.villageId','=',villageId).where('depositExtractions.status','=','in-progress');
  if(worksiteIds)query=query.where('depositExtractions.worksiteId','in',worksiteIds);
+ if(extractionIds)query=query.where('depositExtractions.id','in',extractionIds);
  return (await query.execute()).map(row=>({worksiteId:row.worksiteId,extraction:extractionProjection(row,row)}));
 }
 

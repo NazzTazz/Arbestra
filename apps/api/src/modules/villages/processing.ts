@@ -77,12 +77,13 @@ async function startLot(tx: Transaction<Database>, ctx: Context, order: Order, s
 
 /** Caller holds the village lock; only new notifications are written here. */
 export async function commandProcessing(tx: Transaction<Database>, ctx: Context, command: ProcessingCommand) {
-  const receipt = await tx.selectFrom('processingCommandReceipts').select('request').where('worldId', '=', ctx.worldId)
+  const receipt = await tx.selectFrom('processingCommandReceipts').select(['request', 'orderId', 'commandTime']).where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId).where('commandId', '=', command.commandId).executeTakeFirst();
   if (receipt) {
     if (!isDeepStrictEqual(receipt.request, command)) throw new HttpError(409, 'COMMAND_REUSED', 'Identifiant de commande déjà utilisé.');
-    return;
+    return { orderId: receipt.orderId, commandTime: receipt.commandTime };
   }
+  let orderId: string;
   if (command.action === 'start') {
     let lots:number;
     if ('durationSeconds' in command) {
@@ -100,12 +101,14 @@ export async function commandProcessing(tx: Transaction<Database>, ctx: Context,
     const order = await tx.insertInto('processingOrders').values({ worldId: ctx.worldId, villageId: ctx.villageId,
       buildingId: command.buildingId, status: 'running', blockedReason: null, requestedLots: lots,
       workerCount: command.workerCount, workerIds: '[]', createdAt: ctx.through, finishedAt: null }).returningAll().executeTakeFirstOrThrow();
+    orderId = order.id;
     // A stock shortage preserves the plan; startLot records the waiting state without spending or assigning.
     await startLot(tx, ctx, order);
   } else {
     const order = await tx.selectFrom('processingOrders').selectAll().where('worldId', '=', ctx.worldId)
       .where('villageId', '=', ctx.villageId).where('id', '=', command.orderId).executeTakeFirst();
     if (!order) throw new HttpError(404, 'ORDER_NOT_FOUND', 'Ordre introuvable.');
+    orderId = order.id;
     if (order.status === 'completed' || order.status === 'cancelled') throw new HttpError(409, 'ORDER_FINISHED', 'Cet ordre est terminé.');
     const running = ['running','pause-requested','cancel-requested'].includes(order.status);
     if (command.action === 'resume') {
@@ -126,7 +129,8 @@ export async function commandProcessing(tx: Transaction<Database>, ctx: Context,
     }
   }
   await tx.insertInto('processingCommandReceipts').values({ worldId: ctx.worldId, villageId: ctx.villageId,
-    commandId: command.commandId, request: JSON.stringify(command) }).execute();
+    commandId: command.commandId, request: JSON.stringify(command), orderId, commandTime: ctx.through }).execute();
+  return { orderId, commandTime: ctx.through };
 }
 
 export async function completeProcessingAt(tx: Transaction<Database>, ctx: Context, lotId: string, at: Date) {
@@ -151,6 +155,33 @@ export async function completeProcessingAt(tx: Transaction<Database>, ctx: Conte
   if (status === 'running') await startLot(tx, { ...ctx, through: at }, order, !workers.some(c=>c.pendingRelease!==null));
 }
 
+/** The same mapper is used by legacy snapshots and selected V2 entities. */
+function processingOrderView(order: Order, lot?: Selectable<import('../../database/schema.js').ProcessingLotsTable>): ProcessingOrder {
+  return { id: order.id, buildingId: order.buildingId, status: order.status, blockedReason: order.blockedReason,
+    requestedLots: order.requestedLots, completedLots: order.completedLots, workerCount: order.workerCount,
+    createdAt: order.createdAt.toISOString(), finishedAt: order.finishedAt?.toISOString() ?? null,
+    currentLot: lot ? { id: lot.id, inputResource: lot.inputResource, inputAmount: lot.inputAmount,
+      outputResource: lot.outputResource, outputAmount: lot.outputAmount, startedAt: lot.startedAt.toISOString(), completesAt: lot.completesAt.toISOString() } : null };
+}
+
+/** Read-only, selected orders. Missing IDs are tombstones, never a reason to
+ * expand to the entire village. History is explicitly requested by receipts;
+ * the canonical V2 projection contains open orders only. */
+export async function readProcessingOrders(tx: Transaction<Database>, ctx: Context, ids: readonly string[], includeTerminal = false): Promise<ProcessingOrder[]> {
+  if (!ids.length) return [];
+  if (ids.length > 1024) throw new HttpError(400, 'TOO_MANY_ORDERS', 'Trop d’ordres demandés.');
+  let query = tx.selectFrom('processingOrders').selectAll().where('worldId', '=', ctx.worldId)
+    .where('villageId', '=', ctx.villageId).where('id', 'in', [...new Set(ids)]);
+  if (!includeTerminal) query = query.where('status', 'not in', terminal);
+  const orders = await query.orderBy('id').execute();
+  if (!orders.length) return [];
+  const lots = await tx.selectFrom('processingLots').selectAll().where('worldId', '=', ctx.worldId)
+    .where('villageId', '=', ctx.villageId).where('orderId', 'in', orders.map(order => order.id))
+    .where('completedAt', 'is', null).execute();
+  const byOrder = new Map(lots.map(lot => [lot.orderId, lot]));
+  return orders.map(order => processingOrderView(order, byOrder.get(order.id)));
+}
+
 export async function processingSnapshot(tx: Transaction<Database>, ctx: Context): Promise<ProcessingOrder[]> {
   const [open,recent] = await Promise.all([
     tx.selectFrom('processingOrders').selectAll().where('worldId', '=', ctx.worldId).where('villageId', '=', ctx.villageId)
@@ -161,12 +192,6 @@ export async function processingSnapshot(tx: Transaction<Database>, ctx: Context
   const orders=[...open,...recent].sort((a,b)=>b.createdAt.getTime()-a.createdAt.getTime()||a.id.localeCompare(b.id));
   const lots = await tx.selectFrom('processingLots').selectAll().where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId).where('completedAt', 'is', null).execute();
-  return orders.map(order => {
-    const lot = lots.find(l => l.orderId === order.id);
-    return { id: order.id, buildingId: order.buildingId, status: order.status, blockedReason: order.blockedReason,
-      requestedLots: order.requestedLots, completedLots: order.completedLots, workerCount: order.workerCount,
-      createdAt: order.createdAt.toISOString(), finishedAt: order.finishedAt?.toISOString() ?? null,
-      currentLot: lot ? { id: lot.id, inputResource: lot.inputResource, inputAmount: lot.inputAmount,
-        outputResource: lot.outputResource, outputAmount: lot.outputAmount, startedAt: lot.startedAt.toISOString(), completesAt: lot.completesAt.toISOString() } : null };
-  });
+  const byOrder = new Map(lots.map(lot => [lot.orderId, lot]));
+  return orders.map(order => processingOrderView(order, byOrder.get(order.id)));
 }

@@ -1,3 +1,155 @@
+# Passation courante — 22 octobre 2026, arrêt demandé pour quota
+
+Tristan demande de finir rapidement la tranche en cours et de préparer la reprise après renouvellement du quota. **A/B restent incomplets.** Cette section prévaut sur tous les points historiques ci-dessous. Aucun déploiement, commit, push ni migration de développement. Branche `main`, HEAD `4966379`, modifications non commitées ; conserver la spec documentaire initiale et les fichiers personnels non suivis.
+
+## Tranche serveur et transport
+
+- Routes V2 réellement enregistrées : GET bootstrap, POST sync/read et sync/stream, négociation `x-arbestra-protocol: 2`, authentification, captures cohérentes, fermeture SSE et reprise par curseurs. Bootstrap conserve une réconciliation explicite avant capture. Inventaire porté à 109 routes.
+- Atelier V2 : commande bornée, publication terminale, ACK typé avec effets privés projetés à H dans la transaction, reçu original au rejeu sans nouvelle publication. Les effets ACK n'avancent pas le curseur canonique.
+- Rattrapage : rollback complet de la commande dépassant son budget, réveil économique distinct durable/dédupliqué, 503 `SCOPE_CATCHING_UP` + Retry-After, même UUID à réessayer. Worker raccordé, continuations bornées ; aucune intention métier pending. `lastTransitionAt` n'est pas une frontière de complétude.
+- Terrain ciblé : lecture du chunk et halo, sans agrégat géométrique global ni lecture des ressources naturelles. Parité aux coutures du tore testée sur les deux modèles RC1.
+- Transport client autonome ajouté (`sync-v2-transport.ts`) : bootstrap, session SSE, resynchronisation, génération/abort, intentions atelier conservées en sessionStorage après 503 ou interruption. **Pas raccordé à React**. Le prototype de projection de vue incomplet a été retiré ; ne pas chercher un adaptateur prêt à brancher.
+- **053–056 enregistrées et appliquées uniquement à 127.0.0.1/arbestra_test.** La couverture complète et la recette de B restent à prouver avant toute activation hors test.
+
+## Corrections et précautions pour la reprise
+
+054 reconstruisait chaque feature en relisant le gros artefact RC1 : remplacé par un backfill ensembliste par monde, réutilisé lors du remplacement de source. 053 vérifiait répétitivement les touches au COMMIT : sortie immédiate quand la publication terminale est déjà faite ; les mutations tardives restent interdites. Après application initiale de 053 en test, sa fonction `game_sync_assert_published` a été réalignée sur le SQL corrigé du fichier, sans nouvelle migration ni changement du registre. Revalider une installation fraîche des migrations avant clôture.
+
+Les resets globaux deviennent coûteux avec les triggers actifs ; le test atelier HTTP utilise un monde isolé 64 × 64. Éviter de charger tout `game_sync_changes` pour comparer un rejeu : comparer les compteurs bornés du monde. Deux requêtes de test bloquant longtemps ont été annulées après vérification de leur PID et requête ; aucun processus utilisateur n'a été arrêté.
+
+## Preuves acquises (passes distinctes)
+
+Artefacts ignorés sous `test-results/command-sync/`, ne pas les committer.
+- Atelier/rattrapage : 26/26 puis 2/2, code 0, avant activation finale des triggers (`catchup-processing-retry.log`, `catchup-command-validation.log`).
+- Terrain RC1 + spatial : 15/15, code 0 (`v2-ground-validation.log`).
+- Écrivains partagés 7, routes 2 et inventaire 1 ont passé dans une exécution globale échouée sur le timeout de l'ancienne fixture atelier : ne pas annoncer cette exécution entièrement verte.
+- ACK/rejeu au niveau service : 1/1, code 0 (`v2-processing-bounded-validation.log`), avant passage du test aux routes HTTP.
+- Session/transport client : 6/6, code 0 (`v2-client-transport-retry.log`).
+- Dernière validation HTTP/SSE et vérifications de types : résultat final consigné dans la note de clôture ci-après. Les premiers essais ont révélé des conflits de fixtures avec les triggers d'initialisation et un argument `current` manquant dans le lecteur SSE du test ; corrigés.
+
+## Validation finale de la tranche
+
+- HTTP atelier + vraie socket SSE : **2/2, code 0**, `v2-processing-http-sse-final.log`. Start/pause/cancel, ACK inversés, rejeu et delta après coupure entre lecture et connexion vérifiés.
+- Lint ciblé serveur/contrats/transport : **code 0**, `handoff-lint.log`. `git diff --check` : code 0.
+- Vérification des types : champ obligatoire `constructionDurationOverrideMs` absent de la fixture HTTP, puis valeur `undefined` refusée ; corrigé à `null` conformément au type. **Relance encore en cours lors du handoff**, session outil `32901`, logs `handoff-api-typecheck-null.log` puis `handoff-client-typecheck.log`. Ne pas annoncer ces contrôles verts sans code final. Aucun autre test DB en cours. Cette dernière correction de fixture ne constitue pas une nouvelle validation HTTP.
+
+## Ordre de reprise
+
+1. Lire AGENTS, cette tête de passation et la spec ; vérifier Git et les logs finaux. Ne pas repartir des anciens statuts « migrations non enregistrées » ou « aucune route V2 ».
+2. Raccorder React avec une projection complète : composants privés/spatiaux, horloges par composant, cohortes, terrain, jardins, placement et autorisations serveur. Implémenter la récupération groupée des reçus après coupure/rechargement ; le transport expose les intentions mais cette récupération n'est pas encore branchée.
+3. Étendre les ACK V2 à la pose/construction ; couvrir reprise/completion worker, concurrence, expiration et reprise des abonnements. Tester le parcours navigateur ordinateur/tactile.
+4. Résoudre les plafonds de snapshots (4096 références, 1024 par composant), la pagination et le nombre de scopes (64 courant, 128 spatial dans la spec) sans snapshot faussement complet ; traiter les gros groupes ACK, la rétention et les reçus de rejet.
+5. Revalider les écrivains privés après l'optimisation 053, migrations fraîches, rollback métier/journal, concurrence et budgets sous charge. Aucun test DB en parallèle avec un autre partageant ses fixtures.
+6. Mesures V2 : 30 répétitions chaudes SQL/temps/octets et coût SSE réellement induit, comparaison aux mesures V1 déjà conservées. **Aucune mesure V2 finale ni validation navigateur V2 acquise.** Puis suites connexes, documentation et bilan.
+
+Les timeouts locaux 2 s verrou / 5 s instruction et le budget 64 transitions / 200 ms doivent encore être éprouvés sous charge. La limite de temps est contrôlée entre transitions ; une première transition peut finir après un préfixe SQL lent. Les validations historiques ne valent pas validation complète des modifications actuelles.
+
+---
+
+# Reprise active — raccord V2, 21 octobre 2026 (fin de soirée)
+
+Travail en cours, **A/B non clôturés**, sans déploiement, commit, push ni migration développement. Cette section remplace les états plus anciens ci-dessous.
+
+- Rattrapage : suites atelier + continuation **26/26 code 0**, puis rollback de commande + déduplication **2/2 code 0**. Logs `catchup-processing-retry.log`, `catchup-command-validation.log`. `lastTransitionAt` est une dernière échéance traitée, jamais une frontière de complétude ; `completedThrough` n'est rempli qu'à la fin. Une première transition peut terminer malgré un préfixe SQL lent, puis arrêt entre transitions. Worker `economy.catchup` raccordé ; erreur `SCOPE_CATCHING_UP` avec Retry-After 1 ; aucune intention pending créée.
+- Routes GET bootstrap, POST sync/read et sync/stream enregistrées (`sync-v2-routes.ts`). Auth et protocole 2 requis, corps strict borné, session revérifiée à chaque capture SSE, fermeture au shutdown. Bootstrap garde explicitement `reconcileVillageForRead` avant capture, sans assembleur historique. Barrière de disponibilité : migrations 053–056 nécessaires. Tests initiaux négociation/refus **2/2 code 0** ; fixture de refus adaptée ensuite avec registre de migration isolé, à revalider après activation.
+- Terrain ciblé : régression rouge constatée sur les deux modèles RC1 (`v2-ground-red.log`). Nouveau `worlds/selected-ground.ts`, lectures des seuls sommets/terrasses du chunk et halo, aucun agrégat géométrique ni lecture de features. Parité couture du tore et spatial **15/15 code 0** (`v2-ground-validation.log`), build API correspondant code 0.
+- 053–056 sont désormais **enregistrées** dans migrate.ts. Leur application à `arbestra_test` et validation intégrée sont en cours via `processing-v2.integration.test.ts` : lire `v2-processing-activation.log` et attendre le code final avant de les déclarer appliquées/validées. Ne pas appliquer au développement.
+- `processing-v2.ts` et contrat `ProcessingConfirmationV2Schema` ajoutés : préparation bornée, reçu d'origine au rejeu, publication terminale, projection privée à H dans la même transaction, effets sans curseur complet. Route atelier négocie via `x-arbestra-protocol: 2` et génération. Test réel start/pause/cancel, ACK inversés, delta et rejeu en cours. Compilation contracts/API `v2-ack-*-build.log` en cours. Timeouts locaux 2 s verrou / 5 s instruction ajoutés au chemin V2 et continuation, à valider sous charge.
+- Client SSE envoie désormais l'en-tête de négociation. **React et les commandes navigateur ne sont toujours pas raccordés** ; pose V2, validations navigateur et mesures V2 restent ouvertes. Inventaire routes mis à jour à 109 entrées, test d'inventaire à relancer.
+
+Processus au dernier point : test activation session 90465 ; compilation contracts puis API session 76964. Autres validations citées ci-dessus terminées. Préserver la spec documentaire initiale et les deux fichiers personnels non suivis.
+
+---
+# Reprise d'implémentation A/B — 21 octobre 2026, après changement de compte
+
+**Point le plus récent (vers 23:25)** : RC1 ciblé corrigé après régression rouge de hauteur ; `readSelectedRc1FeatureGeometry` ne lit que les quatre sommets sous chaque arbre/rocher sélectionné. Suite `rc1-ground.integration.test.ts` **9/9 code 0** (`rc1-feature-final-validation.log`), après déplacement du nouveau cas en fin de fichier pour conserver le test de cache froid ; délai de test borné à 120 s lors de cette passe. Migration 054 ajoute l'index transactionnel `game_sync_feature_vertices`, entretenu par les sources RC1, pour republier les features sur édition de leurs sommets même à travers un chunk. Migration **055 écrite, non enregistrée** : backfill des compteurs sans remplacement des epochs/révisions. Écrivains/backfill **7 tests réussis**, log `scope-backfill-validation.log` (vérifier le code final du processus si nécessaire). Build API avant le dernier travail rattrapage terminé code 0.
+
+Rattrapage en cours : `reconcileVillageEconomy` accepte désormais un budget optionnel 64 transitions / 200 ms, sélection SQL limitée et triée à la précision milliseconde, résultat de progression ; `beginVillageEconomy` n'avance pas l'activation jusqu'à H si un préfixe reste incomplet. Appels historiques sans budget conservés. Régression de préfixes construction/atelier/construction **1/1 code 0**, `catchup-prefix-validation.log`. **Attention à la spec §5.4 : aucune conversion de commande synchrone en intention pending.** Un dépassement doit rollback la commande, créer seulement un réveil économique distinct, répondre `SCOPE_CATCHING_UP` + Retry-After et réessayer le même UUID.
+
+Migration **056 écrite, non enregistrée** et module `economy-catchup.ts` : génération durable par village, déduplication des réveils, progression/continuation atomiques, scheduler seul acquittant sa tâche. Pas encore raccordés aux routes/worker de production. Test `economy-catchup.integration.test.ts` utilise sa table dans un schéma isolé avec tables métier publiques de test ; première passe a validé les assertions de progression/rollback mais échoué à la dernière requête IN vide de fixture. Garde corrigé et ancienne notification explicite ajoutée : **relancer et attendre le résultat avant de déclarer vert**. Build `catchup-api-build.log` code 0 antérieur à la dernière extension de `beginProcessingCommand` et au test ajouté. Les migrations 053–056 restent hors du registre : ne pas les présenter comme actives.
+
+Tristan a demandé de reprendre le handoff : poursuite de l'implémentation, toujours sans déploiement. Les trois TS2345 sont corrigées à la source dans le schéma des types de flux (union littérale TypeBox). Builds contracts/API terminés code 0. Validation de reprise : **30/30 code 0** (`resume-foundation-validation.log`), puis nouvelle capture multi-flux privé/connaissance/manifeste/offres **4/4 code 0** (`resume-multistream-validation.log`).
+
+Correction de collecte 054 : une découverte scientifique publie aussi les gisements sans occupation, recherchés par monde et coordonnées indexées. Régression rouge observée (`revealed-deposit-red.log`), puis écrivains partagés/session cliente **10/10 code 0** (`resume-reveal-session-validation.log`). Expiration HTTP 401 et événement SSE expired traités explicitement côté client. Test de vraie socket multi-flux vert (`resume-multistream-socket.log`) : un avancement de révision sans entité modifiée est envoyé comme batch, pas perdu dans un heartbeat. Lint ciblé de ces corrections code 0.
+
+Le snapshot spatial complet a maintenant un test de confidentialité/registre (**4 tests réussis dans `resume-spatial-snapshot.log` ; processus à confirmer avant de reprendre ce résultat comme clôture**). Travail actuel : parité des hauteurs des features RC1 après édition des sommets ; test ajouté à `worlds/rc1-ground.integration.test.ts`, exécution de reproduction dans `rc1-feature-red.log`, résultat à vérifier. Le lecteur ciblé omet actuellement le recalage que fait la projection terrain historique. Ne pas le corriger par une relecture globale du monde.
+
+Les manques structurants de B consignés dans la passation détaillée restent ouverts : activation/backfill après couverture complète, routes/React réels, ACK atelier/pose, rattrapage borné durable, validation navigateur et mesures V2. 053/054 toujours non enregistrées. Aucun commit/push/migration développement/déploiement.
+
+---
+
+# Reprise sur un autre compte — lots A/B, 21 octobre 2026
+
+**Handoff demandé explicitement par Tristan. Implémentation en cours, pas livrée.** Lire [la passation détaillée](docs/HANDOFF-AB-REPRISE-COMPTE-2026-10-21.md) avant de reprendre : état des fichiers, validations, limites, ordre de poursuite et prompt prêt à copier. Cette note remplace les points intermédiaires ci-dessous pour l'avancement courant, sans supprimer leur historique ni la spec initiale.
+
+Branche `main`, HEAD `496637925666b6474a04231d15c368a2d2f8c8a6`, travail non commité. Aucun déploiement, push ou migration développement. 051/052 seules enregistrées/appliquées sur test ; 053/054 non activées. Le dernier build API échoue avec trois TS2345 dans `sync-v2-capture.ts` (kind élargi à string, lignes 33/40 ; `multistream-api-build.log`). Les derniers lecteurs/capture/SSE multi-flux et invalidations économiques dérivées restent à valider. Raccord routes/React, ACK atelier/pose, backfill/activation, rattrapage borné durable et mesures V2 restent à terminer ; aucune validation navigateur V2 acquise.
+
+La demande d'implémenter A puis B reste autorisée, sans déploiement. La reprise ne nécessite pas une nouvelle confirmation de routine. Les anciennes autorisations de publication plus bas concernent d'autres tranches.
+
+---
+
+# Point de travail A/B — 21 octobre 2026, poursuite en cours
+
+La consigne reste de poursuivre l'implémentation A puis B jusqu'à sa validation, **sans déployer**. Aucun commit/push ni migration développement. Les notes ci-dessous sont des points intermédiaires, pas une livraison V2.
+
+Depuis la reprise : inventaire classifié à 106 routes ; fermeture AST recalculée (174 sources, 2 311 fonctions, 61 tables écrites au dernier relevé). Oracle isolé `4966379` compilé et comparaison atelier/population/ressources validée. Mesures V1 supplémentaires terminées : trente répétitions avec 30/300 bâtiments placés ; vraie socket SSE petite fixture ; reçus connus/inconnus à 6 SQL. Artefacts ignorés `test-results/command-sync`.
+
+Le registre privé comporte désormais 23 composants typés : ressources, ordres, cohortes/synthèse/logement, bâtiments, accomplissements, pools, jardins/expansions, extractions/chantiers/consignes/terrassements, échanges/offres/convois, science privée, identité, infrastructure et installation. Les lecteurs partagent une transaction READ ONLY ; les projections existantes acceptent des sélections d'identifiants. La capture explicite de périmètre est distincte des deltas. Les ordres terminaux sont des valeurs, pas des suppressions. Les reçus d'idempotence restent hors du journal de rendu et consultables séparément.
+
+La migration 053 reste **non enregistrée**. Elle collecte les écrivains privés, ainsi que les emprises d'extension et les dépendances de coordonnées des gisements. Dernière validation : six tests de collecte/publication verts. La couverture partagée, le backfill et l'activation restent à achever. Les fondations 051/052 seules sont enregistrées/appliquées à `arbestra_test`.
+
+`capturePrivateSync` et `servePrivateSyncStream` sont des primitives non raccordées aux routes de jeu. Capture MVCC, contrôle monde/propriétaire, récupération sans NOTIFY et vraie socket ciblée : **3/3, code 0** (`private-real-socket.log`). Session cliente fetch/SSE : fermeture/abort, curseurs appliqués après trame tronquée et ACK, reprise requise sur trou ; **3 tests verts**. Elle n'est pas encore le transport de l'application React. Le client pur vérifie les groupes, les limites bigint et les epochs ; l'extension multi-flux est en cours.
+
+La vérification connexe a reproduit quatre échecs chantiers avec les modules historiques (`worksites-historical-reproduction.log`). Cause de fixture : `resetE2eState` conserve l'ancre du village, alors que ces scénarios supposent (1024,512). La fixture la fixe maintenant dans sa transaction. Validation après correction : chantiers 19, oracle 2, écrivains 5, **26/26 code 0** (`private-readers-fixed.log`). Le sixième test écrivain a ensuite passé dans `capture-stream-validation.log` (18 tests au total). Ne pas cumuler ces comptes comme une suite unique.
+
+Travail actuel : schémas/lecteurs spatiaux ciblés, protection des identités privées voisines, extraction `readTerrainProjection` pour capturer le terrain dans la même transaction que le journal. `sync-v2-spatial.integration.test.ts` et régressions natural-features en cours : vérifier processus/logs avant d'annoncer leur résultat. Les éditeurs partagés connaissance/espace/catalogue/offres, la fermeture de dépendances, les routes bootstrap/read/stream, les ACK atelier/pose, le rattrapage borné avec intention durable et le raccord React restent à terminer. Aucune activation partielle du flux n'est autorisée comme preuve de B complet.
+
+---
+
+# Reprise active A/B — 21 octobre 2026
+
+Tristan a demandé de **continuer jusqu'au bout**, après avoir contesté l'arrêt prématuré. L'implémentation reste autorisée, sans déploiement ; ne pas conclure la tâche à partir de fondations partielles. Les modifications documentaires initiales restent la spec. Aucun commit/push ni action développement autorisés implicitement.
+
+Avancement depuis le bilan ci-dessous : graphe d'appels TypeScript résolu (`scripts/audit-command-closure.mjs`), variantes atelier documentées dans `processing-dependencies.ts`, fixture spatiale optionnelle (30 bâtiments réellement placés : série de trente répétitions verte), oracle serveur/contrats isolé au commit `4966379` préparé par `scripts/prepare-command-oracle.mjs` et compilé avec succès. Nouveau harness de vraie connexion SSE, à exécuter/valider ; il inclut auth, contrôles d'échéances et navigation.
+
+Code métier : mode commit atelier préparé par `beginProcessingCommand`. Pause/annulation sans lot échu ne réveillent pas les activités étrangères ; démarrage/reprise sans échéance due évitent terrain/gisements. Prédécesseurs dus : fermeture chronologique historique conservée. Aucun finaliseur d'admissions étrangères après commande commit. Reçu revérifié **après** attente village pour le rejeu concurrent. Régression pause/annulation rouge avant correction puis suite **24/24, code 0**, dont attente PostgreSQL forcée et H post-verrou (`processing-preparation.log`). Le chemin snapshot historique reste disponible ; le client n'est pas encore V2.
+
+Migrations **051 et 052 désormais enregistrées et appliquées uniquement à `arbestra_test`** : journal inactif et résultat/borne des nouveaux reçus atelier. Reçus historiques sans identité d'ordre démontrable restent NULL. Endpoint `POST commands/receipts/read` borné à 32 UUID, autorisé par monde/propriétaire, sans mutation ni payload de requête ; test HTTP vert après correction de la suppression silencieuse des champs par Fastify. Suite reçus/inventaire/journal **30/30, code 0**. Lecteurs sélectionnés d'ordres (actifs, historiques explicites) et de ressources ajoutés.
+
+Migration **053 non enregistrée** : mapping privé par table/clé et triggers de collecte/publication terminale différée. Cinq tests verts dans schéma jetable avec définitions réelles des tables, savepoint/rollback observés, rejet de mutation après publication, deux propriétaires dans le même batch. La couverture spatiale/connaissance/configuration et les lecteurs complets restent à faire avant activation. Lecteur fetch SSE partagé dans contracts, réexporté côté client : cinq tests UTF-8/CRLF/limites/abort/génération verts avant déplacement dans contracts ; pas encore branché à l'abonnement de jeu V2.
+
+Travail en cours : oracle de parité (`processing-reference.integration.test.ts`, opt-in `ARBESTRA_HISTORICAL_ORACLE=1`), build API après derniers ajouts et mesures socket. Vérifier les processus/logs courants ; **ne pas annoncer ces validations terminées à partir de cette note**. Artefacts ignorés sous `test-results/command-sync`. Le bilan ancien ci-dessous reste historique : son statut « 051 non enregistrée » est remplacé par la présente section. A/B ne sont pas clôturés : poursuivre inventaire/mesures, publication complète, lecteurs, protocole de reprise, raccord client/SSE, pose V2 et validations finales.
+
+---
+
+# Commandes bornées A/B — implémentation partielle, 21 octobre 2026
+
+Demande courante : **implémenter A puis B**, conserver la spec documentaire non commitée, **ne pas déployer**. Base `main / 4966379`. [Rapport de travail, mesures et limites](docs/IMPLEMENTATION-COMMANDES-BORNEES-AB.md). **Ni A ni B ne sont clôturés ; aucun raccord V2 de jeu n'est livré.** La section de spécification ci-dessous est historique et ne limite pas cette autorisation d'implémentation.
+
+Ajoutés : inventaire exécutable des 105 routes enregistrées et de leurs actions ; extraction AST des lectures/écritures/finaliseurs ; harness atelier avec 30 répétitions et fixtures 3/30/300 bâtiments plus retard économique ; collecte réseau du parcours navigateur. Référence petite : pause 81 SQL/~65 ko HTTP, projection de synchronisation suivante 49 SQL/~2,4 ko (hors boucle socket/auth/réveils). Retard : 121 SQL, deux lots crédités exactement, rejeu sans nouveau crédit. Ces mesures sont **V1 locales**, pas une performance V2 ni un benchmark de production.
+
+Fondations B isolées : module pur `sync-v2.ts` limité aux ressources/ordres atelier, non raccordé ; proposition `051_game_sync_foundation.ts` **non enregistrée dans migrate.ts**, testée uniquement dans un schéma jetable de `127.0.0.1/arbestra_test`, supprimé après test. Touches SQL/savepoints, phase terminale ordonnée, journal/compteurs/dépendances ; commit sans publication refusé. Aucun trigger métier, lecteur complet, reprise HTTP/SSE ou raccord React.
+
+Preuves : dernière passe inventaire/contrats/journal **13/13, code 0** ; attente PostgreSQL forcée et observée, rollback après mutation/publication constatées, commits inversés de flux indépendants. Trente répétitions par variante aux trois tailles ; nouvelle passe retard avec assertion explicite du crédit au rejeu verte. Builds contrats/API et lint ciblé verts après correction des erreurs initiales de fixture/typage/imports. Recette finale Playwright atelier ordinateur **1/1, code 0**, crédit unique et aucun GET village après les commandes ; collecte réseau conservée : deux réponses HTTP **125 653/125 661 octets**, sans négociation, snapshot SSE initial **124 722 octets**, trames **1 183–1 961 octets**. Le test ferme désormais normalement l'Oracle qui interceptait les clics après 90 s ; nettoyage DB corrigé après timeout. Échecs intermédiaires, preuve de l'interception et limites dans le rapport. Mobile non vérifié. Tous les processus de validation lancés sont terminés.
+
+Suite obligatoire : terminer la matrice transitive et les variantes/fixtures de A ; couvrir tous les écrivains et lecteurs du flux privé avant activation de B, implémenter la préparation économique bornée atelier et la pose V2, les reçus, la reprise, les autorisations et le raccord HTTP/client/SSE. Le rapport détaille les preuves manquantes. Ne pas présenter les tests purs comme un parcours V2 réel.
+
+**Non commité/non poussé, aucun déploiement, aucune migration développement.** Spec et renvois documentaires préexistants conservés ; deux artefacts personnels non suivis intacts. Artefacts de validation ignorés sous `test-results/command-sync`, `test-results/server-costs` et `test-results/e2e`.
+
+---
+
+# Spécification de transition totale des commandes et transports — 21 octobre 2026, Astra
+
+Demande courante : **spécifier**, après discussion du découpage des actions et des transports légers. [Spec complète](docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md), statut **proposée, non implémentée**, base relue main / 4966379. Aucun nouvel accord d'implémentation ou de déploiement n'est inféré de cette demande.
+
+La spec couvre les familles de commandes actuelles, lecteurs, workers, terrain partagé, installation, factory et NOC. Elle distingue dépendances métier, composants de lecture et flux versionnés ; confirmations partielles HTTP, deltas complets SSE, journal durable à rétention bornée, reprise, idempotence et retrait V1. Neuf lots A–I, budgets proposés et critères de fin. Les lectures pures exigent d'abord la couverture autonome des échéances ; une commande ne saute pas les prédécesseurs économiques nécessaires. Un ACK partiel ne fait jamais avancer le curseur complet.
+
+**Vérification documentaire terminée :** 14 liens locaux de la spec présents, 30 routes littérales du fichier village et cinq mentions dynamiques/SSE contrôlées, 15 sections et neuf lots, JSON illustratif valide et absence d'espaces finaux. La première passe a signalé infrastructure/preview absent de l'inventaire textuel ; ajouté puis contrôle vert. Relecture des variantes et des invariants, notamment versions multi-flux, ordre terminal des compteurs, rollback/savepoint et conservation des reçus. Aucune campagne de tests applicatifs ni mesure de performance exécutée pour cette modification documentaire.
+
+Fichiers : nouvelle spec, renvois explicitement prospectifs dans l'index d'architecture, synchronisation et économie, et ce handoff. **Non commité/non poussé**, code et déploiements inchangés. Les deux artefacts personnels non suivis restent intacts. Prochaine étape technique si implémentation demandée : lot A, puis fondation V2 et tranche atelier du lot B ; ne pas annoncer V2 livré à partir de cette spec.
+
+---
+
 # Audit des coûts serveur — déployé en staging et alpha, 21 octobre 2026, Astra
 
 **Rectification du bilan après discussion technique :** les endpoints Oracle/atelier/science prennent en charge les trames après commit, mais `apps/world-web/src/api/client.ts` appelle encore `requestState()` pour ces trois familles, sans `x-village-sync`. Le raccord client n'est donc pas livré ; les ~2 ko mesurés correspondent au harness qui négocie explicitement, pas aux réponses courantes de ces panneaux. Rapport et architecture corrigés. Le SSE transmet des différences mais les calcule encore depuis une nouvelle projection complète ; son ouverture/reconnexion renvoie aussi un snapshot complet. Aucun correctif applicatif de ces points dans cette rectification documentaire.

@@ -1,0 +1,106 @@
+import {processingCommandIsValid,processingConfirmationV2IsValid,syncV2BatchIsValid,
+  type ProcessingCommand,type ProcessingConfirmationV2,type SyncV2State,type SyncV2ReadRequest} from '@arbestra/contracts';
+import {SyncV2Session,SyncV2ResyncRequired,SyncV2SessionExpired} from './sync-v2-session';
+
+let nextGeneration=0;
+export class SyncV2HttpError extends Error{
+  constructor(readonly status:number,readonly code:string,message:string,readonly retryAfterMs=1000){super(message);}
+}
+type Options={publish:(state:SyncV2State,observedAt:string)=>void;expired:()=>void;
+  request?:typeof fetch;storage?:Storage;scopes?:SyncV2ReadRequest['scopes']};
+
+/** One mounted village owns this transport. Only intentions are persisted:
+ * every reload reacquires complete projection values with their cursors. */
+export class SyncV2Transport{
+  readonly generation=++nextGeneration;
+  private session:SyncV2Session|null=null;
+  private closed=false;
+  private readonly controller=new AbortController();
+  private retry:ReturnType<typeof setTimeout>|undefined;
+  private refreshFlight:Promise<void>|null=null;
+  private pendingKey:string|null=null;
+  private readonly request:typeof fetch;
+  private readonly storage:Storage|undefined;
+  private readonly root:string;
+  constructor(worldSlug:string,readonly worldId:string,readonly villageId:string,private readonly options:Options){
+    this.request=options.request??fetch;this.storage=options.storage??globalThis.sessionStorage;
+    this.root=`/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}`;
+  }
+  get snapshot(){return this.session?.snapshot;}
+  private async json(path:string,init:RequestInit={}):Promise<unknown>{
+    const response=await this.request(this.root+path,{credentials:'same-origin',...init,signal:this.controller.signal,
+      headers:{'content-type':'application/json','x-arbestra-protocol':'2','x-arbestra-generation':String(this.generation),...init.headers}});
+    const data:unknown=await response.json();
+    if(response.status===401)throw new SyncV2SessionExpired();
+    if(!response.ok){const error=data as {code?:string;message?:string};
+      const seconds=Number(response.headers.get('retry-after')??'1');
+      throw new SyncV2HttpError(response.status,error.code??'HTTP_ERROR',error.message??'Synchronisation indisponible.',
+        Number.isFinite(seconds)?Math.max(0,Math.min(seconds,60))*1000:1000);}
+    return data;
+  }
+  async start(alreadyWoken=false):Promise<void>{
+    const input=await this.json(alreadyWoken?'/sync/read':`/bootstrap?generation=${this.generation}`,alreadyWoken?
+      {method:'POST',body:JSON.stringify({protocol:2,generation:this.generation,scopes:this.options.scopes??[],cursors:[]})}:{});
+    if(this.closed)return;
+    if(!syncV2BatchIsValid(input)||input.coverage!=='scope-snapshot'||input.worldId!==this.worldId||input.villageId!==this.villageId
+      ||input.generation!==this.generation)throw new SyncV2ResyncRequired();
+    const owner=input.groups.find(group=>group.stream.kind==='knowledge')?.stream.key;
+    if(!owner)throw new SyncV2ResyncRequired();
+    this.pendingKey=`arbestra.processing.v2:${owner}:${this.worldId}:${this.villageId}`;
+    this.session=new SyncV2Session({worldId:this.worldId,villageId:this.villageId,generation:this.generation,scopes:new Map(),
+      subscribedScopes:new Set(input.groups.map(group=>`${group.stream.kind}:${group.stream.key}`))},this.options.publish,this.request);
+    this.session.apply(input);
+    void this.listen();
+  }
+  private async listen():Promise<void>{
+    if(this.closed||!this.session)return;
+    try{await this.session.connect(this.root+'/sync/stream');}
+    catch(error){
+      if(this.closed)return;
+      if(error instanceof SyncV2SessionExpired){this.close();this.options.expired();return;}
+      if(error instanceof SyncV2ResyncRequired){try{await this.refresh(true);}catch(refreshError){
+        if(refreshError instanceof SyncV2SessionExpired){this.close();this.options.expired();return;}
+      }}
+    }
+    if(!this.closed)this.retry=setTimeout(()=>void this.listen(),2000);
+  }
+  refresh(snapshot=false):Promise<void>{
+    if(this.refreshFlight)return this.refreshFlight;
+    this.refreshFlight=(async()=>{
+      const session=this.session;if(this.closed||!session)return;
+      const cursors=session.cursors;
+      const input=await this.json('/sync/read',{method:'POST',body:JSON.stringify({protocol:2,generation:this.generation,
+        scopes:cursors.map(({kind,key})=>({kind,key})),cursors:snapshot?[]:cursors})});
+      if(!this.closed&&this.session===session)session.apply(input);
+    })().finally(()=>{this.refreshFlight=null;});
+    return this.refreshFlight;
+  }
+  reconnect(){void this.refresh().catch(error=>{if(error instanceof SyncV2SessionExpired){this.close();this.options.expired();}});}
+  pending():ProcessingCommand[]{
+    if(!this.pendingKey)return [];
+    try{const data:unknown=JSON.parse(this.storage?.getItem(this.pendingKey)??'[]');
+      return Array.isArray(data)?data.filter(processingCommandIsValid).slice(0,32):[];
+    }catch{return [];}
+  }
+  private remember(command:ProcessingCommand,remove=false){
+    if(!this.pendingKey)throw Error('Synchronisation non initialisée.');
+    const pending=this.pending().filter(row=>row.commandId!==command.commandId);
+    if(!remove){if(pending.length>=32)throw Error('Trop de commandes à vérifier.');pending.push(command);}
+    if(pending.length)this.storage?.setItem(this.pendingKey,JSON.stringify(pending));else this.storage?.removeItem(this.pendingKey);
+  }
+  async processing(command:ProcessingCommand):Promise<ProcessingConfirmationV2>{
+    if(this.closed||!this.session)throw Error('Synchronisation indisponible.');
+    this.remember(command);
+    const input=await this.json('/processing',{method:'POST',body:JSON.stringify(command)});
+    if(!processingConfirmationV2IsValid(input)||input.commandId!==command.commandId||input.worldId!==this.worldId||input.villageId!==this.villageId)
+      throw Error('Confirmation de fabrication invalide.');
+    // An applied receipt is final even if its effects need a fresh projection.
+    this.remember(command,true);
+    if(!this.closed&&input.effects){try{this.session.apply(input.effects);}catch(error){
+      if(!(error instanceof SyncV2ResyncRequired))throw error;
+      this.reconnect();
+    }}
+    return input;
+  }
+  close(){this.closed=true;this.controller.abort();this.session?.close();if(this.retry)clearTimeout(this.retry);}
+}

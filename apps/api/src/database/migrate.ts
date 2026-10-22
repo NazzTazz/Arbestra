@@ -1,6 +1,12 @@
 import * as terrainVerticesMigration from './migrations/048_terrain_vertices.js';
 import * as freeTerraformingMigration from './migrations/049_free_terraforming.js';
 import * as hudWorkforceMigration from './migrations/050_hud_workforce.js';
+import * as gameSyncFoundationMigration from './migrations/051_game_sync_foundation.js';
+import * as processingReceiptResultMigration from './migrations/052_processing_receipt_result.js';
+import * as gameSyncPrivateWritersMigration from './migrations/053_game_sync_private_writers.js';
+import * as gameSyncSharedWritersMigration from './migrations/054_game_sync_shared_writers.js';
+import * as gameSyncScopeBackfillMigration from './migrations/055_game_sync_scope_backfill.js';
+import * as villageEconomyCatchupsMigration from './migrations/056_village_economy_catchups.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -110,6 +116,12 @@ const migrationProvider: MigrationProvider = {
       '048_terrain_vertices': terrainVerticesMigration,
       '049_free_terraforming': freeTerraformingMigration,
       '050_hud_workforce': hudWorkforceMigration,
+      '051_game_sync_foundation': gameSyncFoundationMigration,
+      '052_processing_receipt_result': processingReceiptResultMigration,
+      '053_game_sync_private_writers': gameSyncPrivateWritersMigration,
+      '054_game_sync_shared_writers': gameSyncSharedWritersMigration,
+      '055_game_sync_scope_backfill': gameSyncScopeBackfillMigration,
+      '056_village_economy_catchups': villageEconomyCatchupsMigration,
     };
   },
 };

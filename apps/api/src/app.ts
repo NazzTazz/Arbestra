@@ -22,6 +22,7 @@ import { registerVillageRoutes } from './modules/villages/routes.js';
 import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
 import {registerFactorySettings} from './modules/villages/factory-settings.js';
 import {registerVillageSync} from './modules/villages/sync.js';
+import {registerSyncV2Routes} from './modules/villages/sync-v2-routes.js';
 import { registerAdminAuthRoutes } from './modules/admin/auth.js';
 import { registerAdminRoutes } from './modules/admin/routes.js';
 import { OperationsTelemetry, instrumentHttp, annotateHttpRequest } from './modules/operations/telemetry.js';
@@ -69,6 +70,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
     if (error instanceof HttpError) {
       annotateHttpRequest(request, error.code);
       if(error.statusCode===429)reply.header('Retry-After','2');
+      if(error.code==='SCOPE_CATCHING_UP')reply.header('Retry-After','1');
       return reply.status(error.statusCode).send({ code: error.code, message: error.message });
     }
     if (typeof error === 'object' && error !== null && 'validation' in error && error.validation) {
@@ -124,6 +126,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
   await registerVillageRoutes(app, db, config, villageProjections,navigation);
+  await registerSyncV2Routes(app, db, config);
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app,db,config);
   return app;

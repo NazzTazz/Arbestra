@@ -74,14 +74,18 @@ export async function poolAdmissionCap(tx:Transaction<Database>,ctx:VillageEcono
   return Math.min(childCap,Math.max(0,pool.workerCap-active.reduce((n,e)=>n+e.workerCount,0)));
 }
 
-export async function readExtractionPools(tx:Transaction<Database>,worldId:string,villageId:string):Promise<ExtractionPool[]> {
+export async function readExtractionPools(tx:Transaction<Database>,worldId:string,villageId:string,selected:readonly Resource[]=['wood','stone']):Promise<ExtractionPool[]> {
+  if(!selected.length)return [];
+  const resources=[...new Set(selected)];
+  const selectedSites=tx.selectFrom('extractionWorksites').select('id').where('worldId','=',worldId)
+    .where('villageId','=',villageId).where('poolResource','in',resources);
   const [pools,sites,targets,active]=await Promise.all([
-    tx.selectFrom('extractionPools').selectAll().where('worldId','=',worldId).where('villageId','=',villageId).execute(),
-    tx.selectFrom('extractionWorksites').select(['id','poolResource']).where('worldId','=',worldId).where('villageId','=',villageId).where('poolResource','is not',null).execute(),
-    tx.selectFrom('extractionWorksiteTargets').select(['worksiteId','featureId']).where('worldId','=',worldId).where('villageId','=',villageId).where('status','=','pending').execute(),
-    tx.selectFrom('depositExtractions').select(['worksiteId','workerCount']).where('worldId','=',worldId).where('villageId','=',villageId).where('status','=','in-progress').execute(),
+    tx.selectFrom('extractionPools').selectAll().where('worldId','=',worldId).where('villageId','=',villageId).where('resourceCode','in',resources).execute(),
+    tx.selectFrom('extractionWorksites').select(['id','poolResource']).where('worldId','=',worldId).where('villageId','=',villageId).where('poolResource','in',resources).execute(),
+    tx.selectFrom('extractionWorksiteTargets').select(['worksiteId','featureId']).where('worldId','=',worldId).where('villageId','=',villageId).where('status','=','pending').where('worksiteId','in',selectedSites).execute(),
+    tx.selectFrom('depositExtractions').select(['worksiteId','workerCount']).where('worldId','=',worldId).where('villageId','=',villageId).where('status','=','in-progress').where('worksiteId','in',selectedSites).execute(),
   ]);
-  return (['wood','stone'] as const).map(resource=>{
+  return resources.map(resource=>{
     const pool=pools.find(p=>p.resourceCode===resource),ids=new Set(sites.filter(s=>s.poolResource===resource).map(s=>s.id));
     const missions=active.filter(e=>e.worksiteId&&ids.has(e.worksiteId));
     return {resource,siteCount:pool?.siteCount??1,workerCap:pool?.workerCap??5,mobilized:missions.reduce((n,e)=>n+e.workerCount,0),activeSites:missions.length,pendingTargets:new Set(targets.filter(t=>ids.has(t.worksiteId)).map(t=>t.featureId)).size};

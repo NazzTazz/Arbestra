@@ -1,5 +1,7 @@
 # Économie
 
+**Évolution proposée, non implémentée :** la [spec de commandes bornées et synchronisation ciblée](../SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md) décrit la fermeture des dépendances de chaque action, les travailleurs autonomes et les conditions de suppression des mutations en lecture. Les invariants temporels et les règles de gameplay ci-dessous restent applicables ; aucun nouveau découpage économique n'est livré par cette spec.
+
 ## Consignes d’exploitation et gestes Population (050)
 
 `extraction_pools` conserve par monde/village/ressource le nombre de chantiers et l’effectif total demandé. Les lignes de chantier existantes consomment les cibles communes ; le transfert de leur propriétaire libère d’abord l’index partiel d’unicité, dans la même transaction. L’ordinal appartient à l’historique local de chaque chantier : une cible transférée déjà connue conserve son ordinal ; une cible nouvelle reçoit le prochain ordinal libre du destinataire. Copier l’ordinal du propriétaire d’origine peut violer l’unicité locale et annuler le chargement du village. La préparation canonique verrouille aussi les cibles des propriétaires de liste arrêtés. La pause à zéro conserve les cibles et les retours engagés ; un changement de consigne modifie seulement les prochains départs. Les habitants encore en mission restent déduits du budget global. La sélection géographique des cibles et l’ordre temporel commun sont conservés.

@@ -1,6 +1,6 @@
 import { devTime, devTimeSync } from '../operations/dev-timing.js';
-import {type Kysely} from 'kysely';
-import {type TravelGround,type GeneratedLandscape,type Rc1Ground,type Rc1FeatureGeometry,type SpawnTerrace} from '@arbestra/contracts';
+import {sql,type Kysely} from 'kysely';
+import {vertexSurface,type TerrainVertex,type TravelGround,type GeneratedLandscape,type Rc1Ground,type Rc1FeatureGeometry,type SpawnTerrace} from '@arbestra/contracts';
 import {rc1NetworkGround,type Rc1NetworkEdits} from '../navigation/rc1-network-ground.js';
 import type {Database} from '../../database/schema.js';
 import {readRc1Source} from './rc1-source.js';
@@ -92,3 +92,28 @@ export async function rc1FeatureGeometry(db:Kysely<Database>,worldId:string,data
   });
 }
 export function rc1CellHeight(terraces:readonly SpawnTerrace[],x:number,y:number,fallback:number):number{return terraces.find(t=>t.cellX===x&&t.cellY===y)?.height??fallback;}
+
+/** A selected feature needs only the four corners under each visible tree or
+ * rock. Do not prepare the world's navigation/ground cache for this delta. */
+export async function readSelectedRc1FeatureGeometry(db:Kysely<Database>,worldId:string,ids:string[]):Promise<Map<string,Rc1FeatureGeometry>>{
+ if(!ids.length)return new Map();
+ const source=await readRc1Source(db,worldId);
+ const geometry=await rc1FeatureGeometry(db,worldId,source.data,ids);
+ if(source.world.terrainModel!=='vertices')return geometry;
+ const corners=new Map<string,{vertexX:number;vertexY:number}>();
+ for(const feature of geometry.values())for(const point of [...feature.trees,...feature.rocks]){
+  const x=Math.floor(point.x+.5),y=Math.floor(point.y+.5);
+  for(const dx of [0,1])for(const dy of [0,1]){
+   const vertexX=((x+dx)%source.world.widthCells+source.world.widthCells)%source.world.widthCells;
+   const vertexY=((y+dy)%source.world.heightCells+source.world.heightCells)%source.world.heightCells;
+   corners.set(`${vertexX}:${vertexY}`,{vertexX,vertexY});
+  }
+ }
+ if(!corners.size)return geometry;
+ const vertices=(await sql<TerrainVertex>`select v.vertex_x,v.vertex_y,v.height from world_terrain_vertices v
+   join jsonb_to_recordset(${JSON.stringify([...corners.values()])}::jsonb) c("vertexX" int,"vertexY" int)
+     on v.vertex_x=c."vertexX" and v.vertex_y=c."vertexY" where v.world_id=${worldId}`.execute(db)).rows;
+ const surface=vertexSurface(source.world,(x,y)=>source.field.sample(x,y).elevation,vertices);
+ const ground=<T extends {x:number;y:number;elevation:number}>(point:T):T=>({...point,elevation:surface.sample(point.x,point.y)});
+ return new Map([...geometry].map(([id,feature])=>[id,{trees:feature.trees.map(ground),rocks:feature.rocks.map(ground)}]));
+}

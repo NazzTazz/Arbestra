@@ -52,14 +52,15 @@ import {
   projectVillageResource,
   projectVillageResources,
 } from './economy.js';
-import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
+import { beginVillageEconomy, beginProcessingCommand, reconcileVillageEconomy, type VillageEconomy, type ReconciliationBudget } from './reconcile-economy.js';
+import { requestEconomyCatchup, ScopeCatchingUp } from './economy-catchup.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
-import { advanceEnergy, beginRest, displayedEnergy, feedEnergy, type EnergyState } from '../population/energy.js';
+import { beginRest, feedEnergy } from '../population/energy.js';
 import { startGardenHarvest } from '../population/garden-harvest.js';
 import {startGardenTour} from '../population/garden-tour.js';
 import {planGardenTour} from '@arbestra/contracts';
-import {housingCapacity} from '../population/housing.js';
-import {POPULATION_ARRIVAL_INTERVAL_MS} from '../population/growth.js';
+import {projectPopulation} from '../population/projection.js';
+
 import {reconcileRestHousing} from '../population/work.js';
 import { eligibleWorkers, materializeCohorts, projectCohorts, withoutAssignment, workingTeam } from '../population/work.js';
 import { admitScience, scienceSnapshot, scienceCommand } from '../science/service.js';
@@ -140,7 +141,7 @@ export async function ownedVillage(
   return row;
   });
 }
-async function catalog(
+export async function catalog(
   tx: Transaction<Database>,
 ): Promise<BuildingTypeDefinition[]> {
   const {types,levels,costs,production,recipes,variantCosts}=await tx.selectNoFrom([
@@ -749,38 +750,7 @@ export async function state(
     tx.selectFrom('villagePopulations').select('nextArrivalAt').where('worldId','=',village.worldId)
       .where('villageId','=',village.villageId).executeTakeFirst(),
   ]));
-  const projectedCohorts = cohorts.map((cohort) => ({
-    ...cohort,
-    energy: advanceEnergy({
-      energy: cohort.energy, progress: cohort.energyProgress, activity: cohort.activity,
-      restingSince: cohort.restingSince, foodUsedSinceRest: cohort.foodUsedSinceRest,
-      updatedAt: cohort.energyUpdatedAt,
-    } satisfies EnergyState, at),
-  }));
-  const population = {
-    pendingRelease:{idle:cohorts.filter(c=>c.pendingRelease==='idle').reduce((n,c)=>n+c.memberCount,0),resting:cohorts.filter(c=>c.pendingRelease==='resting').reduce((n,c)=>n+c.memberCount,0)},
-    total: projectedCohorts.reduce((total, cohort) => total + cohort.memberCount, 0),
-    housingCapacity: housingRows.reduce((total, row) => total + housingCapacity(row.buildingType,row.level), 0),
-    growth:{target:Math.floor(housingRows.reduce((total,row)=>total+housingCapacity(row.buildingType,row.level),0)/2),
-      arrivalIntervalMs:POPULATION_ARRIVAL_INTERVAL_MS,nextArrivalAt:growth?.nextArrivalAt?.toISOString()??null},
-    cohorts: projectedCohorts.map(c=>({id:c.id,memberCount:c.memberCount,activity:c.energy.activity,
-      restBuildingId:c.restBuildingId,restingSince:c.energy.restingSince?.toISOString()??null,
-      energy: displayedEnergy(c.energy), cartographer: c.cartographer,
-      assignmentId: c.harvestId ?? c.extractionId ?? c.scienceActivityId ?? c.processingLotId ?? c.tradeJourneyId ?? c.levelingJobId,
-      assignmentKind: c.harvestId ? 'garden' as const : c.extractionId ? 'extraction' as const : c.scienceActivityId ? 'science' as const : c.processingLotId ? 'processing' as const : c.tradeJourneyId ? 'trade' as const : c.levelingJobId ? 'leveling' as const : null })),
-    restHousing: housingRows.filter(b=>housingCapacity(b.buildingType,b.level)>0).map(b=>({buildingId:b.id,capacity:housingCapacity(b.buildingType,b.level),
-      restingCount:projectedCohorts.filter(c=>c.restBuildingId===b.id).reduce((n,c)=>n+c.memberCount,0)})),
-    restingWithoutHousing:projectedCohorts.filter(c=>c.energy.activity==='resting'&&withoutAssignment(c)&&c.restBuildingId===null).reduce((n,c)=>n+c.memberCount,0),
-    available: projectedCohorts.filter((cohort) => cohort.energy.activity === 'idle' && withoutAssignment(cohort))
-      .reduce((total, cohort) => total + cohort.memberCount, 0),
-    working: projectedCohorts.filter((cohort) => cohort.energy.activity === 'working')
-      .reduce((total, cohort) => total + cohort.memberCount, 0),
-    resting: projectedCohorts.filter((cohort) => cohort.energy.activity === 'resting')
-      .reduce((total, cohort) => total + cohort.memberCount, 0),
-    energyCounts: Array.from({ length: 11 }, (_, energy) => projectedCohorts
-      .filter((cohort) => displayedEnergy(cohort.energy) === energy)
-      .reduce((total, cohort) => total + cohort.memberCount, 0)),
-  };
+  const population = projectPopulation(cohorts, housingRows, growth, at);
   const harvestByPlot = new Map(harvestRows.filter((item) => item.plotCellX !== null)
     .flatMap(item=>(item.stops.length?item.stops:[{cellX:item.plotCellX!,cellY:item.plotCellY!}])
       .map(plot=>[worldCellKey(plot.cellX,plot.cellY),item] as const)));
@@ -1202,16 +1172,33 @@ async function replayVillageCommand(db: Kysely<Database>, accountId: string, wor
 }
 
 export async function commandVillageProcessing<Mode extends ConstructionReplyMode = 'snapshot'>(db: Kysely<Database>, accountId: string,
-  worldSlug: string, villageId: string, command: ProcessingCommand, replyMode: Mode = 'snapshot' as Mode): Promise<ConstructionResult<Mode>> {
+  worldSlug: string, villageId: string, command: ProcessingCommand, replyMode: Mode = 'snapshot' as Mode,
+  budget?: ReconciliationBudget): Promise<ConstructionResult<Mode>> {
   if (replyMode === 'commit') {
     const replay = await replayVillageCommand(db, accountId, worldSlug, villageId, command, 'processingCommandReceipts');
     if (replay) return replay as ConstructionResult<Mode>;
   }
   return db.transaction().execute(async tx => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+    if (replyMode === 'commit') {
+      const prepared = await beginProcessingCommand(tx, village.worldId, village.villageId, command, budget);
+      if (prepared.catchingUp) throw new ScopeCatchingUp();
+      if (!prepared.replay) {
+        await commandProcessing(tx, prepared.economy, command);
+        if (prepared.reconciled) await reconcileRestHousing(tx, village.worldId, village.villageId, prepared.economy.through);
+      }
+      // Processing durations are strictly positive; the command cannot create
+      // a new completion at H. Do not run unrelated admissions as a finalizer.
+      return { ...prepared.economy, commandId: command.commandId } as ConstructionResult<Mode>;
+    }
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await commandProcessing(tx, economy, command);
     return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, command.commandId);
+  }).catch(async error => {
+    // Kysely has completed ROLLBACK before this separate durable wakeup.
+    // There is no command receipt or deferred command intent on this path.
+    if (error instanceof ScopeCatchingUp) await requestEconomyCatchup(db, accountId, worldSlug, villageId);
+    throw error;
   });
 }
 

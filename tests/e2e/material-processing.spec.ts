@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
@@ -7,9 +8,38 @@ import { constructBuilding, getVillageState } from '../../apps/api/src/modules/v
 
 test('le tailleur est inspectable en Exploitation et transforme un lot après sa pause', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Picking du toit vérifié avec le cadrage desktop.');
-  test.setTimeout(150_000);
+  // Cold scene loading plus fixture setup can exceed 150 s on the development
+  // laptop. Individual action/visibility deadlines below remain unchanged.
+  test.setTimeout(300_000);
   const browserErrors:string[]=[];
   page.on('pageerror',error=>browserErrors.push(error.message));
+  // The hint can appear between a visibility check and the next click. Handle
+  // its actual appearance during Playwright's actionability checks.
+  const oracleHint = page.locator('.oracle-provisions-overlay');
+  await page.addLocatorHandler(oracleHint, async () => {
+    await oracleHint.getByRole('button', { name: 'Masquer', exact: true }).click();
+  });
+  const network = await page.context().newCDPSession(page);
+  await network.send('Network.enable');
+  const requests = new Map<string, { path: string; method: string; protocol: string | null; started: number }>();
+  const traffic: object[] = [];
+  network.on('Network.requestWillBeSent', event => {
+    const path = new URL(event.request.url).pathname;
+    if (!path.startsWith('/api/')) return;
+    requests.set(event.requestId, { path, method: event.request.method,
+      protocol: event.request.headers['x-arbestra-protocol'] ?? event.request.headers['x-village-sync'] ?? null,
+      started: event.timestamp });
+  });
+  network.on('Network.loadingFinished', event => {
+    const request = requests.get(event.requestId);
+    if (request) traffic.push({ ...request, kind: 'http', wireBytes: event.encodedDataLength,
+      durationMs: (event.timestamp - request.started) * 1000 });
+  });
+  network.on('Network.eventSourceMessageReceived', event => {
+    const request = requests.get(event.requestId);
+    if (request) traffic.push({ path: request.path, kind: 'sse', event: event.eventName,
+      payloadBytes: Buffer.byteLength(event.data) });
+  });
   await resetE2eState();
   const db = createDatabase(testDatabaseUrl());
   try {
@@ -48,7 +78,7 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     await page.mouse.click(roof.x, roof.y);
     const panel = page.getByRole('region', { name: 'Fabrication de matières' });
     await expect(panel).toBeVisible();
-    await panel.getByRole('button', { name: '1 h', exact: true }).click();
+    await panel.getByRole('button', { name: '1 h', exact: true }).click({ timeout: 10_000 });
     await expect(panel.getByRole('button', { name: 'Produire', exact: true })).toBeEnabled();
     // A real click must reach the workshop even where the harvest showroom overlaps it.
     await panel.getByRole('button', { name: 'Produire', exact: true }).click({ timeout: 10_000 });
@@ -68,5 +98,22 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     expect(Number((await db.selectFrom('villageResources').select('amount').where('villageId', '=', ids.village)
       .where('resourceCode', '=', 'cut-stone').executeTakeFirstOrThrow()).amount)).toBe(20);
     expect(browserErrors).toEqual([]);
-  } finally { await db.destroy(); }
+    const commands = [...requests.values()].filter(request => request.method === 'POST' && request.path.endsWith('/processing'));
+    expect(commands).toHaveLength(2);
+    const firstCommandAt = Math.min(...commands.map(request => request.started));
+    expect([...requests.values()].filter(request => request.method === 'GET' && request.path.endsWith('/village')
+      && request.started > firstCommandAt)).toEqual([]);
+  } finally {
+    try {
+      const trafficPath = testInfo.outputPath('atelier-network.json');
+      await writeFile(trafficPath, JSON.stringify({
+        note: 'HTTP encodedDataLength includes wire headers; SSE data bytes exclude framing. No tokens or business payloads retained.', traffic,
+      }, null, 2));
+      await testInfo.attach('atelier-network.json', { path: trafficPath, contentType: 'application/json' });
+    } finally {
+      // Playwright owns CDP/context teardown; detach after a timeout can fail
+      // and previously prevented the database pool from being closed.
+      await db.destroy();
+    }
+  }
 });
