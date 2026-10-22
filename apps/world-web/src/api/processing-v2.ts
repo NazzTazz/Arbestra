@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {visibleSyncV2Scope,villageStateFromSyncV2,VILLAGE_PRESENTATION_COMPONENTS,type ProcessingCommand,type ProcessingOrder,
-  type SyncV2Batch,type SyncV2State,type VillagePresentation} from '@arbestra/contracts';
+  type ResolvedVillagePresentation,type SyncV2Batch,type SyncV2State} from '@arbestra/contracts';
 import type {TimedVillageState} from './client';
 import {SyncV2Transport} from './sync-v2-transport';
 import {SyncV2SessionExpired} from './sync-v2-session';
@@ -38,7 +38,7 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
   const accept=useRef(onState);accept.current=onState;
   useEffect(()=>{
     if(!enabled||!worldId||!villageId){setStatus('off');return;}
-    let presentation:VillagePresentation|null=null,latest:{state:SyncV2State;observedAt:string}|null=null;
+    let presentation:ResolvedVillagePresentation|null=null,latest:{state:SyncV2State;observedAt:string}|null=null;
     let loading=false,stale=false;
     const emit=()=>{
       if(!presentation||!latest||transport.current!==current)return;
@@ -47,11 +47,22 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
       accept.current({state:projected,serverOffsetMs:Date.parse(latest.observedAt)-Date.now(),source:'v2'});
       setVillageReady(true);
     };
+    const fullPresentation=async():Promise<ResolvedVillagePresentation>=>{
+      const full=await current.presentation();
+      if(!full?.region)throw Error('Présentation incomplète.');
+      return {...full,region:full.region};
+    };
     // Single flight; a structural change during a read triggers one more.
     const loadPresentation=async()=>{
       if(loading){stale=true;return;}
       loading=true;
-      try{do{stale=false;const next=await current.presentation(presentation?.version);if(next)presentation=next;}while(stale&&transport.current===current);}
+      try{do{
+        stale=false;
+        const next=await current.presentation(presentation?.version,presentation?.regionVersion);
+        // An omitted region means our copy of that exact version is current.
+        if(next)presentation=next.region?{...next,region:next.region}:presentation&&next.regionVersion===presentation.regionVersion
+          ?{...next,region:presentation.region}:await fullPresentation();
+      }while(stale&&transport.current===current);}
       catch(error){if(error instanceof SyncV2SessionExpired&&transport.current===current){current.close();expired.current();return;}}
       finally{loading=false;}
       emit();

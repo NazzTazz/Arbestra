@@ -1,4 +1,4 @@
-import {villageStateFromSyncV2,type SyncV2Batch,type SyncV2State,type VillagePresentation} from '@arbestra/contracts';
+import {villageStateFromSyncV2,type ResolvedVillagePresentation,type SyncV2Batch,type SyncV2State} from '@arbestra/contracts';
 import type {TimedVillageState} from './client';
 import {SyncV2Transport} from './sync-v2-transport';
 
@@ -10,7 +10,7 @@ export const SYNC_V2_VILLAGE = (() => { try { return localStorage.getItem('arbes
 export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic'] as const;
 
 type Latest = { state: SyncV2State; observedAt: string; batch: SyncV2Batch };
-export interface InitialSyncV2 { transport: SyncV2Transport; presentation: VillagePresentation; latest: () => Latest }
+export interface InitialSyncV2 { transport: SyncV2Transport; presentation: ResolvedVillagePresentation; latest: () => Latest }
 let handoff: InitialSyncV2 | null = null;
 
 /** First village state from V2 (bootstrap + presentation), without the
@@ -22,7 +22,8 @@ export async function initialSyncV2Read(worldSlug: string): Promise<TimedVillage
     // Until adoption, keep the newest applied state; nothing is rendered yet.
     publish: (state, observedAt, batch) => { latest = { state, observedAt, batch }; }, expired: () => undefined });
   try {
-    const presentation = await transport.presentation();
+    const read = await transport.presentation();
+    const presentation = read?.region ? { ...read, region: read.region } : null;
     const current = latest as Latest | null;
     const state = presentation && current ? villageStateFromSyncV2(current.state, presentation, current.observedAt) : null;
     if (!presentation || !current || !state) throw Error('Projection V2 incomplète.');

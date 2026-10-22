@@ -49,6 +49,14 @@ it('matches the historical projection, revalidates by version and mutates nothin
   // Same rules as the inline historical reader, not a second implementation.
   const reference=villagePresentation(await readVillageProjection(db,ids.account,'aube',ids.village));
   expect({...presentation,observedAt:undefined}).toEqual({...reference,observedAt:undefined});
+  // A client holding this terrain window receives null in its place.
+  const known=await app.inject({method:'GET',url:`${path}?knownRegion=${presentation.regionVersion}`,cookies:{session:token},headers:{'x-arbestra-protocol':'2'}});
+  expect(known.statusCode,known.body).toBe(200);
+  // Each read is a new capture: compare everything but its instant.
+  expect({...known.json(),observedAt:undefined}).toEqual({...presentation,region:null,observedAt:undefined});
+  expect(known.body.length).toBeLessThan(first.body.length/1.5);
+  const stale=await app.inject({method:'GET',url:`${path}?knownRegion=${'0'.repeat(64)}`,cookies:{session:token},headers:{'x-arbestra-protocol':'2'}});
+  expect({...stale.json(),observedAt:undefined}).toEqual({...presentation,observedAt:undefined});
   const unchanged=await read(first.headers.etag as string);
   expect(unchanged.statusCode).toBe(304);expect(unchanged.body).toBe('');
   expect(await durableState()).toEqual(before);

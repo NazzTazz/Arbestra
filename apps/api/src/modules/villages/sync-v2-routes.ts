@@ -31,14 +31,17 @@ export async function registerSyncV2Routes(app:FastifyInstance,db:Kysely<Databas
   app.addHook('preClose',async()=>{for(const close of streams)close();});
   // Independent of the change journal: a pure read-only projection, refreshed
   // by the client on invalidation. The ETag spares the transfer, not the work.
-  app.get(`${prefix}/presentation`,{schema:{params,headers,response:{200:VillagePresentationSchema,304:Type.Null()}}},async(request,reply)=>{
+  app.get(`${prefix}/presentation`,{schema:{params,headers,querystring:Type.Object({knownRegion:Type.Optional(Type.String({pattern:'^[a-f0-9]{64}$'}))}),
+    response:{200:VillagePresentationSchema,304:Type.Null()}}},async(request,reply)=>{
     const account=await authenticate(db,request.cookies[config.cookieName]);
     const {worldSlug,villageId}=request.params as {worldSlug:string;villageId:string};
     const presentation=await readVillagePresentation(db,account.id,worldSlug,villageId,navigation);
     const etag=`"${presentation.version}"`;
     reply.header('Cache-Control','private, no-cache').header('ETag',etag);
     if(request.headers['if-none-match']===etag)return reply.status(304).send();
-    return reply.serializer(JSON.stringify).send(presentation);
+    // The client's copy of an unchanged terrain window is reused, not resent.
+    const {knownRegion}=request.query as {knownRegion?:string};
+    return reply.serializer(JSON.stringify).send(knownRegion===presentation.regionVersion?{...presentation,region:null}:presentation);
   });
   const bootstrapQuery=Type.Object({generation:Type.Integer({minimum:0,maximum:Number.MAX_SAFE_INTEGER}),
     // Optional shared scopes; the private stream is always included.

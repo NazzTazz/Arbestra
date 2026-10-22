@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { villageStateFromSyncV2 } from './sync-v2-village-state.js';
 import type { SyncV2Scope, SyncV2State } from './sync-v2.js';
-import type { VillagePresentation } from './village-presentation.js';
+import type { ResolvedVillagePresentation } from './village-presentation.js';
 
 const worldId = '11111111-1111-4111-8111-111111111111', villageId = '22222222-2222-4222-8222-222222222222';
 const scope = (entries: Array<[string, unknown]>): SyncV2Scope =>
@@ -23,7 +23,7 @@ it('shows the 32 most recent worksites, as the historical snapshot', () => {
     [`manifest:${worldId}`, scope([['gameManifest:*', { id: '*', world: { widthCells: 64, heightCells: 64 }, buildingTypes: [], factoryEnabled: false }]])],
   ]) };
   const presentation = { protocol: 2, worldId, villageId, version: '0'.repeat(64), observedAt: at(40), cells: [], travelRoutes: [],
-    region: {}, market: { unlocked: false, deliveryMs: 0, commissionPercent: 30, resources: [] } } as unknown as VillagePresentation;
+    region: {}, market: { unlocked: false, deliveryMs: 0, commissionPercent: 30, resources: [] } } as unknown as ResolvedVillagePresentation;
   const worksites = villageStateFromSyncV2(sync, presentation, at(40))!.village.worksites;
   expect(worksites).toHaveLength(32);
   expect(worksites[0]!.createdAt).toBe(at(32));

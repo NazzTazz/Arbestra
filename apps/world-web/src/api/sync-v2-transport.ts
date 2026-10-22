@@ -166,9 +166,10 @@ export class SyncV2Transport{
     }}
     return input;
   }
-  /** Versioned presentation read; null when the given version is current. */
-  async presentation(version?:string):Promise<VillagePresentation|null>{
-    const response=await this.request(this.root+'/presentation',{credentials:'same-origin',signal:this.controller.signal,
+  /** Versioned presentation read; null when the given version is current.
+   * With `knownRegion`, an unchanged terrain window comes back as null. */
+  async presentation(version?:string,knownRegion?:string):Promise<VillagePresentation|null>{
+    const response=await this.request(this.root+'/presentation'+(knownRegion?`?knownRegion=${knownRegion}`:''),{credentials:'same-origin',signal:this.controller.signal,
       headers:{'x-arbestra-protocol':'2',...(version?{'if-none-match':`"${version}"`}:{})}});
     if(response.status===304)return null;
     if(response.status===401)throw new SyncV2SessionExpired();

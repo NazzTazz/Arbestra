@@ -1,7 +1,7 @@
 import type { VillageState } from './villages.js';
 import type { ProcessingOrder } from './processing.js';
 import type { MarketJourney, TradeOffer } from './market.js';
-import type { VillagePresentation } from './village-presentation.js';
+import type { ResolvedVillagePresentation } from './village-presentation.js';
 import { visibleSyncV2Scope, type SyncV2Change, type SyncV2State } from './sync-v2.js';
 import { emptyInfrastructure } from './infrastructure.js';
 
@@ -21,7 +21,7 @@ const byTime = (a: string, b: string) => Date.parse(a) - Date.parse(b);
  * presentation, with the presence rules of the historical snapshot (recent
  * terminal history, in-progress missions). Returns null while a required
  * stream is not loaded: the caller keeps its previous state. */
-export function villageStateFromSyncV2(sync: SyncV2State, presentation: VillagePresentation, observedAt: string): VillageState | null {
+export function villageStateFromSyncV2(sync: SyncV2State, presentation: ResolvedVillagePresentation, observedAt: string): VillageState | null {
   const scope = (kind: string) => [...sync.scopes].find(([key]) => key.startsWith(kind + ':'))?.[1];
   const village = sync.scopes.get(`village:${sync.villageId}`), knowledge = scope('knowledge'), manifest = scope('manifest'), traffic = scope('traffic');
   if (!village || !knowledge || !manifest || presentation.worldId !== sync.worldId || presentation.villageId !== sync.villageId) return null;
@@ -40,7 +40,7 @@ export function villageStateFromSyncV2(sync: SyncV2State, presentation: VillageP
   const buildings = new Map(list('buildings').map(row => [row.id, row]));
   const plots = list('gardenPlots').sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY);
   const harvests = list('gardenHarvests'), expansions = list('buildingExpansions');
-  const footprintOf = new Map<string, VillagePresentation['cells']>();
+  const footprintOf = new Map<string, ResolvedVillagePresentation['cells']>();
   const ownerAt = new Map<string, string>();
   for (const cell of presentation.cells) if (cell.footprint) {
     const rows = footprintOf.get(cell.footprint.buildingId) ?? [];

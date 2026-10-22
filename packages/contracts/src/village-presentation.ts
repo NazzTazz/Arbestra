@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { BuildingFootprintSchema, VillageStateSchema } from './villages.js';
+import { BuildingFootprintSchema, VillageStateSchema, type VillageState } from './villages.js';
 import { MarketStateSchema } from './market.js';
 import type { SyncV2Change } from './sync-v2.js';
 
@@ -22,11 +22,16 @@ export const VillagePresentationSchema = Type.Object({
     displaysBuilding: Type.Boolean() }, { additionalProperties: false })),
   travelRoutes: VillageStateSchema.properties.travelRoutes,
   // Terrain window around the footprints, with its features and deposits.
-  // Spatial chunk subscriptions are the eventual target for this data.
-  region: VillageStateSchema.properties.region,
+  // Spatial chunk subscriptions are the eventual target for this data. Its
+  // own digest lets a client that already holds it receive null instead:
+  // placing a building changes cells and routes, rarely this window.
+  regionVersion: Type.String({ pattern: '^[a-f0-9]{64}$' }),
+  region: Type.Union([VillageStateSchema.properties.region, Type.Null()]),
   market: Type.Pick(MarketStateSchema, ['unlocked', 'deliveryMs', 'commissionPercent', 'resources'], { additionalProperties: false }),
 }, { additionalProperties: false });
 export type VillagePresentation = Static<typeof VillagePresentationSchema>;
+/** A presentation whose omitted region was restored from the client's copy. */
+export type ResolvedVillagePresentation = VillagePresentation & { region: VillageState['region'] };
 export const villagePresentationIsValid = (value: unknown): value is VillagePresentation => Value.Check(VillagePresentationSchema, value);
 
 /** Private-stream components whose change can alter the presentation:
