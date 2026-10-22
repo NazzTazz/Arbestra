@@ -1,6 +1,6 @@
 # Reprise Claude — 22 octobre 2026 (fin d'après-midi, session autonome)
 
-État en une ligne : branche `wip/v2-commandes-bornees` poussée (dernier commit applicatif `c633bef`), village complet synchronisable en V2 derrière l'option `arbestra:sync-v2`, convois publics via le flux `traffic` (057, test uniquement), **arbitrages ouverts dans [docs/ARBITRAGES-OUVERTS-V2.md](docs/ARBITRAGES-OUVERTS-V2.md)**. Aucun déploiement, aucune migration développement, `main` intact. Détails ci-dessous.
+État en une ligne : branche `wip/v2-commandes-bornees` poussée (HEAD `18d6687`). Village complet en V2 derrière l'option `arbestra:sync-v2` **sans GET V1 initial**, validé ordinateur et mobile ; convois publics via `traffic` (057, test uniquement) ; mesures V2 sur 30 répétitions consignées ; décisions O1–O5 reçues et appliquées ([docs/ARBITRAGES-OUVERTS-V2.md](docs/ARBITRAGES-OUVERTS-V2.md)). Aucun déploiement, aucune migration développement, `main` intact. Prochaines étapes possibles : migrations 051–057 en développement puis staging avec `VITE_SYNC_V2=1` (accord explicite requis, O3), ACK V2 de la pose de bâtiment, allègement de la présentation.
 
 # Reprise Claude — 22 octobre 2026, tranche atelier V2 raccordée à React
 
