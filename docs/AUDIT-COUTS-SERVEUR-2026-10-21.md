@@ -24,7 +24,7 @@ Même harness, même fixture répétée (3 bâtiments, 30 habitants, monde isol�
 | Synchronisation après un rejeu | SSE 1 ms · 1 appel | delta 8 ms · 8 appels · 0,9 Ko |
 | Premier chargement | (GET village, non répété ici) | bootstrap 82 (101) ms · 75 appels · 16 Ko + présentation 61 (87) ms · 49 appels · 45 Ko |
 
-Lecture : la commande V2 ne projette plus le village (coût proportionnel à la commande), et la synchronisation induite lit les seules clés touchées. Le delta à vide coûte 8 appels (authentification, propriété, journal) contre 1 pour la SSE V1 sur révision inchangée : c'est le coût de chaque relève V2 sans changement, à surveiller pour la cadence de 2 s. Mesures locales Windows, pas une qualification de charge ; la latence navigateur reste mesurée par les parcours Playwright.
+Lecture : la commande V2 ne projette plus le village (coût proportionnel à la commande), et la synchronisation induite lit les seules clés touchées. Le delta à vide coûte 8 appels HTTP complets (authentification, propriété, journal). L'échantillon SSE V1 « 1 appel » exclut la boucle d'authentification et d'échéances du socket (commentaire du harness) ; l'inspection de l'audit l'estimait à environ 9 appels par tick inactif. Les deux relèves à vide sont donc du même ordre ; la cadence de 2 s reste à surveiller sous charge. Mesures locales Windows, pas une qualification de charge ; la latence navigateur reste mesurée par les parcours Playwright.
 
 ## Méthode reproductible
 
