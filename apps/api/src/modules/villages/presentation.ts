@@ -9,7 +9,7 @@ import {readVillageProjection} from './service.js';
  * rules stay in one place. Collections are ordered canonically because
  * occupancy rows have no SQL order and the version digests the content. */
 export function villagePresentation(state:VillageState):VillagePresentation{
-  const cells=state.cells.map(({cellX,cellY,canBuild,footprint})=>({cellX,cellY,canBuild,footprint}))
+  const cells=state.cells.map(({cellX,cellY,canBuild,footprint,building})=>({cellX,cellY,canBuild,footprint,displaysBuilding:building!==null}))
     .sort((a,b)=>a.cellY-b.cellY||a.cellX-b.cellX);
   const travelRoutes=[...state.travelRoutes].sort((a,b)=>a.kind.localeCompare(b.kind)||a.id.localeCompare(b.id));
   const market=state.village.market;

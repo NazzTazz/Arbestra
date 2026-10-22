@@ -16,7 +16,10 @@ export const VillagePresentationSchema = Type.Object({
   observedAt: Type.String({ format: 'date-time' }),
   // Same presence rule as the historical village cells: buildable or occupied.
   cells: Type.Array(Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }),
-    canBuild: Type.Boolean(), footprint: Type.Union([BuildingFootprintSchema, Type.Null()]) }, { additionalProperties: false })),
+    canBuild: Type.Boolean(), footprint: Type.Union([BuildingFootprintSchema, Type.Null()]),
+    // The cell that displays its logical building: a merged garden has one,
+    // although every member keeps an anchor role in its footprint.
+    displaysBuilding: Type.Boolean() }, { additionalProperties: false })),
   travelRoutes: VillageStateSchema.properties.travelRoutes,
   // Terrain window around the footprints, with its features and deposits.
   // Spatial chunk subscriptions are the eventual target for this data.

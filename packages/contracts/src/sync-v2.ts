@@ -40,6 +40,7 @@ export const SyncV2ContributionSchema = Type.Object({ id, programCode: Type.Stri
   lastStartedAt: Type.Union([time, Type.Null()]) }, { additionalProperties: false });
 export const SyncV2BuildingSchema = Type.Omit(BuildingSchema, ['garden'], { additionalProperties: false });
 const cell = Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
+const point = Type.Object({ cellX: Type.Number(), cellY: Type.Number() }, { additionalProperties: false });
 export const SyncV2GardenPlotSchema = Type.Object({ id: Type.String({ pattern: '^[0-9]+,[0-9]+$' }), buildingId: id,
   ...cell.properties, amount: Type.Integer({ minimum: 0 }), capacity: Type.Integer({ minimum: 0 }),
   productionPerHour: Type.Number({ minimum: 0 }), productionUpdatedAt: time,
@@ -47,7 +48,8 @@ export const SyncV2GardenPlotSchema = Type.Object({ id: Type.String({ pattern: '
 export const SyncV2GardenHarvestSchema = Type.Object({ id, buildingId: id, workerCount: Type.Integer({ minimum: 1 }),
   startedAt: time, completesAt: time, reservedCarrots: Type.Integer({ minimum: 0 }), transportMs: Type.Integer({ minimum: 0 }),
   plotCellX: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]), plotCellY: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
-  path: Type.Array(cell), returnPath: Type.Array(cell), stops: Type.Array(GardenHarvestStopSchema),
+  // Team paths follow sub-cell road positions, as in the historical garden.
+  path: Type.Array(point), returnPath: Type.Array(point), stops: Type.Array(GardenHarvestStopSchema),
 }, { additionalProperties: false });
 export const SyncV2ExpansionSchema = Type.Object({ id, buildingId: id, startedAt: time, completesAt: time, cells: Type.Array(cell) }, { additionalProperties: false });
 export const SyncV2StreamSchema = Type.Object({
