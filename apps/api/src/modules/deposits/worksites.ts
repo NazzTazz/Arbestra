@@ -43,7 +43,7 @@ export async function readWorksites(tx: Transaction<Database>, worldId: string, 
   for(const {worksiteId,...target} of targets){const group=grouped.get(worksiteId)??[];group.push(target);grouped.set(worksiteId,group);}
   return rows.map(row=>({id:row.id,resourceCode:row.resourceCode,poolResource:row.poolResource,mode:row.mode,status:row.status,
     workerCap:row.workerCap,deliveredAmount:Number(row.deliveredAmount),waitReason:row.waitReason,
-    nextWakeAt:row.nextWakeAt?.toISOString()??null,targets:grouped.get(row.id)??[],activeExtraction:missions.get(row.id)??null}));
+    nextWakeAt:row.nextWakeAt?.toISOString()??null,createdAt:new Date(row.createdAt as unknown as Date).toISOString(),targets:grouped.get(row.id)??[],activeExtraction:missions.get(row.id)??null}));
 }
 
 export async function createWorksite(tx: Transaction<Database>, economy: VillageEconomy,

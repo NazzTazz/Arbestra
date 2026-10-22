@@ -105,9 +105,7 @@ export function villageStateFromSyncV2(sync: SyncV2State, presentation: VillageP
       .sort((a, b) => a.id.localeCompare(b.id)), restHousing: list('restHousing').sort((a, b) => a.buildingId.localeCompare(b.buildingId)) },
     accomplishments: list('accomplishments').sort((a, b) => a.completedAt.localeCompare(b.completedAt) || a.code.localeCompare(b.code)),
     extractions: list('extractions').filter(row => row.status === 'in-progress').sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id)),
-    // No creation time on the wire: the historical "32 most recent" cap
-    // cannot be reproduced, so every worksite of the stream is kept.
-    worksites: list('worksites').sort((a, b) => a.id.localeCompare(b.id)),
+    worksites: list('worksites').sort((a, b) => byTime(b.createdAt, a.createdAt) || a.id.localeCompare(b.id)).slice(0, 32),
     extractionPools: list('extractionPools').sort((a, b) => b.resource.localeCompare(a.resource)),
     exploitationOrders: list('exploitationOrders').sort((a, b) => byTime(b.confirmedAt, a.confirmedAt)).slice(0, 32),
     levelingJobs: list('levelingJobs').sort((a, b) => a.id.localeCompare(b.id)),

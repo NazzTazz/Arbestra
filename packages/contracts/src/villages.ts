@@ -154,6 +154,8 @@ export const ExtractionWorksiteSchema = Type.Object({
   workerCap: Type.Integer({ minimum: 1, maximum: 10 }), deliveredAmount: Type.Integer({ minimum: 0 }),
   waitReason: Type.Union([Type.String(), Type.Null()]),
   nextWakeAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  // Orders the displayed history (32 most recent) on every protocol.
+  createdAt: Type.String({ format: 'date-time' }),
   targets: Type.Array(ExtractionWorksiteTargetSchema),
   activeExtraction: Type.Union([ExtractionSchema, Type.Null()]),
 });
