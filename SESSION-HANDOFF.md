@@ -1,3 +1,14 @@
+# Étude Astra — 23 octobre 2026, journal V2 et rétention
+
+Étude livrée dans [docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md](docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md), **proposition non implémentée et non commitée**, base `4654464`, branche `wip/v2-commandes-bornees`. Aucun code applicatif modifié, aucune migration appliquée, aucun commit/push/déploiement ; développement/staging/alpha non contactés.
+
+- Recommandation : dépendances stockées une fois par lot/monde, assemblées par agrégation unique ; lecteur serveur à deux formats avant bascule, contrat/client V2 inchangés. Conserver l'inline pour les lots mono-flux évite leur surcoût. Rétention proposée : 7 jours ou 10 000 entrées/flux, plancher et suppression atomiques, reprise collective par snapshot sans changement d'epoch.
+- **Mesuré sur `arbestra_test`, transactions annulées** : à 130 portées, journal+lots 0,891 → 0,156 Mio, médiane publication 477 → 257 ms ; à 1 856 portées, 156,98 → 0,71 Mio et 72,07 → 4,84 s. Trois répétitions/variante ; plages très variables, microbenchmark isolé, pas budgets de production. Égalité des vecteurs et rollback vérifiés.
+- RC1 : instructions de persistance dominantes ; échantillon de 1 513 occupations sous EXPLAIN : 2,65 s de triggers V2, 3,61 s navigation, 0,78 s ancien marqueur V1. 19 845 réécritures du marqueur sur une installation ; publication finale 0,89 s dans le premier profil. Attribution détaillée et limites dans le rapport : ne pas imputer tout le résidu aux seules dépendances.
+- Preuves : expériences terminées code 0, aucune suite DB/reset lancée ; contrôles des tables touchées après rollback, journal visible inchangé (4 243 lignes), fonctions/migrations inchangées. Les rollback laissent des pages mortes : journal 38,04 → 40,67 Mo physiques. Harnesses ignorés dans `test-results/journal-study/`. Fichier personnel `codex-session-01a07944-0d99-7ab3-9983-b16b69419275.md` préservé.
+
+Suite : implémentation et validations de concurrence/reprise **à autoriser séparément** ; aucune implémentation incluse dans cette étude. Les estimations staging/alpha sont des scénarios, pas de la télémétrie de production.
+
 # Reprise Claude — 22–23 octobre 2026, déploiement staging V2
 
 Tristan a autorisé la modification des scripts de déploiement et le déploiement en staging. `ops/deploy/build.sh` passe `VITE_SYNC_V2=1` en staging (village complet en V2), `0` en alpha. La branche `wip/v2-commandes-bornees` est fusionnée dans `main` pour le tag `staging-*` ; alpha n'est pas redéployé.
