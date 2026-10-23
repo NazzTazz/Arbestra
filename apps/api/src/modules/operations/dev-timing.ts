@@ -12,6 +12,8 @@ export class DevTimingTrace {
   readonly metrics = new Map<DevTimingPhase, DevTimingMetric>();
   /** Slowest statements, as operation and first table only (no SQL text). */
   readonly slowest: Array<{ label: string; ms: number }> = [];
+  /** Opt-in breakdown of a composite statement, part by part. */
+  readonly profile: Array<{ label: string; ms: number }> = [];
   readonly root: Span;
   closed = false;
   constructor(readonly now = () => performance.now()) {
@@ -41,6 +43,7 @@ export class DevTimingTrace {
         `arb_${m.phase}_self;dur=${m.selfMs.toFixed(3)};desc="${m.count}"`,
       ])
       .concat(this.slowest.map((q, i) => `arbsql_${i + 1};dur=${q.ms.toFixed(3)};desc="${q.label}"`))
+      .concat(this.profile.map((q, i) => `arbpart_${i + 1};dur=${q.ms.toFixed(3)};desc="${q.label}"`))
       .join(', ');
   }
   recordStatement(sql: string, ms: number) {
@@ -58,6 +61,18 @@ export function statementLabel(sql: string): string {
   const table = /\b(?:from|into|update|join)\s+"?([a-z_][a-z0-9_]*)"?/.exec(text)?.[1];
   const fn = /^select\s+([a-z_][a-z0-9_]*)\(/.exec(text)?.[1];
   return [op, table ?? (fn ? 'fn ' + fn : '')].filter(Boolean).join(' ').slice(0, 60);
+}
+
+/** Times each part of a composite read separately, only for an opted-in
+ * request (diagnostics; the parts are rerun read-only in the same transaction). */
+export async function profileParts(parts: ReadonlyArray<readonly [string, () => Promise<unknown>]>): Promise<void> {
+  const trace = context.getStore()?.trace;
+  if (!trace || trace.closed) return;
+  for (const [label, run] of parts) {
+    const started = performance.now();
+    await run();
+    trace.profile.push({ label: label.slice(0, 60), ms: performance.now() - started });
+  }
 }
 
 export function withDevTiming<T>(trace: DevTimingTrace, run: () => T): T {

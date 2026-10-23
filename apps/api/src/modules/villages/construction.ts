@@ -28,6 +28,7 @@ import type { VillageEconomy } from './reconcile-economy.js';
 import { normalizeCell, wrappedDelta, toroidalChebyshev } from '../worlds/coordinates.js';
 import { normalizeSpatialSelection, type SpatialCell } from './spatial-selection.js';
 import { observationVillage } from '../admin/observation-actions.js';
+import { profileParts } from '../operations/dev-timing.js';
 
 type Cost = { resourceCode: string; amount: number };
 export interface BuildingPlacement {
@@ -174,140 +175,139 @@ async function inputs(
     where least(ax,ax+dx)<=${margin} and greatest(ax,ax+dx)>=${-margin}
       and least(ay,ay+dy)<=${margin} and greatest(ay,ay+dy)>=${-margin}
   )),'[]'::jsonb)`;
-  return tx
-    .selectNoFrom([
-      sql<Date>`statement_timestamp()`.as('through'),
-      jsonObjectFrom(receipt).as('receipt'),
-      jsonObjectFrom(
-        tx
-          .selectFrom('buildingTypes as t')
-          .innerJoin('buildingTypeLevels as l', 'l.buildingTypeCode', 't.code')
-          .select([
-            't.code',
-            't.buildable',
-            't.productionMode',
-            't.instanceLimitPerVillage',
-            'l.constructionDurationSeconds',
-          ])
-          .where('t.code', '=', p.buildingType)
-          .where('l.level', '=', 1),
-      ).as('definition'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('buildingLevelCosts')
-          .select(['resourceCode', 'amount'])
-          .where('buildingTypeCode', '=', p.buildingType)
-          .where('level', '=', 1),
-      ).as('costs'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('buildingVariantCosts')
-          .select(['resourceCode', 'amount', 'replacesResourceCode'])
-          .where('buildingTypeCode', '=', p.buildingType)
-          .where('level', '=', 1)
-          .where('variant', '=', p.houseVariant ?? 'stone'),
-      ).as('variants'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('buildingLevelProduction')
-          .select(['resourceCode', 'capacity'])
-          .where('buildingTypeCode', '=', p.buildingType)
-          .where('level', '=', 1),
-      ).as('production'),
+  const fields = [
+    sql<Date>`statement_timestamp()`.as('through'),
+    jsonObjectFrom(receipt).as('receipt'),
+    jsonObjectFrom(
       tx
-        .selectFrom('buildings')
-        .select(sql<number>`count(*)::int`.as('n'))
+        .selectFrom('buildingTypes as t')
+        .innerJoin('buildingTypeLevels as l', 'l.buildingTypeCode', 't.code')
+        .select([
+          't.code',
+          't.buildable',
+          't.productionMode',
+          't.instanceLimitPerVillage',
+          'l.constructionDurationSeconds',
+        ])
+        .where('t.code', '=', p.buildingType)
+        .where('l.level', '=', 1),
+    ).as('definition'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('buildingLevelCosts')
+        .select(['resourceCode', 'amount'])
+        .where('buildingTypeCode', '=', p.buildingType)
+        .where('level', '=', 1),
+    ).as('costs'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('buildingVariantCosts')
+        .select(['resourceCode', 'amount', 'replacesResourceCode'])
+        .where('buildingTypeCode', '=', p.buildingType)
+        .where('level', '=', 1)
+        .where('variant', '=', p.houseVariant ?? 'stone'),
+    ).as('variants'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('buildingLevelProduction')
+        .select(['resourceCode', 'capacity'])
+        .where('buildingTypeCode', '=', p.buildingType)
+        .where('level', '=', 1),
+    ).as('production'),
+    tx
+      .selectFrom('buildings')
+      .select(sql<number>`count(*)::int`.as('n'))
+      .where('worldId', '=', wid)
+      .where('villageId', '=', vid)
+      .where('buildingType', '=', p.buildingType)
+      .as('instances'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldCellOccupancies')
+        .select(['cellX', 'cellY'])
         .where('worldId', '=', wid)
-        .where('villageId', '=', vid)
-        .where('buildingType', '=', p.buildingType)
-        .as('instances'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldCellOccupancies')
-          .select(['cellX', 'cellY'])
-          .where('worldId', '=', wid)
-          .where(near(cells, sql.ref('cellX'), sql.ref('cellY'), v, 0)),
-      ).as('occupied'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldCellOccupancies as o')
-          .innerJoin('buildings as b', (j) => j.onRef('b.worldId', '=', 'o.worldId').onRef('b.id', '=', 'o.buildingId'))
-          .select(['o.cellX', 'o.cellY'])
-          .where('o.worldId', '=', wid)
-          .where('b.villageId', '=', vid)
-          .where('o.pendingExpansionId', 'is', null)
-          .where((eb) =>
-            eb.or([
-              eb('b.status', '=', 'completed'),
-              eb.and([eb('b.buildingType', '=', 'town-hall'), eb('b.targetLevel', 'is not', null)]),
-            ]),
-          )
-          .where(near(cells, sql.ref('o.cellX'), sql.ref('o.cellY'), v, 8)),
-      ).as('reach'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldClearings')
-          .select(['centerCellX', 'centerCellY', 'innerRadius'])
-          .where('worldId', '=', wid)
-          .where('status', '=', 'protected')
-          .where(near(cells, sql.ref('centerCellX'), sql.ref('centerCellY'), v, sql.ref('innerRadius'))),
-      ).as('clearings'),
-      jsonArrayFrom(
-        tx.selectFrom('levelingJobs').select('quote').where('worldId', '=', wid).where('completedAt', 'is', null)
-          .where(sql<boolean>`exists(select 1 from jsonb_to_recordset(quote->'cells') q("cellX" int,"cellY" int)
+        .where(near(cells, sql.ref('cellX'), sql.ref('cellY'), v, 0)),
+    ).as('occupied'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldCellOccupancies as o')
+        .innerJoin('buildings as b', (j) => j.onRef('b.worldId', '=', 'o.worldId').onRef('b.id', '=', 'o.buildingId'))
+        .select(['o.cellX', 'o.cellY'])
+        .where('o.worldId', '=', wid)
+        .where('b.villageId', '=', vid)
+        .where('o.pendingExpansionId', 'is', null)
+        .where((eb) =>
+          eb.or([
+            eb('b.status', '=', 'completed'),
+            eb.and([eb('b.buildingType', '=', 'town-hall'), eb('b.targetLevel', 'is not', null)]),
+          ]),
+        )
+        .where(near(cells, sql.ref('o.cellX'), sql.ref('o.cellY'), v, 8)),
+    ).as('reach'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldClearings')
+        .select(['centerCellX', 'centerCellY', 'innerRadius'])
+        .where('worldId', '=', wid)
+        .where('status', '=', 'protected')
+        .where(near(cells, sql.ref('centerCellX'), sql.ref('centerCellY'), v, sql.ref('innerRadius'))),
+    ).as('clearings'),
+    jsonArrayFrom(
+      tx.selectFrom('levelingJobs').select('quote').where('worldId', '=', wid).where('completedAt', 'is', null)
+        .where(sql<boolean>`exists(select 1 from jsonb_to_recordset(quote->'cells') q("cellX" int,"cellY" int)
         where ${near(cells, sql.raw('q."cellX"'), sql.raw('q."cellY"'), v, 1)})`),
-      ).as('leveling'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('villageInfrastructure as i')
-          .innerJoin('villages as n', (j) => j.onRef('n.id', '=', 'i.villageId').onRef('n.worldId', '=', 'i.worldId'))
-          .select('i.plan')
-          .where('i.worldId', '=', wid)
-          .where(near(cells, sql.ref('n.anchorCellX'), sql.ref('n.anchorCellY'), v, 34)),
-      ).as('plans'),
-      paths.as('paths'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldChunks')
-          .select(['chunkX', 'chunkY', 'terrainCodes', 'elevations'])
-          .where('worldId', '=', wid)
-          .where((eb) =>
-            v.generationVersion === 3
-              ? sql<boolean>`false`
-              : eb.or(chunkKeys.map((c) => eb.and([eb('chunkX', '=', c.chunkX), eb('chunkY', '=', c.chunkY)]))),
-          ),
-      ).as('chunks'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldSpawnTerraces')
-          .select(['cellX', 'cellY', 'height'])
-          .where('worldId', '=', wid)
-          .where(near(cells, sql.ref('cellX'), sql.ref('cellY'), v, 1))
-          .orderBy('cellX')
-          .orderBy('cellY'),
-      ).as('terraces'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldTerrainVertices')
-          .select(['vertexX', 'vertexY', 'height'])
-          .where('worldId', '=', wid)
-          .where(near(cells, sql.ref('vertexX'), sql.ref('vertexY'), v, 1)),
-      ).as('vertices'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldRc1Resources as r')
-          .leftJoin('woodlandDeposits as d', (j) =>
-            j.onRef('d.worldId', '=', 'r.worldId').onRef('d.featureId', '=', 'r.featureId'),
-          )
-          .select(['r.treeIndices', 'r.removedIndices', 'd.cleared', 'd.remainingAmount', 'd.initialAmount'])
-          .where('r.worldId', '=', wid)
-          .where(
-            treeIds.length
-              ? sql<boolean>`exists(select 1 from jsonb_array_elements_text(r.tree_indices) t(i) where t.i::int=any(${sql.val(treeIds)}::integer[]))`
-              : sql<boolean>`false`,
-          ),
-      ).as('trees'),
-      sql<Stock[]>`(select coalesce(jsonb_agg(s),'[]') from (
+    ).as('leveling'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('villageInfrastructure as i')
+        .innerJoin('villages as n', (j) => j.onRef('n.id', '=', 'i.villageId').onRef('n.worldId', '=', 'i.worldId'))
+        .select('i.plan')
+        .where('i.worldId', '=', wid)
+        .where(near(cells, sql.ref('n.anchorCellX'), sql.ref('n.anchorCellY'), v, 34)),
+    ).as('plans'),
+    paths.as('paths'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldChunks')
+        .select(['chunkX', 'chunkY', 'terrainCodes', 'elevations'])
+        .where('worldId', '=', wid)
+        .where((eb) =>
+          v.generationVersion === 3
+            ? sql<boolean>`false`
+            : eb.or(chunkKeys.map((c) => eb.and([eb('chunkX', '=', c.chunkX), eb('chunkY', '=', c.chunkY)]))),
+        ),
+    ).as('chunks'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldSpawnTerraces')
+        .select(['cellX', 'cellY', 'height'])
+        .where('worldId', '=', wid)
+        .where(near(cells, sql.ref('cellX'), sql.ref('cellY'), v, 1))
+        .orderBy('cellX')
+        .orderBy('cellY'),
+    ).as('terraces'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldTerrainVertices')
+        .select(['vertexX', 'vertexY', 'height'])
+        .where('worldId', '=', wid)
+        .where(near(cells, sql.ref('vertexX'), sql.ref('vertexY'), v, 1)),
+    ).as('vertices'),
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldRc1Resources as r')
+        .leftJoin('woodlandDeposits as d', (j) =>
+          j.onRef('d.worldId', '=', 'r.worldId').onRef('d.featureId', '=', 'r.featureId'),
+        )
+        .select(['r.treeIndices', 'r.removedIndices', 'd.cleared', 'd.remainingAmount', 'd.initialAmount'])
+        .where('r.worldId', '=', wid)
+        .where(
+          treeIds.length
+            ? sql<boolean>`exists(select 1 from jsonb_array_elements_text(r.tree_indices) t(i) where t.i::int=any(${sql.val(treeIds)}::integer[]))`
+            : sql<boolean>`false`,
+        ),
+    ).as('trees'),
+    sql<Stock[]>`(select coalesce(jsonb_agg(s),'[]') from (
       select r.resource_code as code,t.display_name,t.icon_key,r.amount::text as stored,
         (r.amount+floor(coalesce(f.remainder,0)+p.rate*coalesce(extract(epoch from (greatest(statement_timestamp(),f.production_updated_at)-f.production_updated_at)),0)/3600))::text as amount,
         p.rate::text as production_per_hour,case when f.production_updated_at is not null then greatest(statement_timestamp(),f.production_updated_at) end as production_updated_at,
@@ -319,37 +319,43 @@ async function inputs(
           where b.world_id=r.world_id and b.village_id=r.village_id and (b.status='completed' or b.target_level is not null)),0) end as rate) p
       where r.world_id=${wid}::uuid and r.village_id=${vid}::uuid order by r.resource_code
     ) s)`.as('stocks'),
-      jsonArrayFrom(
-        tx
-          .selectFrom('worldCellOccupancies as o')
-          .innerJoin('buildings as b', (j) => j.onRef('b.worldId', '=', 'o.worldId').onRef('b.id', '=', 'o.buildingId'))
-          .innerJoin('buildingCommandReceipts as r', (j) =>
-            j.onRef('r.worldId', '=', 'b.worldId').onRef('r.buildingId', '=', 'b.id'),
-          )
-          .select([
-            'o.cellX',
-            'o.cellY',
-            'o.role',
-            'b.id',
-            'b.buildingType',
-            'b.level',
-            'b.targetLevel',
-            'b.status',
-            'b.constructionStartedAt',
-            'b.constructionCompletesAt',
-            'b.completedAt',
-            'b.quarterTurns',
-            'b.visualLayout',
-          ])
-          .where('r.worldId', '=', wid)
-          .where('r.villageId', '=', vid)
-          .where('b.villageId', '=', vid)
-          .where('r.commandId', '=', p.commandId!)
-          .where(near(cells, sql.ref('o.cellX'), sql.ref('o.cellY'), v, 0)),
-      ).as('replay'),
-    ])
-    .executeTakeFirstOrThrow();
+    jsonArrayFrom(
+      tx
+        .selectFrom('worldCellOccupancies as o')
+        .innerJoin('buildings as b', (j) => j.onRef('b.worldId', '=', 'o.worldId').onRef('b.id', '=', 'o.buildingId'))
+        .innerJoin('buildingCommandReceipts as r', (j) =>
+          j.onRef('r.worldId', '=', 'b.worldId').onRef('r.buildingId', '=', 'b.id'),
+        )
+        .select([
+          'o.cellX',
+          'o.cellY',
+          'o.role',
+          'b.id',
+          'b.buildingType',
+          'b.level',
+          'b.targetLevel',
+          'b.status',
+          'b.constructionStartedAt',
+          'b.constructionCompletesAt',
+          'b.completedAt',
+          'b.quarterTurns',
+          'b.visualLayout',
+        ])
+        .where('r.worldId', '=', wid)
+        .where('r.villageId', '=', vid)
+        .where('b.villageId', '=', vid)
+        .where('r.commandId', '=', p.commandId!)
+        .where(near(cells, sql.ref('o.cellX'), sql.ref('o.cellY'), v, 0)),
+    ).as('replay'),
+  ] as const;
+  // Opted-in diagnostics only: time each part of this one-round-trip read.
+  await profileParts(
+    fields.map((field) => [partName(field), () => tx.selectNoFrom([field] as never).execute()] as const),
+  );
+  return tx.selectNoFrom(fields).executeTakeFirstOrThrow();
 }
+const partName = (field: { toOperationNode(): unknown }) =>
+  String((field.toOperationNode() as { alias?: { name?: string } }).alias?.name ?? '?');
 interface Stock {
   code: string;
   displayName: string;
