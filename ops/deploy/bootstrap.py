@@ -130,7 +130,12 @@ http://:WEB_PORT {
       header Origin https://NOC
     }
   }
-  @crossSite header Sec-Fetch-Site cross-site
+  # Cross-site calls are refused on the API only: a player following a link
+  # (Discord, search engine) must still load the pages.
+  @crossSite {
+    header Sec-Fetch-Site cross-site
+    path /api/*
+  }
   @adminOnPlayer {
     path /api/admin /api/admin/*
     not host NOC
