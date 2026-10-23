@@ -165,13 +165,16 @@ async function inputs(
     union all select path from trade_journeys where world_id=${wid}::uuid and returns_at>statement_timestamp()
     union all select path from leveling_jobs where world_id=${wid}::uuid and completed_at is null
   ) paths cross join lateral (
-    select coalesce(lag(point) over(order by ord),point) as a,point as b from jsonb_array_elements(path) with ordinality p(point,ord)
-  ) segments where exists(select 1 from jsonb_to_recordset(${json(cells)}) c("cellX" int,"cellY" int)
-    cross join lateral(select
-      ${wrap(sql`(a->>'cellX')::float8-c."cellX"`, v.widthCells)} as ax,
-      ${wrap(sql`(a->>'cellY')::float8-c."cellY"`, v.heightCells)} as ay,
-      ${wrap(sql`(b->>'cellX')::float8-(a->>'cellX')::float8`, v.widthCells)} as dx,
-      ${wrap(sql`(b->>'cellY')::float8-(a->>'cellY')::float8`, v.heightCells)} as dy) d
+    -- Coordinates read once per point; the footprint is a constant VALUES list
+    -- (not JSON parsed again for each of the world's path segments).
+    select coalesce(lag(point) over(order by ord),point) as a,point as b,
+      coalesce(lag((point->>'cellX')::float8) over(order by ord),(point->>'cellX')::float8) as x0,
+      coalesce(lag((point->>'cellY')::float8) over(order by ord),(point->>'cellY')::float8) as y0,
+      (point->>'cellX')::float8 as x1,(point->>'cellY')::float8 as y1
+    from jsonb_array_elements(path) with ordinality p(point,ord)
+  ) segments cross join lateral (select ${wrap(sql`x1-x0`, v.widthCells)} as dx,${wrap(sql`y1-y0`, v.heightCells)} as dy) m
+  where exists(select 1 from (values ${sql.join(cells.map((c) => sql`(${c.cellX}::float8,${c.cellY}::float8)`))}) c(x,y)
+    cross join lateral(select ${wrap(sql`x0-c.x`, v.widthCells)} as ax,${wrap(sql`y0-c.y`, v.heightCells)} as ay) d
     where least(ax,ax+dx)<=${margin} and greatest(ax,ax+dx)>=${-margin}
       and least(ay,ay+dy)<=${margin} and greatest(ay,ay+dy)>=${-margin}
   )),'[]'::jsonb)`;

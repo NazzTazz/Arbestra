@@ -21,13 +21,16 @@ export function createDatabase(
   const pool = new Pool({
     connectionString: databaseUrl,
     max: options?.observation ? 2 : 8,
+    // Game statements are short but composite: their estimated cost can cross
+    // the JIT threshold, and compiling them (LLVM, production Linux builds) costs
+    // far more than it saves. Seen on a staging placement: 1.7 s of work, 4.2 s.
     ...(options?.observation
       ? {
           connectionTimeoutMillis: 500,
           options:
-            '-c default_transaction_read_only=on -c statement_timeout=2000 -c lock_timeout=250 -c transaction_timeout=4000',
+            '-c jit=off -c default_transaction_read_only=on -c statement_timeout=2000 -c lock_timeout=250 -c transaction_timeout=4000',
         }
-      : {}),
+      : { options: '-c jit=off' }),
   });
   const reported = new WeakSet<Error>();
   const report = (error: Error) => {
