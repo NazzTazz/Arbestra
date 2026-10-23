@@ -1,3 +1,11 @@
+# Reprise Claude — 23 octobre 2026, alpha V2 et purge du journal
+
+Alpha déployé en V2 (`7f00b4c`, tag `alpha-2026.10.23.1`, six contrôles publics OK) après recette staging de Tristan.
+
+Purge du journal V2 (`sync-v2-retention.ts`, branchée dans `server.ts`, passe toutes les 5 min) : par flux, garde 7 jours ou 10 000 entrées ; supprime le préfixe expiré et pose `retained_from` dans la même transaction, au plus 2 000 lignes par flux et 200 flux par passe, `SKIP LOCKED` sur le compteur, aucun verrou métier ; epoch et révision inchangées, curseur sous le plancher → snapshot (`reason: 'floor'`). Tests `sync-v2-retention.integration.test.ts` 5/5 (âge, nombre, budget, compteur verrouillé ignoré sans attente, capture MVCC ouverte pendant une passe) + journal 9/9 ; lint/typecheck OK. Pas de migration.
+
+Risques Astra non traités : boucle client si une epoch change en cours de session (la purge ne change jamais l'epoch) ; snapshot plafonné à 4 096 références. Suivant proposé : dépendances normalisées (étude Astra §3), puis déclencheurs de l'installation RC1.
+
 # Étude Astra — 23 octobre 2026, journal V2 et rétention
 
 Étude livrée dans [docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md](docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md), **proposition non implémentée et non commitée**, base `4654464`, branche `wip/v2-commandes-bornees`. Aucun code applicatif modifié, aucune migration appliquée, aucun commit/push/déploiement ; développement/staging/alpha non contactés.

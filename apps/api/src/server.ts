@@ -7,6 +7,7 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDatabase } from './database/connection.js';
 import { startScheduledTaskWorker } from './jobs/scheduled-tasks.js';
+import { startSyncJournalRetention } from './modules/villages/sync-v2-retention.js';
 import { operationsFor } from './modules/operations/telemetry.js';
 import { observeScheduler } from './modules/operations/scheduler-observer.js';
 import { SCIENCE_WAKE_TASK } from './modules/science/service.js';
@@ -32,7 +33,12 @@ const stopWorker = startScheduledTaskWorker(
   operations ? observeScheduler(operations) : undefined,
 );
 
+// The V2 journal keeps 7 days or 10,000 entries per stream (bounded passes).
+const stopRetention = startSyncJournalRetention(db, 5 * 60000,
+  () => app.log.error({ code: 'SYNC_RETENTION_FAILED' }, 'Synchronization journal retention failed'));
+
 const shutdown = async () => {
+  await stopRetention();
   await stopWorker();
   await app.close();
   await db.destroy();
