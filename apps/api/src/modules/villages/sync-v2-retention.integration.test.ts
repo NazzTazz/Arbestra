@@ -4,6 +4,7 @@ import { Kysely, PostgresDialect, sql, type Transaction } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { up } from '../../database/migrations/051_game_sync_foundation.js';
+import { up as batchDependencies } from '../../database/migrations/059_game_sync_batch_dependencies.js';
 import type { Database } from '../../database/schema.js';
 import { readJournalSelection } from './sync-v2-journal.js';
 import { pruneSyncJournal } from './sync-v2-retention.js';
@@ -15,7 +16,7 @@ const administration = new pg.Pool({ connectionString: url, max: 1 });
 const pool = new pg.Pool({ connectionString: url, max: 4, options: `-c search_path=${schema} -c statement_timeout=10000 -c lock_timeout=8000` });
 const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 const world = randomUUID();
-beforeAll(async () => { await administration.query(`create schema ${schema}`); await up(db); }, 60000);
+beforeAll(async () => { await administration.query(`create schema ${schema}`); await up(db); await batchDependencies(db); }, 60000);
 afterAll(async () => { await db.destroy(); await administration.query(`drop schema ${schema} cascade`); await administration.end(); }, 30000);
 
 /** Publishes `count` revisions on a fresh village stream, the first `old` of them recorded 8 days ago. */
@@ -96,4 +97,24 @@ it('lets a capture opened before a pass keep its consistent view, and the next o
     expect(await read()).toEqual(before);
   });
   expect(await select(scope, epoch, '1')).toMatchObject({ kind: 'snapshot-required', reason: 'floor' });
+});
+
+it('removes a stored dependency vector with the last journal row that references it', async () => {
+  const [left, right] = [randomUUID(), randomUUID()];
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    for (const scope of [left, right]) await client.query("select game_sync_touch($1,'village',$2,'resources','shared')", [world, scope]);
+    await client.query('select game_sync_publish()');
+    await client.query('commit');
+  } finally { client.release(); }
+  const batch = (await pool.query('select batch_id from game_sync_changes where scope_key=$1', [left])).rows[0].batch_id;
+  const headers = async () => (await pool.query('select count(*)::int as n from game_sync_batches where batch_id=$1', [batch])).rows[0].n;
+  await pool.query(`update game_sync_changes set recorded_at=now()-interval '8 days' where scope_key=$1`, [left]);
+  await pruneSyncJournal(db, options);
+  expect(await state(left)).toMatchObject({ retained_from: '1', revisions: [] });
+  expect(await headers()).toBe(1);
+  await pool.query(`update game_sync_changes set recorded_at=now()-interval '8 days' where scope_key=$1`, [right]);
+  await pruneSyncJournal(db, options);
+  expect(await headers()).toBe(0);
 });

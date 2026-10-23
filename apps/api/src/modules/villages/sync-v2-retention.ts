@@ -35,12 +35,19 @@ export async function pruneSyncJournal<DB>(db: Kysely<DB>, options: SyncRetentio
       if (expired !== null && BigInt(expired) > floor) floor = BigInt(expired);
       if (floor > from + BigInt(options.rowBudget)) floor = from + BigInt(options.rowBudget);
       if (floor <= from) return 0;
-      const removed = await sql`delete from game_sync_changes
+      const removed = (await sql<{ batchId: string | null }>`delete from game_sync_changes
         where world_id=${candidate.worldId} and stream_kind=${candidate.kind} and scope_key=${candidate.key}
-          and epoch=${stream.epoch}::uuid and revision<=${floor.toString()}::bigint`.execute(tx);
+          and epoch=${stream.epoch}::uuid and revision<=${floor.toString()}::bigint
+        returning dependencies_batch_id::text as "batchId"`.execute(tx)).rows;
       await sql`update game_sync_streams set retained_from=${floor.toString()}::bigint
         where world_id=${candidate.worldId} and stream_kind=${candidate.kind} and scope_key=${candidate.key}`.execute(tx);
-      return Number(removed.numAffectedRows ?? 0n);
+      // A stored vector goes with the last journal row of any stream that
+      // references it, not by age: companions are compacted at their own pace.
+      const batches = [...new Set(removed.flatMap(row => row.batchId ? [row.batchId] : []))];
+      if (batches.length) await sql`delete from game_sync_batches b where b.world_id=${candidate.worldId}
+        and b.batch_id=any(${batches}::uuid[]) and not exists(select 1 from game_sync_changes c
+          where c.world_id=b.world_id and c.dependencies_batch_id=b.batch_id)`.execute(tx);
+      return removed.length;
     });
     if (deleted > 0) { streams++; rows += deleted; }
   }

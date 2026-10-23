@@ -14,7 +14,8 @@ export type JournalSelection = { kind: 'delta'; cursor: SyncCursor; fromRevision
  * transaction. No payload from another private scope is returned unless the
  * server-provided authorizer explicitly permits that dependency. */
 export async function readJournalSelection(tx: Transaction<Database>, worldId: string, scope: SyncScope,
-  base: SyncCursor | null, authorized: (dependency: SyncDependency) => boolean, captured?: Counter | null): Promise<JournalSelection> {
+  base: SyncCursor | null, authorized: (dependency: SyncDependency) => boolean, captured?: Counter | null,
+  batches: Map<string, SyncDependency[]> = new Map()): Promise<JournalSelection> {
   if (base && !/^(0|[1-9][0-9]{0,18})$/.test(base.revision)) throw new RangeError('Invalid synchronization revision');
   if (base && BigInt(base.revision) > 9223372036854775807n) throw new RangeError('Invalid synchronization revision');
   const counter = captured === undefined ? (await sql<Counter>`select epoch::text,revision::text,retained_from::text as "retainedFrom"
@@ -26,17 +27,26 @@ export async function readJournalSelection(tx: Transaction<Database>, worldId: s
   if (BigInt(base.revision) > BigInt(counter.revision)) return { kind: 'snapshot-required', cursor, reason: 'ahead' };
   if (base.revision === counter.revision) return { kind: 'delta', cursor, fromRevision: base.revision, references: [], dependencies: [] };
   if (BigInt(counter.revision) - BigInt(base.revision) > 10000n) return { kind: 'snapshot-required', cursor, reason: 'size' };
-  const rows = (await sql<{ revision: string; changes: SyncEntityReference[]; dependencies: SyncDependency[] }>`
-    select revision::text,changes,dependencies from game_sync_changes
+  const rows = (await sql<{ revision: string; changes: SyncEntityReference[]; dependencies: SyncDependency[]; batchId: string | null }>`
+    select revision::text,changes,dependencies,dependencies_batch_id::text as "batchId" from game_sync_changes
     where world_id=${worldId} and stream_kind=${scope.kind} and scope_key=${scope.key} and epoch=${counter.epoch}::uuid
       and revision>${base.revision}::bigint and revision<=${counter.revision}::bigint order by revision limit 10001`.execute(tx)).rows;
   if (BigInt(rows.length) !== BigInt(counter.revision) - BigInt(base.revision)) return { kind: 'snapshot-required', cursor, reason: 'gap' };
+  // Multi-stream batches (059) store their vector once: read each distinct
+  // one once per capture, in this same MVCC view. Older rows are inline.
+  const missing = [...new Set(rows.flatMap(row => row.batchId && !batches.has(row.batchId) ? [row.batchId] : []))];
+  if (missing.length) for (const batch of (await sql<{ batchId: string; dependencies: SyncDependency[] }>`
+    select batch_id::text as "batchId",dependencies from game_sync_batches
+    where world_id=${worldId} and batch_id=any(${missing}::uuid[])`.execute(tx)).rows) batches.set(batch.batchId, batch.dependencies);
   const references = new Map<string, SyncEntityReference>(), dependencies = new Map<string, SyncDependency>();
   let expected = BigInt(base.revision);
   for (const row of rows) {
     if (BigInt(row.revision) !== ++expected) return { kind: 'snapshot-required', cursor, reason: 'gap' };
     for (const reference of row.changes) references.set(JSON.stringify([reference.component, reference.key]), reference);
-    for (const dependency of row.dependencies) {
+    const vector = row.batchId === null ? row.dependencies : batches.get(row.batchId);
+    // A referenced vector never reads as "no dependency".
+    if (!vector) throw Error('Missing synchronization batch');
+    for (const dependency of vector) {
       if (dependency.worldId !== worldId || !authorized(dependency)) continue;
       const key = JSON.stringify([dependency.worldId, dependency.kind, dependency.key]);
       const previous = dependencies.get(key);
@@ -72,11 +82,12 @@ export async function readSubscribedJournal(tx: Transaction<Database>, worldId: 
   const counters = new Map(rows.map(row => [key(row), row]));
   const streams: Extract<SubscribedJournalCapture, { kind: 'ready' }>['streams'] = [];
   let snapshot = false;
+  const batches = new Map<string, SyncDependency[]>();
   for (const subscription of subscriptions) {
     const counter = counters.get(key(subscription.scope));
     if (!counter) return { kind: 'unavailable', reason: 'uninitialized', scope: subscription.scope };
     const selection = await readJournalSelection(tx, worldId, subscription.scope, subscription.base,
-      dependency => wanted.has(key(dependency)), counter);
+      dependency => wanted.has(key(dependency)), counter, batches);
     if (selection.kind === 'snapshot-required') snapshot = true;
     else for (const dependency of selection.dependencies) {
       const current = counters.get(key(dependency))!;

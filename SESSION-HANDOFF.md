@@ -1,3 +1,11 @@
+# Reprise Claude — 23 octobre 2026, dépendances de lots normalisées (059)
+
+Tristan autorise désormais commits, fusions et déploiements staging/alpha sans aval. Purge du journal déployée en staging (`staging-2026.10.23.2`) et alpha (`alpha-2026.10.23.2`), contrôles publics OK.
+
+**059** (étude Astra §3) : un lot multi-flux stocke son vecteur de dépendances une fois par monde dans `game_sync_batches` ; ses lignes de journal portent `[]` et `dependencies_batch_id` (FK, contrôle d'égalité au `batch_id`). Lot mono-flux : inline comme avant. Vecteur assemblé par une seule agrégation, retour SQL de `game_sync_publish()` inchangé (ACK). Lecteur (`sync-v2-journal.ts`) : deux formats, chaque vecteur lu une fois par capture, vecteur référencé absent = erreur (jamais « aucune dépendance »). Purge : un vecteur part avec la dernière ligne qui le référence. Contrat/client inchangés. Tests : journal + purge 15/15, fichiers V2 12/12 (53 tests), installation RC1 10/10 (première installation 36,9 s sur secteur ; un passage sur batterie à 5 % est ininterprétable). Lint/typecheck OK.
+
+Limite connue : deux passes de purge concurrentes peuvent laisser un vecteur orphelin (sans incidence de lecture). Suivant : déclencheurs de l'installation RC1 (étude Astra §5).
+
 # Reprise Claude — 23 octobre 2026, alpha V2 et purge du journal
 
 Alpha déployé en V2 (`7f00b4c`, tag `alpha-2026.10.23.1`, six contrôles publics OK) après recette staging de Tristan.

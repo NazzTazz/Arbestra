@@ -5,6 +5,7 @@ import { Kysely, PostgresDialect, sql, type Transaction } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { up } from '../../database/migrations/051_game_sync_foundation.js';
+import { up as batchDependencies } from '../../database/migrations/059_game_sync_batch_dependencies.js';
 import type { Database } from '../../database/schema.js';
 import { readJournalSelection, readSubscribedJournal } from './sync-v2-journal.js';
 
@@ -17,7 +18,7 @@ const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 const world = randomUUID();
 beforeAll(async () => {
   await administration.query(`create schema ${schema}`);
-  await up(db);
+  await up(db); await batchDependencies(db);
   await pool.query('create table business_stock (id text primary key, amount int not null)');
   await pool.query("insert into business_stock values ('wood',100)");
 }, 60000);
@@ -118,16 +119,31 @@ async function captured(scope: string) {
 }
 it('deduplicates keys, publishes once per stream and preserves cross-stream batch dependencies', async () => {
   const scope = randomUUID(), peer = randomUUID();
+  let versions: unknown[] = [];
   await transaction(async client => {
     await touch(client, scope); await touch(client, scope); await touch(client, peer, 'stone');
-    const versions = (await publish(client)).rows[0].versions;
+    versions = (await publish(client)).rows[0].versions;
     expect(versions).toHaveLength(2);
-    expect(versions.every((value: { revision: string }) => value.revision === '1')).toBe(true);
+    expect(versions.every(value => (value as { revision: string }).revision === '1')).toBe(true);
   });
   const rows = (await pool.query('select * from game_sync_changes where scope_key=any($1)', [[scope, peer]])).rows;
   expect(rows).toHaveLength(2);
   expect(rows[0].batch_id).toBe(rows[1].batch_id);
-  expect(rows[0].dependencies).toEqual(rows[1].dependencies);
+  // A multi-stream vector is stored once and equals the returned one; rows reference it.
+  expect(rows.map(row => [row.dependencies, row.dependencies_batch_id])).toEqual([[[], rows[0].batch_id], [[], rows[0].batch_id]]);
+  expect((await pool.query('select dependencies from game_sync_batches where batch_id=$1', [rows[0].batch_id])).rows)
+    .toEqual([{ dependencies: versions }]);
+  // A single-stream batch stays inline, without a header.
+  await transaction(async client => { await touch(client, scope, 'clay'); await publish(client); });
+  const single = (await pool.query('select * from game_sync_changes where scope_key=$1 and revision=2', [scope])).rows[0];
+  expect(single).toMatchObject({ dependencies_batch_id: null, dependencies: [{ key: scope, revision: '2' }] });
+  expect((await pool.query('select 1 from game_sync_batches where batch_id=$1', [single.batch_id])).rowCount).toBe(0);
+  // Both forms read together, each vector once per capture.
+  const read = await db.transaction().setIsolationLevel('repeatable read').execute(tx => readJournalSelection(tx as Transaction<Database>,
+    world, { kind: 'village', key: scope }, { epoch: single.epoch, revision: '0' }, () => true));
+  expect(read).toMatchObject({ kind: 'delta', cursor: { revision: '2' } });
+  if (read.kind !== 'delta') throw Error('Expected complete journal');
+  expect(new Map(read.dependencies.map(dependency => [dependency.key, dependency.revision]))).toEqual(new Map([[scope, '2'], [peer, '1']]));
   expect(rows.every(row => row.changes.length === 1)).toBe(true);
   expect((await captured(scope)).pending).toEqual([]);
 });
