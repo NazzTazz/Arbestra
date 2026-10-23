@@ -15,6 +15,7 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 - Journal V2 : purge bornée (7 jours / 10 000 entrées par flux, `sync-v2-retention.ts`), dépendances de lot stockées une fois (059).
 - Coût des insertions en masse (058, 060) : première installation RC1 en test 205 s → 11 s.
 - Pose V2 affichée dès la confirmation, sans attendre la relecture de présentation.
+- Prettier sur tout le code (`16ca6cc` outillage, `102c5f4` formatage seul, ignoré par `git blame` via `.git-blame-ignore-revs`) ; règle dans AGENTS.md.
 
 Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md). Étude Astra : [docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md](docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md). Arbitrages : [docs/ARBITRAGES-OUVERTS-V2.md](docs/ARBITRAGES-OUVERTS-V2.md) (aucun ouvert).
 
@@ -22,7 +23,7 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 
 - **Pose d'un bâtiment neuf encore lente au ressenti de Tristan** — remis à plus tard ; mesures et pistes en priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes).
 - Risques signalés par Astra, non reproduits : boucle client si une epoch change en cours de session (la purge ne change jamais l'epoch) ; snapshot plafonné à 4 096 références.
-- Test `economy` « serializes two workers… » : échec ponctuel de barrière (5 s) dans la suite complète, 3/3 seul ; instabilité de timing à surveiller.
+- Tests de concurrence `economy` (« serializes two workers… », « starts an upgrade while another worker holds… ») et préparation `infrastructure` : expirations de barrière (5 s) ou de hook (10 s) de plus en plus fréquentes, **à l'identique sur le code d'avant formatage** ; instabilité d'environnement à traiter (barrières trop serrées pour ce portable).
 - Purge : deux passes concurrentes peuvent laisser un vecteur de dépendances orphelin (sans incidence de lecture).
 - Aucune recette métier distante faite par l'agent (installation RC1, pose, atelier sur staging/alpha).
 

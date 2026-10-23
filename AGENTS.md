@@ -51,5 +51,6 @@
 
 - Faire les corrections de finition et les vérifications requises avant d'annoncer la livraison. Si une preuve manque, statut **à valider**, pas **terminé**.
 - Mettre à jour le handoff courant et uniquement les docs de référence affectées. Ne pas recopier un ancien compte de tests comme résultat actuel.
+- Formater le code avant de committer : `corepack pnpm format` (Prettier, code seulement ; vérification `corepack pnpm format:check`). Un reformatage de masse va dans un commit dédié, ajouté à `.git-blame-ignore-revs`.
 - Commit/push lorsqu'autorisés pour la tâche, sans confirmation supplémentaire. Examiner les fichiers inclus, `git diff --cached --check`, puis vérifier branche et résultat du push. Aucun force-push par défaut.
 - Le bilan final donne le résultat, les preuves, les limites restantes et l'état Git réel. Une relecture distincte peut être utile ; elle ne remplace pas l'auto-validation de l'implémenteur.
