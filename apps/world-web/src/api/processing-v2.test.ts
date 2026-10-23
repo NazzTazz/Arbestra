@@ -1,6 +1,7 @@
 import {expect,it} from 'vitest';
 import {applySyncV2Batch,SYNC_V2_PRIVATE_COMPONENTS,type ProcessingOrder,type SyncV2State} from '@arbestra/contracts';
-import {processingCommandBuilding,processingOrdersV2} from './processing-v2';
+import {presentationWithPlacement,processingCommandBuilding,processingOrdersV2} from './processing-v2';
+import type {ResolvedVillagePresentation} from '@arbestra/contracts';
 
 const worldId='11111111-1111-4111-8111-111111111111',villageId='22222222-2222-4222-8222-222222222222';
 const epoch='33333333-3333-4333-8333-333333333333',building='44444444-4444-4444-8444-444444444444';
@@ -30,4 +31,20 @@ it('locates the workshop of a command through its order',()=>{
   expect(processingCommandBuilding({commandId:epoch,action:'start',buildingId:building,durationSeconds:3600,workerCount:1},[])).toBe(building);
   expect(processingCommandBuilding({commandId:epoch,action:'pause',orderId:newer.id},[older,newer])).toBe(building);
   expect(processingCommandBuilding({commandId:epoch,action:'pause',orderId:epoch},[older])).toBeNull();
+});
+
+it('shows a confirmed placement with the server roles and leaves gardens and unknown cells to the presentation read',()=>{
+  const cell=(cellX:number,cellY:number)=>({cellX,cellY,canBuild:true,footprint:null,displaysBuilding:false});
+  const presentation={cells:[cell(1,1),cell(2,1),cell(3,1)],version:'v'} as unknown as ResolvedVillagePresentation;
+  const buildingId='00000000-0000-4000-8000-000000000001';
+  const placed=presentationWithPlacement(presentation,{buildingId,buildingType:'stonemason',anchor:{cellX:1,cellY:1},cells:[{cellX:1,cellY:1},{cellX:2,cellY:1}]})!;
+  expect(placed.cells).toEqual([
+    {cellX:1,cellY:1,canBuild:false,displaysBuilding:true,footprint:{buildingId,buildingType:'stonemason',role:'anchor',state:'reserved'}},
+    {cellX:2,cellY:1,canBuild:false,displaysBuilding:false,footprint:{buildingId,buildingType:'stonemason',role:'extension',state:'reserved'}},
+    cell(3,1),
+  ]);
+  expect(placed.version).toBe('v');
+  expect(presentation.cells[0]).toEqual(cell(1,1));
+  expect(presentationWithPlacement(presentation,{buildingId,buildingType:'garden',anchor:{cellX:1,cellY:1},cells:[{cellX:1,cellY:1}]})).toBeNull();
+  expect(presentationWithPlacement(presentation,{buildingId,buildingType:'dwelling',anchor:{cellX:9,cellY:9},cells:[{cellX:9,cellY:9}]})).toBeNull();
 });

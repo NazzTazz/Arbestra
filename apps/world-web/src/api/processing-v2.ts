@@ -20,6 +20,22 @@ export function processingCommandBuilding(command:ProcessingCommand,orders:reado
   return 'buildingId' in command?command.buildingId:orders.find(order=>order.id===command.orderId)?.buildingId??null;
 }
 
+export interface ConfirmedPlacement{buildingId:string;buildingType:string;anchor:{cellX:number;cellY:number};cells:ReadonlyArray<{cellX:number;cellY:number}>}
+/** The footprint the server just confirmed, shown before the recomputed
+ * presentation (whose travel network can take a few hundred ms) arrives.
+ * Same roles and state as the server for a new building under construction.
+ * Null when it cannot be shown faithfully: a garden may merge with others,
+ * and an unknown cell means the client's window is stale. */
+export function presentationWithPlacement(presentation:ResolvedVillagePresentation,placed:ConfirmedPlacement):ResolvedVillagePresentation|null{
+  if(placed.buildingType==='garden')return null;
+  const key=(cell:{cellX:number;cellY:number})=>`${cell.cellX}:${cell.cellY}`,footprint=new Set(placed.cells.map(key));
+  const anchor=key(placed.anchor);
+  if(!footprint.has(anchor)||presentation.cells.filter(cell=>footprint.has(key(cell))).length!==footprint.size)return null;
+  return {...presentation,cells:presentation.cells.map(cell=>!footprint.has(key(cell))?cell:{...cell,canBuild:false,displaysBuilding:key(cell)===anchor,
+    footprint:{buildingId:placed.buildingId,buildingType:placed.buildingType as NonNullable<typeof cell.footprint>['buildingType'],
+      role:key(cell)===anchor?'anchor' as const:'extension' as const,state:'reserved' as const}})};
+}
+
 export type ProcessingV2Status='off'|'starting'|'ready'|'unavailable';
 type Options={worldSlug:string;worldId:string|undefined;villageId:string|undefined;enabled:boolean;
   /** Whole village from V2 (streams + presentation), not only the workshop. */
@@ -36,6 +52,7 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
   const transport=useRef<SyncV2Transport|null>(null);
   const expired=useRef(onExpired);expired.current=onExpired;
   const accept=useRef(onState);accept.current=onState;
+  const placed=useRef<(placement:ConfirmedPlacement)=>void>(()=>undefined);
   useEffect(()=>{
     if(!enabled||!worldId||!villageId){setStatus('off');return;}
     let presentation:ResolvedVillagePresentation|null=null,latest:{state:SyncV2State;observedAt:string}|null=null;
@@ -66,6 +83,11 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
       catch(error){if(error instanceof SyncV2SessionExpired&&transport.current===current){current.close();expired.current();return;}}
       finally{loading=false;}
       emit();
+    };
+    // A confirmed placement shows at once; the pending read replaces it.
+    placed.current=placement=>{
+      const patched=presentation&&presentationWithPlacement(presentation,placement);
+      if(patched&&transport.current===current){presentation=patched;emit();}
     };
     const handlers={expired:()=>expired.current(),
       publish:(state:SyncV2State,observedAt:string,batch:SyncV2Batch)=>{
@@ -121,7 +143,11 @@ export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,on
   const construct=useCallback((body:Parameters<SyncV2Transport['construct']>[0])=>{
     const current=transport.current;
     if(!current)throw Error('Synchronisation indisponible.');
-    return current.construct(body);
+    return current.construct(body).then(confirmation=>{
+      if(confirmation.result.buildingId)placed.current({buildingId:confirmation.result.buildingId,buildingType:body.buildingType,
+        anchor:{cellX:body.anchorCellX,cellY:body.anchorCellY},cells:body.cells});
+      return confirmation;
+    });
   },[]);
   /** Immediate delta read, e.g. after a command still answered by V1. */
   const refresh=useCallback(()=>{transport.current?.reconnect();},[]);
