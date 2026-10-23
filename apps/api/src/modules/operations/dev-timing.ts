@@ -10,6 +10,8 @@ const context = new AsyncLocalStorage<Context>();
 
 export class DevTimingTrace {
   readonly metrics = new Map<DevTimingPhase, DevTimingMetric>();
+  /** Slowest statements, as operation and first table only (no SQL text). */
+  readonly slowest: Array<{ label: string; ms: number }> = [];
   readonly root: Span;
   closed = false;
   constructor(readonly now = () => performance.now()) {
@@ -38,8 +40,24 @@ export class DevTimingTrace {
         `arb_${m.phase};dur=${m.durationMs.toFixed(3)};desc="${m.count}"`,
         `arb_${m.phase}_self;dur=${m.selfMs.toFixed(3)};desc="${m.count}"`,
       ])
+      .concat(this.slowest.map((q, i) => `arbsql_${i + 1};dur=${q.ms.toFixed(3)};desc="${q.label}"`))
       .join(', ');
   }
+  recordStatement(sql: string, ms: number) {
+    if (this.closed) return;
+    this.slowest.push({ label: statementLabel(sql), ms });
+    this.slowest.sort((a, b) => b.ms - a.ms);
+    this.slowest.length = Math.min(this.slowest.length, 3);
+  }
+}
+
+/** "insert world_cell_occupancies", "select villages", "select fn game_sync_publish". */
+export function statementLabel(sql: string): string {
+  const text = sql.replace(/\s+/g, ' ').trim().toLowerCase();
+  const op = /^(\w+)/.exec(text)?.[1] ?? '?';
+  const table = /\b(?:from|into|update|join)\s+"?([a-z_][a-z0-9_]*)"?/.exec(text)?.[1];
+  const fn = /^select\s+([a-z_][a-z0-9_]*)\(/.exec(text)?.[1];
+  return [op, table ?? (fn ? 'fn ' + fn : '')].filter(Boolean).join(' ').slice(0, 60);
 }
 
 export function withDevTiming<T>(trace: DevTimingTrace, run: () => T): T {
@@ -90,7 +108,14 @@ export function instrumentDevDriver(driver: Driver): Driver {
     const connection = await devTime('pool', acquire);
     if (!wrapped.has(connection)) {
       const execute = connection.executeQuery.bind(connection);
-      connection.executeQuery = <R>(query: CompiledQuery) => devTime('sql', () => execute<R>(query));
+      connection.executeQuery = <R>(query: CompiledQuery) => {
+        const trace = context.getStore()?.trace;
+        if (!trace) return execute<R>(query);
+        const started = performance.now();
+        return devTime('sql', () => execute<R>(query)).finally(() =>
+          trace.recordStatement(query.sql, performance.now() - started),
+        );
+      };
       wrapped.add(connection);
     }
     return connection;

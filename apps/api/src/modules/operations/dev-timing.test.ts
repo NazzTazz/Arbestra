@@ -9,6 +9,7 @@ import {
   devTimeSync,
   instrumentDevDriver,
   instrumentDevTimings,
+  statementLabel,
   withDevTiming,
 } from './dev-timing.js';
 
@@ -294,4 +295,13 @@ describe('development timing', () => {
     withDevTiming(trace, () => devTimeSync('navigation', () => 1));
     expect(trace.header()).toBe(header);
   });
+});
+
+it('labels statements by operation and first table only', () => {
+  expect(statementLabel('insert into "world_cell_occupancies" ("a") values ($1)')).toBe(
+    'insert world_cell_occupancies',
+  );
+  expect(statementLabel('select "id" from "villages" where "id" = $1 for update')).toBe('select villages');
+  expect(statementLabel('select game_sync_publish() as published')).toBe('select fn game_sync_publish');
+  expect(statementLabel('commit')).toBe('commit');
 });
