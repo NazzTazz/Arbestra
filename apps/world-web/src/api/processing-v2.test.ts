@@ -6,6 +6,7 @@ import {
   type SyncV2State,
 } from '@arbestra/contracts';
 import {
+  footprintsKnown,
   presentationReadNeeded,
   presentationWithPlacement,
   processingCommandBuilding,
@@ -173,4 +174,39 @@ it('rereads the presentation once per structural revision, not again for the str
   expect(presentationReadNeeded(batch('delta', group('resources', '9')), 7n)).toEqual({ needed: false, through: null });
   // A scope snapshot always rereads and restarts the coverage.
   expect(presentationReadNeeded(batch('scope-snapshot'), 7n)).toEqual({ needed: true, through: null });
+});
+
+it('shows a state at once only when every building already has its footprint', () => {
+  const village = '22222222-2222-4222-8222-222222222222',
+    known = '00000000-0000-4000-8000-0000000000aa',
+    fresh = '00000000-0000-4000-8000-0000000000bb';
+  const state = (ids: string[]) =>
+    ({
+      scopes: new Map([
+        [
+          `village:${village}`,
+          {
+            epoch: 'e',
+            revision: '1',
+            base: new Map(ids.map((id) => [`buildings:${id}`, { id }])),
+            effects: new Map(),
+          },
+        ],
+      ]),
+    }) as unknown as Parameters<typeof footprintsKnown>[0];
+  const presentation = {
+    cells: [
+      {
+        cellX: 1,
+        cellY: 1,
+        canBuild: false,
+        displaysBuilding: true,
+        footprint: { buildingId: known, buildingType: 'dwelling', role: 'anchor', state: 'active' },
+      },
+    ],
+  } as unknown as ResolvedVillagePresentation;
+  // An upgrade of a placed building: shown before the reread.
+  expect(footprintsKnown(state([known]), village, presentation)).toBe(true);
+  // A new building without its footprint yet: wait for the presentation.
+  expect(footprintsKnown(state([known, fresh]), village, presentation)).toBe(false);
 });

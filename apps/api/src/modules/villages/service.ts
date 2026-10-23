@@ -725,6 +725,8 @@ async function finalizeVillageEconomy(
   });
 }
 export type ConstructionReplyMode = 'snapshot' | 'commit';
+/** Runs last in the command transaction, after a new (not replayed) commit. */
+export type AfterConstructionWrites = (tx: Transaction<Database>, economy: VillageEconomy) => Promise<void>;
 export interface ConstructionCommit {
   worldId: string;
   villageId: string;
@@ -743,10 +745,13 @@ export async function villageCommandResult<Mode extends ConstructionReplyMode>(
   economy: VillageEconomy,
   mode: Mode,
   commandId?: string,
+  afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionResult<Mode>> {
   if (mode === 'snapshot') return (await state(tx, accountId, worldSlug, economy)) as ConstructionResult<Mode>;
   await finalizeVillageEconomy(tx, economy, village);
   await reconcileRestHousing(tx, village.worldId, village.villageId, economy.through);
+  // Terminal step of a committed command (V2 publication): no write after it.
+  if (afterWrites) await afterWrites(tx, economy);
   return {
     worldId: village.worldId,
     villageId: village.villageId,
@@ -2202,6 +2207,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
   commandId?: string,
   expectedCosts?: ExpectedCost[],
   replyMode: Mode = 'snapshot' as Mode,
+  afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionResult<Mode>> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
@@ -2342,7 +2348,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
     )
       throw new HttpError(409, 'INVALID_BUILDING_EXTENSION', 'L’extension doit toucher le jardin actif.');
     if (newCells.length === 0)
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+      return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId, afterWrites);
     await assertBuildableCells(tx, village, newCells);
     const item = await definition(tx, 'garden', 1);
     const actualCosts = scaledCosts(item.costs, newCells.length);
@@ -2377,7 +2383,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
       })
       .execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId, afterWrites);
   });
 }
 
@@ -2394,6 +2400,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
   expectedCosts?: ExpectedCost[],
   expectedLevel?: number,
   replyMode: Mode = 'snapshot' as Mode,
+  afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionResult<Mode>> {
   // Compatibility for saved clients/tests from the old single-cell Garden UX.
   // The HTTP API uses /expansions; both paths now create the same expansion.
@@ -2540,7 +2547,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
       })
       .execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId, afterWrites);
   });
 }
 export async function harvestGardenSelection(

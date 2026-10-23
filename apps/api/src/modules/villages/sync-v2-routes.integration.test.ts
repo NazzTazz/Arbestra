@@ -74,8 +74,9 @@ it('requires protocol negotiation and authentication and rejects unknown request
   }
 });
 it('fails closed before writer activation, including bootstrap without economic mutation', async () => {
-  // Shadow only migration metadata to model an unactivated installation;
-  // never edit the real migration ledger or disable business writers.
+  // The gate reads the catalog (the runtime role cannot read kysely_migration):
+  // hide the last rollout piece by name for this test only, restored below.
+  // Triggers bind functions by OID, so business writers keep working.
   const schema = 'sync_gate_' + randomUUID().replaceAll('-', '');
   await sql`create schema ${sql.id(schema)}`.execute(db);
   const unready = new Kysely<Database>({
@@ -86,7 +87,7 @@ it('fails closed before writer activation, including bootstrap without economic 
   });
   const unavailable = Fastify();
   try {
-    await sql`create table ${sql.id(schema, 'kysely_migration')}(name text primary key)`.execute(db);
+    await sql`alter function game_sync_collect_traffic() rename to game_sync_collect_traffic_hidden`.execute(db);
     await unavailable.register(cookie);
     unavailable.setErrorHandler((error, _request, reply) =>
       error instanceof HttpError
@@ -110,6 +111,7 @@ it('fails closed before writer activation, including bootstrap without economic 
       before,
     );
   } finally {
+    await sql`alter function game_sync_collect_traffic_hidden() rename to game_sync_collect_traffic`.execute(db);
     await unavailable.close();
     await unready.destroy();
     await sql`drop schema ${sql.id(schema)} cascade`.execute(db);

@@ -217,6 +217,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     ready: boolean;
     refresh: () => void;
     construct?: ReturnType<typeof useVillageSyncV2>['construct'];
+    upgrade?: ReturnType<typeof useVillageSyncV2>['upgrade'];
+    expand?: ReturnType<typeof useVillageSyncV2>['expand'];
   }>({ ready: false, refresh: () => {} });
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -419,6 +421,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     ready: villageV2Mode && villageV2.villageReady,
     refresh: villageV2.refresh,
     construct: villageV2.construct,
+    upgrade: villageV2.upgrade,
+    expand: villageV2.expand,
   };
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
@@ -1002,9 +1006,21 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           ? { revision: current.syncRevision, serverTime: current.serverTime }
           : undefined;
       const v2 = villageV2Ref.current;
-      // Placement on the V2 contract: its ACK effects update the village and
-      // invalidate the presentation; expansion and upgrade remain V1 for now.
-      if (command.kind === 'build' && v2.ready && v2.construct)
+      // Construction commands on the V2 contract: their ACK effects update the
+      // village; a new footprint also rereads the presentation.
+      if (command.kind === 'upgrade' && v2.ready && v2.upgrade)
+        await v2.upgrade(command.buildingId, {
+          commandId: command.commandId,
+          expectedCosts: command.expectedCosts,
+          expectedLevel: command.expectedLevel,
+        });
+      else if (command.kind === 'expand' && v2.ready && v2.expand)
+        await v2.expand(command.buildingId, {
+          commandId: command.commandId,
+          cells: command.cells,
+          expectedCosts: command.expectedCosts,
+        });
+      else if (command.kind === 'build' && v2.ready && v2.construct)
         await v2.construct({
           commandId: command.commandId,
           buildingType: command.buildingType,

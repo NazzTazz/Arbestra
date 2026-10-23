@@ -86,7 +86,7 @@ export class SyncV2Transport {
     transport.open(input);
     return transport;
   }
-  readonly generation: number;
+  generation: number;
   private session: SyncV2Session | null = null;
   private closed = false;
   private readonly controller = new AbortController();
@@ -195,10 +195,32 @@ export class SyncV2Transport {
             this.options.expired();
             return;
           }
+          // Even a snapshot is refused: a stream epoch was replaced, which a
+          // subscription generation never accepts. Reopen a new one.
+          if (refreshError instanceof SyncV2ResyncRequired) return this.reopen();
         }
       }
     }
     if (!this.closed) this.retry = setTimeout(() => void this.listen(), 2000);
+  }
+  /** New subscription generation from a full bootstrap; its stream starts
+   * with it. Retried until it succeeds, the session expires or we close. */
+  private async reopen(): Promise<void> {
+    if (this.closed) return;
+    this.session?.close();
+    this.session = null;
+    this.generation = ++nextGeneration;
+    try {
+      await this.start();
+    } catch (error) {
+      if (this.closed) return;
+      if (error instanceof SyncV2SessionExpired) {
+        this.close();
+        this.options.expired();
+        return;
+      }
+      this.retry = setTimeout(() => void this.reopen(), 2000);
+    }
   }
   refresh(snapshot = false): Promise<void> {
     if (this.refreshFlight) return this.refreshFlight;
@@ -318,8 +340,33 @@ export class SyncV2Transport {
     quarterTurns: number;
     houseVariant: 'stone' | 'logs' | 'beams';
   }): Promise<ConstructionConfirmationV2> {
+    return this.confirmConstruction('/buildings', body);
+  }
+  /** Upgrade of a building on the V2 contract (same confirmation as placement). */
+  upgrade(
+    buildingId: string,
+    body: {
+      commandId: string;
+      expectedCosts: Array<{ resourceCode: string; amount: number }>;
+      expectedLevel?: number | undefined;
+    },
+  ): Promise<ConstructionConfirmationV2> {
+    return this.confirmConstruction(`/buildings/${encodeURIComponent(buildingId)}/upgrade`, body);
+  }
+  /** Garden expansion on the V2 contract. */
+  expand(
+    buildingId: string,
+    body: {
+      commandId: string;
+      cells: Array<{ cellX: number; cellY: number }>;
+      expectedCosts: Array<{ resourceCode: string; amount: number }>;
+    },
+  ): Promise<ConstructionConfirmationV2> {
+    return this.confirmConstruction(`/buildings/${encodeURIComponent(buildingId)}/expansions`, body);
+  }
+  private async confirmConstruction(path: string, body: { commandId: string }): Promise<ConstructionConfirmationV2> {
     if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
-    const input = await this.json('/buildings', { method: 'POST', body: JSON.stringify(body) });
+    const input = await this.json(path, { method: 'POST', body: JSON.stringify(body) });
     if (
       !constructionConfirmationV2IsValid(input) ||
       input.commandId !== body.commandId ||

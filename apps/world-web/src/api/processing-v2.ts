@@ -98,6 +98,21 @@ export function presentationReadNeeded(
   return { needed: through !== null, through };
 }
 
+/** Whether every building of the private stream already has its footprint
+ * in the presentation, so the state can be shown before a reread. */
+export function footprintsKnown(
+  state: SyncV2State,
+  villageId: string | undefined,
+  presentation: ResolvedVillagePresentation,
+): boolean {
+  const scope = state.scopes.get(`village:${villageId}`);
+  if (!scope) return false;
+  const placed = new Set(presentation.cells.flatMap((cell) => (cell.footprint ? [cell.footprint.buildingId] : [])));
+  for (const [key] of visibleSyncV2Scope(scope))
+    if (key.startsWith('buildings:') && !placed.has(key.slice(10))) return false;
+  return true;
+}
+
 export type ProcessingV2Status = 'off' | 'starting' | 'ready' | 'unavailable';
 type Options = {
   worldSlug: string;
@@ -199,6 +214,9 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
           // A snapshot (possibly a new epoch) restarts the coverage.
           if (read.needed) covered = read.through;
           void loadPresentation();
+          // An upgrade or a stock change keeps every footprint: show it now,
+          // the read refreshes routes and cells. A new building still waits.
+          if (presentation && footprintsKnown(state, villageId, presentation)) emit();
         } else emit();
       },
     };
@@ -283,9 +301,19 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
       return confirmation;
     });
   }, []);
+  const upgrade = useCallback((buildingId: string, body: Parameters<SyncV2Transport['upgrade']>[1]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.upgrade(buildingId, body);
+  }, []);
+  const expand = useCallback((buildingId: string, body: Parameters<SyncV2Transport['expand']>[1]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.expand(buildingId, body);
+  }, []);
   /** Immediate delta read, e.g. after a command still answered by V1. */
   const refresh = useCallback(() => {
     transport.current?.reconnect();
   }, []);
-  return { status, villageReady, orders, unresolved, command, discard, refresh, construct };
+  return { status, villageReady, orders, unresolved, command, discard, refresh, construct, upgrade, expand };
 }

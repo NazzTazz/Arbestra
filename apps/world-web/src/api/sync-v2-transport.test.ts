@@ -332,3 +332,104 @@ it('applies a placement ACK through the session and refuses a foreign confirmati
     transport.close();
   }
 });
+
+it('reopens a new generation when a stream epoch was replaced, instead of rereading the same snapshot forever', async () => {
+  const replaced = '66666666-6666-4666-8666-666666666666';
+  const withEpoch = (batch: SyncV2Batch, value: string): SyncV2Batch => ({
+    ...batch,
+    groups: batch.groups.map((group) =>
+      group.stream.kind === 'village' ? { ...group, stream: { ...group.stream, epoch: value } } : group,
+    ),
+  });
+  const bootstraps: number[] = [],
+    reads: number[] = [],
+    published: Array<{ epoch: string | undefined; generation: number }> = [];
+  let streams = 0,
+    current = epoch;
+  const request: typeof fetch = async (url, init) => {
+    const generation = Number(new Headers(init?.headers).get('x-arbestra-generation') ?? 0);
+    if (String(url).endsWith('/sync/stream')) {
+      // The first stream reports that its scope was replaced (new epoch).
+      if (streams++ === 0) {
+        current = replaced;
+        return new Response('event: reset\ndata: {}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+      }
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    }
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(url).endsWith('/sync/read')) {
+      reads.push(body.generation);
+      return json(withEpoch(bootstrap(body.generation), current));
+    }
+    const query = Number(new URL(String(url), 'http://x').searchParams.get('generation'));
+    bootstraps.push(query || generation);
+    return json(withEpoch(bootstrap(query || generation), current));
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: (state) =>
+      published.push({
+        epoch: state.scopes.get(`village:${villageId}`)?.epoch,
+        generation: state.generation,
+      }),
+    expired: () => {
+      throw Error('Unexpected expiration');
+    },
+  });
+  try {
+    await transport.start();
+    await vi.waitFor(() => expect(published.at(-1)?.epoch).toBe(replaced), { timeout: 1000 });
+    // One snapshot attempt in the old generation, then a full bootstrap in a new one.
+    expect(bootstraps).toHaveLength(2);
+    expect(bootstraps[1]).toBeGreaterThan(bootstraps[0]!);
+    expect(reads).toHaveLength(1);
+    expect(published.at(-1)?.generation).toBe(bootstraps[1]);
+    expect(transport.generation).toBe(bootstraps[1]);
+  } finally {
+    transport.close();
+  }
+});
+
+it('sends upgrades and expansions on the V2 contract to their building routes', async () => {
+  const paths: string[] = [];
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream'))
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const generation = Number(new Headers(init?.headers).get('x-arbestra-generation'));
+    if (String(url).endsWith('/sync/read')) return json(bootstrap(generation));
+    paths.push(String(url).replace(/.*villages\/[^/]+/, ''));
+    expect(new Headers(init?.headers).get('x-arbestra-protocol')).toBe('2');
+    const body = JSON.parse(String(init?.body));
+    return json({
+      protocol: 2,
+      worldId,
+      villageId,
+      commandId: body.commandId,
+      status: 'applied',
+      commandTime: '2026-10-23T00:00:00Z',
+      result: { buildingId: epoch },
+    });
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: () => undefined,
+    expired: () => undefined,
+  });
+  try {
+    await transport.start(true);
+    const command = '77777777-7777-4777-8777-777777777777';
+    await expect(
+      transport.upgrade(epoch, { commandId: command, expectedCosts: [], expectedLevel: 2 }),
+    ).resolves.toMatchObject({
+      result: { buildingId: epoch },
+    });
+    await expect(
+      transport.expand(epoch, { commandId: command, cells: [{ cellX: 1, cellY: 2 }], expectedCosts: [] }),
+    ).resolves.toMatchObject({ commandId: command });
+    expect(paths).toEqual([`/buildings/${epoch}/upgrade`, `/buildings/${epoch}/expansions`]);
+  } finally {
+    transport.close();
+  }
+});

@@ -41,7 +41,7 @@ import {
 import { readCommandReceipts } from './command-receipts.js';
 import { ProcessingConfirmationV2Schema } from '@arbestra/contracts';
 import { commandProcessingV2 } from './processing-v2.js';
-import { placeBuildingV2 } from './construction-v2.js';
+import { expandGardenV2, placeBuildingV2, upgradeBuildingV2 } from './construction-v2.js';
 import type { BuildingType } from '@arbestra/contracts';
 import { assertSyncV2Available } from './sync-v2-routes.js';
 import {
@@ -777,6 +777,22 @@ export async function registerVillageRoutes(
         commandId?: string;
         expectedCosts?: Array<{ resourceCode: string; amount: number }>;
       };
+      if (request.headers['x-arbestra-protocol'] === '2') {
+        if (!commandId) throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
+        await assertSyncV2Available(db);
+        const confirmation = await expandGardenV2(
+          db,
+          account.id,
+          worldSlug,
+          villageId,
+          buildingId,
+          { cells, commandId, expectedCosts },
+          config.constructionDurationOverrideMs,
+          Number(request.headers['x-arbestra-generation'] ?? '0'),
+        );
+        observationCommitted(request);
+        return reply.status(201).serializer(JSON.stringify).send(confirmation);
+      }
       const state = await expandGarden(
         db,
         account.id,
@@ -814,6 +830,28 @@ export async function registerVillageRoutes(
         villageId: string;
         buildingId: string;
       };
+      const upgrade = request.body as {
+        commandId?: string;
+        expectedCosts?: Array<{ resourceCode: string; amount: number }>;
+        expectedLevel?: number;
+      };
+      if (request.headers['x-arbestra-protocol'] === '2') {
+        if (!upgrade.commandId)
+          throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
+        await assertSyncV2Available(db);
+        const confirmation = await upgradeBuildingV2(
+          db,
+          account.id,
+          worldSlug,
+          villageId,
+          buildingId,
+          { commandId: upgrade.commandId, expectedCosts: upgrade.expectedCosts, expectedLevel: upgrade.expectedLevel },
+          config.constructionDurationOverrideMs,
+          Number(request.headers['x-arbestra-generation'] ?? '0'),
+        );
+        observationCommitted(request);
+        return reply.status(201).serializer(JSON.stringify).send(confirmation);
+      }
       const state = await upgradeBuilding(
         db,
         account.id,

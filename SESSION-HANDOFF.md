@@ -11,7 +11,7 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 
 ## Livré (V2, commandes bornées)
 
-- Village complet synchronisé en V2 sur staging et alpha (`VITE_SYNC_V2=1` dans `ops/deploy/build.sh` ; option locale `arbestra:sync-v2` en développement). Atelier et pose de bâtiment répondent sur le contrat V2 ; extension et amélioration restent V1 suivies d'une relecture V2.
+- Village complet synchronisé en V2 sur staging et alpha (`VITE_SYNC_V2=1` dans `ops/deploy/build.sh` ; option locale `arbestra:sync-v2` en développement). Atelier, pose, amélioration et agrandissement de jardin répondent sur le contrat V2 (effets privés dans l'ACK, rejeu sans publication) ; une amélioration s'affiche sans attendre la relecture de présentation (emprises déjà connues).
 - Présentation versionnée (région versionnée, `knownRegion`), convois publics (flux `traffic`, 057).
 - Journal V2 : purge bornée (7 jours / 10 000 entrées par flux, `sync-v2-retention.ts`), dépendances de lot stockées une fois (059).
 - Coût des insertions en masse (058, 060, 061) : première installation RC1 en test 205 s → 11 s ; achèvement d'un bâtiment (relevé `science_places`) 3,0–3,5 s → 0,9 s de verrou village.
@@ -25,11 +25,11 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 - Pose d'un bâtiment neuf : **résolue sur staging** (mesure navigateur réelle : 4,9 s → 0,27 s). Causes : V2 inactive en prod (ci-dessus), JIT PostgreSQL sur une requête composite (pool API en `jit=off`) et contrôle de croisement des trajets réécrit. Détails : priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes).
 - Passerelle : la règle `@crossSite` (403) ne vise plus que `/api/*` — **appliqué le 23 octobre sur staging et alpha** (`ops/repairs/2026-10-23-crosssite-pages.py`, sauvegardes `/etc/arbestra/*.Caddyfile.pre-crosssite-20261023T183809`). Les pages s'ouvrent depuis un lien externe (200), l'API reste refusée en inter-sites (403). Le Caddy web tourne `admin off` : `systemctl reload` ne relit pas sa config, il faut `restart`. Accès VPS : session PuTTY `VPS` via `plink` (`../.vps`, procédure seulement).
 - Diagnostic prod : `localStorage['arbestra:timing']='1'` → Server-Timing sur les requêtes V2 (phases, 3 instructions les plus lentes `arbsql_n`, profil par partie de la préparation de pose `arbpart_n`). L'extension Claude in Chrome permet à l'agent de mesurer sur staging directement (connecté avec le compte de Tristan).
-- Risques signalés par Astra, non reproduits : boucle client si une epoch change en cours de session (la purge ne change jamais l'epoch) ; snapshot plafonné à 4 096 références.
+- Boucle client sur changement d'epoch : corrigée (le transport rouvre une nouvelle génération par bootstrap si même l'instantané est refusé ; régression rouge puis verte). Reste ouvert (Astra) : snapshot plafonné à 4 096 références.
 - Tests de concurrence `economy` stabilisés : leurs échecs révélaient un achèvement de bâtiment trop long (relevé `science_places` ligne par ligne) dépassant le `lock_timeout` de 2 s d'un second worker ; corrigé par 061. `hookTimeout` vitest porté à 30 s (reset après construction). Suite complète verte (1384).
 - Purge : deux passes concurrentes peuvent laisser un vecteur de dépendances orphelin (sans incidence de lecture).
 - Aucune recette métier distante faite par l'agent (installation RC1, pose, atelier sur staging/alpha).
 
 ## Suite proposée
 
-Correctif de la boucle d'epoch côté client ; agrandissement et amélioration en V2 ; puis retrait progressif du V1. La lenteur de pose reprend quand Tristan le décide.
+Retrait progressif du V1 (lecture `GET /village`, SSE historique, chemins de commande V1 encore utilisés par les autres gestes) ; recenser d'abord les gestes encore V1. La lenteur de pose reprend quand Tristan le décide.

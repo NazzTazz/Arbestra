@@ -54,13 +54,15 @@ export class DevTimingTrace {
   }
 }
 
-/** "insert world_cell_occupancies", "select villages", "select fn game_sync_publish". */
+/** "world_cell_occupancies:insert", "villages:select", "game_sync_publish():select". */
 export function statementLabel(sql: string): string {
   const text = sql.replace(/\s+/g, ' ').trim().toLowerCase();
   const op = /^(\w+)/.exec(text)?.[1] ?? '?';
   const table = /\b(?:from|into|update|join)\s+"?([a-z_][a-z0-9_]*)"?/.exec(text)?.[1];
   const fn = /^select\s+([a-z_][a-z0-9_]*)\(/.exec(text)?.[1];
-  return [op, table ?? (fn ? 'fn ' + fn : '')].filter(Boolean).join(' ').slice(0, 60);
+  // Object first, never "select …": the header must not resemble SQL text.
+  const object = table ?? (fn ? fn + '()' : '');
+  return (object ? object + ':' + op : op).slice(0, 60);
 }
 
 /** Times each part of a composite read separately, only for an opted-in
