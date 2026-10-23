@@ -1,3 +1,9 @@
+# Reprise Claude — 23 octobre 2026, insertions en masse par instruction (060)
+
+059 déployé en staging et alpha (`*-2026.10.23.3`, contrôles publics OK).
+
+**060** (étude Astra §5) : les insertions simples dans `world_cell_occupancies`, `world_features`, `woodland_deposits`, `stone_deposits` passent par un déclencheur d'instruction (`bulk_insert_collect`) qui collecte en une fois les mêmes références que les quatre familles de déclencheurs ligne par ligne (V2 partagé/indirect 053/054, navigation 042/046, marqueur V1 041). Les occupations de bâtiment ou d'extension gardent leurs déclencheurs ligne (`WHEN`) ; mises à jour et suppressions inchangées. Preuve d'équivalence : `bulk-insert-triggers.integration.test.ts` rejoue la séquence d'installation avec 060 puis avec les déclencheurs historiques recréés, transactions annulées, références identiques par instruction (1/6/9/1137). Première installation RC1 en test : **37 s → 11 s** (10/10). Suite complète : 1382 verts, 1 échec `economy` « serializes two workers… » (barrière de 5 s expirée), passé 3/3 seul — instabilité de timing, à surveiller.
+
 # Reprise Claude — 23 octobre 2026, dépendances de lots normalisées (059)
 
 Tristan autorise désormais commits, fusions et déploiements staging/alpha sans aval. Purge du journal déployée en staging (`staging-2026.10.23.2`) et alpha (`alpha-2026.10.23.2`), contrôles publics OK.
