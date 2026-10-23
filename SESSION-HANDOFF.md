@@ -4,7 +4,8 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 
 ## État
 
-- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. Staging et alpha déployés à 061 (tags `*-2026.10.23.6`), contrôles publics OK.
+- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. Staging et alpha déployés à `947d6c2` (tags `staging-2026.10.23.11`, `alpha-2026.10.23.8`), contrôles publics OK.
+- **Jusqu'au 23 octobre ~17 h, la V2 n'a jamais tourné en prod** : son contrôle d'activation lisait `kysely_migration`, interdite au rôle applicatif (`deploy.py`) → 500 sur toutes les routes V2 et repli silencieux du client sur V1. Corrigé (`1383eb4`, contrôle par le catalogue, régression qui reproduit les droits de prod). Les recettes staging antérieures portaient donc sur la V1.
 - Autorisations durables de Tristan : commits, push, fusion dans `main`, déploiements staging/alpha et enchaînement des tranches, sans aval de routine. Restent à lui demander : gameplay, base de développement locale, actions destructives sur données joueurs.
 - Migrations 051–061 appliquées en test, staging et alpha ; **pas sur la base de développement locale** (sauvegarde et commande à lancer par Tristan : `corepack pnpm db:migrate`).
 
@@ -21,7 +22,9 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 
 ## Ouvert
 
-- **Pose d'un bâtiment neuf encore lente au ressenti de Tristan** — remis à plus tard ; mesures et pistes en priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes).
+- Pose d'un bâtiment neuf : **résolue sur staging** (mesure navigateur réelle : 4,9 s → 0,27 s). Causes : V2 inactive en prod (ci-dessus), JIT PostgreSQL sur une requête composite (pool API en `jit=off`) et contrôle de croisement des trajets réécrit. Détails : priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes).
+- **Passerelle Caddy (VPS, hors dépôt applicatif)** : `respond @crossSite 403` rejette aussi les navigations de page venant d'un autre site (lien Discord, moteur de recherche). À restreindre à `/api/*` dans la config du VPS (`ops/deploy/bootstrap.py` pour l'installation initiale).
+- Diagnostic prod : `localStorage['arbestra:timing']='1'` → Server-Timing sur les requêtes V2 (phases, 3 instructions les plus lentes `arbsql_n`, profil par partie de la préparation de pose `arbpart_n`). L'extension Claude in Chrome permet à l'agent de mesurer sur staging, Tristan ouvrant l'URL (les navigations lancées par l'extension prennent le 403 inter-sites).
 - Risques signalés par Astra, non reproduits : boucle client si une epoch change en cours de session (la purge ne change jamais l'epoch) ; snapshot plafonné à 4 096 références.
 - Tests de concurrence `economy` stabilisés : leurs échecs révélaient un achèvement de bâtiment trop long (relevé `science_places` ligne par ligne) dépassant le `lock_timeout` de 2 s d'un second worker ; corrigé par 061. `hookTimeout` vitest porté à 30 s (reset après construction). Suite complète verte (1384).
 - Purge : deux passes concurrentes peuvent laisser un vecteur de dépendances orphelin (sans incidence de lecture).
