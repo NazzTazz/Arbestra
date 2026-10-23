@@ -26,12 +26,14 @@ const headers = Type.Object({ 'x-arbestra-protocol': Type.Literal('2') }, { addi
 const prefix = '/api/worlds/:worldSlug/villages/:villageId';
 
 /** Registration is not activation: until the complete writer/backfill rollout
- * is recorded, these endpoints fail closed rather than expose partial streams. */
+ * is installed, these endpoints fail closed rather than expose partial streams.
+ * Checked in the catalog, readable by the runtime role: deployment revokes
+ * every right on kysely_migration from it. The 057 traffic collector is the
+ * last piece of that rollout (053–057 are applied in order). */
 export async function assertSyncV2Available(db: Kysely<Database>): Promise<void> {
   const { ready } = (
-    await sql<{ ready: boolean }>`select count(*)=5 as ready from kysely_migration where name in
-    ('053_game_sync_private_writers','054_game_sync_shared_writers','055_game_sync_scope_backfill','056_village_economy_catchups',
-     '057_game_sync_public_traffic')`.execute(db)
+    await sql<{ ready: boolean }>`select to_regclass('game_sync_streams') is not null
+      and to_regprocedure('game_sync_collect_traffic()') is not null as ready`.execute(db)
   ).rows[0]!;
   if (!ready) throw new HttpError(503, 'SYNC_V2_UNAVAILABLE', 'Synchronisation V2 indisponible.');
 }
