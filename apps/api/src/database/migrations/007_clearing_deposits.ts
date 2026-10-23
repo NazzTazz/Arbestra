@@ -21,20 +21,10 @@ export async function up(database: Kysely<unknown>): Promise<void> {
   for (const world of worlds) {
     if (world.generationStatus !== 'ready') continue;
     const [clearings, occupancies] = await Promise.all([
-      db
-        .selectFrom('worldClearings')
-        .select(['centerCellX', 'centerCellY'])
-        .where('worldId', '=', world.id)
-        .execute(),
-      db
-        .selectFrom('worldCellOccupancies')
-        .select(['cellX', 'cellY'])
-        .where('worldId', '=', world.id)
-        .execute(),
+      db.selectFrom('worldClearings').select(['centerCellX', 'centerCellY']).where('worldId', '=', world.id).execute(),
+      db.selectFrom('worldCellOccupancies').select(['cellX', 'cellY']).where('worldId', '=', world.id).execute(),
     ]);
-    const occupied = new Set(
-      occupancies.map(({ cellX, cellY }) => worldCellKey(cellX, cellY)),
-    );
+    const occupied = new Set(occupancies.map(({ cellX, cellY }) => worldCellKey(cellX, cellY)));
     const plans = planClearingFeatures(
       Number(world.seed),
       world.widthCells,

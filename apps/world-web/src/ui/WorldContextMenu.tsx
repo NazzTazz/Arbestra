@@ -30,22 +30,27 @@ export function WorldContextMenu({ anchor, children }: WorldContextMenuProps) {
       if (menu.querySelector('.player-market')) {
         menu.style.maxHeight = `${Math.max(160, window.innerHeight - 80)}px`;
         rect = menu.getBoundingClientRect();
-        const nextPosition = { x: Math.max(8, Math.min(anchor.x + 12, window.innerWidth - rect.width - 8)), y: Math.max(8, Math.min(anchor.y + 12, window.innerHeight - 64 - rect.height)) };
-        setPosition(current => current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition);
+        const nextPosition = {
+          x: Math.max(8, Math.min(anchor.x + 12, window.innerWidth - rect.width - 8)),
+          y: Math.max(8, Math.min(anchor.y + 12, window.innerHeight - 64 - rect.height)),
+        };
+        setPosition((current) =>
+          current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition,
+        );
         return;
       }
       const x = Math.max(8, Math.min(anchor.x + 12, window.innerWidth - rect.width - 8));
       const palettes = [...document.querySelectorAll('.command-palette, .mode-toolbar, .world-mode-bar')]
-        .map(element => element.getBoundingClientRect())
-        .filter(box => box.width && box.left < x + rect.width && box.right > x);
-      const bottom = Math.min(window.innerHeight - 46, ...palettes.map(box => box.top - 8));
+        .map((element) => element.getBoundingClientRect())
+        .filter((box) => box.width && box.left < x + rect.width && box.right > x);
+      const bottom = Math.min(window.innerHeight - 46, ...palettes.map((box) => box.top - 8));
       menu.style.maxHeight = `${Math.max(100, bottom - 8)}px`;
       rect = menu.getBoundingClientRect();
       const nextPosition = {
         x,
         y: Math.max(8, Math.min(anchor.y + 12, bottom - rect.height)),
       };
-      setPosition((current) => current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition);
+      setPosition((current) => (current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition));
     };
     placeMenu();
     window.addEventListener('resize', placeMenu);

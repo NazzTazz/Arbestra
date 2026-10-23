@@ -12,13 +12,35 @@ test('la carte affiche les habitants low-poly et les chemins de débogage', asyn
   await resetE2eState();
   const db = createDatabase(testDatabaseUrl());
   try {
-    const state = await constructBuildingArea(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, 'garden',
-      DEVELOPMENT_CELLS.garden, [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth], 0);
+    const state = await constructBuildingArea(
+      db,
+      DEVELOPMENT_IDS.account,
+      'aube',
+      DEVELOPMENT_IDS.village,
+      'garden',
+      DEVELOPMENT_CELLS.garden,
+      [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth],
+      0,
+    );
     const gardenId = state.cells.find((cell) => cell.building?.type === 'garden')!.building!.id;
-    await db.updateTable('gardenPlots').set({ storedAmount: 13 }).where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-    await harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, gardenId,
-      DEVELOPMENT_CELLS.gardenNorth.cellX, DEVELOPMENT_CELLS.gardenNorth.cellY, randomUUID());
-  } finally { await db.destroy(); }
+    await db
+      .updateTable('gardenPlots')
+      .set({ storedAmount: 13 })
+      .where('worldId', '=', DEVELOPMENT_IDS.world)
+      .execute();
+    await harvestGarden(
+      db,
+      DEVELOPMENT_IDS.account,
+      'aube',
+      DEVELOPMENT_IDS.village,
+      gardenId,
+      DEVELOPMENT_CELLS.gardenNorth.cellX,
+      DEVELOPMENT_CELLS.gardenNorth.cellY,
+      randomUUID(),
+    );
+  } finally {
+    await db.destroy();
+  }
 
   await page.goto('/');
   await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');

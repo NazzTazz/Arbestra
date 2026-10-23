@@ -8,33 +8,59 @@ import { TimberThatch } from './timber-thatch';
 export function buildCampusTrees(root: Mesh, kit: TimberThatch) {
   const leaves = ['#446b38', '#668344'].map((colour, index) => {
     const material = new StandardMaterial(`campus-leaves-${index}`, kit.scene);
-    material.diffuseColor = Color3.FromHexString(colour); material.specularColor = Color3.Black(); return material;
+    material.diffuseColor = Color3.FromHexString(colour);
+    material.specularColor = Color3.Black();
+    return material;
   });
   const positions = [
     // Three in Medicine's C, leaving the entrance's central approach clear.
-    [-2.65, -4.65, .68], [-1.85, -3.15, .62], [-1.85, -4.45, .74],
+    [-2.65, -4.65, 0.68],
+    [-1.85, -3.15, 0.62],
+    [-1.85, -4.45, 0.74],
     // Three on Geography's courtyard-facing side, away from its central door.
-    [2.8, -4.7, .7], [3.45, -2.8, .64], [2.65, -2.3, .76],
+    [2.8, -4.7, 0.7],
+    [3.45, -2.8, 0.64],
+    [2.65, -2.3, 0.76],
     // One between Medicine and Mathematics, outside the wide staircase.
-    [-4.6, 2.5, .8],
+    [-4.6, 2.5, 0.8],
   ] as const;
-  const trunks: Mesh[] = [], lower: Mesh[] = [], upper: Mesh[] = [];
+  const trunks: Mesh[] = [],
+    lower: Mesh[] = [],
+    upper: Mesh[] = [];
   for (const [index, [x, z, scale]] of positions.entries()) {
-    const trunk = MeshBuilder.CreateCylinder('campus-tree-trunk', { height: 1.1 * scale, diameterTop: .22 * scale,
-      diameterBottom: .38 * scale, tessellation: 6 }, kit.scene);
-    trunk.position.set(x, .02 + .5 * scale, z); trunk.material = kit.wood; trunks.push(trunk);
+    const trunk = MeshBuilder.CreateCylinder(
+      'campus-tree-trunk',
+      { height: 1.1 * scale, diameterTop: 0.22 * scale, diameterBottom: 0.38 * scale, tessellation: 6 },
+      kit.scene,
+    );
+    trunk.position.set(x, 0.02 + 0.5 * scale, z);
+    trunk.material = kit.wood;
+    trunks.push(trunk);
     for (const [layer, meshes] of [lower, upper].entries()) {
-      const canopy = MeshBuilder.CreateCylinder('campus-tree-crown', { height: (layer ? 1.25 : 1.55) * scale,
-        diameterTop: (layer ? .04 : .16) * scale, diameterBottom: (layer ? 1.15 : 1.55) * scale, tessellation: 7 }, kit.scene);
-      canopy.position.set(x, .02 + (layer ? 2.22 : 1.48) * scale, z);
-      canopy.rotation.y = index * .73; canopy.material = leaves[layer]!; meshes.push(canopy);
+      const canopy = MeshBuilder.CreateCylinder(
+        'campus-tree-crown',
+        {
+          height: (layer ? 1.25 : 1.55) * scale,
+          diameterTop: (layer ? 0.04 : 0.16) * scale,
+          diameterBottom: (layer ? 1.15 : 1.55) * scale,
+          tessellation: 7,
+        },
+        kit.scene,
+      );
+      canopy.position.set(x, 0.02 + (layer ? 2.22 : 1.48) * scale, z);
+      canopy.rotation.y = index * 0.73;
+      canopy.material = leaves[layer]!;
+      meshes.push(canopy);
     }
   }
   for (const [index, meshes] of [trunks, lower, upper].entries()) {
     const merged = Mesh.MergeMeshes(meshes, true, true);
     if (!merged) continue;
-    merged.name = `campus-decorative-trees-${index}`; merged.parent = root;
-    merged.material = index ? leaves[index - 1]! : kit.wood; merged.receiveShadows = true; merged.isPickable = false;
+    merged.name = `campus-decorative-trees-${index}`;
+    merged.parent = root;
+    merged.material = index ? leaves[index - 1]! : kit.wood;
+    merged.receiveShadows = true;
+    merged.isPickable = false;
   }
-  root.onDisposeObservable.add(() => leaves.forEach(material => material.dispose()));
+  root.onDisposeObservable.add(() => leaves.forEach((material) => material.dispose()));
 }

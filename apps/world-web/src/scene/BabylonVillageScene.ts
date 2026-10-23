@@ -1,35 +1,61 @@
-import type {ObservationPose} from '@arbestra/contracts';
-import {interpolateObservationPose} from '@arbestra/contracts';
-import {playerSceneTransport,type SceneTransport} from './scene-transport';
-import { clientTime, FrameTimings, statisticsEnabled, recordFrame, timedFetch as fetch, timedJson } from '../dev/statistics';
-import type {StarterGhost} from '../spawn-map/starter-controller';
-import {poseStarterElement, spawnDelta, woodlandTrees} from '@arbestra/contracts';
-import {automaticBraziers,prepareInfrastructureEdit,infrastructureBlockedPixels,infrastructureBarrierAt,buildingAccesses} from '@arbestra/contracts';
+import type { ObservationPose } from '@arbestra/contracts';
+import { interpolateObservationPose } from '@arbestra/contracts';
+import { playerSceneTransport, type SceneTransport } from './scene-transport';
+import {
+  clientTime,
+  FrameTimings,
+  statisticsEnabled,
+  recordFrame,
+  timedFetch as fetch,
+  timedJson,
+} from '../dev/statistics';
+import type { StarterGhost } from '../spawn-map/starter-controller';
+import { poseStarterElement, spawnDelta, woodlandTrees } from '@arbestra/contracts';
+import {
+  automaticBraziers,
+  prepareInfrastructureEdit,
+  infrastructureBlockedPixels,
+  infrastructureBarrierAt,
+  buildingAccesses,
+} from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
-import {cameraFocusAt} from './camera-focus';
+import { cameraFocusAt } from './camera-focus';
 import { buildStonemason, buildStonemasonFire } from './stonemason-factory';
 import { buildProceduralBuildingLod, buildCachedProceduralBuildingLod } from './building-lod-procedural';
 import { buildSawmill } from './sawmill-factory';
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { buildPresentation } from './building-presentation';
 import { VillageWorkers } from './village-workers';
-import {WORKER_COLOURS} from './worker-figure';
+import { WORKER_COLOURS } from './worker-figure';
 import { TimberThatch } from './timber-thatch';
-import {barracksPreviewPlacement,buildBarracks} from './barracks-factory';
+import { barracksPreviewPlacement, buildBarracks } from './barracks-factory';
 import { buildUniversityMonuments } from './university-factory';
 import { clonePreviewMaterial, bakedPlanKey, loadBakedBuilding, buildingAssets } from './building-assets';
-import {buildInfrastructurePresentation} from './infrastructure-factory';
-import {InfrastructureRenderer,type InfrastructureGesture} from './infrastructure-renderer';
-import {TerraformPreview,type TerraformVisual} from './terraform-preview';
-import {selectEquipment} from './equipment-selection';
-import {infrastructureSurface,infrastructurePlanSurface,wrapCoordinate,type InfrastructureOperation,type SubPoint} from '@arbestra/contracts';
+import { buildInfrastructurePresentation } from './infrastructure-factory';
+import { InfrastructureRenderer, type InfrastructureGesture } from './infrastructure-renderer';
+import { TerraformPreview, type TerraformVisual } from './terraform-preview';
+import { selectEquipment } from './equipment-selection';
+import {
+  infrastructureSurface,
+  infrastructurePlanSurface,
+  wrapCoordinate,
+  type InfrastructureOperation,
+  type SubPoint,
+} from '@arbestra/contracts';
 import { sciencePreview } from '../api/client';
 import { villageRoadDisplayRoutes, roadEdges, ROAD_HALF_WIDTH } from './road-profile';
 import { WeatherMap, WeatherMaterial } from './weather-view';
 import { LocalRain } from './weather-rain';
 import { weatherAt } from './weather';
 import { SolarClock } from './solar-clock';
-import { arrivalFrame, landingPose, townHallFocus, VILLAGE_LANDING, type LandingPose, type VillageArrival } from './village-arrival';
+import {
+  arrivalFrame,
+  landingPose,
+  townHallFocus,
+  VILLAGE_LANDING,
+  type LandingPose,
+  type VillageArrival,
+} from './village-arrival';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import { SceneInstrumentation } from '@babylonjs/core/Instrumentation/sceneInstrumentation';
@@ -61,7 +87,15 @@ import '@babylonjs/core/Shaders/default.vertex';
 import '@babylonjs/core/Shaders/default.fragment';
 import { Scene } from '@babylonjs/core/scene';
 
-import type { NaturalFeature, StoneDeposit, TerrainChunk, TerrainOverview, TravelCell, VillageCell, VillageState } from '@arbestra/contracts';
+import type {
+  NaturalFeature,
+  StoneDeposit,
+  TerrainChunk,
+  TerrainOverview,
+  TravelCell,
+  VillageCell,
+  VillageState,
+} from '@arbestra/contracts';
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import { WorldSpace, terrainDemand, delta, normalize } from './world-space';
@@ -81,11 +115,19 @@ import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
-import {ResourceHalos,type ResourceHaloCell} from './resource-halos';
-import {WorkerObstacles} from './worker-obstacles';
+import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
+import { WorkerObstacles } from './worker-obstacles';
 
 const TOWN_HALL_DOOR_Z = -1.1;
-import { buildingPlan, recipeFor, entranceConnector, planForSite, resolveMurets, transformPoint, type BuildingPlan } from './building-plan';
+import {
+  buildingPlan,
+  recipeFor,
+  entranceConnector,
+  planForSite,
+  resolveMurets,
+  transformPoint,
+  type BuildingPlan,
+} from './building-plan';
 const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
@@ -111,9 +153,9 @@ export class BabylonVillageScene {
   readonly #waterRippleMaterial: StandardMaterial;
   readonly #workers: VillageWorkers;
   readonly #inhabitantCamera: InhabitantCamera;
-  #selectedRepresentative:string|null=null;
-  readonly #buildingJobs:Array<{parent:Mesh;steps:Generator<void,Mesh,unknown>;siteId:string}>=[];
-  #workerDebugAt=0;
+  #selectedRepresentative: string | null = null;
+  readonly #buildingJobs: Array<{ parent: Mesh; steps: Generator<void, Mesh, unknown>; siteId: string }> = [];
+  #workerDebugAt = 0;
   #selectedFeatureId: string | null = null;
   readonly #onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void;
   readonly #selectableMeshes = new Map<string, Mesh>();
@@ -145,15 +187,15 @@ export class BabylonVillageScene {
   #starterGhost: StarterGhost | null = null;
   #ghostRequest: Parameters<BabylonVillageScene['updateConstructionGhost']> | null = null;
   #areaRequest: Parameters<BabylonVillageScene['updateAreaSelection']> | null = null;
-  #starterManual: (()=>void) | null = null;
+  #starterManual: (() => void) | null = null;
   #constructionGhost: Mesh | null = null;
   #constructionGhostCode: string | null = null;
   #ghostMaterials: StandardMaterial[] = [];
   #ghostOwnMaterials: Set<import('@babylonjs/core/Materials/material').Material> = new Set();
 
-  #buildingCache = new Map<string,{signature:string;mesh:Mesh}>();
+  #buildingCache = new Map<string, { signature: string; mesh: Mesh }>();
   #buildingGenerationCount = 0;
-  #factoryGenerationCount=0;
+  #factoryGenerationCount = 0;
   readonly #stoneMaterial: StandardMaterial;
   readonly #pebbleMaterial: StandardMaterial;
   readonly #windowMaterial: StandardMaterial;
@@ -185,28 +227,40 @@ export class BabylonVillageScene {
   #arrival: { started: number; name: string; time: string; from: LandingPose; fromTarget: TravelCell } | null = null;
   #flyover: { requested: number; started: number | null; landing: boolean; local?: boolean } | null = null;
   #geographyRevision = 0;
-  #globalModelAvailable(): boolean { return sciencePreview() || this.#state?.science?.globalModelAvailable === true; }
+  #globalModelAvailable(): boolean {
+    return sciencePreview() || this.#state?.science?.globalModelAvailable === true;
+  }
   readonly #flyoverKey = (event: KeyboardEvent): void => {
     if (!this.#initialLoad.ready) return;
-    if(event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
-    if(event.code==='KeyV' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      event.preventDefault(); event.stopPropagation(); this.startFlyover();
-    } else if(event.code==='KeyC' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
+    if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable="true"]'))
+      return;
+    if (event.code === 'KeyV' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.startFlyover();
+    } else if (event.code === 'KeyC' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
       if (!import.meta.env.DEV || !this.#cosmologyDebug || !this.#globalModelAvailable()) return;
-      event.preventDefault(); event.stopPropagation();
-      this.#endFlyover(); this.skipArrival(true);
-      this.#pendingCatView = true; this.showWorld();
-      if(this.#mode==='world' && !this.#transition.active && this.#torusOverview) {
-        this.#torusOverview.showCatEyes(); this.#pendingCatView = false;
+      event.preventDefault();
+      event.stopPropagation();
+      this.#endFlyover();
+      this.skipArrival(true);
+      this.#pendingCatView = true;
+      this.showWorld();
+      if (this.#mode === 'world' && !this.#transition.active && this.#torusOverview) {
+        this.#torusOverview.showCatEyes();
+        this.#pendingCatView = false;
       }
-    } else if(event.key==='Escape' && this.#flyover) {
-      event.preventDefault(); event.stopPropagation(); this.#endFlyover(); this.skipArrival(true);
+    } else if (event.key === 'Escape' && this.#flyover) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#endFlyover();
+      this.skipArrival(true);
     }
   };
   #arrivalPending = false;
   #presentationLight = 1;
   #baseSolar = 0;
-  #baseAmbient = .34;
+  #baseAmbient = 0.34;
   #arrivalNextAt = 0;
   #clock: SolarClock | null = null;
   #eyesSince: number | null = null;
@@ -238,13 +292,26 @@ export class BabylonVillageScene {
   #pendingCatView = false;
   #cosmologyNextAt = 0;
   #cosmologyServerOffsetMs = 0;
-  #cosmologyMetrics = { phase: 0, torusPhase: 0, sunPhase: 0, rotationPeriodMs: COSMOLOGY.periodMs as number,
-    u: 0, v: 0, direct: 1, occluded: false, paused: false, updateMs: 0,
-    worldRenderMs: 0, worldMeshes: 0, shadowBytes: 0 };
+  #cosmologyMetrics = {
+    phase: 0,
+    torusPhase: 0,
+    sunPhase: 0,
+    rotationPeriodMs: COSMOLOGY.periodMs as number,
+    u: 0,
+    v: 0,
+    direct: 1,
+    occluded: false,
+    paused: false,
+    updateMs: 0,
+    worldRenderMs: 0,
+    worldMeshes: 0,
+    shadowBytes: 0,
+  };
   #lastViewChangeAt = 0;
   #mode: TerrainViewMode = 'village';
   readonly #onViewChanged: (mode: TerrainViewMode) => void;
-  readonly #reducedQuality = navigator.webdriver && (import.meta.env.PROD || !new URLSearchParams(location.search).has('terrainPerf'));
+  readonly #reducedQuality =
+    navigator.webdriver && (import.meta.env.PROD || !new URLSearchParams(location.search).has('terrainPerf'));
   #buildableGrid: Mesh | null = null;
   #buildableArea: Mesh | null = null;
   #travelLines: Mesh | null = null;
@@ -268,60 +335,146 @@ export class BabylonVillageScene {
   #renderer: TerrainRenderer | null = null;
   #state: VillageState | null = null;
   #worldMode: 'exploration' | 'exploitation' | 'population' | 'construction' | 'terraform' = 'exploration';
-  #terraformRenderer:TerraformPreview|null=null;
-  #terraformVisual:TerraformVisual|null=null;
-  public terraformPreview(value:TerraformVisual|null){
-    this.#terraformVisual=value;
-    if(!this.#space)return;
-    this.#terraformRenderer??=new TerraformPreview(this.#scene);
-    this.#terraformRenderer.update(value,this.#space);
-    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.terraformSelection=JSON.stringify(value?{
-      origin:value.origin,cells:value.quote.cells,triangles:this.#scene.meshes.filter(m=>m.name==='terraform-future-ground').reduce((n,m)=>n+m.getTotalIndices()/3,0),at:performance.now(),
-    }:null);
+  #terraformRenderer: TerraformPreview | null = null;
+  #terraformVisual: TerraformVisual | null = null;
+  public terraformPreview(value: TerraformVisual | null) {
+    this.#terraformVisual = value;
+    if (!this.#space) return;
+    this.#terraformRenderer ??= new TerraformPreview(this.#scene);
+    this.#terraformRenderer.update(value, this.#space);
+    if (import.meta.env.MODE === 'e2e')
+      this.#canvas.dataset.terraformSelection = JSON.stringify(
+        value
+          ? {
+              origin: value.origin,
+              cells: value.quote.cells,
+              triangles: this.#scene.meshes
+                .filter((m) => m.name === 'terraform-future-ground')
+                .reduce((n, m) => n + m.getTotalIndices() / 3, 0),
+              at: performance.now(),
+            }
+          : null,
+      );
   }
-  public terrainVertexHeight(x:number,y:number){return this.#store?.vertexHeight(x,y)??null;}
-  #infrastructureRenderer:InfrastructureRenderer|null=null;
-  #infrastructurePreview:InfrastructureRenderer|null=null;
-  #infrastructureHandler:((gesture:InfrastructureGesture)=>void)|null=null;
-  #infrastructureHoverFrame=0;
-  #infrastructureHoverEvent:PointerEvent|null=null;
-  #infrastructureDown:{x:number;y:number;pointerId:number}|null=null;
-  #infrastructureBarriers=new Set<string>();
-  #infrastructureEquipment:Array<{x:number;y:number}>=[];
-  #infrastructureGhost:Mesh|null=null;
-  public infrastructureTool(handler:((gesture:InfrastructureGesture)=>void)|null){
-    if(!handler){this.cancelGesture();cancelAnimationFrame(this.#infrastructureHoverFrame);this.#infrastructureHoverFrame=0;this.#infrastructureHoverEvent=null;}this.#infrastructureHandler=handler;
-    if(!handler){this.#infrastructurePreview?.clear();this.#infrastructureGhost?.setEnabled(false);}
+  public terrainVertexHeight(x: number, y: number) {
+    return this.#store?.vertexHeight(x, y) ?? null;
   }
-  public infrastructurePreview(operation:InfrastructureOperation|null,invalid=false,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>){
-    if(!this.#space||!this.#state)return;this.#infrastructurePreview??=new InfrastructureRenderer(this.#scene);
-    this.#infrastructureGhost?.setEnabled(false);
-    if(!operation){this.#infrastructurePreview.clear();return;}
-    if(operation.kind==='road'){
-      const world=this.#state.world,next=preparedPlan??prepareInfrastructureEdit(this.#state,operation,'preview').next;
-      const selected=infrastructureSurface([{...operation.stroke,operation:'paint'}],world),full=preparedSurface??infrastructurePlanSurface(next,world);
-      const surface=new Map([...selected].map(([key,p])=>[key,{...(full.get(key)??p),manual:true}]));
-      this.#infrastructurePreview.update(next,this.#space,(x,y)=>this.#store?.ground(x,y)?.height??null,true,0,surface,operation.stroke.operation==='border',[],{followTerrain:this.#state.world.generationVersion===3});
-      this.#infrastructurePreview.setInvalid(invalid);
-    }else if(operation.kind==='place'||operation.kind==='move'){
-      this.#infrastructurePreview.clear();
-      this.#infrastructureGhost??=buildInfrastructurePresentation(this.#scene,{fixture:'brazier',material:'earth',width:4,border:false,length:1,quarterTurns:0});
-      const p=this.#space.project({cellX:operation.position.x/8,cellY:operation.position.y/8});
-      const cell={cellX:wrapCoordinate(Math.floor(operation.position.x/8+.5),this.#space.width),cellY:wrapCoordinate(Math.floor(operation.position.y/8+.5),this.#space.height)};
-      const height=this.#store?.ground(cell.cellX,cell.cellY)?.height;
-      this.#infrastructureGhost.position.set(p.x,(height??0)+.02,p.z);this.#infrastructureGhost.rotation.y=operation.quarterTurns*Math.PI/2;
-      this.#infrastructureGhost.setEnabled(height!==undefined&&this.#mode==='village');
-      for(const mesh of this.#infrastructureGhost.getChildMeshes()){mesh.isPickable=false;if(mesh.material instanceof StandardMaterial){mesh.material.alpha=.6;mesh.material.emissiveColor=Color3.FromHexString(invalid?'#a82f25':'#2a557b');}}
+  #infrastructureRenderer: InfrastructureRenderer | null = null;
+  #infrastructurePreview: InfrastructureRenderer | null = null;
+  #infrastructureHandler: ((gesture: InfrastructureGesture) => void) | null = null;
+  #infrastructureHoverFrame = 0;
+  #infrastructureHoverEvent: PointerEvent | null = null;
+  #infrastructureDown: { x: number; y: number; pointerId: number } | null = null;
+  #infrastructureBarriers = new Set<string>();
+  #infrastructureEquipment: Array<{ x: number; y: number }> = [];
+  #infrastructureGhost: Mesh | null = null;
+  public infrastructureTool(handler: ((gesture: InfrastructureGesture) => void) | null) {
+    if (!handler) {
+      this.cancelGesture();
+      cancelAnimationFrame(this.#infrastructureHoverFrame);
+      this.#infrastructureHoverFrame = 0;
+      this.#infrastructureHoverEvent = null;
+    }
+    this.#infrastructureHandler = handler;
+    if (!handler) {
+      this.#infrastructurePreview?.clear();
+      this.#infrastructureGhost?.setEnabled(false);
     }
   }
-  public equipmentAt(point:SubPoint,pickedId?:string):{id:string;version:number;position:SubPoint;quarterTurns:number}|null{
-    const plan=this.#state?.infrastructure;if(!plan||!this.#space)return null;
-    const manual=plan.equipment.map(e=>({id:e.id,version:e.version,position:{x:e.x,y:e.y},quarterTurns:e.quarterTurns}));
-    const selected=selectEquipment(manual,point,{widthCells:this.#space.width,heightCells:this.#space.height},pickedId);
-    if(selected)return selected;
-    return selectEquipment(automaticBraziers(this.#state!).map(e=>({id:e.id,version:0,position:e.position,quarterTurns:0})),point,{widthCells:this.#space.width,heightCells:this.#space.height},pickedId);
+  public infrastructurePreview(
+    operation: InfrastructureOperation | null,
+    invalid = false,
+    preparedPlan?: import('@arbestra/contracts').InfrastructurePlan,
+    preparedSurface?: ReadonlyMap<string, import('@arbestra/contracts').RoadPixel>,
+  ) {
+    if (!this.#space || !this.#state) return;
+    this.#infrastructurePreview ??= new InfrastructureRenderer(this.#scene);
+    this.#infrastructureGhost?.setEnabled(false);
+    if (!operation) {
+      this.#infrastructurePreview.clear();
+      return;
+    }
+    if (operation.kind === 'road') {
+      const world = this.#state.world,
+        next = preparedPlan ?? prepareInfrastructureEdit(this.#state, operation, 'preview').next;
+      const selected = infrastructureSurface([{ ...operation.stroke, operation: 'paint' }], world),
+        full = preparedSurface ?? infrastructurePlanSurface(next, world);
+      const surface = new Map([...selected].map(([key, p]) => [key, { ...(full.get(key) ?? p), manual: true }]));
+      this.#infrastructurePreview.update(
+        next,
+        this.#space,
+        (x, y) => this.#store?.ground(x, y)?.height ?? null,
+        true,
+        0,
+        surface,
+        operation.stroke.operation === 'border',
+        [],
+        { followTerrain: this.#state.world.generationVersion === 3 },
+      );
+      this.#infrastructurePreview.setInvalid(invalid);
+    } else if (operation.kind === 'place' || operation.kind === 'move') {
+      this.#infrastructurePreview.clear();
+      this.#infrastructureGhost ??= buildInfrastructurePresentation(this.#scene, {
+        fixture: 'brazier',
+        material: 'earth',
+        width: 4,
+        border: false,
+        length: 1,
+        quarterTurns: 0,
+      });
+      const p = this.#space.project({ cellX: operation.position.x / 8, cellY: operation.position.y / 8 });
+      const cell = {
+        cellX: wrapCoordinate(Math.floor(operation.position.x / 8 + 0.5), this.#space.width),
+        cellY: wrapCoordinate(Math.floor(operation.position.y / 8 + 0.5), this.#space.height),
+      };
+      const height = this.#store?.ground(cell.cellX, cell.cellY)?.height;
+      this.#infrastructureGhost.position.set(p.x, (height ?? 0) + 0.02, p.z);
+      this.#infrastructureGhost.rotation.y = (operation.quarterTurns * Math.PI) / 2;
+      this.#infrastructureGhost.setEnabled(height !== undefined && this.#mode === 'village');
+      for (const mesh of this.#infrastructureGhost.getChildMeshes()) {
+        mesh.isPickable = false;
+        if (mesh.material instanceof StandardMaterial) {
+          mesh.material.alpha = 0.6;
+          mesh.material.emissiveColor = Color3.FromHexString(invalid ? '#a82f25' : '#2a557b');
+        }
+      }
+    }
   }
-  #infrastructurePoint(event:PointerEvent):SubPoint|null{const p=this.#gridPointAtPointer(event);return p&&this.#space?{x:wrapCoordinate(Math.round(p.cellX*8),this.#space.width*8),y:wrapCoordinate(Math.round(p.cellY*8),this.#space.height*8)}:null;}
+  public equipmentAt(
+    point: SubPoint,
+    pickedId?: string,
+  ): { id: string; version: number; position: SubPoint; quarterTurns: number } | null {
+    const plan = this.#state?.infrastructure;
+    if (!plan || !this.#space) return null;
+    const manual = plan.equipment.map((e) => ({
+      id: e.id,
+      version: e.version,
+      position: { x: e.x, y: e.y },
+      quarterTurns: e.quarterTurns,
+    }));
+    const selected = selectEquipment(
+      manual,
+      point,
+      { widthCells: this.#space.width, heightCells: this.#space.height },
+      pickedId,
+    );
+    if (selected) return selected;
+    return selectEquipment(
+      automaticBraziers(this.#state!).map((e) => ({ id: e.id, version: 0, position: e.position, quarterTurns: 0 })),
+      point,
+      { widthCells: this.#space.width, heightCells: this.#space.height },
+      pickedId,
+    );
+  }
+  #infrastructurePoint(event: PointerEvent): SubPoint | null {
+    const p = this.#gridPointAtPointer(event);
+    return p && this.#space
+      ? {
+          x: wrapCoordinate(Math.round(p.cellX * 8), this.#space.width * 8),
+          y: wrapCoordinate(Math.round(p.cellY * 8), this.#space.height * 8),
+        }
+      : null;
+  }
   #populationFocus: string | null = null;
   #populationFilter = 'all';
   #resourceOverlayAt = 0;
@@ -347,66 +500,126 @@ export class BabylonVillageScene {
   readonly #navigationKeyDown = (event: KeyboardEvent): void => {
     if (!this.#initialLoad.ready) return;
     if (event.key === 'Escape') {
-      this.#cameraFocus=null;
+      this.#cameraFocus = null;
       const owned = Boolean(this.#pointerDown?.harvest || this.#pointerDown?.mouseArea);
       this.#handlePointerCancel();
-      if (owned) { event.preventDefault(); event.stopImmediatePropagation(); }
+      if (owned) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
       return;
     }
-    if (event.code !== 'Space' || (event.target as HTMLElement | null)?.closest('input, textarea, select, button')) return;
+    if (event.code !== 'Space' || (event.target as HTMLElement | null)?.closest('input, textarea, select, button'))
+      return;
     this.#spaceNavigation = true;
-    this.#cameraFocus=null;
+    this.#cameraFocus = null;
     if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
   };
-  readonly #navigationKeyUp = (event: KeyboardEvent): void => { if (event.code === 'Space') this.#spaceNavigation = false; };
+  readonly #navigationKeyUp = (event: KeyboardEvent): void => {
+    if (event.code === 'Space') this.#spaceNavigation = false;
+  };
 
-  #pointerDown: { x: number; y: number; pointerId: number; inspect: boolean; mouseArea: boolean; harvest: boolean; first: Cell | null; lastPoint: Cell | null } | null = null;
+  #pointerDown: {
+    x: number;
+    y: number;
+    pointerId: number;
+    inspect: boolean;
+    mouseArea: boolean;
+    harvest: boolean;
+    first: Cell | null;
+    lastPoint: Cell | null;
+  } | null = null;
   #lastDragCell = '';
   #lastPreviewSignature = '';
   #lastVisualSignature = '';
   #serverOffsetMs = 0;
   #lastFrameAt = 0;
-  #cameraFocus:{from:Cell;to:Cell;at:number;duration:number;radius:number;height:number}|null=null;
+  #cameraFocus: { from: Cell; to: Cell; at: number; duration: number; radius: number; height: number } | null = null;
   #lastCameraRadius: number | null = null;
   #initialCameraFramed = false;
-  #e2eCells: Array<{ id: string; x: number; z: number; cellX:number; cellY:number }> = [];
+  #e2eCells: Array<{ id: string; x: number; z: number; cellX: number; cellY: number }> = [];
   #e2eFeatures: Array<{ id: string; x: number; z: number }> = [];
   #worldWidthUnits = 2048 * TILE_SIZE;
   #worldHeightUnits = 1024 * TILE_SIZE;
 
   readonly #handlePointerDown = (event: PointerEvent): void => {
-    this.#cameraFocus=null;
-    if(event.button===2&&this.#starterManual&&this.#worldMode==='construction'){event.preventDefault();event.stopImmediatePropagation();this.#starterManual();return;}
-    if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation&&(event.button===0||event.button===2)){
-      event.preventDefault();event.stopImmediatePropagation();
-      if(this.#worldMode==='terraform'&&(!event.isPrimary||this.#infrastructureDown))return;
-      if(event.button===2)this.#infrastructureHandler({kind:'right',point:this.#infrastructurePoint(event)});
-      else{this.#infrastructureDown={x:event.clientX,y:event.clientY,pointerId:event.pointerId};this.#canvas.setPointerCapture(event.pointerId);this.#infrastructureHandler({kind:'down',point:this.#infrastructurePoint(event)});}return;
+    this.#cameraFocus = null;
+    if (event.button === 2 && this.#starterManual && this.#worldMode === 'construction') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.#starterManual();
+      return;
     }
-    if(this.#inhabitantCamera.mode==='pov'||this.#inhabitantCamera.mode==='free')return;
+    if (
+      this.#infrastructureHandler &&
+      this.#mode === 'village' &&
+      !this.#arrival &&
+      !this.#flyover &&
+      !this.#spaceNavigation &&
+      (event.button === 0 || event.button === 2)
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (this.#worldMode === 'terraform' && (!event.isPrimary || this.#infrastructureDown)) return;
+      if (event.button === 2) this.#infrastructureHandler({ kind: 'right', point: this.#infrastructurePoint(event) });
+      else {
+        this.#infrastructureDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+        this.#canvas.setPointerCapture(event.pointerId);
+        this.#infrastructureHandler({ kind: 'down', point: this.#infrastructurePoint(event) });
+      }
+      return;
+    }
+    if (this.#inhabitantCamera.mode === 'pov' || this.#inhabitantCamera.mode === 'free') return;
     if (this.#transition.active || this.#arrival || this.#flyover) return;
-    if (!event.isPrimary) { this.#handlePointerCancel(); return; }
+    if (!event.isPrimary) {
+      this.#handlePointerCancel();
+      return;
+    }
     if (event.button !== 0) return;
     if (this.#spaceNavigation) return;
     if (this.#mode === 'world') {
-      this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, inspect: event.shiftKey,
-        mouseArea: false, harvest: false, first: null, lastPoint: null };
+      this.#pointerDown = {
+        x: event.clientX,
+        y: event.clientY,
+        pointerId: event.pointerId,
+        inspect: event.shiftKey,
+        mouseArea: false,
+        harvest: false,
+        first: null,
+        lastPoint: null,
+      };
       return;
     }
     if (this.#mode === 'region') return;
     const mouseArea = this.#selectingArea && this.#worldMode === 'construction' && !event.shiftKey;
     const first = this.#cellAtPointer(event);
     let workshopInspection = false;
-    if(this.#worldMode==='exploitation' && this.#state){
-      const bounds=this.#canvas.getBoundingClientRect();
-      const pick=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,
-        mesh=>mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&typeof mesh.metadata?.siteId==='string');
-      const site=this.#state.cells.find(c=>c.id===pick.pickedMesh?.metadata?.siteId);
-      const building=site?.building??this.#state.cells.find(c=>c.building?.id===site?.footprint?.buildingId)?.building;
-      workshopInspection=!!building&&(building.type==='town-hall'||this.#state.buildingTypes.some(t=>t.code===building.type&&t.productionMode==='processing'));
+    if (this.#worldMode === 'exploitation' && this.#state) {
+      const bounds = this.#canvas.getBoundingClientRect();
+      const pick = this.#scene.pick(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        (mesh) => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && typeof mesh.metadata?.siteId === 'string',
+      );
+      const site = this.#state.cells.find((c) => c.id === pick.pickedMesh?.metadata?.siteId);
+      const building =
+        site?.building ?? this.#state.cells.find((c) => c.building?.id === site?.footprint?.buildingId)?.building;
+      workshopInspection =
+        !!building &&
+        (building.type === 'town-hall' ||
+          this.#state.buildingTypes.some((t) => t.code === building.type && t.productionMode === 'processing'));
     }
     const harvest = this.#worldMode === 'exploitation' && first !== null && !event.shiftKey && !workshopInspection;
-    this.#pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, inspect: event.shiftKey||workshopInspection, mouseArea, harvest, first, lastPoint: this.#gridPointAtPointer(event) };
+    this.#pointerDown = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId,
+      inspect: event.shiftKey || workshopInspection,
+      mouseArea,
+      harvest,
+      first,
+      lastPoint: this.#gridPointAtPointer(event),
+    };
     if (mouseArea || harvest) {
       // Consume only the construction drag. Right-drag, wheel and touch camera
       // gestures keep their usual controls.
@@ -417,34 +630,78 @@ export class BabylonVillageScene {
       this.#camera.inertialPanningX = this.#camera.inertialPanningY = 0;
       if (first) {
         this.#lastDragCell = cellKey(first);
-        if (harvest) { this.#harvestVisited = new Set([cellKey(first)]); this.#onGardenHarvest(first, true); }
-        else this.#onAreaGesture(first, first, false);
+        if (harvest) {
+          this.#harvestVisited = new Set([cellKey(first)]);
+          this.#onGardenHarvest(first, true);
+        } else this.#onAreaGesture(first, first, false);
       }
     }
   };
 
   readonly #handlePointerMove = (event: PointerEvent): void => {
-    if(this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation){
-      if(this.#worldMode==='terraform'&&(!event.isPrimary||this.#infrastructureDown&&this.#infrastructureDown.pointerId!==event.pointerId))return;
-      event.stopImmediatePropagation();this.#infrastructureHoverEvent=event;
+    if (
+      this.#infrastructureHandler &&
+      this.#mode === 'village' &&
+      !this.#arrival &&
+      !this.#flyover &&
+      !this.#spaceNavigation
+    ) {
+      if (
+        this.#worldMode === 'terraform' &&
+        (!event.isPrimary || (this.#infrastructureDown && this.#infrastructureDown.pointerId !== event.pointerId))
+      )
+        return;
+      event.stopImmediatePropagation();
+      this.#infrastructureHoverEvent = event;
       // At most one terrain ray and one HUD update per display frame.
-      if(!this.#infrastructureHoverFrame)this.#infrastructureHoverFrame=requestAnimationFrame(()=>{
-        this.#infrastructureHoverFrame=0;const latest=this.#infrastructureHoverEvent;this.#infrastructureHoverEvent=null;
-        if(latest&&this.#infrastructureHandler&&this.#mode==='village'&&!this.#arrival&&!this.#flyover&&!this.#spaceNavigation)this.#infrastructureHandler({kind:'hover',point:this.#infrastructurePoint(latest)});
-      });return;
+      if (!this.#infrastructureHoverFrame)
+        this.#infrastructureHoverFrame = requestAnimationFrame(() => {
+          this.#infrastructureHoverFrame = 0;
+          const latest = this.#infrastructureHoverEvent;
+          this.#infrastructureHoverEvent = null;
+          if (
+            latest &&
+            this.#infrastructureHandler &&
+            this.#mode === 'village' &&
+            !this.#arrival &&
+            !this.#flyover &&
+            !this.#spaceNavigation
+          )
+            this.#infrastructureHandler({ kind: 'hover', point: this.#infrastructurePoint(latest) });
+        });
+      return;
     }
-    if (!this.#pointerDown && this.#worldMode === 'exploitation' && this.#mode === 'village' && !this.#arrival && !this.#flyover) {
-      const cell = this.#cellAtPointer(event), key = cell ? cellKey(cell) : '';
-      if (cell && key !== this.#hoveredHarvestCell) { this.#hoveredHarvestCell = key; this.#onGardenHarvest(cell, true, true); }
+    if (
+      !this.#pointerDown &&
+      this.#worldMode === 'exploitation' &&
+      this.#mode === 'village' &&
+      !this.#arrival &&
+      !this.#flyover
+    ) {
+      const cell = this.#cellAtPointer(event),
+        key = cell ? cellKey(cell) : '';
+      if (cell && key !== this.#hoveredHarvestCell) {
+        this.#hoveredHarvestCell = key;
+        this.#onGardenHarvest(cell, true, true);
+      }
     }
-    if (!this.#pointerDown && this.#worldMode === 'construction' && this.#constructionAction === 'upgrade' && this.#mode === 'village') {
+    if (
+      !this.#pointerDown &&
+      this.#worldMode === 'construction' &&
+      this.#constructionAction === 'upgrade' &&
+      this.#mode === 'village'
+    ) {
       const bounds = this.#canvas.getBoundingClientRect();
-      const pick = this.#scene.pick(event.clientX - bounds.left, event.clientY - bounds.top,
-        mesh => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && typeof mesh.metadata?.siteId === 'string');
+      const pick = this.#scene.pick(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        (mesh) => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && typeof mesh.metadata?.siteId === 'string',
+      );
       this.#onBuildingHover(pick.pickedMesh?.metadata?.siteId ?? null);
     }
     if (this.#pointerDown?.harvest && this.#pointerDown.pointerId === event.pointerId) {
-      event.stopImmediatePropagation(); event.preventDefault();
+      event.stopImmediatePropagation();
+      event.preventDefault();
       this.#continueHarvest(event);
       return;
     }
@@ -465,41 +722,80 @@ export class BabylonVillageScene {
       }
       return;
     }
-    if (!this.#pointerDown || Math.hypot(event.clientX - this.#pointerDown.x, event.clientY - this.#pointerDown.y) < 8) return;
+    if (!this.#pointerDown || Math.hypot(event.clientX - this.#pointerDown.x, event.clientY - this.#pointerDown.y) < 8)
+      return;
     this.#pointerDown = null;
     this.#clearSelection();
   };
 
   readonly #handlePointerUp = (event: PointerEvent): void => {
-    if(this.#worldMode==='terraform'&&this.#infrastructureDown&&this.#infrastructureDown.pointerId!==event.pointerId)return;
-    if(this.#infrastructureHandler&&this.#infrastructureDown){event.preventDefault();event.stopImmediatePropagation();const d=this.#infrastructureDown;this.#infrastructureDown=null;
-      const bounds=this.#canvas.getBoundingClientRect();
-      const picked=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,mesh=>mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&typeof mesh.metadata?.equipmentId==='string');
-      this.#infrastructureHandler({kind:'up',point:this.#infrastructurePoint(event),equipmentId:picked?.pickedMesh?.metadata?.equipmentId,drag:Math.hypot(event.clientX-d.x,event.clientY-d.y)>8});if(this.#canvas.hasPointerCapture(event.pointerId))this.#canvas.releasePointerCapture(event.pointerId);return;}
+    if (
+      this.#worldMode === 'terraform' &&
+      this.#infrastructureDown &&
+      this.#infrastructureDown.pointerId !== event.pointerId
+    )
+      return;
+    if (this.#infrastructureHandler && this.#infrastructureDown) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const d = this.#infrastructureDown;
+      this.#infrastructureDown = null;
+      const bounds = this.#canvas.getBoundingClientRect();
+      const picked = this.#scene.pick(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        (mesh) =>
+          mesh.isEnabled() && mesh.isVisible && mesh.isPickable && typeof mesh.metadata?.equipmentId === 'string',
+      );
+      this.#infrastructureHandler({
+        kind: 'up',
+        point: this.#infrastructurePoint(event),
+        equipmentId: picked?.pickedMesh?.metadata?.equipmentId,
+        drag: Math.hypot(event.clientX - d.x, event.clientY - d.y) > 8,
+      });
+      if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (this.#transition.active) return;
     if (!this.#pointerDown || this.#pointerDown.pointerId !== event.pointerId) return;
     if (this.#mode === 'world') {
-      const gesture = this.#pointerDown; this.#pointerDown = null;
+      const gesture = this.#pointerDown;
+      this.#pointerDown = null;
       if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 8 && this.#torusOverview) {
         const bounds = this.#canvas.getBoundingClientRect();
         const chosen = this.#torusOverview.select(event.clientX - bounds.left, event.clientY - bounds.top);
         if (import.meta.env.DEV) this.#canvas.dataset.worldPick = chosen ? `${chosen.cellX},${chosen.cellY}` : 'none';
-        if (chosen) { this.#worldTarget = chosen; this.#torusOverview.focus(chosen); this.#torusOverview.mark(this.#villageAnchor, chosen); }
+        if (chosen) {
+          this.#worldTarget = chosen;
+          this.#torusOverview.focus(chosen);
+          this.#torusOverview.mark(this.#villageAnchor, chosen);
+        }
       }
       return;
     }
-    if (this.#mode === 'region') { this.#pointerDown = null; return; }
+    if (this.#mode === 'region') {
+      this.#pointerDown = null;
+      return;
+    }
     const gesture = this.#pointerDown;
     if (gesture.harvest) {
-      if (!this.#endsOnWorldSurface(event)) { this.#handlePointerCancel(); return; }
+      if (!this.#endsOnWorldSurface(event)) {
+        this.#handlePointerCancel();
+        return;
+      }
       this.#continueHarvest(event);
       this.#onGardenHarvest(null, false);
-      this.#pointerDown = null; event.stopImmediatePropagation(); event.preventDefault();
+      this.#pointerDown = null;
+      event.stopImmediatePropagation();
+      event.preventDefault();
       if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
       return;
     }
     if (gesture.mouseArea) {
-      if (!this.#endsOnWorldSurface(event)) { this.#handlePointerCancel(); return; }
+      if (!this.#endsOnWorldSurface(event)) {
+        this.#handlePointerCancel();
+        return;
+      }
       this.#pointerDown = null;
       event.stopImmediatePropagation();
       if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
@@ -507,10 +803,7 @@ export class BabylonVillageScene {
       if (gesture.first && last) this.#onAreaGesture(gesture.first, last, true);
       return;
     }
-    const moved = Math.hypot(
-      event.clientX - this.#pointerDown.x,
-      event.clientY - this.#pointerDown.y,
-    );
+    const moved = Math.hypot(event.clientX - this.#pointerDown.x, event.clientY - this.#pointerDown.y);
     this.#pointerDown = null;
     if (moved >= 8) return;
 
@@ -524,16 +817,24 @@ export class BabylonVillageScene {
     const picked = this.#scene.pick(
       event.clientX - bounds.left,
       event.clientY - bounds.top,
-      (mesh) => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && (typeof mesh.metadata?.siteId === 'string' || typeof mesh.metadata?.featureId === 'string'
-        || this.#worldMode === 'population' && typeof mesh.metadata?.populationId === 'string'),
+      (mesh) =>
+        mesh.isEnabled() &&
+        mesh.isVisible &&
+        mesh.isPickable &&
+        (typeof mesh.metadata?.siteId === 'string' ||
+          typeof mesh.metadata?.featureId === 'string' ||
+          (this.#worldMode === 'population' && typeof mesh.metadata?.populationId === 'string')),
     );
     const pickedMetadata = picked.pickedMesh?.metadata;
     if (this.#worldMode === 'population' && typeof pickedMetadata?.populationId === 'string') {
-      this.#onSiteSelected(`representative:${pickedMetadata.representativeId}`, { x: event.clientX, y: event.clientY }); return;
+      this.#onSiteSelected(`representative:${pickedMetadata.representativeId}`, { x: event.clientX, y: event.clientY });
+      return;
     }
-    const featureId = (picked.thinInstanceIndex >= 0
-      ? pickedMetadata?.instanceFeatureIds?.[picked.thinInstanceIndex]
-      : pickedMetadata?.featureId) as string | undefined;
+    const featureId = (
+      picked.thinInstanceIndex >= 0
+        ? pickedMetadata?.instanceFeatureIds?.[picked.thinInstanceIndex]
+        : pickedMetadata?.featureId
+    ) as string | undefined;
     if (featureId) {
       if (this.#worldMode !== 'exploitation') return;
       this.#selectedSiteId = null;
@@ -549,32 +850,51 @@ export class BabylonVillageScene {
   };
   /** React cancellation and native cancellation clear the same pointer owner. */
   public cancelGesture(): void {
-    if(this.#infrastructureDown){const down=this.#infrastructureDown;this.#infrastructureDown=null;if(this.#canvas.hasPointerCapture(down.pointerId))this.#canvas.releasePointerCapture(down.pointerId);this.#infrastructureHandler?.({kind:'cancel',point:null});}
+    if (this.#infrastructureDown) {
+      const down = this.#infrastructureDown;
+      this.#infrastructureDown = null;
+      if (this.#canvas.hasPointerCapture(down.pointerId)) this.#canvas.releasePointerCapture(down.pointerId);
+      this.#infrastructureHandler?.({ kind: 'cancel', point: null });
+    }
     const gesture = this.#pointerDown;
     this.#pointerDown = null;
-    this.#lastDragCell = ''; this.#hoveredHarvestCell = '';
+    this.#lastDragCell = '';
+    this.#hoveredHarvestCell = '';
     this.#harvestVisited.clear();
-    if (gesture && this.#canvas.hasPointerCapture(gesture.pointerId)) this.#canvas.releasePointerCapture(gesture.pointerId);
+    if (gesture && this.#canvas.hasPointerCapture(gesture.pointerId))
+      this.#canvas.releasePointerCapture(gesture.pointerId);
   }
   readonly #handlePointerCancel = (): void => {
     const hadWorldGesture = Boolean(this.#pointerDown?.harvest || this.#pointerDown?.mouseArea);
     this.cancelGesture();
     if (hadWorldGesture) this.#onWorldGestureCancelled();
   };
-  public setConstructionAction(action: 'build' | 'upgrade' | 'extend' | null, onHover: (id: string | null) => void): void {
-    if (action !== this.#constructionAction) { this.cancelGesture(); this.#lastDragCell = ''; }
-    this.#constructionAction = action; this.#onBuildingHover = onHover;
+  public setConstructionAction(
+    action: 'build' | 'upgrade' | 'extend' | null,
+    onHover: (id: string | null) => void,
+  ): void {
+    if (action !== this.#constructionAction) {
+      this.cancelGesture();
+      this.#lastDragCell = '';
+    }
+    this.#constructionAction = action;
+    this.#onBuildingHover = onHover;
   }
   readonly #handleWheel = (event: WheelEvent): void => {
-    this.#cameraFocus=null;
-    if(this.#inhabitantCamera.active)return;
-    if(this.#flyover) return;
+    this.#cameraFocus = null;
+    if (this.#inhabitantCamera.active) return;
+    if (this.#flyover) return;
     if (this.#pointerDown?.harvest || this.#pointerDown?.mouseArea) this.#handlePointerCancel();
-    if (this.#mode === 'world' && event.deltaY < 0 && this.#torusOverview
-      && this.#torusOverview.camera.radius <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.1) this.showRegion();
+    if (
+      this.#mode === 'world' &&
+      event.deltaY < 0 &&
+      this.#torusOverview &&
+      this.#torusOverview.camera.radius <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.1
+    )
+      this.showRegion();
     // Zooming inside Village must retain the logical building and its outline,
     // including when its graphical representation changes LOD.
-    else if (this.#mode === 'region' || this.#mode === 'village' && !this.#selectedSiteId) this.#clearSelection();
+    else if (this.#mode === 'region' || (this.#mode === 'village' && !this.#selectedSiteId)) this.#clearSelection();
   };
 
   #endsOnWorldSurface(event: PointerEvent): boolean {
@@ -583,10 +903,17 @@ export class BabylonVillageScene {
   }
 
   #continueHarvest(event: PointerEvent): void {
-    const last = this.#gridPointAtPointer(event), previous = this.#pointerDown?.lastPoint;
+    const last = this.#gridPointAtPointer(event),
+      previous = this.#pointerDown?.lastPoint;
     if (!last || !previous || cellKey(last) === cellKey(previous)) return;
-    for (const cell of cellsAlongSegment(previous, last, { widthCells: this.#worldWidthUnits / TILE_SIZE, heightCells: this.#worldHeightUnits / TILE_SIZE })) {
-      if (!this.#harvestVisited.has(cellKey(cell))) { this.#harvestVisited.add(cellKey(cell)); this.#onGardenHarvest(cell, false); }
+    for (const cell of cellsAlongSegment(previous, last, {
+      widthCells: this.#worldWidthUnits / TILE_SIZE,
+      heightCells: this.#worldHeightUnits / TILE_SIZE,
+    })) {
+      if (!this.#harvestVisited.has(cellKey(cell))) {
+        this.#harvestVisited.add(cellKey(cell));
+        this.#onGardenHarvest(cell, false);
+      }
     }
     this.#pointerDown!.lastPoint = last;
   }
@@ -604,7 +931,7 @@ export class BabylonVillageScene {
     private readonly onArrival: (arrival: VillageArrival | null) => void = () => {},
     private readonly onEyesFound: () => void = () => {},
     private readonly onInitialLoad: (progress: InitialLoadProgress) => void = () => {},
-    private readonly transport:SceneTransport=playerSceneTransport,
+    private readonly transport: SceneTransport = playerSceneTransport,
   ) {
     this.#canvas = canvas;
     this.#canvas.dataset.workerModel = 'low-poly';
@@ -620,12 +947,15 @@ export class BabylonVillageScene {
     this.#engine.maxFPS = this.#reducedQuality ? 5 : 45;
     this.#engine.setHardwareScalingLevel(Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5));
     this.#scene = new Scene(this.#engine);
-    this.#sceneStats = import.meta.env.DEV || import.meta.env.MODE === 'e2e' ? new SceneInstrumentation(this.#scene) : null;
+    this.#sceneStats =
+      import.meta.env.DEV || import.meta.env.MODE === 'e2e' ? new SceneInstrumentation(this.#scene) : null;
     if (this.#sceneStats) {
       this.#sceneStats.captureActiveMeshesEvaluationTime = true;
       this.#sceneStats.captureRenderTime = true;
     }
-    this.#renderDiagnostics = this.#sceneStats ? new RenderDiagnostics(this.#engine, this.#scene, this.#sceneStats) : null;
+    this.#renderDiagnostics = this.#sceneStats
+      ? new RenderDiagnostics(this.#engine, this.#scene, this.#sceneStats)
+      : null;
     this.#scene.skipPointerMovePicking = true;
     this.#scene.clearColor = Color4.FromHexString('#8ea0a0ff');
     this.#scene.fogMode = Scene.FOGMODE_LINEAR;
@@ -697,77 +1027,150 @@ export class BabylonVillageScene {
     this.#leafLightMaterial = this.#material('leaves-light', '#668442');
     this.#leafDarkMaterial = this.#material('leaves-dark', '#294e2d');
     for (const material of [this.#leafMaterial, this.#leafLightMaterial, this.#leafDarkMaterial])
-      new WeatherMaterial(material, 'leaves', () => this.#weather, () => this.#space);
+      new WeatherMaterial(
+        material,
+        'leaves',
+        () => this.#weather,
+        () => this.#space,
+      );
     for (const material of [this.#soilMaterial, ...this.#gardenTileMaterials])
-      new WeatherMaterial(material, 'ground', () => this.#weather, () => this.#space);
-    new WeatherMaterial(this.#waterRippleMaterial, 'water', () => this.#weather, () => this.#space);
+      new WeatherMaterial(
+        material,
+        'ground',
+        () => this.#weather,
+        () => this.#space,
+      );
+    new WeatherMaterial(
+      this.#waterRippleMaterial,
+      'water',
+      () => this.#weather,
+      () => this.#space,
+    );
     this.#rain = new LocalRain(this.#scene, (x, z) => {
       const cell = this.#space?.inverse(x, z);
-      return cell ? this.#store?.ground(cell.cellX, cell.cellY)?.height ?? null : null;
+      return cell ? (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? null) : null;
     });
     this.#trunkMaterial = this.#material('trunk', '#523620');
-    let workerObstacles:{state:VillageState;version:number;
-      routes:Array<{destination:TravelCell;points:ReturnType<WorldSpace['path']>}>}|null=null;
-    let workerWidths:{state:VillageState;widths:Map<string,number>}|null=null;
-    const workerSpatial=new WorkerObstacles();
-    this.#workers = new VillageWorkers(this.#scene, {
-      skin: WORKER_COLOURS.skin.map((color,i) => this.#material(`worker-skin-${i}`,color)),
-      clothes: WORKER_COLOURS.clothes.map((color,i) => this.#material(`worker-clothes-${i}`,color)),
-      hair: WORKER_COLOURS.hair.map((color,i) => this.#material(`worker-hair-${i}`,color)),
-      pants: this.#material('worker-pants',WORKER_COLOURS.pants), timber: this.#trunkMaterial, stone: this.#stoneMaterial,
-    }, {
-      path: path => this.#workerPath(path), project: cell => this.#space!.project(cell),
-      localPath: path=>this.#pathPoints(path),
-      leisurePath:(buildingId,path)=>this.#leisurePath(buildingId,path),
-      key: point => { const cell=this.#space!.inverse(point.x,point.z); return `${cell.cellX.toFixed(3)}:${cell.cellY.toFixed(3)}`; },
-      width: point => {
-        if(!this.#state||!this.#space)return .8;
-        if(workerWidths?.state!==this.#state){const widths=new Map<string,number>();
-          for(const edge of roadEdges(this.#state.travelRoutes))for(const cell of [edge.from,edge.to]){
-            const key=cellKey(cell);widths.set(key,Math.max(widths.get(key)??0,edge.kind==='paved'?ROAD_HALF_WIDTH*2:.8));
-          }workerWidths={state:this.#state,widths};}
-        const cell=this.#space.inverse(point.x,point.z);return workerWidths.widths.get(`${Math.round(cell.cellX)%this.#space.width}:${Math.round(cell.cellY)%this.#space.height}`)??.8;
+    let workerObstacles: {
+      state: VillageState;
+      version: number;
+      routes: Array<{ destination: TravelCell; points: ReturnType<WorldSpace['path']> }>;
+    } | null = null;
+    let workerWidths: { state: VillageState; widths: Map<string, number> } | null = null;
+    const workerSpatial = new WorkerObstacles();
+    this.#workers = new VillageWorkers(
+      this.#scene,
+      {
+        skin: WORKER_COLOURS.skin.map((color, i) => this.#material(`worker-skin-${i}`, color)),
+        clothes: WORKER_COLOURS.clothes.map((color, i) => this.#material(`worker-clothes-${i}`, color)),
+        hair: WORKER_COLOURS.hair.map((color, i) => this.#material(`worker-hair-${i}`, color)),
+        pants: this.#material('worker-pants', WORKER_COLOURS.pants),
+        timber: this.#trunkMaterial,
+        stone: this.#stoneMaterial,
       },
-      ground: point => {
-        if (!this.#space || !this.#store) return null;
-        const cell=this.#space.inverse(point.x,point.z);
-        return this.#store.ground(cell.cellX,cell.cellY)?.height ?? null;
+      {
+        path: (path) => this.#workerPath(path),
+        project: (cell) => this.#space!.project(cell),
+        localPath: (path) => this.#pathPoints(path),
+        leisurePath: (buildingId, path) => this.#leisurePath(buildingId, path),
+        key: (point) => {
+          const cell = this.#space!.inverse(point.x, point.z);
+          return `${cell.cellX.toFixed(3)}:${cell.cellY.toFixed(3)}`;
+        },
+        width: (point) => {
+          if (!this.#state || !this.#space) return 0.8;
+          if (workerWidths?.state !== this.#state) {
+            const widths = new Map<string, number>();
+            for (const edge of roadEdges(this.#state.travelRoutes))
+              for (const cell of [edge.from, edge.to]) {
+                const key = cellKey(cell);
+                widths.set(key, Math.max(widths.get(key) ?? 0, edge.kind === 'paved' ? ROAD_HALF_WIDTH * 2 : 0.8));
+              }
+            workerWidths = { state: this.#state, widths };
+          }
+          const cell = this.#space.inverse(point.x, point.z);
+          return (
+            workerWidths.widths.get(
+              `${Math.round(cell.cellX) % this.#space.width}:${Math.round(cell.cellY) % this.#space.height}`,
+            ) ?? 0.8
+          );
+        },
+        ground: (point) => {
+          if (!this.#space || !this.#store) return null;
+          const cell = this.#space.inverse(point.x, point.z);
+          return this.#store.ground(cell.cellX, cell.cellY)?.height ?? null;
+        },
+        free: (point, radius, featureId, allowRoads = false) => {
+          if (!this.#space || !this.#store || !this.#state) return false;
+          workerSpatial.update(this.#state);
+          for (const [dx, dz] of [
+            [0, 0],
+            [-radius, -radius],
+            [radius, radius],
+            [-radius, radius],
+            [radius, -radius],
+          ]) {
+            const cell = this.#space.inverse(point.x + dx!, point.z + dz!),
+              x = Math.round(cell.cellX) % this.#space.width,
+              y = Math.round(cell.cellY) % this.#space.height;
+            const ground = this.#store.ground(x, y);
+            if (!ground || ground.code !== 1) return false;
+            if (infrastructureBarrierAt(this.#infrastructureBarriers, cell, this.#state.world)) return false;
+            if (workerSpatial.blocked(x, y, featureId)) return false;
+          }
+          const own = workerSpatial.feature(featureId);
+          if (own) {
+            const centre = this.#space.project(own);
+            if (Math.hypot(point.x - centre.x, point.z - centre.z) < 0.42 + radius * 0.3) return false;
+          }
+          if (workerObstacles?.state !== this.#state || workerObstacles.version !== this.#space.version) {
+            const routes = villageRoadDisplayRoutes(this.#state);
+            workerObstacles = {
+              state: this.#state,
+              version: this.#space.version,
+              routes: routes.map((r) => ({ destination: r.destination, points: this.#space!.path(r.cells) })),
+            };
+          }
+          workerSpatial.updateEquipment(this.#infrastructureEquipment, this.#space);
+          if (workerSpatial.equipmentBlocked(point, radius)) return false;
+          if (!allowRoads)
+            for (const route of workerObstacles.routes) {
+              if (own && route.destination.cellX === own.cellX && route.destination.cellY === own.cellY) continue;
+              const path = route.points;
+              for (let i = 1; i < path.length; i++) {
+                const a = path[i - 1]!,
+                  b = path[i]!,
+                  dx = b.x - a.x,
+                  dz = b.z - a.z;
+                const t = Math.max(
+                  0,
+                  Math.min(1, ((point.x - a.x) * dx + (point.z - a.z) * dz) / (dx * dx + dz * dz || 1)),
+                );
+                if (Math.hypot(point.x - a.x - dx * t, point.z - a.z - dz * t) < radius + 0.53) return false;
+              }
+            }
+          return true;
+        },
+        detailed: (point) =>
+          Math.hypot(point.x - this.#camera.target.x, point.z - this.#camera.target.z) < 35 && this.#camera.radius < 95,
       },
-      free: (point,radius,featureId,allowRoads=false) => {
-        if (!this.#space || !this.#store || !this.#state) return false;
-        workerSpatial.update(this.#state);
-        for (const [dx,dz] of [[0,0],[-radius,-radius],[radius,radius],[-radius,radius],[radius,-radius]]) {
-          const cell=this.#space.inverse(point.x+dx!,point.z+dz!),x=Math.round(cell.cellX)%this.#space.width,y=Math.round(cell.cellY)%this.#space.height;
-          const ground=this.#store.ground(x,y);
-          if (!ground || ground.code!==1) return false;
-          if(infrastructureBarrierAt(this.#infrastructureBarriers,cell,this.#state.world))return false;
-          if (workerSpatial.blocked(x,y,featureId)) return false;
-        }
-        const own=workerSpatial.feature(featureId);
-        if(own){const centre=this.#space.project(own);if(Math.hypot(point.x-centre.x,point.z-centre.z)<.42+radius*.3)return false;}
-        if(workerObstacles?.state!==this.#state||workerObstacles.version!==this.#space.version){
-          const routes=villageRoadDisplayRoutes(this.#state);
-          workerObstacles={state:this.#state,version:this.#space.version,
-            routes:routes.map(r=>({destination:r.destination,points:this.#space!.path(r.cells)}))};
-        }
-        workerSpatial.updateEquipment(this.#infrastructureEquipment,this.#space);
-        if(workerSpatial.equipmentBlocked(point,radius))return false;
-        if(!allowRoads)for(const route of workerObstacles.routes){
-          if(own&&route.destination.cellX===own.cellX&&route.destination.cellY===own.cellY)continue;
-          const path=route.points;
-          for(let i=1;i<path.length;i++){const a=path[i-1]!,b=path[i]!,dx=b.x-a.x,dz=b.z-a.z;
-            const t=Math.max(0,Math.min(1,((point.x-a.x)*dx+(point.z-a.z)*dz)/(dx*dx+dz*dz||1)));
-            if(Math.hypot(point.x-a.x-dx*t,point.z-a.z-dz*t)<radius+.53)return false;}
-        }
-        return true;
-      },
-      detailed: point => Math.hypot(point.x-this.#camera.target.x,point.z-this.#camera.target.z)<35&&this.#camera.radius<95,
-    });
-    this.#inhabitantCamera = new InhabitantCamera(this.#scene,this.#camera,canvas,
-      id=>this.#workers.representativePose(id),(x,z)=>this.#walkGround(x,z),
-      (x,z)=>this.#canWalk(x,z),id=>this.#workers.hideRepresentative(id));
+    );
+    this.#inhabitantCamera = new InhabitantCamera(
+      this.#scene,
+      this.#camera,
+      canvas,
+      (id) => this.#workers.representativePose(id),
+      (x, z) => this.#walkGround(x, z),
+      (x, z) => this.#canWalk(x, z),
+      (id) => this.#workers.hideRepresentative(id),
+    );
     this.#woodlandMaterial = new MultiMaterial('woodland-shared', this.#scene);
-    this.#woodlandMaterial.subMaterials = [this.#trunkMaterial, this.#leafMaterial, this.#leafLightMaterial, this.#leafDarkMaterial];
+    this.#woodlandMaterial.subMaterials = [
+      this.#trunkMaterial,
+      this.#leafMaterial,
+      this.#leafLightMaterial,
+      this.#leafDarkMaterial,
+    ];
     this.#constructionMaterial = this.#material('construction', '#c5a15d', 0.32, '#20170b');
     this.#constructionMaterial.wireframe = true;
     this.#scaffoldMaterial = this.#material('scaffold', '#9c7440', 0.88);
@@ -779,21 +1182,29 @@ export class BabylonVillageScene {
     this.#sawdustMaterial = this.#material('sawdust', '#806b3d');
 
     this.#deepGround = this.#createTerrain();
-    this.#regionalOverview = new RegionalOverview(this.#scene, () => this.#weather, () => this.#space);
+    this.#regionalOverview = new RegionalOverview(
+      this.#scene,
+      () => this.#weather,
+      () => this.#space,
+    );
     this.#regionalVillages = new RegionalVillages(this.#scene, (x, y) => {
       const ground = this.#store?.ground(x, y)?.height;
       if (ground !== undefined) return ground;
       const data = this.#overview;
       if (!data) return null;
-      const bx = Math.floor(normalize(x, data.world.widthCells) * data.gridWidth / data.world.widthCells);
-      const by = Math.floor(normalize(y, data.world.heightCells) * data.gridHeight / data.world.heightCells);
-      return (data.meanElevations[by * data.gridWidth + bx] ?? 0) * .025;
+      const bx = Math.floor((normalize(x, data.world.widthCells) * data.gridWidth) / data.world.widthCells);
+      const by = Math.floor((normalize(y, data.world.heightCells) * data.gridHeight) / data.world.heightCells);
+      return (data.meanElevations[by * data.gridWidth + bx] ?? 0) * 0.025;
     });
     this.#clouds = new CloudTransition(this.#engine);
     for (const material of this.#scene.materials) material.freeze();
     this.#resourceHalos = new ResourceHalos(this.#scene);
 
-    this.#selectionMarker = MeshBuilder.CreateBox('selection-marker', { width: 2.64, depth: 2.64, height: 0.035 }, this.#scene);
+    this.#selectionMarker = MeshBuilder.CreateBox(
+      'selection-marker',
+      { width: 2.64, depth: 2.64, height: 0.035 },
+      this.#scene,
+    );
     this.#selectionMarker.position.y = 0.12;
     this.#selectionMarker.material = this.#selectionMaterial;
     this.#selectionMarker.isPickable = false;
@@ -816,189 +1227,311 @@ export class BabylonVillageScene {
     }
     window.addEventListener('online', this.#resumeTerrain);
     window.addEventListener('blur', this.#handlePointerCancel);
-    window.addEventListener('keydown',this.#flyoverKey,true);
+    window.addEventListener('keydown', this.#flyoverKey, true);
     window.addEventListener('keydown', this.#navigationKeyDown, true);
     window.addEventListener('keyup', this.#navigationKeyUp, true);
     document.addEventListener('visibilitychange', this.#resumeTerrain);
-    this.#resizeObserver = new ResizeObserver(() => { this.#engine.resize(); this.#torusOverview?.fit(this.#engine); });
+    this.#resizeObserver = new ResizeObserver(() => {
+      this.#engine.resize();
+      this.#torusOverview?.fit(this.#engine);
+    });
     this.#resizeObserver.observe(canvas);
     this.#engine.runRenderLoop(() => {
       if (this.#initialFailure) return;
       try {
-      const now = performance.now();
-      const measureFrame = statisticsEnabled();
-      const frame = measureFrame ? new FrameTimings(now) : undefined;
-      let renderMs = 0;
-      const wasTransitioning = this.#transition.active;
-      const wasLocked = this.#transition.locked;
-      this.#transition.update(now, this.#clouds.covered, this.#clouds.ready);
-      if (!wasLocked && this.#transition.locked) {
-        this.#camera.detachControl(); this.#torusOverview?.camera.detachControl();
-      }
-      if (wasTransitioning && !this.#transition.active) {
-        if(!this.#flyover) (this.#mode === 'world' ? this.#torusOverview?.camera : this.#camera)?.attachControl(this.#canvas, true);
-        if (this.#transition.failed) { this.#projectionRetryAt = now + 5000; this.#requestedWorld = false; this.#pendingView = null; this.#pendingCatView = false; }
-        const pending = this.#pendingView; this.#pendingView = null;
-        if (pending === 'world') this.showWorld(); else if (pending === 'region') this.showRegion(); else if (pending === 'village') this.showVillage();
-      }
-      if(this.#pendingCatView && this.#mode==='world' && !this.#transition.active && this.#torusOverview) {
-        this.#torusOverview.showCatEyes(); this.#pendingCatView = false;
-      }
-      this.#updateFlyover(now);
-      if (!this.#flyover && !this.#transition.active && this.#mode === 'world' && this.#torusOverview && this.#torusOverview.camera.radius
-        <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.03) this.showRegion();
-      this.#updateArrival(now);
-      if (this.#mode !== 'world') {
-        this.#updateCameraFocus(now);
-        this.#wrapCamera();
-        if (!this.#arrival && !this.#inhabitantCamera.active) this.#updateCameraProfile();
-        this.#updateViewMode();
-        if (import.meta.env.DEV && this.#space) {
-          const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
-          this.#canvas.dataset.viewTarget = `${Math.floor(target.cellX)},${Math.floor(target.cellY)}`;
+        const now = performance.now();
+        const measureFrame = statisticsEnabled();
+        const frame = measureFrame ? new FrameTimings(now) : undefined;
+        let renderMs = 0;
+        const wasTransitioning = this.#transition.active;
+        const wasLocked = this.#transition.locked;
+        this.#transition.update(now, this.#clouds.covered, this.#clouds.ready);
+        if (!wasLocked && this.#transition.locked) {
+          this.#camera.detachControl();
+          this.#torusOverview?.camera.detachControl();
         }
-      }
-      frame?.mark('camera');
-      if (this.#mode !== 'world') {
-        this.#streamTerrain(now, frame);
-        frame?.mark('streamingStats');
-        if (this.#space) this.#regionalOverview.update(this.#space, this.#space.inverse(this.#camera.target.x, this.#camera.target.z));
-      }
-      if (!this.#initialLoad.ready) {
+        if (wasTransitioning && !this.#transition.active) {
+          if (!this.#flyover)
+            (this.#mode === 'world' ? this.#torusOverview?.camera : this.#camera)?.attachControl(this.#canvas, true);
+          if (this.#transition.failed) {
+            this.#projectionRetryAt = now + 5000;
+            this.#requestedWorld = false;
+            this.#pendingView = null;
+            this.#pendingCatView = false;
+          }
+          const pending = this.#pendingView;
+          this.#pendingView = null;
+          if (pending === 'world') this.showWorld();
+          else if (pending === 'region') this.showRegion();
+          else if (pending === 'village') this.showVillage();
+        }
+        if (this.#pendingCatView && this.#mode === 'world' && !this.#transition.active && this.#torusOverview) {
+          this.#torusOverview.showCatEyes();
+          this.#pendingCatView = false;
+        }
+        this.#updateFlyover(now);
+        if (
+          !this.#flyover &&
+          !this.#transition.active &&
+          this.#mode === 'world' &&
+          this.#torusOverview &&
+          this.#torusOverview.camera.radius <= (this.#torusOverview.camera.lowerRadiusLimit ?? 5.8) * 1.03
+        )
+          this.showRegion();
+        this.#updateArrival(now);
+        if (this.#mode !== 'world') {
+          this.#updateCameraFocus(now);
+          this.#wrapCamera();
+          if (!this.#arrival && !this.#inhabitantCamera.active) this.#updateCameraProfile();
+          this.#updateViewMode();
+          if (import.meta.env.DEV && this.#space) {
+            const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
+            this.#canvas.dataset.viewTarget = `${Math.floor(target.cellX)},${Math.floor(target.cellY)}`;
+          }
+        }
+        frame?.mark('camera');
+        if (this.#mode !== 'world') {
+          this.#streamTerrain(now, frame);
+          frame?.mark('streamingStats');
+          if (this.#space)
+            this.#regionalOverview.update(
+              this.#space,
+              this.#space.inverse(this.#camera.target.x, this.#camera.target.z),
+            );
+        }
+        if (!this.#initialLoad.ready) {
+          this.#advanceBuildings();
+          const progress = this.#observeInitialLoad(false);
+          if (progress.phase === 'routes' && !progress.error) {
+            // Let React paint the actual phase before starting its synchronous work.
+            if (!this.#initialRoutesAnnounced) {
+              this.#initialRoutesAnnounced = true;
+              return;
+            }
+            this.#refreshBuildingGround();
+            this.#workers.reproject();
+            this.#updateTravelPaths(this.#state!, this.#showTravel, this.#selectedRoute, frame);
+            this.#projectionVersion = this.#renderer!.version;
+            this.#projectionGroundRevision = this.#store!.groundRevision;
+            this.#initialRoutesReady = true;
+            return;
+          }
+          if (progress.phase !== 'render' || progress.error) return;
+        } else this.#loadOverview(now);
+        if (this.#space && this.#state) {
+          const blend = Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
+          this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1);
+          this.#regionalOverview.detailBlend(blend);
+          for (const root of this.#villageMeshes)
+            for (const mesh of [root, ...root.getChildMeshes()]) {
+              const visibility = (mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
+              // Native building instances share source visibility; each instance still owns culling/picking.
+              const target =
+                'sourceMesh' in mesh
+                  ? (mesh as import('@babylonjs/core/Meshes/instancedMesh').InstancedMesh).sourceMesh
+                  : mesh;
+              if (target.visibility !== visibility) target.visibility = visibility;
+            }
+          this.#regionalVillages.update(this.#space, this.#state.village.id, this.#store?.groundRevision ?? 0);
+          for (const mesh of this.#renderer?.meshes() ?? []) {
+            mesh.visibility = this.#overview ? 1 - blend : 1;
+          }
+          this.#canvas.dataset.regionalVillages = String(this.#regionalVillages.meshes.size);
+        }
+        frame?.mark('visibility');
+        const workerServerNow = Date.now() - this.#serverOffsetMs;
+        this.#updateResourceOverlay(now);
+        if (this.#space && this.#store)
+          this.#resourceHalos.update(
+            now,
+            this.#space,
+            this.#store,
+            this.#worldMode === 'exploitation' && this.#mode === 'village',
+            1 - (this.#camera.radius - 110) / 50,
+          );
+        if (import.meta.env.DEV && now - this.#workerDebugAt > 500) {
+          this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);
+          this.#workerDebugAt = now;
+        }
+        this.#weather?.update(Date.now() + this.#cosmologyServerOffsetMs);
+        this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
+        this.#villageBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
+        this.#rain.update(
+          this.#camera.target,
+          this.#rainIntensity,
+          this.#mode === 'village' && this.#camera.radius < 160,
+        );
+        this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
+        this.#ambientLight.intensity = 0.08 + (this.#baseAmbient - 0.08) * this.#presentationLight;
+        this.#regionalOverview.setPresentationLight(this.#presentationLight);
+        frame?.mark('environment');
+        if (this.#mode !== 'world') {
+          this.#workers.animate(workerServerNow, this.#mode === 'village' && this.#camera.radius < 165);
+          const figureBlend = 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
+          if (this.#selectedRepresentative && this.#workers.selectedRepresentative === null) {
+            this.#selectedRepresentative = null;
+            this.#inhabitantCamera.stop();
+          }
+          this.#workers.setPopulationFocus(
+            this.#worldMode === 'population',
+            this.#populationFocus,
+            this.#populationFilter,
+          );
+          this.#inhabitantCamera.update(now);
+          this.#workers.setVisibility(figureBlend);
+          this.#animateWater(now);
+          frame?.mark('population');
+          const renderAt = measureFrame ? performance.now() : 0;
+          this.#renderDiagnostics?.beforeRender(this.#scene);
+          this.#scene.render();
+          if (measureFrame) renderMs += performance.now() - renderAt;
+          frame?.mark('render');
+          this.#renderDiagnostics?.afterRender(this.#scene, 'village');
+        } else {
+          this.#workers.animate(workerServerNow, false);
+          frame?.mark('population');
+          const renderAt = measureFrame ? performance.now() : 0;
+          if (this.#torusOverview) {
+            this.#renderDiagnostics?.beforeRender(this.#torusOverview.scene);
+            this.#torusOverview.scene.render();
+          }
+          if (measureFrame) renderMs += performance.now() - renderAt;
+          frame?.mark('render');
+          if (this.#torusOverview) this.#renderDiagnostics?.afterRender(this.#torusOverview.scene, 'world');
+        }
+        const cloudsAt = measureFrame ? performance.now() : 0;
+        this.#clouds.render(this.#transition.alpha, now);
+        if (measureFrame) renderMs += performance.now() - cloudsAt;
+        frame?.mark('clouds');
+        if (!this.#initialLoad.ready && this.#scene.isReady()) this.#observeInitialLoad(true);
+        const observing =
+          this.#mode === 'world' &&
+          !this.#flyover &&
+          !this.#cosmologyDebug &&
+          !this.#transition.active &&
+          !document.hidden &&
+          !this.#state?.village.accomplishments.some((item) => item.code === 'cat-eyes') &&
+          this.#torusOverview?.eyesVisible();
+        if (!observing) this.#eyesSince = null;
+        else {
+          this.#eyesSince ??= now;
+          if (now - this.#eyesSince >= 1800 && now >= this.#eyesRetryAt) {
+            this.#eyesRetryAt = now + 15000;
+            this.onEyesFound();
+          }
+        }
+        this.#canvas.dataset.cloudCover = String(this.#transition.alpha);
+        if (import.meta.env.DEV && this.#mode === 'world')
+          this.#canvas.dataset.worldCamera = JSON.stringify(this.#torusOverview?.navigationMetrics());
+        if (import.meta.env.MODE === 'e2e') {
+          const viewport = this.#camera.viewport.toGlobal(
+            this.#engine.getRenderWidth(),
+            this.#engine.getRenderHeight(),
+          );
+          this.#canvas.dataset.worldInteractionReady = String(
+            this.#mode === 'village' && !this.#transition.active && !this.#arrival && !this.#flyover,
+          );
+          this.#canvas.dataset.buildingScreens = JSON.stringify(
+            this.#state?.cells.flatMap((site) => {
+              if (!site.building) return [];
+              const mesh = this.#buildingCache.get(site.building.id)?.mesh;
+              if (!mesh) return [];
+              const bounds = mesh.getHierarchyBoundingVectors(true),
+                centre = bounds.min.add(bounds.max).scale(0.5);
+              centre.y = bounds.max.y - 0.1;
+              const point = Vector3.Project(centre, Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
+              return [
+                {
+                  id: site.building.id,
+                  x: point.x / this.#engine.getRenderWidth(),
+                  y: point.y / this.#engine.getRenderHeight(),
+                },
+              ];
+            }) ?? [],
+          );
+          this.#canvas.dataset.cellScreens = JSON.stringify(
+            this.#e2eCells.map((cell) => {
+              const point = Vector3.Project(
+                new Vector3(cell.x, (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.075, cell.z),
+                Matrix.Identity(),
+                this.#scene.getTransformMatrix(),
+                viewport,
+              );
+              return {
+                id: cell.id,
+                x: point.x / this.#engine.getRenderWidth(),
+                y: point.y / this.#engine.getRenderHeight(),
+              };
+            }),
+          );
+          const renderedFeatures = new Map<string, { id: string; x: number; z: number }>();
+          for (const mesh of this.#renderer?.meshes() ?? []) {
+            const data = mesh.metadata as { featureId?: string; cellX: number; cellY: number } | null;
+            if (data?.featureId && mesh.isEnabled())
+              renderedFeatures.set(data.featureId, { id: data.featureId, ...this.#space!.project(data) });
+          }
+          this.#e2eFeatures = [...renderedFeatures.values()];
+          this.#canvas.dataset.featureScreens = JSON.stringify(
+            this.#e2eFeatures.map((feature) => {
+              const point = Vector3.Project(
+                new Vector3(feature.x, 0.4, feature.z),
+                Matrix.Identity(),
+                this.#scene.getTransformMatrix(),
+                viewport,
+              );
+              return {
+                id: feature.id,
+                x: point.x / this.#engine.getRenderWidth(),
+                y: point.y / this.#engine.getRenderHeight(),
+              };
+            }),
+          );
+          this.#canvas.dataset.camera = JSON.stringify([
+            this.#camera.alpha,
+            this.#camera.beta,
+            this.#camera.radius,
+            this.#camera.target.x,
+            this.#camera.target.z,
+          ]);
+          this.#canvas.dataset.cameraLimits = JSON.stringify([
+            this.#camera.lowerBetaLimit,
+            this.#camera.upperBetaLimit,
+          ]);
+          this.#canvas.dataset.renderedPendingHarvests = String(this.#resourceHalos.pendingCount);
+          this.#canvas.dataset.debugTravelPaths = String(this.#travelLines?.getTotalVertices() ?? 0);
+          this.#canvas.dataset.workerPositions = JSON.stringify(
+            [...this.#workers.figures].map((f) => ({
+              id: f.root.name,
+              enabled: f.root.isEnabled(),
+              ...this.#space!.inverse(f.root.position.x, f.root.position.z),
+            })),
+          );
+          this.#canvas.dataset.workerServerNow = String(workerServerNow);
+          this.#canvas.dataset.workerFigures = String(this.#workers.figures.length);
+          this.#canvas.dataset.workerVertices = String(
+            this.#workers.figures.reduce(
+              (sum, figure) =>
+                sum + figure.root.getChildMeshes().reduce((parts, mesh) => parts + mesh.getTotalVertices(), 0),
+              0,
+            ),
+          );
+          this.#canvas.dataset.buildableGrid = JSON.stringify({
+            construction: this.#constructionMode,
+            minY: this.#buildableGrid?.getBoundingInfo().boundingBox.minimumWorld.y ?? null,
+            vertices: this.#buildableGrid?.getTotalVertices() ?? 0,
+            ready: this.#buildableGrid?.isReady(true) ?? false,
+            blending: this.#buildableGrid?.material?.needAlphaBlending() ?? false,
+            areaVertices: this.#buildableArea?.getTotalVertices() ?? 0,
+            areaMinY: this.#buildableArea?.getBoundingInfo().boundingBox.minimumWorld.y ?? null,
+          });
+        }
+        this.#frameMs.push(this.#lastFrameAt ? now - this.#lastFrameAt : 0);
+        if (this.#frameMs.length > 3600) this.#frameMs.shift();
+        this.#lastFrameAt = now;
+        frame?.mark('diagnostics');
         this.#advanceBuildings();
-        const progress = this.#observeInitialLoad(false);
-        if (progress.phase === 'routes' && !progress.error) {
-          // Let React paint the actual phase before starting its synchronous work.
-          if (!this.#initialRoutesAnnounced) { this.#initialRoutesAnnounced = true; return; }
-          this.#refreshBuildingGround(); this.#workers.reproject();
-          this.#updateTravelPaths(this.#state!, this.#showTravel, this.#selectedRoute, frame);
-          this.#projectionVersion = this.#renderer!.version; this.#projectionGroundRevision = this.#store!.groundRevision;
-          this.#initialRoutesReady = true;
-          return;
-        }
-        if (progress.phase !== 'render' || progress.error) return;
-      } else this.#loadOverview(now);
-      if (this.#space && this.#state) {
-        const blend = Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
-        this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1);
-        this.#regionalOverview.detailBlend(blend);
-        for (const root of this.#villageMeshes) for (const mesh of [root, ...root.getChildMeshes()]) {
-          const visibility=(mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
-          // Native building instances share source visibility; each instance still owns culling/picking.
-          const target='sourceMesh' in mesh ? (mesh as import('@babylonjs/core/Meshes/instancedMesh').InstancedMesh).sourceMesh : mesh;
-          if(target.visibility!==visibility)target.visibility=visibility;
-        }
-        this.#regionalVillages.update(this.#space, this.#state.village.id, this.#store?.groundRevision ?? 0);
-        for (const mesh of this.#renderer?.meshes() ?? []) {
-          mesh.visibility = this.#overview ? 1 - blend : 1;
-        }
-        this.#canvas.dataset.regionalVillages = String(this.#regionalVillages.meshes.size);
-      }
-      frame?.mark('visibility');
-      const workerServerNow = Date.now() - this.#serverOffsetMs;
-      this.#updateResourceOverlay(now);
-      if(this.#space&&this.#store)this.#resourceHalos.update(now,this.#space,this.#store,
-        this.#worldMode==='exploitation'&&this.#mode==='village',1-(this.#camera.radius-110)/50);
-      if (import.meta.env.DEV&&now-this.#workerDebugAt>500) {this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);this.#workerDebugAt=now;}
-      this.#weather?.update(Date.now() + this.#cosmologyServerOffsetMs);
-      this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
-      this.#villageBraziers?.animate(now, this.#villageNight,
-        this.#mode === 'world' ? 0 : 1);
-      this.#rain.update(this.#camera.target, this.#rainIntensity, this.#mode === 'village' && this.#camera.radius < 160);
-      this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
-      this.#ambientLight.intensity = .08 + (this.#baseAmbient - .08) * this.#presentationLight;
-      this.#regionalOverview.setPresentationLight(this.#presentationLight);
-      frame?.mark('environment');
-      if (this.#mode !== 'world') {
-        this.#workers.animate(workerServerNow, this.#mode === 'village' && this.#camera.radius < 165);
-        const figureBlend = 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
-        if(this.#selectedRepresentative&&this.#workers.selectedRepresentative===null){this.#selectedRepresentative=null;this.#inhabitantCamera.stop();}
-        this.#workers.setPopulationFocus(this.#worldMode === 'population', this.#populationFocus, this.#populationFilter);
-        this.#inhabitantCamera.update(now);
-        this.#workers.setVisibility(figureBlend);
-        this.#animateWater(now);
-        frame?.mark('population');
-        const renderAt = measureFrame ? performance.now() : 0;
-        this.#renderDiagnostics?.beforeRender(this.#scene);
-        this.#scene.render();
-        if (measureFrame) renderMs += performance.now() - renderAt;
-        frame?.mark('render');
-        this.#renderDiagnostics?.afterRender(this.#scene, 'village');
-      } else {
-        this.#workers.animate(workerServerNow, false);
-        frame?.mark('population');
-        const renderAt = measureFrame ? performance.now() : 0;
-        if (this.#torusOverview) {
-          this.#renderDiagnostics?.beforeRender(this.#torusOverview.scene);
-          this.#torusOverview.scene.render();
-        }
-        if (measureFrame) renderMs += performance.now() - renderAt;
-        frame?.mark('render');
-        if (this.#torusOverview) this.#renderDiagnostics?.afterRender(this.#torusOverview.scene, 'world');
-      }
-      const cloudsAt = measureFrame ? performance.now() : 0;
-      this.#clouds.render(this.#transition.alpha, now);
-      if (measureFrame) renderMs += performance.now() - cloudsAt;
-      frame?.mark('clouds');
-      if (!this.#initialLoad.ready && this.#scene.isReady()) this.#observeInitialLoad(true);
-      const observing = this.#mode === 'world' && !this.#flyover && !this.#cosmologyDebug && !this.#transition.active && !document.hidden
-        && !this.#state?.village.accomplishments.some(item => item.code === 'cat-eyes') && this.#torusOverview?.eyesVisible();
-      if (!observing) this.#eyesSince = null;
-      else {
-        this.#eyesSince ??= now;
-        if (now - this.#eyesSince >= 1800 && now >= this.#eyesRetryAt) { this.#eyesRetryAt = now + 15000; this.onEyesFound(); }
-      }
-      this.#canvas.dataset.cloudCover = String(this.#transition.alpha);
-      if (import.meta.env.DEV && this.#mode === 'world') this.#canvas.dataset.worldCamera = JSON.stringify(this.#torusOverview?.navigationMetrics());
-      if (import.meta.env.MODE === 'e2e') {
-        const viewport = this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight());
-        this.#canvas.dataset.worldInteractionReady=String(this.#mode==='village'&&!this.#transition.active&&!this.#arrival&&!this.#flyover);
-        this.#canvas.dataset.buildingScreens=JSON.stringify(this.#state?.cells.flatMap(site=>{
-          if(!site.building)return [];
-          const mesh=this.#buildingCache.get(site.building.id)?.mesh;if(!mesh)return [];
-          const bounds=mesh.getHierarchyBoundingVectors(true), centre=bounds.min.add(bounds.max).scale(.5);
-          centre.y=bounds.max.y-.1;
-          const point=Vector3.Project(centre,Matrix.Identity(),this.#scene.getTransformMatrix(),viewport);
-          return [{id:site.building.id,x:point.x/this.#engine.getRenderWidth(),y:point.y/this.#engine.getRenderHeight()}];
-        })??[]);
-        this.#canvas.dataset.cellScreens = JSON.stringify(this.#e2eCells.map((cell) => {
-          const point = Vector3.Project(new Vector3(cell.x, (this.#store?.ground(cell.cellX,cell.cellY)?.height??0)+.075, cell.z), Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
-          return { id: cell.id, x: point.x / this.#engine.getRenderWidth(), y: point.y / this.#engine.getRenderHeight() };
-        }));
-        const renderedFeatures = new Map<string, { id: string; x: number; z: number }>();
-        for (const mesh of this.#renderer?.meshes() ?? []) {
-          const data = mesh.metadata as { featureId?: string; cellX: number; cellY: number } | null;
-          if (data?.featureId && mesh.isEnabled()) renderedFeatures.set(data.featureId, { id: data.featureId, ...this.#space!.project(data) });
-        }
-        this.#e2eFeatures = [...renderedFeatures.values()];
-        this.#canvas.dataset.featureScreens = JSON.stringify(this.#e2eFeatures.map((feature) => {
-          const point = Vector3.Project(new Vector3(feature.x, 0.4, feature.z), Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
-          return { id: feature.id, x: point.x / this.#engine.getRenderWidth(), y: point.y / this.#engine.getRenderHeight() };
-        }));
-        this.#canvas.dataset.camera = JSON.stringify([this.#camera.alpha, this.#camera.beta, this.#camera.radius, this.#camera.target.x, this.#camera.target.z]);
-        this.#canvas.dataset.cameraLimits = JSON.stringify([this.#camera.lowerBetaLimit, this.#camera.upperBetaLimit]);
-        this.#canvas.dataset.renderedPendingHarvests = String(this.#resourceHalos.pendingCount);
-        this.#canvas.dataset.debugTravelPaths = String(this.#travelLines?.getTotalVertices() ?? 0);
-        this.#canvas.dataset.workerPositions = JSON.stringify([
-          ...this.#workers.figures,
-        ].map(f => ({ id: f.root.name, enabled: f.root.isEnabled(), ...this.#space!.inverse(f.root.position.x, f.root.position.z) })));
-        this.#canvas.dataset.workerServerNow = String(workerServerNow);
-        this.#canvas.dataset.workerFigures = String(this.#workers.figures.length);
-        this.#canvas.dataset.workerVertices = String(this.#workers.figures.reduce((sum, figure) => sum + figure.root.getChildMeshes().reduce((parts, mesh) => parts + mesh.getTotalVertices(), 0), 0));
-        this.#canvas.dataset.buildableGrid = JSON.stringify({ construction: this.#constructionMode,
-          minY: this.#buildableGrid?.getBoundingInfo().boundingBox.minimumWorld.y ?? null,
-          vertices: this.#buildableGrid?.getTotalVertices() ?? 0,
-          ready: this.#buildableGrid?.isReady(true) ?? false,
-          blending: this.#buildableGrid?.material?.needAlphaBlending() ?? false,
-          areaVertices: this.#buildableArea?.getTotalVertices() ?? 0,
-          areaMinY: this.#buildableArea?.getBoundingInfo().boundingBox.minimumWorld.y ?? null });
-      }
-      this.#frameMs.push(this.#lastFrameAt ? now - this.#lastFrameAt : 0); if (this.#frameMs.length > 3600) this.#frameMs.shift();
-      this.#lastFrameAt = now;
-      frame?.mark('diagnostics');
-      this.#advanceBuildings();
-      frame?.mark('buildings');
-      if (measureFrame) recordFrame(now, renderMs, performance.now(), frame?.costs);
+        frame?.mark('buildings');
+        if (measureFrame) recordFrame(now, renderMs, performance.now(), frame?.costs);
       } catch (error) {
         if (this.#initialLoad.ready) throw error;
         this.#initialFailure = 'La préparation du paysage a été interrompue.';
@@ -1009,200 +1542,380 @@ export class BabylonVillageScene {
   }
 
   #observeInitialLoad(rendered: boolean): InitialLoadProgress {
-    const assets = [...this.#buildingCache.values()].map(c => c.mesh.metadata?.assetState);
-    const progress = this.#initialLoad.observe({ground: this.#renderer?.groundProgress ?? {completed: 0, total: 0},
-      detailsPending: this.#renderer?.queued ?? 0, terrainFailed: this.#store?.degraded ?? false,
-      buildingsPending: this.#buildingJobs.length > 0 || assets.includes('loading'), buildingsFailed: assets.includes('error'),
-      routesPrepared: this.#initialRoutesReady, rendered});
+    const assets = [...this.#buildingCache.values()].map((c) => c.mesh.metadata?.assetState);
+    const progress = this.#initialLoad.observe({
+      ground: this.#renderer?.groundProgress ?? { completed: 0, total: 0 },
+      detailsPending: this.#renderer?.queued ?? 0,
+      terrainFailed: this.#store?.degraded ?? false,
+      buildingsPending: this.#buildingJobs.length > 0 || assets.includes('loading'),
+      buildingsFailed: assets.includes('error'),
+      routesPrepared: this.#initialRoutesReady,
+      rendered,
+    });
     if (this.#initialFailure) progress.error = this.#initialFailure;
     this.#canvas.dataset.initialLoad = progress.phase;
     this.#canvas.dataset.initialGround = `${progress.completed}/${progress.total}`;
     if (JSON.stringify(progress) !== JSON.stringify(this.#initialProgress)) {
-      this.#initialProgress = progress; this.onInitialLoad(progress);
+      this.#initialProgress = progress;
+      this.onInitialLoad(progress);
     }
     return progress;
   }
 
-  public update(state: VillageState, highlightedSiteIds: string[] = [], constructionMode = false, showTravelPaths = false, selectedRouteId: string | null = null): void {
+  public update(
+    state: VillageState,
+    highlightedSiteIds: string[] = [],
+    constructionMode = false,
+    showTravelPaths = false,
+    selectedRouteId: string | null = null,
+  ): void {
     return clientTime('scene', () => {
-    if(import.meta.env.DEV&&new URLSearchParams(location.search).get('barracksPreview')==='1'){
-      // Preview the new house kit without changing the server's persisted layouts.
-      state={...state,cells:state.cells.map(cell=>cell.building?.type==='dwelling'&&!cell.building.visualLayout
-        ? {...cell,building:{...cell.building,visualLayout:{recipe:'stone-house',version:1,quarterTurns:0,entranceFace:'-z',offset:[0,0]}}}
-        : cell)};
-    }
-    this.#villageAnchor = { cellX: state.village.anchorCellX, cellY: state.village.anchorCellY };
-    if (!this.#space || this.#store?.world.id !== state.world.id || this.#store.world.generationVersion !== state.world.generationVersion) {
-      this.#cameraFocus=null;
-      this.#resourceHalos.clear();
-      this.#renderer?.dispose(); this.#store?.dispose();
-      this.#endFlyover();
-      this.#overviewAbort?.abort(); this.#overviewAbort = new AbortController();
-      this.#transition.cancel(); this.#pendingView = null; this.#camera.attachControl(this.#canvas, true); this.#regionalOverview.clear();
-      this.#regionalVillages.clear(); this.#villagesLoading = false; this.#villagesDue = 0; this.#villagesCenter = '';
-      this.#overview = null; this.#torusOverview?.dispose(); this.#torusOverview = null;
-      this.#overviewLoading = this.#vegetationLoading = false; this.#vegetationDue = 0; this.#requestedWorld = this.#worldFromWheel = false;
-      this.#setMode('village');
-      this.#space = new WorldSpace(state.world.widthCells, state.world.heightCells, this.#villageAnchor);
-      this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) => this.#preparing
-        ? fetch('/api/worlds/'+encodeURIComponent(state.world.slug)+'/starter/terrain?chunks='+encodeURIComponent(chunks.map(c=>c.chunkX+','+c.chunkY).join(';')), {signal}).then(async r=>{if(!r.ok)throw Error('Terrain indisponible');return timedJson<TerrainResponse>(r);})
-        : updatesOnly
-        ? this.transport.getTerrainUpdates(state.world.slug, chunks, signal) : this.transport.getTerrain(state.world.slug, chunks, signal));
-      this.#weather?.dispose(); this.#weather = new WeatherMap(this.#scene, state.world.id);
-      this.#weather.update(Date.now() + this.#cosmologyServerOffsetMs);
-      const material = this.#material('streamed-ground', '#ffffff');
-      new WeatherMaterial(material, 'ground', () => this.#weather, () => this.#space);
-      material.specularColor.set(0, 0, 0);
-      material.backFaceCulling=state.world.generationVersion!==3;
-      material.diffuseTexture = new Texture('/tiles/atlas.png', this.#scene, false, false, Texture.BILINEAR_SAMPLINGMODE);
-      material.freeze();
-      this.#renderer = new TerrainRenderer(this.#scene, this.#store, this.#space, material, this.#waterRippleMaterial,
-        (f) => this.#buildFeature(f), (c, x, y) => this.#buildDecor(c, x, y), (features) => this.#buildWoodland(features),
-        () => this.#space!.inverse(this.#camera.target.x, this.#camera.target.z));
-    }
-    const revision = state.science?.geographyRevision ?? 0;
-    if (this.#geographyRevision && revision !== this.#geographyRevision) {
-      this.#store!.geographyChanged(); this.#overviewAbort?.abort(); this.#overviewAbort = new AbortController();
-      this.#overview = null; this.#overviewLoading = false; this.#overviewRetryAt = 0;
-      this.#vegetationLoading = false; this.#vegetationDue = 0; this.#villagesLoading = false; this.#villagesDue = 0;
-    }
-    this.#geographyRevision = revision;
-    this.#state = state; this.#store!.observe(state); this.#showTravel = showTravelPaths; this.#selectedRoute = selectedRouteId;
-    this.#torusOverview?.setGlobalModel(this.#globalModelAvailable());
-    state = { ...state, cells: state.cells.map(c => ({ ...c, ...this.#space!.projectFrom(c, this.#villageAnchor) })) };
-
-    if (import.meta.env.MODE === 'e2e') {
-      this.#e2eCells = state.cells.map(({ id, x, z, cellX, cellY }) => ({ id, x, z, cellX, cellY }));
-
-    }
-    if (!this.#initialCameraFramed) {
-      const occupied = state.cells.filter((cell) => cell.footprint || cell.building);
-      if (occupied.length) {
-        const xs = occupied.map((cell) => cell.x), zs = occupied.map((cell) => cell.z);
-        this.#camera.target.copyFromFloats(
-          (Math.min(...xs) + Math.max(...xs)) / 2, 0.45,
-          (Math.min(...zs) + Math.max(...zs)) / 2,
+      if (import.meta.env.DEV && new URLSearchParams(location.search).get('barracksPreview') === '1') {
+        // Preview the new house kit without changing the server's persisted layouts.
+        state = {
+          ...state,
+          cells: state.cells.map((cell) =>
+            cell.building?.type === 'dwelling' && !cell.building.visualLayout
+              ? {
+                  ...cell,
+                  building: {
+                    ...cell.building,
+                    visualLayout: {
+                      recipe: 'stone-house',
+                      version: 1,
+                      quarterTurns: 0,
+                      entranceFace: '-z',
+                      offset: [0, 0],
+                    },
+                  },
+                }
+              : cell,
+          ),
+        };
+      }
+      this.#villageAnchor = { cellX: state.village.anchorCellX, cellY: state.village.anchorCellY };
+      if (
+        !this.#space ||
+        this.#store?.world.id !== state.world.id ||
+        this.#store.world.generationVersion !== state.world.generationVersion
+      ) {
+        this.#cameraFocus = null;
+        this.#resourceHalos.clear();
+        this.#renderer?.dispose();
+        this.#store?.dispose();
+        this.#endFlyover();
+        this.#overviewAbort?.abort();
+        this.#overviewAbort = new AbortController();
+        this.#transition.cancel();
+        this.#pendingView = null;
+        this.#camera.attachControl(this.#canvas, true);
+        this.#regionalOverview.clear();
+        this.#regionalVillages.clear();
+        this.#villagesLoading = false;
+        this.#villagesDue = 0;
+        this.#villagesCenter = '';
+        this.#overview = null;
+        this.#torusOverview?.dispose();
+        this.#torusOverview = null;
+        this.#overviewLoading = this.#vegetationLoading = false;
+        this.#vegetationDue = 0;
+        this.#requestedWorld = this.#worldFromWheel = false;
+        this.#setMode('village');
+        this.#space = new WorldSpace(state.world.widthCells, state.world.heightCells, this.#villageAnchor);
+        this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) =>
+          this.#preparing
+            ? fetch(
+                '/api/worlds/' +
+                  encodeURIComponent(state.world.slug) +
+                  '/starter/terrain?chunks=' +
+                  encodeURIComponent(chunks.map((c) => c.chunkX + ',' + c.chunkY).join(';')),
+                { signal },
+              ).then(async (r) => {
+                if (!r.ok) throw Error('Terrain indisponible');
+                return timedJson<TerrainResponse>(r);
+              })
+            : updatesOnly
+              ? this.transport.getTerrainUpdates(state.world.slug, chunks, signal)
+              : this.transport.getTerrain(state.world.slug, chunks, signal),
+        );
+        this.#weather?.dispose();
+        this.#weather = new WeatherMap(this.#scene, state.world.id);
+        this.#weather.update(Date.now() + this.#cosmologyServerOffsetMs);
+        const material = this.#material('streamed-ground', '#ffffff');
+        new WeatherMaterial(
+          material,
+          'ground',
+          () => this.#weather,
+          () => this.#space,
+        );
+        material.specularColor.set(0, 0, 0);
+        material.backFaceCulling = state.world.generationVersion !== 3;
+        material.diffuseTexture = new Texture(
+          '/tiles/atlas.png',
+          this.#scene,
+          false,
+          false,
+          Texture.BILINEAR_SAMPLINGMODE,
+        );
+        material.freeze();
+        this.#renderer = new TerrainRenderer(
+          this.#scene,
+          this.#store,
+          this.#space,
+          material,
+          this.#waterRippleMaterial,
+          (f) => this.#buildFeature(f),
+          (c, x, y) => this.#buildDecor(c, x, y),
+          (features) => this.#buildWoodland(features),
+          () => this.#space!.inverse(this.#camera.target.x, this.#camera.target.z),
         );
       }
-      this.#initialCameraFramed = true;
-    }
-    this.#worldWidthUnits = state.world.widthCells * TILE_SIZE;
-    this.#worldHeightUnits = state.world.heightCells * TILE_SIZE;
-    this.#camera.upperRadiusLimit = Math.min(680, Math.max(80, Math.min(state.world.widthCells, state.world.heightCells) * TILE_SIZE * 0.7));
-    this.#deepGround.scaling.set(state.world.widthCells / 2048, 1, state.world.heightCells / 1024);
-    this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
-    // Start network transfers before the synchronous assembly of the campus.
-    if (!this.#initialLoad.ready) this.#streamTerrain(performance.now());
-    const plots = state.cells.flatMap((cell) => cell.building?.garden?.plots ?? []);
-    this.#gardenStages = new Map(plots.map((plot) => [cellKey(plot), gardenTileStage(plot)]));
-    this.#harvestableSites = new Set(state.cells.flatMap((cell) => cell.building?.garden && !cell.building.garden.harvest
-      ? cell.building.garden.plots.filter((plot) => plot.storedCarrots >= 1 && !plot.harvest).map(cellKey) : []));
-    this.#fullGardenSites = new Set(plots.filter((plot) => plot.full && !plot.harvest).map(cellKey));
-    this.#workers.sync(state, Date.now() - this.#serverOffsetMs);
-    // Prepare the baked legacy substrate once, but project route meshes only on complete ground.
-    if (this.#initialLoad.ready) this.#updateTravelPaths(state, showTravelPaths, selectedRouteId);
-    else { if (state.infrastructure) this.#renderer?.setInfrastructure(state.infrastructure); this.#initialRoutesReady = false; }
-    this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
-    this.#canvas.dataset.completedBuildingCount = String(state.cells.filter((site) => site.building?.status === 'completed').length);
-    this.#canvas.dataset.underConstructionCount = String(state.cells.filter((site) => site.building?.status === 'under-construction').length);
-    const visualSignature = JSON.stringify({
-      highlightedSiteIds,
-      constructionMode,
-      sites: state.cells.map((site) => [
-        site.id,
-        site.canBuild,
-        site.building?.type,
-        site.building?.status,
-        site.building?.level,
-        site.building?.targetLevel,
-        site.footprint?.state,
-        site.building?.visualLayout,
-        site.cellX, site.cellY,
-        this.#gardenStages.get(site.id),
-        this.#fullGardenSites.has(site.id),
-      ]),
-    });
-    this.#refreshBuildingGround();
-    if (visualSignature === this.#lastVisualSignature) return;
-    const generationStarted=performance.now();
-    this.#lastVisualSignature = visualSignature;
-    this.#villageMeshes.splice(0);
-    this.#selectableMeshes.clear();
-    this.#highlightedSiteIds = new Set(highlightedSiteIds);
-    this.#constructionMode = constructionMode;
-    this.#updateBuildableGrid(state);
-    const planned=state.cells.flatMap(site=>{const plan=planForSite(state,site,(x,y)=>this.#store?.ground(x,y)?.height??null);return plan?[{plan,anchor:site}]:[];});
-    const boundaries=resolveMurets(planned,state.world);
-    for(const {plan} of planned)if(plan.murets.length)plan.murets=boundaries.get(plan.id)??[];
-    const plans=new Map(planned.map(({plan})=>[plan.id,plan]));
-    const retained = new Set<string>();
-    for (const site of state.cells) {
-      if(site.footprint && !site.building && site.footprint.buildingType!=='garden') continue;
-      const key=site.building?.id??site.id;
-      const footprint=site.building?state.cells.filter(c=>c.footprint?.buildingId===site.building!.id).map(c=>[c.cellX,c.cellY]):[];
-      const signature=JSON.stringify([state.world.id,site.building?.type==='university'?[site.cellX,site.cellY]:[site.x,site.z],site.building?.type,site.building?.status,site.building?.level,site.building?.targetLevel,site.building?.visualLayout,site.building?.quarterTurns,footprint,plans.get(key)?.murets,site.footprint?.state,this.#gardenStages.get(site.id),this.#fullGardenSites.has(site.id),site.building?.type==='university'?[state.science?.levels.mathematics,state.science?.levels.astronomy]:null,!site.building&&!site.footprint?[site.canBuild,this.#highlightedSiteIds.has(site.id)]:null]);
-      retained.add(key);
-      let cached=this.#buildingCache.get(key);
-      if(cached?.signature!==signature){this.#buildingGenerationCount++;cached?.mesh.dispose(false,false);
-      const mesh = site.building?.type === 'university' ? this.#createUniversity(site) : site.building?.visualLayout ? this.#createFactoryBuilding(site,plans.get(key)!)
-        : site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2?this.#createTownHall(site)
-        : site.building?.status === 'under-construction'
-        ? this.#createConstructionSite(site)
-        : site.footprint?.buildingType === 'garden'
-          ? this.#createGardenExtension(site)
-          : site.building
-            ? this.#createBuilding(site)
-            : this.#createAvailableSite(site);
-      if(site.building&&site.building.type!=='university'&&site.building.type!=='stonemason'&&!site.building.visualLayout)mesh.rotation.y+=(site.building.quarterTurns??0)*Math.PI/2;
-      const base=this.#siteGround(site);
-      const grounded=site.building?.visualLayout||['university','stonemason','garden'].includes(site.building?.type??'')||site.footprint?.buildingType==='garden';
-      if(!grounded)mesh.position.y+=base;
-      mesh.metadata={...mesh.metadata,groundOffset:mesh.position.y-base};
-      cached={signature,mesh};this.#buildingCache.set(key,cached);}
-      const mesh=cached.mesh;
-      // Rebasing the local frame moves a campus; it does not change its geometry.
-      if(site.building?.type==='university')mesh.position.copyFrom(this.#universityCentre(site));
-      if(!site.building&&!site.footprint){mesh.isVisible=this.#constructionMode&&site.canBuild;mesh.material=this.#siteMaterial;for(const border of mesh.getChildMeshes())border.isVisible=mesh.isVisible;}
-      for (const selectable of [mesh, ...mesh.getChildMeshes()]) {
-        selectable.metadata = { ...selectable.metadata, siteId: site.id };
-        selectable.isPickable = Boolean(site.footprint || this.transport.readOnly&&site.building || this.#constructionMode && site.canBuild)
-          && !selectable.name.startsWith('garden-full-') && !selectable.name.startsWith('site-border-') && selectable.metadata?.buildingAttachment !== 'glass';
+      const revision = state.science?.geographyRevision ?? 0;
+      if (this.#geographyRevision && revision !== this.#geographyRevision) {
+        this.#store!.geographyChanged();
+        this.#overviewAbort?.abort();
+        this.#overviewAbort = new AbortController();
+        this.#overview = null;
+        this.#overviewLoading = false;
+        this.#overviewRetryAt = 0;
+        this.#vegetationLoading = false;
+        this.#vegetationDue = 0;
+        this.#villagesLoading = false;
+        this.#villagesDue = 0;
       }
-      this.#villageMeshes.push(mesh);
-      freezeStaticHierarchy(mesh);
-      this.#selectableMeshes.set(site.id, mesh);
-      if(site.building)for(const cell of state.cells.filter(c=>c.footprint?.buildingId===site.building!.id))this.#selectableMeshes.set(cell.id,mesh);
-    }
-    if(import.meta.env.DEV&&new URLSearchParams(location.search).get('barracksPreview')==='1'&&this.#space){
-      const placement=barracksPreviewPlacement(state),key='dev-barracks-preview';
-      this.#canvas.dataset.barracksPreview=placement?`${placement.cellX},${placement.cellY}`:'no-free-patch';
-      if(placement){
-        retained.add(key);const signature=JSON.stringify([state.world.id,placement]);let cached=this.#buildingCache.get(key);
-        if(cached?.signature!==signature){cached?.mesh.dispose(false,false);
-          const mesh=new BabylonMesh('dev-barracks-preview',this.#scene);
-          this.#timberThatch??=new TimberThatch(this.#scene);buildCachedProceduralBuildingLod(mesh,'barracks-finished',root=>buildBarracks(root,this.#timberThatch!),this.#timberThatch);
-          for(const child of mesh.getChildMeshes())child.isPickable=false;
-          cached={signature,mesh};this.#buildingCache.set(key,cached);
+      this.#geographyRevision = revision;
+      this.#state = state;
+      this.#store!.observe(state);
+      this.#showTravel = showTravelPaths;
+      this.#selectedRoute = selectedRouteId;
+      this.#torusOverview?.setGlobalModel(this.#globalModelAvailable());
+      state = {
+        ...state,
+        cells: state.cells.map((c) => ({ ...c, ...this.#space!.projectFrom(c, this.#villageAnchor) })),
+      };
+
+      if (import.meta.env.MODE === 'e2e') {
+        this.#e2eCells = state.cells.map(({ id, x, z, cellX, cellY }) => ({ id, x, z, cellX, cellY }));
+      }
+      if (!this.#initialCameraFramed) {
+        const occupied = state.cells.filter((cell) => cell.footprint || cell.building);
+        if (occupied.length) {
+          const xs = occupied.map((cell) => cell.x),
+            zs = occupied.map((cell) => cell.z);
+          this.#camera.target.copyFromFloats(
+            (Math.min(...xs) + Math.max(...xs)) / 2,
+            0.45,
+            (Math.min(...zs) + Math.max(...zs)) / 2,
+          );
         }
-        const centre=this.#space.project({cellX:placement.cellX+.5,cellY:placement.cellY+2});cached.mesh.position.set(centre.x,placement.base,centre.z);
-        this.#villageMeshes.push(cached.mesh);
-        freezeStaticHierarchy(cached.mesh);
+        this.#initialCameraFramed = true;
       }
-    }
-    for(const [key,cached] of this.#buildingCache)if(!retained.has(key)){cached.mesh.dispose(false,false);this.#buildingCache.delete(key);}
-    this.#canvas.dataset.factoryBuildingCount=String(plans.size);
-    this.#canvas.dataset.factoryGenerationCount=String(this.#factoryGenerationCount);
-    this.#canvas.dataset.buildingGenerationCount=String(this.#buildingGenerationCount);
-    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.buildingMeshIds=JSON.stringify(Object.fromEntries([...this.#buildingCache].map(([key,value])=>[key,value.mesh.uniqueId])));
-    if(import.meta.env.DEV)this.#canvas.dataset.factoryBuildMs=String(Math.round(performance.now()-generationStarted));
-    this.#applySelection();
+      this.#worldWidthUnits = state.world.widthCells * TILE_SIZE;
+      this.#worldHeightUnits = state.world.heightCells * TILE_SIZE;
+      this.#camera.upperRadiusLimit = Math.min(
+        680,
+        Math.max(80, Math.min(state.world.widthCells, state.world.heightCells) * TILE_SIZE * 0.7),
+      );
+      this.#deepGround.scaling.set(state.world.widthCells / 2048, 1, state.world.heightCells / 1024);
+      this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
+      // Start network transfers before the synchronous assembly of the campus.
+      if (!this.#initialLoad.ready) this.#streamTerrain(performance.now());
+      const plots = state.cells.flatMap((cell) => cell.building?.garden?.plots ?? []);
+      this.#gardenStages = new Map(plots.map((plot) => [cellKey(plot), gardenTileStage(plot)]));
+      this.#harvestableSites = new Set(
+        state.cells.flatMap((cell) =>
+          cell.building?.garden && !cell.building.garden.harvest
+            ? cell.building.garden.plots.filter((plot) => plot.storedCarrots >= 1 && !plot.harvest).map(cellKey)
+            : [],
+        ),
+      );
+      this.#fullGardenSites = new Set(plots.filter((plot) => plot.full && !plot.harvest).map(cellKey));
+      this.#workers.sync(state, Date.now() - this.#serverOffsetMs);
+      // Prepare the baked legacy substrate once, but project route meshes only on complete ground.
+      if (this.#initialLoad.ready) this.#updateTravelPaths(state, showTravelPaths, selectedRouteId);
+      else {
+        if (state.infrastructure) this.#renderer?.setInfrastructure(state.infrastructure);
+        this.#initialRoutesReady = false;
+      }
+      this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
+      this.#canvas.dataset.completedBuildingCount = String(
+        state.cells.filter((site) => site.building?.status === 'completed').length,
+      );
+      this.#canvas.dataset.underConstructionCount = String(
+        state.cells.filter((site) => site.building?.status === 'under-construction').length,
+      );
+      const visualSignature = JSON.stringify({
+        highlightedSiteIds,
+        constructionMode,
+        sites: state.cells.map((site) => [
+          site.id,
+          site.canBuild,
+          site.building?.type,
+          site.building?.status,
+          site.building?.level,
+          site.building?.targetLevel,
+          site.footprint?.state,
+          site.building?.visualLayout,
+          site.cellX,
+          site.cellY,
+          this.#gardenStages.get(site.id),
+          this.#fullGardenSites.has(site.id),
+        ]),
       });
-}
+      this.#refreshBuildingGround();
+      if (visualSignature === this.#lastVisualSignature) return;
+      const generationStarted = performance.now();
+      this.#lastVisualSignature = visualSignature;
+      this.#villageMeshes.splice(0);
+      this.#selectableMeshes.clear();
+      this.#highlightedSiteIds = new Set(highlightedSiteIds);
+      this.#constructionMode = constructionMode;
+      this.#updateBuildableGrid(state);
+      const planned = state.cells.flatMap((site) => {
+        const plan = planForSite(state, site, (x, y) => this.#store?.ground(x, y)?.height ?? null);
+        return plan ? [{ plan, anchor: site }] : [];
+      });
+      const boundaries = resolveMurets(planned, state.world);
+      for (const { plan } of planned) if (plan.murets.length) plan.murets = boundaries.get(plan.id) ?? [];
+      const plans = new Map(planned.map(({ plan }) => [plan.id, plan]));
+      const retained = new Set<string>();
+      for (const site of state.cells) {
+        if (site.footprint && !site.building && site.footprint.buildingType !== 'garden') continue;
+        const key = site.building?.id ?? site.id;
+        const footprint = site.building
+          ? state.cells.filter((c) => c.footprint?.buildingId === site.building!.id).map((c) => [c.cellX, c.cellY])
+          : [];
+        const signature = JSON.stringify([
+          state.world.id,
+          site.building?.type === 'university' ? [site.cellX, site.cellY] : [site.x, site.z],
+          site.building?.type,
+          site.building?.status,
+          site.building?.level,
+          site.building?.targetLevel,
+          site.building?.visualLayout,
+          site.building?.quarterTurns,
+          footprint,
+          plans.get(key)?.murets,
+          site.footprint?.state,
+          this.#gardenStages.get(site.id),
+          this.#fullGardenSites.has(site.id),
+          site.building?.type === 'university'
+            ? [state.science?.levels.mathematics, state.science?.levels.astronomy]
+            : null,
+          !site.building && !site.footprint ? [site.canBuild, this.#highlightedSiteIds.has(site.id)] : null,
+        ]);
+        retained.add(key);
+        let cached = this.#buildingCache.get(key);
+        if (cached?.signature !== signature) {
+          this.#buildingGenerationCount++;
+          cached?.mesh.dispose(false, false);
+          const mesh =
+            site.building?.type === 'university'
+              ? this.#createUniversity(site)
+              : site.building?.visualLayout
+                ? this.#createFactoryBuilding(site, plans.get(key)!)
+                : site.building?.type === 'town-hall' && (site.building.targetLevel ?? site.building.level) >= 2
+                  ? this.#createTownHall(site)
+                  : site.building?.status === 'under-construction'
+                    ? this.#createConstructionSite(site)
+                    : site.footprint?.buildingType === 'garden'
+                      ? this.#createGardenExtension(site)
+                      : site.building
+                        ? this.#createBuilding(site)
+                        : this.#createAvailableSite(site);
+          if (
+            site.building &&
+            site.building.type !== 'university' &&
+            site.building.type !== 'stonemason' &&
+            !site.building.visualLayout
+          )
+            mesh.rotation.y += ((site.building.quarterTurns ?? 0) * Math.PI) / 2;
+          const base = this.#siteGround(site);
+          const grounded =
+            site.building?.visualLayout ||
+            ['university', 'stonemason', 'garden'].includes(site.building?.type ?? '') ||
+            site.footprint?.buildingType === 'garden';
+          if (!grounded) mesh.position.y += base;
+          mesh.metadata = { ...mesh.metadata, groundOffset: mesh.position.y - base };
+          cached = { signature, mesh };
+          this.#buildingCache.set(key, cached);
+        }
+        const mesh = cached.mesh;
+        // Rebasing the local frame moves a campus; it does not change its geometry.
+        if (site.building?.type === 'university') mesh.position.copyFrom(this.#universityCentre(site));
+        if (!site.building && !site.footprint) {
+          mesh.isVisible = this.#constructionMode && site.canBuild;
+          mesh.material = this.#siteMaterial;
+          for (const border of mesh.getChildMeshes()) border.isVisible = mesh.isVisible;
+        }
+        for (const selectable of [mesh, ...mesh.getChildMeshes()]) {
+          selectable.metadata = { ...selectable.metadata, siteId: site.id };
+          selectable.isPickable =
+            Boolean(
+              site.footprint || (this.transport.readOnly && site.building) || (this.#constructionMode && site.canBuild),
+            ) &&
+            !selectable.name.startsWith('garden-full-') &&
+            !selectable.name.startsWith('site-border-') &&
+            selectable.metadata?.buildingAttachment !== 'glass';
+        }
+        this.#villageMeshes.push(mesh);
+        freezeStaticHierarchy(mesh);
+        this.#selectableMeshes.set(site.id, mesh);
+        if (site.building)
+          for (const cell of state.cells.filter((c) => c.footprint?.buildingId === site.building!.id))
+            this.#selectableMeshes.set(cell.id, mesh);
+      }
+      if (import.meta.env.DEV && new URLSearchParams(location.search).get('barracksPreview') === '1' && this.#space) {
+        const placement = barracksPreviewPlacement(state),
+          key = 'dev-barracks-preview';
+        this.#canvas.dataset.barracksPreview = placement ? `${placement.cellX},${placement.cellY}` : 'no-free-patch';
+        if (placement) {
+          retained.add(key);
+          const signature = JSON.stringify([state.world.id, placement]);
+          let cached = this.#buildingCache.get(key);
+          if (cached?.signature !== signature) {
+            cached?.mesh.dispose(false, false);
+            const mesh = new BabylonMesh('dev-barracks-preview', this.#scene);
+            this.#timberThatch ??= new TimberThatch(this.#scene);
+            buildCachedProceduralBuildingLod(
+              mesh,
+              'barracks-finished',
+              (root) => buildBarracks(root, this.#timberThatch!),
+              this.#timberThatch,
+            );
+            for (const child of mesh.getChildMeshes()) child.isPickable = false;
+            cached = { signature, mesh };
+            this.#buildingCache.set(key, cached);
+          }
+          const centre = this.#space.project({ cellX: placement.cellX + 0.5, cellY: placement.cellY + 2 });
+          cached.mesh.position.set(centre.x, placement.base, centre.z);
+          this.#villageMeshes.push(cached.mesh);
+          freezeStaticHierarchy(cached.mesh);
+        }
+      }
+      for (const [key, cached] of this.#buildingCache)
+        if (!retained.has(key)) {
+          cached.mesh.dispose(false, false);
+          this.#buildingCache.delete(key);
+        }
+      this.#canvas.dataset.factoryBuildingCount = String(plans.size);
+      this.#canvas.dataset.factoryGenerationCount = String(this.#factoryGenerationCount);
+      this.#canvas.dataset.buildingGenerationCount = String(this.#buildingGenerationCount);
+      if (import.meta.env.MODE === 'e2e')
+        this.#canvas.dataset.buildingMeshIds = JSON.stringify(
+          Object.fromEntries([...this.#buildingCache].map(([key, value]) => [key, value.mesh.uniqueId])),
+        );
+      if (import.meta.env.DEV)
+        this.#canvas.dataset.factoryBuildMs = String(Math.round(performance.now() - generationStarted));
+      this.#applySelection();
+    });
+  }
 
   public selectSite(siteId: string, anchor: ScreenAnchor, inspect = false): void {
-    if (this.#worldMode === 'exploration'&&!this.transport.readOnly) {
-      const site = this.#state?.cells.find(c => c.id === siteId);
-      const building = site?.building ?? this.#state?.cells.find(c => c.building?.id === site?.footprint?.buildingId)?.building;
+    if (this.#worldMode === 'exploration' && !this.transport.readOnly) {
+      const site = this.#state?.cells.find((c) => c.id === siteId);
+      const building =
+        site?.building ?? this.#state?.cells.find((c) => c.building?.id === site?.footprint?.buildingId)?.building;
       if (!building || !['town-hall', 'sawmill', 'stonemason', 'university'].includes(building.type)) return;
     }
     if (!this.#selectableMeshes.has(siteId)) return;
@@ -1214,62 +1927,113 @@ export class BabylonVillageScene {
   }
 
   #cellAtPointer(event: PointerEvent): Cell | null {
-    if(this.#worldMode==='construction'&&this.#state){
-      const bounds=this.#canvas.getBoundingClientRect();
-      const occupied=new Map(this.#state.cells.filter(c=>c.building||c.footprint).map(c=>[c.id,c]));
-      const pick=this.#scene.pick(event.clientX-bounds.left,event.clientY-bounds.top,mesh=>
-        mesh.isEnabled()&&mesh.isVisible&&mesh.isPickable&&occupied.has(mesh.metadata?.siteId));
-      const site=occupied.get(pick.pickedMesh?.metadata?.siteId);
-      if(site)return {cellX:site.cellX,cellY:site.cellY};
+    if (this.#worldMode === 'construction' && this.#state) {
+      const bounds = this.#canvas.getBoundingClientRect();
+      const occupied = new Map(this.#state.cells.filter((c) => c.building || c.footprint).map((c) => [c.id, c]));
+      const pick = this.#scene.pick(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        (mesh) => mesh.isEnabled() && mesh.isVisible && mesh.isPickable && occupied.has(mesh.metadata?.siteId),
+      );
+      const site = occupied.get(pick.pickedMesh?.metadata?.siteId);
+      if (site) return { cellX: site.cellX, cellY: site.cellY };
     }
     const point = this.#gridPointAtPointer(event);
     if (!point) return null;
-    return { cellX: Math.round(point.cellX) % (this.#worldWidthUnits / TILE_SIZE), cellY: Math.round(point.cellY) % (this.#worldHeightUnits / TILE_SIZE) };
+    return {
+      cellX: Math.round(point.cellX) % (this.#worldWidthUnits / TILE_SIZE),
+      cellY: Math.round(point.cellY) % (this.#worldHeightUnits / TILE_SIZE),
+    };
   }
 
   #gridPointAtPointer(event: PointerEvent): Cell | null {
     const bounds = this.#canvas.getBoundingClientRect();
-    const ray = this.#scene.createPickingRay(event.clientX - bounds.left, event.clientY - bounds.top, Matrix.Identity(), this.#camera);
+    const ray = this.#scene.createPickingRay(
+      event.clientX - bounds.left,
+      event.clientY - bounds.top,
+      Matrix.Identity(),
+      this.#camera,
+    );
     if (Math.abs(ray.direction.y) < 0.00001) return null;
     const distance = (0.075 - ray.origin.y) / ray.direction.y;
-    if(this.#state?.world.generationVersion===3){const hit=this.#scene.pickWithRay(ray,mesh=>mesh.name==='rc1-ground-unit'&&mesh.isEnabled());return hit?.pickedPoint?this.#space?.inverse(hit.pickedPoint.x,hit.pickedPoint.z)??null:null;}
+    if (this.#state?.world.generationVersion === 3) {
+      const hit = this.#scene.pickWithRay(ray, (mesh) => mesh.name === 'rc1-ground-unit' && mesh.isEnabled());
+      return hit?.pickedPoint ? (this.#space?.inverse(hit.pickedPoint.x, hit.pickedPoint.z) ?? null) : null;
+    }
     if (distance < 0) return null;
-    return this.#space?.inverse(ray.origin.x + ray.direction.x * distance, ray.origin.z + ray.direction.z * distance) ?? null;
+    return (
+      this.#space?.inverse(ray.origin.x + ray.direction.x * distance, ray.origin.z + ray.direction.z * distance) ?? null
+    );
   }
 
-  public observationPose():ObservationPose|null {
-    if(!this.#space||!this.#state)return null;
-    if(this.#transition.active)return{mode:'transition'};
-    if(this.#inhabitantCamera.mode==='pov'||this.#inhabitantCamera.mode==='free')return{mode:'inhabitant'};
-    if(this.#mode==='world')return this.#torusOverview?.observationPose()??null;
-    const cell=this.#space.inverse(this.#camera.target.x,this.#camera.target.z);
-    return{mode:this.#mode,...cell,altitude:this.#camera.target.y,alpha:((this.#camera.alpha+Math.PI*2)%(Math.PI*2)),beta:this.#camera.beta,radius:this.#camera.radius/2.5,fov:this.#camera.fov};
+  public observationPose(): ObservationPose | null {
+    if (!this.#space || !this.#state) return null;
+    if (this.#transition.active) return { mode: 'transition' };
+    if (this.#inhabitantCamera.mode === 'pov' || this.#inhabitantCamera.mode === 'free') return { mode: 'inhabitant' };
+    if (this.#mode === 'world') return this.#torusOverview?.observationPose() ?? null;
+    const cell = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
+    return {
+      mode: this.#mode,
+      ...cell,
+      altitude: this.#camera.target.y,
+      alpha: (this.#camera.alpha + Math.PI * 2) % (Math.PI * 2),
+      beta: this.#camera.beta,
+      radius: this.#camera.radius / 2.5,
+      fov: this.#camera.fov,
+    };
   }
-  public applyObservationPose(p:ObservationPose):void {
-    if(!this.#space||this.#transition.active)return;
-    const current=this.observationPose();if(current&&this.#state)p=interpolateObservationPose(current,p,this.#state.world,.25);
-    if(p.mode==='inhabitant'||p.mode==='transition')return;
-    if(p.mode==='world'){if(this.#mode!=='world'){this.showWorld();return;}this.#torusOverview?.applyObservationPose(p);return;}
-    if(this.#mode!==p.mode){if(p.mode==='region')this.showRegion();else this.showVillage();return;}
-    const pos=this.#space.project(p);this.#camera.target.copyFromFloats(pos.x,p.altitude,pos.z);this.#camera.alpha=p.alpha;this.#camera.beta=p.beta;this.#camera.radius=p.radius*2.5;this.#camera.fov=p.fov;
-    this.#camera.inertialAlphaOffset=this.#camera.inertialBetaOffset=this.#camera.inertialRadiusOffset=this.#camera.inertialPanningX=this.#camera.inertialPanningY=0;
+  public applyObservationPose(p: ObservationPose): void {
+    if (!this.#space || this.#transition.active) return;
+    const current = this.observationPose();
+    if (current && this.#state) p = interpolateObservationPose(current, p, this.#state.world, 0.25);
+    if (p.mode === 'inhabitant' || p.mode === 'transition') return;
+    if (p.mode === 'world') {
+      if (this.#mode !== 'world') {
+        this.showWorld();
+        return;
+      }
+      this.#torusOverview?.applyObservationPose(p);
+      return;
+    }
+    if (this.#mode !== p.mode) {
+      if (p.mode === 'region') this.showRegion();
+      else this.showVillage();
+      return;
+    }
+    const pos = this.#space.project(p);
+    this.#camera.target.copyFromFloats(pos.x, p.altitude, pos.z);
+    this.#camera.alpha = p.alpha;
+    this.#camera.beta = p.beta;
+    this.#camera.radius = p.radius * 2.5;
+    this.#camera.fov = p.fov;
+    this.#camera.inertialAlphaOffset =
+      this.#camera.inertialBetaOffset =
+      this.#camera.inertialRadiusOffset =
+      this.#camera.inertialPanningX =
+      this.#camera.inertialPanningY =
+        0;
   }
   public setWorldMode(mode: 'exploration' | 'exploitation' | 'population' | 'construction' | 'terraform'): void {
-    if(this.transport.readOnly&&mode!=='exploration')return;
+    if (this.transport.readOnly && mode !== 'exploration') return;
     if (mode !== 'exploration') this.setVillageSolarPreview(null);
     if (mode === this.#worldMode) return;
     this.#handlePointerCancel();
-    if(mode!=='population'){this.#inhabitantCamera.stop();this.selectRepresentative(null);}
+    if (mode !== 'population') {
+      this.#inhabitantCamera.stop();
+      this.selectRepresentative(null);
+    }
     this.#worldMode = mode;
-    this.#selectedSiteId = null; this.#selectedFeatureId = null;
-    this.#applySelection(); this.#applyFeatureSelection();
+    this.#selectedSiteId = null;
+    this.#selectedFeatureId = null;
+    this.#applySelection();
+    this.#applyFeatureSelection();
     this.#canvas.dataset.worldMode = mode;
     this.#resourceOverlayAt = 0;
   }
 
   public featuresAt(cell: Cell) {
     const chunk = this.#store?.chunk(this.#store.key(cell.cellX, cell.cellY));
-    return (chunk?.features ?? this.#state?.region.features ?? []).filter(f => cellKey(f) === cellKey(cell));
+    return (chunk?.features ?? this.#state?.region.features ?? []).filter((f) => cellKey(f) === cellKey(cell));
   }
 
   #updateResourceOverlay(now: number): void {
@@ -1279,84 +2043,143 @@ export class BabylonVillageScene {
     if (!this.#space || !this.#store || now < this.#resourceOverlayAt) return;
     this.#resourceOverlayAt = now + 700;
     const cells = new Map<string, ResourceHaloCell>();
-    for (const key of this.#harvestableSites) { const [cellX, cellY] = key.split(':').map(Number); cells.set(key, { cellX: cellX!, cellY: cellY!,garden:true,resource:'carrot' }); }
-    for (const demand of this.#store.demand.filter(d => d.visible)) for (const f of this.#store.chunk(demand.key)?.features ?? [])
-      if (f.deposit && !f.deposit.cleared && f.deposit.availableAmount > 0) cells.set(cellKey(f), {...f,resource:f.deposit.resourceCode});
+    for (const key of this.#harvestableSites) {
+      const [cellX, cellY] = key.split(':').map(Number);
+      cells.set(key, { cellX: cellX!, cellY: cellY!, garden: true, resource: 'carrot' });
+    }
+    for (const demand of this.#store.demand.filter((d) => d.visible))
+      for (const f of this.#store.chunk(demand.key)?.features ?? [])
+        if (f.deposit && !f.deposit.cleared && f.deposit.availableAmount > 0)
+          cells.set(cellKey(f), { ...f, resource: f.deposit.resourceCode });
     const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
-    const visible = [...cells.values()].filter(c => this.#renderer?.rendered(c.cellX, c.cellY) && (this.#store!.ground(c.cellX, c.cellY)?.code ?? 0) > 0)
-      .sort((a, b) => Math.abs(delta(a.cellX, target.cellX, this.#store!.world.widthCells)) + Math.abs(delta(a.cellY, target.cellY, this.#store!.world.heightCells))
-        - Math.abs(delta(b.cellX, target.cellX, this.#store!.world.widthCells)) - Math.abs(delta(b.cellY, target.cellY, this.#store!.world.heightCells))).slice(0, 128);
+    const visible = [...cells.values()]
+      .filter(
+        (c) => this.#renderer?.rendered(c.cellX, c.cellY) && (this.#store!.ground(c.cellX, c.cellY)?.code ?? 0) > 0,
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(delta(a.cellX, target.cellX, this.#store!.world.widthCells)) +
+          Math.abs(delta(a.cellY, target.cellY, this.#store!.world.heightCells)) -
+          Math.abs(delta(b.cellX, target.cellX, this.#store!.world.widthCells)) -
+          Math.abs(delta(b.cellY, target.cellY, this.#store!.world.heightCells)),
+      )
+      .slice(0, 128);
     this.#resourceHalos.setAvailable(visible);
   }
 
   public setPopulationFocus(focus: string | null, filter: string): void {
-    this.#populationFocus = focus; this.#populationFilter = filter;
+    this.#populationFocus = focus;
+    this.#populationFilter = filter;
   }
 
-  #advanceBuildings(){
-    if(document.hidden||this.#mode==='world')return;
-    const until=performance.now()+8;
-    while(this.#buildingJobs.length&&performance.now()<until){
-      const job=this.#buildingJobs[0]!;
-      if(job.parent.isDisposed()){job.steps.return(job.parent);this.#buildingJobs.shift();continue;}
-      const result=job.steps.next();
-      for(const mesh of job.parent.getChildMeshes()){
-        mesh.metadata={...mesh.metadata,siteId:job.siteId};mesh.isPickable=true;
+  #advanceBuildings() {
+    if (document.hidden || this.#mode === 'world') return;
+    const until = performance.now() + 8;
+    while (this.#buildingJobs.length && performance.now() < until) {
+      const job = this.#buildingJobs[0]!;
+      if (job.parent.isDisposed()) {
+        job.steps.return(job.parent);
+        this.#buildingJobs.shift();
+        continue;
       }
-      if(result.done)this.#buildingJobs.shift();
+      const result = job.steps.next();
+      for (const mesh of job.parent.getChildMeshes()) {
+        mesh.metadata = { ...mesh.metadata, siteId: job.siteId };
+        mesh.isPickable = true;
+      }
+      if (result.done) this.#buildingJobs.shift();
       refreshStaticHierarchy(job.parent);
     }
-    if(import.meta.env.DEV){this.#canvas.dataset.pendingBuildingJobs=String(this.#buildingJobs.length);this.#canvas.dataset.buildingAssets=JSON.stringify([...this.#buildingCache.values()].filter(c=>c.mesh.metadata?.assetState).map(c=>({name:c.mesh.name,state:c.mesh.metadata.assetState})));}
+    if (import.meta.env.DEV) {
+      this.#canvas.dataset.pendingBuildingJobs = String(this.#buildingJobs.length);
+      this.#canvas.dataset.buildingAssets = JSON.stringify(
+        [...this.#buildingCache.values()]
+          .filter((c) => c.mesh.metadata?.assetState)
+          .map((c) => ({ name: c.mesh.name, state: c.mesh.metadata.assetState })),
+      );
+    }
   }
 
-  public selectRepresentative(id:string|null){
-    if(id!==this.#selectedRepresentative)this.#inhabitantCamera.stop();
-    this.#workers.selectRepresentative(id);this.#selectedRepresentative=this.#workers.selectedRepresentative;
+  public selectRepresentative(id: string | null) {
+    if (id !== this.#selectedRepresentative) this.#inhabitantCamera.stop();
+    this.#workers.selectRepresentative(id);
+    this.#selectedRepresentative = this.#workers.selectedRepresentative;
   }
-  public representativeInfo(id:string){return id===this.#selectedRepresentative?this.#workers.representativeInfo(id):null;}
-  public representativeCamera(mode:'follow'|'pov'|'village'){
-    if(mode==='village'){this.#inhabitantCamera.stop();return;}
-    if(this.#worldMode==='population'&&this.#mode==='village'&&this.#selectedRepresentative)
-      this.#inhabitantCamera.start(this.#selectedRepresentative,mode);
+  public representativeInfo(id: string) {
+    return id === this.#selectedRepresentative ? this.#workers.representativeInfo(id) : null;
   }
-  public get representativeCameraMode(){return this.#inhabitantCamera.mode;}
-  public setNoclip(enabled:boolean){this.#inhabitantCamera.noclip=import.meta.env.DEV&&enabled;}
-  public projectRepresentative(id:string){
-    const pose=this.#workers.representativePose(id);
-    return pose?this.#projectPoint(pose.position.add(new Vector3(0,.35,0))):null;
-  }
-  #walkGround(x:number,z:number):number|null {
-    if(!this.#space||!this.#store||!this.#renderer)return null;
-    const c=this.#space.inverse(x,z),cx=((Math.round(c.cellX)%this.#space.width)+this.#space.width)%this.#space.width,
-      cy=((Math.round(c.cellY)%this.#space.height)+this.#space.height)%this.#space.height;
-    return this.#renderer.rendered(cx,cy)?this.#store.ground(cx,cy)?.height??null:null;
-  }
-  #canWalk(x:number,z:number):boolean {
-    if(!this.#space||!this.#store||!this.#state)return false;
-    for(const [dx,dz] of [[0,0],[-.13,-.13],[.13,.13],[-.13,.13],[.13,-.13]]){
-      const c=this.#space.inverse(x+dx!,z+dz!),cx=((Math.round(c.cellX)%this.#space.width)+this.#space.width)%this.#space.width,
-        cy=((Math.round(c.cellY)%this.#space.height)+this.#space.height)%this.#space.height;
-      if(this.#store.ground(cx,cy)?.code!==1)return false;
-      const occupied=this.#state.cells.find(cell=>cell.cellX===cx&&cell.cellY===cy&&(cell.footprint||cell.building));
-      if(occupied){const id=occupied.footprint?.buildingId??occupied.building!.id;
-        if(!buildingAccesses(this.#state,id).some(a=>{
-          const xx=delta(c.cellX,a.position.cellX,this.#space!.width),yy=delta(c.cellY,a.position.cellY,this.#space!.height);
-          return Math.abs(a.normal.x?yy:xx)<a.width/2&&xx*a.normal.x+yy*a.normal.y>=-.125;
-        }))return false;
-      }
-      if(infrastructureBarrierAt(this.#infrastructureBarriers,c,this.#state.world))return false;
-      const features=this.featuresAt({cellX:cx,cellY:cy});
-      for(const feature of features)if(feature.deposit?.cleared!==true&&feature.deposit?.blocksCell!==false){
-        const p=this.#space.project(feature);if(Math.hypot(x-p.x,z-p.z)<.5)return false;
-      }
+  public representativeCamera(mode: 'follow' | 'pov' | 'village') {
+    if (mode === 'village') {
+      this.#inhabitantCamera.stop();
+      return;
     }
-    for(const e of this.#infrastructureEquipment){const p=this.#space.project({cellX:e.x/8,cellY:e.y/8});if(Math.hypot(x-p.x,z-p.z)<.3)return false;}    return true;
+    if (this.#worldMode === 'population' && this.#mode === 'village' && this.#selectedRepresentative)
+      this.#inhabitantCamera.start(this.#selectedRepresentative, mode);
+  }
+  public get representativeCameraMode() {
+    return this.#inhabitantCamera.mode;
+  }
+  public setNoclip(enabled: boolean) {
+    this.#inhabitantCamera.noclip = import.meta.env.DEV && enabled;
+  }
+  public projectRepresentative(id: string) {
+    const pose = this.#workers.representativePose(id);
+    return pose ? this.#projectPoint(pose.position.add(new Vector3(0, 0.35, 0))) : null;
+  }
+  #walkGround(x: number, z: number): number | null {
+    if (!this.#space || !this.#store || !this.#renderer) return null;
+    const c = this.#space.inverse(x, z),
+      cx = ((Math.round(c.cellX) % this.#space.width) + this.#space.width) % this.#space.width,
+      cy = ((Math.round(c.cellY) % this.#space.height) + this.#space.height) % this.#space.height;
+    return this.#renderer.rendered(cx, cy) ? (this.#store.ground(cx, cy)?.height ?? null) : null;
+  }
+  #canWalk(x: number, z: number): boolean {
+    if (!this.#space || !this.#store || !this.#state) return false;
+    for (const [dx, dz] of [
+      [0, 0],
+      [-0.13, -0.13],
+      [0.13, 0.13],
+      [-0.13, 0.13],
+      [0.13, -0.13],
+    ]) {
+      const c = this.#space.inverse(x + dx!, z + dz!),
+        cx = ((Math.round(c.cellX) % this.#space.width) + this.#space.width) % this.#space.width,
+        cy = ((Math.round(c.cellY) % this.#space.height) + this.#space.height) % this.#space.height;
+      if (this.#store.ground(cx, cy)?.code !== 1) return false;
+      const occupied = this.#state.cells.find(
+        (cell) => cell.cellX === cx && cell.cellY === cy && (cell.footprint || cell.building),
+      );
+      if (occupied) {
+        const id = occupied.footprint?.buildingId ?? occupied.building!.id;
+        if (
+          !buildingAccesses(this.#state, id).some((a) => {
+            const xx = delta(c.cellX, a.position.cellX, this.#space!.width),
+              yy = delta(c.cellY, a.position.cellY, this.#space!.height);
+            return Math.abs(a.normal.x ? yy : xx) < a.width / 2 && xx * a.normal.x + yy * a.normal.y >= -0.125;
+          })
+        )
+          return false;
+      }
+      if (infrastructureBarrierAt(this.#infrastructureBarriers, c, this.#state.world)) return false;
+      const features = this.featuresAt({ cellX: cx, cellY: cy });
+      for (const feature of features)
+        if (feature.deposit?.cleared !== true && feature.deposit?.blocksCell !== false) {
+          const p = this.#space.project(feature);
+          if (Math.hypot(x - p.x, z - p.z) < 0.5) return false;
+        }
+    }
+    for (const e of this.#infrastructureEquipment) {
+      const p = this.#space.project({ cellX: e.x / 8, cellY: e.y / 8 });
+      if (Math.hypot(x - p.x, z - p.z) < 0.3) return false;
+    }
+    return true;
   }
 
   public projectCell(cell: Cell): ScreenAnchor | null {
     if (!this.#space || this.#mode !== 'village') return null;
-    const p = this.#space.project(cell), ground = this.#store?.ground(cell.cellX, cell.cellY);
-    return this.#projectPoint(new Vector3(p.x, (ground?.height ?? 0) + .5, p.z));
+    const p = this.#space.project(cell),
+      ground = this.#store?.ground(cell.cellX, cell.cellY);
+    return this.#projectPoint(new Vector3(p.x, (ground?.height ?? 0) + 0.5, p.z));
   }
 
   public projectPopulation(id: string): ScreenAnchor | null {
@@ -1365,18 +2188,23 @@ export class BabylonVillageScene {
   }
 
   #projectPoint(position: Vector3): ScreenAnchor | null {
-    const point = Vector3.Project(position, Matrix.Identity(),
-      this.#scene.getTransformMatrix(), this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight()));
+    const point = Vector3.Project(
+      position,
+      Matrix.Identity(),
+      this.#scene.getTransformMatrix(),
+      this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight()),
+    );
     if (point.z < 0 || point.z > 1) return null;
     const bounds = this.#canvas.getBoundingClientRect();
-    const x = bounds.left + point.x * bounds.width / this.#engine.getRenderWidth(), y = bounds.top + point.y * bounds.height / this.#engine.getRenderHeight();
+    const x = bounds.left + (point.x * bounds.width) / this.#engine.getRenderWidth(),
+      y = bounds.top + (point.y * bounds.height) / this.#engine.getRenderHeight();
     return x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom ? null : { x, y };
   }
 
   public updateAreaSelection(enabled: boolean, preview: AreaPreview | null, invalid: boolean): void {
-    this.#areaRequest=[enabled,preview,invalid];
+    this.#areaRequest = [enabled, preview, invalid];
     this.#selectingArea = enabled;
-    if(!this.#space)return;
+    if (!this.#space) return;
     const signature = JSON.stringify([preview, invalid]);
     if (signature === this.#lastPreviewSignature) return;
     this.#lastPreviewSignature = signature;
@@ -1385,100 +2213,185 @@ export class BabylonVillageScene {
     for (const cell of preview?.cells ?? []) {
       const mesh = this.#createConstructionBorder(`area-preview-${cellKey(cell)}`, TILE_SIZE - 0.06);
       const p = this.#space!.projectFrom(cell, this.#villageAnchor);
-      mesh.position.set(
-        p.x,
-        (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.15,
-        p.z,
-      );
-      if(this.#state?.region.vertexHeights){
-        const data=mesh.getVerticesData('position');
-        if(data){for(let i=0;i<data.length;i+=3){
-          const ground=this.#store?.ground(cell.cellX+data[i]!/TILE_SIZE,cell.cellY+data[i+2]!/TILE_SIZE);
-          if(ground)data[i+1]=data[i+1]!+ground.height+.15-mesh.position.y;
-        }mesh.setVerticesData('position',data);}
+      mesh.position.set(p.x, (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.15, p.z);
+      if (this.#state?.region.vertexHeights) {
+        const data = mesh.getVerticesData('position');
+        if (data) {
+          for (let i = 0; i < data.length; i += 3) {
+            const ground = this.#store?.ground(
+              cell.cellX + data[i]! / TILE_SIZE,
+              cell.cellY + data[i + 2]! / TILE_SIZE,
+            );
+            if (ground) data[i + 1] = data[i + 1]! + ground.height + 0.15 - mesh.position.y;
+          }
+          mesh.setVerticesData('position', data);
+        }
       }
-      mesh.material = obstacles.has(cellKey(cell)) ? this.#invalidAreaMaterial
-        : preview?.needsLeveling ? this.#levelingAreaMaterial : invalid && !preview?.newCells ? this.#invalidAreaMaterial : this.#candidateMaterial;
+      mesh.material = obstacles.has(cellKey(cell))
+        ? this.#invalidAreaMaterial
+        : preview?.needsLeveling
+          ? this.#levelingAreaMaterial
+          : invalid && !preview?.newCells
+            ? this.#invalidAreaMaterial
+            : this.#candidateMaterial;
       mesh.isPickable = false;
       this.#previewMeshes.push(mesh);
     }
   }
 
-  public setPreparation(value:boolean){this.#preparing=value;}
-  public setStarterGhost(value:StarterGhost|null,onManual:(()=>void)|null){this.#starterGhost=value;this.#starterManual=onManual;}
-  public updateConstructionGhost(code: string | null, preview: AreaPreview | null, _invalid: boolean,quarterTurns=0,houseVariant:'stone'|'logs'|'beams'='stone'): void {
-    this.#ghostRequest=[code,preview,_invalid,quarterTurns,houseVariant];
+  public setPreparation(value: boolean) {
+    this.#preparing = value;
+  }
+  public setStarterGhost(value: StarterGhost | null, onManual: (() => void) | null) {
+    this.#starterGhost = value;
+    this.#starterManual = onManual;
+  }
+  public updateConstructionGhost(
+    code: string | null,
+    preview: AreaPreview | null,
+    _invalid: boolean,
+    quarterTurns = 0,
+    houseVariant: 'stone' | 'logs' | 'beams' = 'stone',
+  ): void {
+    this.#ghostRequest = [code, preview, _invalid, quarterTurns, houseVariant];
     if (!code || !preview?.cells.length || !this.#space || this.#mode !== 'village') {
-      this.#constructionGhost?.setEnabled(false); return;
+      this.#constructionGhost?.setEnabled(false);
+      return;
     }
-    const starter=this.#starterGhost;
-    if(starter) code='starter:'+JSON.stringify([starter.elements,starter.relativeToHall]);
+    const starter = this.#starterGhost;
+    if (starter) code = 'starter:' + JSON.stringify([starter.elements, starter.relativeToHall]);
     // Gardens are already a crop-surface footprint, including arbitrary spatial extensions.
-    if (code === 'garden') { this.#constructionGhost?.setEnabled(false); return; }
-    if(code==='dwelling'&&houseVariant!=='stone')code=`dwelling-${houseVariant}`;
+    if (code === 'garden') {
+      this.#constructionGhost?.setEnabled(false);
+      return;
+    }
+    if (code === 'dwelling' && houseVariant !== 'stone') code = `dwelling-${houseVariant}`;
     if (code !== this.#constructionGhostCode) {
       this.#constructionGhost?.dispose(false, false);
       for (const m of this.#ghostMaterials) m.dispose(false, false);
       for (const m of this.#ghostOwnMaterials) m.dispose(false, true);
-      this.#ghostMaterials = []; this.#ghostOwnMaterials.clear();
-      const assetKey=`${code}-1-finished`;
-      const baked=Boolean(starter || buildingAssets[assetKey]);
+      this.#ghostMaterials = [];
+      this.#ghostOwnMaterials.clear();
+      const assetKey = `${code}-1-finished`;
+      const baked = Boolean(starter || buildingAssets[assetKey]);
       const previous = new Set(this.#scene.materials);
-      if(baked)this.#constructionGhost=new BabylonMesh(`ghost-${code}`,this.#scene);
-      else {this.#timberThatch??=new TimberThatch(this.#scene);this.#constructionGhost=buildPresentation(this.#timberThatch,code);}
-      this.#constructionGhostCode=code;
-      if(!baked)this.#ghostOwnMaterials=new Set(this.#scene.materials.filter(m=>!previous.has(m)));
-      const root=this.#constructionGhost;
-      const style=()=>{
-        if(root.isDisposed()||this.#constructionGhost!==root)return;
-        const clones=new Map<StandardMaterial,StandardMaterial>();
-        for(const mesh of root.getChildMeshes()) {
-          mesh.isPickable=false;
-          if(!(mesh.material instanceof StandardMaterial))continue;
-          const source=mesh.material;
-          let material=clones.get(source);
-          if(!material){material=clonePreviewMaterial(source);clones.set(source,material);}
-          mesh.material=material;
-        }
-        this.#ghostMaterials=[...clones.values()];
-      };
-      if(starter){
-        const loads=starter.elements.map(element=>{
-          const posed=poseStarterElement(element,{x:256,y:128},0,starter.relativeToHall);
-          const xs=posed.cells.map(c=>spawnDelta(c.cellX,256,512)), ys=posed.cells.map(c=>spawnDelta(c.cellY,128,256));
-          const child=new BabylonMesh('starter-'+element.key,this.#scene);child.parent=root;
-          child.position.set((Math.min(...xs)+Math.max(...xs))/2*TILE_SIZE,0,(Math.min(...ys)+Math.max(...ys))/2*TILE_SIZE);
-          child.rotation.y=posed.quarterTurns*Math.PI/2;child.metadata={starterBaseTurns:posed.quarterTurns};
-          if(element.type==='garden'){
-            const patch=MeshBuilder.CreateGround('starter-garden',{width:TILE_SIZE*.92,height:TILE_SIZE*.92},this.#scene);patch.parent=child;patch.position.y=.04;patch.material=this.#material('starter-garden-soil','#776343');this.#ghostOwnMaterials.add(patch.material);return Promise.resolve();
+      if (baked) this.#constructionGhost = new BabylonMesh(`ghost-${code}`, this.#scene);
+      else {
+        this.#timberThatch ??= new TimberThatch(this.#scene);
+        this.#constructionGhost = buildPresentation(this.#timberThatch, code);
+      }
+      this.#constructionGhostCode = code;
+      if (!baked) this.#ghostOwnMaterials = new Set(this.#scene.materials.filter((m) => !previous.has(m)));
+      const root = this.#constructionGhost;
+      const style = () => {
+        if (root.isDisposed() || this.#constructionGhost !== root) return;
+        const clones = new Map<StandardMaterial, StandardMaterial>();
+        for (const mesh of root.getChildMeshes()) {
+          mesh.isPickable = false;
+          if (!(mesh.material instanceof StandardMaterial)) continue;
+          const source = mesh.material;
+          let material = clones.get(source);
+          if (!material) {
+            material = clonePreviewMaterial(source);
+            clones.set(source, material);
           }
-          const resolved=recipeFor({...posed,status:'completed',targetLevel:null});
-          if(!resolved)return Promise.resolve();
-          const plan=buildingPlan({id:element.key,anchor:posed.cells.find(c=>c.role==='anchor')!,cells:posed.cells,world:this.#state!.world,...resolved,quarterTurns:posed.quarterTurns,offset:posed.visualLayout?.offset??[0,0]});
-          const key=bakedPlanKey(plan);
-          if(key)return loadBakedBuilding(child,key,false,true);
-          this.#timberThatch??=new TimberThatch(this.#scene);this.#timberThatch.build(child,plan);
+          mesh.material = material;
+        }
+        this.#ghostMaterials = [...clones.values()];
+      };
+      if (starter) {
+        const loads = starter.elements.map((element) => {
+          const posed = poseStarterElement(element, { x: 256, y: 128 }, 0, starter.relativeToHall);
+          const xs = posed.cells.map((c) => spawnDelta(c.cellX, 256, 512)),
+            ys = posed.cells.map((c) => spawnDelta(c.cellY, 128, 256));
+          const child = new BabylonMesh('starter-' + element.key, this.#scene);
+          child.parent = root;
+          child.position.set(
+            ((Math.min(...xs) + Math.max(...xs)) / 2) * TILE_SIZE,
+            0,
+            ((Math.min(...ys) + Math.max(...ys)) / 2) * TILE_SIZE,
+          );
+          child.rotation.y = (posed.quarterTurns * Math.PI) / 2;
+          child.metadata = { starterBaseTurns: posed.quarterTurns };
+          if (element.type === 'garden') {
+            const patch = MeshBuilder.CreateGround(
+              'starter-garden',
+              { width: TILE_SIZE * 0.92, height: TILE_SIZE * 0.92 },
+              this.#scene,
+            );
+            patch.parent = child;
+            patch.position.y = 0.04;
+            patch.material = this.#material('starter-garden-soil', '#776343');
+            this.#ghostOwnMaterials.add(patch.material);
+            return Promise.resolve();
+          }
+          const resolved = recipeFor({ ...posed, status: 'completed', targetLevel: null });
+          if (!resolved) return Promise.resolve();
+          const plan = buildingPlan({
+            id: element.key,
+            anchor: posed.cells.find((c) => c.role === 'anchor')!,
+            cells: posed.cells,
+            world: this.#state!.world,
+            ...resolved,
+            quarterTurns: posed.quarterTurns,
+            offset: posed.visualLayout?.offset ?? [0, 0],
+          });
+          const key = bakedPlanKey(plan);
+          if (key) return loadBakedBuilding(child, key, false, true);
+          this.#timberThatch ??= new TimberThatch(this.#scene);
+          this.#timberThatch.build(child, plan);
           return Promise.resolve();
         });
-        void Promise.all(loads).then(style).catch(error=>console.error('Starter preview failed',error));
-      } else if(baked)void loadBakedBuilding(root,assetKey,false,true).then(style).catch(error=>console.error('Building preview failed',error));else style();
+        void Promise.all(loads)
+          .then(style)
+          .catch((error) => console.error('Starter preview failed', error));
+      } else if (baked)
+        void loadBakedBuilding(root, assetKey, false, true)
+          .then(style)
+          .catch((error) => console.error('Building preview failed', error));
+      else style();
     }
-    const positions = preview.cells.map(cell => this.#space!.projectFrom(cell, this.#villageAnchor));
-    const x = (Math.min(...positions.map(p => p.x)) + Math.max(...positions.map(p => p.x))) / 2;
-    const z = (Math.min(...positions.map(p => p.z)) + Math.max(...positions.map(p => p.z))) / 2;
-    const ground = Math.max(...preview.cells.map(cell => this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0));
-    const anchor=starter?this.#space.projectFrom({cellX:starter.point.x,cellY:starter.point.y},this.#villageAnchor):null;
-    const starterHeight=starter?.referenceHeight===undefined?this.#store?.ground(starter?.point.x??0,starter?.point.y??0)?.height:starter.referenceHeight*TILE_SIZE;
-    this.#constructionGhost!.position.set(anchor?.x??x, (starter?starterHeight??ground:ground) + .03, anchor?.z??z);
-    this.#constructionGhost!.rotation.y=(starter?starter.quarterTurns:quarterTurns)*Math.PI/2;
-    if(starter)for(const child of this.#constructionGhost!.getChildren())if(child instanceof BabylonMesh&&typeof child.metadata?.starterBaseTurns==='number')child.rotation.y=(child.metadata.starterBaseTurns)*Math.PI/2;
+    const positions = preview.cells.map((cell) => this.#space!.projectFrom(cell, this.#villageAnchor));
+    const x = (Math.min(...positions.map((p) => p.x)) + Math.max(...positions.map((p) => p.x))) / 2;
+    const z = (Math.min(...positions.map((p) => p.z)) + Math.max(...positions.map((p) => p.z))) / 2;
+    const ground = Math.max(...preview.cells.map((cell) => this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0));
+    const anchor = starter
+      ? this.#space.projectFrom({ cellX: starter.point.x, cellY: starter.point.y }, this.#villageAnchor)
+      : null;
+    const starterHeight =
+      starter?.referenceHeight === undefined
+        ? this.#store?.ground(starter?.point.x ?? 0, starter?.point.y ?? 0)?.height
+        : starter.referenceHeight * TILE_SIZE;
+    this.#constructionGhost!.position.set(
+      anchor?.x ?? x,
+      (starter ? (starterHeight ?? ground) : ground) + 0.03,
+      anchor?.z ?? z,
+    );
+    this.#constructionGhost!.rotation.y = ((starter ? starter.quarterTurns : quarterTurns) * Math.PI) / 2;
+    if (starter)
+      for (const child of this.#constructionGhost!.getChildren())
+        if (child instanceof BabylonMesh && typeof child.metadata?.starterBaseTurns === 'number')
+          child.rotation.y = (child.metadata.starterBaseTurns * Math.PI) / 2;
     this.#constructionGhost!.setEnabled(true);
-    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.constructionGhost=JSON.stringify({point:starter?.point,turns:starter?.quarterTurns,position:this.#constructionGhost!.position.asArray(),models:this.#constructionGhost!.getChildMeshes().filter(m=>m.getTotalVertices()>4).length});
+    if (import.meta.env.MODE === 'e2e')
+      this.#canvas.dataset.constructionGhost = JSON.stringify({
+        point: starter?.point,
+        turns: starter?.quarterTurns,
+        position: this.#constructionGhost!.position.asArray(),
+        models: this.#constructionGhost!.getChildMeshes().filter((m) => m.getTotalVertices() > 4).length,
+      });
   }
 
   public updateHarvestPending(cells: Cell[]): void {
-    this.#resourceHalos.setPending(cells.map(cell=>({...cell,garden:this.#gardenStages.has(cellKey(cell)),
-      resource:this.#gardenStages.has(cellKey(cell))?'carrot':this.featuresAt(cell).find(f=>f.deposit)?.deposit?.resourceCode})));
+    this.#resourceHalos.setPending(
+      cells.map((cell) => ({
+        ...cell,
+        garden: this.#gardenStages.has(cellKey(cell)),
+        resource: this.#gardenStages.has(cellKey(cell))
+          ? 'carrot'
+          : this.featuresAt(cell).find((f) => f.deposit)?.deposit?.resourceCode,
+      })),
+    );
   }
 
   #clearSelection(): void {
@@ -1524,27 +2437,38 @@ export class BabylonVillageScene {
 
   #animateWater(now: number): void {
     this.#waterRippleTexture.uOffset = now * 0.000006;
-    this.#waterRippleMaterial.alpha = .32 + this.#rainIntensity * .12;
+    this.#waterRippleMaterial.alpha = 0.32 + this.#rainIntensity * 0.12;
     this.#waterRippleTexture.vOffset = now * 0.000003;
   }
 
   #tileMaterial(category: 'garden', index: number): StandardMaterial {
     const material = this.#material(`${category}-tile-${index}`, '#ffffff');
-    const texture = new Texture(`/tiles/${category}-${index}.png`, this.#scene, false, false, Texture.TRILINEAR_SAMPLINGMODE);
+    const texture = new Texture(
+      `/tiles/${category}-${index}.png`,
+      this.#scene,
+      false,
+      false,
+      Texture.TRILINEAR_SAMPLINGMODE,
+    );
     material.diffuseTexture = texture;
     material.specularColor.set(0, 0, 0);
     return material;
   }
 
   #createTerrain(): Mesh {
-    const earth = MeshBuilder.CreateBox('deep-ground', {
-      width: this.#worldWidthUnits * 3,
-      depth: this.#worldHeightUnits * 3,
-      height: 0.8,
-    }, this.#scene);
+    const earth = MeshBuilder.CreateBox(
+      'deep-ground',
+      {
+        width: this.#worldWidthUnits * 3,
+        depth: this.#worldHeightUnits * 3,
+        height: 0.8,
+      },
+      this.#scene,
+    );
     earth.position.y = -1.55;
     const background = new StandardMaterial('loading-backdrop', this.#scene);
-    background.diffuseColor = Color3.FromHexString('#8ea0a0'); background.disableLighting = true;
+    background.diffuseColor = Color3.FromHexString('#8ea0a0');
+    background.disableLighting = true;
     background.emissiveColor = background.diffuseColor.clone();
     earth.material = background;
     earth.receiveShadows = true;
@@ -1556,8 +2480,15 @@ export class BabylonVillageScene {
     let data = this.#sceneryData.get(key);
     if (data) return data;
     let mesh = this.#sceneryGeometry.get(key);
-    if (!mesh) { mesh = create(); mesh.setEnabled(false); mesh.isPickable = false; this.#sceneryGeometry.set(key, mesh); }
-    data = VertexData.ExtractFromMesh(mesh, true, true); this.#sceneryData.set(key, data); return data;
+    if (!mesh) {
+      mesh = create();
+      mesh.setEnabled(false);
+      mesh.isPickable = false;
+      this.#sceneryGeometry.set(key, mesh);
+    }
+    data = VertexData.ExtractFromMesh(mesh, true, true);
+    this.#sceneryData.set(key, data);
+    return data;
   }
 
   #buildWoodland(features: NaturalFeature[]): Mesh[] {
@@ -1565,35 +2496,73 @@ export class BabylonVillageScene {
     let source = this.#sceneryGeometry.get('woodland-thin-source');
     if (!source) {
       const shape = (key: string, height: number, material: StandardMaterial): SceneryPart => ({
-        geometry: this.#shapeData(key, () => key === 'trunk'
-          ? MeshBuilder.CreateCylinder('scenery-trunk', { height: 1.1, diameterTop: 0.22, diameterBottom: 0.38, tessellation: 6 }, this.#scene)
-          : key === 'lower'
-            ? MeshBuilder.CreateCylinder('scenery-lower', { height: 1.55, diameterTop: 0.16, diameterBottom: 1.55, tessellation: 7 }, this.#scene)
-            : MeshBuilder.CreateCylinder('scenery-upper', { height: 1.25, diameterTop: 0.04, diameterBottom: 1.15, tessellation: 7 }, this.#scene)),
-        material, position: new Vector3(0, height, 0), scaling: Vector3.One(), rotation: Vector3.Zero(),
+        geometry: this.#shapeData(key, () =>
+          key === 'trunk'
+            ? MeshBuilder.CreateCylinder(
+                'scenery-trunk',
+                { height: 1.1, diameterTop: 0.22, diameterBottom: 0.38, tessellation: 6 },
+                this.#scene,
+              )
+            : key === 'lower'
+              ? MeshBuilder.CreateCylinder(
+                  'scenery-lower',
+                  { height: 1.55, diameterTop: 0.16, diameterBottom: 1.55, tessellation: 7 },
+                  this.#scene,
+                )
+              : MeshBuilder.CreateCylinder(
+                  'scenery-upper',
+                  { height: 1.25, diameterTop: 0.04, diameterBottom: 1.15, tessellation: 7 },
+                  this.#scene,
+                ),
+        ),
+        material,
+        position: new Vector3(0, height, 0),
+        scaling: Vector3.One(),
+        rotation: Vector3.Zero(),
       });
-      source = bakeScenery(this.#scene, [shape('trunk', 0.5, this.#trunkMaterial),
-        shape('lower', 1.48, this.#leafMaterial), shape('upper', 2.22, this.#leafLightMaterial)], this.#woodlandMaterial)[0]!;
-      source.name = 'woodland-thin-source'; source.setEnabled(false);
+      source = bakeScenery(
+        this.#scene,
+        [
+          shape('trunk', 0.5, this.#trunkMaterial),
+          shape('lower', 1.48, this.#leafMaterial),
+          shape('upper', 2.22, this.#leafLightMaterial),
+        ],
+        this.#woodlandMaterial,
+      )[0]!;
+      source.name = 'woodland-thin-source';
+      source.setEnabled(false);
       this.#sceneryGeometry.set('woodland-thin-source', source);
     }
     const transforms: number[] = [];
     const instanceFeatureIds: string[] = [];
     for (const feature of features) {
       if (feature.deposit?.cleared) continue;
-      const ground = this.#store!.ground(feature.cellX, feature.cellY); if (!ground) continue;
+      const ground = this.#store!.ground(feature.cellX, feature.cellY);
+      if (!ground) continue;
       const size = this.#store!.world.chunkSize;
-      for(const tree of woodlandTrees(feature)){
-        const at=this.#space!.projectFrom({cellX:tree.x,cellY:tree.y},{cellX:Math.floor(feature.cellX/size)*size,cellY:Math.floor(feature.cellY/size)*size});
-        const transform=Matrix.Compose(new Vector3(tree.scale,tree.heightScale,tree.scale),Quaternion.RotationAxis(Vector3.Up(),tree.rotation),
-          new Vector3(at.x,tree.elevation===undefined?ground.height:tree.elevation*TILE_SIZE,at.z));
-        transforms.push(...transform.toArray());instanceFeatureIds.push(feature.id);
+      for (const tree of woodlandTrees(feature)) {
+        const at = this.#space!.projectFrom(
+          { cellX: tree.x, cellY: tree.y },
+          { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size },
+        );
+        const transform = Matrix.Compose(
+          new Vector3(tree.scale, tree.heightScale, tree.scale),
+          Quaternion.RotationAxis(Vector3.Up(), tree.rotation),
+          new Vector3(at.x, tree.elevation === undefined ? ground.height : tree.elevation * TILE_SIZE, at.z),
+        );
+        transforms.push(...transform.toArray());
+        instanceFeatureIds.push(feature.id);
       }
     }
     if (!transforms.length) return [];
     const mesh = cloneWoodland(source, `woodland-${features[0]!.id}`, new Float32Array(transforms));
-    mesh.metadata = { woodlandId: features[0]!.id, featureId: features[0]!.id, instanceFeatureIds,
-      cellX: features[0]!.cellX, cellY: features[0]!.cellY };
+    mesh.metadata = {
+      woodlandId: features[0]!.id,
+      featureId: features[0]!.id,
+      instanceFeatureIds,
+      cellX: features[0]!.cellX,
+      cellY: features[0]!.cellY,
+    };
     mesh.isPickable = true;
     mesh.thinInstanceEnablePicking = true;
     mesh.addLODLevel(250, null);
@@ -1605,35 +2574,68 @@ export class BabylonVillageScene {
     if (!ground) return [];
     const { x, z } = this.#space!.project(feature);
     if (feature.type === 'leveling-site') {
-      const border = this.#createConstructionBorder(`leveling-site-${feature.id}-${cellKey(feature)}`, TILE_SIZE - .08);
-      border.position.set(x, ground.height + .08, z); border.material = this.#levelingAreaMaterial; border.isPickable = false;
-      const stake = MeshBuilder.CreateBox(`leveling-stake-${feature.id}-${cellKey(feature)}`, {width:.07,depth:.07,height:.45}, this.#scene);
-      stake.position.set(x - TILE_SIZE * .4, ground.height + .225, z - TILE_SIZE * .4); stake.material = this.#trunkMaterial; stake.isPickable = false;
+      const border = this.#createConstructionBorder(
+        `leveling-site-${feature.id}-${cellKey(feature)}`,
+        TILE_SIZE - 0.08,
+      );
+      border.position.set(x, ground.height + 0.08, z);
+      border.material = this.#levelingAreaMaterial;
+      border.isPickable = false;
+      const stake = MeshBuilder.CreateBox(
+        `leveling-stake-${feature.id}-${cellKey(feature)}`,
+        { width: 0.07, depth: 0.07, height: 0.45 },
+        this.#scene,
+      );
+      stake.position.set(x - TILE_SIZE * 0.4, ground.height + 0.225, z - TILE_SIZE * 0.4);
+      stake.material = this.#trunkMaterial;
+      stake.isPickable = false;
       return [border, stake];
     }
-    const seed = Math.abs(feature.variantSeed), scenery: Mesh[] = [];
-    if(feature.rc1?.rocks.length){
-      if(feature.deposit?.state==='depleted')return [];
-      for(const rock of feature.rc1.rocks){const p=this.#space!.project({cellX:rock.x,cellY:rock.y}),mesh=MeshBuilder.CreateBox('rc1-rock',{width:rock.width*2.5,depth:rock.depth*2.5,height:rock.height*2.5},this.#scene);mesh.position.set(p.x,(rock.elevation+rock.height*.5)*2.5,p.z);mesh.rotation.y=rock.rotation;mesh.material=this.#pebbleMaterial;mesh.metadata={featureId:feature.id,cellX:feature.cellX,cellY:feature.cellY};mesh.isPickable=true;scenery.push(mesh);}return scenery;
+    const seed = Math.abs(feature.variantSeed),
+      scenery: Mesh[] = [];
+    if (feature.rc1?.rocks.length) {
+      if (feature.deposit?.state === 'depleted') return [];
+      for (const rock of feature.rc1.rocks) {
+        const p = this.#space!.project({ cellX: rock.x, cellY: rock.y }),
+          mesh = MeshBuilder.CreateBox(
+            'rc1-rock',
+            { width: rock.width * 2.5, depth: rock.depth * 2.5, height: rock.height * 2.5 },
+            this.#scene,
+          );
+        mesh.position.set(p.x, (rock.elevation + rock.height * 0.5) * 2.5, p.z);
+        mesh.rotation.y = rock.rotation;
+        mesh.material = this.#pebbleMaterial;
+        mesh.metadata = { featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY };
+        mesh.isPickable = true;
+        scenery.push(mesh);
+      }
+      return scenery;
     }
     if (feature.deposit && feature.deposit.state !== 'depleted') {
-      const scale = (0.95 + this.#hash(seed, 443) * 0.38)
-        * (0.55 + 0.45 * feature.deposit.remainingAmount / feature.deposit.initialAmount);
+      const scale =
+        (0.95 + this.#hash(seed, 443) * 0.38) *
+        (0.55 + (0.45 * feature.deposit.remainingAmount) / feature.deposit.initialAmount);
       this.#createRockCluster(x, z, scale, seed, scenery, ground.height);
       for (const m of scenery) {
-        m.metadata = { featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY }; m.isPickable = true;
-        if (feature.id === this.#selectedFeatureId) { m.enableEdgesRendering(); m.edgesColor.set(0.95, 0.85, 0.3, 1); m.edgesWidth = 3; }
+        m.metadata = { featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY };
+        m.isPickable = true;
+        if (feature.id === this.#selectedFeatureId) {
+          m.enableEdgesRendering();
+          m.edgesColor.set(0.95, 0.85, 0.3, 1);
+          m.edgesWidth = 3;
+        }
       }
     }
     return scenery;
   }
 
   #buildDecor(chunk: TerrainChunk, offsetX: number, offsetY: number): Mesh[] {
-    if(chunk.rc1)return [];
-    const size = this.#store!.world.chunkSize, stride = size + 2;
+    if (chunk.rc1) return [];
+    const size = this.#store!.world.chunkSize,
+      stride = size + 2;
     const origin = this.#space!.project({ cellX: chunk.originCellX, cellY: chunk.originCellY });
     const parts: SceneryPart[] = [];
-    const featureCells = new Set(chunk.features.filter(f => f.deposit?.state !== 'depleted').map(cellKey));
+    const featureCells = new Set(chunk.features.filter((f) => f.deposit?.state !== 'depleted').map(cellKey));
     const occupiedCells = new Set(chunk.occupiedCells.map(cellKey));
     for (let localY = offsetY; localY < Math.min(offsetY + RENDER_UNIT_CELLS, size); localY += 1) {
       for (let localX = offsetX; localX < Math.min(offsetX + RENDER_UNIT_CELLS, size); localX += 1) {
@@ -1643,8 +2645,11 @@ export class BabylonVillageScene {
         const cellY = (chunk.originCellY + localY) % this.#space!.height;
         const key = cellKey({ cellX, cellY });
         if (featureCells.has(key) || occupiedCells.has(key)) continue;
-        const shore = chunk.terrainCodes[index - 1] === 2 || chunk.terrainCodes[index + 1] === 2
-          || chunk.terrainCodes[index - stride] === 2 || chunk.terrainCodes[index + stride] === 2;
+        const shore =
+          chunk.terrainCodes[index - 1] === 2 ||
+          chunk.terrainCodes[index + 1] === 2 ||
+          chunk.terrainCodes[index - stride] === 2 ||
+          chunk.terrainCodes[index + stride] === 2;
         if (this.#hash(cellX + 709, cellY + 541) > (shore ? 0.24 : 0.045)) continue;
         const x = origin.x + localX * TILE_SIZE;
         const z = origin.z + localY * TILE_SIZE;
@@ -1654,9 +2659,15 @@ export class BabylonVillageScene {
           const angle = this.#hash(cellX + part * 31, cellY + part * 47) * Math.PI * 2;
           const radius = 0.22 + this.#hash(cellX + part * 59, cellY + part * 71) * 0.35;
           const pebbleRadius = 0.17 + this.#hash(cellX + part * 97, cellY + part * 83) * 0.08;
-          parts.push({ geometry: this.#shapeData('ico', () => MeshBuilder.CreateIcoSphere('scenery-ico', { radius: 1, subdivisions: 1 }, this.#scene)),
-            material: this.#pebbleMaterial, position: new Vector3(x + Math.cos(angle) * radius, elevation + 0.09, z + Math.sin(angle) * radius),
-            scaling: new Vector3(pebbleRadius * 1.1, pebbleRadius * 0.48, pebbleRadius * 0.8), rotation: new Vector3(0, angle, 0) });
+          parts.push({
+            geometry: this.#shapeData('ico', () =>
+              MeshBuilder.CreateIcoSphere('scenery-ico', { radius: 1, subdivisions: 1 }, this.#scene),
+            ),
+            material: this.#pebbleMaterial,
+            position: new Vector3(x + Math.cos(angle) * radius, elevation + 0.09, z + Math.sin(angle) * radius),
+            scaling: new Vector3(pebbleRadius * 1.1, pebbleRadius * 0.48, pebbleRadius * 0.8),
+            rotation: new Vector3(0, angle, 0),
+          });
         }
       }
     }
@@ -1668,7 +2679,9 @@ export class BabylonVillageScene {
       const id = (mesh.metadata as { featureId?: string } | null)?.featureId;
       if (!id) continue;
       if (id === this.#selectedFeatureId) {
-        mesh.enableEdgesRendering(); mesh.edgesColor.set(0.95, 0.85, 0.3, 1); mesh.edgesWidth = 3;
+        mesh.enableEdgesRendering();
+        mesh.edgesColor.set(0.95, 0.85, 0.3, 1);
+        mesh.edgesWidth = 3;
       } else mesh.disableEdgesRendering();
     }
   }
@@ -1676,9 +2689,10 @@ export class BabylonVillageScene {
   #pathPoints(path: TravelCell[]): Vector3[] {
     const points = this.#space!.path(path);
     return path.map((cell, index) => {
-      const x=wrapCoordinate(Math.floor(cell.cellX+.5),this.#space!.width),y=wrapCoordinate(Math.floor(cell.cellY+.5),this.#space!.height);
-      const ground = this.#store!.ground(cell.cellX,cell.cellY);
-      const shown = this.#renderer!.rendered(x,y);
+      const x = wrapCoordinate(Math.floor(cell.cellX + 0.5), this.#space!.width),
+        y = wrapCoordinate(Math.floor(cell.cellY + 0.5), this.#space!.height);
+      const ground = this.#store!.ground(cell.cellX, cell.cellY);
+      const shown = this.#renderer!.rendered(x, y);
       return new Vector3(points[index]!.x, ground && shown ? ground.height + 0.33 : NaN, points[index]!.z);
     });
   }
@@ -1686,111 +2700,236 @@ export class BabylonVillageScene {
   /** Doorstep presentation connector; server journey and work deadlines stay unchanged. */
   #workerPath(path: TravelCell[]): Vector3[] {
     const points = this.#pathPoints(path);
-    if(path.some(p=>!Number.isInteger(p.cellX)||!Number.isInteger(p.cellY)))return points;
-    const hall = this.#state?.cells.find(cell => cell.building?.type === 'town-hall');
+    if (path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY))) return points;
+    const hall = this.#state?.cells.find((cell) => cell.building?.type === 'town-hall');
     if (!hall || points.length < 2) return points;
-    const factoryPlan=planForSite(this.#state!,hall,(x,y)=>this.#store?.ground(x,y)?.height??null);
-    if(factoryPlan)return this.#factoryDeparture(hall,factoryPlan,points);
+    const factoryPlan = planForSite(this.#state!, hall, (x, y) => this.#store?.ground(x, y)?.height ?? null);
+    if (factoryPlan) return this.#factoryDeparture(hall, factoryPlan, points);
     const centre = this.#space!.project(hall);
     centre.x = points[0]!.x + delta(centre.x, points[0]!.x, this.#worldWidthUnits);
     centre.z = points[0]!.z + delta(centre.z, points[0]!.z, this.#worldHeightUnits);
-    const firstOutside = points.findIndex(p => Math.abs(p.x-centre.x)>1.6 || Math.abs(p.z-centre.z)>1.7);
+    const firstOutside = points.findIndex((p) => Math.abs(p.x - centre.x) > 1.6 || Math.abs(p.z - centre.z) > 1.7);
     if (firstOutside < 0) return points;
     const join = points[firstOutside]!;
-    const height = this.#store!.ground(hall.cellX,hall.cellY)?.height;
-    const y = height !== undefined && this.#renderer!.rendered(hall.cellX,hall.cellY) ? height+.33 : NaN;
+    const height = this.#store!.ground(hall.cellX, hall.cellY)?.height;
+    const y = height !== undefined && this.#renderer!.rendered(hall.cellX, hall.cellY) ? height + 0.33 : NaN;
     // Door faces -Z: start just inside, clear the porch, then turn outside the walls.
-    const entrance = [new Vector3(centre.x,y+.10,centre.z+TOWN_HALL_DOOR_Z+.06), new Vector3(centre.x,y,centre.z-1.8)];
-    if (join.z > centre.z-1.7 && Math.abs(join.x-centre.x)<1.6) {
-      const side = centre.x + (join.x < centre.x ? -1 : 1)*1.7;
-      entrance.push(new Vector3(side,y,centre.z-1.8),new Vector3(side,join.y,join.z));
-    } else entrance.push(new Vector3(join.x,y,centre.z-1.8));
-    return [...entrance,...points.slice(firstOutside)];
+    const entrance = [
+      new Vector3(centre.x, y + 0.1, centre.z + TOWN_HALL_DOOR_Z + 0.06),
+      new Vector3(centre.x, y, centre.z - 1.8),
+    ];
+    if (join.z > centre.z - 1.7 && Math.abs(join.x - centre.x) < 1.6) {
+      const side = centre.x + (join.x < centre.x ? -1 : 1) * 1.7;
+      entrance.push(new Vector3(side, y, centre.z - 1.8), new Vector3(side, join.y, join.z));
+    } else entrance.push(new Vector3(join.x, y, centre.z - 1.8));
+    return [...entrance, ...points.slice(firstOutside)];
   }
 
-  #leisurePath(buildingId:string,path:TravelCell[]):Vector3[]{
-    const building=this.#state?.cells.find(c=>c.building?.id===buildingId);
-    if(!building||!this.#space)return [];
-    if(path.some(p=>!Number.isInteger(p.cellX)||!Number.isInteger(p.cellY)))return this.#pathPoints(path);
-    const factoryPlan=planForSite(this.#state!,building,(x,y)=>this.#store?.ground(x,y)?.height??null);
-    if(factoryPlan){
-      const points=this.#workerPath(path);
-      if(building.building!.type==='town-hall'){const p=transformPoint(factoryPlan,factoryPlan.entry.inside),centre=this.#space.project(building);return [new Vector3(centre.x+p.x,p.y+.31,centre.z+p.z)];}
-      return this.#factoryDeparture(building,factoryPlan,[...points].reverse()).reverse();
+  #leisurePath(buildingId: string, path: TravelCell[]): Vector3[] {
+    const building = this.#state?.cells.find((c) => c.building?.id === buildingId);
+    if (!building || !this.#space) return [];
+    if (path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY))) return this.#pathPoints(path);
+    const factoryPlan = planForSite(this.#state!, building, (x, y) => this.#store?.ground(x, y)?.height ?? null);
+    if (factoryPlan) {
+      const points = this.#workerPath(path);
+      if (building.building!.type === 'town-hall') {
+        const p = transformPoint(factoryPlan, factoryPlan.entry.inside),
+          centre = this.#space.project(building);
+        return [new Vector3(centre.x + p.x, p.y + 0.31, centre.z + p.z)];
+      }
+      return this.#factoryDeparture(building, factoryPlan, [...points].reverse()).reverse();
     }
-    if(building.building!.type==='town-hall'){
-      const centre=this.#space.project(building);return [new Vector3(centre.x,0,centre.z+TOWN_HALL_DOOR_Z+.06)];
+    if (building.building!.type === 'town-hall') {
+      const centre = this.#space.project(building);
+      return [new Vector3(centre.x, 0, centre.z + TOWN_HALL_DOOR_Z + 0.06)];
     }
-    const points=this.#workerPath(path);if(!points.length)return points;
-    const centre=this.#space.project(building),last=points[points.length-1]!;
-    centre.x=last.x+delta(centre.x,last.x,this.#worldWidthUnits);centre.z=last.z+delta(centre.z,last.z,this.#worldHeightUnits);
-    let outside=points.length-1;
-    while(outside>0&&Math.abs(points[outside]!.x-centre.x)<1.05&&Math.abs(points[outside]!.z-centre.z)<1.05)outside--;
-    const join=points[outside]!,entrance:Vector3[]=[];
-    if(join.z>centre.z-1.05&&Math.abs(join.x-centre.x)<1.05){
-      const side=centre.x+(join.x<centre.x?-1:1)*1.08;
-      entrance.push(new Vector3(side,join.y,join.z),new Vector3(side,join.y,centre.z-1.08));
-    }else entrance.push(new Vector3(join.x,join.y,centre.z-1.08));
-    entrance.push(new Vector3(centre.x,join.y,centre.z-1.08),new Vector3(centre.x,join.y,centre.z-.74));
-    return [...points.slice(0,outside+1),...entrance];
+    const points = this.#workerPath(path);
+    if (!points.length) return points;
+    const centre = this.#space.project(building),
+      last = points[points.length - 1]!;
+    centre.x = last.x + delta(centre.x, last.x, this.#worldWidthUnits);
+    centre.z = last.z + delta(centre.z, last.z, this.#worldHeightUnits);
+    let outside = points.length - 1;
+    while (
+      outside > 0 &&
+      Math.abs(points[outside]!.x - centre.x) < 1.05 &&
+      Math.abs(points[outside]!.z - centre.z) < 1.05
+    )
+      outside--;
+    const join = points[outside]!,
+      entrance: Vector3[] = [];
+    if (join.z > centre.z - 1.05 && Math.abs(join.x - centre.x) < 1.05) {
+      const side = centre.x + (join.x < centre.x ? -1 : 1) * 1.08;
+      entrance.push(new Vector3(side, join.y, join.z), new Vector3(side, join.y, centre.z - 1.08));
+    } else entrance.push(new Vector3(join.x, join.y, centre.z - 1.08));
+    entrance.push(new Vector3(centre.x, join.y, centre.z - 1.08), new Vector3(centre.x, join.y, centre.z - 0.74));
+    return [...points.slice(0, outside + 1), ...entrance];
   }
 
-  #factoryDeparture(site:VillageCell,plan:BuildingPlan,points:Vector3[]):Vector3[]{
-    if(!points.length)return points;
-    const anchor=this.#space!.project(site),c=Math.cos(plan.rotation),s=Math.sin(plan.rotation);
-    anchor.x=points[0]!.x+delta(anchor.x,points[0]!.x,this.#worldWidthUnits);
-    anchor.z=points[0]!.z+delta(anchor.z,points[0]!.z,this.#worldHeightUnits);
-    const local=(p:Vector3)=>{const x=p.x-anchor.x-plan.origin.x,z=p.z-anchor.z-plan.origin.z;return {x:c*x-s*z,y:0,z:s*x+c*z};};
-    const outside=points.findIndex(p=>{const q=local(p);return Math.abs(q.x)>plan.width/2+.23||Math.abs(q.z)>plan.depth/2+.23;});
-    if(outside<0)return points;
-    const route=entranceConnector(plan,local(points[outside]!)).map(p=>{const q=transformPoint(plan,p);return new Vector3(anchor.x+q.x,plan.origin.y+.31,anchor.z+q.z);});
-    return [...route,...points.slice(outside+1)];
+  #factoryDeparture(site: VillageCell, plan: BuildingPlan, points: Vector3[]): Vector3[] {
+    if (!points.length) return points;
+    const anchor = this.#space!.project(site),
+      c = Math.cos(plan.rotation),
+      s = Math.sin(plan.rotation);
+    anchor.x = points[0]!.x + delta(anchor.x, points[0]!.x, this.#worldWidthUnits);
+    anchor.z = points[0]!.z + delta(anchor.z, points[0]!.z, this.#worldHeightUnits);
+    const local = (p: Vector3) => {
+      const x = p.x - anchor.x - plan.origin.x,
+        z = p.z - anchor.z - plan.origin.z;
+      return { x: c * x - s * z, y: 0, z: s * x + c * z };
+    };
+    const outside = points.findIndex((p) => {
+      const q = local(p);
+      return Math.abs(q.x) > plan.width / 2 + 0.23 || Math.abs(q.z) > plan.depth / 2 + 0.23;
+    });
+    if (outside < 0) return points;
+    const route = entranceConnector(plan, local(points[outside]!)).map((p) => {
+      const q = transformPoint(plan, p);
+      return new Vector3(anchor.x + q.x, plan.origin.y + 0.31, anchor.z + q.z);
+    });
+    return [...route, ...points.slice(outside + 1)];
   }
 
-  #travelDerived: {signature:string;accesses:ReturnType<typeof buildingAccesses>;occupied:Set<string>;displayRoutes:ReturnType<typeof villageRoadDisplayRoutes>;fires:ReturnType<typeof automaticBraziers>} | null = null;
-  #updateTravelPaths(state: VillageState, visible: boolean, selectedRouteId: string | null, frame?: FrameTimings): void {
-    const derivedSignature=JSON.stringify([state.world.id,state.travelRoutes,state.infrastructure,
-      state.cells.filter(c=>c.footprint||c.building).map(c=>[c.cellX,c.cellY,c.footprint,c.building&&[c.building.id,c.building.type,c.building.visualLayout,c.building.quarterTurns,c.building.accesses]]),
-      state.region.originCellX,state.region.originCellY,state.region.terrainCodes,state.region.features.map(f=>[f.cellX,f.cellY,f.deposit?.blocksCell,f.deposit?.cleared,f.deposit?.state])]);
-    if(this.#travelDerived?.signature!==derivedSignature){
-      const accesses=state.cells.flatMap(c=>c.building?buildingAccesses(state,c.building.id):[]);
-      this.#infrastructureBarriers=state.infrastructure?infrastructureBlockedPixels(state.infrastructure,state.world,accesses):new Set();
-      const fires=automaticBraziers(state);
-      this.#infrastructureEquipment=[...(state.infrastructure?.equipment??[]).map(e=>({x:e.x,y:e.y})),...fires.map(e=>e.position)];
-      const occupied=new Set(state.cells.filter(c=>c.footprint||c.building).map(c=>`${c.cellX}:${c.cellY}`));
-      this.#travelDerived={signature:derivedSignature,accesses,occupied,fires,displayRoutes:villageRoadDisplayRoutes(state)};
+  #travelDerived: {
+    signature: string;
+    accesses: ReturnType<typeof buildingAccesses>;
+    occupied: Set<string>;
+    displayRoutes: ReturnType<typeof villageRoadDisplayRoutes>;
+    fires: ReturnType<typeof automaticBraziers>;
+  } | null = null;
+  #updateTravelPaths(
+    state: VillageState,
+    visible: boolean,
+    selectedRouteId: string | null,
+    frame?: FrameTimings,
+  ): void {
+    const derivedSignature = JSON.stringify([
+      state.world.id,
+      state.travelRoutes,
+      state.infrastructure,
+      state.cells
+        .filter((c) => c.footprint || c.building)
+        .map((c) => [
+          c.cellX,
+          c.cellY,
+          c.footprint,
+          c.building && [
+            c.building.id,
+            c.building.type,
+            c.building.visualLayout,
+            c.building.quarterTurns,
+            c.building.accesses,
+          ],
+        ]),
+      state.region.originCellX,
+      state.region.originCellY,
+      state.region.terrainCodes,
+      state.region.features.map((f) => [f.cellX, f.cellY, f.deposit?.blocksCell, f.deposit?.cleared, f.deposit?.state]),
+    ]);
+    if (this.#travelDerived?.signature !== derivedSignature) {
+      const accesses = state.cells.flatMap((c) => (c.building ? buildingAccesses(state, c.building.id) : []));
+      this.#infrastructureBarriers = state.infrastructure
+        ? infrastructureBlockedPixels(state.infrastructure, state.world, accesses)
+        : new Set();
+      const fires = automaticBraziers(state);
+      this.#infrastructureEquipment = [
+        ...(state.infrastructure?.equipment ?? []).map((e) => ({ x: e.x, y: e.y })),
+        ...fires.map((e) => e.position),
+      ];
+      const occupied = new Set(
+        state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`),
+      );
+      this.#travelDerived = {
+        signature: derivedSignature,
+        accesses,
+        occupied,
+        fires,
+        displayRoutes: villageRoadDisplayRoutes(state),
+      };
     }
-    const {accesses,occupied,fires,displayRoutes}=this.#travelDerived;
-    const groundIdentity=this.#store?JSON.stringify([state.world.id,state.world.generationVersion,this.#store.groundRevision,this.#renderer?.groundVersion]):undefined;
-    const groundCellIdentity=(x:number,y:number)=>`${state.world.id}:${state.world.generationVersion}:${this.#renderer?.hasGround(x,y)?(this.#store?.groundRevisionAt(x,y)??0)+1:0}`;
+    const { accesses, occupied, fires, displayRoutes } = this.#travelDerived;
+    const groundIdentity = this.#store
+      ? JSON.stringify([
+          state.world.id,
+          state.world.generationVersion,
+          this.#store.groundRevision,
+          this.#renderer?.groundVersion,
+        ])
+      : undefined;
+    const groundCellIdentity = (x: number, y: number) =>
+      `${state.world.id}:${state.world.generationVersion}:${this.#renderer?.hasGround(x, y) ? (this.#store?.groundRevisionAt(x, y) ?? 0) + 1 : 0}`;
     frame?.mark('roadsPlan');
-    if(state.infrastructure){this.#renderer?.setInfrastructure(state.infrastructure);this.#infrastructureRenderer??=new InfrastructureRenderer(this.#scene,true);
-      this.#infrastructureRenderer.update(state.infrastructure,this.#space!,(x,y)=>this.#renderer?.hasGround(x,y)?this.#store?.ground(x,y)?.height??null:null,false,this.#renderer?.groundVersion??0,undefined,false,accesses,{followTerrain:state.world.generationVersion===3,groundIdentity,groundCellIdentity});this.#infrastructureRenderer.visible(this.#mode!=='world');}
+    if (state.infrastructure) {
+      this.#renderer?.setInfrastructure(state.infrastructure);
+      this.#infrastructureRenderer ??= new InfrastructureRenderer(this.#scene, true);
+      this.#infrastructureRenderer.update(
+        state.infrastructure,
+        this.#space!,
+        (x, y) => (this.#renderer?.hasGround(x, y) ? (this.#store?.ground(x, y)?.height ?? null) : null),
+        false,
+        this.#renderer?.groundVersion ?? 0,
+        undefined,
+        false,
+        accesses,
+        { followTerrain: state.world.generationVersion === 3, groundIdentity, groundCellIdentity },
+      );
+      this.#infrastructureRenderer.visible(this.#mode !== 'world');
+    }
     frame?.mark('roadsManual');
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
-    const campusFires = state.cells.flatMap(site => {
-      if (site.building?.type !== 'university' || site.building.status !== 'completed' || site.building.level !== 3) return [];
+    const campusFires = state.cells.flatMap((site) => {
+      if (site.building?.type !== 'university' || site.building.status !== 'completed' || site.building.level !== 3)
+        return [];
       const centre = this.#universityCentre(site);
-      const turn=(site.building.quarterTurns??0)*Math.PI/2,c=Math.cos(turn),s=Math.sin(turn),z=2.5*TILE_SIZE-(TILE_SIZE/2+.18);
-      return [-1, 1].flatMap(sign => [3.125, 4.375, 5.625].map((x, index) => ({
-        renderKey: `campus:${site.building!.id}:${sign}:${index}`,
-        x: centre.x+c*sign*x+s*z, y: centre.y+.02, z: centre.z-s*sign*x+c*z,
-        seed: (index + (sign > 0 ? 3 : 0) + .5) / 6,
-      })));
+      const turn = ((site.building.quarterTurns ?? 0) * Math.PI) / 2,
+        c = Math.cos(turn),
+        s = Math.sin(turn),
+        z = 2.5 * TILE_SIZE - (TILE_SIZE / 2 + 0.18);
+      return [-1, 1].flatMap((sign) =>
+        [3.125, 4.375, 5.625].map((x, index) => ({
+          renderKey: `campus:${site.building!.id}:${sign}:${index}`,
+          x: centre.x + c * sign * x + s * z,
+          y: centre.y + 0.02,
+          z: centre.z - s * sign * x + c * z,
+          seed: (index + (sign > 0 ? 3 : 0) + 0.5) / 6,
+        })),
+      );
     });
-    this.#villageBraziers.update(displayRoutes, this.#space!, cell => this.#renderer!.hasGround(cell.cellX,cell.cellY)
-      ? this.#store!.ground(cell.cellX,cell.cellY) : null, occupied, campusFires,state.infrastructure,state,fires);
+    this.#villageBraziers.update(
+      displayRoutes,
+      this.#space!,
+      (cell) =>
+        this.#renderer!.hasGround(cell.cellX, cell.cellY) ? this.#store!.ground(cell.cellX, cell.cellY) : null,
+      occupied,
+      campusFires,
+      state.infrastructure,
+      state,
+      fires,
+    );
     frame?.mark('braziers');
     this.#villageRoads ??= new VillageRoads(this.#scene);
-    this.#villageRoads.update(JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion, displayRoutes]),
-      displayRoutes, this.#space!, cell => this.#renderer!.hasGround(cell.cellX, cell.cellY)
-        ? this.#store!.ground(cell.cellX, cell.cellY) : null,state.world.generationVersion===3,groundIdentity,groundCellIdentity);
+    this.#villageRoads.update(
+      JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion, displayRoutes]),
+      displayRoutes,
+      this.#space!,
+      (cell) =>
+        this.#renderer!.hasGround(cell.cellX, cell.cellY) ? this.#store!.ground(cell.cellX, cell.cellY) : null,
+      state.world.generationVersion === 3,
+      groundIdentity,
+      groundCellIdentity,
+    );
     frame?.mark('roadsAutomatic');
     const routes = selectedRouteId
       ? state.travelRoutes.filter((route) => route.id === selectedRouteId)
       : state.travelRoutes;
-    const signature = JSON.stringify([visible, selectedRouteId, this.#space?.version, this.#renderer?.version, routes.map((route) => route.cells)]);
+    const signature = JSON.stringify([
+      visible,
+      selectedRouteId,
+      this.#space?.version,
+      this.#renderer?.version,
+      routes.map((route) => route.cells),
+    ]);
     if (signature === this.#lastTravelSignature) return;
     this.#lastTravelSignature = signature;
     this.#travelLines?.dispose();
@@ -1802,44 +2941,66 @@ export class BabylonVillageScene {
     const indices: number[] = [];
     const contours: Vector3[][] = [];
     const seen = new Set<string>();
-    const inRegion = (cell: TravelCell): boolean => this.#renderer!.rendered(cell.cellX, cell.cellY) && this.#store!.ground(cell.cellX, cell.cellY) !== null;
+    const inRegion = (cell: TravelCell): boolean =>
+      this.#renderer!.rendered(cell.cellX, cell.cellY) && this.#store!.ground(cell.cellX, cell.cellY) !== null;
     for (const route of routes) {
       const points = this.#pathPoints(route.cells);
       for (let step = 1; step < route.cells.length; step++) {
-        const firstCell = route.cells[step - 1]!, secondCell = route.cells[step]!;
+        const firstCell = route.cells[step - 1]!,
+          secondCell = route.cells[step]!;
         if (!inRegion(firstCell) || !inRegion(secondCell)) continue;
         const firstKey = `${firstCell.cellX}:${firstCell.cellY}`;
         const secondKey = `${secondCell.cellX}:${secondCell.cellY}`;
-        const reversed = firstCell.cellX > secondCell.cellX
-          || (firstCell.cellX === secondCell.cellX && firstCell.cellY > secondCell.cellY);
+        const reversed =
+          firstCell.cellX > secondCell.cellX ||
+          (firstCell.cellX === secondCell.cellX && firstCell.cellY > secondCell.cellY);
         const key = reversed ? `${secondKey}|${firstKey}` : `${firstKey}|${secondKey}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const image = this.#space!.project(firstCell), prior = points[step - 1]!;
+        const image = this.#space!.project(firstCell),
+          prior = points[step - 1]!;
         const shift = new Vector3(image.x - prior.x, 0, image.z - prior.z);
         const start = (reversed ? points[step]! : prior).add(shift);
         const end = (reversed ? prior : points[step]!).add(shift);
-        const dx = end.x - start.x, dz = end.z - start.z;
+        const dx = end.x - start.x,
+          dz = end.z - start.z;
         const length = Math.hypot(dx, dz);
         if (length < 0.01 || length > TILE_SIZE * 1.5) continue;
-        const normalX = -dz / length, normalZ = dx / length;
-        const left: Vector3[] = [], right: Vector3[] = [];
+        const normalX = -dz / length,
+          normalZ = dx / length;
+        const left: Vector3[] = [],
+          right: Vector3[] = [];
         const count = 6;
         const base = positions.length / 3;
         for (let sample = 0; sample <= count; sample++) {
           const fraction = sample / count;
-          const x = start.x + dx * fraction, z = start.z + dz * fraction;
+          const x = start.x + dx * fraction,
+            z = start.z + dz * fraction;
           const canonical = this.#space!.inverse(x, z);
           const y = start.y + (end.y - start.y) * fraction - 0.26;
           for (const side of [1, -1]) {
-            const width = 0.32 + (this.#hash(Math.round(canonical.cellX * TILE_SIZE * 10) + side * 113, Math.round(canonical.cellY * TILE_SIZE * 10) + side * 227) - 0.5) * 0.14;
-            const ex=x+normalX*width*side,ez=z+normalZ*width*side,c=this.#space!.inverse(ex,ez);
-            const edge = new Vector3(ex,state.world.generationVersion===3?(this.#store!.ground(c.cellX,c.cellY)?.height??y)+.07:y,ez);
+            const width =
+              0.32 +
+              (this.#hash(
+                Math.round(canonical.cellX * TILE_SIZE * 10) + side * 113,
+                Math.round(canonical.cellY * TILE_SIZE * 10) + side * 227,
+              ) -
+                0.5) *
+                0.14;
+            const ex = x + normalX * width * side,
+              ez = z + normalZ * width * side,
+              c = this.#space!.inverse(ex, ez);
+            const edge = new Vector3(
+              ex,
+              state.world.generationVersion === 3 ? (this.#store!.ground(c.cellX, c.cellY)?.height ?? y) + 0.07 : y,
+              ez,
+            );
             positions.push(edge.x, edge.y, edge.z);
             (side === 1 ? left : right).push(edge.add(new Vector3(0, 0.012, 0)));
           }
           if (sample > 0) {
-            const previous = base + (sample - 1) * 2, current = base + sample * 2;
+            const previous = base + (sample - 1) * 2,
+              current = base + sample * 2;
             indices.push(previous, current, previous + 1, previous + 1, current, current + 1);
           }
         }
@@ -1860,7 +3021,11 @@ export class BabylonVillageScene {
     surface.material = material;
     surface.isPickable = false;
     this.#travelSurface = surface;
-    const outline = MeshBuilder.CreateLineSystem('debug-travel-paths', { lines: contours, useVertexAlpha: true }, this.#scene);
+    const outline = MeshBuilder.CreateLineSystem(
+      'debug-travel-paths',
+      { lines: contours, useVertexAlpha: true },
+      this.#scene,
+    );
     outline.color = Color3.FromHexString('#65583a');
     outline.alpha = 0.62;
     outline.isPickable = false;
@@ -1889,8 +3054,10 @@ export class BabylonVillageScene {
       if (!cell.canBuild) continue;
       const regionX = (cell.cellX - state.region.originCellX + state.world.widthCells) % state.world.widthCells;
       const regionY = (cell.cellY - state.region.originCellY + state.world.heightCells) % state.world.heightCells;
-      const elevation = regionX < state.region.width && regionY < state.region.height
-        ? state.region.elevations[regionY * state.region.width + regionX] ?? 0 : 0;
+      const elevation =
+        regionX < state.region.width && regionY < state.region.height
+          ? (state.region.elevations[regionY * state.region.width + regionX] ?? 0)
+          : 0;
       // The textured terrain is elevated per cell; an absolute plane can be
       // buried below it. Clear the shore lip as well as the grass surface.
       const y = elevation * 0.025 + 0.06;
@@ -1898,9 +3065,15 @@ export class BabylonVillageScene {
       const northEast = new Vector3(cell.x + half, y, cell.z - half);
       const southEast = new Vector3(cell.x + half, y, cell.z + half);
       const southWest = new Vector3(cell.x - half, y, cell.z + half);
-      if(state.region.vertexHeights){
-        for(const [corner,dx,dy] of [[northWest,0,0],[northEast,1,0],[southEast,1,1],[southWest,0,1]] as const)
-          corner.y=state.region.vertexHeights[(regionY+dy)*(state.region.width+1)+regionX+dx]!*TILE_SIZE+.06;
+      if (state.region.vertexHeights) {
+        for (const [corner, dx, dy] of [
+          [northWest, 0, 0],
+          [northEast, 1, 0],
+          [southEast, 1, 1],
+          [southWest, 0, 1],
+        ] as const)
+          corner.y =
+            state.region.vertexHeights[(regionY + dy) * (state.region.width + 1) + regionX + dx]! * TILE_SIZE + 0.06;
       }
       {
         const first = areaPositions.length / 3;
@@ -1930,13 +3103,10 @@ export class BabylonVillageScene {
       area.alphaIndex = 0;
       this.#buildableArea = area;
     }
-    const grid = lines.length > 0
-      ? MeshBuilder.CreateLineSystem(
-          'buildable-grid',
-          { lines, useVertexAlpha: true },
-          this.#scene,
-        )
-      : null;
+    const grid =
+      lines.length > 0
+        ? MeshBuilder.CreateLineSystem('buildable-grid', { lines, useVertexAlpha: true }, this.#scene)
+        : null;
     this.#buildableGrid = grid;
     if (!grid) return;
     grid.color = Color3.FromHexString('#ffffff');
@@ -1950,16 +3120,24 @@ export class BabylonVillageScene {
 
   #sceneryClone(key: string, name: string, create: () => Mesh): Mesh {
     let geometry = this.#sceneryGeometry.get(key);
-    if (!geometry) { geometry = create(); geometry.setEnabled(false); geometry.isPickable = false; this.#sceneryGeometry.set(key, geometry); }
+    if (!geometry) {
+      geometry = create();
+      geometry.setEnabled(false);
+      geometry.isPickable = false;
+      this.#sceneryGeometry.set(key, geometry);
+    }
     const mesh = geometry.clone(name, null, true)!;
-    mesh.setEnabled(true); mesh.isPickable = false; return mesh;
+    mesh.setEnabled(true);
+    mesh.isPickable = false;
+    return mesh;
   }
 
   #createRockCluster(x: number, z: number, scale: number, index: number, sceneryMeshes: Mesh[], baseY = 0): void {
     for (let part = 0; part < (index % 3 === 0 ? 3 : 2); part += 1) {
       const radius = scale * (0.42 - part * 0.07);
       const rock = this.#sceneryClone('ico', 'rock-' + index + '-' + part, () =>
-        MeshBuilder.CreateIcoSphere('scenery-ico', { radius: 1, subdivisions: 1 }, this.#scene));
+        MeshBuilder.CreateIcoSphere('scenery-ico', { radius: 1, subdivisions: 1 }, this.#scene),
+      );
       rock.position.set(x + part * scale * 0.42, baseY + scale * (0.3 - part * 0.03), z + (part % 2) * scale * 0.28);
       rock.scaling.set(radius, radius * 0.72, radius * 0.86);
       rock.rotation.set(part * 0.24, this.#hash(index, part + 251) * Math.PI, part * -0.16);
@@ -1975,10 +3153,36 @@ export class BabylonVillageScene {
   }
 
   #createConstructionBorder(name: string, size: number): Mesh {
-    const outer = size / 2, inner = outer - 0.08;
-    const mesh = new BabylonMesh(name, this.#scene), data = new VertexData();
-    data.positions = [-outer,0,-outer, outer,0,-outer, outer,0,outer, -outer,0,outer,
-      -inner,0,-inner, inner,0,-inner, inner,0,inner, -inner,0,inner];
+    const outer = size / 2,
+      inner = outer - 0.08;
+    const mesh = new BabylonMesh(name, this.#scene),
+      data = new VertexData();
+    data.positions = [
+      -outer,
+      0,
+      -outer,
+      outer,
+      0,
+      -outer,
+      outer,
+      0,
+      outer,
+      -outer,
+      0,
+      outer,
+      -inner,
+      0,
+      -inner,
+      inner,
+      0,
+      -inner,
+      inner,
+      0,
+      inner,
+      -inner,
+      0,
+      inner,
+    ];
     data.indices = [];
     for (let i = 0; i < 4; i++) {
       const next = (i + 1) % 4;
@@ -2017,21 +3221,26 @@ export class BabylonVillageScene {
     return marker;
   }
 
-  #siteGround(site:VillageCell):number {
-    const cells=site.building?this.#state!.cells.filter(c=>c.footprint?.buildingId===site.building!.id):[];
-    return Math.max(...(cells.length?cells:[site]).map(c=>this.#store?.ground(c.cellX,c.cellY)?.height??0));
+  #siteGround(site: VillageCell): number {
+    const cells = site.building ? this.#state!.cells.filter((c) => c.footprint?.buildingId === site.building!.id) : [];
+    return Math.max(...(cells.length ? cells : [site]).map((c) => this.#store?.ground(c.cellX, c.cellY)?.height ?? 0));
   }
-  #refreshBuildingGround():void {
-    if(!this.#state)return;
-    const bases=new Map<string,number>();
-    for(const site of this.#state.cells){const id=site.footprint?.buildingId??site.building?.id??site.id;
-      const h=this.#store?.ground(site.cellX,site.cellY)?.height??0;
-      bases.set(id,Math.max(bases.get(id)??-Infinity,h));
+  #refreshBuildingGround(): void {
+    if (!this.#state) return;
+    const bases = new Map<string, number>();
+    for (const site of this.#state.cells) {
+      const id = site.footprint?.buildingId ?? site.building?.id ?? site.id;
+      const h = this.#store?.ground(site.cellX, site.cellY)?.height ?? 0;
+      bases.set(id, Math.max(bases.get(id) ?? -Infinity, h));
     }
-    for(const [id,cached] of this.#buildingCache){const base=bases.get(id);
-      if(base!==undefined&&cached.mesh.metadata?.groundOffset!==undefined){
-        const y=base+cached.mesh.metadata.groundOffset;
-        if(cached.mesh.position.y!==y){cached.mesh.position.y=y;refreshStaticHierarchy(cached.mesh);}
+    for (const [id, cached] of this.#buildingCache) {
+      const base = bases.get(id);
+      if (base !== undefined && cached.mesh.metadata?.groundOffset !== undefined) {
+        const y = base + cached.mesh.metadata.groundOffset;
+        if (cached.mesh.position.y !== y) {
+          cached.mesh.position.y = y;
+          refreshStaticHierarchy(cached.mesh);
+        }
       }
     }
   }
@@ -2040,11 +3249,16 @@ export class BabylonVillageScene {
     if (site.building?.type === 'stonemason') {
       const body = new BabylonMesh(`stonemason-${site.building.id}`, this.#scene);
       body.position.copyFrom(this.#universityCentre(site));
-      body.rotation.y = (site.building.quarterTurns ?? 0) * Math.PI / 2;
+      body.rotation.y = ((site.building.quarterTurns ?? 0) * Math.PI) / 2;
       this.#timberThatch ??= new TimberThatch(this.#scene);
-      buildCachedProceduralBuildingLod(body,'stonemason-finished',root=>buildStonemason(root,this.#timberThatch!,'finished',false),this.#timberThatch);
-      buildStonemasonFire(body,this.#timberThatch);
-      this.#createContactShadow(body, 4.5, 4.5,body.position.y);
+      buildCachedProceduralBuildingLod(
+        body,
+        'stonemason-finished',
+        (root) => buildStonemason(root, this.#timberThatch!, 'finished', false),
+        this.#timberThatch,
+      );
+      buildStonemasonFire(body, this.#timberThatch);
+      this.#createContactShadow(body, 4.5, 4.5, body.position.y);
       return this.#registerStructure(body);
     }
     if (site.building?.type === 'garden') return this.#createGardenPlot(site, false);
@@ -2057,85 +3271,147 @@ export class BabylonVillageScene {
     const body = new BabylonMesh(`town-hall-${site.id}`, this.#scene);
     body.position.set(site.x, 0.78, site.z);
     this.#timberThatch ??= new TimberThatch(this.#scene);
-    if((site.building?.targetLevel??site.building?.level??1)>=2){
-      body.position.y=0;
-      buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,site.building?.status==='under-construction'?'works':'finished',lod===0?body:null),this.#timberThatch);
-      this.#createContactShadow(body,2.32,4.56);return this.#registerStructure(body);
+    if ((site.building?.targetLevel ?? site.building?.level ?? 1) >= 2) {
+      body.position.y = 0;
+      buildProceduralBuildingLod(
+        body,
+        (root, lod) =>
+          buildTownHallMarket(
+            root,
+            this.#timberThatch!,
+            site.building?.status === 'under-construction' ? 'works' : 'finished',
+            lod === 0 ? body : null,
+          ),
+        this.#timberThatch,
+      );
+      this.#createContactShadow(body, 2.32, 4.56);
+      return this.#registerStructure(body);
     }
-    buildProceduralBuildingLod(body,root=>this.#timberThatch!.build(root),this.#timberThatch);
+    buildProceduralBuildingLod(body, (root) => this.#timberThatch!.build(root), this.#timberThatch);
     this.#createContactShadow(body, 2.75, 2.45);
     return this.#registerStructure(body);
   }
 
   #universityCentre(site: VillageCell): Vector3 {
-    const cells = this.#state!.cells.filter(c => c.footprint?.buildingId === site.building!.id);
-    const dx = cells.map(c => delta(c.cellX, site.cellX, this.#state!.world.widthCells));
-    const dz = cells.map(c => delta(c.cellY, site.cellY, this.#state!.world.heightCells));
-    const heights = cells.map(c => this.#store?.ground(c.cellX, c.cellY)?.height ?? 0);
+    const cells = this.#state!.cells.filter((c) => c.footprint?.buildingId === site.building!.id);
+    const dx = cells.map((c) => delta(c.cellX, site.cellX, this.#state!.world.widthCells));
+    const dz = cells.map((c) => delta(c.cellY, site.cellY, this.#state!.world.heightCells));
+    const heights = cells.map((c) => this.#store?.ground(c.cellX, c.cellY)?.height ?? 0);
     const point = this.#space!.projectFrom(site, this.#villageAnchor);
-    return new Vector3(point.x + (Math.min(...dx) + Math.max(...dx)) * TILE_SIZE / 2,
-      Math.max(0, ...heights), point.z + (Math.min(...dz) + Math.max(...dz)) * TILE_SIZE / 2);
+    return new Vector3(
+      point.x + ((Math.min(...dx) + Math.max(...dx)) * TILE_SIZE) / 2,
+      Math.max(0, ...heights),
+      point.z + ((Math.min(...dz) + Math.max(...dz)) * TILE_SIZE) / 2,
+    );
   }
 
   #createUniversity(site: VillageCell): Mesh {
     const body = new BabylonMesh(`university-${site.building!.id}`, this.#scene);
     body.position.copyFrom(this.#universityCentre(site));
-    body.rotation.y=(site.building?.quarterTurns??0)*Math.PI/2;
-    const level=site.building!.targetLevel??site.building!.level;
-    const phase=site.building!.status==='under-construction'?'works':'finished';
-    const monuments={mathematics:(this.#state!.science?.levels.mathematics??0)>=3,astronomy:(this.#state!.science?.levels.astronomy??0)>=1};
-    this.#loadBuildingAsset(body,`university-${level}-${phase}`,()=>{
-      if(phase==='finished'&&(monuments.mathematics||monuments.astronomy)){
-        this.#timberThatch??=new TimberThatch(this.#scene);
-        buildUniversityMonuments(body,this.#timberThatch,monuments);
+    body.rotation.y = ((site.building?.quarterTurns ?? 0) * Math.PI) / 2;
+    const level = site.building!.targetLevel ?? site.building!.level;
+    const phase = site.building!.status === 'under-construction' ? 'works' : 'finished';
+    const monuments = {
+      mathematics: (this.#state!.science?.levels.mathematics ?? 0) >= 3,
+      astronomy: (this.#state!.science?.levels.astronomy ?? 0) >= 1,
+    };
+    this.#loadBuildingAsset(body, `university-${level}-${phase}`, () => {
+      if (phase === 'finished' && (monuments.mathematics || monuments.astronomy)) {
+        this.#timberThatch ??= new TimberThatch(this.#scene);
+        buildUniversityMonuments(body, this.#timberThatch, monuments);
       }
     });
     return this.#registerStructure(body);
   }
 
-  #loadBuildingAsset(body:Mesh,key:string,ready?:()=>void,attempt=0):void {
-    body.metadata={...body.metadata,assetState:'loading'};
-    void loadBakedBuilding(body,key,true).then(()=>{
-      if(body.isDisposed())return;
-      ready?.();body.metadata={...body.metadata,assetState:'ready'};
-      for(const mesh of body.getChildMeshes()){
-        mesh.metadata={...mesh.metadata,siteId:body.metadata?.siteId};
-        mesh.isPickable=body.isPickable&&mesh.metadata?.buildingAttachment!=='glass';mesh.receiveShadows=true;
-      }
-      refreshStaticHierarchy(body);
-    }).catch(error=>{
-      if(body.isDisposed())return;
-      if(attempt<2){
-        const timer=window.setTimeout(()=>{if(!body.isDisposed())this.#loadBuildingAsset(body,key,ready,attempt+1);},500*(attempt+1));
-        body.onDisposeObservable.addOnce(()=>window.clearTimeout(timer));
-      }else {body.metadata={...body.metadata,assetState:'error'};console.error('Building asset failed',key,error);}
-    });
+  #loadBuildingAsset(body: Mesh, key: string, ready?: () => void, attempt = 0): void {
+    body.metadata = { ...body.metadata, assetState: 'loading' };
+    void loadBakedBuilding(body, key, true)
+      .then(() => {
+        if (body.isDisposed()) return;
+        ready?.();
+        body.metadata = { ...body.metadata, assetState: 'ready' };
+        for (const mesh of body.getChildMeshes()) {
+          mesh.metadata = { ...mesh.metadata, siteId: body.metadata?.siteId };
+          mesh.isPickable = body.isPickable && mesh.metadata?.buildingAttachment !== 'glass';
+          mesh.receiveShadows = true;
+        }
+        refreshStaticHierarchy(body);
+      })
+      .catch((error) => {
+        if (body.isDisposed()) return;
+        if (attempt < 2) {
+          const timer = window.setTimeout(
+            () => {
+              if (!body.isDisposed()) this.#loadBuildingAsset(body, key, ready, attempt + 1);
+            },
+            500 * (attempt + 1),
+          );
+          body.onDisposeObservable.addOnce(() => window.clearTimeout(timer));
+        } else {
+          body.metadata = { ...body.metadata, assetState: 'error' };
+          console.error('Building asset failed', key, error);
+        }
+      });
   }
 
-  #createFactoryBuilding(site:VillageCell,plan:BuildingPlan):Mesh {
+  #createFactoryBuilding(site: VillageCell, plan: BuildingPlan): Mesh {
     this.#factoryGenerationCount++;
-    const body=new BabylonMesh(`factory-${site.building!.id}`,this.#scene);
-    body.position.set(site.x+plan.origin.x,plan.origin.y,site.z+plan.origin.z);
-    body.rotation.y=plan.rotation;
-    if(site.building?.type==='town-hall'&&(site.building.targetLevel??site.building.level)>=2){
-      this.#timberThatch??=new TimberThatch(this.#scene);
-      buildProceduralBuildingLod(body,(root,lod)=>buildTownHallMarket(root,this.#timberThatch!,plan.phase,lod===0?body:null,plan.recipe.entrance.face==='+x'),this.#timberThatch);
-      this.#createContactShadow(body,plan.width+.08,plan.depth+.08,plan.base);
+    const body = new BabylonMesh(`factory-${site.building!.id}`, this.#scene);
+    body.position.set(site.x + plan.origin.x, plan.origin.y, site.z + plan.origin.z);
+    body.rotation.y = plan.rotation;
+    if (site.building?.type === 'town-hall' && (site.building.targetLevel ?? site.building.level) >= 2) {
+      this.#timberThatch ??= new TimberThatch(this.#scene);
+      buildProceduralBuildingLod(
+        body,
+        (root, lod) =>
+          buildTownHallMarket(
+            root,
+            this.#timberThatch!,
+            plan.phase,
+            lod === 0 ? body : null,
+            plan.recipe.entrance.face === '+x',
+          ),
+        this.#timberThatch,
+      );
+      this.#createContactShadow(body, plan.width + 0.08, plan.depth + 0.08, plan.base);
       return this.#registerStructure(body);
     }
-    const key=bakedPlanKey(plan);
-    if(key)this.#loadBuildingAsset(body,key);
-    else {this.#timberThatch??=new TimberThatch(this.#scene);buildProceduralBuildingLod(body,root=>this.#timberThatch!.build(root,plan),this.#timberThatch);}
-    this.#createContactShadow(body,plan.width+.08,plan.depth+.08);
+    const key = bakedPlanKey(plan);
+    if (key) this.#loadBuildingAsset(body, key);
+    else {
+      this.#timberThatch ??= new TimberThatch(this.#scene);
+      buildProceduralBuildingLod(body, (root) => this.#timberThatch!.build(root, plan), this.#timberThatch);
+    }
+    this.#createContactShadow(body, plan.width + 0.08, plan.depth + 0.08);
     return this.#registerStructure(body);
   }
 
   #createSawmill(site: VillageCell): Mesh {
     const level = site.building?.level ?? 1;
-    const foundation = new BabylonMesh(`sawmill-${site.id}`,this.#scene);foundation.position.set(site.x,.09,site.z);
-    buildCachedProceduralBuildingLod(foundation,`sawmill-${level}`,(root,lod)=>{
-      const model=buildSawmill(this.#scene, { stone: this.#stoneMaterial, lightTimber: this.#lightTimberMaterial, packedEarth: this.#packedEarthMaterial, sawdust: this.#sawdustMaterial, darkTimber: this.#darkTimberMaterial, timber: this.#timberMaterial, roof: this.#roofMaterial, trunk: this.#trunkMaterial }, `${site.id}-lod${lod}`, level,0,0,lod);
-      model.parent=root;model.position.y=0;
+    const foundation = new BabylonMesh(`sawmill-${site.id}`, this.#scene);
+    foundation.position.set(site.x, 0.09, site.z);
+    buildCachedProceduralBuildingLod(foundation, `sawmill-${level}`, (root, lod) => {
+      const model = buildSawmill(
+        this.#scene,
+        {
+          stone: this.#stoneMaterial,
+          lightTimber: this.#lightTimberMaterial,
+          packedEarth: this.#packedEarthMaterial,
+          sawdust: this.#sawdustMaterial,
+          darkTimber: this.#darkTimberMaterial,
+          timber: this.#timberMaterial,
+          roof: this.#roofMaterial,
+          trunk: this.#trunkMaterial,
+        },
+        `${site.id}-lod${lod}`,
+        level,
+        0,
+        0,
+        lod,
+      );
+      model.parent = root;
+      model.position.y = 0;
     });
     this.#createContactShadow(foundation, level >= 2 ? 3.5 : 2.65, 2.45);
     return this.#registerStructure(foundation);
@@ -2146,12 +3422,20 @@ export class BabylonVillageScene {
     const body = MeshBuilder.CreateBox(`dwelling-${site.id}`, { width: 1.7, depth: 1.55, height: 1.12 }, this.#scene);
     body.position.set(site.x, 0.66, site.z);
     body.material = level >= 2 ? this.#timberMaterial : this.#lightTimberMaterial;
-    const roof = MeshBuilder.CreateCylinder(`dwelling-roof-${site.id}`, { height: 0.72, diameterTop: 0, diameterBottom: 2.25, tessellation: 4 }, this.#scene);
+    const roof = MeshBuilder.CreateCylinder(
+      `dwelling-roof-${site.id}`,
+      { height: 0.72, diameterTop: 0, diameterBottom: 2.25, tessellation: 4 },
+      this.#scene,
+    );
     roof.parent = body;
     roof.position.y = 0.85;
     roof.rotation.y = Math.PI / 4;
     roof.material = this.#roofMaterial;
-    const door = MeshBuilder.CreateBox(`dwelling-door-${site.id}`, { width: 0.42, height: 0.68, depth: 0.06 }, this.#scene);
+    const door = MeshBuilder.CreateBox(
+      `dwelling-door-${site.id}`,
+      { width: 0.42, height: 0.68, depth: 0.06 },
+      this.#scene,
+    );
     door.parent = body;
     door.position.set(0, -0.21, -0.8);
     door.material = this.#darkTimberMaterial;
@@ -2160,11 +3444,21 @@ export class BabylonVillageScene {
   }
 
   #createGardenPlot(site: VillageCell, reserved: boolean): Mesh {
-    this.#gardenPlots ??= new GardenPlots(this.#scene, {soil: this.#soilMaterial,
-      tiles: this.#gardenTileMaterials, marker: this.#windowMaterial, stem: this.#leafDarkMaterial});
+    this.#gardenPlots ??= new GardenPlots(this.#scene, {
+      soil: this.#soilMaterial,
+      tiles: this.#gardenTileMaterials,
+      marker: this.#windowMaterial,
+      stem: this.#leafDarkMaterial,
+    });
     const ground = this.#store?.ground(site.cellX, site.cellY)?.height ?? 0;
-    const plot = this.#gardenPlots.create(site.id, site.x, site.z, ground,
-      reserved ? 0 : this.#gardenStages.get(site.id) ?? 1, !reserved && this.#fullGardenSites.has(site.id));
+    const plot = this.#gardenPlots.create(
+      site.id,
+      site.x,
+      site.z,
+      ground,
+      reserved ? 0 : (this.#gardenStages.get(site.id) ?? 1),
+      !reserved && this.#fullGardenSites.has(site.id),
+    );
     return this.#registerStructure(plot);
   }
 
@@ -2178,26 +3472,41 @@ export class BabylonVillageScene {
     const isGarden = building?.type === 'garden';
     const height = building?.type === 'sawmill' ? 0.95 + targetLevel * 0.78 : isGarden ? 0.34 : 1.25;
     const width = isGarden ? 2.32 : 1.82;
-    const construction = MeshBuilder.CreateBox(`construction-${building?.id}`, { width, depth: width, height }, this.#scene);
+    const construction = MeshBuilder.CreateBox(
+      `construction-${building?.id}`,
+      { width, depth: width, height },
+      this.#scene,
+    );
     construction.position.set(site.x, height / 2 + 0.11, site.z);
     construction.material = this.#constructionMaterial;
     if (isGarden) {
-      const surface = MeshBuilder.CreateGround(`garden-construction-surface-${site.id}`,
-        { width: TILE_SIZE * 0.97, height: TILE_SIZE * 0.97 }, this.#scene);
+      const surface = MeshBuilder.CreateGround(
+        `garden-construction-surface-${site.id}`,
+        { width: TILE_SIZE * 0.97, height: TILE_SIZE * 0.97 },
+        this.#scene,
+      );
       surface.parent = construction;
       surface.position.y = 0.16 - construction.position.y;
       surface.material = this.#gardenTileMaterials[0]!;
     }
     for (const x of [-width / 2, width / 2]) {
       for (const z of [-width / 2, width / 2]) {
-        const post = MeshBuilder.CreateBox(`scaffold-${site.id}-${x}-${z}`, { width: 0.09, depth: 0.09, height: Math.max(0.42, height) }, this.#scene);
+        const post = MeshBuilder.CreateBox(
+          `scaffold-${site.id}-${x}-${z}`,
+          { width: 0.09, depth: 0.09, height: Math.max(0.42, height) },
+          this.#scene,
+        );
         post.parent = construction;
         post.position.set(x * 0.9, 0, z * 0.9);
         post.material = this.#scaffoldMaterial;
       }
     }
     for (const y of [-height * 0.25, height * 0.25]) {
-      const rail = MeshBuilder.CreateBox(`scaffold-rail-${site.id}-${y}`, { width: width * 0.96, depth: 0.07, height: 0.08 }, this.#scene);
+      const rail = MeshBuilder.CreateBox(
+        `scaffold-rail-${site.id}-${y}`,
+        { width: width * 0.96, depth: 0.07, height: 0.08 },
+        this.#scene,
+      );
       rail.parent = construction;
       rail.position.set(0, y, -width * 0.47);
       rail.material = this.#scaffoldMaterial;
@@ -2213,9 +3522,13 @@ export class BabylonVillageScene {
     return root;
   }
 
-  #createContactShadow(parent: Mesh, width: number, depth: number, ground=0): void {
+  #createContactShadow(parent: Mesh, width: number, depth: number, ground = 0): void {
     if (!this.#contactShadowSource) {
-      this.#contactShadowSource = MeshBuilder.CreateDisc('contact-shadow-source', { radius: 0.5, tessellation: 16 }, this.#scene);
+      this.#contactShadowSource = MeshBuilder.CreateDisc(
+        'contact-shadow-source',
+        { radius: 0.5, tessellation: 16 },
+        this.#scene,
+      );
       this.#contactShadowSource.material = this.#contactShadowMaterial;
       this.#contactShadowSource.isVisible = false;
       this.#contactShadowSource.isPickable = false;
@@ -2223,7 +3536,7 @@ export class BabylonVillageScene {
     const shadow = this.#contactShadowSource.createInstance(`contact-shadow-${parent.name}`);
     shadow.parent = parent;
     shadow.rotation.x = Math.PI / 2;
-    shadow.position.set(0.1, ground-parent.position.y + 0.035, 0.12);
+    shadow.position.set(0.1, ground - parent.position.y + 0.035, 0.12);
     shadow.scaling.set(width, depth, 1);
     shadow.isPickable = false;
   }
@@ -2231,7 +3544,12 @@ export class BabylonVillageScene {
   #applySelection(): void {
     const selected = this.#selectedSiteId ? this.#selectableMeshes.get(this.#selectedSiteId) : undefined;
     this.#selectionMarker.isVisible = Boolean(selected);
-    if (selected) this.#selectionMarker.position.set(selected.position.x, selected.position.y-(selected.metadata?.groundOffset??selected.position.y)+0.135, selected.position.z);
+    if (selected)
+      this.#selectionMarker.position.set(
+        selected.position.x,
+        selected.position.y - (selected.metadata?.groundOffset ?? selected.position.y) + 0.135,
+        selected.position.z,
+      );
   }
 
   #wrapCamera(): void {
@@ -2239,53 +3557,91 @@ export class BabylonVillageScene {
     const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
     const priorVillage = this.#space.project(this.#villageAnchor);
     const shift = this.#space.rebase(target, this.#store.world.chunkSize);
-    if(shift)this.#terraformRenderer?.update(this.#terraformVisual,this.#space);
+    if (shift) this.#terraformRenderer?.update(this.#terraformVisual, this.#space);
     if (!shift) return;
     const nextVillage = this.#space.project(this.#villageAnchor);
     const villageShift = { x: priorVillage.x - nextVillage.x, z: priorVillage.z - nextVillage.z };
-    this.#camera.target.x -= shift.x; this.#camera.target.z -= shift.z;
-    this.#camera.position.x -= shift.x; this.#camera.position.z -= shift.z;
+    this.#camera.target.x -= shift.x;
+    this.#camera.target.z -= shift.z;
+    this.#camera.position.x -= shift.x;
+    this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
-    this.#inhabitantCamera.shift(shift.x,shift.z);
+    this.#inhabitantCamera.shift(shift.x, shift.z);
     this.#resourceOverlayAt = 0;
-    for (const mesh of [...this.#villageMeshes, ...this.#previewMeshes,
-      this.#selectionMarker, this.#constructionGhost, this.#buildableGrid, this.#buildableArea].filter((m): m is Mesh => m !== null)) {
-      mesh.position.x -= villageShift.x; mesh.position.z -= villageShift.z; mesh.computeWorldMatrix(true);
+    for (const mesh of [
+      ...this.#villageMeshes,
+      ...this.#previewMeshes,
+      this.#selectionMarker,
+      this.#constructionGhost,
+      this.#buildableGrid,
+      this.#buildableArea,
+    ].filter((m): m is Mesh => m !== null)) {
+      mesh.position.x -= villageShift.x;
+      mesh.position.z -= villageShift.z;
+      mesh.computeWorldMatrix(true);
       refreshStaticHierarchy(mesh);
     }
-    for (const cell of this.#e2eCells) { cell.x -= villageShift.x; cell.z -= villageShift.z; }
-    for (const feature of this.#e2eFeatures) { feature.x -= shift.x; feature.z -= shift.z; }
+    for (const cell of this.#e2eCells) {
+      cell.x -= villageShift.x;
+      cell.z -= villageShift.z;
+    }
+    for (const feature of this.#e2eFeatures) {
+      feature.x -= shift.x;
+      feature.z -= shift.z;
+    }
     this.#renderer?.shift(shift.x, shift.z);
     this.#regionalOverview.shift(shift.x, shift.z);
-    if (this.#state && this.#initialLoad.ready) this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
+    if (this.#state && this.#initialLoad.ready)
+      this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
   }
 
   readonly #testCamera = (event: Event): void => {
     if (!this.#space) return;
-    const target = (event as CustomEvent<TravelCell & { radius?: number; alpha?: number; beta?: number }>).detail, point = this.#space.project(target);
+    const target = (event as CustomEvent<TravelCell & { radius?: number; alpha?: number; beta?: number }>).detail,
+      point = this.#space.project(target);
     this.#camera.inertialPanningX = this.#camera.inertialPanningY = 0;
     this.#camera.inertialAlphaOffset = this.#camera.inertialBetaOffset = this.#camera.inertialRadiusOffset = 0;
     this.#camera.target.copyFromFloats(point.x, 0.45, point.z);
-    if (target.radius !== undefined) this.#camera.radius = Math.max(8, Math.min(this.#camera.upperRadiusLimit ?? 680, target.radius));
+    if (target.radius !== undefined)
+      this.#camera.radius = Math.max(8, Math.min(this.#camera.upperRadiusLimit ?? 680, target.radius));
     if (target.alpha !== undefined) this.#camera.alpha = target.alpha;
     if (target.beta !== undefined) this.#camera.beta = Math.max(0.05, Math.min(1.35, target.beta));
   };
   readonly #testMetricsReset = (): void => {
-    this.#frameMs.length = 0; this.#streamMs.length = 0;
+    this.#frameMs.length = 0;
+    this.#streamMs.length = 0;
     if (this.#renderer) {
-      this.#renderer.integrationMs.length = 0; this.#renderer.activeIntegrationMs.length = 0;
+      this.#renderer.integrationMs.length = 0;
+      this.#renderer.activeIntegrationMs.length = 0;
       this.#renderer.slowestUnit = { kind: '', ms: 0 };
     }
   };
 
-  public acceptDeposit(deposit: StoneDeposit): void { this.#store?.deposit(deposit); }
+  public acceptDeposit(deposit: StoneDeposit): void {
+    this.#store?.deposit(deposit);
+  }
   public setCosmologyDebug(enabled: boolean): void {
     this.#cosmologyDebug = enabled && this.#globalModelAvailable();
-    if (!enabled) { this.#pendingSolarProfile = false; this.#torusOverview?.restoreNavigation(); this.#cosmologyPhase = null; this.#cosmologyPeriod = COSMOLOGY.periodMs; }
+    if (!enabled) {
+      this.#pendingSolarProfile = false;
+      this.#torusOverview?.restoreNavigation();
+      this.#cosmologyPhase = null;
+      this.#cosmologyPeriod = COSMOLOGY.periodMs;
+    }
   }
-  public setCosmologyServerOffset(offsetMs: number): void { this.#cosmologyServerOffsetMs = offsetMs; }
+  public setCosmologyServerOffset(offsetMs: number): void {
+    this.#cosmologyServerOffsetMs = offsetMs;
+  }
   public setVillageSolarPreview(fraction: number | null): void {
-    if (fraction !== null && (this.#worldMode !== 'exploration' || this.#mode !== 'village' || this.#transition.active || this.#arrival || this.#flyover)) return;
+    if (
+      fraction !== null &&
+      (this.#worldMode !== 'exploration' ||
+        this.#mode !== 'village' ||
+        this.#transition.active ||
+        this.#arrival ||
+        this.#flyover)
+    )
+      return;
     this.#villageSolarPreview = fraction === null ? null : Math.max(0, Math.min(1, fraction)) * TAU;
     this.#cosmologyNextAt = 0;
   }
@@ -2293,180 +3649,300 @@ export class BabylonVillageScene {
     if (!this.#space) return undefined;
     const serverMs = Date.now() + this.#cosmologyServerOffsetMs;
     const phase = this.#villageSolarPreview ?? cyclePhase(serverMs);
-    const u = this.#villageAnchor.cellX / this.#space.width * TAU, v = this.#villageAnchor.cellY / this.#space.height * TAU + Math.PI;
+    const u = (this.#villageAnchor.cellX / this.#space.width) * TAU,
+      v = (this.#villageAnchor.cellY / this.#space.height) * TAU + Math.PI;
     if (!this.#clock || this.#clock.u !== u || this.#clock.v !== v) this.#clock = new SolarClock(u, v);
-    return { fraction: (phase / TAU) % 1, label: this.#clock.label(serverMs, phase), preview: this.#villageSolarPreview !== null };
+    return {
+      fraction: (phase / TAU) % 1,
+      label: this.#clock.label(serverMs, phase),
+      preview: this.#villageSolarPreview !== null,
+    };
   }
   public setCosmologyPhase(fraction: number | null): void {
     this.#cosmologyPhase = fraction === null ? null : Math.max(0, Math.min(1, fraction)) * TAU;
     this.#cosmologyNextAt = 0;
   }
   public setCosmologyPeriod(seconds: number): void {
-    this.#cosmologyPeriod = Math.max(30, Math.min(28800, seconds)) * 1000; this.#cosmologyNextAt = 0;
+    this.#cosmologyPeriod = Math.max(30, Math.min(28800, seconds)) * 1000;
+    this.#cosmologyNextAt = 0;
   }
   public previewSolarProfile(): void {
     this.showWorld();
-    if (this.#mode === 'world' && !this.#transition.active && this.#torusOverview) this.#torusOverview.showSolarProfile();
+    if (this.#mode === 'world' && !this.#transition.active && this.#torusOverview)
+      this.#torusOverview.showSolarProfile();
     else this.#pendingSolarProfile = true;
   }
-  public getCosmologyDiagnostics() { return this.#cosmologyMetrics; }
+  public getCosmologyDiagnostics() {
+    return this.#cosmologyMetrics;
+  }
   #updateCosmology(serverMs: number, now: number): void {
     if (!this.#state || !this.#space) return;
-    const preview = this.#mode === 'village' && this.#worldMode === 'exploration' && !this.#arrival && !this.#flyover && !this.#transition.active ? this.#villageSolarPreview : null;
+    const preview =
+      this.#mode === 'village' &&
+      this.#worldMode === 'exploration' &&
+      !this.#arrival &&
+      !this.#flyover &&
+      !this.#transition.active
+        ? this.#villageSolarPreview
+        : null;
     const phase = preview ?? this.#cosmologyPhase ?? cyclePhase(serverMs, combinedPeriod(this.#cosmologyPeriod));
-    if (this.#mode === 'world') this.#torusOverview?.updateCosmology(phase,
-      (serverMs - COSMOLOGY.epochMs) / this.#cosmologyPeriod, now, this.#cosmologyDebug);
+    if (this.#mode === 'world')
+      this.#torusOverview?.updateCosmology(
+        phase,
+        (serverMs - COSMOLOGY.epochMs) / this.#cosmologyPeriod,
+        now,
+        this.#cosmologyDebug,
+      );
     if (now < this.#cosmologyNextAt) return;
     this.#cosmologyNextAt = now + 200;
-    this.#villageNight = illumination(this.#villageAnchor.cellX / this.#space.width * TAU,
-      this.#villageAnchor.cellY / this.#space.height * TAU + Math.PI, phase).direct <= 0;
+    this.#villageNight =
+      illumination(
+        (this.#villageAnchor.cellX / this.#space.width) * TAU,
+        (this.#villageAnchor.cellY / this.#space.height) * TAU + Math.PI,
+        phase,
+      ).direct <= 0;
     const started = performance.now();
     if (this.#mode !== 'world') this.#regionalOverview.updateLighting(phase, now);
-    const target = this.#mode === 'world' ? this.#worldTarget ?? this.#villageAnchor
-      : this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
-    const u = target.cellX / this.#space.width * TAU, v = target.cellY / this.#space.height * TAU + Math.PI;
+    const target =
+      this.#mode === 'world'
+        ? (this.#worldTarget ?? this.#villageAnchor)
+        : this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
+    const u = (target.cellX / this.#space.width) * TAU,
+      v = (target.cellY / this.#space.height) * TAU + Math.PI;
     const light = illumination(u, v, phase);
-    this.#solarLight.direction.copyFromFloats(-light.localDirection[0], -light.localDirection[1], -light.localDirection[2]);
-    this.#baseSolar = light.direct > 0 ? .85 : 0;
+    this.#solarLight.direction.copyFromFloats(
+      -light.localDirection[0],
+      -light.localDirection[1],
+      -light.localDirection[2],
+    );
+    this.#baseSolar = light.direct > 0 ? 0.85 : 0;
     this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
-    const weather = weatherAt(target.cellX / this.#space.width, target.cellY / this.#space.height, serverMs, this.#weather?.seed ?? 0);
+    const weather = weatherAt(
+      target.cellX / this.#space.width,
+      target.cellY / this.#space.height,
+      serverMs,
+      this.#weather?.seed ?? 0,
+    );
     this.#rainIntensity = weather.rain;
-    this.#baseAmbient = .34 + light.direct * .24 * (1 - weather.cloud * .4);
+    this.#baseAmbient = 0.34 + light.direct * 0.24 * (1 - weather.cloud * 0.4);
     if (import.meta.env.DEV) this.#canvas.dataset.weather = JSON.stringify(weather);
-    this.#scene.clearColor = Color4.FromHexString(light.direct > .01 ? '#8ea0a0ff' : '#263744ff');
+    this.#scene.clearColor = Color4.FromHexString(light.direct > 0.01 ? '#8ea0a0ff' : '#263744ff');
     this.#scene.fogColor.copyFromFloats(this.#scene.clearColor.r, this.#scene.clearColor.g, this.#scene.clearColor.b);
     const phases = cyclePhases(phase);
-    this.#cosmologyMetrics = { phase, torusPhase: phases.torus, sunPhase: phases.sun, rotationPeriodMs: this.#cosmologyPeriod,
-      u, v, direct: light.direct, occluded: light.occluded,
-      paused: this.#cosmologyPhase !== null, updateMs: performance.now() - started,
-      ...(this.#torusOverview?.metrics() ?? { worldRenderMs: 0, worldMeshes: 0, shadowBytes: 0 }) };
+    this.#cosmologyMetrics = {
+      phase,
+      torusPhase: phases.torus,
+      sunPhase: phases.sun,
+      rotationPeriodMs: this.#cosmologyPeriod,
+      u,
+      v,
+      direct: light.direct,
+      occluded: light.occluded,
+      paused: this.#cosmologyPhase !== null,
+      updateMs: performance.now() - started,
+      ...(this.#torusOverview?.metrics() ?? { worldRenderMs: 0, worldMeshes: 0, shadowBytes: 0 }),
+    };
     if (import.meta.env.DEV) this.#canvas.dataset.cosmology = JSON.stringify(this.#cosmologyMetrics);
   }
   public skipArrival(finish = false): void {
-    if (finish && this.#arrival) { this.#applyLanding(VILLAGE_LANDING); this.#aimTownHall(1); }
-    if(this.#flyover?.landing && this.#arrival) this.#endFlyover();
-    this.#arrivalPending = false; this.#arrival = null; this.#presentationLight = 1;
+    if (finish && this.#arrival) {
+      this.#applyLanding(VILLAGE_LANDING);
+      this.#aimTownHall(1);
+    }
+    if (this.#flyover?.landing && this.#arrival) this.#endFlyover();
+    this.#arrivalPending = false;
+    this.#arrival = null;
+    this.#presentationLight = 1;
     this.onArrival(null);
   }
   #applyLanding(pose: LandingPose): void {
-    this.#camera.radius = pose.radius; this.#camera.beta = pose.beta; this.#camera.fov = pose.fov;
+    this.#camera.radius = pose.radius;
+    this.#camera.beta = pose.beta;
+    this.#camera.fov = pose.fov;
     this.#camera.upperBetaLimit = Math.max(1.05, pose.beta);
     this.#camera.inertialRadiusOffset = this.#camera.inertialAlphaOffset = this.#camera.inertialBetaOffset = 0;
     this.#lastCameraRadius = pose.radius;
   }
   public zoomDuringArrival(deltaY: number): void {
     this.skipArrival();
-    this.#camera.radius = Math.max(8, Math.min(680, this.#camera.radius * Math.exp(Math.sign(deltaY) * .2)));
+    this.#camera.radius = Math.max(8, Math.min(680, this.#camera.radius * Math.exp(Math.sign(deltaY) * 0.2)));
   }
   #updateArrival(now: number): void {
     if (this.#arrivalPending && !this.#transition.active && this.#state && this.#space) {
       this.#arrivalPending = false;
       const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
-      if (Math.hypot(delta(target.cellX, this.#villageAnchor.cellX, this.#space.width), delta(target.cellY, this.#villageAnchor.cellY, this.#space.height)) <= 24) {
-        const u = this.#villageAnchor.cellX / this.#space.width * TAU, v = this.#villageAnchor.cellY / this.#space.height * TAU + Math.PI;
+      if (
+        Math.hypot(
+          delta(target.cellX, this.#villageAnchor.cellX, this.#space.width),
+          delta(target.cellY, this.#villageAnchor.cellY, this.#space.height),
+        ) <= 24
+      ) {
+        const u = (this.#villageAnchor.cellX / this.#space.width) * TAU,
+          v = (this.#villageAnchor.cellY / this.#space.height) * TAU + Math.PI;
         if (!this.#clock || this.#clock.u !== u || this.#clock.v !== v) this.#clock = new SolarClock(u, v);
-        this.#arrival = { started: now, name: this.#state.village.name,
+        this.#arrival = {
+          started: now,
+          name: this.#state.village.name,
           fromTarget: target,
           from: { radius: this.#camera.radius, beta: this.#camera.beta, fov: this.#camera.fov },
-          time: this.#clock.label(Date.now() + this.#cosmologyServerOffsetMs,
-            this.#cosmologyPhase ?? cyclePhase(Date.now() + this.#cosmologyServerOffsetMs, combinedPeriod(this.#cosmologyPeriod))) };
+          time: this.#clock.label(
+            Date.now() + this.#cosmologyServerOffsetMs,
+            this.#cosmologyPhase ??
+              cyclePhase(Date.now() + this.#cosmologyServerOffsetMs, combinedPeriod(this.#cosmologyPeriod)),
+          ),
+        };
       }
     }
     if (!this.#arrival) return;
-    const elapsed = now - this.#arrival.started, reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const elapsed = now - this.#arrival.started,
+      reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const frame = arrivalFrame(elapsed, reduced);
     this.#applyLanding(landingPose(this.#arrival.from, elapsed, reduced));
-    this.#aimTownHall(reduced ? 1 : Math.min(1,elapsed/5200));
+    this.#aimTownHall(reduced ? 1 : Math.min(1, elapsed / 5200));
     this.#presentationLight = frame.light;
-    if (frame.done) { this.skipArrival(); return; }
+    if (frame.done) {
+      this.skipArrival();
+      return;
+    }
     if (now >= this.#arrivalNextAt) {
       this.#arrivalNextAt = now + 32;
-      this.onArrival({ name: this.#arrival.name, time: this.#arrival.time, veil: frame.veil, black: frame.black, title: frame.title });
+      this.onArrival({
+        name: this.#arrival.name,
+        time: this.#arrival.time,
+        veil: frame.veil,
+        black: frame.black,
+        title: frame.title,
+      });
     }
   }
-  public retryTerrain(): void { this.#overviewRetryAt = 0; this.#store?.revalidate(); }
+  public retryTerrain(): void {
+    this.#overviewRetryAt = 0;
+    this.#store?.revalidate();
+  }
   #aimTownHall(progress: number): void {
-    if(!this.#space || !this.#state || !this.#arrival) return;
-    const hall=townHallFocus(this.#state), to=this.#space.project(hall);
-    const from=this.#space.projectFrom(this.#arrival.fromTarget,hall), t=progress*progress*(3-2*progress);
-    const height=this.#store?.ground(hall.cellX,hall.cellY)?.height ?? 0;
-    this.#camera.target.set(from.x+(to.x-from.x)*t,.45+(height+.65-.45)*t,from.z+(to.z-from.z)*t);
+    if (!this.#space || !this.#state || !this.#arrival) return;
+    const hall = townHallFocus(this.#state),
+      to = this.#space.project(hall);
+    const from = this.#space.projectFrom(this.#arrival.fromTarget, hall),
+      t = progress * progress * (3 - 2 * progress);
+    const height = this.#store?.ground(hall.cellX, hall.cellY)?.height ?? 0;
+    this.#camera.target.set(
+      from.x + (to.x - from.x) * t,
+      0.45 + (height + 0.65 - 0.45) * t,
+      from.z + (to.z - from.z) * t,
+    );
   }
   public startFlyover(): void {
-    this.#inhabitantCamera.stop();this.selectRepresentative(null);
-    if(this.#flyover || !this.#state || this.#transition.active) return;
+    this.#inhabitantCamera.stop();
+    this.selectRepresentative(null);
+    if (this.#flyover || !this.#state || this.#transition.active) return;
     this.skipArrival();
     if (!this.#globalModelAvailable()) {
-      this.showRegion(); this.#flyover = { requested: performance.now(), started: performance.now(), landing: false, local: true };
-      this.#camera.detachControl(); return;
+      this.showRegion();
+      this.#flyover = { requested: performance.now(), started: performance.now(), landing: false, local: true };
+      this.#camera.detachControl();
+      return;
     }
-    this.#flyover={requested:performance.now(),started:null,landing:false};
-    this.#camera.detachControl(); this.#torusOverview?.camera.detachControl();
-    if(this.#mode!=='world') this.showWorld();
+    this.#flyover = { requested: performance.now(), started: null, landing: false };
+    this.#camera.detachControl();
+    this.#torusOverview?.camera.detachControl();
+    if (this.#mode !== 'world') this.showWorld();
   }
   #endFlyover(): void {
-    this.#flyover=null; this.#torusOverview?.finishFlyover();
-    this.#requestedWorld=false;
+    this.#flyover = null;
+    this.#torusOverview?.finishFlyover();
+    this.#requestedWorld = false;
     delete this.#canvas.dataset.flyover;
-    if(!this.#transition.active) (this.#mode==='world'?this.#torusOverview?.camera:this.#camera)?.attachControl(this.#canvas,true);
+    if (!this.#transition.active)
+      (this.#mode === 'world' ? this.#torusOverview?.camera : this.#camera)?.attachControl(this.#canvas, true);
   }
   #updateFlyover(now: number): void {
-    const shot=this.#flyover; if(!shot || !this.#state) return;
+    const shot = this.#flyover;
+    if (!shot || !this.#state) return;
     if (shot.local && !shot.landing) {
-      const regional = (this.#state.science?.knowledgeCoefficient ?? 0) >= .15 && (this.#state.science?.levels.geography ?? 0) >= 1;
-      const duration = regional ? 5000 : 1200, progress = Math.min(1, (now - shot.requested) / duration);
+      const regional =
+        (this.#state.science?.knowledgeCoefficient ?? 0) >= 0.15 && (this.#state.science?.levels.geography ?? 0) >= 1;
+      const duration = regional ? 5000 : 1200,
+        progress = Math.min(1, (now - shot.requested) / duration);
       if (regional && this.#space) {
-        const focus = this.#space.project(townHallFocus(this.#state)), glide = (1 - progress) ** 2;
-        this.#camera.target.set(focus.x + glide * 18, .45, focus.z - glide * 12);
+        const focus = this.#space.project(townHallFocus(this.#state)),
+          glide = (1 - progress) ** 2;
+        this.#camera.target.set(focus.x + glide * 18, 0.45, focus.z - glide * 12);
         this.#camera.radius = 170 + glide * 80;
       }
       if (progress >= 1) {
-        shot.landing = true; this.showVillage();
+        shot.landing = true;
+        this.showVillage();
       }
       return;
     }
-    if(import.meta.env.DEV) this.#canvas.dataset.flyover=JSON.stringify({stage:shot.landing?'landing':shot.started===null?'waiting':now-shot.started<12000?'orbit':'descent',elapsed:shot.started===null?0:now-shot.started});
-    if(this.#transition.failed || now-shot.requested>45000) { this.#endFlyover(); return; }
-    if(shot.landing) {
-      if(!this.#transition.active && !this.#arrival && !this.#arrivalPending) this.#endFlyover();
+    if (import.meta.env.DEV)
+      this.#canvas.dataset.flyover = JSON.stringify({
+        stage: shot.landing
+          ? 'landing'
+          : shot.started === null
+            ? 'waiting'
+            : now - shot.started < 12000
+              ? 'orbit'
+              : 'descent',
+        elapsed: shot.started === null ? 0 : now - shot.started,
+      });
+    if (this.#transition.failed || now - shot.requested > 45000) {
+      this.#endFlyover();
       return;
     }
-    if(this.#mode!=='world' || !this.#torusOverview || this.#transition.active) return;
+    if (shot.landing) {
+      if (!this.#transition.active && !this.#arrival && !this.#arrivalPending) this.#endFlyover();
+      return;
+    }
+    if (this.#mode !== 'world' || !this.#torusOverview || this.#transition.active) return;
     shot.started ??= now;
-    if(this.#torusOverview.flyover(now-shot.started,townHallFocus(this.#state),this.#returnAlpha)) {
-      shot.landing=true; this.#torusOverview.finishFlyover(); this.showVillage();
+    if (this.#torusOverview.flyover(now - shot.started, townHallFocus(this.#state), this.#returnAlpha)) {
+      shot.landing = true;
+      this.#torusOverview.finishFlyover();
+      this.showVillage();
     }
   }
 
   #worldTarget: TravelCell | null = null;
   #setMode(mode: TerrainViewMode): void {
     if (this.#mode === mode) return;
-    this.#cameraFocus=null;
+    this.#cameraFocus = null;
     this.#pointerDown = null;
     if (mode === 'village' && this.#mode !== 'village') this.#arrivalPending = true;
     else if (mode !== 'village') this.skipArrival();
     this.#mode = mode;
     if (mode === 'world') {
-      this.#store?.setPaused(true); this.#renderer?.setVisible(false);
+      this.#store?.setPaused(true);
+      this.#renderer?.setVisible(false);
       this.#requestedWorld = this.#worldFromWheel = false;
     }
     this.#buildableGrid?.setEnabled(mode === 'village');
     this.#buildableArea?.setEnabled(mode === 'village');
     for (const mesh of this.#previewMeshes) mesh.setEnabled(mode === 'village');
-    this.#infrastructureRenderer?.visible(mode!=='world');this.#infrastructurePreview?.visible(mode==='village');if(mode!=='village')this.#infrastructureGhost?.setEnabled(false);
+    this.#infrastructureRenderer?.visible(mode !== 'world');
+    this.#infrastructurePreview?.visible(mode === 'village');
+    if (mode !== 'village') this.#infrastructureGhost?.setEnabled(false);
     this.#regionalVillages.visible(mode !== 'world');
-    this.#onCameraMoved(); this.#onViewChanged(mode);
+    this.#onCameraMoved();
+    this.#onViewChanged(mode);
   }
   #updateViewMode(): void {
     if (!this.#space || this.#flyover || this.#transition.active || this.#arrival || this.#arrivalPending) return;
     const radius = this.#camera.radius;
     const limit = this.#camera.upperRadiusLimit ?? 680;
     const regionStart = Math.min(110, Math.max(20, limit * 0.42));
-    const next: TerrainViewMode = radius >= limit * 0.85 ? 'world'
-      : radius >= (this.#mode === 'region' ? regionStart * 0.86 : regionStart) ? 'region' : 'village';
+    const next: TerrainViewMode =
+      radius >= limit * 0.85
+        ? 'world'
+        : radius >= (this.#mode === 'region' ? regionStart * 0.86 : regionStart)
+          ? 'region'
+          : 'village';
     if (next === 'world') {
       this.#setMode('region');
-      this.#worldFromWheel = true; this.showWorld(); return;
+      this.#worldFromWheel = true;
+      this.showWorld();
+      return;
     }
     if (this.#worldFromWheel) this.#requestedWorld = this.#worldFromWheel = false;
     this.#setMode(next);
@@ -2481,228 +3957,454 @@ export class BabylonVillageScene {
     this.#transition.start(performance.now(), swap);
   }
   public showWorld(): void {
-    this.#inhabitantCamera.stop();this.selectRepresentative(null);
-    if(this.#flyover?.landing) return;
-    if (this.#transition.active) { this.#pendingView = 'world'; return; }
+    this.#inhabitantCamera.stop();
+    this.selectRepresentative(null);
+    if (this.#flyover?.landing) return;
+    if (this.#transition.active) {
+      this.#pendingView = 'world';
+      return;
+    }
     if (!this.#space || this.#mode === 'world' || performance.now() < this.#projectionRetryAt) return;
     this.#requestedWorld = true;
     if (!this.#torusOverview) return;
-    this.#returnRadius = this.#camera.radius; this.#returnAlpha = this.#camera.alpha; this.#returnBeta = this.#camera.beta;
+    this.#returnRadius = this.#camera.radius;
+    this.#returnAlpha = this.#camera.alpha;
+    this.#returnBeta = this.#camera.beta;
     this.#worldTarget = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
     this.#changeProjection(() => {
-      this.#returnRadius = this.#camera.radius; this.#returnAlpha = this.#camera.alpha; this.#returnBeta = this.#camera.beta;
+      this.#returnRadius = this.#camera.radius;
+      this.#returnAlpha = this.#camera.alpha;
+      this.#returnBeta = this.#camera.beta;
       this.#worldTarget = this.#space!.inverse(this.#camera.target.x, this.#camera.target.z);
-      this.#torusOverview!.enter(this.#worldTarget!, this.#returnAlpha, this.#returnRadius, this.#returnBeta, this.#camera.fov);
+      this.#torusOverview!.enter(
+        this.#worldTarget!,
+        this.#returnAlpha,
+        this.#returnRadius,
+        this.#returnBeta,
+        this.#camera.fov,
+      );
       this.#torusOverview!.mark(this.#villageAnchor, this.#worldTarget!);
-      if(this.#flyover && this.#state) this.#torusOverview!.flyover(0,townHallFocus(this.#state),this.#returnAlpha);
-      if (this.#pendingSolarProfile) { this.#torusOverview!.showSolarProfile(); this.#pendingSolarProfile = false; }
-      if (this.#pendingCatView) { this.#torusOverview!.showCatEyes(); this.#pendingCatView = false; }
+      if (this.#flyover && this.#state) this.#torusOverview!.flyover(0, townHallFocus(this.#state), this.#returnAlpha);
+      if (this.#pendingSolarProfile) {
+        this.#torusOverview!.showSolarProfile();
+        this.#pendingSolarProfile = false;
+      }
+      if (this.#pendingCatView) {
+        this.#torusOverview!.showCatEyes();
+        this.#pendingCatView = false;
+      }
       this.#setMode('world');
     });
   }
   #returnToPlane(village: boolean): void {
     this.#torusOverview?.restoreNavigation();
     if (!village && this.#torusOverview) this.#returnAlpha = this.#torusOverview.planarHeading();
-    const target = village ? this.#villageAnchor : this.#torusOverview?.observed() ?? this.#worldTarget;
+    const target = village ? this.#villageAnchor : (this.#torusOverview?.observed() ?? this.#worldTarget);
     this.#worldTarget = target;
     if (target && this.#space) {
-      const p = this.#space.project(target); this.#camera.target.copyFromFloats(p.x, .45, p.z);
+      const p = this.#space.project(target);
+      this.#camera.target.copyFromFloats(p.x, 0.45, p.z);
     }
-    this.#camera.alpha = this.#returnAlpha; this.#camera.beta = this.#returnBeta;
-    this.#camera.radius = village ? 90 : Math.max(120, Math.min(this.#returnRadius, (this.#camera.upperRadiusLimit ?? 680) * .8));
+    this.#camera.alpha = this.#returnAlpha;
+    this.#camera.beta = this.#returnBeta;
+    this.#camera.radius = village
+      ? 90
+      : Math.max(120, Math.min(this.#returnRadius, (this.#camera.upperRadiusLimit ?? 680) * 0.8));
     this.#setMode(village ? 'village' : 'region');
   }
   public showRegion(): void {
-    this.#inhabitantCamera.stop();this.selectRepresentative(null);
-    if(this.#flyover) return;
-    if (this.#transition.active) { this.#pendingView = 'region'; return; }
+    this.#inhabitantCamera.stop();
+    this.selectRepresentative(null);
+    if (this.#flyover) return;
+    if (this.#transition.active) {
+      this.#pendingView = 'region';
+      return;
+    }
     this.#requestedWorld = false;
     this.#worldFromWheel = false;
     if (this.#mode === 'world') this.#changeProjection(() => this.#returnToPlane(false));
-    else { this.#camera.radius = Math.min(260, (this.#camera.upperRadiusLimit ?? 680) * .65); this.#setMode('region'); }
+    else {
+      this.#camera.radius = Math.min(260, (this.#camera.upperRadiusLimit ?? 680) * 0.65);
+      this.#setMode('region');
+    }
   }
   public showVillage(): void {
-    this.#cameraFocus=null;
-    this.#inhabitantCamera.stop();this.selectRepresentative(null);
-    if(this.#flyover && !this.#flyover.landing) return;
-    if (this.#transition.active) { this.#pendingView = 'village'; return; }
+    this.#cameraFocus = null;
+    this.#inhabitantCamera.stop();
+    this.selectRepresentative(null);
+    if (this.#flyover && !this.#flyover.landing) return;
+    if (this.#transition.active) {
+      this.#pendingView = 'village';
+      return;
+    }
     this.#requestedWorld = false;
     this.#worldFromWheel = false;
-    if (this.#mode === 'world') { this.#changeProjection(() => this.#returnToPlane(true)); return; }
+    if (this.#mode === 'world') {
+      this.#changeProjection(() => this.#returnToPlane(true));
+      return;
+    }
     if (this.#space) {
-      const p = this.#space.project(this.#villageAnchor); this.#camera.target.copyFromFloats(p.x, .45, p.z);
+      const p = this.#space.project(this.#villageAnchor);
+      this.#camera.target.copyFromFloats(p.x, 0.45, p.z);
     }
     this.#camera.radius = this.#mode === 'village' ? VILLAGE_LANDING.radius : Math.max(90, this.#camera.radius);
     this.#setMode('village');
   }
   public rotateWorld(horizontal: number, vertical: number): void {
-    if(this.#flyover) return;
+    if (this.#flyover) return;
     if (this.#mode === 'world' && this.#torusOverview) {
       this.#torusOverview.camera.alpha += horizontal * 0.13;
-      this.#torusOverview.camera.beta = Math.max(0.08, Math.min(Math.PI - 0.08, this.#torusOverview.camera.beta + vertical * 0.13));
+      this.#torusOverview.camera.beta = Math.max(
+        0.08,
+        Math.min(Math.PI - 0.08, this.#torusOverview.camera.beta + vertical * 0.13),
+      );
     }
   }
-  public viewCenter():Cell|null {return this.#space?.inverse(this.#camera.target.x,this.#camera.target.z)??null;}
-  public naturalFeatures(){return this.#store?.naturalFeatures()??this.#state?.region.features??[];}
-  public focusCell(cell:Cell):void {
-    const from=this.viewCenter();if(!from||this.#mode!=='village'||this.#arrival||this.#flyover||this.#transition.active)return;
-    this.cancelGesture();this.#inhabitantCamera.stop();this.selectRepresentative(null);
-    this.#camera.inertialPanningX=0;this.#camera.inertialPanningY=0;this.#camera.inertialRadiusOffset=0;this.#camera.inertialAlphaOffset=0;this.#camera.inertialBetaOffset=0;
-    this.#cameraFocus={from,to:cell,at:performance.now(),duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:650,radius:this.#camera.radius,height:this.#camera.target.y};
+  public viewCenter(): Cell | null {
+    return this.#space?.inverse(this.#camera.target.x, this.#camera.target.z) ?? null;
   }
-  #updateCameraFocus(now:number):void {
-    const focus=this.#cameraFocus;if(!focus||!this.#space)return;
-    const progress=focus.duration?(now-focus.at)/focus.duration:1;
-    const target=cameraFocusAt(focus.from,focus.to,this.#space.width,this.#space.height,progress),p=this.#space.project(target);
-    const height=Math.max(.45,(this.#store?.ground(focus.to.cellX,focus.to.cellY)?.height??0)+.35);
-    this.#camera.target.set(p.x,focus.height+(height-focus.height)*target.eased,p.z);
-    this.#camera.radius=focus.radius+(42-focus.radius)*target.eased;
-    if(progress>=1)this.#cameraFocus=null;
+  public naturalFeatures() {
+    return this.#store?.naturalFeatures() ?? this.#state?.region.features ?? [];
+  }
+  public focusCell(cell: Cell): void {
+    const from = this.viewCenter();
+    if (!from || this.#mode !== 'village' || this.#arrival || this.#flyover || this.#transition.active) return;
+    this.cancelGesture();
+    this.#inhabitantCamera.stop();
+    this.selectRepresentative(null);
+    this.#camera.inertialPanningX = 0;
+    this.#camera.inertialPanningY = 0;
+    this.#camera.inertialRadiusOffset = 0;
+    this.#camera.inertialAlphaOffset = 0;
+    this.#camera.inertialBetaOffset = 0;
+    this.#cameraFocus = {
+      from,
+      to: cell,
+      at: performance.now(),
+      duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 650,
+      radius: this.#camera.radius,
+      height: this.#camera.target.y,
+    };
+  }
+  #updateCameraFocus(now: number): void {
+    const focus = this.#cameraFocus;
+    if (!focus || !this.#space) return;
+    const progress = focus.duration ? (now - focus.at) / focus.duration : 1;
+    const target = cameraFocusAt(focus.from, focus.to, this.#space.width, this.#space.height, progress),
+      p = this.#space.project(target);
+    const height = Math.max(0.45, (this.#store?.ground(focus.to.cellX, focus.to.cellY)?.height ?? 0) + 0.35);
+    this.#camera.target.set(p.x, focus.height + (height - focus.height) * target.eased, p.z);
+    this.#camera.radius = focus.radius + (42 - focus.radius) * target.eased;
+    if (progress >= 1) this.#cameraFocus = null;
   }
   public selectWorldCenter(): void {
-    if(this.#flyover) return;
+    if (this.#flyover) return;
     if (this.#mode !== 'world' || !this.#torusOverview) return;
     const chosen = this.#torusOverview.select(this.#engine.getRenderWidth() / 2, this.#engine.getRenderHeight() / 2);
-    if (chosen) { this.#worldTarget = chosen; this.#torusOverview.focus(chosen); this.#torusOverview.mark(this.#villageAnchor, chosen); }
+    if (chosen) {
+      this.#worldTarget = chosen;
+      this.#torusOverview.focus(chosen);
+      this.#torusOverview.mark(this.#villageAnchor, chosen);
+    }
   }
   #loadOverview(now: number): void {
     if (!this.#state || !this.#space || !this.#overviewAbort) return;
-    const world = this.#state.world, signal = this.#overviewAbort.signal;
+    const world = this.#state.world,
+      signal = this.#overviewAbort.signal;
     const store = this.#store;
     if (!store) return;
     const center = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
     const explicitOverview = this.#requestedWorld || this.#mode === 'region';
-    const idleVillage = this.#mode === 'village' && now - this.#lastViewChangeAt >= 3_000
-      && store.pending === 0 && this.#renderer?.queued === 0;
-    if (!this.#overview && !this.#overviewLoading && now >= this.#overviewRetryAt && store.pending < 2
-      && (explicitOverview || idleVillage && this.#renderer?.rendered(center.cellX, center.cellY))) {
+    const idleVillage =
+      this.#mode === 'village' &&
+      now - this.#lastViewChangeAt >= 3_000 &&
+      store.pending === 0 &&
+      this.#renderer?.queued === 0;
+    if (
+      !this.#overview &&
+      !this.#overviewLoading &&
+      now >= this.#overviewRetryAt &&
+      store.pending < 2 &&
+      (explicitOverview || (idleVillage && this.#renderer?.rendered(center.cellX, center.cellY)))
+    ) {
       this.#overviewLoading = true;
-      void this.transport.getTerrainOverview(world.slug, signal).then((data) => {
-        if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
-        const view = this.#torusOverview ?? new TorusOverview(this.#engine, data, this.#villageAnchor,
-          this.#space!.inverse(this.#camera.target.x, this.#camera.target.z), () => this.#weather);
-        view.setGeography(data); view.setGlobalModel(this.#globalModelAvailable());
-        this.#overview = data; this.#regionalOverview.set(data); this.#torusOverview = view;
-        this.#regionalVillages.invalidateGround();
-        if (this.#requestedWorld) this.showWorld();
-
-      }).catch(() => { this.#overviewRetryAt = performance.now() + 5_000; })
-        .finally(() => { if (!signal.aborted) this.#overviewLoading = false; });
+      void this.transport
+        .getTerrainOverview(world.slug, signal)
+        .then((data) => {
+          if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion)
+            return;
+          const view =
+            this.#torusOverview ??
+            new TorusOverview(
+              this.#engine,
+              data,
+              this.#villageAnchor,
+              this.#space!.inverse(this.#camera.target.x, this.#camera.target.z),
+              () => this.#weather,
+            );
+          view.setGeography(data);
+          view.setGlobalModel(this.#globalModelAvailable());
+          this.#overview = data;
+          this.#regionalOverview.set(data);
+          this.#torusOverview = view;
+          this.#regionalVillages.invalidateGround();
+          if (this.#requestedWorld) this.showWorld();
+        })
+        .catch(() => {
+          this.#overviewRetryAt = performance.now() + 5_000;
+        })
+        .finally(() => {
+          if (!signal.aborted) this.#overviewLoading = false;
+        });
     }
     const villageCenter = `${Math.floor(center.cellX / 128)},${Math.floor(center.cellY / 128)}`;
-    if (this.#overview && !this.#villagesLoading && !this.#vegetationLoading && (now >= this.#villagesDue || villageCenter !== this.#villagesCenter)
-      && store.pending < 2 && (explicitOverview || idleVillage)) {
-      this.#villagesLoading = true; this.#villagesCenter = villageCenter;
-      void this.transport.getTerrainVillages(world.slug, center.cellX, center.cellY, signal).then(data => {
-        if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
-        this.#regionalVillages.set(data); this.#villagesDue = performance.now() + 30_000;
-      }).catch(() => { this.#villagesDue = performance.now() + 5_000; })
-        .finally(() => { if (!signal.aborted) this.#villagesLoading = false; });
+    if (
+      this.#overview &&
+      !this.#villagesLoading &&
+      !this.#vegetationLoading &&
+      (now >= this.#villagesDue || villageCenter !== this.#villagesCenter) &&
+      store.pending < 2 &&
+      (explicitOverview || idleVillage)
+    ) {
+      this.#villagesLoading = true;
+      this.#villagesCenter = villageCenter;
+      void this.transport
+        .getTerrainVillages(world.slug, center.cellX, center.cellY, signal)
+        .then((data) => {
+          if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion)
+            return;
+          this.#regionalVillages.set(data);
+          this.#villagesDue = performance.now() + 30_000;
+        })
+        .catch(() => {
+          this.#villagesDue = performance.now() + 5_000;
+        })
+        .finally(() => {
+          if (!signal.aborted) this.#villagesLoading = false;
+        });
     }
-    if (this.#overview && !this.#villagesLoading && !this.#vegetationLoading && now >= this.#vegetationDue && store.pending < 2
-      && (explicitOverview || idleVillage || this.#mode === 'world')) {
+    if (
+      this.#overview &&
+      !this.#villagesLoading &&
+      !this.#vegetationLoading &&
+      now >= this.#vegetationDue &&
+      store.pending < 2 &&
+      (explicitOverview || idleVillage || this.#mode === 'world')
+    ) {
       this.#vegetationLoading = true;
-      void this.transport.getTerrainVegetationOverview(world.slug, signal).then((data) => {
-        if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion) return;
-        this.#regionalOverview.set(this.#overview!, data);
-        this.#torusOverview?.setVegetation(data);
-        this.#vegetationDue = performance.now() + Math.max(1_000, data.maxAgeMs - data.ageMs);
-      }).catch(() => { this.#vegetationDue = performance.now() + 5_000; })
-        .finally(() => { if (!signal.aborted) this.#vegetationLoading = false; });
+      void this.transport
+        .getTerrainVegetationOverview(world.slug, signal)
+        .then((data) => {
+          if (signal.aborted || data.world.id !== world.id || data.world.generationVersion !== world.generationVersion)
+            return;
+          this.#regionalOverview.set(this.#overview!, data);
+          this.#torusOverview?.setVegetation(data);
+          this.#vegetationDue = performance.now() + Math.max(1_000, data.maxAgeMs - data.ageMs);
+        })
+        .catch(() => {
+          this.#vegetationDue = performance.now() + 5_000;
+        })
+        .finally(() => {
+          if (!signal.aborted) this.#vegetationLoading = false;
+        });
     }
   }
 
   #streamTerrain(now: number, frame?: FrameTimings): void {
     if (!this.#space || !this.#store || !this.#renderer || !this.#state) return;
     const started = performance.now();
-    const detailPaused = (this.#mode !== 'village' || this.#arrival !== null) && (this.#camera.radius >= 160 || this.#requestedWorld);
-    if (this.#store.paused && !detailPaused) { this.#viewSignature = ''; this.#demandAt = 0; }
+    const detailPaused =
+      (this.#mode !== 'village' || this.#arrival !== null) && (this.#camera.radius >= 160 || this.#requestedWorld);
+    if (this.#store.paused && !detailPaused) {
+      this.#viewSignature = '';
+      this.#demandAt = 0;
+    }
     this.#store.setPaused(detailPaused);
     this.#renderer.setVisible(!detailPaused || !this.#overview);
     if (!detailPaused && now >= this.#demandAt) {
-      const signature = [this.#space.version, this.#camera.alpha, this.#camera.beta, this.#camera.radius,
-        this.#camera.target.x, this.#camera.target.z, this.#engine.getRenderWidth(), this.#engine.getRenderHeight()].join(':');
+      const signature = [
+        this.#space.version,
+        this.#camera.alpha,
+        this.#camera.beta,
+        this.#camera.radius,
+        this.#camera.target.x,
+        this.#camera.target.z,
+        this.#engine.getRenderWidth(),
+        this.#engine.getRenderHeight(),
+      ].join(':');
       const moved = signature !== this.#viewSignature;
       if (moved) {
-      this.#viewSignature = signature;
-      this.#lastViewChangeAt = now;
-      const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
-      const planes = Frustum.GetPlanes(this.#camera.getViewMatrix(true).multiply(this.#camera.getProjectionMatrix(true)));
-      const size = this.#store.world.chunkSize;
-      const intersects = (x: number, y: number, span: number) => {
-        const anchor = { cellX: Math.floor(x / size) * size, cellY: Math.floor(y / size) * size };
-        const p = this.#space!.projectFrom({ cellX: x, cellY: y }, anchor), margin = RENDER_UNIT_CELLS * TILE_SIZE;
-        return new BoundingBox(new Vector3(p.x - TILE_SIZE / 2 - margin, -1, p.z - TILE_SIZE / 2 - margin),
-          new Vector3(p.x + (span - 0.5) * TILE_SIZE + margin, 8, p.z + (span - 0.5) * TILE_SIZE + margin)).isInFrustum(planes);
-      };
-      const demand = terrainDemand(target, this.#space.width, this.#space.height, size, (x, y) => intersects(x * size, y * size, size));
-      this.#terrainDemand = demand; this.#terrainIntersects = intersects; this.#store.demandChunks(demand, !this.#initialLoad.ready);
+        this.#viewSignature = signature;
+        this.#lastViewChangeAt = now;
+        const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
+        const planes = Frustum.GetPlanes(
+          this.#camera.getViewMatrix(true).multiply(this.#camera.getProjectionMatrix(true)),
+        );
+        const size = this.#store.world.chunkSize;
+        const intersects = (x: number, y: number, span: number) => {
+          const anchor = { cellX: Math.floor(x / size) * size, cellY: Math.floor(y / size) * size };
+          const p = this.#space!.projectFrom({ cellX: x, cellY: y }, anchor),
+            margin = RENDER_UNIT_CELLS * TILE_SIZE;
+          return new BoundingBox(
+            new Vector3(p.x - TILE_SIZE / 2 - margin, -1, p.z - TILE_SIZE / 2 - margin),
+            new Vector3(p.x + (span - 0.5) * TILE_SIZE + margin, 8, p.z + (span - 0.5) * TILE_SIZE + margin),
+          ).isInFrustum(planes);
+        };
+        const demand = terrainDemand(target, this.#space.width, this.#space.height, size, (x, y) =>
+          intersects(x * size, y * size, size),
+        );
+        this.#terrainDemand = demand;
+        this.#terrainIntersects = intersects;
+        this.#store.demandChunks(demand, !this.#initialLoad.ready);
       }
-      if (moved || this.#terrainDemand.some(d => d.visible && this.#store!.changed.has(d.key)))
+      if (moved || this.#terrainDemand.some((d) => d.visible && this.#store!.changed.has(d.key)))
         this.#renderer.demand(this.#terrainDemand, this.#terrainIntersects);
       this.#demandAt = now + TERRAIN_STREAMING.coalesceMs;
     }
-    if (document.visibilityState === 'visible') this.#store.tick(
-      this.#overviewLoading || this.#vegetationLoading || this.#villagesLoading || this.#requestedWorld && !this.#overview ? 1 : TERRAIN_STREAMING.concurrentBatches, !this.#initialLoad.ready);
+    if (document.visibilityState === 'visible')
+      this.#store.tick(
+        this.#overviewLoading ||
+          this.#vegetationLoading ||
+          this.#villagesLoading ||
+          (this.#requestedWorld && !this.#overview)
+          ? 1
+          : TERRAIN_STREAMING.concurrentBatches,
+        !this.#initialLoad.ready,
+      );
     frame?.mark('demand');
     if (!detailPaused) this.#renderer.tick(this.#initialLoad.ready ? TERRAIN_STREAMING.admissionMs : 8);
     frame?.mark('integration');
-    const loading: TerrainStatus = this.#requestedWorld && !this.#torusOverview
-      ? this.#overviewRetryAt > now ? 'retry' : 'loading'
-      : detailPaused ? !this.#overview ? this.#overviewRetryAt > now ? 'retry' : 'loading' : null
-      : this.#store.degraded ? 'retry' : this.#renderer.missingVisible ? 'loading' : null;
-    if (loading !== this.#terrainLoading) { this.#terrainLoading = loading; this.#onTerrainLoading(loading); }
-    if (this.#projectionVersion !== this.#renderer.version || this.#projectionGroundRevision !== this.#store.groundRevision) {
-      if (!this.#initialLoad.ready) { this.#initialRoutesReady = false; return; }
+    const loading: TerrainStatus =
+      this.#requestedWorld && !this.#torusOverview
+        ? this.#overviewRetryAt > now
+          ? 'retry'
+          : 'loading'
+        : detailPaused
+          ? !this.#overview
+            ? this.#overviewRetryAt > now
+              ? 'retry'
+              : 'loading'
+            : null
+          : this.#store.degraded
+            ? 'retry'
+            : this.#renderer.missingVisible
+              ? 'loading'
+              : null;
+    if (loading !== this.#terrainLoading) {
+      this.#terrainLoading = loading;
+      this.#onTerrainLoading(loading);
+    }
+    if (
+      this.#projectionVersion !== this.#renderer.version ||
+      this.#projectionGroundRevision !== this.#store.groundRevision
+    ) {
+      if (!this.#initialLoad.ready) {
+        this.#initialRoutesReady = false;
+        return;
+      }
       this.#projectionVersion = this.#renderer.version;
       this.#projectionGroundRevision = this.#store.groundRevision;
       this.#refreshBuildingGround();
       this.#workers.reproject();
       // Streaming and origin changes can arrive after the pointer stopped moving.
-      if(this.#ghostRequest)this.updateConstructionGhost(...this.#ghostRequest);
-      if(this.#areaRequest){this.#lastPreviewSignature='';this.updateAreaSelection(...this.#areaRequest);}
+      if (this.#ghostRequest) this.updateConstructionGhost(...this.#ghostRequest);
+      if (this.#areaRequest) {
+        this.#lastPreviewSignature = '';
+        this.updateAreaSelection(...this.#areaRequest);
+      }
       frame?.mark('projection');
       this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute, frame);
       frame?.mark('roadsDebug');
     }
     frame?.mark('projection');
-    this.#streamMs.push(performance.now() - started); if (this.#streamMs.length > 3600) this.#streamMs.shift();
+    this.#streamMs.push(performance.now() - started);
+    if (this.#streamMs.length > 3600) this.#streamMs.shift();
     if (now < this.#metricsAt) return;
     this.#metricsAt = now + 1000;
-    if(import.meta.env.MODE==='e2e')this.#canvas.dataset.terrainPresentation=JSON.stringify({
-      buildings:this.#state.cells.filter(c=>c.building).map(c=>{const root=this.#buildingCache.get(c.building!.id)?.mesh;return {id:c.building!.id,type:c.building!.type,base:this.#siteGround(c),y:root?.position.y,offset:root?.metadata?.groundOffset,mesh:root?.uniqueId};}),
-      roads:this.#scene.meshes.filter(m=>m.name.startsWith('village-road-')).map(m=>({name:m.name,vertices:m.getTotalVertices()})),
-      grass:this.#renderer.meshes().filter(m=>m.name==='rc1-ground-unit').some(m=>m.material?.name==='streamed-ground'&&Boolean(m.getVerticesData('uv'))),
-      anonymousMasses:Boolean(this.#scene.getMeshByName('regional-forest-rock-masses')),
-    });
+    if (import.meta.env.MODE === 'e2e')
+      this.#canvas.dataset.terrainPresentation = JSON.stringify({
+        buildings: this.#state.cells
+          .filter((c) => c.building)
+          .map((c) => {
+            const root = this.#buildingCache.get(c.building!.id)?.mesh;
+            return {
+              id: c.building!.id,
+              type: c.building!.type,
+              base: this.#siteGround(c),
+              y: root?.position.y,
+              offset: root?.metadata?.groundOffset,
+              mesh: root?.uniqueId,
+            };
+          }),
+        roads: this.#scene.meshes
+          .filter((m) => m.name.startsWith('village-road-'))
+          .map((m) => ({ name: m.name, vertices: m.getTotalVertices() })),
+        grass: this.#renderer
+          .meshes()
+          .filter((m) => m.name === 'rc1-ground-unit')
+          .some((m) => m.material?.name === 'streamed-ground' && Boolean(m.getVerticesData('uv'))),
+        anonymousMasses: Boolean(this.#scene.getMeshByName('regional-forest-rock-masses')),
+      });
 
     if (navigator.webdriver) {
       const viewport = this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight());
-      this.#canvas.dataset.woodlandScreens = JSON.stringify(this.#renderer.meshes().flatMap(mesh => {
-        const meta = mesh.metadata as { woodlandId?: string; cellX: number; cellY: number } | null;
-        if (!meta?.woodlandId || !this.#renderer!.rendered(meta.cellX, meta.cellY)) return [];
-        const ground = this.#store!.ground(meta.cellX, meta.cellY);
-        if (!ground) return [];
-        const world = this.#space!.project(meta);
-        const point = Vector3.Project(new Vector3(world.x, ground.height + 1.5, world.z), Matrix.Identity(), this.#scene.getTransformMatrix(), viewport);
-        return [{ id: meta.woodlandId, x: point.x / this.#engine.getRenderWidth(), y: point.y / this.#engine.getRenderHeight() }];
-      }));
+      this.#canvas.dataset.woodlandScreens = JSON.stringify(
+        this.#renderer.meshes().flatMap((mesh) => {
+          const meta = mesh.metadata as { woodlandId?: string; cellX: number; cellY: number } | null;
+          if (!meta?.woodlandId || !this.#renderer!.rendered(meta.cellX, meta.cellY)) return [];
+          const ground = this.#store!.ground(meta.cellX, meta.cellY);
+          if (!ground) return [];
+          const world = this.#space!.project(meta);
+          const point = Vector3.Project(
+            new Vector3(world.x, ground.height + 1.5, world.z),
+            Matrix.Identity(),
+            this.#scene.getTransformMatrix(),
+            viewport,
+          );
+          return [
+            {
+              id: meta.woodlandId,
+              x: point.x / this.#engine.getRenderWidth(),
+              y: point.y / this.#engine.getRenderHeight(),
+            },
+          ];
+        }),
+      );
     }
-    this.#canvas.dataset.terrainStreaming = JSON.stringify({ origin: this.#space.origin, version: this.#space.version,
-      resident: this.#renderer.residents.size, graphicPeak: this.#renderer.peakGraphicChunks, cached: this.#store.entries.size, queued: this.#renderer.queued,
-      network: this.#store.pending, focusGround: this.#renderer.rendered(this.#space.inverse(this.#camera.target.x, this.#camera.target.z).cellX, this.#space.inverse(this.#camera.target.x, this.#camera.target.z).cellY), loaded: [...this.#renderer.residents.keys()],
-      integrationP95: percentile(this.#renderer.integrationMs), integrationMax: Math.max(0, ...this.#renderer.integrationMs),
+    this.#canvas.dataset.terrainStreaming = JSON.stringify({
+      origin: this.#space.origin,
+      version: this.#space.version,
+      resident: this.#renderer.residents.size,
+      graphicPeak: this.#renderer.peakGraphicChunks,
+      cached: this.#store.entries.size,
+      queued: this.#renderer.queued,
+      network: this.#store.pending,
+      focusGround: this.#renderer.rendered(
+        this.#space.inverse(this.#camera.target.x, this.#camera.target.z).cellX,
+        this.#space.inverse(this.#camera.target.x, this.#camera.target.z).cellY,
+      ),
+      loaded: [...this.#renderer.residents.keys()],
+      integrationP95: percentile(this.#renderer.integrationMs),
+      integrationMax: Math.max(0, ...this.#renderer.integrationMs),
       integrationActiveP95: percentile(this.#renderer.activeIntegrationMs),
       slowestUnit: this.#renderer.slowestUnit,
-      streamP95: percentile(this.#streamMs), streamMax: Math.max(0, ...this.#streamMs),
-      meshes: this.#scene.meshes.length, geometries: this.#scene.geometries.length, materials: this.#scene.materials.length,
+      streamP95: percentile(this.#streamMs),
+      streamMax: Math.max(0, ...this.#streamMs),
+      meshes: this.#scene.meshes.length,
+      geometries: this.#scene.geometries.length,
+      materials: this.#scene.materials.length,
       drawCalls: this.#sceneStats?.drawCallsCounter.current ?? null,
       activeMeshesMs: this.#sceneStats?.activeMeshesEvaluationTimeCounter.current ?? null,
       nativeRenderMs: this.#sceneStats?.renderTimeCounter.current ?? null,
-      mode: this.#mode, overview: Boolean(this.#overview), fogStart: this.#scene.fogStart, fogEnd: this.#scene.fogEnd,
-      detailPaused, worldRequested: this.#requestedWorld,
+      mode: this.#mode,
+      overview: Boolean(this.#overview),
+      fogStart: this.#scene.fogStart,
+      fogEnd: this.#scene.fogEnd,
+      detailPaused,
+      worldRequested: this.#requestedWorld,
       reducedQuality: this.#reducedQuality,
-      frameP95: percentile(this.#frameMs) });
+      frameP95: percentile(this.#frameMs),
+    });
   }
 
   #updateCameraProfile(): void {
@@ -2727,10 +4429,7 @@ export class BabylonVillageScene {
       const previous = profileAt(this.#lastCameraRadius);
       const lowerBeta = this.#camera.lowerBetaLimit ?? 0.05;
       const upperBeta = this.#camera.upperBetaLimit ?? 0.95;
-      this.#camera.beta = Math.max(
-        lowerBeta,
-        Math.min(upperBeta, this.#camera.beta + current.beta - previous.beta),
-      );
+      this.#camera.beta = Math.max(lowerBeta, Math.min(upperBeta, this.#camera.beta + current.beta - previous.beta));
     }
     this.#camera.fov = current.fov;
     this.#lastCameraRadius = this.#camera.radius;
@@ -2738,15 +4437,24 @@ export class BabylonVillageScene {
 
   public dispose(): void {
     this.#terraformRenderer?.dispose();
-    cancelAnimationFrame(this.#infrastructureHoverFrame);this.#infrastructureHoverFrame=0;this.#infrastructureHoverEvent=null;
-    this.#infrastructureRenderer?.dispose();this.#infrastructurePreview?.dispose();this.#infrastructureGhost?.dispose(false,false);
-    for(const job of this.#buildingJobs)job.steps.return(job.parent);
-    this.#buildingJobs.length=0;
-    window.removeEventListener('keydown',this.#flyoverKey,true);
+    cancelAnimationFrame(this.#infrastructureHoverFrame);
+    this.#infrastructureHoverFrame = 0;
+    this.#infrastructureHoverEvent = null;
+    this.#infrastructureRenderer?.dispose();
+    this.#infrastructurePreview?.dispose();
+    this.#infrastructureGhost?.dispose(false, false);
+    for (const job of this.#buildingJobs) job.steps.return(job.parent);
+    this.#buildingJobs.length = 0;
+    window.removeEventListener('keydown', this.#flyoverKey, true);
     this.#villageBraziers?.dispose();
     this.#villageRoads?.dispose();
-    this.#rain.dispose(); this.#weather?.dispose();
-    this.#overviewAbort?.abort(); this.#torusOverview?.dispose(); this.#regionalOverview.dispose(); this.#regionalVillages.dispose(); this.#clouds.dispose();
+    this.#rain.dispose();
+    this.#weather?.dispose();
+    this.#overviewAbort?.abort();
+    this.#torusOverview?.dispose();
+    this.#regionalOverview.dispose();
+    this.#regionalVillages.dispose();
+    this.#clouds.dispose();
     this.#renderDiagnostics?.dispose();
     this.#canvas.removeEventListener('terrain-camera', this.#testCamera);
     this.#canvas.removeEventListener('terrain-metrics-reset', this.#testMetricsReset);
@@ -2755,7 +4463,8 @@ export class BabylonVillageScene {
     document.removeEventListener('visibilitychange', this.#resumeTerrain);
     window.removeEventListener('keydown', this.#navigationKeyDown, true);
     window.removeEventListener('keyup', this.#navigationKeyUp, true);
-    this.#renderer?.dispose(); this.#store?.dispose();
+    this.#renderer?.dispose();
+    this.#store?.dispose();
     this.#canvas.removeEventListener('pointerdown', this.#handlePointerDown, { capture: true });
     this.#canvas.removeEventListener('pointermove', this.#handlePointerMove, { capture: true });
     this.#canvas.removeEventListener('pointerup', this.#handlePointerUp, { capture: true });

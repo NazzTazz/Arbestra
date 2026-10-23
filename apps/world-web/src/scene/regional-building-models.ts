@@ -26,13 +26,16 @@ export class RegionalBuildingModels {
     else {
       let template = this.#templates.get(key);
       if (!template) {
-        const materials = new Set(this.scene.materials), textures = new Set(this.scene.textures);
-        this.#kit ??= new TimberThatch(this.scene); this.#kit.lod = 2;
+        const materials = new Set(this.scene.materials),
+          textures = new Set(this.scene.textures);
+        this.#kit ??= new TimberThatch(this.scene);
+        this.#kit.lod = 2;
         const root = buildPresentation(this.#kit, exterior.model, exterior.level, exterior.phase);
         batchDistantBuilding(root);
         template = new AssetContainer(this.scene);
         template.meshes.push(root, ...root.getChildMeshes().filter((mesh): mesh is Mesh => mesh instanceof Mesh));
-        template.removeAllFromScene(); this.#templates.set(key, template);
+        template.removeAllFromScene();
+        this.#templates.set(key, template);
         for (const material of this.scene.materials) if (!materials.has(material)) this.#materials.add(material);
         for (const texture of this.scene.textures) if (!textures.has(texture)) this.#textures.add(texture);
       }
@@ -47,6 +50,7 @@ export class RegionalBuildingModels {
     this.#templates.clear();
     for (const material of this.#materials) material.dispose();
     for (const texture of this.#textures) texture.dispose();
-    this.#materials.clear(); this.#textures.clear();
+    this.#materials.clear();
+    this.#textures.clear();
   }
 }

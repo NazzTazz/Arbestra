@@ -1,5 +1,5 @@
-﻿import {sql,type Kysely} from 'kysely';
-export async function up(db:Kysely<unknown>):Promise<void>{
+﻿import { sql, type Kysely } from 'kysely';
+export async function up(db: Kysely<unknown>): Promise<void> {
   // An inbox is not an economic mutation: do not contend with FOR UPDATE on
   // villages merely to receive a gesture. Ownership is checked at intake and execution.
   await sql`create table harvest_submissions (

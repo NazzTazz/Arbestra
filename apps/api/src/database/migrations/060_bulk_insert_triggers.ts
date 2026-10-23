@@ -120,10 +120,16 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       create trigger village_sync_change after update or delete on ${id} for each row execute function mark_village_sync_change();
       create trigger bulk_insert_collect after insert on ${id} referencing new table as added
         for each statement execute function bulk_insert_collect();`.execute(db);
-    if (table !== 'stone_deposits') await sql`drop trigger navigation_change on ${id};
-      create trigger navigation_change after update or delete on ${id} for each row execute function mark_navigation_change();`.execute(db);
-    if (table !== 'world_features') await sql`drop trigger game_sync_private_indirect on ${id};
-      create trigger game_sync_private_indirect after update or delete on ${id} for each row execute function game_sync_private_indirect_change();`.execute(db);
+    if (table !== 'stone_deposits')
+      await sql`drop trigger navigation_change on ${id};
+      create trigger navigation_change after update or delete on ${id} for each row execute function mark_navigation_change();`.execute(
+        db,
+      );
+    if (table !== 'world_features')
+      await sql`drop trigger game_sync_private_indirect on ${id};
+      create trigger game_sync_private_indirect after update or delete on ${id} for each row execute function game_sync_private_indirect_change();`.execute(
+        db,
+      );
   }
   await sql`
     create trigger game_sync_shared_building after insert on world_cell_occupancies

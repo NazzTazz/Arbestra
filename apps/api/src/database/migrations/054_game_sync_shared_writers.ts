@@ -2,13 +2,40 @@ import { sql, type Kysely } from 'kysely';
 
 // Staged until all corresponding readers and activation checks are validated.
 export const sharedSyncSources = [
-  'world_cell_occupancies', 'world_features', 'stone_deposits', 'woodland_deposits', 'world_rc1_resources',
-  'world_chunks', 'world_terrain_vertices', 'world_spawn_terraces', 'buildings', 'villages',
-  'player_science', 'science_programs', 'science_places', 'science_village_reports', 'science_activities', 'population_cohorts',
-  'trade_offers', 'worlds', 'world_factory_settings', 'world_atlas_presentations', 'world_generation_candidates',
+  'world_cell_occupancies',
+  'world_features',
+  'stone_deposits',
+  'woodland_deposits',
+  'world_rc1_resources',
+  'world_chunks',
+  'world_terrain_vertices',
+  'world_spawn_terraces',
+  'buildings',
+  'villages',
+  'player_science',
+  'science_programs',
+  'science_places',
+  'science_village_reports',
+  'science_activities',
+  'population_cohorts',
+  'trade_offers',
+  'worlds',
+  'world_factory_settings',
+  'world_atlas_presentations',
+  'world_generation_candidates',
 ] as const;
-export const globalCatalogSyncSources = ['resource_types', 'building_types', 'building_type_levels', 'building_level_costs',
-  'building_level_production', 'building_variant_costs', 'processing_recipes', 'oracle_market_resources', 'terrain_types', 'world_feature_types'] as const;
+export const globalCatalogSyncSources = [
+  'resource_types',
+  'building_types',
+  'building_type_levels',
+  'building_level_costs',
+  'building_level_production',
+  'building_variant_costs',
+  'processing_recipes',
+  'oracle_market_resources',
+  'terrain_types',
+  'world_feature_types',
+] as const;
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
@@ -314,8 +341,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       return null;
     end $$;
   `.execute(db);
-  for (const table of sharedSyncSources) await sql`create trigger game_sync_shared after insert or update or delete on ${sql.id(table)}
+  for (const table of sharedSyncSources)
+    await sql`create trigger game_sync_shared after insert or update or delete on ${sql.id(table)}
     for each row execute function game_sync_shared_change()`.execute(db);
-  for (const table of globalCatalogSyncSources) await sql`create trigger game_sync_catalog after insert or update or delete on ${sql.id(table)}
+  for (const table of globalCatalogSyncSources)
+    await sql`create trigger game_sync_catalog after insert or update or delete on ${sql.id(table)}
     for each row execute function game_sync_catalog_change()`.execute(db);
 }

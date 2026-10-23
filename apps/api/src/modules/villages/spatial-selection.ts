@@ -1,8 +1,14 @@
 import { HttpError } from '../../errors.js';
 import { normalizeCell, wrappedDelta, worldCellKey } from '../worlds/coordinates.js';
 
-export interface SpatialCell { cellX: number; cellY: number }
-export interface SpatialSelection { anchor: SpatialCell; cells: SpatialCell[] }
+export interface SpatialCell {
+  cellX: number;
+  cellY: number;
+}
+export interface SpatialSelection {
+  anchor: SpatialCell;
+  cells: SpatialCell[];
+}
 
 const MAX_SPATIAL_CELLS = 100;
 
@@ -15,7 +21,11 @@ export function normalizeSpatialSelection(
   height: number,
 ): SpatialSelection {
   if (rawCells.length === 0 || rawCells.length > MAX_SPATIAL_CELLS)
-    throw new HttpError(400, 'INVALID_SPATIAL_SELECTION', `Une sélection doit contenir entre 1 et ${MAX_SPATIAL_CELLS} cases.`);
+    throw new HttpError(
+      400,
+      'INVALID_SPATIAL_SELECTION',
+      `Une sélection doit contenir entre 1 et ${MAX_SPATIAL_CELLS} cases.`,
+    );
   const normalizedAnchor = {
     cellX: normalizeCell(anchor.cellX, width),
     cellY: normalizeCell(anchor.cellY, height),
@@ -41,10 +51,17 @@ export function normalizeSpatialSelection(
   const maxY = Math.max(...unwrapped.map((cell) => cell.y));
   const expected = (maxX - minX + 1) * (maxY - minY + 1);
   if (expected !== cells.length)
-    throw new HttpError(400, 'SPATIAL_SELECTION_NOT_RECTANGULAR', 'Un jardin doit être une zone rectangulaire sans trou.');
+    throw new HttpError(
+      400,
+      'SPATIAL_SELECTION_NOT_RECTANGULAR',
+      'Un jardin doit être une zone rectangulaire sans trou.',
+    );
   return { anchor: normalizedAnchor, cells };
 }
 
-export function scaledCosts<T extends { resourceCode: string; amount: string | number }>(costs: T[], factor: number): T[] {
+export function scaledCosts<T extends { resourceCode: string; amount: string | number }>(
+  costs: T[],
+  factor: number,
+): T[] {
   return costs.map((cost) => ({ ...cost, amount: Number(cost.amount) * factor }));
 }

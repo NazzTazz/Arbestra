@@ -1,54 +1,92 @@
-import {expect,test} from '@playwright/test';
-test.use({baseURL:'http://localhost:5274'});
-test('programme les ateliers au toucher, selon leurs postes et la durée de travail',async({page,isMobile},testInfo)=>{
- test.setTimeout(180000);
- const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
- const previews:string[]=[];
- await page.route('**/api/worlds/production-fixture/**',route=>{previews.push(route.request().url());return route.fulfill({status:503,json:{message:'Devis indisponible'}});});
- await page.goto('/tests/production.html');
- const panel=page.getByRole('region',{name:'Fabrication de matières'});
- await expect(panel.getByText(/Par lot :|Vérification des moyens/)).toHaveCount(0);
- await expect(panel.getByRole('button',{name:'Produire',exact:true})).toBeEnabled();
- const touch=async(locator:ReturnType<typeof page.getByRole>)=>{if(isMobile)await locator.tap();else await locator.click();};
- await expect(panel.getByRole('button',{name:'1 habitant',exact:true})).toBeEnabled();
- await expect(panel.getByRole('button',{name:/2 habitants/})).toBeDisabled();await expect(panel.getByRole('button',{name:/3 habitants/})).toBeDisabled();
- await expect(panel.getByLabel('Quantité produite')).toHaveText('120');
- await touch(panel.getByRole('button',{name:'12 h',exact:true}));await expect(panel.getByLabel('Quantité produite')).toHaveText(/1\s*440/);
- expect(await panel.locator('input[type=number]').count()).toBe(0);
- await expect(panel.locator('.production-workers img')).toHaveCount(3,{timeout:60000});
- // Les deux choix restent sur trois colonnes, même au format tactile.
- const durations=panel.getByRole('group',{name:'Durée de production prévue'});
- const workers=panel.getByRole('group',{name:'Habitants affectés'});
- for(const group of [durations,workers]){
-  const boxes=await group.getByRole('button').evaluateAll(buttons=>buttons.map(button=>{const box=button.getBoundingClientRect();return {x:box.x,y:box.y,width:box.width,height:box.height};}));
-  expect(boxes).toHaveLength(3);
-  expect(Math.max(...boxes.map(box=>box.y))-Math.min(...boxes.map(box=>box.y))).toBeLessThan(1);
-  expect(boxes[1].x).toBeGreaterThan(boxes[0].x+boxes[0].width);
-  expect(boxes[2].x).toBeGreaterThan(boxes[1].x+boxes[1].width);
-  expect(Math.max(...boxes.map(box=>box.width))-Math.min(...boxes.map(box=>box.width))).toBeLessThan(1);
-  expect(boxes.every(box=>box.height>=48)).toBe(true);
-  expect(await group.evaluate(element=>{const css=getComputedStyle(element);return [css.borderTopWidth,css.borderRightWidth,css.borderBottomWidth,css.borderLeftWidth];})).toEqual(['0px','0px','0px','0px']);
- }
- const hero=await panel.locator('.production-hero').boundingBox(),durationRow=await durations.boundingBox(),workerRow=await workers.boundingBox(),summary=await panel.locator('.production-plan').boundingBox();
- expect(hero!.y+hero!.height).toBeLessThanOrEqual(durationRow!.y);
- expect(durationRow!.y+durationRow!.height).toBeLessThanOrEqual(workerRow!.y);
- expect(workerRow!.y+workerRow!.height).toBeLessThanOrEqual(summary!.y);
- expect(summary!.y+summary!.height-hero!.y).toBeLessThan(400);
- await page.screenshot({path:testInfo.outputPath('sawmill-level-1.png')});
- await page.getByLabel('Atelier de recette').selectOption('sawmill-2');
- await expect(panel.getByRole('button',{name:'2 habitants',exact:true})).toBeEnabled();await expect(panel.getByRole('button',{name:/3 habitants/})).toBeDisabled();
- await touch(panel.getByRole('button',{name:'3 h',exact:true}));await touch(panel.getByRole('button',{name:'2 habitants',exact:true}));
- await expect(panel.getByLabel('Quantité produite')).toHaveText('720');
- await page.getByLabel('Atelier de recette').selectOption('sawmill-3');
- await touch(panel.getByRole('button',{name:'12 h',exact:true}));await touch(panel.getByRole('button',{name:'3 habitants',exact:true}));
- await expect(panel.getByLabel('Quantité produite')).toHaveText(/4\s*320/);await expect(panel.locator('.production-plan')).toContainText('12 h');await expect(panel.locator('.production-plan')).toContainText(/5\s*400 bois bruts/);
- await page.screenshot({path:testInfo.outputPath('sawmill-level-3.png')});
- await touch(panel.getByRole('button',{name:'Produire',exact:true}));
- await expect.poll(()=>page.getByTestId('production-command').textContent()).toContain('durationSeconds');
- expect(JSON.parse((await page.getByTestId('production-command').textContent())!)).toMatchObject({action:'start',durationSeconds:43200,workerCount:3});
- await page.getByLabel('Atelier de recette').selectOption('stonemason-1');
- await touch(panel.getByRole('button',{name:'3 h',exact:true}));await touch(panel.getByRole('button',{name:'3 habitants',exact:true}));
- await expect(panel.getByLabel('Quantité produite')).toHaveText(/1\s*080/);await expect(panel.locator('.production-plan')).toContainText(/1\s*350 pierres brutes/);
- await page.screenshot({path:testInfo.outputPath('stonemason.png')});
- expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);expect(errors).toEqual([]);expect(previews).toEqual([]);
+import { expect, test } from '@playwright/test';
+test.use({ baseURL: 'http://localhost:5274' });
+test('programme les ateliers au toucher, selon leurs postes et la durée de travail', async ({
+  page,
+  isMobile,
+}, testInfo) => {
+  test.setTimeout(180000);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const previews: string[] = [];
+  await page.route('**/api/worlds/production-fixture/**', (route) => {
+    previews.push(route.request().url());
+    return route.fulfill({ status: 503, json: { message: 'Devis indisponible' } });
+  });
+  await page.goto('/tests/production.html');
+  const panel = page.getByRole('region', { name: 'Fabrication de matières' });
+  await expect(panel.getByText(/Par lot :|Vérification des moyens/)).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Produire', exact: true })).toBeEnabled();
+  const touch = async (locator: ReturnType<typeof page.getByRole>) => {
+    if (isMobile) await locator.tap();
+    else await locator.click();
+  };
+  await expect(panel.getByRole('button', { name: '1 habitant', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: /2 habitants/ })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: /3 habitants/ })).toBeDisabled();
+  await expect(panel.getByLabel('Quantité produite')).toHaveText('120');
+  await touch(panel.getByRole('button', { name: '12 h', exact: true }));
+  await expect(panel.getByLabel('Quantité produite')).toHaveText(/1\s*440/);
+  expect(await panel.locator('input[type=number]').count()).toBe(0);
+  await expect(panel.locator('.production-workers img')).toHaveCount(3, { timeout: 60000 });
+  // Les deux choix restent sur trois colonnes, même au format tactile.
+  const durations = panel.getByRole('group', { name: 'Durée de production prévue' });
+  const workers = panel.getByRole('group', { name: 'Habitants affectés' });
+  for (const group of [durations, workers]) {
+    const boxes = await group.getByRole('button').evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const box = button.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      }),
+    );
+    expect(boxes).toHaveLength(3);
+    expect(Math.max(...boxes.map((box) => box.y)) - Math.min(...boxes.map((box) => box.y))).toBeLessThan(1);
+    expect(boxes[1].x).toBeGreaterThan(boxes[0].x + boxes[0].width);
+    expect(boxes[2].x).toBeGreaterThan(boxes[1].x + boxes[1].width);
+    expect(Math.max(...boxes.map((box) => box.width)) - Math.min(...boxes.map((box) => box.width))).toBeLessThan(1);
+    expect(boxes.every((box) => box.height >= 48)).toBe(true);
+    expect(
+      await group.evaluate((element) => {
+        const css = getComputedStyle(element);
+        return [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth];
+      }),
+    ).toEqual(['0px', '0px', '0px', '0px']);
+  }
+  const hero = await panel.locator('.production-hero').boundingBox(),
+    durationRow = await durations.boundingBox(),
+    workerRow = await workers.boundingBox(),
+    summary = await panel.locator('.production-plan').boundingBox();
+  expect(hero!.y + hero!.height).toBeLessThanOrEqual(durationRow!.y);
+  expect(durationRow!.y + durationRow!.height).toBeLessThanOrEqual(workerRow!.y);
+  expect(workerRow!.y + workerRow!.height).toBeLessThanOrEqual(summary!.y);
+  expect(summary!.y + summary!.height - hero!.y).toBeLessThan(400);
+  await page.screenshot({ path: testInfo.outputPath('sawmill-level-1.png') });
+  await page.getByLabel('Atelier de recette').selectOption('sawmill-2');
+  await expect(panel.getByRole('button', { name: '2 habitants', exact: true })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: /3 habitants/ })).toBeDisabled();
+  await touch(panel.getByRole('button', { name: '3 h', exact: true }));
+  await touch(panel.getByRole('button', { name: '2 habitants', exact: true }));
+  await expect(panel.getByLabel('Quantité produite')).toHaveText('720');
+  await page.getByLabel('Atelier de recette').selectOption('sawmill-3');
+  await touch(panel.getByRole('button', { name: '12 h', exact: true }));
+  await touch(panel.getByRole('button', { name: '3 habitants', exact: true }));
+  await expect(panel.getByLabel('Quantité produite')).toHaveText(/4\s*320/);
+  await expect(panel.locator('.production-plan')).toContainText('12 h');
+  await expect(panel.locator('.production-plan')).toContainText(/5\s*400 bois bruts/);
+  await page.screenshot({ path: testInfo.outputPath('sawmill-level-3.png') });
+  await touch(panel.getByRole('button', { name: 'Produire', exact: true }));
+  await expect.poll(() => page.getByTestId('production-command').textContent()).toContain('durationSeconds');
+  expect(JSON.parse((await page.getByTestId('production-command').textContent())!)).toMatchObject({
+    action: 'start',
+    durationSeconds: 43200,
+    workerCount: 3,
+  });
+  await page.getByLabel('Atelier de recette').selectOption('stonemason-1');
+  await touch(panel.getByRole('button', { name: '3 h', exact: true }));
+  await touch(panel.getByRole('button', { name: '3 habitants', exact: true }));
+  await expect(panel.getByLabel('Quantité produite')).toHaveText(/1\s*080/);
+  await expect(panel.locator('.production-plan')).toContainText(/1\s*350 pierres brutes/);
+  await page.screenshot({ path: testInfo.outputPath('stonemason.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+  expect(previews).toEqual([]);
 });

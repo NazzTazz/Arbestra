@@ -21,11 +21,15 @@ describe('operational data presentation', () => {
     expect(result.path.match(/L/g)).toHaveLength(1);
   });
   it('positions samples by elapsed time, not by array index', () => {
-    const result = chartPath([
-      { time: '2026-10-15T10:00:00Z', value: 1 },
-      { time: '2026-10-15T10:00:01Z', value: 2 },
-      { time: '2026-10-15T10:00:10Z', value: 3 },
-    ], 100, 100);
+    const result = chartPath(
+      [
+        { time: '2026-10-15T10:00:00Z', value: 1 },
+        { time: '2026-10-15T10:00:01Z', value: 2 },
+        { time: '2026-10-15T10:00:10Z', value: 3 },
+      ],
+      100,
+      100,
+    );
     expect(result.path).toContain('L10.00,');
     expect(result.path).toContain('L100.00,');
   });

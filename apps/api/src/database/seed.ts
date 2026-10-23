@@ -6,7 +6,7 @@ import { loadConfig } from '../config.js';
 import { hashPassword } from '../security/passwords.js';
 import { createDatabase } from './connection.js';
 import { generateWorld } from '../modules/worlds/generation.js';
-import {configureTownHallFactory} from '../modules/villages/service.js';
+import { configureTownHallFactory } from '../modules/villages/service.js';
 
 export const DEVELOPMENT_IDS = {
   account: '10000000-0000-4000-8000-000000000001',
@@ -28,78 +28,185 @@ export const DEVELOPMENT_CELLS = {
   gardenNorth: { cellX: ANCHOR_X, cellY: ANCHOR_Y + 1 },
 } as const;
 
-export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl, factoryPilot=false): Promise<void> {
-  let createdHall=false;
+export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl, factoryPilot = false): Promise<void> {
+  let createdHall = false;
   const db = createDatabase(databaseUrl);
   const passwordHash = await hashPassword('arbestra');
   try {
     await db.transaction().execute(async (transaction) => {
-      await transaction.insertInto('accounts').values({
-        id: DEVELOPMENT_IDS.account, email: 'player@arbestra.local', passwordHash,
-      }).onConflict((conflict) => conflict.column('id').doUpdateSet({ email: 'player@arbestra.local', passwordHash })).execute();
+      await transaction
+        .insertInto('accounts')
+        .values({
+          id: DEVELOPMENT_IDS.account,
+          email: 'player@arbestra.local',
+          passwordHash,
+        })
+        .onConflict((conflict) => conflict.column('id').doUpdateSet({ email: 'player@arbestra.local', passwordHash }))
+        .execute();
 
-      await transaction.insertInto('worlds').values({
-        id: DEVELOPMENT_IDS.world, slug: 'aube', name: "Monde de l'Aube", topology: 'torus',
-        widthCells: WORLD_WIDTH, heightCells: WORLD_HEIGHT, chunkSize: 32, seed: 1, isOpen:true,
-      }).onConflict((conflict) => conflict.column('id').doUpdateSet({
-        slug: 'aube', name: "Monde de l'Aube", topology: 'torus',
-        widthCells: WORLD_WIDTH, heightCells: WORLD_HEIGHT, chunkSize: 32, seed: 1,
-      })).execute();
+      await transaction
+        .insertInto('worlds')
+        .values({
+          id: DEVELOPMENT_IDS.world,
+          slug: 'aube',
+          name: "Monde de l'Aube",
+          topology: 'torus',
+          widthCells: WORLD_WIDTH,
+          heightCells: WORLD_HEIGHT,
+          chunkSize: 32,
+          seed: 1,
+          isOpen: true,
+        })
+        .onConflict((conflict) =>
+          conflict.column('id').doUpdateSet({
+            slug: 'aube',
+            name: "Monde de l'Aube",
+            topology: 'torus',
+            widthCells: WORLD_WIDTH,
+            heightCells: WORLD_HEIGHT,
+            chunkSize: 32,
+            seed: 1,
+          }),
+        )
+        .execute();
 
-      await transaction.insertInto('worldMemberships').values({
-        accountId: DEVELOPMENT_IDS.account, worldId: DEVELOPMENT_IDS.world, playerName: 'Pionnier',
-      }).onConflict((conflict) => conflict.columns(['accountId', 'worldId']).doUpdateSet({ playerName: 'Pionnier' })).execute();
+      await transaction
+        .insertInto('worldMemberships')
+        .values({
+          accountId: DEVELOPMENT_IDS.account,
+          worldId: DEVELOPMENT_IDS.world,
+          playerName: 'Pionnier',
+        })
+        .onConflict((conflict) => conflict.columns(['accountId', 'worldId']).doUpdateSet({ playerName: 'Pionnier' }))
+        .execute();
 
-      await transaction.insertInto('villages').values({
-        id: DEVELOPMENT_IDS.village, worldId: DEVELOPMENT_IDS.world, ownerAccountId: DEVELOPMENT_IDS.account,
-        name: 'Clairière', anchorCellX: ANCHOR_X, anchorCellY: ANCHOR_Y,
-      }).onConflict((conflict) => conflict.column('id').doNothing()).execute();
+      await transaction
+        .insertInto('villages')
+        .values({
+          id: DEVELOPMENT_IDS.village,
+          worldId: DEVELOPMENT_IDS.world,
+          ownerAccountId: DEVELOPMENT_IDS.account,
+          name: 'Clairière',
+          anchorCellX: ANCHOR_X,
+          anchorCellY: ANCHOR_Y,
+        })
+        .onConflict((conflict) => conflict.column('id').doNothing())
+        .execute();
 
-      await transaction.insertInto('villageResources').values([
-        { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'wood', amount: 2000 },
-        { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'carrot', amount: 50 },
-        { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'stone', amount: 0 },
-      ]).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
-      await transaction.insertInto('villageResourceFlows').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'wood',
-        baseRatePerHour: 0, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
-      }).onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing()).execute();
+      await transaction
+        .insertInto('villageResources')
+        .values([
+          { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'wood', amount: 2000 },
+          { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'carrot', amount: 50 },
+          { worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, resourceCode: 'stone', amount: 0 },
+        ])
+        .onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing())
+        .execute();
+      await transaction
+        .insertInto('villageResourceFlows')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+          resourceCode: 'wood',
+          baseRatePerHour: 0,
+          remainder: 0,
+          productionUpdatedAt: sql`transaction_timestamp()`,
+        })
+        .onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doNothing())
+        .execute();
 
-      const insertedHall=await transaction.insertInto('buildings').values({
-        id: DEVELOPMENT_IDS.townHall, worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-        buildingType: 'town-hall', level: 1, targetLevel: null,
-        status: 'completed', constructionStartedAt: null, constructionCompletesAt: null,
-        completedAt: sql`transaction_timestamp()`,
-      }).onConflict((conflict) => conflict.column('id').doNothing()).returning('id').executeTakeFirst();
-      createdHall=Boolean(insertedHall);
-      await transaction.insertInto('worldCellOccupancies').values({
-        worldId: DEVELOPMENT_IDS.world,
-        ...DEVELOPMENT_CELLS.townHall, buildingId: DEVELOPMENT_IDS.townHall, featureId: null, role: 'anchor',
-      }).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
-      await transaction.insertInto('villagePopulations').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-      }).onConflict((conflict) => conflict.columns(['worldId', 'villageId']).doNothing()).execute();
-      const existingPopulation = await transaction.selectFrom('populationCohorts').select('id')
-        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).executeTakeFirst();
-      if (!existingPopulation) await transaction.insertInto('populationCohorts').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-        originVillageId: DEVELOPMENT_IDS.village, memberCount: 15, activity: 'idle', energy: 10,
-        energyProgress: 0, energyUpdatedAt: sql`transaction_timestamp()`, restingSince: null,
-        foodUsedSinceRest: 0, harvestId: null, extractionId: null,
-      }).execute();
-      await transaction.insertInto('buildingHiddenSupplies').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, buildingId: DEVELOPMENT_IDS.townHall,
-        resourceCode: 'carrot', amount: 2000, claimedAt: null,
-      }).onConflict((conflict) => conflict.columns(['worldId', 'buildingId']).doNothing()).execute();
+      const insertedHall = await transaction
+        .insertInto('buildings')
+        .values({
+          id: DEVELOPMENT_IDS.townHall,
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+          buildingType: 'town-hall',
+          level: 1,
+          targetLevel: null,
+          status: 'completed',
+          constructionStartedAt: null,
+          constructionCompletesAt: null,
+          completedAt: sql`transaction_timestamp()`,
+        })
+        .onConflict((conflict) => conflict.column('id').doNothing())
+        .returning('id')
+        .executeTakeFirst();
+      createdHall = Boolean(insertedHall);
+      await transaction
+        .insertInto('worldCellOccupancies')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          ...DEVELOPMENT_CELLS.townHall,
+          buildingId: DEVELOPMENT_IDS.townHall,
+          featureId: null,
+          role: 'anchor',
+        })
+        .onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing())
+        .execute();
+      await transaction
+        .insertInto('villagePopulations')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+        })
+        .onConflict((conflict) => conflict.columns(['worldId', 'villageId']).doNothing())
+        .execute();
+      const existingPopulation = await transaction
+        .selectFrom('populationCohorts')
+        .select('id')
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('villageId', '=', DEVELOPMENT_IDS.village)
+        .executeTakeFirst();
+      if (!existingPopulation)
+        await transaction
+          .insertInto('populationCohorts')
+          .values({
+            worldId: DEVELOPMENT_IDS.world,
+            villageId: DEVELOPMENT_IDS.village,
+            originVillageId: DEVELOPMENT_IDS.village,
+            memberCount: 15,
+            activity: 'idle',
+            energy: 10,
+            energyProgress: 0,
+            energyUpdatedAt: sql`transaction_timestamp()`,
+            restingSince: null,
+            foodUsedSinceRest: 0,
+            harvestId: null,
+            extractionId: null,
+          })
+          .execute();
+      await transaction
+        .insertInto('buildingHiddenSupplies')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+          buildingId: DEVELOPMENT_IDS.townHall,
+          resourceCode: 'carrot',
+          amount: 2000,
+          claimedAt: null,
+        })
+        .onConflict((conflict) => conflict.columns(['worldId', 'buildingId']).doNothing())
+        .execute();
       await generateWorld(transaction, DEVELOPMENT_IDS.world);
     });
-    if(createdHall&&factoryPilot)await configureTownHallFactory(db,DEVELOPMENT_IDS.account,'aube',DEVELOPMENT_IDS.village,DEVELOPMENT_CELLS.townHall.cellX,DEVELOPMENT_CELLS.townHall.cellY-1,true,'+x');
+    if (createdHall && factoryPilot)
+      await configureTownHallFactory(
+        db,
+        DEVELOPMENT_IDS.account,
+        'aube',
+        DEVELOPMENT_IDS.village,
+        DEVELOPMENT_CELLS.townHall.cellX,
+        DEVELOPMENT_CELLS.townHall.cellY - 1,
+        true,
+        '+x',
+      );
   } finally {
     await db.destroy();
   }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await seedDevelopmentData(loadConfig().databaseUrl,true);
+  await seedDevelopmentData(loadConfig().databaseUrl, true);
   console.info('Development data seeded.');
 }

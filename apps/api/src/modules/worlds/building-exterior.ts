@@ -3,23 +3,50 @@ import type { BuildingsTable, Database } from '../../database/schema.js';
 import { sql, type Selectable, type Transaction } from 'kysely';
 
 /** Explicit allowlist: never serialize a building row into a public exterior. */
-export function buildingExterior(b: Pick<Selectable<BuildingsTable>, 'buildingType' | 'level' | 'targetLevel' | 'status' | 'quarterTurns' | 'visualLayout'>): TerrainBuildingExterior | undefined {
+export function buildingExterior(
+  b: Pick<
+    Selectable<BuildingsTable>,
+    'buildingType' | 'level' | 'targetLevel' | 'status' | 'quarterTurns' | 'visualLayout'
+  >,
+): TerrainBuildingExterior | undefined {
   const models = ['town-hall', 'dwelling', 'university', 'sawmill', 'stonemason', 'barracks', 'garden'];
   if (!models.includes(b.buildingType)) return undefined;
   const layout = b.visualLayout;
-  const model = b.buildingType === 'dwelling' && layout?.recipe === 'log-house' ? 'dwelling-logs'
-    : b.buildingType === 'dwelling' && layout?.recipe === 'beam-house' ? 'dwelling-beams' : b.buildingType;
-  return { model, level: Math.max(1, Math.min(3, b.targetLevel ?? b.level)),
-    phase: b.status === 'under-construction' ? 'works' : 'finished', quarterTurns: layout?.quarterTurns ?? b.quarterTurns,
-    ...(layout ? { entranceFace: layout.entranceFace, offset: layout.offset } : {}) };
+  const model =
+    b.buildingType === 'dwelling' && layout?.recipe === 'log-house'
+      ? 'dwelling-logs'
+      : b.buildingType === 'dwelling' && layout?.recipe === 'beam-house'
+        ? 'dwelling-beams'
+        : b.buildingType;
+  return {
+    model,
+    level: Math.max(1, Math.min(3, b.targetLevel ?? b.level)),
+    phase: b.status === 'under-construction' ? 'works' : 'finished',
+    quarterTurns: layout?.quarterTurns ?? b.quarterTurns,
+    ...(layout ? { entranceFace: layout.entranceFace, offset: layout.offset } : {}),
+  };
 }
 
 /** Same bounded exterior capture for live scenery and new dated reports. */
-export async function readVillageExteriorBlocks(tx: Transaction<Database>, world: Pick<TerrainOverview['world'], 'id' | 'widthCells' | 'heightCells'>, villageIds: string[]) {
+export async function readVillageExteriorBlocks(
+  tx: Transaction<Database>,
+  world: Pick<TerrainOverview['world'], 'id' | 'widthCells' | 'heightCells'>,
+  villageIds: string[],
+) {
   if (!villageIds.length) return [];
-  type Block = Pick<Selectable<BuildingsTable>, 'buildingType' | 'level' | 'targetLevel' | 'status' | 'quarterTurns' | 'visualLayout'>
-      & { villageId: string; garden: boolean; underConstruction:boolean; x: number; y: number; width: number; depth: number };
-    const blocks = await sql<Block>`
+  type Block = Pick<
+    Selectable<BuildingsTable>,
+    'buildingType' | 'level' | 'targetLevel' | 'status' | 'quarterTurns' | 'visualLayout'
+  > & {
+    villageId: string;
+    garden: boolean;
+    underConstruction: boolean;
+    x: number;
+    y: number;
+    width: number;
+    depth: number;
+  };
+  const blocks = await sql<Block>`
       with cells as (
         select b.id, b.village_id, b.building_type, b.level, b.target_level, b.status, b.quarter_turns, b.visual_layout,
           b.building_type = 'garden' as garden, b.status='under-construction' as under_construction,
@@ -40,6 +67,14 @@ export async function readVillageExteriorBlocks(tx: Transaction<Database>, world
         from cells group by id, village_id, building_type, level, target_level, status, quarter_turns, visual_layout, garden, under_construction
       ) select village_id, building_type, level, target_level, status, quarter_turns, visual_layout,
         garden, under_construction, x, y, width, depth from grouped where rank <= 64`.execute(tx);
-  return blocks.rows.map(b => ({ villageId: b.villageId, x: b.x, y: b.y, width: b.width, depth: b.depth,
-    garden: b.garden, underConstruction: b.underConstruction, exterior: buildingExterior(b) }));
+  return blocks.rows.map((b) => ({
+    villageId: b.villageId,
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    depth: b.depth,
+    garden: b.garden,
+    underConstruction: b.underConstruction,
+    exterior: buildingExterior(b),
+  }));
 }

@@ -1,4 +1,9 @@
-import { villageFrame, type VillageCommandResponse, type VillageState, type VillageSyncBase } from '@arbestra/contracts';
+import {
+  villageFrame,
+  type VillageCommandResponse,
+  type VillageState,
+  type VillageSyncBase,
+} from '@arbestra/contracts';
 import type { ConstructionCommit } from './service.js';
 type Reader = (accountId: string, worldSlug: string, villageId: string) => Promise<VillageState>;
 type Entry = { state: VillageState; bytes: number };
@@ -8,24 +13,48 @@ export class VillageSyncProjections {
   #bases = new Map<string, Entry[]>();
   #flights = new Map<string, Promise<VillageState>>();
   #bytes = 0;
-  peek(accountId:string,worldSlug:string,villageId:string){return this.#flights.get(accountId+':'+worldSlug+':'+villageId);}
-  /** Observation only: never used to answer a player command or advance its clock. */
-  observedBase(accountId:string,worldId:string,villageId:string,revision:number,now=Date.now()){
-    return this.#bases.get(accountId+':'+worldId+':'+villageId)?.findLast(e=>e.state.syncRevision===revision&&Date.parse(e.state.serverTime)<=now+1000&&now-Date.parse(e.state.serverTime)<=2000)?.state;
+  peek(accountId: string, worldSlug: string, villageId: string) {
+    return this.#flights.get(accountId + ':' + worldSlug + ':' + villageId);
   }
-  constructor(private readonly load: Reader, private readonly limits = {
-    snapshots: 8, contexts: 32, bytes: 16 * 1024 * 1024,
-  }) {}
-  #key(accountId: string, state: VillageState) { return accountId + ':' + state.world.id + ':' + state.village.id; }
+  /** Observation only: never used to answer a player command or advance its clock. */
+  observedBase(accountId: string, worldId: string, villageId: string, revision: number, now = Date.now()) {
+    return this.#bases
+      .get(accountId + ':' + worldId + ':' + villageId)
+      ?.findLast(
+        (e) =>
+          e.state.syncRevision === revision &&
+          Date.parse(e.state.serverTime) <= now + 1000 &&
+          now - Date.parse(e.state.serverTime) <= 2000,
+      )?.state;
+  }
+  constructor(
+    private readonly load: Reader,
+    private readonly limits = {
+      snapshots: 8,
+      contexts: 32,
+      bytes: 16 * 1024 * 1024,
+    },
+  ) {}
+  #key(accountId: string, state: VillageState) {
+    return accountId + ':' + state.world.id + ':' + state.village.id;
+  }
   remember(accountId: string, state: VillageState) {
     if (state.syncRevision === undefined) throw Error('Unversioned projection');
-    const key = this.#key(accountId, state), entries = this.#bases.get(key) ?? [];
-    const duplicate = entries.findIndex(e => e.state.syncRevision === state.syncRevision && e.state.serverTime === state.serverTime);
-    if (duplicate >= 0) { this.#bytes -= entries[duplicate]!.bytes; entries.splice(duplicate, 1); }
+    const key = this.#key(accountId, state),
+      entries = this.#bases.get(key) ?? [];
+    const duplicate = entries.findIndex(
+      (e) => e.state.syncRevision === state.syncRevision && e.state.serverTime === state.serverTime,
+    );
+    if (duplicate >= 0) {
+      this.#bytes -= entries[duplicate]!.bytes;
+      entries.splice(duplicate, 1);
+    }
     const entry = { state, bytes: Buffer.byteLength(JSON.stringify(state)) };
-    entries.push(entry); this.#bytes += entry.bytes;
+    entries.push(entry);
+    this.#bytes += entry.bytes;
     while (entries.length > this.limits.snapshots) this.#bytes -= entries.shift()!.bytes;
-    this.#bases.delete(key); this.#bases.set(key, entries);
+    this.#bases.delete(key);
+    this.#bases.set(key, entries);
     while (this.#bases.size > this.limits.contexts || this.#bytes > this.limits.bytes) {
       const oldest = this.#bases.keys().next().value!;
       for (const e of this.#bases.get(oldest)!) this.#bytes -= e.bytes;
@@ -33,14 +62,19 @@ export class VillageSyncProjections {
     }
   }
   #base(accountId: string, worldId: string, villageId: string, base: VillageSyncBase) {
-    return this.#bases.get(accountId + ':' + worldId + ':' + villageId)
-      ?.find(e => e.state.syncRevision === base.revision && e.state.serverTime === base.serverTime)?.state;
+    return this.#bases
+      .get(accountId + ':' + worldId + ':' + villageId)
+      ?.find((e) => e.state.syncRevision === base.revision && e.state.serverTime === base.serverTime)?.state;
   }
   #project(accountId: string, worldSlug: string, villageId: string) {
     const key = accountId + ':' + worldSlug + ':' + villageId;
     let flight = this.#flights.get(key);
     if (!flight) {
-      flight = this.load(accountId, worldSlug, villageId).then(state => { this.remember(accountId, state); return state; })
+      flight = this.load(accountId, worldSlug, villageId)
+        .then((state) => {
+          this.remember(accountId, state);
+          return state;
+        })
         .finally(() => this.#flights.delete(key));
       this.#flights.set(key, flight);
     }
@@ -53,13 +87,22 @@ export class VillageSyncProjections {
     if (next.syncRevision! < minimumRevision) throw Error('Projection predates committed command');
     return next;
   }
-  async commandResponse(accountId: string, worldSlug: string, commit: ConstructionCommit,
-    base: VillageSyncBase | undefined, minimumRevision: number): Promise<VillageCommandResponse> {
+  async commandResponse(
+    accountId: string,
+    worldSlug: string,
+    commit: ConstructionCommit,
+    base: VillageSyncBase | undefined,
+    minimumRevision: number,
+  ): Promise<VillageCommandResponse> {
     const before = base ? this.#base(accountId, commit.worldId, commit.villageId, base) : undefined;
     const after = await this.read(accountId, worldSlug, commit.villageId, minimumRevision);
-    const metadata = { ...(commit.commandId ? { commandId: commit.commandId } : {}),
-      commandTime: commit.through.toISOString(), serverTime: after.serverTime };
-    if (before && after.syncRevision! > before.syncRevision!) return { ...metadata, kind: 'frame', frame: villageFrame(before, after) };
+    const metadata = {
+      ...(commit.commandId ? { commandId: commit.commandId } : {}),
+      commandTime: commit.through.toISOString(),
+      serverTime: after.serverTime,
+    };
+    if (before && after.syncRevision! > before.syncRevision!)
+      return { ...metadata, kind: 'frame', frame: villageFrame(before, after) };
     return { ...metadata, kind: 'snapshot', state: after };
   }
 }

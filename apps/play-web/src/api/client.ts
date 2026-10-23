@@ -1,14 +1,26 @@
-import type { LoginRequest, SessionResponse, RegisterRequest, AvailableWorlds, JoinWorldRequest, JoinWorldResponse } from '@arbestra/contracts';
+import type {
+  LoginRequest,
+  SessionResponse,
+  RegisterRequest,
+  AvailableWorlds,
+  JoinWorldRequest,
+  JoinWorldResponse,
+} from '@arbestra/contracts';
 
 export class ApiError extends Error {
-  public constructor(message: string, public readonly status: number) {
+  public constructor(
+    message: string,
+    public readonly status: number,
+  ) {
     super(message);
   }
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Une erreur est survenue.' })) as { message?: string };
+    const error = (await response.json().catch(() => ({ message: 'Une erreur est survenue.' }))) as {
+      message?: string;
+    };
     throw new ApiError(error.message ?? 'Une erreur est survenue.', response.status);
   }
   return response.json() as Promise<T>;
@@ -36,12 +48,25 @@ export async function logout(): Promise<void> {
 }
 
 export async function register(credentials: RegisterRequest): Promise<SessionResponse> {
-  return parseResponse<SessionResponse>(await fetch('/api/auth/register', {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(credentials)}));
+  return parseResponse<SessionResponse>(
+    await fetch('/api/auth/register', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(credentials),
+    }),
+  );
 }
 export async function getWorlds(): Promise<AvailableWorlds> {
-  return parseResponse<AvailableWorlds>(await fetch('/api/worlds',{credentials:'same-origin'}));
+  return parseResponse<AvailableWorlds>(await fetch('/api/worlds', { credentials: 'same-origin' }));
 }
 export async function joinWorld(slug: string, request: JoinWorldRequest): Promise<JoinWorldResponse> {
-  return parseResponse<JoinWorldResponse>(await fetch(`/api/worlds/${encodeURIComponent(slug)}/join`,
-    {method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify(request)}));
+  return parseResponse<JoinWorldResponse>(
+    await fetch(`/api/worlds/${encodeURIComponent(slug)}/join`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
+  );
 }

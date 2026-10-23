@@ -9,7 +9,10 @@ export class BuildingGeometry {
   rotation = Vector3.Zero();
   rotationQuaternion: Quaternion | null = null;
 
-  constructor(readonly name: string, readonly data: VertexData) {}
+  constructor(
+    readonly name: string,
+    readonly data: VertexData,
+  ) {}
 
   static box(name: string, options: Parameters<typeof CreateBoxVertexData>[0]) {
     return new BuildingGeometry(name, CreateBoxVertexData(options));
@@ -19,7 +22,9 @@ export class BuildingGeometry {
     return new BuildingGeometry(name, CreateCylinderVertexData(options));
   }
 
-  getTotalVertices() { return (this.data.positions?.length ?? 0) / 3; }
+  getTotalVertices() {
+    return (this.data.positions?.length ?? 0) / 3;
+  }
 
   getVerticesData(kind: 'uv' | 'color') {
     return kind === 'uv' ? this.data.uvs : this.data.colors;
@@ -33,11 +38,15 @@ export class BuildingGeometry {
   /** Consumes these pieces; upload the returned batch once, after all edits. */
   static merge(parts: readonly BuildingGeometry[]) {
     if (!parts.length) throw new Error('Cannot merge an empty building batch');
-    const transformed = parts.map(part => part.data.transform(Matrix.Compose(
-      Vector3.One(),
-      part.rotationQuaternion ?? Quaternion.RotationYawPitchRoll(part.rotation.y, part.rotation.x, part.rotation.z),
-      part.position,
-    )));
+    const transformed = parts.map((part) =>
+      part.data.transform(
+        Matrix.Compose(
+          Vector3.One(),
+          part.rotationQuaternion ?? Quaternion.RotationYawPitchRoll(part.rotation.y, part.rotation.x, part.rotation.z),
+          part.position,
+        ),
+      ),
+    );
     return transformed[0]!.merge(transformed.slice(1), true);
   }
 }

@@ -1,4 +1,4 @@
-import {sql, type Kysely, type QueryExecutorProvider} from 'kysely';
+import { sql, type Kysely, type QueryExecutorProvider } from 'kysely';
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`

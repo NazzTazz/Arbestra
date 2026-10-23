@@ -11,13 +11,23 @@ export function wrappedDelta(value: number, origin: number, size: number): numbe
 }
 
 export function toroidalManhattan(
-  aX: number, aY: number, bX: number, bY: number, width: number, height: number,
+  aX: number,
+  aY: number,
+  bX: number,
+  bY: number,
+  width: number,
+  height: number,
 ): number {
   return Math.abs(wrappedDelta(aX, bX, width)) + Math.abs(wrappedDelta(aY, bY, height));
 }
 
 export function toroidalChebyshev(
-  aX: number, aY: number, bX: number, bY: number, width: number, height: number,
+  aX: number,
+  aY: number,
+  bX: number,
+  bY: number,
+  width: number,
+  height: number,
 ): number {
   return Math.max(Math.abs(wrappedDelta(aX, bX, width)), Math.abs(wrappedDelta(aY, bY, height)));
 }

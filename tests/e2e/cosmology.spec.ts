@@ -2,12 +2,20 @@ import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 
 test.setTimeout(120_000);
-test.use({ launchOptions: { args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [] } });
-test('cosmological pause, rotating torus picking and local return preserve navigation without commands', async ({ page }, info) => {
+test.use({
+  launchOptions: { args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [] },
+});
+test('cosmological pause, rotating torus picking and local return preserve navigation without commands', async ({
+  page,
+}, info) => {
   await resetE2eState();
-  const errors: string[] = [], geography: string[] = [], commands: string[] = [];
-  page.on('pageerror', e => errors.push(e.message));
-  page.on('response', r => { if (r.url().endsWith('/terrain/overview')) geography.push(r.url()); });
+  const errors: string[] = [],
+    geography: string[] = [],
+    commands: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('response', (r) => {
+    if (r.url().endsWith('/terrain/overview')) geography.push(r.url());
+  });
   await page.goto('/');
   await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
   await page.getByLabel('Mot de passe').fill('arbestra');
@@ -15,13 +23,20 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
   const canvas = page.getByTestId('village-canvas');
   await expect(canvas).toBeVisible({ timeout: 40_000 });
-  page.on('request', r => { if (r.method() === 'POST' && r.url().includes('/api/')) commands.push(r.url()); });
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().includes('/api/')) commands.push(r.url());
+  });
   await page.getByRole('button', { name: 'Cosmologie · debug' }).click();
   await expect(page.getByRole('region', { name: 'Laboratoire cosmologique' })).toBeVisible();
   await page.getByRole('button', { name: 'Pause cosmologique' }).click();
-  const phase = async () => JSON.parse(await canvas.getAttribute('data-cosmology') ?? '{}') as {
-    phase: number; torusPhase: number; sunPhase: number; rotationPeriodMs: number; paused: boolean;
-  };
+  const phase = async () =>
+    JSON.parse((await canvas.getAttribute('data-cosmology')) ?? '{}') as {
+      phase: number;
+      torusPhase: number;
+      sunPhase: number;
+      rotationPeriodMs: number;
+      paused: boolean;
+    };
   await expect.poll(async () => (await phase()).paused).toBe(true);
   const frozen = (await phase()).phase;
   await page.waitForTimeout(1200);
@@ -42,12 +57,21 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   await page.getByRole('button', { name: 'Monde torique' }).click();
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
-  const cameraState = async () => JSON.parse(await canvas.getAttribute('data-world-camera') ?? '{}') as {
-    sticky: boolean; screen: number[]; position: number[]; alpha: number; beta: number; radius: number;
-  };
-  const attached = await cameraState(); expect(attached.sticky).toBe(true);
-  expect(attached.screen[0]).toBeCloseTo(.5, 3); expect(attached.screen[1]).toBeCloseTo(.5, 3);
-  expect(attached.radius).toBeGreaterThan(0); expect(attached.radius).toBeLessThan(2);
+  const cameraState = async () =>
+    JSON.parse((await canvas.getAttribute('data-world-camera')) ?? '{}') as {
+      sticky: boolean;
+      screen: number[];
+      position: number[];
+      alpha: number;
+      beta: number;
+      radius: number;
+    };
+  const attached = await cameraState();
+  expect(attached.sticky).toBe(true);
+  expect(attached.screen[0]).toBeCloseTo(0.5, 3);
+  expect(attached.screen[1]).toBeCloseTo(0.5, 3);
+  expect(attached.radius).toBeGreaterThan(0);
+  expect(attached.radius).toBeLessThan(2);
   await page.getByLabel('Phase cosmologique').press('PageUp');
   await expect.poll(async () => (await cameraState()).position).not.toEqual(attached.position);
   const rotated = await cameraState();
@@ -56,7 +80,7 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   expect([rotated.alpha, rotated.beta, rotated.radius]).toEqual([attached.alpha, attached.beta, attached.radius]);
   await page.getByLabel('Phase cosmologique').press('PageDown');
   await expect.poll(async () => (await phase()).phase).toBeCloseTo(chosenPhase);
-  const renderer = await canvas.evaluate(el => {
+  const renderer = await canvas.evaluate((el) => {
     const gl = (el as HTMLCanvasElement).getContext('webgl2') ?? (el as HTMLCanvasElement).getContext('webgl');
     const extension = gl?.getExtension('WEBGL_debug_renderer_info');
     return extension ? String(gl!.getParameter(extension.UNMASKED_RENDERER_WEBGL)) : 'unavailable';
@@ -66,7 +90,12 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   await page.getByRole('button', { name: 'Cosmologie · debug' }).click();
   const bounds = (await canvas.boundingBox())!;
   let chosen: string | null = null;
-  for (const [x, y] of [[.5, .4], [.72, .68], [.3, .55], [.5, .72]]) {
+  for (const [x, y] of [
+    [0.5, 0.4],
+    [0.72, 0.68],
+    [0.3, 0.55],
+    [0.5, 0.72],
+  ]) {
     await page.mouse.click(bounds.x + bounds.width * x, bounds.y + bounds.height * y);
     chosen = await canvas.getAttribute('data-world-pick');
     if (chosen && chosen !== 'none') break;
@@ -91,5 +120,6 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   expect((await phase()).paused).toBe(false);
   expect((await phase()).rotationPeriodMs).toBe(28_800_000);
   expect(geography).toHaveLength(1);
-  expect(commands).toEqual([]); expect(errors).toEqual([]);
+  expect(commands).toEqual([]);
+  expect(errors).toEqual([]);
 });

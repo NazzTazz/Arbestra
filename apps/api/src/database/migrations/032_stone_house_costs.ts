@@ -1,5 +1,5 @@
-import {sql,type Kysely} from 'kysely';
-export async function up(db:Kysely<unknown>){
+import { sql, type Kysely } from 'kysely';
+export async function up(db: Kysely<unknown>) {
   await sql`
     create table building_variant_costs (
       building_type_code text not null, level integer not null,

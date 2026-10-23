@@ -22,8 +22,12 @@ for (const path of files) {
   const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
   function visit(node, owner = '<module>') {
     if (ts.isFunctionDeclaration(node) && node.name) owner = node.name.text;
-    if (ts.isVariableDeclaration(node) && node.initializer &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) owner = node.name.getText(source);
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+    )
+      owner = node.name.getText(source);
     let kind, target;
     if (ts.isCallExpression(node)) {
       const call = node.expression.getText(source);
@@ -31,21 +35,48 @@ for (const path of files) {
       if (['selectFrom', 'innerJoin', 'leftJoin', 'insertInto', 'updateTable', 'deleteFrom'].includes(method)) {
         kind = ['insertInto', 'updateTable', 'deleteFrom'].includes(method) ? 'write' : 'read';
         target = node.arguments[0]?.getText(source);
-      } else if (/^(state|beginVillageEconomy|reconcileVillageEconomy|finalizeVillageEconomy|villageCommandResult|readVillageProjection|reconcileSyncDeadline)$/.test(method)) {
-        kind = 'economy-or-projection'; target = call;
+      } else if (
+        /^(state|beginVillageEconomy|reconcileVillageEconomy|finalizeVillageEconomy|villageCommandResult|readVillageProjection|reconcileSyncDeadline)$/.test(
+          method,
+        )
+      ) {
+        kind = 'economy-or-projection';
+        target = call;
       }
     } else if (ts.isTaggedTemplateExpression(node) && node.tag.getText(source).startsWith('sql')) {
-      kind = 'sql-review'; target = node.template.getText(source);
+      kind = 'sql-review';
+      target = node.template.getText(source);
     }
-    if (kind) evidence.push({ file: relative(root, path).replaceAll('\\', '/'),
-      line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1, owner, kind, target });
-    ts.forEachChild(node, child => visit(child, owner));
+    if (kind)
+      evidence.push({
+        file: relative(root, path).replaceAll('\\', '/'),
+        line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+        owner,
+        kind,
+        target,
+      });
+    ts.forEachChild(node, (child) => visit(child, owner));
   }
   visit(source);
 }
 mkdirSync('test-results/command-sync', { recursive: true });
-writeFileSync('test-results/command-sync/dependencies.json', JSON.stringify({
-  scope: 'Direct AST references, including workers, migrations, seeds and scripts. SQL templates require review; no inferred transitive completeness.', evidence,
-}, null, 2));
-console.log(JSON.stringify({ files: files.length, references: evidence.length,
-  writes: evidence.filter(e => e.kind === 'write').length, output: 'test-results/command-sync/dependencies.json' }));
+writeFileSync(
+  'test-results/command-sync/dependencies.json',
+  JSON.stringify(
+    {
+      scope:
+        'Direct AST references, including workers, migrations, seeds and scripts. SQL templates require review; no inferred transitive completeness.',
+      evidence,
+    },
+    null,
+    2,
+  ),
+);
+console.log(
+  JSON.stringify({
+    files: files.length,
+    references: evidence.length,
+    writes: evidence.filter((e) => e.kind === 'write').length,
+    output: 'test-results/command-sync/dependencies.json',
+  }),
+);

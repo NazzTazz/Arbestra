@@ -1,6 +1,6 @@
-import {sql,type Kysely} from 'kysely';
+import { sql, type Kysely } from 'kysely';
 
-export async function up<DB>(db:Kysely<DB>):Promise<void>{
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await sql`alter table village_populations add column next_arrival_at timestamptz,
       add column growth_started_at timestamptz not null default statement_timestamp();
     insert into village_populations(world_id,village_id)

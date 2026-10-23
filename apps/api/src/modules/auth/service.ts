@@ -1,5 +1,5 @@
 import { devTime } from '../operations/dev-timing.js';
-import {observationAuthenticated} from '../admin/observation-actions.js';
+import { observationAuthenticated } from '../admin/observation-actions.js';
 import { scrypt as callbackScrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -16,14 +16,25 @@ import { createSessionToken, hashSessionToken } from '../../security/sessions.js
 const scrypt = promisify(callbackScrypt);
 
 export async function register(db: Kysely<Database>, config: AppConfig, email: string, password: string) {
-  const normalizedEmail = email.trim().toLowerCase(), passwordHash = await hashPassword(password);
-  return db.transaction().execute(async tx => {
-    const account = await tx.insertInto('accounts').values({ email: normalizedEmail, passwordHash })
-      .onConflict(c => c.column('email').doNothing()).returning(['id', 'email']).executeTakeFirst();
+  const normalizedEmail = email.trim().toLowerCase(),
+    passwordHash = await hashPassword(password);
+  return db.transaction().execute(async (tx) => {
+    const account = await tx
+      .insertInto('accounts')
+      .values({ email: normalizedEmail, passwordHash })
+      .onConflict((c) => c.column('email').doNothing())
+      .returning(['id', 'email'])
+      .executeTakeFirst();
     if (!account) throw new HttpError(409, 'EMAIL_ALREADY_USED', 'Cette adresse possède déjà un compte.');
     const token = createSessionToken();
-    await tx.insertInto('sessions').values({ tokenHash: hashSessionToken(token), accountId: account.id,
-      expiresAt: new Date(Date.now() + config.sessionTtlDays * 86_400_000) }).execute();
+    await tx
+      .insertInto('sessions')
+      .values({
+        tokenHash: hashSessionToken(token),
+        accountId: account.id,
+        expiresAt: new Date(Date.now() + config.sessionTtlDays * 86_400_000),
+      })
+      .execute();
     return { token, session: { account, worlds: [] } satisfies SessionResponse };
   });
 }
@@ -40,7 +51,8 @@ export async function login(
   password: string,
 ): Promise<{ token: string; session: SessionResponse }> {
   const normalizedEmail = email.trim().toLowerCase();
-  const account = await db.selectFrom('accounts')
+  const account = await db
+    .selectFrom('accounts')
     .select(['id', 'email', 'passwordHash'])
     .where('email', '=', normalizedEmail)
     .executeTakeFirst();
@@ -55,32 +67,33 @@ export async function login(
 
   const token = createSessionToken();
   const expiresAt = new Date(Date.now() + config.sessionTtlDays * 86_400_000);
-  await db.insertInto('sessions').values({
-    tokenHash: hashSessionToken(token),
-    accountId: account.id,
-    expiresAt,
-  }).execute();
+  await db
+    .insertInto('sessions')
+    .values({
+      tokenHash: hashSessionToken(token),
+      accountId: account.id,
+      expiresAt,
+    })
+    .execute();
 
   return { token, session: await getSessionForAccount(db, account) };
 }
 
-export async function authenticate(
-  db: Kysely<Database>,
-  token: string | undefined,
-): Promise<AuthenticatedAccount> {
+export async function authenticate(db: Kysely<Database>, token: string | undefined): Promise<AuthenticatedAccount> {
   return devTime('auth', async () => {
-  if (!token) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Connexion requise.');
+    if (!token) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Connexion requise.');
 
-  const account = await db.selectFrom('sessions')
-    .innerJoin('accounts', 'accounts.id', 'sessions.accountId')
-    .select(['accounts.id', 'accounts.email'])
-    .where('sessions.tokenHash', '=', hashSessionToken(token))
-    .where('sessions.expiresAt', '>', new Date())
-    .executeTakeFirst();
+    const account = await db
+      .selectFrom('sessions')
+      .innerJoin('accounts', 'accounts.id', 'sessions.accountId')
+      .select(['accounts.id', 'accounts.email'])
+      .where('sessions.tokenHash', '=', hashSessionToken(token))
+      .where('sessions.expiresAt', '>', new Date())
+      .executeTakeFirst();
 
-  if (!account) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Session invalide ou expirée.');
-  observationAuthenticated(account.id);
-  return account;
+    if (!account) throw new HttpError(401, 'AUTHENTICATION_REQUIRED', 'Session invalide ou expirée.');
+    observationAuthenticated(account.id);
+    return account;
   });
 }
 
@@ -88,7 +101,8 @@ export async function getSessionForAccount(
   db: Kysely<Database>,
   account: AuthenticatedAccount,
 ): Promise<SessionResponse> {
-  const worlds = await db.selectFrom('worldMemberships')
+  const worlds = await db
+    .selectFrom('worldMemberships')
     .innerJoin('worlds', 'worlds.id', 'worldMemberships.worldId')
     .select(['worlds.id', 'worlds.slug', 'worlds.name', 'worldMemberships.playerName'])
     .where('worldMemberships.accountId', '=', account.id)

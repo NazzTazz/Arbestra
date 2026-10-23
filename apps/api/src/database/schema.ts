@@ -1,5 +1,13 @@
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
-import type {BuildingVisualLayout,GardenHarvestStop,TravelCell,ExploitationRequest,InfrastructurePlan,InfrastructureQuote,TerrainBuildingExterior} from '@arbestra/contracts';
+import type {
+  BuildingVisualLayout,
+  GardenHarvestStop,
+  TravelCell,
+  ExploitationRequest,
+  InfrastructurePlan,
+  InfrastructureQuote,
+  TerrainBuildingExterior,
+} from '@arbestra/contracts';
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -11,7 +19,7 @@ export interface AccountsTable {
 }
 
 export interface WorldsTable {
-  terrainModel: Generated<'terraces'|'vertices'>;
+  terrainModel: Generated<'terraces' | 'vertices'>;
   id: Generated<string>;
   slug: string;
   name: string;
@@ -24,22 +32,40 @@ export interface WorldsTable {
   generationStatus: Generated<'pending' | 'generating' | 'ready' | 'failed'>;
   generatedAt: Timestamp | null;
   isOpen: Generated<boolean>;
-  openedAt: ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
+  openedAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   createdAt: Generated<Timestamp>;
 }
 
 export interface WorldGenerationCandidatesTable {
-  worldId:string; commandId:string; ownerAccountId:string;
-  parameters:JSONColumnType<import('@arbestra/contracts').GeneratorParameters,import('@arbestra/contracts').GeneratorParameters>;
-  status:Generated<'pending'|'running'|'ready'|'failed'>;
-  attempt:Generated<number>; revision:Generated<number>; recipeRevision:Generated<number>;
-  heartbeatAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
-  startedAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
-  finishedAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
-  checksum:Generated<string|null>; error:Generated<string|null>; retainedAt:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
-  durationMs:Generated<number|null>; createdAt:ColumnType<Date,Date|string|undefined,Date|string>;
-  metrics:ColumnType<import('@arbestra/contracts').GeneratedLandscape['metrics']|null,import('@arbestra/contracts').GeneratedLandscape['metrics']|null|undefined,import('@arbestra/contracts').GeneratedLandscape['metrics']|null>;
-  artifact:ColumnType<import('@arbestra/contracts').GeneratedLandscape|null,import('@arbestra/contracts').GeneratedLandscape|null|undefined,import('@arbestra/contracts').GeneratedLandscape|null>;
+  worldId: string;
+  commandId: string;
+  ownerAccountId: string;
+  parameters: JSONColumnType<
+    import('@arbestra/contracts').GeneratorParameters,
+    import('@arbestra/contracts').GeneratorParameters
+  >;
+  status: Generated<'pending' | 'running' | 'ready' | 'failed'>;
+  attempt: Generated<number>;
+  revision: Generated<number>;
+  recipeRevision: Generated<number>;
+  heartbeatAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  startedAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  finishedAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  checksum: Generated<string | null>;
+  error: Generated<string | null>;
+  retainedAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  durationMs: Generated<number | null>;
+  createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
+  metrics: ColumnType<
+    import('@arbestra/contracts').GeneratedLandscape['metrics'] | null,
+    import('@arbestra/contracts').GeneratedLandscape['metrics'] | null | undefined,
+    import('@arbestra/contracts').GeneratedLandscape['metrics'] | null
+  >;
+  artifact: ColumnType<
+    import('@arbestra/contracts').GeneratedLandscape | null,
+    import('@arbestra/contracts').GeneratedLandscape | null | undefined,
+    import('@arbestra/contracts').GeneratedLandscape | null
+  >;
 }
 export interface WorldMembershipsTable {
   accountId: string;
@@ -60,7 +86,7 @@ export interface VillagesTable {
 }
 
 export interface BuildingsTable {
-  quarterTurns:Generated<number>;
+  quarterTurns: Generated<number>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -72,7 +98,11 @@ export interface BuildingsTable {
   constructionCompletesAt: Timestamp | null;
   completedAt: Timestamp | null;
   createdAt: Generated<Timestamp>;
-  visualLayout: ColumnType<BuildingVisualLayout|null,BuildingVisualLayout|null|undefined,BuildingVisualLayout|null>;
+  visualLayout: ColumnType<
+    BuildingVisualLayout | null,
+    BuildingVisualLayout | null | undefined,
+    BuildingVisualLayout | null
+  >;
 }
 
 export interface BuildingCommandReceiptsTable {
@@ -234,13 +264,17 @@ export interface VillagePopulationsTable {
   worldId: string;
   villageId: string;
   initializedAt: Generated<Timestamp>;
-  nextArrivalAt: ColumnType<Date|null,Date|string|null|undefined,Date|string|null>;
-  growthStartedAt: ColumnType<Date,Date|string|undefined,Date|string>;
+  nextArrivalAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  growthStartedAt: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
 export interface PopulationCohortsTable {
-  pendingRelease: ColumnType<'idle'|'resting'|null,'idle'|'resting'|null|undefined,'idle'|'resting'|null>;
-  avoidWorksiteId: ColumnType<string|null,string|null|undefined,string|null>;
+  pendingRelease: ColumnType<
+    'idle' | 'resting' | null,
+    'idle' | 'resting' | null | undefined,
+    'idle' | 'resting' | null
+  >;
+  avoidWorksiteId: ColumnType<string | null, string | null | undefined, string | null>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -259,7 +293,7 @@ export interface PopulationCohortsTable {
   levelingJobId: ColumnType<string | null, string | null | undefined, string | null>;
   tradeJourneyId: ColumnType<string | null, string | null | undefined, string | null>;
   cartographer: ColumnType<boolean, boolean | undefined, boolean>;
-  restBuildingId: ColumnType<string|null,string|null|undefined,string|null>;
+  restBuildingId: ColumnType<string | null, string | null | undefined, string | null>;
   createdAt: Generated<Timestamp>;
 }
 
@@ -291,11 +325,15 @@ export interface DepositExtractionsTable {
   workerCount: number;
   reservedAmount: ColumnType<string, number | string, number | string>;
   transportMs: ColumnType<number, number | undefined, number>;
-  pathCells: ColumnType<Array<{ cellX: number; cellY: number }> | null, Array<{ cellX: number; cellY: number }> | null | undefined, Array<{ cellX: number; cellY: number }> | null>;
+  pathCells: ColumnType<
+    Array<{ cellX: number; cellY: number }> | null,
+    Array<{ cellX: number; cellY: number }> | null | undefined,
+    Array<{ cellX: number; cellY: number }> | null
+  >;
 }
 
 export interface ExtractionWorksitesTable {
-  poolResource: ColumnType<'wood'|'stone'|null,'wood'|'stone'|null|undefined,'wood'|'stone'|null>;
+  poolResource: ColumnType<'wood' | 'stone' | null, 'wood' | 'stone' | null | undefined, 'wood' | 'stone' | null>;
   exploitationOrderId: ColumnType<string | null, string | null | undefined, string | null>;
   id: Generated<string>;
   worldId: string;
@@ -305,7 +343,11 @@ export interface ExtractionWorksitesTable {
   requestedWorkerCap: number;
   resourceCode: 'stone' | 'wood';
   mode: 'extract' | 'cut' | 'clear';
-  status: ColumnType<'running' | 'paused' | 'stopping' | 'stopped' | 'completed', 'running' | 'paused' | 'stopping' | 'stopped' | 'completed' | undefined, 'running' | 'paused' | 'stopping' | 'stopped' | 'completed'>;
+  status: ColumnType<
+    'running' | 'paused' | 'stopping' | 'stopped' | 'completed',
+    'running' | 'paused' | 'stopping' | 'stopped' | 'completed' | undefined,
+    'running' | 'paused' | 'stopping' | 'stopped' | 'completed'
+  >;
   workerCap: number;
   deliveredAmount: ColumnType<string, number | string | undefined, number | string>;
   waitReason: string | null;
@@ -322,7 +364,11 @@ export interface ExtractionWorksiteTargetsTable {
   villageId: string;
   featureId: string;
   ordinal: number;
-  status: ColumnType<'pending' | 'completed' | 'external' | 'abandoned', 'pending' | 'completed' | 'external' | 'abandoned' | undefined, 'pending' | 'completed' | 'external' | 'abandoned'>;
+  status: ColumnType<
+    'pending' | 'completed' | 'external' | 'abandoned',
+    'pending' | 'completed' | 'external' | 'abandoned' | undefined,
+    'pending' | 'completed' | 'external' | 'abandoned'
+  >;
   admittedAt: Timestamp | null;
   thresholdReachedAt: Timestamp | null;
   completedAt: Timestamp | null;
@@ -349,8 +395,8 @@ export interface BuildingHiddenSuppliesTable {
 
 export interface GardenHarvestsTable {
   exploitationOrderId: ColumnType<string | null, string | null | undefined, string | null>;
-  stops: ColumnType<GardenHarvestStop[],GardenHarvestStop[]|undefined,GardenHarvestStop[]>;
-  returnPathCells: ColumnType<TravelCell[]|null,TravelCell[]|null|undefined,TravelCell[]|null>;
+  stops: ColumnType<GardenHarvestStop[], GardenHarvestStop[] | undefined, GardenHarvestStop[]>;
+  returnPathCells: ColumnType<TravelCell[] | null, TravelCell[] | null | undefined, TravelCell[] | null>;
   id: Generated<string>;
   worldId: string;
   villageId: string;
@@ -365,7 +411,11 @@ export interface GardenHarvestsTable {
   plotCellX: ColumnType<number | null, number | null | undefined, number | null>;
   plotCellY: ColumnType<number | null, number | null | undefined, number | null>;
   transportMs: ColumnType<number, number | undefined, number>;
-  pathCells: ColumnType<Array<{ cellX: number; cellY: number }> | null, Array<{ cellX: number; cellY: number }> | null | undefined, Array<{ cellX: number; cellY: number }> | null>;
+  pathCells: ColumnType<
+    Array<{ cellX: number; cellY: number }> | null,
+    Array<{ cellX: number; cellY: number }> | null | undefined,
+    Array<{ cellX: number; cellY: number }> | null
+  >;
 }
 
 export interface GardenPlotsTable {
@@ -404,89 +454,292 @@ export interface SessionsTable {
 }
 
 export interface Database {
-  extractionPools: { worldId:string; villageId:string; resourceCode:'wood'|'stone'; siteCount:number; workerCap:number };
-  hudWorkforceReceipts: { worldId:string; villageId:string; commandId:string; request:JSONColumnType<Record<string,unknown>>; affected:number; carrots:number };
+  extractionPools: {
+    worldId: string;
+    villageId: string;
+    resourceCode: 'wood' | 'stone';
+    siteCount: number;
+    workerCap: number;
+  };
+  hudWorkforceReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<Record<string, unknown>>;
+    affected: number;
+    carrots: number;
+  };
   levelingJobs: {
-    id: Generated<string>; worldId: string; villageId: string; featureId: string; commandId: string;
-    request: JSONColumnType<import('@arbestra/contracts').LevelingCommand|import('@arbestra/contracts').TerraformCommand>;
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    featureId: string;
+    commandId: string;
+    request: JSONColumnType<
+      import('@arbestra/contracts').LevelingCommand | import('@arbestra/contracts').TerraformCommand
+    >;
     quote: JSONColumnType<import('@arbestra/contracts').LevelingQuote>;
-    path: JSONColumnType<TravelCell[]>; workerCount: number;
-    startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;
+    path: JSONColumnType<TravelCell[]>;
+    workerCount: number;
+    startedAt: Timestamp;
+    completesAt: Timestamp;
+    completedAt: Timestamp | null;
   };
   tradeOffers: {
-    id: Generated<string>; worldId: string; villageId: string;
-    requestedResource: string; requestedAmount: number; offeredResource: string; offeredAmount: number;
-    maxTravelSeconds: number; status: 'open' | 'cancelled' | 'accepted' | 'oracle';
-    createdAt: Timestamp; oracleAt: Timestamp; oracleEligible: boolean;
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    requestedResource: string;
+    requestedAmount: number;
+    offeredResource: string;
+    offeredAmount: number;
+    maxTravelSeconds: number;
+    status: 'open' | 'cancelled' | 'accepted' | 'oracle';
+    createdAt: Timestamp;
+    oracleAt: Timestamp;
+    oracleEligible: boolean;
   };
   tradeJourneys: {
-    id: Generated<string>; worldId: string; villageId: string; destinationVillageId: string; offerId: string;
-    workerCount: number; path: JSONColumnType<import('@arbestra/contracts').TravelCell[]>;
-    startedAt: Timestamp; arrivesAt: Timestamp; returnsAt: Timestamp;
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    destinationVillageId: string;
+    offerId: string;
+    workerCount: number;
+    path: JSONColumnType<import('@arbestra/contracts').TravelCell[]>;
+    startedAt: Timestamp;
+    arrivesAt: Timestamp;
+    returnsAt: Timestamp;
   };
   tradeDeliveries: {
-    id: Generated<string>; worldId: string; villageId: string; journeyId: string;
-    resourceCode: string; amount: number; dueAt: Timestamp; completedAt: Timestamp | null; releaseWorkers: boolean;
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    journeyId: string;
+    resourceCode: string;
+    amount: number;
+    dueAt: Timestamp;
+    completedAt: Timestamp | null;
+    releaseWorkers: boolean;
   };
-  tradeReceipts: { worldId: string; villageId: string; commandId: string; request: JSONColumnType<import('@arbestra/contracts').TradeCommand> };
-  expeditionSubmissions:{worldId:string;villageId:string;accountId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').ExpeditionIntent>;receipt:JSONColumnType<import('@arbestra/contracts').ExpeditionReceipt>;receivedOrder:Generated<string>;createdAt:ColumnType<Date,Date|string|undefined,Date|string>;expiresAt:ColumnType<Date,Date|string|undefined,Date|string>;attempt:Generated<number>;attemptToken:Generated<string|null>;leaseUntil:ColumnType<Date|null,Date|string|null|undefined,Date|string|null>};
-  villageSyncChanges: { worldId: string; transactionId: ColumnType<string, string, string>; navigationChanged: Generated<boolean> };
-  harvestSubmissions:{worldId:string;villageId:string;commandId:string;accountId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt|null,string|null,string|null>;createdAt:Generated<Timestamp>};
-  harvestIntents: {worldId:string;villageId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').HarvestIntent>;receipt:JSONColumnType<import('@arbestra/contracts').HarvestReceipt>;orderId:string|null;createdAt:Timestamp};
-  villageStarterInstallations: {worldId:string;villageId:string;accountId:string;commandId:string;
-    request:JSONColumnType<import('@arbestra/contracts').SpawnPoseRequest>;
-    kit:JSONColumnType<import('@arbestra/contracts').StarterKit>;remaining:JSONColumnType<string[]>;
-    anchorX:number;anchorY:number;quarterTurns:number;referenceHeight:number;createdAt:Generated<Timestamp>};
-  starterPoseReceipts:{worldId:string;villageId:string;commandId:string;request:JSONColumnType<import('@arbestra/contracts').StarterPoseRequest>;buildingId:string};
-  worldTerrainVertices:{worldId:string;vertexX:number;vertexY:number;height:number};
-  worldSpawnTerraces:{worldId:string;villageId:string;cellX:number;cellY:number;height:number};
-  worldRc1Resources:{worldId:string;featureId:string;sourceKey:string;treeIndices:JSONColumnType<number[]>;removedIndices:JSONColumnType<number[]>};
+  tradeReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<import('@arbestra/contracts').TradeCommand>;
+  };
+  expeditionSubmissions: {
+    worldId: string;
+    villageId: string;
+    accountId: string;
+    commandId: string;
+    request: JSONColumnType<import('@arbestra/contracts').ExpeditionIntent>;
+    receipt: JSONColumnType<import('@arbestra/contracts').ExpeditionReceipt>;
+    receivedOrder: Generated<string>;
+    createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
+    expiresAt: ColumnType<Date, Date | string | undefined, Date | string>;
+    attempt: Generated<number>;
+    attemptToken: Generated<string | null>;
+    leaseUntil: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  };
+  villageSyncChanges: {
+    worldId: string;
+    transactionId: ColumnType<string, string, string>;
+    navigationChanged: Generated<boolean>;
+  };
+  harvestSubmissions: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    accountId: string;
+    request: JSONColumnType<import('@arbestra/contracts').HarvestIntent>;
+    receipt: JSONColumnType<import('@arbestra/contracts').HarvestReceipt | null, string | null, string | null>;
+    createdAt: Generated<Timestamp>;
+  };
+  harvestIntents: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<import('@arbestra/contracts').HarvestIntent>;
+    receipt: JSONColumnType<import('@arbestra/contracts').HarvestReceipt>;
+    orderId: string | null;
+    createdAt: Timestamp;
+  };
+  villageStarterInstallations: {
+    worldId: string;
+    villageId: string;
+    accountId: string;
+    commandId: string;
+    request: JSONColumnType<import('@arbestra/contracts').SpawnPoseRequest>;
+    kit: JSONColumnType<import('@arbestra/contracts').StarterKit>;
+    remaining: JSONColumnType<string[]>;
+    anchorX: number;
+    anchorY: number;
+    quarterTurns: number;
+    referenceHeight: number;
+    createdAt: Generated<Timestamp>;
+  };
+  starterPoseReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<import('@arbestra/contracts').StarterPoseRequest>;
+    buildingId: string;
+  };
+  worldTerrainVertices: { worldId: string; vertexX: number; vertexY: number; height: number };
+  worldSpawnTerraces: { worldId: string; villageId: string; cellX: number; cellY: number; height: number };
+  worldRc1Resources: {
+    worldId: string;
+    featureId: string;
+    sourceKey: string;
+    treeIndices: JSONColumnType<number[]>;
+    removedIndices: JSONColumnType<number[]>;
+  };
   worldAtlasPresentations: { worldId: string; title: string; slogan: string };
-  villageSpawnTerritories: { worldId: string; villageId: string; points: JSONColumnType<import('@arbestra/contracts').SpawnPoint[]> };
-  buildingVariantCosts: {buildingTypeCode:string;level:number;variant:'stone'|'logs'|'beams';resourceCode:string;amount:ColumnType<string,number|string,number|string>;replacesResourceCode:Generated<string|null>};
+  villageSpawnTerritories: {
+    worldId: string;
+    villageId: string;
+    points: JSONColumnType<import('@arbestra/contracts').SpawnPoint[]>;
+  };
+  buildingVariantCosts: {
+    buildingTypeCode: string;
+    level: number;
+    variant: 'stone' | 'logs' | 'beams';
+    resourceCode: string;
+    amount: ColumnType<string, number | string, number | string>;
+    replacesResourceCode: Generated<string | null>;
+  };
   processingRecipes: ProcessingRecipesTable;
   oracleMarketResources: { resourceCode: string; valueUnits: number };
   marketExchanges: {
-    id: Generated<string>; worldId: string; villageId: string; commandId: string;
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    commandId: string;
     request: JSONColumnType<Record<string, unknown>, string, string>;
-    offeredResource: string; requestedResource: string;
+    offeredResource: string;
+    requestedResource: string;
     offeredAmount: ColumnType<string, number | string, number | string>;
     receivedAmount: ColumnType<string, number | string, number | string>;
-    startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;
+    startedAt: Timestamp;
+    completesAt: Timestamp;
+    completedAt: Timestamp | null;
   };
   processingOrders: ProcessingOrdersTable;
   processingLots: ProcessingLotsTable;
   processingCommandReceipts: ProcessingCommandReceiptsTable;
-  villageInfrastructure:{worldId:string;villageId:string;plan:JSONColumnType<InfrastructurePlan>};
-  infrastructureReceipts:{worldId:string;villageId:string;commandId:string;sessionId:string;request:JSONColumnType<object>;
-    beforePlan:JSONColumnType<InfrastructurePlan>;afterPlan:JSONColumnType<InfrastructurePlan>;quote:JSONColumnType<InfrastructureQuote>;undone:Generated<boolean>;createdAt:Generated<Timestamp>};
-  worldFactorySettings:{worldId:string;enabled:boolean};
+  villageInfrastructure: { worldId: string; villageId: string; plan: JSONColumnType<InfrastructurePlan> };
+  infrastructureReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    sessionId: string;
+    request: JSONColumnType<object>;
+    beforePlan: JSONColumnType<InfrastructurePlan>;
+    afterPlan: JSONColumnType<InfrastructurePlan>;
+    quote: JSONColumnType<InfrastructureQuote>;
+    undone: Generated<boolean>;
+    createdAt: Generated<Timestamp>;
+  };
+  worldFactorySettings: { worldId: string; enabled: boolean };
   exploitationOrders: {
-    id: Generated<string>; worldId: string; villageId: string; commandId: string;
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    commandId: string;
     request: ColumnType<ExploitationRequest, string, string>;
-    workerCap: number; confirmedAt: Timestamp; deadline: Timestamp | null;
-    cohortId: string | null; initialRemaining: number;
+    workerCap: number;
+    confirmedAt: Timestamp;
+    deadline: Timestamp | null;
+    cohortId: string | null;
+    initialRemaining: number;
     gardenStatus: 'pending' | 'active' | 'completed' | 'closed';
-    gardenPlan: ColumnType<{stops: Array<Omit<GardenHarvestStop, 'reservedCarrots'>>; returnPath: TravelCell[]; durationMs: number} | null, string | null, string | null>;
+    gardenPlan: ColumnType<
+      { stops: Array<Omit<GardenHarvestStop, 'reservedCarrots'>>; returnPath: TravelCell[]; durationMs: number } | null,
+      string | null,
+      string | null
+    >;
     nextWakeAt: Timestamp | null;
   };
-  playerScience: { worldId: string; accountId: string; observationsSince: Timestamp | null; solarReport: JSONColumnType<Record<string, unknown> | null, string | null, string | null> };
-  sciencePrograms: { worldId: string; accountId: string; code: string; discipline: 'mathematics' | 'geography' | 'astronomy';
-    level: number; workDoneMs: ColumnType<string, string | number | undefined, string | number>; paused: ColumnType<boolean, boolean | undefined, boolean>;
-    acquiredAt: Timestamp | null; createdAt: Timestamp; workerCap: number };
-  scienceContributions: { worldId: string; villageId: string; buildingId: string; accountId: string; programCode: string;
-    workerCap: number; requestedAt: Timestamp; lastStartedAt: Timestamp | null };
-  scienceActivities: { id: Generated<string>; worldId: string; villageId: string; accountId: string; buildingId: string | null;
-    programCode: string | null; kind: 'research' | 'training' | 'survey' | 'exploration'; status: 'in-progress' | 'completed';
-    workerCount: number; workMs: ColumnType<string, string | number, string | number>; startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp | null;
-    pathCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]>; surveyCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]> };
-  sciencePlaces: { worldId: string; accountId: string; cellX: number; cellY: number; terrainCode: number; elevation: number;
-    observedAt: Timestamp; surveyed: boolean; sourceActivityId: string | null };
-  scienceVillageReports: { worldId: string; accountId: string; villageId: string; name: string; anchorCellX: number; anchorCellY: number;
-    observedAt: Timestamp; blocks: JSONColumnType<Array<{ x: number; y: number; width: number; depth: number; garden: boolean; underConstruction?: boolean; exterior?: TerrainBuildingExterior }>> };
-    extractionWorksites: ExtractionWorksitesTable;
-    extractionWorksiteTargets: ExtractionWorksiteTargetsTable;
-    extractionWorksiteCommands: ExtractionWorksiteCommandsTable;
+  playerScience: {
+    worldId: string;
+    accountId: string;
+    observationsSince: Timestamp | null;
+    solarReport: JSONColumnType<Record<string, unknown> | null, string | null, string | null>;
+  };
+  sciencePrograms: {
+    worldId: string;
+    accountId: string;
+    code: string;
+    discipline: 'mathematics' | 'geography' | 'astronomy';
+    level: number;
+    workDoneMs: ColumnType<string, string | number | undefined, string | number>;
+    paused: ColumnType<boolean, boolean | undefined, boolean>;
+    acquiredAt: Timestamp | null;
+    createdAt: Timestamp;
+    workerCap: number;
+  };
+  scienceContributions: {
+    worldId: string;
+    villageId: string;
+    buildingId: string;
+    accountId: string;
+    programCode: string;
+    workerCap: number;
+    requestedAt: Timestamp;
+    lastStartedAt: Timestamp | null;
+  };
+  scienceActivities: {
+    id: Generated<string>;
+    worldId: string;
+    villageId: string;
+    accountId: string;
+    buildingId: string | null;
+    programCode: string | null;
+    kind: 'research' | 'training' | 'survey' | 'exploration';
+    status: 'in-progress' | 'completed';
+    workerCount: number;
+    workMs: ColumnType<string, string | number, string | number>;
+    startedAt: Timestamp;
+    completesAt: Timestamp;
+    completedAt: Timestamp | null;
+    pathCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]>;
+    surveyCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]>;
+  };
+  sciencePlaces: {
+    worldId: string;
+    accountId: string;
+    cellX: number;
+    cellY: number;
+    terrainCode: number;
+    elevation: number;
+    observedAt: Timestamp;
+    surveyed: boolean;
+    sourceActivityId: string | null;
+  };
+  scienceVillageReports: {
+    worldId: string;
+    accountId: string;
+    villageId: string;
+    name: string;
+    anchorCellX: number;
+    anchorCellY: number;
+    observedAt: Timestamp;
+    blocks: JSONColumnType<
+      Array<{
+        x: number;
+        y: number;
+        width: number;
+        depth: number;
+        garden: boolean;
+        underConstruction?: boolean;
+        exterior?: TerrainBuildingExterior;
+      }>
+    >;
+  };
+  extractionWorksites: ExtractionWorksitesTable;
+  extractionWorksiteTargets: ExtractionWorksiteTargetsTable;
+  extractionWorksiteCommands: ExtractionWorksiteCommandsTable;
   woodlandDeposits: StoneDepositsTable & {
     regrowthPeriodMs: ColumnType<string, number | string | undefined, number | string>;
     regrowthUpdatedAt: Timestamp;
@@ -517,9 +770,15 @@ export interface Database {
   buildingResourceBuffers: BuildingResourceBuffersTable;
   scheduledTasks: ScheduledTasksTable;
   villageEconomyCatchups: {
-    worldId:string; villageId:string; generation:string; targetThrough:Timestamp;
-    completedThrough:Timestamp|null; lastTransitionAt:Timestamp|null; transitions:ColumnType<string,number|string|undefined,number|string>;
-    status:'active'|'complete'; updatedAt:Generated<Timestamp>;
+    worldId: string;
+    villageId: string;
+    generation: string;
+    targetThrough: Timestamp;
+    completedThrough: Timestamp | null;
+    lastTransitionAt: Timestamp | null;
+    transitions: ColumnType<string, number | string | undefined, number | string>;
+    status: 'active' | 'complete';
+    updatedAt: Generated<Timestamp>;
   };
   villagePopulations: VillagePopulationsTable;
   populationCohorts: PopulationCohortsTable;
@@ -534,24 +793,51 @@ export interface Database {
 }
 
 export interface ProcessingRecipesTable {
-  buildingTypeCode: string; level: number; version: number;
-  inputResource: string; inputAmount: number; outputResource: string; outputAmount: number;
-  workMs: number; workerCap: number;
+  buildingTypeCode: string;
+  level: number;
+  version: number;
+  inputResource: string;
+  inputAmount: number;
+  outputResource: string;
+  outputAmount: number;
+  workMs: number;
+  workerCap: number;
 }
 export interface ProcessingOrdersTable {
-  id: Generated<string>; worldId: string; villageId: string; buildingId: string;
-  status: 'running'|'pause-requested'|'cancel-requested'|'paused'|'blocked'|'completed'|'cancelled';
-  blockedReason: 'missing-input'|'missing-workers'|null;
-  requestedLots: number; completedLots: Generated<number>; workerCount: number;
+  id: Generated<string>;
+  worldId: string;
+  villageId: string;
+  buildingId: string;
+  status: 'running' | 'pause-requested' | 'cancel-requested' | 'paused' | 'blocked' | 'completed' | 'cancelled';
+  blockedReason: 'missing-input' | 'missing-workers' | null;
+  requestedLots: number;
+  completedLots: Generated<number>;
+  workerCount: number;
   workerIds: JSONColumnType<string[], string, string>;
-  createdAt: Timestamp; finishedAt: Timestamp|null;
+  createdAt: Timestamp;
+  finishedAt: Timestamp | null;
 }
 export interface ProcessingLotsTable {
-  id: Generated<string>; worldId: string; villageId: string; orderId: string; lotNumber: number;
-  recipeVersion: number; inputResource: string; inputAmount: number; outputResource: string; outputAmount: number;
-  workerCount: number; startedAt: Timestamp; completesAt: Timestamp; completedAt: Timestamp|null;
+  id: Generated<string>;
+  worldId: string;
+  villageId: string;
+  orderId: string;
+  lotNumber: number;
+  recipeVersion: number;
+  inputResource: string;
+  inputAmount: number;
+  outputResource: string;
+  outputAmount: number;
+  workerCount: number;
+  startedAt: Timestamp;
+  completesAt: Timestamp;
+  completedAt: Timestamp | null;
 }
 export interface ProcessingCommandReceiptsTable {
-  worldId: string; villageId: string; commandId: string; request: JSONColumnType<Record<string, unknown>, string, string>;
-  orderId: Generated<string | null>; commandTime: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  worldId: string;
+  villageId: string;
+  commandId: string;
+  request: JSONColumnType<Record<string, unknown>, string, string>;
+  orderId: Generated<string | null>;
+  commandTime: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
 }

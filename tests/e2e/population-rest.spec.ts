@@ -10,21 +10,32 @@ test('un repos court rend les habitants disponibles sans attendre cinq heures', 
   await resetE2eState();
   const db = createDatabase(testDatabaseUrl());
   try {
-    await db.updateTable('populationCohorts').set({ energy: 9, energyProgress: 79_000_000,
-      foodUsedSinceRest: 2, energyUpdatedAt: new Date() })
-      .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village).execute();
+    await db
+      .updateTable('populationCohorts')
+      .set({ energy: 9, energyProgress: 79_000_000, foodUsedSinceRest: 2, energyUpdatedAt: new Date() })
+      .where('worldId', '=', DEVELOPMENT_IDS.world)
+      .where('villageId', '=', DEVELOPMENT_IDS.village)
+      .execute();
     await page.goto('/');
     await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
     await page.getByLabel('Mot de passe').fill('arbestra');
     await page.getByRole('button', { name: 'Se connecter' }).click();
     await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
     await page.getByRole('button', { name: 'Gérer les habitants' }).click();
-    await page.getByRole('button', { name: 'Disponibles : 15 habitants', exact:true }).click();
-    await page.getByRole('button', { name: 'Au repos : 0 habitants', exact:true }).click();
-    await expect(page.getByRole('button',{name:'Au repos : 10 habitants',exact:true})).toBeVisible();
-    await expect(page.getByRole('button',{name:'Disponibles : 15 habitants',exact:true})).toBeVisible({ timeout: 25_000 });
-    const cohorts = await db.selectFrom('populationCohorts').select(['foodUsedSinceRest']).where('worldId', '=', DEVELOPMENT_IDS.world)
-      .where('villageId', '=', DEVELOPMENT_IDS.village).execute();
+    await page.getByRole('button', { name: 'Disponibles : 15 habitants', exact: true }).click();
+    await page.getByRole('button', { name: 'Au repos : 0 habitants', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Au repos : 10 habitants', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Disponibles : 15 habitants', exact: true })).toBeVisible({
+      timeout: 25_000,
+    });
+    const cohorts = await db
+      .selectFrom('populationCohorts')
+      .select(['foodUsedSinceRest'])
+      .where('worldId', '=', DEVELOPMENT_IDS.world)
+      .where('villageId', '=', DEVELOPMENT_IDS.village)
+      .execute();
     expect(cohorts.every((cohort) => cohort.foodUsedSinceRest === 2)).toBe(true);
-  } finally { await db.destroy(); }
+  } finally {
+    await db.destroy();
+  }
 });

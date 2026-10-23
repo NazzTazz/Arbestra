@@ -1,2 +1,109 @@
-.observation-controls{position:absolute;z-index:6;top:12px;left:12px;right:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;background:#101d1de8;color:#d8f1e3;border:1px solid #7caa91;border-radius:6px;font-size:13px}.observation-controls strong{color:#bdebc9}.observation-controls small{flex-basis:100%;color:#b7c9bb}.observation-controls p{flex-basis:100%;margin:0;color:#f5c384}.observation-journal,.observation-inspection{position:absolute;z-index:8;right:12px;top:125px;width:340px;max-width:calc(100% - 24px);max-height:calc(100% - 210px);overflow:auto;padding:16px;background:#111c19ed;color:#dcebe1;border:1px solid #7caa91;border-radius:6px}.observation-journal button,.observation-inspection button{float:right}.observation-journal h2{font-size:16px}.observation-journal article{padding:12px 0;border-top:1px solid #527060}.observation-journal article strong,.observation-journal code{display:block;overflow-wrap:anywhere}.observation-journal time,.observation-journal small{color:#b0c8bb}.observation-inspection{left:12px;right:auto;top:auto;bottom:65px;width:250px}.observation-game .population-button:disabled{opacity:1;cursor:default}@media(max-width:700px){.observation-controls{gap:6px;font-size:11px}.observation-journal{top:160px;max-height:calc(100% - 240px)}}
-.observation-controls button,.observation-controls select,.observation-journal button,.observation-inspection button{font:inherit;color:#d8f1e3;background:#1c3028;border:1px solid #63846e;border-radius:4px;padding:5px 8px;cursor:pointer}.observation-controls button:hover,.observation-journal button:hover,.observation-inspection button:hover{background:#2b4536}.observation-controls :focus-visible,.observation-journal :focus-visible,.observation-inspection :focus-visible{outline:2px solid #c1e6c6;outline-offset:2px}
+.observation-controls {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: #101d1de8;
+  color: #d8f1e3;
+  border: 1px solid #7caa91;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.observation-controls strong {
+  color: #bdebc9;
+}
+.observation-controls small {
+  flex-basis: 100%;
+  color: #b7c9bb;
+}
+.observation-controls p {
+  flex-basis: 100%;
+  margin: 0;
+  color: #f5c384;
+}
+.observation-journal,
+.observation-inspection {
+  position: absolute;
+  z-index: 8;
+  right: 12px;
+  top: 125px;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 210px);
+  overflow: auto;
+  padding: 16px;
+  background: #111c19ed;
+  color: #dcebe1;
+  border: 1px solid #7caa91;
+  border-radius: 6px;
+}
+.observation-journal button,
+.observation-inspection button {
+  float: right;
+}
+.observation-journal h2 {
+  font-size: 16px;
+}
+.observation-journal article {
+  padding: 12px 0;
+  border-top: 1px solid #527060;
+}
+.observation-journal article strong,
+.observation-journal code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.observation-journal time,
+.observation-journal small {
+  color: #b0c8bb;
+}
+.observation-inspection {
+  left: 12px;
+  right: auto;
+  top: auto;
+  bottom: 65px;
+  width: 250px;
+}
+.observation-game .population-button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+@media (max-width: 700px) {
+  .observation-controls {
+    gap: 6px;
+    font-size: 11px;
+  }
+  .observation-journal {
+    top: 160px;
+    max-height: calc(100% - 240px);
+  }
+}
+.observation-controls button,
+.observation-controls select,
+.observation-journal button,
+.observation-inspection button {
+  font: inherit;
+  color: #d8f1e3;
+  background: #1c3028;
+  border: 1px solid #63846e;
+  border-radius: 4px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.observation-controls button:hover,
+.observation-journal button:hover,
+.observation-inspection button:hover {
+  background: #2b4536;
+}
+.observation-controls :focus-visible,
+.observation-journal :focus-visible,
+.observation-inspection :focus-visible {
+  outline: 2px solid #c1e6c6;
+  outline-offset: 2px;
+}

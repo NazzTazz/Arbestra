@@ -82,7 +82,8 @@ export async function validateStoneDepositBackfill(db: Kysely<unknown>): Promise
     having f.state <> 'available' or count(o.feature_id) <> 1
     limit 1
   `.execute(db);
-  if (invalid.rows.length) throw new Error(`Stone backfill requires one available cell per feature: ${invalid.rows[0]!.id}`);
+  if (invalid.rows.length)
+    throw new Error(`Stone backfill requires one available cell per feature: ${invalid.rows[0]!.id}`);
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {

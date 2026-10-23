@@ -6,8 +6,12 @@ const dynamic = new WeakSet<TransformNode>();
 const revisions = new WeakMap<Scene, number>();
 
 /** Exclude an animated branch, including children whose world pose follows it. */
-export function keepWorldMatrixDynamic(root: TransformNode): void { dynamic.add(root); }
-export function staticTransformRevision(scene: Scene): number { return revisions.get(scene) ?? 0; }
+export function keepWorldMatrixDynamic(root: TransformNode): void {
+  dynamic.add(root);
+}
+export function staticTransformRevision(scene: Scene): number {
+  return revisions.get(scene) ?? 0;
+}
 
 /** Opt-in only: callers own invalidation after changing pose, parent or geometry. */
 export function freezeStaticHierarchy(root: TransformNode): void {

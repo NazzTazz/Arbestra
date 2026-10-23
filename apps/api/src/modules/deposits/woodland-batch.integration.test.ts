@@ -1,55 +1,338 @@
-import {randomUUID} from 'node:crypto';
-import {sql,type Transaction} from 'kysely';
-import {afterAll,expect,it} from 'vitest';
-import type {Database} from '../../database/schema.js';
-import {createDatabase} from '../../database/connection.js';
-import {testDatabaseUrl} from '../../database/test-environment.js';
-import {materializeWoodland,materializeWoodlands} from './woodland.js';
-const url=testDatabaseUrl(),target=new URL(url);
-if(target.hostname!=='127.0.0.1'||target.pathname!=='/arbestra_test')throw Error('Unexpected woodland batch fixture DB');
-let queries=0;const db=createDatabase(url).withPlugin({transformQuery(args){queries++;return args.node;},async transformResult(args){return args.result;}});
-afterAll(()=>db.destroy());
-it('batches non-due woodlands with historical stock, reservations, thresholds and occupied-cell effects',async()=>{
- const worldId=randomUUID(),accountId=randomUUID(),villageId=randomUUID(),buildingId=randomUUID(),abort=Error('EXPECTED_WOODLAND_BATCH_FIXTURE_ROLLBACK');let observed=false;
- await expect(db.transaction().execute(async tx=>{
-  await sql`set local lock_timeout='2000ms'`.execute(tx);
-  await tx.insertInto('accounts').values({id:accountId,email:accountId+'@wood-batch.test',passwordHash:'fixture'}).execute();
-  await tx.insertInto('worlds').values({id:worldId,slug:'wood-batch-'+worldId,name:'Wood batch fixture',topology:'torus',widthCells:512,heightCells:256,chunkSize:32,seed:4109,generationVersion:1,generationStatus:'ready',isOpen:false,generatedAt:new Date()}).execute();
-  await tx.insertInto('worldMemberships').values({worldId,accountId,playerName:'Wood batch fixture'}).execute();
-  await tx.insertInto('villages').values({id:villageId,worldId,ownerAccountId:accountId,name:'Wood batch',anchorCellX:64,anchorCellY:64,economyActivatedAt:new Date()}).execute();
-  await tx.selectFrom('villages').select('id').where('worldId','=',worldId).where('id','=',villageId).forUpdate().executeTakeFirstOrThrow();
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);
-  const t=(await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at,horizon=new Date(t.getTime()+3_600_000);
-  await tx.insertInto('buildings').values({id:buildingId,worldId,villageId,buildingType:'dwelling',level:1,targetLevel:null,status:'completed',constructionStartedAt:null,constructionCompletesAt:null,completedAt:t}).execute();
-  const cases=[{amount:'1000',reserve:0,cleared:false,occupation:'feature'},{amount:'600.25',reserve:0,cleared:false,occupation:'feature'},{amount:'400',reserve:100,cleared:false,occupation:'feature'},{amount:'95',reserve:0,cleared:false,occupation:'feature'},{amount:'100.000001',reserve:0,cleared:false,occupation:'feature'},{amount:'600',reserve:0,cleared:false,occupation:'none'},{amount:'95',reserve:20,cleared:false,occupation:'building'},{amount:'20',reserve:20,cleared:true,occupation:'feature'}];
-  const ids:string[]=[];
-  for(const [i,c]of cases.entries()){
-   const id=randomUUID();ids.push(id);const cellX=80+i,cellY=64;
-   await tx.insertInto('worldFeatures').values({id,worldId,featureTypeCode:'woodland',state:'available',variantSeed:i}).execute();
-   await tx.insertInto('woodlandDeposits').values({worldId,featureId:id,cellX,cellY,initialAmount:1000,remainingAmount:c.amount,reservedAmount:c.reserve,regrowthPeriodMs:1_000_000_000_000,regrowthUpdatedAt:t,revision:1,updatedAt:t,cleared:c.cleared}).execute();
-   if(c.occupation!=='none')await tx.insertInto('worldCellOccupancies').values({worldId,cellX,cellY,role:'body',featureId:c.occupation==='feature'?id:null,buildingId:c.occupation==='building'?buildingId:null}).execute();
-   if(c.reserve)await tx.insertInto('depositExtractions').values({worldId,villageId,featureId:id,commandId:randomUUID(),resourceCode:'wood',status:'in-progress',startedAt:t,completesAt:new Date(horizon.getTime()+3_600_000),completedAt:null,workerCount:1,reservedAmount:c.reserve,pathCells:[],transportMs:0,woodDebitedAt:null}).execute();
-  }
-  const dueId=randomUUID(),dueSite=randomUUID(),dueAt=new Date(t.getTime()+600_000);ids.push(dueId);
-  await tx.insertInto('worldFeatures').values({id:dueId,worldId,featureTypeCode:'woodland',state:'available',variantSeed:8}).execute();
-  await tx.insertInto('woodlandDeposits').values({worldId,featureId:dueId,cellX:88,cellY:64,initialAmount:1000,remainingAmount:105,reservedAmount:20,regrowthPeriodMs:100_000_000,regrowthUpdatedAt:t,revision:1,updatedAt:t,cleared:false}).execute();
-  await tx.insertInto('worldCellOccupancies').values({worldId,cellX:88,cellY:64,role:'body',featureId:dueId,buildingId:null}).execute();
-  await tx.insertInto('extractionWorksites').values({id:dueSite,worldId,villageId,commandId:randomUUID(),requestedFeatureIds:[dueId],requestedWorkerCap:1,resourceCode:'wood',mode:'cut',status:'running',workerCap:1,waitReason:null,nextWakeAt:null,lastDepartureAt:sql`${t.toISOString()}::timestamptz`,createdAt:sql`${t.toISOString()}::timestamptz`,updatedAt:t}).execute();
-  await tx.insertInto('extractionWorksiteTargets').values({worksiteId:dueSite,worldId,villageId,featureId:dueId,ordinal:0,status:'pending',admittedAt:t,thresholdReachedAt:null,completedAt:null,reason:null}).execute();
-  await tx.insertInto('depositExtractions').values({worldId,villageId,featureId:dueId,worksiteId:dueSite,commandId:randomUUID(),resourceCode:'wood',status:'in-progress',startedAt:t,completesAt:dueAt,completedAt:null,workerCount:1,reservedAmount:20,pathCells:[],transportMs:0,woodDebitedAt:null}).execute();
-  await tx.selectFrom('woodlandDeposits').select('featureId').where('worldId','=',worldId).where('featureId','in',ids).orderBy('featureId').forUpdate().execute();
-  const snapshot=async(t:Transaction<Database>)=>({woods:await t.selectFrom('woodlandDeposits').selectAll().where('worldId','=',worldId).orderBy('cellX').execute(),features:await t.selectFrom('worldFeatures').selectAll().where('worldId','=',worldId).orderBy('variantSeed').execute(),occupancies:await t.selectFrom('worldCellOccupancies').selectAll().where('worldId','=',worldId).orderBy('cellX').execute(),missions:await t.selectFrom('depositExtractions').selectAll().where('worldId','=',worldId).orderBy('featureId').execute(),targets:await t.selectFrom('extractionWorksiteTargets').selectAll().where('worldId','=',worldId).orderBy('ordinal').execute()});
-  const initial=await snapshot(tx);await sql`savepoint woodland_batch_reference`.execute(tx);
-  let start=queries;for(const id of ids.slice(1,-1))await materializeWoodland(tx,worldId,id,horizon);const dueStart=queries;await materializeWoodland(tx,worldId,dueId,horizon);const historicalDueQueries=queries-dueStart,historicalQueries=queries-start,expected=await snapshot(tx);
-  await sql`rollback to savepoint woodland_batch_reference`.execute(tx);start=queries;
-  await materializeWoodlands(tx,worldId,ids,horizon);const batchQueries=queries-start,actual=await snapshot(tx);
-  expect(actual).toEqual(expected);expect(actual.woods[0]).toEqual(initial.woods[0]);
-  expect(actual.occupancies.find(o=>o.buildingId===buildingId)).toEqual(initial.occupancies.find(o=>o.buildingId===buildingId));
-  expect(actual.missions.filter(m=>m.featureId!==dueId)).toEqual(initial.missions.filter(m=>m.featureId!==dueId));
-  expect(actual.missions.find(m=>m.featureId===dueId)).toMatchObject({woodDebitedAt:dueAt,status:'in-progress',reservedAmount:'20',completedAt:null});
-  expect(actual.targets[0]!.thresholdReachedAt).toEqual(dueAt);expect(Number(actual.woods.find(w=>w.featureId===dueId)!.remainingAmount)).toBe(121);
-  expect(batchQueries).toBeLessThanOrEqual(8+historicalDueQueries);expect(historicalQueries).toBeGreaterThanOrEqual(40);
-  console.info(JSON.stringify({kind:'isolated woodland transaction, no reset',woodlands:ids.length,historicalQueries,batchQueries,historicalDueQueries,nonDueBatchQueries:batchQueries-historicalDueQueries}));observed=true;throw abort;
- })).rejects.toBe(abort);
- expect(observed).toBe(true);expect(await db.selectFrom('worlds').select('id').where('id','=',worldId).execute()).toEqual([]);expect(await db.selectFrom('accounts').select('id').where('id','=',accountId).execute()).toEqual([]);
+import { randomUUID } from 'node:crypto';
+import { sql, type Transaction } from 'kysely';
+import { afterAll, expect, it } from 'vitest';
+import type { Database } from '../../database/schema.js';
+import { createDatabase } from '../../database/connection.js';
+import { testDatabaseUrl } from '../../database/test-environment.js';
+import { materializeWoodland, materializeWoodlands } from './woodland.js';
+const url = testDatabaseUrl(),
+  target = new URL(url);
+if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+  throw Error('Unexpected woodland batch fixture DB');
+let queries = 0;
+const db = createDatabase(url).withPlugin({
+  transformQuery(args) {
+    queries++;
+    return args.node;
+  },
+  async transformResult(args) {
+    return args.result;
+  },
+});
+afterAll(() => db.destroy());
+it('batches non-due woodlands with historical stock, reservations, thresholds and occupied-cell effects', async () => {
+  const worldId = randomUUID(),
+    accountId = randomUUID(),
+    villageId = randomUUID(),
+    buildingId = randomUUID(),
+    abort = Error('EXPECTED_WOODLAND_BATCH_FIXTURE_ROLLBACK');
+  let observed = false;
+  await expect(
+    db.transaction().execute(async (tx) => {
+      await sql`set local lock_timeout='2000ms'`.execute(tx);
+      await tx
+        .insertInto('accounts')
+        .values({ id: accountId, email: accountId + '@wood-batch.test', passwordHash: 'fixture' })
+        .execute();
+      await tx
+        .insertInto('worlds')
+        .values({
+          id: worldId,
+          slug: 'wood-batch-' + worldId,
+          name: 'Wood batch fixture',
+          topology: 'torus',
+          widthCells: 512,
+          heightCells: 256,
+          chunkSize: 32,
+          seed: 4109,
+          generationVersion: 1,
+          generationStatus: 'ready',
+          isOpen: false,
+          generatedAt: new Date(),
+        })
+        .execute();
+      await tx
+        .insertInto('worldMemberships')
+        .values({ worldId, accountId, playerName: 'Wood batch fixture' })
+        .execute();
+      await tx
+        .insertInto('villages')
+        .values({
+          id: villageId,
+          worldId,
+          ownerAccountId: accountId,
+          name: 'Wood batch',
+          anchorCellX: 64,
+          anchorCellY: 64,
+          economyActivatedAt: new Date(),
+        })
+        .execute();
+      await tx
+        .selectFrom('villages')
+        .select('id')
+        .where('worldId', '=', worldId)
+        .where('id', '=', villageId)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);
+      const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at,
+        horizon = new Date(t.getTime() + 3_600_000);
+      await tx
+        .insertInto('buildings')
+        .values({
+          id: buildingId,
+          worldId,
+          villageId,
+          buildingType: 'dwelling',
+          level: 1,
+          targetLevel: null,
+          status: 'completed',
+          constructionStartedAt: null,
+          constructionCompletesAt: null,
+          completedAt: t,
+        })
+        .execute();
+      const cases = [
+        { amount: '1000', reserve: 0, cleared: false, occupation: 'feature' },
+        { amount: '600.25', reserve: 0, cleared: false, occupation: 'feature' },
+        { amount: '400', reserve: 100, cleared: false, occupation: 'feature' },
+        { amount: '95', reserve: 0, cleared: false, occupation: 'feature' },
+        { amount: '100.000001', reserve: 0, cleared: false, occupation: 'feature' },
+        { amount: '600', reserve: 0, cleared: false, occupation: 'none' },
+        { amount: '95', reserve: 20, cleared: false, occupation: 'building' },
+        { amount: '20', reserve: 20, cleared: true, occupation: 'feature' },
+      ];
+      const ids: string[] = [];
+      for (const [i, c] of cases.entries()) {
+        const id = randomUUID();
+        ids.push(id);
+        const cellX = 80 + i,
+          cellY = 64;
+        await tx
+          .insertInto('worldFeatures')
+          .values({ id, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: i })
+          .execute();
+        await tx
+          .insertInto('woodlandDeposits')
+          .values({
+            worldId,
+            featureId: id,
+            cellX,
+            cellY,
+            initialAmount: 1000,
+            remainingAmount: c.amount,
+            reservedAmount: c.reserve,
+            regrowthPeriodMs: 1_000_000_000_000,
+            regrowthUpdatedAt: t,
+            revision: 1,
+            updatedAt: t,
+            cleared: c.cleared,
+          })
+          .execute();
+        if (c.occupation !== 'none')
+          await tx
+            .insertInto('worldCellOccupancies')
+            .values({
+              worldId,
+              cellX,
+              cellY,
+              role: 'body',
+              featureId: c.occupation === 'feature' ? id : null,
+              buildingId: c.occupation === 'building' ? buildingId : null,
+            })
+            .execute();
+        if (c.reserve)
+          await tx
+            .insertInto('depositExtractions')
+            .values({
+              worldId,
+              villageId,
+              featureId: id,
+              commandId: randomUUID(),
+              resourceCode: 'wood',
+              status: 'in-progress',
+              startedAt: t,
+              completesAt: new Date(horizon.getTime() + 3_600_000),
+              completedAt: null,
+              workerCount: 1,
+              reservedAmount: c.reserve,
+              pathCells: [],
+              transportMs: 0,
+              woodDebitedAt: null,
+            })
+            .execute();
+      }
+      const dueId = randomUUID(),
+        dueSite = randomUUID(),
+        dueAt = new Date(t.getTime() + 600_000);
+      ids.push(dueId);
+      await tx
+        .insertInto('worldFeatures')
+        .values({ id: dueId, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 8 })
+        .execute();
+      await tx
+        .insertInto('woodlandDeposits')
+        .values({
+          worldId,
+          featureId: dueId,
+          cellX: 88,
+          cellY: 64,
+          initialAmount: 1000,
+          remainingAmount: 105,
+          reservedAmount: 20,
+          regrowthPeriodMs: 100_000_000,
+          regrowthUpdatedAt: t,
+          revision: 1,
+          updatedAt: t,
+          cleared: false,
+        })
+        .execute();
+      await tx
+        .insertInto('worldCellOccupancies')
+        .values({ worldId, cellX: 88, cellY: 64, role: 'body', featureId: dueId, buildingId: null })
+        .execute();
+      await tx
+        .insertInto('extractionWorksites')
+        .values({
+          id: dueSite,
+          worldId,
+          villageId,
+          commandId: randomUUID(),
+          requestedFeatureIds: [dueId],
+          requestedWorkerCap: 1,
+          resourceCode: 'wood',
+          mode: 'cut',
+          status: 'running',
+          workerCap: 1,
+          waitReason: null,
+          nextWakeAt: null,
+          lastDepartureAt: sql`${t.toISOString()}::timestamptz`,
+          createdAt: sql`${t.toISOString()}::timestamptz`,
+          updatedAt: t,
+        })
+        .execute();
+      await tx
+        .insertInto('extractionWorksiteTargets')
+        .values({
+          worksiteId: dueSite,
+          worldId,
+          villageId,
+          featureId: dueId,
+          ordinal: 0,
+          status: 'pending',
+          admittedAt: t,
+          thresholdReachedAt: null,
+          completedAt: null,
+          reason: null,
+        })
+        .execute();
+      await tx
+        .insertInto('depositExtractions')
+        .values({
+          worldId,
+          villageId,
+          featureId: dueId,
+          worksiteId: dueSite,
+          commandId: randomUUID(),
+          resourceCode: 'wood',
+          status: 'in-progress',
+          startedAt: t,
+          completesAt: dueAt,
+          completedAt: null,
+          workerCount: 1,
+          reservedAmount: 20,
+          pathCells: [],
+          transportMs: 0,
+          woodDebitedAt: null,
+        })
+        .execute();
+      await tx
+        .selectFrom('woodlandDeposits')
+        .select('featureId')
+        .where('worldId', '=', worldId)
+        .where('featureId', 'in', ids)
+        .orderBy('featureId')
+        .forUpdate()
+        .execute();
+      const snapshot = async (t: Transaction<Database>) => ({
+        woods: await t
+          .selectFrom('woodlandDeposits')
+          .selectAll()
+          .where('worldId', '=', worldId)
+          .orderBy('cellX')
+          .execute(),
+        features: await t
+          .selectFrom('worldFeatures')
+          .selectAll()
+          .where('worldId', '=', worldId)
+          .orderBy('variantSeed')
+          .execute(),
+        occupancies: await t
+          .selectFrom('worldCellOccupancies')
+          .selectAll()
+          .where('worldId', '=', worldId)
+          .orderBy('cellX')
+          .execute(),
+        missions: await t
+          .selectFrom('depositExtractions')
+          .selectAll()
+          .where('worldId', '=', worldId)
+          .orderBy('featureId')
+          .execute(),
+        targets: await t
+          .selectFrom('extractionWorksiteTargets')
+          .selectAll()
+          .where('worldId', '=', worldId)
+          .orderBy('ordinal')
+          .execute(),
+      });
+      const initial = await snapshot(tx);
+      await sql`savepoint woodland_batch_reference`.execute(tx);
+      let start = queries;
+      for (const id of ids.slice(1, -1)) await materializeWoodland(tx, worldId, id, horizon);
+      const dueStart = queries;
+      await materializeWoodland(tx, worldId, dueId, horizon);
+      const historicalDueQueries = queries - dueStart,
+        historicalQueries = queries - start,
+        expected = await snapshot(tx);
+      await sql`rollback to savepoint woodland_batch_reference`.execute(tx);
+      start = queries;
+      await materializeWoodlands(tx, worldId, ids, horizon);
+      const batchQueries = queries - start,
+        actual = await snapshot(tx);
+      expect(actual).toEqual(expected);
+      expect(actual.woods[0]).toEqual(initial.woods[0]);
+      expect(actual.occupancies.find((o) => o.buildingId === buildingId)).toEqual(
+        initial.occupancies.find((o) => o.buildingId === buildingId),
+      );
+      expect(actual.missions.filter((m) => m.featureId !== dueId)).toEqual(
+        initial.missions.filter((m) => m.featureId !== dueId),
+      );
+      expect(actual.missions.find((m) => m.featureId === dueId)).toMatchObject({
+        woodDebitedAt: dueAt,
+        status: 'in-progress',
+        reservedAmount: '20',
+        completedAt: null,
+      });
+      expect(actual.targets[0]!.thresholdReachedAt).toEqual(dueAt);
+      expect(Number(actual.woods.find((w) => w.featureId === dueId)!.remainingAmount)).toBe(121);
+      expect(batchQueries).toBeLessThanOrEqual(8 + historicalDueQueries);
+      expect(historicalQueries).toBeGreaterThanOrEqual(40);
+      console.info(
+        JSON.stringify({
+          kind: 'isolated woodland transaction, no reset',
+          woodlands: ids.length,
+          historicalQueries,
+          batchQueries,
+          historicalDueQueries,
+          nonDueBatchQueries: batchQueries - historicalDueQueries,
+        }),
+      );
+      observed = true;
+      throw abort;
+    }),
+  ).rejects.toBe(abort);
+  expect(observed).toBe(true);
+  expect(await db.selectFrom('worlds').select('id').where('id', '=', worldId).execute()).toEqual([]);
+  expect(await db.selectFrom('accounts').select('id').where('id', '=', accountId).execute()).toEqual([]);
 });

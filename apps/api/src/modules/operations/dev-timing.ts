@@ -12,23 +12,33 @@ export class DevTimingTrace {
   readonly metrics = new Map<DevTimingPhase, DevTimingMetric>();
   readonly root: Span;
   closed = false;
-  constructor(readonly now = () => performance.now()) { this.root = this.start(); }
-  start(): Span { return { start: this.now(), children: 0, childStart: 0, childMs: 0, ended: false }; }
+  constructor(readonly now = () => performance.now()) {
+    this.root = this.start();
+  }
+  start(): Span {
+    return { start: this.now(), children: 0, childStart: 0, childMs: 0, ended: false };
+  }
   finish(phase: DevTimingPhase, span: Span) {
     if (span.ended || this.closed) return;
-    const end = this.now(), durationMs = Math.max(0, end - span.start);
+    const end = this.now(),
+      durationMs = Math.max(0, end - span.start);
     const covered = span.childMs + (span.children ? end - span.childStart : 0);
     span.ended = true;
     const prior = this.metrics.get(phase) ?? { phase, durationMs: 0, selfMs: 0, count: 0 };
-    prior.durationMs += durationMs; prior.selfMs += Math.max(0, durationMs - covered); prior.count++;
+    prior.durationMs += durationMs;
+    prior.selfMs += Math.max(0, durationMs - covered);
+    prior.count++;
     this.metrics.set(phase, prior);
   }
   header(): string {
-    this.finish('request', this.root); this.closed = true;
-    return [...this.metrics.values()].flatMap(m => [
-      `arb_${m.phase};dur=${m.durationMs.toFixed(3)};desc="${m.count}"`,
-      `arb_${m.phase}_self;dur=${m.selfMs.toFixed(3)};desc="${m.count}"`,
-    ]).join(', ');
+    this.finish('request', this.root);
+    this.closed = true;
+    return [...this.metrics.values()]
+      .flatMap((m) => [
+        `arb_${m.phase};dur=${m.durationMs.toFixed(3)};desc="${m.count}"`,
+        `arb_${m.phase}_self;dur=${m.selfMs.toFixed(3)};desc="${m.count}"`,
+      ])
+      .join(', ');
   }
 }
 
@@ -39,25 +49,43 @@ export function withDevTiming<T>(trace: DevTimingTrace, run: () => T): T {
 function begin(phase: DevTimingPhase) {
   const current = context.getStore();
   if (!current || current.trace.closed) return;
-  const { trace, span: parent } = current, span = trace.start();
+  const { trace, span: parent } = current,
+    span = trace.start();
   if (parent.children++ === 0) parent.childStart = span.start;
-  return { trace, span, end: () => {
-    trace.finish(phase, span);
-    if (--parent.children === 0 && !parent.ended) parent.childMs += Math.max(0, trace.now() - parent.childStart);
-  } };
+  return {
+    trace,
+    span,
+    end: () => {
+      trace.finish(phase, span);
+      if (--parent.children === 0 && !parent.ended) parent.childMs += Math.max(0, trace.now() - parent.childStart);
+    },
+  };
 }
 export function devTimeSync<T>(phase: DevTimingPhase, run: () => T): T {
-  const timing = begin(phase); if (!timing) return run();
-  try { return context.run(timing, run); } finally { timing.end(); }
+  const timing = begin(phase);
+  if (!timing) return run();
+  try {
+    return context.run(timing, run);
+  } finally {
+    timing.end();
+  }
 }
 export function devTime<T>(phase: DevTimingPhase, run: () => Promise<T>): Promise<T> {
-  const timing = begin(phase); if (!timing) return run();
-  return context.run(timing, async () => { try { return await run(); } finally { timing.end(); } });
+  const timing = begin(phase);
+  if (!timing) return run();
+  return context.run(timing, async () => {
+    try {
+      return await run();
+    } finally {
+      timing.end();
+    }
+  });
 }
 
 /** Retains the original connection object (including driver-owned release symbols). */
 export function instrumentDevDriver(driver: Driver): Driver {
-  const acquire = driver.acquireConnection.bind(driver), wrapped = new WeakSet<DatabaseConnection>();
+  const acquire = driver.acquireConnection.bind(driver),
+    wrapped = new WeakSet<DatabaseConnection>();
   driver.acquireConnection = async () => {
     const connection = await devTime('pool', acquire);
     if (!wrapped.has(connection)) {
@@ -70,20 +98,33 @@ export function instrumentDevDriver(driver: Driver): Driver {
   return driver;
 }
 
-const routes = new Set(['/api/worlds/:worldSlug/village', '/api/worlds/:worldSlug/starter', '/api/worlds/:worldSlug/starter/terrain',
-  '/api/worlds/:worldSlug/terrain', '/api/worlds/:worldSlug/terrain/updates',
-  '/api/worlds/:worldSlug/terrain/overview', '/api/worlds/:worldSlug/terrain/overview/vegetation',
-  '/api/worlds/:worldSlug/terrain/overview/villages']);
+const routes = new Set([
+  '/api/worlds/:worldSlug/village',
+  '/api/worlds/:worldSlug/starter',
+  '/api/worlds/:worldSlug/starter/terrain',
+  '/api/worlds/:worldSlug/terrain',
+  '/api/worlds/:worldSlug/terrain/updates',
+  '/api/worlds/:worldSlug/terrain/overview',
+  '/api/worlds/:worldSlug/terrain/overview/vegetation',
+  '/api/worlds/:worldSlug/terrain/overview/villages',
+]);
 
 export function instrumentDevTimings(app: FastifyInstance, isProduction: boolean) {
   if (isProduction) return;
   const traces = new WeakMap<FastifyRequest, DevTimingTrace>();
   app.addHook('onRequest', (request, _reply, done) => {
     const route = request.routeOptions.url ?? '';
-    const villageAction = route.startsWith('/api/worlds/:worldSlug/villages/:villageId/') && !route.endsWith('/events')
-      && (request.method === 'GET' || request.method === 'POST');
-    if (request.headers[DEV_TIMING_HEADER] !== '1' || !(villageAction || request.method === 'GET' && routes.has(route))) return done();
-    const trace = new DevTimingTrace(); traces.set(request, trace);
+    const villageAction =
+      route.startsWith('/api/worlds/:worldSlug/villages/:villageId/') &&
+      !route.endsWith('/events') &&
+      (request.method === 'GET' || request.method === 'POST');
+    if (
+      request.headers[DEV_TIMING_HEADER] !== '1' ||
+      !(villageAction || (request.method === 'GET' && routes.has(route)))
+    )
+      return done();
+    const trace = new DevTimingTrace();
+    traces.set(request, trace);
     withDevTiming(trace, done);
   });
   app.addHook('onSend', (request, reply, payload, done) => {
@@ -95,5 +136,9 @@ export function instrumentDevTimings(app: FastifyInstance, isProduction: boolean
     }
     done(null, payload);
   });
-  app.addHook('onResponse', (request, _reply, done) => { const trace = traces.get(request); if (trace) trace.closed = true; done(); });
+  app.addHook('onResponse', (request, _reply, done) => {
+    const trace = traces.get(request);
+    if (trace) trace.closed = true;
+    done();
+  });
 }

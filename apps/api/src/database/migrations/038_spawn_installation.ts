@@ -1,5 +1,5 @@
-﻿import {sql,type Kysely} from 'kysely';
-export async function up(db:Kysely<unknown>):Promise<void>{
+﻿import { sql, type Kysely } from 'kysely';
+export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     create table village_starter_installations (
       world_id uuid not null, village_id uuid primary key, account_id uuid not null references accounts(id),

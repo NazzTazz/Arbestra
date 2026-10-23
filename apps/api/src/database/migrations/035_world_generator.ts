@@ -1,5 +1,5 @@
 import { sql, type Kysely } from 'kysely';
-export async function up(db:Kysely<unknown>):Promise<void>{
+export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     alter table worlds add column is_open boolean not null default false, add column opened_at timestamptz;
     -- Preserve access to every existing ready world. Newly inserted worlds remain closed.

@@ -541,12 +541,7 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/extraction-pools",
-    "actions": [
-      "people-down",
-      "people-up",
-      "sites-down",
-      "sites-up"
-    ],
+    "actions": ["people-down", "people-up", "sites-down", "sites-up"],
     "lot": "C",
     "role": "mutation"
   },
@@ -651,12 +646,7 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/market/trades",
-    "actions": [
-      "accept",
-      "cancel",
-      "oracle",
-      "publish"
-    ],
+    "actions": ["accept", "cancel", "oracle", "publish"],
     "lot": "F",
     "role": "mutation"
   },
@@ -691,11 +681,7 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/population/gestures",
-    "actions": [
-      "feed",
-      "release",
-      "rest"
-    ],
+    "actions": ["feed", "release", "rest"],
     "lot": "C",
     "role": "mutation"
   },
@@ -716,12 +702,7 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/processing",
-    "actions": [
-      "cancel",
-      "pause",
-      "resume",
-      "start"
-    ],
+    "actions": ["cancel", "pause", "resume", "start"],
     "lot": "B",
     "role": "mutation"
   },
@@ -735,15 +716,7 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/science",
-    "actions": [
-      "explore",
-      "pause",
-      "recall",
-      "research",
-      "resume",
-      "survey",
-      "train"
-    ],
+    "actions": ["explore", "pause", "recall", "research", "resume", "survey", "train"],
     "lot": "G",
     "role": "mutation"
   },
@@ -792,12 +765,7 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/worksites/:worksiteId",
-    "actions": [
-      "pause",
-      "resume",
-      "set-cap",
-      "stop"
-    ],
+    "actions": ["pause", "resume", "set-cap", "stop"],
     "lot": "E",
     "role": "mutation"
   },

@@ -10,7 +10,12 @@ export function shoreInset(cellX: number, cellY: number, edge: number, point: nu
 }
 
 /** Babylon treats this vertex order as the water-facing side of the wall. */
-export function shoreFaceCorners(a: readonly [number, number], b: readonly [number, number], top: number, bottom: number): number[] {
+export function shoreFaceCorners(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  top: number,
+  bottom: number,
+): number[] {
   return [b[0], top, b[1], a[0], top, a[1], a[0], bottom, a[1], b[0], bottom, b[1]];
 }
 

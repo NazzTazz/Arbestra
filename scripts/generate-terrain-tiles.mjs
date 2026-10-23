@@ -17,7 +17,9 @@ const hash = (x, y, seed) => {
   n = Math.imul(n ^ (n >>> 13), 1274126177);
   return ((n ^ (n >>> 16)) >>> 0) / 0x100000000;
 };
-function blank() { return new Uint8Array(SIZE * SIZE * 4); }
+function blank() {
+  return new Uint8Array(SIZE * SIZE * 4);
+}
 function blend(pixels, x, y, color) {
   if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
   const at = (y * SIZE + x) * 4;
@@ -41,31 +43,35 @@ function diamond(pixels, cx, cy, rx, ry, color) {
 function grass(index) {
   const pixels = blank();
   const base = rgba(grassColors[index]);
-  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-    const coarse = hash(Math.floor(x / 19), Math.floor(y / 23), index) - 0.5;
-    const fine = hash(x, y, index) - 0.5;
-    const delta = Math.round(coarse * 7 + fine * 3);
-    const at = (y * SIZE + x) * 4;
-    for (let channel = 0; channel < 3; channel++) pixels[at + channel] = Math.max(0, Math.min(255, base[channel] + delta));
-    pixels[at + 3] = 255;
-  }
+  for (let y = 0; y < SIZE; y++)
+    for (let x = 0; x < SIZE; x++) {
+      const coarse = hash(Math.floor(x / 19), Math.floor(y / 23), index) - 0.5;
+      const fine = hash(x, y, index) - 0.5;
+      const delta = Math.round(coarse * 7 + fine * 3);
+      const at = (y * SIZE + x) * 4;
+      for (let channel = 0; channel < 3; channel++)
+        pixels[at + channel] = Math.max(0, Math.min(255, base[channel] + delta));
+      pixels[at + 3] = 255;
+    }
   for (let i = 0; i < 25; i++) {
     const x = 8 + Math.floor(hash(i, 51, index) * 112);
     const y = 8 + Math.floor(hash(i, 83, index) * 112);
     const shade = i % 3 === 0 ? rgba('81904d', 35) : rgba('314d29', 30);
-    diamond(pixels, x, y, 2 + i % 2, 4, shade);
+    diamond(pixels, x, y, 2 + (i % 2), 4, shade);
   }
   return pixels;
 }
 function garden(stage) {
   const pixels = blank();
-  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-    const variation = Math.round((hash(Math.floor(x / 11), Math.floor(y / 9), 70) - 0.5) * 11
-      + (hash(x, y, 71) - 0.5) * 5);
-    const at = (y * SIZE + x) * 4;
-    for (let channel = 0; channel < 3; channel++) pixels[at + channel] = soil[channel] + variation;
-    pixels[at + 3] = 255;
-  }
+  for (let y = 0; y < SIZE; y++)
+    for (let x = 0; x < SIZE; x++) {
+      const variation = Math.round(
+        (hash(Math.floor(x / 11), Math.floor(y / 9), 70) - 0.5) * 11 + (hash(x, y, 71) - 0.5) * 5,
+      );
+      const at = (y * SIZE + x) * 4;
+      for (let channel = 0; channel < 3; channel++) pixels[at + channel] = soil[channel] + variation;
+      pixels[at + 3] = 255;
+    }
   for (const row of [28, 64, 100]) {
     rect(pixels, 4, row - 10, 124, row - 6, rgba('825a32', 120));
     rect(pixels, 5, row - 5, 123, row + 7, rgba('392819', 195));
@@ -93,28 +99,29 @@ function garden(stage) {
 }
 function shoreTop() {
   const pixels = blank();
-  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-    const grain = (hash(Math.floor(x / 13), Math.floor(y / 11), 41) - 0.5) * 17
-      + (hash(x, y, 42) - 0.5) * 5;
-    const at = (y * SIZE + x) * 4;
-    const base = [139, 134, 83];
-    for (let channel = 0; channel < 3; channel++) pixels[at + channel] = Math.round(base[channel] + grain);
-    pixels[at + 3] = 255;
-  }
+  for (let y = 0; y < SIZE; y++)
+    for (let x = 0; x < SIZE; x++) {
+      const grain = (hash(Math.floor(x / 13), Math.floor(y / 11), 41) - 0.5) * 17 + (hash(x, y, 42) - 0.5) * 5;
+      const at = (y * SIZE + x) * 4;
+      const base = [139, 134, 83];
+      for (let channel = 0; channel < 3; channel++) pixels[at + channel] = Math.round(base[channel] + grain);
+      pixels[at + 3] = 255;
+    }
   return pixels;
 }
 function shoreFace() {
   const pixels = blank();
   const bands = [rgba('bd9b65'), rgba('866443'), rgba('aa8150'), rgba('694b32')];
-  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-    const bandY = y + (hash(Math.floor(x / 19), 0, 51) - 0.5) * 9;
-    const layer = Math.max(0, Math.min(3, Math.floor(bandY / 32)));
-    const grain = Math.round((hash(Math.floor(x / 6), Math.floor(y / 5), 52) - 0.5) * 13);
-    const at = (y * SIZE + x) * 4;
-    const seam = bandY % 32 < 4 && y > 4 ? -24 : 0;
-    for (let channel = 0; channel < 3; channel++) pixels[at + channel] = bands[layer][channel] + grain + seam;
-    pixels[at + 3] = 255;
-  }
+  for (let y = 0; y < SIZE; y++)
+    for (let x = 0; x < SIZE; x++) {
+      const bandY = y + (hash(Math.floor(x / 19), 0, 51) - 0.5) * 9;
+      const layer = Math.max(0, Math.min(3, Math.floor(bandY / 32)));
+      const grain = Math.round((hash(Math.floor(x / 6), Math.floor(y / 5), 52) - 0.5) * 13);
+      const at = (y * SIZE + x) * 4;
+      const seam = bandY % 32 < 4 && y > 4 ? -24 : 0;
+      for (let channel = 0; channel < 3; channel++) pixels[at + channel] = bands[layer][channel] + grain + seam;
+      pixels[at + 3] = 255;
+    }
   return pixels;
 }
 function crc32(data) {
@@ -126,30 +133,42 @@ function crc32(data) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 function chunk(type, data) {
-  const size = Buffer.alloc(4); size.writeUInt32BE(data.length);
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(data.length);
   const name = Buffer.from(type);
-  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([name, data])));
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([name, data])));
   return Buffer.concat([size, name, data, crc]);
 }
 function png(width, height, pixels) {
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4);
-  header[8] = 8; header[9] = 6;
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
   const raw = Buffer.alloc((width * 4 + 1) * height);
   for (let y = 0; y < height; y++) {
     Buffer.from(pixels.subarray(y * width * 4, (y + 1) * width * 4)).copy(raw, y * (width * 4 + 1) + 1);
   }
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk('IHDR', header), chunk('IDAT', deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }
-for (const [category, generator] of [['grass', grass], ['garden', garden]]) {
+for (const [category, generator] of [
+  ['grass', grass],
+  ['garden', garden],
+]) {
   for (let index = 0; index < 8; index++) {
     const pixels = generator(index);
     images.push(pixels);
     await writeFile(new URL(`${category}-${index}.png`, OUT), png(SIZE, SIZE, pixels));
   }
 }
-const top = shoreTop(), face = shoreFace();
+const top = shoreTop(),
+  face = shoreFace();
 await writeFile(new URL('shore-top.png', OUT), png(SIZE, SIZE, top));
 await writeFile(new URL('shore-face.png', OUT), png(SIZE, SIZE, face));
 const atlas = new Uint8Array(SIZE * 8 * SIZE * 4 * 4);
@@ -158,7 +177,8 @@ images[25] = top;
 images[26] = face;
 for (const [index, tile] of images.entries()) {
   if (!tile) continue;
-  const tileX = index % 8, tileY = Math.floor(index / 8);
+  const tileX = index % 8,
+    tileY = Math.floor(index / 8);
   for (let y = 0; y < SIZE; y++) {
     atlas.set(tile.subarray(y * SIZE * 4, (y + 1) * SIZE * 4), ((tileY * SIZE + y) * SIZE * 8 + tileX * SIZE) * 4);
   }

@@ -1,6 +1,6 @@
-import {sql,type Kysely} from 'kysely';
-export async function up(db:Kysely<unknown>){
- await sql`
+import { sql, type Kysely } from 'kysely';
+export async function up(db: Kysely<unknown>) {
+  await sql`
   alter table worlds add column terrain_model text not null default 'terraces' check(terrain_model in ('terraces','vertices'));
   create table world_terrain_vertices (
    world_id uuid not null references worlds(id) on delete cascade,

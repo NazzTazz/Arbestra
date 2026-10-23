@@ -9,16 +9,21 @@ it('quotes exact whole quantities for all approved tariffs, including carrots', 
   expect(oracleAmount(1, 1, 6)).toBe(0);
 });
 it('cannot profit through any two or three-resource cycle', () => {
-  for (const a of [1,4,6]) for (const b of [1,4,6]) for (const c of [1,4,6]) {
-    const q=10000, ab=oracleAmount(q,a,b);
-    expect(oracleAmount(ab,b,a)).toBeLessThan(q);
-    expect(oracleAmount(oracleAmount(ab,b,c),c,a)).toBeLessThan(q);
-  }
+  for (const a of [1, 4, 6])
+    for (const b of [1, 4, 6])
+      for (const c of [1, 4, 6]) {
+        const q = 10000,
+          ab = oracleAmount(q, a, b);
+        expect(oracleAmount(ab, b, a)).toBeLessThan(q);
+        expect(oracleAmount(oracleAmount(ab, b, c), c, a)).toBeLessThan(q);
+      }
 });
-it('prices every permanent lot at the least whole payment that covers the requested quantity',()=>{
-  for(const amount of MARKET_QUANTITIES)for(const offered of [1,4,6])for(const requested of [1,4,6]){
-    const cost=oracleCost(amount,offered,requested);
-    expect(oracleAmount(cost,offered,requested)).toBeGreaterThanOrEqual(amount);
-    expect(oracleAmount(cost-1,offered,requested)).toBeLessThan(amount);
-  }
+it('prices every permanent lot at the least whole payment that covers the requested quantity', () => {
+  for (const amount of MARKET_QUANTITIES)
+    for (const offered of [1, 4, 6])
+      for (const requested of [1, 4, 6]) {
+        const cost = oracleCost(amount, offered, requested);
+        expect(oracleAmount(cost, offered, requested)).toBeGreaterThanOrEqual(amount);
+        expect(oracleAmount(cost - 1, offered, requested)).toBeLessThan(amount);
+      }
 });

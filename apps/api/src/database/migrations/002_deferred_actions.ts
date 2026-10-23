@@ -25,7 +25,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
   await db.schema
     .alterTable('buildings')
-    .addForeignKeyConstraint('buildings_world_id_fkey', ['worldId'], 'worlds', ['id'], (constraint) => constraint.onDelete('cascade'))
+    .addForeignKeyConstraint('buildings_world_id_fkey', ['worldId'], 'worlds', ['id'], (constraint) =>
+      constraint.onDelete('cascade'),
+    )
     .execute();
   await db.schema
     .alterTable('buildings')
@@ -33,7 +35,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
   await db.schema
     .alterTable('buildings')
-    .addCheckConstraint('buildings_construction_times_check', sql`
+    .addCheckConstraint(
+      'buildings_construction_times_check',
+      sql`
       (status = 'under-construction'
         and construction_started_at is not null
         and construction_completes_at is not null
@@ -41,11 +45,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         and construction_completes_at >= construction_started_at)
       or
       (status = 'completed' and completed_at is not null)
-    `)
+    `,
+    )
     .execute();
 
   await db.schema.createIndex('buildings_world_id_index').on('buildings').column('worldId').execute();
-  await db.schema.createIndex('buildings_due_index')
+  await db.schema
+    .createIndex('buildings_due_index')
     .on('buildings')
     .columns(['worldId', 'constructionCompletesAt'])
     .where(sql<SqlBool>`status = 'under-construction'`)
@@ -60,7 +66,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('payload', 'jsonb', (column) => column.notNull().defaultTo(sql`'{}'::jsonb`))
     .addColumn('dueAt', 'timestamptz', (column) => column.notNull())
     .addColumn('availableAt', 'timestamptz', (column) => column.notNull())
-    .addColumn('attempts', 'integer', (column) => column.notNull().defaultTo(0).check(sql`attempts >= 0`))
+    .addColumn('attempts', 'integer', (column) =>
+      column
+        .notNull()
+        .defaultTo(0)
+        .check(sql`attempts >= 0`),
+    )
     .addColumn('lastError', 'text')
     .addColumn('completedAt', 'timestamptz')
     .addColumn('createdAt', 'timestamptz', (column) => column.notNull().defaultTo(db.fn('now')))
@@ -68,12 +79,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 
   await db.schema.createIndex('scheduled_tasks_world_id_index').on('scheduledTasks').column('worldId').execute();
-  await db.schema.createIndex('scheduled_tasks_pending_global_index')
+  await db.schema
+    .createIndex('scheduled_tasks_pending_global_index')
     .on('scheduledTasks')
     .columns(['availableAt', 'id'])
     .where(sql<SqlBool>`completed_at is null`)
     .execute();
-  await db.schema.createIndex('scheduled_tasks_pending_world_index')
+  await db.schema
+    .createIndex('scheduled_tasks_pending_world_index')
     .on('scheduledTasks')
     .columns(['worldId', 'availableAt', 'id'])
     .where(sql<SqlBool>`completed_at is null`)

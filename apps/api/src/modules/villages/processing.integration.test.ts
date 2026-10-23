@@ -1,122 +1,343 @@
-import {randomUUID} from 'node:crypto';
-import {sql,type Transaction} from 'kysely';
-import {afterAll,beforeAll,beforeEach,expect,it} from 'vitest';
-import type {ProcessingCommand} from '@arbestra/contracts';
-import type {Database} from '../../database/schema.js';
-import {createDatabase} from '../../database/connection.js';
-import {migrateToLatest} from '../../database/migrate.js';
-import {resetE2eState} from '../../database/reset-e2e.js';
-import {DEVELOPMENT_IDS as ids} from '../../database/seed.js';
-import {testDatabaseUrl} from '../../database/test-environment.js';
-import {processNextScheduledTask} from '../../jobs/scheduled-tasks.js';
-import {commandProcessing,processingSnapshot,readProcessingOrders,COMPLETE_PROCESSING_TASK} from './processing.js';
-import {readCommandReceipts} from './command-receipts.js';
-import {completeProcessing} from './complete-construction.js';
-import {beginVillageEconomy,reconcileVillageEconomy} from './reconcile-economy.js';
-import {constructBuilding,getVillageState,commandVillageProcessing,upgradeBuilding} from './service.js';
+import { randomUUID } from 'node:crypto';
+import { sql, type Transaction } from 'kysely';
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
+import type { ProcessingCommand } from '@arbestra/contracts';
+import type { Database } from '../../database/schema.js';
+import { createDatabase } from '../../database/connection.js';
+import { migrateToLatest } from '../../database/migrate.js';
+import { resetE2eState } from '../../database/reset-e2e.js';
+import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
+import { testDatabaseUrl } from '../../database/test-environment.js';
+import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
+import { commandProcessing, processingSnapshot, readProcessingOrders, COMPLETE_PROCESSING_TASK } from './processing.js';
+import { readCommandReceipts } from './command-receipts.js';
+import { completeProcessing } from './complete-construction.js';
+import { beginVillageEconomy, reconcileVillageEconomy } from './reconcile-economy.js';
+import { constructBuilding, getVillageState, commandVillageProcessing, upgradeBuilding } from './service.js';
 
-const url=testDatabaseUrl(),db=createDatabase(url),t0=new Date('2026-10-01T10:00:00Z');
-const ctx=(ms=0)=>({worldId:ids.world,villageId:ids.village,through:new Date(t0.getTime()+ms)});
-beforeAll(()=>migrateToLatest(url),60000);
-beforeEach(async()=>{await resetE2eState(url);await db.updateTable('populationCohorts').set({energy:10,energyProgress:0,energyUpdatedAt:t0}).where('worldId','=',ids.world).execute();},60000);
-afterAll(()=>db.destroy(),60000);
-async function locked<T>(action:(tx:Transaction<Database>)=>Promise<T>){return db.transaction().execute(async tx=>{
-  await tx.selectFrom('villages').select('id').where('worldId','=',ids.world).where('id','=',ids.village).forUpdate().executeTakeFirstOrThrow();return action(tx);
-});}
-async function workshop(type='sawmill',level=1){return (await db.insertInto('buildings').values({worldId:ids.world,villageId:ids.village,buildingType:type,level,targetLevel:null,status:'completed',constructionStartedAt:null,constructionCompletesAt:null,completedAt:t0,visualLayout:null}).returning('id').executeTakeFirstOrThrow()).id;}
-async function amount(code:string){return Number((await db.selectFrom('villageResources').select('amount').where('worldId','=',ids.world).where('villageId','=',ids.village).where('resourceCode','=',code).executeTakeFirstOrThrow()).amount);}
-async function stock(code:string,n:number){await db.updateTable('villageResources').set({amount:n}).where('worldId','=',ids.world).where('villageId','=',ids.village).where('resourceCode','=',code).execute();}
-async function start(buildingId:string,lots=1,workers=1){const command:ProcessingCommand={commandId:randomUUID(),action:'start',buildingId,lots,workerCount:workers};await locked(tx=>commandProcessing(tx,ctx(),command));return command;}
-async function orders(){return locked(tx=>processingSnapshot(tx,ctx()));}
-async function reconcile(ms:number){await locked(tx=>reconcileVillageEconomy(tx,ctx(ms)));}
-it('commits chronological catch-up prefixes without skipping another category or acknowledging old notifications',async()=>{
-  const buildingId=await workshop();await start(buildingId,1);
-  const lot=await db.selectFrom('processingLots').selectAll().where('worldId','=',ids.world).where('villageId','=',ids.village).executeTakeFirstOrThrow();
-  const before=lot.completesAt.getTime()-1000,after=lot.completesAt.getTime()+1000;
-  const houses=[];
-  for(const deadline of [before,after])houses.push((await db.insertInto('buildings').values({worldId:ids.world,villageId:ids.village,
-    buildingType:'dwelling',level:1,targetLevel:null,status:'under-construction',constructionStartedAt:t0,
-    constructionCompletesAt:new Date(deadline),completedAt:null}).returning('id').executeTakeFirstOrThrow()).id);
-  const oldTasks=await db.selectFrom('scheduledTasks').selectAll().where('worldId','=',ids.world).orderBy('id').execute();
-  const economy={...ctx(),through:new Date(after+1000)},budget={maxTransitions:1,maxWorkMs:200};
-  const first=await locked(tx=>reconcileVillageEconomy(tx,economy,budget));
-  expect(first).toEqual({complete:false,transitions:1,lastTransitionAt:new Date(before)});
-  expect((await db.selectFrom('buildings').select('status').where('id','=',houses[0]!).executeTakeFirstOrThrow()).status).toBe('completed');
-  expect((await db.selectFrom('processingLots').select('completedAt').where('id','=',lot.id).executeTakeFirstOrThrow()).completedAt).toBeNull();
-  const second=await locked(tx=>reconcileVillageEconomy(tx,economy,budget));
-  expect(second).toEqual({complete:false,transitions:1,lastTransitionAt:lot.completesAt});
-  expect((await db.selectFrom('processingLots').select('completedAt').where('id','=',lot.id).executeTakeFirstOrThrow()).completedAt).toEqual(lot.completesAt);
-  expect((await db.selectFrom('buildings').select('status').where('id','=',houses[1]!).executeTakeFirstOrThrow()).status).toBe('under-construction');
-  const third=await locked(tx=>reconcileVillageEconomy(tx,economy,budget));
-  expect(third).toEqual({complete:true,transitions:1,lastTransitionAt:new Date(after)});
-  expect(await db.selectFrom('scheduledTasks').selectAll().where('id','in',oldTasks.map(task=>task.id)).orderBy('id').execute()).toEqual(oldTasks);
-  expect(await locked(tx=>reconcileVillageEconomy(tx,economy,budget))).toEqual({complete:true,transitions:0,lastTransitionAt:null});
+const url = testDatabaseUrl(),
+  db = createDatabase(url),
+  t0 = new Date('2026-10-01T10:00:00Z');
+const ctx = (ms = 0) => ({ worldId: ids.world, villageId: ids.village, through: new Date(t0.getTime() + ms) });
+beforeAll(() => migrateToLatest(url), 60000);
+beforeEach(async () => {
+  await resetE2eState(url);
+  await db
+    .updateTable('populationCohorts')
+    .set({ energy: 10, energyProgress: 0, energyUpdatedAt: t0 })
+    .where('worldId', '=', ids.world)
+    .execute();
+}, 60000);
+afterAll(() => db.destroy(), 60000);
+async function locked<T>(action: (tx: Transaction<Database>) => Promise<T>) {
+  return db.transaction().execute(async (tx) => {
+    await tx
+      .selectFrom('villages')
+      .select('id')
+      .where('worldId', '=', ids.world)
+      .where('id', '=', ids.village)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+    return action(tx);
+  });
+}
+async function workshop(type = 'sawmill', level = 1) {
+  return (
+    await db
+      .insertInto('buildings')
+      .values({
+        worldId: ids.world,
+        villageId: ids.village,
+        buildingType: type,
+        level,
+        targetLevel: null,
+        status: 'completed',
+        constructionStartedAt: null,
+        constructionCompletesAt: null,
+        completedAt: t0,
+        visualLayout: null,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+  ).id;
+}
+async function amount(code: string) {
+  return Number(
+    (
+      await db
+        .selectFrom('villageResources')
+        .select('amount')
+        .where('worldId', '=', ids.world)
+        .where('villageId', '=', ids.village)
+        .where('resourceCode', '=', code)
+        .executeTakeFirstOrThrow()
+    ).amount,
+  );
+}
+async function stock(code: string, n: number) {
+  await db
+    .updateTable('villageResources')
+    .set({ amount: n })
+    .where('worldId', '=', ids.world)
+    .where('villageId', '=', ids.village)
+    .where('resourceCode', '=', code)
+    .execute();
+}
+async function start(buildingId: string, lots = 1, workers = 1) {
+  const command: ProcessingCommand = {
+    commandId: randomUUID(),
+    action: 'start',
+    buildingId,
+    lots,
+    workerCount: workers,
+  };
+  await locked((tx) => commandProcessing(tx, ctx(), command));
+  return command;
+}
+async function orders() {
+  return locked((tx) => processingSnapshot(tx, ctx()));
+}
+async function reconcile(ms: number) {
+  await locked((tx) => reconcileVillageEconomy(tx, ctx(ms)));
+}
+it('commits chronological catch-up prefixes without skipping another category or acknowledging old notifications', async () => {
+  const buildingId = await workshop();
+  await start(buildingId, 1);
+  const lot = await db
+    .selectFrom('processingLots')
+    .selectAll()
+    .where('worldId', '=', ids.world)
+    .where('villageId', '=', ids.village)
+    .executeTakeFirstOrThrow();
+  const before = lot.completesAt.getTime() - 1000,
+    after = lot.completesAt.getTime() + 1000;
+  const houses = [];
+  for (const deadline of [before, after])
+    houses.push(
+      (
+        await db
+          .insertInto('buildings')
+          .values({
+            worldId: ids.world,
+            villageId: ids.village,
+            buildingType: 'dwelling',
+            level: 1,
+            targetLevel: null,
+            status: 'under-construction',
+            constructionStartedAt: t0,
+            constructionCompletesAt: new Date(deadline),
+            completedAt: null,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id,
+    );
+  const oldTasks = await db
+    .selectFrom('scheduledTasks')
+    .selectAll()
+    .where('worldId', '=', ids.world)
+    .orderBy('id')
+    .execute();
+  const economy = { ...ctx(), through: new Date(after + 1000) },
+    budget = { maxTransitions: 1, maxWorkMs: 200 };
+  const first = await locked((tx) => reconcileVillageEconomy(tx, economy, budget));
+  expect(first).toEqual({ complete: false, transitions: 1, lastTransitionAt: new Date(before) });
+  expect(
+    (await db.selectFrom('buildings').select('status').where('id', '=', houses[0]!).executeTakeFirstOrThrow()).status,
+  ).toBe('completed');
+  expect(
+    (await db.selectFrom('processingLots').select('completedAt').where('id', '=', lot.id).executeTakeFirstOrThrow())
+      .completedAt,
+  ).toBeNull();
+  const second = await locked((tx) => reconcileVillageEconomy(tx, economy, budget));
+  expect(second).toEqual({ complete: false, transitions: 1, lastTransitionAt: lot.completesAt });
+  expect(
+    (await db.selectFrom('processingLots').select('completedAt').where('id', '=', lot.id).executeTakeFirstOrThrow())
+      .completedAt,
+  ).toEqual(lot.completesAt);
+  expect(
+    (await db.selectFrom('buildings').select('status').where('id', '=', houses[1]!).executeTakeFirstOrThrow()).status,
+  ).toBe('under-construction');
+  const third = await locked((tx) => reconcileVillageEconomy(tx, economy, budget));
+  expect(third).toEqual({ complete: true, transitions: 1, lastTransitionAt: new Date(after) });
+  expect(
+    await db
+      .selectFrom('scheduledTasks')
+      .selectAll()
+      .where(
+        'id',
+        'in',
+        oldTasks.map((task) => task.id),
+      )
+      .orderBy('id')
+      .execute(),
+  ).toEqual(oldTasks);
+  expect(await locked((tx) => reconcileVillageEconomy(tx, economy, budget))).toEqual({
+    complete: true,
+    transitions: 0,
+    lastTransitionAt: null,
+  });
 });
 it('keeps original receipt targets and time after completion and reads selected orders without waking the economy', async () => {
-  const buildingId = await workshop(), command = await start(buildingId, 1);
+  const buildingId = await workshop(),
+    command = await start(buildingId, 1);
   const order = (await orders())[0]!;
-  const selected = await locked(tx => readProcessingOrders(tx, ctx(), [order.id, randomUUID()]));
+  const selected = await locked((tx) => readProcessingOrders(tx, ctx(), [order.id, randomUUID()]));
   expect(selected).toEqual([order]);
   await reconcile(600000);
-  expect(await locked(tx => readProcessingOrders(tx, ctx(600000), [order.id]))).toEqual([]);
-  expect(await locked(tx => readProcessingOrders(tx, ctx(600000), [order.id], true))).toEqual(await orders());
-  const before = await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute();
-  const read = () => readCommandReceipts(db, ids.account, 'aube', ids.village, { commands: [
-    { family: 'processing', commandId: command.commandId }, { family: 'processing', commandId: randomUUID() },
-  ] });
-  expect((await read()).receipts).toEqual([{ family: 'processing', commandId: command.commandId,
-    commandTime: t0.toISOString(), status: 'applied', result: { orderId: order.id } }]);
-  expect(await locked(tx => commandProcessing(tx, ctx(900000), command))).toEqual({ orderId: order.id, commandTime: t0 });
+  expect(await locked((tx) => readProcessingOrders(tx, ctx(600000), [order.id]))).toEqual([]);
+  expect(await locked((tx) => readProcessingOrders(tx, ctx(600000), [order.id], true))).toEqual(await orders());
+  const before = await db
+    .selectFrom('scheduledTasks')
+    .selectAll()
+    .where('worldId', '=', ids.world)
+    .orderBy('id')
+    .execute();
+  const read = () =>
+    readCommandReceipts(db, ids.account, 'aube', ids.village, {
+      commands: [
+        { family: 'processing', commandId: command.commandId },
+        { family: 'processing', commandId: randomUUID() },
+      ],
+    });
+  expect((await read()).receipts).toEqual([
+    {
+      family: 'processing',
+      commandId: command.commandId,
+      commandTime: t0.toISOString(),
+      status: 'applied',
+      result: { orderId: order.id },
+    },
+  ]);
+  expect(await locked((tx) => commandProcessing(tx, ctx(900000), command))).toEqual({
+    orderId: order.id,
+    commandTime: t0,
+  });
   expect((await read()).receipts[0]?.commandTime).toBe(t0.toISOString());
-  expect(await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute()).toEqual(before);
-  await expect(readCommandReceipts(db, randomUUID(), 'aube', ids.village,
-    { commands: [{ family: 'processing', commandId: command.commandId }] })).rejects.toMatchObject({ code: 'VILLAGE_NOT_FOUND' });
-  await expect(readCommandReceipts(db, ids.account, 'unknown-world', ids.village,
-    { commands: [{ family: 'processing', commandId: command.commandId }] })).rejects.toMatchObject({ code: 'VILLAGE_NOT_FOUND' });
+  expect(
+    await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute(),
+  ).toEqual(before);
+  await expect(
+    readCommandReceipts(db, randomUUID(), 'aube', ids.village, {
+      commands: [{ family: 'processing', commandId: command.commandId }],
+    }),
+  ).rejects.toMatchObject({ code: 'VILLAGE_NOT_FOUND' });
+  await expect(
+    readCommandReceipts(db, ids.account, 'unknown-world', ids.village, {
+      commands: [{ family: 'processing', commandId: command.commandId }],
+    }),
+  ).rejects.toMatchObject({ code: 'VILLAGE_NOT_FOUND' });
 });
-it.each(['pause', 'cancel'] as const)('bounded %s without a due lot leaves unrelated economy and notifications untouched', async action => {
+it.each(['pause', 'cancel'] as const)(
+  'bounded %s without a due lot leaves unrelated economy and notifications untouched',
+  async (action) => {
+    const buildingId = await workshop();
+    await stock('wood', 0);
+    await start(buildingId, 2);
+    const order = (await orders())[0]!;
+    const unrelated = await db
+      .insertInto('buildings')
+      .values({
+        worldId: ids.world,
+        villageId: ids.village,
+        buildingType: 'dwelling',
+        level: 1,
+        targetLevel: null,
+        status: 'under-construction',
+        constructionStartedAt: t0,
+        constructionCompletesAt: new Date(t0.getTime() + 1000),
+        completedAt: null,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const before = {
+      cohorts: await db
+        .selectFrom('populationCohorts')
+        .selectAll()
+        .where('villageId', '=', ids.village)
+        .orderBy('id')
+        .execute(),
+      stocks: await db
+        .selectFrom('villageResources')
+        .selectAll()
+        .where('villageId', '=', ids.village)
+        .orderBy('resourceCode')
+        .execute(),
+      tasks: await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute(),
+    };
+    const command: ProcessingCommand = { commandId: randomUUID(), action, orderId: order.id };
+    await commandVillageProcessing(db, ids.account, 'aube', ids.village, command, 'commit');
+    expect(
+      await db.selectFrom('buildings').select('status').where('id', '=', unrelated.id).executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'under-construction' });
+    expect((await orders()).find((row) => row.id === order.id)?.status).toBe(
+      action === 'pause' ? 'paused' : 'cancelled',
+    );
+    expect(
+      await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', ids.village).orderBy('id').execute(),
+    ).toEqual(before.cohorts);
+    expect(
+      await db
+        .selectFrom('villageResources')
+        .selectAll()
+        .where('villageId', '=', ids.village)
+        .orderBy('resourceCode')
+        .execute(),
+    ).toEqual(before.stocks);
+    expect(
+      await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute(),
+    ).toEqual(before.tasks);
+    await commandVillageProcessing(db, ids.account, 'aube', ids.village, command, 'commit');
+    expect(
+      await db
+        .selectFrom('processingCommandReceipts')
+        .select('commandId')
+        .where('commandId', '=', command.commandId)
+        .execute(),
+    ).toHaveLength(1);
+  },
+);
+it('uses post-lock H and observes a receipt committed while an identical command waits', async () => {
   const buildingId = await workshop();
   await stock('wood', 0);
-  await start(buildingId, 2);
-  const order = (await orders())[0]!;
-  const unrelated = await db.insertInto('buildings').values({ worldId: ids.world, villageId: ids.village,
-    buildingType: 'dwelling', level: 1, targetLevel: null, status: 'under-construction',
-    constructionStartedAt: t0, constructionCompletesAt: new Date(t0.getTime() + 1000), completedAt: null,
-  }).returning('id').executeTakeFirstOrThrow();
-  const before = {
-    cohorts: await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', ids.village).orderBy('id').execute(),
-    stocks: await db.selectFrom('villageResources').selectAll().where('villageId', '=', ids.village).orderBy('resourceCode').execute(),
-    tasks: await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute(),
-  };
-  const command: ProcessingCommand = { commandId: randomUUID(), action, orderId: order.id };
-  await commandVillageProcessing(db, ids.account, 'aube', ids.village, command, 'commit');
-  expect(await db.selectFrom('buildings').select('status').where('id', '=', unrelated.id).executeTakeFirstOrThrow())
-    .toEqual({ status: 'under-construction' });
-  expect((await orders()).find(row => row.id === order.id)?.status).toBe(action === 'pause' ? 'paused' : 'cancelled');
-  expect(await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', ids.village).orderBy('id').execute()).toEqual(before.cohorts);
-  expect(await db.selectFrom('villageResources').selectAll().where('villageId', '=', ids.village).orderBy('resourceCode').execute()).toEqual(before.stocks);
-  expect(await db.selectFrom('scheduledTasks').selectAll().where('worldId', '=', ids.world).orderBy('id').execute()).toEqual(before.tasks);
-  await commandVillageProcessing(db, ids.account, 'aube', ids.village, command, 'commit');
-  expect(await db.selectFrom('processingCommandReceipts').select('commandId').where('commandId', '=', command.commandId).execute()).toHaveLength(1);
-});
-it('uses post-lock H and observes a receipt committed while an identical command waits', async () => {
-  const buildingId = await workshop(); await stock('wood', 0);
   const command: ProcessingCommand = { commandId: randomUUID(), action: 'start', buildingId, lots: 2, workerCount: 1 };
   let ready!: (pid: number) => void, release!: () => void;
-  const acquired = new Promise<number>(resolve => { ready = resolve; });
-  const gate = new Promise<void>(resolve => { release = resolve; });
+  const acquired = new Promise<number>((resolve) => {
+    ready = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   const timeout = <T>(promise: Promise<T>) => {
     let timer: ReturnType<typeof setTimeout>;
-    return Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('Receipt barrier timeout')), 15000); })])
-      .finally(() => clearTimeout(timer));
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(Error('Receipt barrier timeout')), 15000);
+      }),
+    ]).finally(() => clearTimeout(timer));
   };
-  let unrelatedId = '', committedAfter = new Date(0);
-  const first = locked(async tx => {
+  let unrelatedId = '',
+    committedAfter = new Date(0);
+  const first = locked(async (tx) => {
     await commandProcessing(tx, { ...ctx(), through: new Date() }, command);
-    unrelatedId = (await tx.insertInto('buildings').values({ worldId: ids.world, villageId: ids.village,
-      buildingType: 'dwelling', level: 1, targetLevel: null, status: 'under-construction',
-      constructionStartedAt: t0, constructionCompletesAt: new Date(t0.getTime() + 1000), completedAt: null,
-    }).returning('id').executeTakeFirstOrThrow()).id;
+    unrelatedId = (
+      await tx
+        .insertInto('buildings')
+        .values({
+          worldId: ids.world,
+          villageId: ids.village,
+          buildingType: 'dwelling',
+          level: 1,
+          targetLevel: null,
+          status: 'under-construction',
+          constructionStartedAt: t0,
+          constructionCompletesAt: new Date(t0.getTime() + 1000),
+          completedAt: null,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
     ready((await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(tx)).rows[0]!.pid);
     await timeout(gate);
   });
@@ -128,254 +349,692 @@ it('uses post-lock H and observes a receipt committed while an identical command
     void second.catch(() => undefined);
     let waiting = false;
     for (let i = 0; i < 100 && !waiting; i++) {
-      waiting = (await sql<{ waiting: boolean }>`select exists(select 1 from pg_stat_activity
-        where datname=current_database() and ${blocker}=any(pg_blocking_pids(pid))) as waiting`.execute(db)).rows[0]!.waiting;
-      if (!waiting) await new Promise(resolve => setTimeout(resolve, 20));
+      waiting = (
+        await sql<{ waiting: boolean }>`select exists(select 1 from pg_stat_activity
+        where datname=current_database() and ${blocker}=any(pg_blocking_pids(pid))) as waiting`.execute(db)
+      ).rows[0]!.waiting;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(waiting).toBe(true);
     committedAfter = (await sql<{ at: Date }>`select statement_timestamp() as at`.execute(db)).rows[0]!.at;
   } finally {
-    release(); await firstSettled; if (second) await Promise.allSettled([second]);
+    release();
+    await firstSettled;
+    if (second) await Promise.allSettled([second]);
   }
   await first;
   expect((await second!)!.through.getTime()).toBeGreaterThanOrEqual(committedAfter.getTime());
-  expect((await db.selectFrom('buildings').select('status').where('id', '=', unrelatedId).executeTakeFirstOrThrow()).status).toBe('under-construction');
+  expect(
+    (await db.selectFrom('buildings').select('status').where('id', '=', unrelatedId).executeTakeFirstOrThrow()).status,
+  ).toBe('under-construction');
   expect(await orders()).toHaveLength(1);
-  expect(await db.selectFrom('processingCommandReceipts').select('commandId').where('commandId', '=', command.commandId).execute()).toHaveLength(1);
+  expect(
+    await db
+      .selectFrom('processingCommandReceipts')
+      .select('commandId')
+      .where('commandId', '=', command.commandId)
+      .execute(),
+  ).toHaveLength(1);
 });
-it('plans 12 hours on the server and crosses lot 20 without duplicate debits on replay',async()=>{
-  const id=await workshop('sawmill',3);
-  const command:ProcessingCommand={commandId:randomUUID(),action:'start',buildingId:id,durationSeconds:43200,workerCount:3};
-  await locked(tx=>commandProcessing(tx,ctx(),command));
-  await locked(tx=>commandProcessing(tx,ctx(),command));
-  const order=(await orders())[0]!;
-  expect(order.requestedLots).toBe(216);expect(await amount('wood')).toBe(1975);
+it('plans 12 hours on the server and crosses lot 20 without duplicate debits on replay', async () => {
+  const id = await workshop('sawmill', 3);
+  const command: ProcessingCommand = {
+    commandId: randomUUID(),
+    action: 'start',
+    buildingId: id,
+    durationSeconds: 43200,
+    workerCount: 3,
+  };
+  await locked((tx) => commandProcessing(tx, ctx(), command));
+  await locked((tx) => commandProcessing(tx, ctx(), command));
+  const order = (await orders())[0]!;
+  expect(order.requestedLots).toBe(216);
+  expect(await amount('wood')).toBe(1975);
   // A persisted checkpoint immediately before the former lot-number boundary.
-  await db.updateTable('processingOrders').set({completedLots:19}).where('id','=',order.id).execute();
-  await db.updateTable('processingLots').set({lotNumber:20}).where('id','=',order.currentLot!.id).execute();
-  await stock('wood',25);
+  await db.updateTable('processingOrders').set({ completedLots: 19 }).where('id', '=', order.id).execute();
+  await db.updateTable('processingLots').set({ lotNumber: 20 }).where('id', '=', order.currentLot!.id).execute();
+  await stock('wood', 25);
   await reconcile(200000);
-  const next=await db.selectFrom('processingLots').selectAll().where('orderId','=',order.id).where('lotNumber','=',21).executeTakeFirstOrThrow();
-  expect(next.completedAt).toBeNull();expect(await amount('wood')).toBe(0);expect(await amount('timber')).toBe(20);
-  await reconcile(400000);
-  expect((await orders())[0]).toMatchObject({requestedLots:216,completedLots:21,status:'blocked',blockedReason:'missing-input'});
-  expect(await amount('timber')).toBe(40);
-});
-it('preserves a 12-hour work order across a longer stock shortage and resumes explicitly',async()=>{
-  const id=await workshop();await stock('wood',25);
-  await locked(tx=>commandProcessing(tx,ctx(),{commandId:randomUUID(),action:'start',buildingId:id,durationSeconds:43200,workerCount:1}));
-  await reconcile(13*3600000);
-  const order=(await orders())[0]!;
-  expect(order).toMatchObject({requestedLots:72,completedLots:1,status:'blocked',blockedReason:'missing-input'});
+  const next = await db
+    .selectFrom('processingLots')
+    .selectAll()
+    .where('orderId', '=', order.id)
+    .where('lotNumber', '=', 21)
+    .executeTakeFirstOrThrow();
+  expect(next.completedAt).toBeNull();
+  expect(await amount('wood')).toBe(0);
   expect(await amount('timber')).toBe(20);
-  await stock('wood',25);
-  await locked(tx=>commandProcessing(tx,ctx(14*3600000),{commandId:randomUUID(),action:'resume',orderId:order.id,workerCount:1}));
-  await reconcile(14*3600000+600000);
-  expect((await orders())[0]).toMatchObject({requestedLots:72,completedLots:2,status:'blocked'});
+  await reconcile(400000);
+  expect((await orders())[0]).toMatchObject({
+    requestedLots: 216,
+    completedLots: 21,
+    status: 'blocked',
+    blockedReason: 'missing-input',
+  });
   expect(await amount('timber')).toBe(40);
 });
-it('rejects duration commands beyond the building worker capacity without spending stock',async()=>{
-  const id=await workshop();
-  await expect(locked(tx=>commandProcessing(tx,ctx(),{commandId:randomUUID(),action:'start',buildingId:id,durationSeconds:43200,workerCount:3}))).rejects.toMatchObject({code:'WORKER_CAP'});
-  expect(await amount('wood')).toBe(2000);expect(await orders()).toEqual([]);
+it('preserves a 12-hour work order across a longer stock shortage and resumes explicitly', async () => {
+  const id = await workshop();
+  await stock('wood', 25);
+  await locked((tx) =>
+    commandProcessing(tx, ctx(), {
+      commandId: randomUUID(),
+      action: 'start',
+      buildingId: id,
+      durationSeconds: 43200,
+      workerCount: 1,
+    }),
+  );
+  await reconcile(13 * 3600000);
+  const order = (await orders())[0]!;
+  expect(order).toMatchObject({
+    requestedLots: 72,
+    completedLots: 1,
+    status: 'blocked',
+    blockedReason: 'missing-input',
+  });
+  expect(await amount('timber')).toBe(20);
+  await stock('wood', 25);
+  await locked((tx) =>
+    commandProcessing(tx, ctx(14 * 3600000), {
+      commandId: randomUUID(),
+      action: 'resume',
+      orderId: order.id,
+      workerCount: 1,
+    }),
+  );
+  await reconcile(14 * 3600000 + 600000);
+  expect((await orders())[0]).toMatchObject({ requestedLots: 72, completedLots: 2, status: 'blocked' });
+  expect(await amount('timber')).toBe(40);
 });
-it('debits 25 on start, credits 20 only at completion, and preserves population on replay',async()=>{
-  const id=await workshop(),command=await start(id);
-  expect(await amount('wood')).toBe(1975);expect(await amount('timber')).toBe(0);
-  await reconcile(599999);expect(await amount('timber')).toBe(0);
-  await reconcile(600000);await reconcile(600000);await locked(tx=>commandProcessing(tx,ctx(600000),command));
-  expect(await amount('timber')).toBe(20);expect(await amount('wood')).toBe(1975);
-  expect((await orders())[0]).toMatchObject({status:'completed',completedLots:1,currentLot:null});
-  const people=await db.selectFrom('populationCohorts').selectAll().where('villageId','=',ids.village).execute();
-  expect(people.reduce((n,c)=>n+c.memberCount,0)).toBe(15);expect(people.every(c=>!c.processingLotId)).toBe(true);
-  await expect(locked(tx=>commandProcessing(tx,ctx(),{...command,lots:2}))).rejects.toMatchObject({code:'COMMAND_REUSED'});
+it('rejects duration commands beyond the building worker capacity without spending stock', async () => {
+  const id = await workshop();
+  await expect(
+    locked((tx) =>
+      commandProcessing(tx, ctx(), {
+        commandId: randomUUID(),
+        action: 'start',
+        buildingId: id,
+        durationSeconds: 43200,
+        workerCount: 3,
+      }),
+    ),
+  ).rejects.toMatchObject({ code: 'WORKER_CAP' });
+  expect(await amount('wood')).toBe(2000);
+  expect(await orders()).toEqual([]);
 });
-it('catches up finite orders with three workers without acknowledging existing notifications',async()=>{
-  const id=await workshop('sawmill',3);await start(id,3,3);
-  const lot=(await orders())[0]!.currentLot!;expect(Date.parse(lot.completesAt)-Date.parse(lot.startedAt)).toBe(200000);
-  await reconcile(600000);expect(await amount('timber')).toBe(60);expect(await amount('wood')).toBe(1925);
-  expect((await orders())[0]).toMatchObject({completedLots:3,status:'completed'});
-  const tasks=await db.selectFrom('scheduledTasks').selectAll().where('taskType','=',COMPLETE_PROCESSING_TASK).execute();
-  expect(tasks).toHaveLength(3);expect(tasks.every(t=>t.completedAt===null)).toBe(true);
+it('debits 25 on start, credits 20 only at completion, and preserves population on replay', async () => {
+  const id = await workshop(),
+    command = await start(id);
+  expect(await amount('wood')).toBe(1975);
+  expect(await amount('timber')).toBe(0);
+  await reconcile(599999);
+  expect(await amount('timber')).toBe(0);
+  await reconcile(600000);
+  await reconcile(600000);
+  await locked((tx) => commandProcessing(tx, ctx(600000), command));
+  expect(await amount('timber')).toBe(20);
+  expect(await amount('wood')).toBe(1975);
+  expect((await orders())[0]).toMatchObject({ status: 'completed', completedLots: 1, currentLot: null });
+  const people = await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', ids.village).execute();
+  expect(people.reduce((n, c) => n + c.memberCount, 0)).toBe(15);
+  expect(people.every((c) => !c.processingLotId)).toBe(true);
+  await expect(locked((tx) => commandProcessing(tx, ctx(), { ...command, lots: 2 }))).rejects.toMatchObject({
+    code: 'COMMAND_REUSED',
+  });
 });
-it('blocks between lots without reserving future inputs and resumes at the explicit new date',async()=>{
-  const id=await workshop('stonemason');await stock('stone',25);await start(id,2);await reconcile(600000);
-  const order=(await orders())[0]!;expect(order).toMatchObject({status:'blocked',blockedReason:'missing-input',completedLots:1});
-  expect(await amount('stone')).toBe(0);expect(await amount('cut-stone')).toBe(20);
-  await stock('stone',25);await reconcile(1200000);expect(await amount('stone')).toBe(25);
-  await locked(tx=>commandProcessing(tx,ctx(1200000),{commandId:randomUUID(),action:'resume',orderId:order.id,workerCount:2}));
-  expect(Date.parse((await orders())[0]!.currentLot!.startedAt)).toBe(t0.getTime()+1200000);
-  await reconcile(1500000);expect(await amount('cut-stone')).toBe(40);
+it('catches up finite orders with three workers without acknowledging existing notifications', async () => {
+  const id = await workshop('sawmill', 3);
+  await start(id, 3, 3);
+  const lot = (await orders())[0]!.currentLot!;
+  expect(Date.parse(lot.completesAt) - Date.parse(lot.startedAt)).toBe(200000);
+  await reconcile(600000);
+  expect(await amount('timber')).toBe(60);
+  expect(await amount('wood')).toBe(1925);
+  expect((await orders())[0]).toMatchObject({ completedLots: 3, status: 'completed' });
+  const tasks = await db
+    .selectFrom('scheduledTasks')
+    .selectAll()
+    .where('taskType', '=', COMPLETE_PROCESSING_TASK)
+    .execute();
+  expect(tasks).toHaveLength(3);
+  expect(tasks.every((t) => t.completedAt === null)).toBe(true);
 });
-it('pauses and cancels after the paid lot, preserving its deadline and completed output',async()=>{
-  const id=await workshop();await start(id,3);const order=(await orders())[0]!,deadline=order.currentLot!.completesAt;
-  await locked(tx=>commandProcessing(tx,ctx(1000),{commandId:randomUUID(),action:'pause',orderId:order.id}));
-  expect((await orders())[0]!.currentLot!.completesAt).toBe(deadline);await reconcile(600000);
-  expect((await orders())[0]).toMatchObject({status:'paused',completedLots:1});expect(await amount('wood')).toBe(1975);
-  await locked(tx=>commandProcessing(tx,ctx(700000),{commandId:randomUUID(),action:'resume',orderId:order.id,workerCount:1}));
-  await locked(tx=>commandProcessing(tx,ctx(700001),{commandId:randomUUID(),action:'cancel',orderId:order.id}));await reconcile(2000000);
-  expect((await orders())[0]).toMatchObject({status:'cancelled',completedLots:2});expect(await amount('wood')).toBe(1950);expect(await amount('timber')).toBe(40);
+it('blocks between lots without reserving future inputs and resumes at the explicit new date', async () => {
+  const id = await workshop('stonemason');
+  await stock('stone', 25);
+  await start(id, 2);
+  await reconcile(600000);
+  const order = (await orders())[0]!;
+  expect(order).toMatchObject({ status: 'blocked', blockedReason: 'missing-input', completedLots: 1 });
+  expect(await amount('stone')).toBe(0);
+  expect(await amount('cut-stone')).toBe(20);
+  await stock('stone', 25);
+  await reconcile(1200000);
+  expect(await amount('stone')).toBe(25);
+  await locked((tx) =>
+    commandProcessing(tx, ctx(1200000), {
+      commandId: randomUUID(),
+      action: 'resume',
+      orderId: order.id,
+      workerCount: 2,
+    }),
+  );
+  expect(Date.parse((await orders())[0]!.currentLot!.startedAt)).toBe(t0.getTime() + 1200000);
+  await reconcile(1500000);
+  expect(await amount('cut-stone')).toBe(40);
 });
-it('accepts an empty-stock plan without debit or workers, replays it once and resumes after restocking',async()=>{
-  const id=await workshop('stonemason');await stock('stone',0);
-  const command:ProcessingCommand={commandId:randomUUID(),action:'start',buildingId:id,durationSeconds:3600,workerCount:1};
-  await locked(tx=>commandProcessing(tx,ctx(),command));
-  await locked(tx=>commandProcessing(tx,ctx(),command));
-  const waiting=await orders();expect(waiting).toHaveLength(1);
-  expect(waiting[0]).toMatchObject({status:'blocked',blockedReason:'missing-input',requestedLots:6,completedLots:0,currentLot:null});
-  expect(await amount('stone')).toBe(0);expect(await amount('cut-stone')).toBe(0);
-  expect(await db.selectFrom('processingLots').select('id').where('worldId','=',ids.world).execute()).toHaveLength(0);
-  expect(await db.selectFrom('scheduledTasks').select('id').where('worldId','=',ids.world).where('taskType','=',COMPLETE_PROCESSING_TASK).execute()).toHaveLength(0);
-  expect((await db.selectFrom('populationCohorts').select('processingLotId').where('worldId','=',ids.world).execute()).every(c=>c.processingLotId===null)).toBe(true);
-  await expect(start(id)).rejects.toMatchObject({code:'PROCESSING_UNAVAILABLE'});
-  await stock('stone',25);await reconcile(600000);
-  expect((await orders())[0]).toMatchObject({status:'blocked',currentLot:null});expect(await amount('stone')).toBe(25);
-  await locked(tx=>commandProcessing(tx,ctx(600000),{commandId:randomUUID(),action:'resume',orderId:waiting[0]!.id,workerCount:1}));
-  expect((await orders())[0]).toMatchObject({status:'running'});expect(await amount('stone')).toBe(0);
-  await reconcile(1200000);expect(await amount('cut-stone')).toBe(20);
-  expect((await orders())[0]).toMatchObject({status:'blocked',completedLots:1});
+it('pauses and cancels after the paid lot, preserving its deadline and completed output', async () => {
+  const id = await workshop();
+  await start(id, 3);
+  const order = (await orders())[0]!,
+    deadline = order.currentLot!.completesAt;
+  await locked((tx) =>
+    commandProcessing(tx, ctx(1000), { commandId: randomUUID(), action: 'pause', orderId: order.id }),
+  );
+  expect((await orders())[0]!.currentLot!.completesAt).toBe(deadline);
+  await reconcile(600000);
+  expect((await orders())[0]).toMatchObject({ status: 'paused', completedLots: 1 });
+  expect(await amount('wood')).toBe(1975);
+  await locked((tx) =>
+    commandProcessing(tx, ctx(700000), {
+      commandId: randomUUID(),
+      action: 'resume',
+      orderId: order.id,
+      workerCount: 1,
+    }),
+  );
+  await locked((tx) =>
+    commandProcessing(tx, ctx(700001), { commandId: randomUUID(), action: 'cancel', orderId: order.id }),
+  );
+  await reconcile(2000000);
+  expect((await orders())[0]).toMatchObject({ status: 'cancelled', completedLots: 2 });
+  expect(await amount('wood')).toBe(1950);
+  expect(await amount('timber')).toBe(40);
 });
-it('rejects excessive staffing and occupied staff without admitting a new order',async()=>{
-  const id=await workshop();
-  await stock('wood',100);await expect(start(id,1,2)).rejects.toMatchObject({code:'WORKER_CAP'});
-  await db.updateTable('populationCohorts').set({memberCount:1}).where('villageId','=',ids.village).execute();
-  await start(id);await expect(start(await workshop())).rejects.toMatchObject({code:'PROCESSING_UNAVAILABLE'});
-  expect(await amount('wood')).toBe(75);expect(await orders()).toHaveLength(1);
+it('accepts an empty-stock plan without debit or workers, replays it once and resumes after restocking', async () => {
+  const id = await workshop('stonemason');
+  await stock('stone', 0);
+  const command: ProcessingCommand = {
+    commandId: randomUUID(),
+    action: 'start',
+    buildingId: id,
+    durationSeconds: 3600,
+    workerCount: 1,
+  };
+  await locked((tx) => commandProcessing(tx, ctx(), command));
+  await locked((tx) => commandProcessing(tx, ctx(), command));
+  const waiting = await orders();
+  expect(waiting).toHaveLength(1);
+  expect(waiting[0]).toMatchObject({
+    status: 'blocked',
+    blockedReason: 'missing-input',
+    requestedLots: 6,
+    completedLots: 0,
+    currentLot: null,
+  });
+  expect(await amount('stone')).toBe(0);
+  expect(await amount('cut-stone')).toBe(0);
+  expect(await db.selectFrom('processingLots').select('id').where('worldId', '=', ids.world).execute()).toHaveLength(0);
+  expect(
+    await db
+      .selectFrom('scheduledTasks')
+      .select('id')
+      .where('worldId', '=', ids.world)
+      .where('taskType', '=', COMPLETE_PROCESSING_TASK)
+      .execute(),
+  ).toHaveLength(0);
+  expect(
+    (
+      await db.selectFrom('populationCohorts').select('processingLotId').where('worldId', '=', ids.world).execute()
+    ).every((c) => c.processingLotId === null),
+  ).toBe(true);
+  await expect(start(id)).rejects.toMatchObject({ code: 'PROCESSING_UNAVAILABLE' });
+  await stock('stone', 25);
+  await reconcile(600000);
+  expect((await orders())[0]).toMatchObject({ status: 'blocked', currentLot: null });
+  expect(await amount('stone')).toBe(25);
+  await locked((tx) =>
+    commandProcessing(tx, ctx(600000), {
+      commandId: randomUUID(),
+      action: 'resume',
+      orderId: waiting[0]!.id,
+      workerCount: 1,
+    }),
+  );
+  expect((await orders())[0]).toMatchObject({ status: 'running' });
+  expect(await amount('stone')).toBe(0);
+  await reconcile(1200000);
+  expect(await amount('cut-stone')).toBe(20);
+  expect((await orders())[0]).toMatchObject({ status: 'blocked', completedLots: 1 });
 });
-it('stops for fatigue and releases the team without paying for another lot',async()=>{
-  const id=await workshop();await db.updateTable('populationCohorts').set({memberCount:1,energy:0,energyProgress:22*600000+1}).where('villageId','=',ids.village).execute();
-  await start(id,2);await reconcile(600000);expect((await orders())[0]).toMatchObject({status:'blocked',blockedReason:'missing-workers',completedLots:1});
-  expect(await amount('wood')).toBe(1975);expect((await db.selectFrom('populationCohorts').select('processingLotId').where('villageId','=',ids.village).execute()).every(c=>c.processingLotId===null)).toBe(true);
+it('rejects excessive staffing and occupied staff without admitting a new order', async () => {
+  const id = await workshop();
+  await stock('wood', 100);
+  await expect(start(id, 1, 2)).rejects.toMatchObject({ code: 'WORKER_CAP' });
+  await db.updateTable('populationCohorts').set({ memberCount: 1 }).where('villageId', '=', ids.village).execute();
+  await start(id);
+  await expect(start(await workshop())).rejects.toMatchObject({ code: 'PROCESSING_UNAVAILABLE' });
+  expect(await amount('wood')).toBe(75);
+  expect(await orders()).toHaveLength(1);
 });
-it('rolls back demonstrated changes to stock, team, order, lot, receipt and notification',async()=>{
-  const id=await workshop(),error=new Error('injected-after-processing-admission');
-  const before=await db.selectFrom('populationCohorts').selectAll().where('villageId','=',ids.village).execute();
-  await expect(locked(async tx=>{
-    await commandProcessing(tx,ctx(),{commandId:randomUUID(),action:'start',buildingId:id,lots:2,workerCount:1});
-    expect(Number((await tx.selectFrom('villageResources').select('amount').where('villageId','=',ids.village).where('resourceCode','=','wood').executeTakeFirstOrThrow()).amount)).toBe(1975);
-    expect(await tx.selectFrom('populationCohorts').select('id').where('worldId','=',ids.world).where('processingLotId','is not',null).execute()).toHaveLength(1);
-    expect(await tx.selectFrom('processingCommandReceipts').selectAll().where('worldId','=',ids.world).execute()).toHaveLength(1);
-    expect(await tx.selectFrom('scheduledTasks').selectAll().where('taskType','=',COMPLETE_PROCESSING_TASK).execute()).toHaveLength(1);
-    throw error;
-  })).rejects.toBe(error);
-  expect(await amount('wood')).toBe(2000);expect(await amount('timber')).toBe(0);expect(await orders()).toHaveLength(0);
+it('stops for fatigue and releases the team without paying for another lot', async () => {
+  const id = await workshop();
+  await db
+    .updateTable('populationCohorts')
+    .set({ memberCount: 1, energy: 0, energyProgress: 22 * 600000 + 1 })
+    .where('villageId', '=', ids.village)
+    .execute();
+  await start(id, 2);
+  await reconcile(600000);
+  expect((await orders())[0]).toMatchObject({ status: 'blocked', blockedReason: 'missing-workers', completedLots: 1 });
+  expect(await amount('wood')).toBe(1975);
+  expect(
+    (
+      await db.selectFrom('populationCohorts').select('processingLotId').where('villageId', '=', ids.village).execute()
+    ).every((c) => c.processingLotId === null),
+  ).toBe(true);
+});
+it('rolls back demonstrated changes to stock, team, order, lot, receipt and notification', async () => {
+  const id = await workshop(),
+    error = new Error('injected-after-processing-admission');
+  const before = await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', ids.village).execute();
+  await expect(
+    locked(async (tx) => {
+      await commandProcessing(tx, ctx(), {
+        commandId: randomUUID(),
+        action: 'start',
+        buildingId: id,
+        lots: 2,
+        workerCount: 1,
+      });
+      expect(
+        Number(
+          (
+            await tx
+              .selectFrom('villageResources')
+              .select('amount')
+              .where('villageId', '=', ids.village)
+              .where('resourceCode', '=', 'wood')
+              .executeTakeFirstOrThrow()
+          ).amount,
+        ),
+      ).toBe(1975);
+      expect(
+        await tx
+          .selectFrom('populationCohorts')
+          .select('id')
+          .where('worldId', '=', ids.world)
+          .where('processingLotId', 'is not', null)
+          .execute(),
+      ).toHaveLength(1);
+      expect(
+        await tx.selectFrom('processingCommandReceipts').selectAll().where('worldId', '=', ids.world).execute(),
+      ).toHaveLength(1);
+      expect(
+        await tx.selectFrom('scheduledTasks').selectAll().where('taskType', '=', COMPLETE_PROCESSING_TASK).execute(),
+      ).toHaveLength(1);
+      throw error;
+    }),
+  ).rejects.toBe(error);
+  expect(await amount('wood')).toBe(2000);
+  expect(await amount('timber')).toBe(0);
+  expect(await orders()).toHaveLength(0);
   // The reset owns this world; unrelated test worlds can retain their history.
-  expect(await db.selectFrom('processingLots').selectAll().where('worldId','=',ids.world).execute()).toHaveLength(0);expect(await db.selectFrom('processingCommandReceipts').selectAll().where('worldId','=',ids.world).execute()).toHaveLength(0);
-  expect(await db.selectFrom('scheduledTasks').selectAll().where('taskType','=',COMPLETE_PROCESSING_TASK).execute()).toHaveLength(0);
-  expect(await db.selectFrom('populationCohorts').selectAll().where('villageId','=',ids.village).execute()).toEqual(before);
+  expect(await db.selectFrom('processingLots').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(0);
+  expect(
+    await db.selectFrom('processingCommandReceipts').selectAll().where('worldId', '=', ids.world).execute(),
+  ).toHaveLength(0);
+  expect(
+    await db.selectFrom('scheduledTasks').selectAll().where('taskType', '=', COMPLETE_PROCESSING_TASK).execute(),
+  ).toHaveLength(0);
+  expect(await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', ids.village).execute()).toEqual(
+    before,
+  );
 });
-it('settles historical passive production once, retaining its remainder and existing workshops',async()=>{
-  const id=await workshop();await db.updateTable('villages').set({economyActivatedAt:null}).where('id','=',ids.village).execute();
-  await db.updateTable('villageResourceFlows').set({productionUpdatedAt:new Date(Date.now()-3600000),baseRatePerHour:60,remainder:'0.5'}).where('villageId','=',ids.village).execute();
-  const first=await getVillageState(db,ids.account,'aube',ids.village);expect(first.village.wood).toBe(2120);expect(first.village.woodProductionPerHour).toBe(0);
-  const flow=await db.selectFrom('villageResourceFlows').selectAll().where('villageId','=',ids.village).executeTakeFirstOrThrow();expect(Number(flow.remainder)).toBeGreaterThanOrEqual(0.5);expect(Number(flow.remainder)).toBeLessThan(0.6);
-  expect((await getVillageState(db,ids.account,'aube',ids.village)).village.wood).toBe(2120);expect(await amount('timber')).toBe(0);
-  expect(await db.selectFrom('buildings').select('id').where('id','=',id).execute()).toHaveLength(1);
+it('settles historical passive production once, retaining its remainder and existing workshops', async () => {
+  const id = await workshop();
+  await db.updateTable('villages').set({ economyActivatedAt: null }).where('id', '=', ids.village).execute();
+  await db
+    .updateTable('villageResourceFlows')
+    .set({ productionUpdatedAt: new Date(Date.now() - 3600000), baseRatePerHour: 60, remainder: '0.5' })
+    .where('villageId', '=', ids.village)
+    .execute();
+  const first = await getVillageState(db, ids.account, 'aube', ids.village);
+  expect(first.village.wood).toBe(2120);
+  expect(first.village.woodProductionPerHour).toBe(0);
+  const flow = await db
+    .selectFrom('villageResourceFlows')
+    .selectAll()
+    .where('villageId', '=', ids.village)
+    .executeTakeFirstOrThrow();
+  expect(Number(flow.remainder)).toBeGreaterThanOrEqual(0.5);
+  expect(Number(flow.remainder)).toBeLessThan(0.6);
+  expect((await getVillageState(db, ids.account, 'aube', ids.village)).village.wood).toBe(2120);
+  expect(await amount('timber')).toBe(0);
+  expect(await db.selectFrom('buildings').select('id').where('id', '=', id).execute()).toHaveLength(1);
 });
-it('allows multiple scieries, forbids upgrades during fabrication and uses refined construction costs',async()=>{
-  const state=await getVillageState(db,ids.account,'aube',ids.village),free=state.cells.filter(c=>c.canBuild).slice(0,3);
-  for(const c of free.slice(0,2))await constructBuilding(db,ids.account,'aube',ids.village,c.cellX,c.cellY,'sawmill',0);
-  const mills=await db.selectFrom('buildings').select('id').where('villageId','=',ids.village).where('buildingType','=','sawmill').execute();expect(mills).toHaveLength(2);
-  await db.updateTable('populationCohorts').set({energy:10,energyProgress:0,energyUpdatedAt:new Date()}).where('villageId','=',ids.village).execute();
-  await commandVillageProcessing(db,ids.account,'aube',ids.village,{commandId:randomUUID(),action:'start',buildingId:mills[0]!.id,lots:1,workerCount:1});
-  await expect(upgradeBuilding(db,ids.account,'aube',ids.village,mills[0]!.id,undefined,undefined,0)).rejects.toMatchObject({code:'PROCESSING_BUSY'});
-  await stock('timber',25);await stock('cut-stone',10);
-  const c=free[2]!;await constructBuilding(db,ids.account,'aube',ids.village,c.cellX,c.cellY,'dwelling',0);
-  expect(await amount('timber')).toBe(0);expect(await amount('cut-stone')).toBe(0);
+it('allows multiple scieries, forbids upgrades during fabrication and uses refined construction costs', async () => {
+  const state = await getVillageState(db, ids.account, 'aube', ids.village),
+    free = state.cells.filter((c) => c.canBuild).slice(0, 3);
+  for (const c of free.slice(0, 2))
+    await constructBuilding(db, ids.account, 'aube', ids.village, c.cellX, c.cellY, 'sawmill', 0);
+  const mills = await db
+    .selectFrom('buildings')
+    .select('id')
+    .where('villageId', '=', ids.village)
+    .where('buildingType', '=', 'sawmill')
+    .execute();
+  expect(mills).toHaveLength(2);
+  await db
+    .updateTable('populationCohorts')
+    .set({ energy: 10, energyProgress: 0, energyUpdatedAt: new Date() })
+    .where('villageId', '=', ids.village)
+    .execute();
+  await commandVillageProcessing(db, ids.account, 'aube', ids.village, {
+    commandId: randomUUID(),
+    action: 'start',
+    buildingId: mills[0]!.id,
+    lots: 1,
+    workerCount: 1,
+  });
+  await expect(
+    upgradeBuilding(db, ids.account, 'aube', ids.village, mills[0]!.id, undefined, undefined, 0),
+  ).rejects.toMatchObject({ code: 'PROCESSING_BUSY' });
+  await stock('timber', 25);
+  await stock('cut-stone', 10);
+  const c = free[2]!;
+  await constructBuilding(db, ids.account, 'aube', ids.village, c.cellX, c.cellY, 'dwelling', 0);
+  expect(await amount('timber')).toBe(0);
+  expect(await amount('cut-stone')).toBe(0);
 });
-it('a scheduler acknowledges only its acquired task while catching up successor lots',async()=>{
-  await start(await workshop(),2);const result=await processNextScheduledTask(db,{[COMPLETE_PROCESSING_TASK]:completeProcessing});
-  expect(result?.outcome).toBe('completed');expect(await amount('timber')).toBe(40);
-  const tasks=await db.selectFrom('scheduledTasks').selectAll().where('taskType','=',COMPLETE_PROCESSING_TASK).execute();expect(tasks).toHaveLength(2);expect(tasks.filter(t=>t.completedAt!==null)).toHaveLength(1);
+it('a scheduler acknowledges only its acquired task while catching up successor lots', async () => {
+  await start(await workshop(), 2);
+  const result = await processNextScheduledTask(db, { [COMPLETE_PROCESSING_TASK]: completeProcessing });
+  expect(result?.outcome).toBe('completed');
+  expect(await amount('timber')).toBe(40);
+  const tasks = await db
+    .selectFrom('scheduledTasks')
+    .selectAll()
+    .where('taskType', '=', COMPLETE_PROCESSING_TASK)
+    .execute();
+  expect(tasks).toHaveLength(2);
+  expect(tasks.filter((t) => t.completedAt !== null)).toHaveLength(1);
 });
-it('charges log dwellings and their upgrade in raw wood only, preserving the other variant prices',async()=>{
-  const free=(await getVillageState(db,ids.account,'aube',ids.village)).cells.filter(c=>c.canBuild);
-  const c=free[0]!,commandId=randomUUID();
-  const built=await constructBuilding(db,ids.account,'aube',ids.village,c.cellX,c.cellY,'dwelling',0,commandId,[{resourceCode:'wood',amount:25}],0,'logs');
-  const house=built.cells.find(c=>c.building?.visualLayout?.recipe==='log-house')!.building!;
-  await constructBuilding(db,ids.account,'aube',ids.village,c.cellX,c.cellY,'dwelling',0,commandId,[{resourceCode:'wood',amount:25}],0,'logs');
-  expect(await amount('wood')).toBe(1975);expect(await amount('timber')).toBe(0);expect(await amount('cut-stone')).toBe(0);
-  await upgradeBuilding(db,ids.account,'aube',ids.village,house.id,undefined,undefined,0,undefined,[{resourceCode:'wood',amount:300}],2);
-  expect(await amount('wood')).toBe(1675);expect(await amount('timber')).toBe(0);
-  await stock('timber',50);await stock('cut-stone',10);
-  const beam=free[1]!,stone=free[2]!;
-  await constructBuilding(db,ids.account,'aube',ids.village,beam.cellX,beam.cellY,'dwelling',0,undefined,undefined,0,'beams');
-  expect(await amount('timber')).toBe(25);expect(await amount('cut-stone')).toBe(10);
-  await constructBuilding(db,ids.account,'aube',ids.village,stone.cellX,stone.cellY,'dwelling',0);
-  expect(await amount('wood')).toBe(1675);expect(await amount('timber')).toBe(0);expect(await amount('cut-stone')).toBe(0);
+it('charges log dwellings and their upgrade in raw wood only, preserving the other variant prices', async () => {
+  const free = (await getVillageState(db, ids.account, 'aube', ids.village)).cells.filter((c) => c.canBuild);
+  const c = free[0]!,
+    commandId = randomUUID();
+  const built = await constructBuilding(
+    db,
+    ids.account,
+    'aube',
+    ids.village,
+    c.cellX,
+    c.cellY,
+    'dwelling',
+    0,
+    commandId,
+    [{ resourceCode: 'wood', amount: 25 }],
+    0,
+    'logs',
+  );
+  const house = built.cells.find((c) => c.building?.visualLayout?.recipe === 'log-house')!.building!;
+  await constructBuilding(
+    db,
+    ids.account,
+    'aube',
+    ids.village,
+    c.cellX,
+    c.cellY,
+    'dwelling',
+    0,
+    commandId,
+    [{ resourceCode: 'wood', amount: 25 }],
+    0,
+    'logs',
+  );
+  expect(await amount('wood')).toBe(1975);
+  expect(await amount('timber')).toBe(0);
+  expect(await amount('cut-stone')).toBe(0);
+  await upgradeBuilding(
+    db,
+    ids.account,
+    'aube',
+    ids.village,
+    house.id,
+    undefined,
+    undefined,
+    0,
+    undefined,
+    [{ resourceCode: 'wood', amount: 300 }],
+    2,
+  );
+  expect(await amount('wood')).toBe(1675);
+  expect(await amount('timber')).toBe(0);
+  await stock('timber', 50);
+  await stock('cut-stone', 10);
+  const beam = free[1]!,
+    stone = free[2]!;
+  await constructBuilding(
+    db,
+    ids.account,
+    'aube',
+    ids.village,
+    beam.cellX,
+    beam.cellY,
+    'dwelling',
+    0,
+    undefined,
+    undefined,
+    0,
+    'beams',
+  );
+  expect(await amount('timber')).toBe(25);
+  expect(await amount('cut-stone')).toBe(10);
+  await constructBuilding(db, ids.account, 'aube', ids.village, stone.cellX, stone.cellY, 'dwelling', 0);
+  expect(await amount('wood')).toBe(1675);
+  expect(await amount('timber')).toBe(0);
+  expect(await amount('cut-stone')).toBe(0);
 });
-it('bootstraps a raw-funded scierie and spends its first two lots on a beam dwelling without refined gifts',async()=>{
-  expect(await amount('timber')).toBe(0);expect(await amount('cut-stone')).toBe(0);
-  const initial=await getVillageState(db,ids.account,'aube',ids.village),cell=initial.cells.find(c=>c.canBuild)!;
-  const built=await constructBuilding(db,ids.account,'aube',ids.village,cell.cellX,cell.cellY,'sawmill',0);
-  const mill=built.cells.find(c=>c.building?.type==='sawmill')!.building!;
+it('bootstraps a raw-funded scierie and spends its first two lots on a beam dwelling without refined gifts', async () => {
+  expect(await amount('timber')).toBe(0);
+  expect(await amount('cut-stone')).toBe(0);
+  const initial = await getVillageState(db, ids.account, 'aube', ids.village),
+    cell = initial.cells.find((c) => c.canBuild)!;
+  const built = await constructBuilding(db, ids.account, 'aube', ids.village, cell.cellX, cell.cellY, 'sawmill', 0);
+  const mill = built.cells.find((c) => c.building?.type === 'sawmill')!.building!;
   expect(await amount('wood')).toBe(1950);
   // Position the completed fixture and its workers at the controlled test clock.
-  await db.updateTable('buildings').set({status:'completed',constructionStartedAt:t0,constructionCompletesAt:t0,completedAt:t0}).where('id','=',mill.id).execute();
-  await db.updateTable('populationCohorts').set({energy:10,energyProgress:0,energyUpdatedAt:t0}).where('villageId','=',ids.village).execute();
-  await start(mill.id,2);await reconcile(1200000);
-  expect(await amount('wood')).toBe(1900);expect(await amount('timber')).toBe(40);
-  const next=(await getVillageState(db,ids.account,'aube',ids.village)).cells.find(c=>c.canBuild)!;
-  await constructBuilding(db,ids.account,'aube',ids.village,next.cellX,next.cellY,'dwelling',0,undefined,undefined,0,'beams');
-  expect(await amount('timber')).toBe(15);expect(await amount('cut-stone')).toBe(0);expect(await amount('wood')).toBe(1900);
+  await db
+    .updateTable('buildings')
+    .set({ status: 'completed', constructionStartedAt: t0, constructionCompletesAt: t0, completedAt: t0 })
+    .where('id', '=', mill.id)
+    .execute();
+  await db
+    .updateTable('populationCohorts')
+    .set({ energy: 10, energyProgress: 0, energyUpdatedAt: t0 })
+    .where('villageId', '=', ids.village)
+    .execute();
+  await start(mill.id, 2);
+  await reconcile(1200000);
+  expect(await amount('wood')).toBe(1900);
+  expect(await amount('timber')).toBe(40);
+  const next = (await getVillageState(db, ids.account, 'aube', ids.village)).cells.find((c) => c.canBuild)!;
+  await constructBuilding(
+    db,
+    ids.account,
+    'aube',
+    ids.village,
+    next.cellX,
+    next.cellY,
+    'dwelling',
+    0,
+    undefined,
+    undefined,
+    0,
+    'beams',
+  );
+  expect(await amount('timber')).toBe(15);
+  expect(await amount('cut-stone')).toBe(0);
+  expect(await amount('wood')).toBe(1900);
 });
-it('forces a village-lock wait between two competing debits',async()=>{
-  const first=await workshop(),second=await workshop();await stock('wood',25);
-  await db.updateTable('populationCohorts').set({energyUpdatedAt:new Date(),energy:10,energyProgress:0}).where('villageId','=',ids.village).execute();
-  let ready!:()=>void,release!:()=>void,pidReady!:(pid:number)=>void;
-  const admitted=new Promise<void>(r=>{ready=r;}),gate=new Promise<void>(r=>{release=r;}),pidPromise=new Promise<number>(r=>{pidReady=r;});
-  async function bounded<T>(promise:Promise<T>):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;
-    try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Concurrency barrier timed out')),20000);})]);}
-    finally{clearTimeout(timer);}
+it('forces a village-lock wait between two competing debits', async () => {
+  const first = await workshop(),
+    second = await workshop();
+  await stock('wood', 25);
+  await db
+    .updateTable('populationCohorts')
+    .set({ energyUpdatedAt: new Date(), energy: 10, energyProgress: 0 })
+    .where('villageId', '=', ids.village)
+    .execute();
+  let ready!: () => void, release!: () => void, pidReady!: (pid: number) => void;
+  const admitted = new Promise<void>((r) => {
+      ready = r;
+    }),
+    gate = new Promise<void>((r) => {
+      release = r;
+    }),
+    pidPromise = new Promise<number>((r) => {
+      pidReady = r;
+    });
+  async function bounded<T>(promise: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Concurrency barrier timed out')), 20000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
-  const a=locked(async tx=>{await commandProcessing(tx,{...ctx(),through:new Date()},{commandId:randomUUID(),action:'start',buildingId:first,lots:1,workerCount:1});ready();await bounded(gate);});
-  let b:Promise<void>|undefined;
-  const settledA=Promise.allSettled([a]);
-  try{await bounded(admitted);
-    b=db.transaction().execute(async tx=>{await sql`set local lock_timeout = '10s'`.execute(tx);
-      const pid=(await tx.selectNoFrom(sql<number>`pg_backend_pid()`.as('pid')).executeTakeFirstOrThrow()).pid;pidReady(pid);
-      await commandProcessing(tx,await beginVillageEconomy(tx,ids.world,ids.village),{commandId:randomUUID(),action:'start',buildingId:second,lots:1,workerCount:1});});
-    void b.catch(()=>undefined);
-    const pid=await bounded(pidPromise);let waiting=false;
-    for(let n=0;n<50&&!waiting;n++){const rows=await sql<{waiting:boolean}>`select wait_event_type='Lock' as waiting from pg_stat_activity where pid=${pid}`.execute(db);waiting=rows.rows[0]?.waiting??false;if(!waiting)await new Promise(r=>setTimeout(r,20));}
+  const a = locked(async (tx) => {
+    await commandProcessing(
+      tx,
+      { ...ctx(), through: new Date() },
+      { commandId: randomUUID(), action: 'start', buildingId: first, lots: 1, workerCount: 1 },
+    );
+    ready();
+    await bounded(gate);
+  });
+  let b: Promise<void> | undefined;
+  const settledA = Promise.allSettled([a]);
+  try {
+    await bounded(admitted);
+    b = db.transaction().execute(async (tx) => {
+      await sql`set local lock_timeout = '10s'`.execute(tx);
+      const pid = (await tx.selectNoFrom(sql<number>`pg_backend_pid()`.as('pid')).executeTakeFirstOrThrow()).pid;
+      pidReady(pid);
+      await commandProcessing(tx, await beginVillageEconomy(tx, ids.world, ids.village), {
+        commandId: randomUUID(),
+        action: 'start',
+        buildingId: second,
+        lots: 1,
+        workerCount: 1,
+      });
+    });
+    void b.catch(() => undefined);
+    const pid = await bounded(pidPromise);
+    let waiting = false;
+    for (let n = 0; n < 50 && !waiting; n++) {
+      const rows = await sql<{
+        waiting: boolean;
+      }>`select wait_event_type='Lock' as waiting from pg_stat_activity where pid=${pid}`.execute(db);
+      waiting = rows.rows[0]?.waiting ?? false;
+      if (!waiting) await new Promise((r) => setTimeout(r, 20));
+    }
     expect(waiting).toBe(true);
-  }finally{release();await settledA;if(b)await Promise.allSettled([b]);}
-  const outcomes=await Promise.allSettled([a,b!]);expect(outcomes[0]!.status).toBe('fulfilled');expect(outcomes[1]!.status).toBe('fulfilled');expect(await amount('wood')).toBe(0);
-  const plans=await orders();expect(plans).toHaveLength(2);
-  expect(plans.find(o=>o.buildingId===first)).toMatchObject({status:'running'});
-  expect(plans.find(o=>o.buildingId===second)).toMatchObject({status:'blocked',blockedReason:'missing-input',currentLot:null});
-  expect(await db.selectFrom('processingLots').select('id').where('worldId','=',ids.world).execute()).toHaveLength(1);
-  expect(await db.selectFrom('scheduledTasks').select('id').where('worldId','=',ids.world).where('taskType','=',COMPLETE_PROCESSING_TASK).execute()).toHaveLength(1);
+  } finally {
+    release();
+    await settledA;
+    if (b) await Promise.allSettled([b]);
+  }
+  const outcomes = await Promise.allSettled([a, b!]);
+  expect(outcomes[0]!.status).toBe('fulfilled');
+  expect(outcomes[1]!.status).toBe('fulfilled');
+  expect(await amount('wood')).toBe(0);
+  const plans = await orders();
+  expect(plans).toHaveLength(2);
+  expect(plans.find((o) => o.buildingId === first)).toMatchObject({ status: 'running' });
+  expect(plans.find((o) => o.buildingId === second)).toMatchObject({
+    status: 'blocked',
+    blockedReason: 'missing-input',
+    currentLot: null,
+  });
+  expect(await db.selectFrom('processingLots').select('id').where('worldId', '=', ids.world).execute()).toHaveLength(1);
+  expect(
+    await db
+      .selectFrom('scheduledTasks')
+      .select('id')
+      .where('worldId', '=', ids.world)
+      .where('taskType', '=', COMPLETE_PROCESSING_TASK)
+      .execute(),
+  ).toHaveLength(1);
 });
-it('rejects another owner and another world without changing stocks',async()=>{
-  const command:ProcessingCommand={commandId:randomUUID(),action:'start',buildingId:await workshop(),lots:1,workerCount:1};
-  await expect(commandVillageProcessing(db,randomUUID(),'aube',ids.village,command)).rejects.toMatchObject({code:'VILLAGE_NOT_FOUND'});
-  await expect(commandVillageProcessing(db,ids.account,'another-world',ids.village,command)).rejects.toMatchObject({code:'VILLAGE_NOT_FOUND'});
-  expect(await orders()).toHaveLength(0);expect(await amount('wood')).toBe(2000);
+it('rejects another owner and another world without changing stocks', async () => {
+  const command: ProcessingCommand = {
+    commandId: randomUUID(),
+    action: 'start',
+    buildingId: await workshop(),
+    lots: 1,
+    workerCount: 1,
+  };
+  await expect(commandVillageProcessing(db, randomUUID(), 'aube', ids.village, command)).rejects.toMatchObject({
+    code: 'VILLAGE_NOT_FOUND',
+  });
+  await expect(commandVillageProcessing(db, ids.account, 'another-world', ids.village, command)).rejects.toMatchObject({
+    code: 'VILLAGE_NOT_FOUND',
+  });
+  expect(await orders()).toHaveLength(0);
+  expect(await amount('wood')).toBe(2000);
 });
 
-it('interleaves successor lots of two workshops by deadline rather than finishing one workshop in a block',async()=>{
-  const slow=await workshop('sawmill',2),fast=await workshop('sawmill',3);
-  await start(slow,2,2);await start(fast,2,3);
-  await locked(async tx=>{
+it('interleaves successor lots of two workshops by deadline rather than finishing one workshop in a block', async () => {
+  const slow = await workshop('sawmill', 2),
+    fast = await workshop('sawmill', 3);
+  await start(slow, 2, 2);
+  await start(fast, 2, 3);
+  await locked(async (tx) => {
     await sql`create temporary table processing_test_trace(position serial, deadline timestamptz);
       create function pg_temp.processing_trace() returns trigger language plpgsql as $$
       begin insert into processing_test_trace(deadline) values(new.completed_at); return new; end; $$;
       create trigger processing_test_trace after update of completed_at on processing_lots
         for each row when (old.completed_at is null and new.completed_at is not null)
         execute function pg_temp.processing_trace();`.execute(tx);
-    try{
-      await reconcileVillageEconomy(tx,ctx(600000));
-      const trace=await sql<{deadline:Date}>`select deadline from processing_test_trace order by position`.execute(tx);
-      expect(trace.rows.map(r=>r.deadline.getTime()-t0.getTime())).toEqual([200000,300000,400000,600000]);
-    }finally{await sql`drop trigger processing_test_trace on processing_lots; drop table processing_test_trace;`.execute(tx);}
+    try {
+      await reconcileVillageEconomy(tx, ctx(600000));
+      const trace = await sql<{ deadline: Date }>`select deadline from processing_test_trace order by position`.execute(
+        tx,
+      );
+      expect(trace.rows.map((r) => r.deadline.getTime() - t0.getTime())).toEqual([200000, 300000, 400000, 600000]);
+    } finally {
+      await sql`drop trigger processing_test_trace on processing_lots; drop table processing_test_trace;`.execute(tx);
+    }
   });
-  expect(await amount('timber')).toBe(80);expect(await amount('wood')).toBe(1900);
+  expect(await amount('timber')).toBe(80);
+  expect(await amount('wood')).toBe(1900);
 });
 
-it('freezes the paid lot recipe when the catalogue changes',async()=>{
+it('freezes the paid lot recipe when the catalogue changes', async () => {
   await start(await workshop());
-  await db.updateTable('processingRecipes').set({version:2,outputAmount:999}).where('buildingTypeCode','=','sawmill').where('level','=',1).execute();
-  try{await reconcile(600000);expect(await amount('timber')).toBe(20);}
-  finally{await db.updateTable('processingRecipes').set({version:1,outputAmount:20}).where('buildingTypeCode','=','sawmill').where('level','=',1).execute();}
+  await db
+    .updateTable('processingRecipes')
+    .set({ version: 2, outputAmount: 999 })
+    .where('buildingTypeCode', '=', 'sawmill')
+    .where('level', '=', 1)
+    .execute();
+  try {
+    await reconcile(600000);
+    expect(await amount('timber')).toBe(20);
+  } finally {
+    await db
+      .updateTable('processingRecipes')
+      .set({ version: 1, outputAmount: 20 })
+      .where('buildingTypeCode', '=', 'sawmill')
+      .where('level', '=', 1)
+      .execute();
+  }
 });

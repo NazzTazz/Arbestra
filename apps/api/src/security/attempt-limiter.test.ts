@@ -6,8 +6,9 @@ describe('authentication attempt limits', () => {
     const limiter = new AttemptLimiter();
     limiter.login('192.0.2.1', 'Admin@Example.test', { ip: 10, identity: 2 });
     limiter.login('192.0.2.2', ' admin@example.test ', { ip: 10, identity: 2 });
-    expect(() => limiter.login('192.0.2.3', 'admin@example.test', { ip: 10, identity: 2 }))
-      .toThrow(expect.objectContaining({ code: 'TOO_MANY_ATTEMPTS' }));
+    expect(() => limiter.login('192.0.2.3', 'admin@example.test', { ip: 10, identity: 2 })).toThrow(
+      expect.objectContaining({ code: 'TOO_MANY_ATTEMPTS' }),
+    );
   });
 
   it('limits password spraying by IP and does not extend an exhausted window', () => {

@@ -1,155 +1,270 @@
-import {useCallback,useEffect,useRef,useState} from 'react';
-import {visibleSyncV2Scope,villageStateFromSyncV2,VILLAGE_PRESENTATION_COMPONENTS,type ProcessingCommand,type ProcessingOrder,
-  type ResolvedVillagePresentation,type SyncV2Batch,type SyncV2State} from '@arbestra/contracts';
-import type {TimedVillageState} from './client';
-import {SyncV2Transport} from './sync-v2-transport';
-import {SyncV2SessionExpired} from './sync-v2-session';
-import {adoptInitialSyncV2,SYNC_V2_VILLAGE_INCLUDE} from './sync-v2-initial';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  visibleSyncV2Scope,
+  villageStateFromSyncV2,
+  VILLAGE_PRESENTATION_COMPONENTS,
+  type ProcessingCommand,
+  type ProcessingOrder,
+  type ResolvedVillagePresentation,
+  type SyncV2Batch,
+  type SyncV2State,
+} from '@arbestra/contracts';
+import type { TimedVillageState } from './client';
+import { SyncV2Transport } from './sync-v2-transport';
+import { SyncV2SessionExpired } from './sync-v2-session';
+import { adoptInitialSyncV2, SYNC_V2_VILLAGE_INCLUDE } from './sync-v2-initial';
 
 /** Newest first, like the historical snapshot. The private stream keeps
  * terminal orders as values, so the latest outcome stays displayable. */
-export function processingOrdersV2(state:SyncV2State):ProcessingOrder[]{
-  const scope=state.scopes.get(`village:${state.villageId}`);
-  if(!scope)return [];
-  const orders:ProcessingOrder[]=[];
-  for(const [key,value] of visibleSyncV2Scope(scope))if(key.startsWith('processingOrders:'))orders.push(value as ProcessingOrder);
-  return orders.sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)||a.id.localeCompare(b.id));
+export function processingOrdersV2(state: SyncV2State): ProcessingOrder[] {
+  const scope = state.scopes.get(`village:${state.villageId}`);
+  if (!scope) return [];
+  const orders: ProcessingOrder[] = [];
+  for (const [key, value] of visibleSyncV2Scope(scope))
+    if (key.startsWith('processingOrders:')) orders.push(value as ProcessingOrder);
+  return orders.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id));
 }
 
-export function processingCommandBuilding(command:ProcessingCommand,orders:readonly ProcessingOrder[]):string|null{
-  return 'buildingId' in command?command.buildingId:orders.find(order=>order.id===command.orderId)?.buildingId??null;
+export function processingCommandBuilding(
+  command: ProcessingCommand,
+  orders: readonly ProcessingOrder[],
+): string | null {
+  return 'buildingId' in command
+    ? command.buildingId
+    : (orders.find((order) => order.id === command.orderId)?.buildingId ?? null);
 }
 
-export interface ConfirmedPlacement{buildingId:string;buildingType:string;anchor:{cellX:number;cellY:number};cells:ReadonlyArray<{cellX:number;cellY:number}>}
+export interface ConfirmedPlacement {
+  buildingId: string;
+  buildingType: string;
+  anchor: { cellX: number; cellY: number };
+  cells: ReadonlyArray<{ cellX: number; cellY: number }>;
+}
 /** The footprint the server just confirmed, shown before the recomputed
  * presentation (whose travel network can take a few hundred ms) arrives.
  * Same roles and state as the server for a new building under construction.
  * Null when it cannot be shown faithfully: a garden may merge with others,
  * and an unknown cell means the client's window is stale. */
-export function presentationWithPlacement(presentation:ResolvedVillagePresentation,placed:ConfirmedPlacement):ResolvedVillagePresentation|null{
-  if(placed.buildingType==='garden')return null;
-  const key=(cell:{cellX:number;cellY:number})=>`${cell.cellX}:${cell.cellY}`,footprint=new Set(placed.cells.map(key));
-  const anchor=key(placed.anchor);
-  if(!footprint.has(anchor)||presentation.cells.filter(cell=>footprint.has(key(cell))).length!==footprint.size)return null;
-  return {...presentation,cells:presentation.cells.map(cell=>!footprint.has(key(cell))?cell:{...cell,canBuild:false,displaysBuilding:key(cell)===anchor,
-    footprint:{buildingId:placed.buildingId,buildingType:placed.buildingType as NonNullable<typeof cell.footprint>['buildingType'],
-      role:key(cell)===anchor?'anchor' as const:'extension' as const,state:'reserved' as const}})};
+export function presentationWithPlacement(
+  presentation: ResolvedVillagePresentation,
+  placed: ConfirmedPlacement,
+): ResolvedVillagePresentation | null {
+  if (placed.buildingType === 'garden') return null;
+  const key = (cell: { cellX: number; cellY: number }) => `${cell.cellX}:${cell.cellY}`,
+    footprint = new Set(placed.cells.map(key));
+  const anchor = key(placed.anchor);
+  if (!footprint.has(anchor) || presentation.cells.filter((cell) => footprint.has(key(cell))).length !== footprint.size)
+    return null;
+  return {
+    ...presentation,
+    cells: presentation.cells.map((cell) =>
+      !footprint.has(key(cell))
+        ? cell
+        : {
+            ...cell,
+            canBuild: false,
+            displaysBuilding: key(cell) === anchor,
+            footprint: {
+              buildingId: placed.buildingId,
+              buildingType: placed.buildingType as NonNullable<typeof cell.footprint>['buildingType'],
+              role: key(cell) === anchor ? ('anchor' as const) : ('extension' as const),
+              state: 'reserved' as const,
+            },
+          },
+    ),
+  };
 }
 
-export type ProcessingV2Status='off'|'starting'|'ready'|'unavailable';
-type Options={worldSlug:string;worldId:string|undefined;villageId:string|undefined;enabled:boolean;
+export type ProcessingV2Status = 'off' | 'starting' | 'ready' | 'unavailable';
+type Options = {
+  worldSlug: string;
+  worldId: string | undefined;
+  villageId: string | undefined;
+  enabled: boolean;
   /** Whole village from V2 (streams + presentation), not only the workshop. */
-  village:boolean;onState:(update:TimedVillageState)=>void;onExpired:()=>void};
+  village: boolean;
+  onState: (update: TimedVillageState) => void;
+  onExpired: () => void;
+};
 
 /** One V2 transport per mounted village. The workshop always uses it when
  * the server negotiates V2; the whole village only in village mode. A server
  * that does not negotiate V2 leaves both on their historical path. */
-export function useVillageSyncV2({worldSlug,worldId,villageId,enabled,village,onState,onExpired}:Options){
-  const [status,setStatus]=useState<ProcessingV2Status>('off');
-  const [villageReady,setVillageReady]=useState(false);
-  const [orders,setOrders]=useState<ProcessingOrder[]>([]);
-  const [unresolved,setUnresolved]=useState<ProcessingCommand[]>([]);
-  const transport=useRef<SyncV2Transport|null>(null);
-  const expired=useRef(onExpired);expired.current=onExpired;
-  const accept=useRef(onState);accept.current=onState;
-  const placed=useRef<(placement:ConfirmedPlacement)=>void>(()=>undefined);
-  useEffect(()=>{
-    if(!enabled||!worldId||!villageId){setStatus('off');return;}
-    let presentation:ResolvedVillagePresentation|null=null,latest:{state:SyncV2State;observedAt:string}|null=null;
-    let loading=false,stale=false;
-    const emit=()=>{
-      if(!presentation||!latest||transport.current!==current)return;
-      const projected=villageStateFromSyncV2(latest.state,presentation,latest.observedAt);
-      if(!projected)return;
-      accept.current({state:projected,serverOffsetMs:Date.parse(latest.observedAt)-Date.now(),source:'v2'});
+export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, village, onState, onExpired }: Options) {
+  const [status, setStatus] = useState<ProcessingV2Status>('off');
+  const [villageReady, setVillageReady] = useState(false);
+  const [orders, setOrders] = useState<ProcessingOrder[]>([]);
+  const [unresolved, setUnresolved] = useState<ProcessingCommand[]>([]);
+  const transport = useRef<SyncV2Transport | null>(null);
+  const expired = useRef(onExpired);
+  expired.current = onExpired;
+  const accept = useRef(onState);
+  accept.current = onState;
+  const placed = useRef<(placement: ConfirmedPlacement) => void>(() => undefined);
+  useEffect(() => {
+    if (!enabled || !worldId || !villageId) {
+      setStatus('off');
+      return;
+    }
+    let presentation: ResolvedVillagePresentation | null = null,
+      latest: { state: SyncV2State; observedAt: string } | null = null;
+    let loading = false,
+      stale = false;
+    const emit = () => {
+      if (!presentation || !latest || transport.current !== current) return;
+      const projected = villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
+      if (!projected) return;
+      accept.current({ state: projected, serverOffsetMs: Date.parse(latest.observedAt) - Date.now(), source: 'v2' });
       setVillageReady(true);
     };
-    const fullPresentation=async():Promise<ResolvedVillagePresentation>=>{
-      const full=await current.presentation();
-      if(!full?.region)throw Error('Présentation incomplète.');
-      return {...full,region:full.region};
+    const fullPresentation = async (): Promise<ResolvedVillagePresentation> => {
+      const full = await current.presentation();
+      if (!full?.region) throw Error('Présentation incomplète.');
+      return { ...full, region: full.region };
     };
     // Single flight; a structural change during a read triggers one more.
-    const loadPresentation=async()=>{
-      if(loading){stale=true;return;}
-      loading=true;
-      try{do{
-        stale=false;
-        const next=await current.presentation(presentation?.version,presentation?.regionVersion);
-        // An omitted region means our copy of that exact version is current.
-        if(next)presentation=next.region?{...next,region:next.region}:presentation&&next.regionVersion===presentation.regionVersion
-          ?{...next,region:presentation.region}:await fullPresentation();
-      }while(stale&&transport.current===current);}
-      catch(error){if(error instanceof SyncV2SessionExpired&&transport.current===current){current.close();expired.current();return;}}
-      finally{loading=false;}
+    const loadPresentation = async () => {
+      if (loading) {
+        stale = true;
+        return;
+      }
+      loading = true;
+      try {
+        do {
+          stale = false;
+          const next = await current.presentation(presentation?.version, presentation?.regionVersion);
+          // An omitted region means our copy of that exact version is current.
+          if (next)
+            presentation = next.region
+              ? { ...next, region: next.region }
+              : presentation && next.regionVersion === presentation.regionVersion
+                ? { ...next, region: presentation.region }
+                : await fullPresentation();
+        } while (stale && transport.current === current);
+      } catch (error) {
+        if (error instanceof SyncV2SessionExpired && transport.current === current) {
+          current.close();
+          expired.current();
+          return;
+        }
+      } finally {
+        loading = false;
+      }
       emit();
     };
     // A confirmed placement shows at once; the pending read replaces it.
-    placed.current=placement=>{
-      const patched=presentation&&presentationWithPlacement(presentation,placement);
-      if(patched&&transport.current===current){presentation=patched;emit();}
+    placed.current = (placement) => {
+      const patched = presentation && presentationWithPlacement(presentation, placement);
+      if (patched && transport.current === current) {
+        presentation = patched;
+        emit();
+      }
     };
-    const handlers={expired:()=>expired.current(),
-      publish:(state:SyncV2State,observedAt:string,batch:SyncV2Batch)=>{
+    const handlers = {
+      expired: () => expired.current(),
+      publish: (state: SyncV2State, observedAt: string, batch: SyncV2Batch) => {
         setOrders(processingOrdersV2(state));
-        if(!village)return;
+        if (!village) return;
         // An ACK carries its command time, possibly before the last delta.
-        latest={state,observedAt:latest&&latest.observedAt>observedAt?latest.observedAt:observedAt};
-        const structural=batch.coverage==='scope-snapshot'||batch.groups.some(group=>group.changes.some(change=>
-          (VILLAGE_PRESENTATION_COMPONENTS as readonly string[]).includes(change.component)&&(change.upsert.length>0||change.remove.length>0)));
+        latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
+        const structural =
+          batch.coverage === 'scope-snapshot' ||
+          batch.groups.some((group) =>
+            group.changes.some(
+              (change) =>
+                (VILLAGE_PRESENTATION_COMPONENTS as readonly string[]).includes(change.component) &&
+                (change.upsert.length > 0 || change.remove.length > 0),
+            ),
+          );
         // Never show a building without its footprint: wait for the new read.
-        if(structural||!presentation)void loadPresentation();else emit();
-      }};
-    // The first village state may already come from V2: adopt that session.
-    const adopted=village?adoptInitialSyncV2(worldId,villageId):null;
-    // Convoys are public world entities: the traffic stream shows them all.
-    const current=adopted?.transport??new SyncV2Transport(worldSlug,worldId,villageId,{...(village?{include:SYNC_V2_VILLAGE_INCLUDE}:{}),...handlers});
-    transport.current=current;setVillageReady(false);
-    const recover=async()=>{
-      const list=await current.recover().catch(()=>current.pending());
-      if(transport.current===current)setUnresolved(list);
+        if (structural || !presentation) void loadPresentation();
+        else emit();
+      },
     };
-    if(adopted){
-      current.rebind(handlers);presentation=adopted.presentation;
-      const last=adopted.latest();latest={state:last.state,observedAt:last.observedAt};
-      setOrders(processingOrdersV2(last.state));setStatus('ready');emit();void recover();
-    }else{
+    // The first village state may already come from V2: adopt that session.
+    const adopted = village ? adoptInitialSyncV2(worldId, villageId) : null;
+    // Convoys are public world entities: the traffic stream shows them all.
+    const current =
+      adopted?.transport ??
+      new SyncV2Transport(worldSlug, worldId, villageId, {
+        ...(village ? { include: SYNC_V2_VILLAGE_INCLUDE } : {}),
+        ...handlers,
+      });
+    transport.current = current;
+    setVillageReady(false);
+    const recover = async () => {
+      const list = await current.recover().catch(() => current.pending());
+      if (transport.current === current) setUnresolved(list);
+    };
+    if (adopted) {
+      current.rebind(handlers);
+      presentation = adopted.presentation;
+      const last = adopted.latest();
+      latest = { state: last.state, observedAt: last.observedAt };
+      setOrders(processingOrdersV2(last.state));
+      setStatus('ready');
+      emit();
+      void recover();
+    } else {
       setStatus('starting');
-      void (async()=>{
-        try{await current.start();}
-        catch(error){
-          if(transport.current!==current)return;
-          current.close();transport.current=null;
-          if(error instanceof SyncV2SessionExpired){setStatus('off');expired.current();}
-          else setStatus('unavailable');
+      void (async () => {
+        try {
+          await current.start();
+        } catch (error) {
+          if (transport.current !== current) return;
+          current.close();
+          transport.current = null;
+          if (error instanceof SyncV2SessionExpired) {
+            setStatus('off');
+            expired.current();
+          } else setStatus('unavailable');
           return;
         }
-        if(transport.current!==current)return;
-        setStatus('ready');void recover();
+        if (transport.current !== current) return;
+        setStatus('ready');
+        void recover();
       })();
     }
-    return ()=>{current.close();if(transport.current===current)transport.current=null;setOrders([]);setUnresolved([]);setVillageReady(false);};
-  },[enabled,village,worldSlug,worldId,villageId]);
-  const command=useCallback(async(command:ProcessingCommand)=>{
-    const current=transport.current;
-    if(!current)throw Error('Synchronisation indisponible.');
-    try{await current.processing(command);}
-    finally{if(transport.current===current)setUnresolved(current.pending());}
-  },[]);
-  const discard=useCallback((commandId:string)=>{
-    const current=transport.current;if(!current)return;
-    current.forget(commandId);setUnresolved(current.pending());
-  },[]);
-  const construct=useCallback((body:Parameters<SyncV2Transport['construct']>[0])=>{
-    const current=transport.current;
-    if(!current)throw Error('Synchronisation indisponible.');
-    return current.construct(body).then(confirmation=>{
-      if(confirmation.result.buildingId)placed.current({buildingId:confirmation.result.buildingId,buildingType:body.buildingType,
-        anchor:{cellX:body.anchorCellX,cellY:body.anchorCellY},cells:body.cells});
+    return () => {
+      current.close();
+      if (transport.current === current) transport.current = null;
+      setOrders([]);
+      setUnresolved([]);
+      setVillageReady(false);
+    };
+  }, [enabled, village, worldSlug, worldId, villageId]);
+  const command = useCallback(async (command: ProcessingCommand) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    try {
+      await current.processing(command);
+    } finally {
+      if (transport.current === current) setUnresolved(current.pending());
+    }
+  }, []);
+  const discard = useCallback((commandId: string) => {
+    const current = transport.current;
+    if (!current) return;
+    current.forget(commandId);
+    setUnresolved(current.pending());
+  }, []);
+  const construct = useCallback((body: Parameters<SyncV2Transport['construct']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.construct(body).then((confirmation) => {
+      if (confirmation.result.buildingId)
+        placed.current({
+          buildingId: confirmation.result.buildingId,
+          buildingType: body.buildingType,
+          anchor: { cellX: body.anchorCellX, cellY: body.anchorCellY },
+          cells: body.cells,
+        });
       return confirmation;
     });
-  },[]);
+  }, []);
   /** Immediate delta read, e.g. after a command still answered by V1. */
-  const refresh=useCallback(()=>{transport.current?.reconnect();},[]);
-  return {status,villageReady,orders,unresolved,command,discard,refresh,construct};
+  const refresh = useCallback(() => {
+    transport.current?.reconnect();
+  }, []);
+  return { status, villageReady, orders, unresolved, command, discard, refresh, construct };
 }

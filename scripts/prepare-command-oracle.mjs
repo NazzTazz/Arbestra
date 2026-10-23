@@ -13,10 +13,24 @@ const destination = resolve(root, 'test-results/command-sync/oracle-' + revision
 if (existsSync(destination)) throw Error('Oracle directory already exists; preserve it instead of overwriting');
 mkdirSync(destination, { recursive: true });
 const archive = join(destination, 'source.tar');
-execFileSync('git', ['archive', '--format=tar', '--output=' + archive, revision,
-  'apps/api/src', 'apps/api/package.json', 'apps/api/tsconfig.json',
-  'packages/contracts/src', 'packages/contracts/package.json', 'packages/contracts/tsconfig.json',
-  'tsconfig.base.json', 'package.json'], { cwd: root, stdio: 'pipe' });
+execFileSync(
+  'git',
+  [
+    'archive',
+    '--format=tar',
+    '--output=' + archive,
+    revision,
+    'apps/api/src',
+    'apps/api/package.json',
+    'apps/api/tsconfig.json',
+    'packages/contracts/src',
+    'packages/contracts/package.json',
+    'packages/contracts/tsconfig.json',
+    'tsconfig.base.json',
+    'package.json',
+  ],
+  { cwd: root, stdio: 'pipe' },
+);
 execFileSync('tar', ['-xf', archive, '-C', destination], { stdio: 'pipe' });
 const link = (from, to) => symlinkSync(realpathSync(from), to, process.platform === 'win32' ? 'junction' : 'dir');
 link(join(root, 'node_modules'), join(destination, 'node_modules'));
@@ -28,9 +42,17 @@ for (const entry of readdirSync(join(root, 'apps/api/node_modules'), { withFileT
   if (entry.name === '@arbestra' || entry.name === '.bin') continue;
   link(join(root, 'apps/api/node_modules', entry.name), join(modules, entry.name));
 }
-writeFileSync(join(destination, 'oracle-manifest.json'), JSON.stringify({ revision,
-  source: 'git archive: API and contracts source, compiler configuration and manifests',
-  dependencies: 'Existing installed third-party packages, shared read-only by directory links',
-  database: 'Not started or configured. Test runner must guard TEST_DATABASE_URL.',
-}, null, 2));
+writeFileSync(
+  join(destination, 'oracle-manifest.json'),
+  JSON.stringify(
+    {
+      revision,
+      source: 'git archive: API and contracts source, compiler configuration and manifests',
+      dependencies: 'Existing installed third-party packages, shared read-only by directory links',
+      database: 'Not started or configured. Test runner must guard TEST_DATABASE_URL.',
+    },
+    null,
+    2,
+  ),
+);
 console.log(JSON.stringify({ revision, destination }));

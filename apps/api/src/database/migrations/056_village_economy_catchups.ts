@@ -1,7 +1,7 @@
-import {sql,type Kysely} from 'kysely';
+import { sql, type Kysely } from 'kysely';
 
 /** Durable continuation of economy work, never a pending player command. */
-export async function up(db:Kysely<unknown>):Promise<void>{
+export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`create table village_economy_catchups (
     world_id uuid not null, village_id uuid not null, generation uuid not null,
     target_through timestamptz not null, completed_through timestamptz, last_transition_at timestamptz,

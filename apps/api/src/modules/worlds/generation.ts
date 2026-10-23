@@ -3,11 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 
 import type { Database } from '../../database/schema.js';
-import {
-  normalizeCell,
-  toroidalChebyshev,
-  worldCellKey,
-} from './coordinates.js';
+import { normalizeCell, toroidalChebyshev, worldCellKey } from './coordinates.js';
 import { planClearingFeatures } from './clearing-features.js';
 import { STONE_DEPOSIT_INITIAL_AMOUNT, WORLD_GENERATION_V2 } from './generation-config.js';
 
@@ -17,11 +13,7 @@ export const TERRAIN = {
   rockyGround: 3,
 } as const;
 
-const {
-  clearing: CLEARING,
-  terrain: TERRAIN_CONFIG,
-  features: FEATURE_CONFIG,
-} = WORLD_GENERATION_V2;
+const { clearing: CLEARING, terrain: TERRAIN_CONFIG, features: FEATURE_CONFIG } = WORLD_GENERATION_V2;
 
 function stoneDepositAmount(variantSeed: number): number {
   const span = STONE_DEPOSIT_INITIAL_AMOUNT.max - STONE_DEPOSIT_INITIAL_AMOUNT.min + 1;
@@ -38,8 +30,7 @@ interface ClearingPlan {
 // Small, explicit integer hash: stable across Node/browser versions and adequate
 // for deterministic world decoration. It is not used for security.
 function hash(seed: number, x: number, y: number, salt = 0): number {
-  let value =
-    (seed ^ Math.imul(x, 0x45d9f3b) ^ Math.imul(y, 0x27d4eb2d) ^ salt) >>> 0;
+  let value = (seed ^ Math.imul(x, 0x45d9f3b) ^ Math.imul(y, 0x27d4eb2d) ^ salt) >>> 0;
   value = Math.imul(value ^ (value >>> 16), 0x7feb352d) >>> 0;
   value = Math.imul(value ^ (value >>> 15), 0x846ca68b) >>> 0;
   return (value ^ (value >>> 16)) >>> 0;
@@ -69,17 +60,9 @@ function periodicNoise(
   const blendX = smooth((cellX % scale) / scale);
   const blendY = smooth((cellY % scale) / scale);
   const sample = (x: number, y: number) =>
-    fraction(
-      seed,
-      normalizeCell(x, gridWidth),
-      normalizeCell(y, gridHeight),
-      salt,
-    );
-  const top =
-    sample(gridX, gridY) * (1 - blendX) + sample(gridX + 1, gridY) * blendX;
-  const bottom =
-    sample(gridX, gridY + 1) * (1 - blendX) +
-    sample(gridX + 1, gridY + 1) * blendX;
+    fraction(seed, normalizeCell(x, gridWidth), normalizeCell(y, gridHeight), salt);
+  const top = sample(gridX, gridY) * (1 - blendX) + sample(gridX + 1, gridY) * blendX;
+  const bottom = sample(gridX, gridY + 1) * (1 - blendX) + sample(gridX + 1, gridY + 1) * blendX;
   return top * (1 - blendY) + bottom * blendY;
 }
 
@@ -90,43 +73,13 @@ function terrainAt(
   width: number,
   height: number,
 ): { terrain: number; elevation: number } {
-  const broad = periodicNoise(
-    seed,
-    cellX,
-    cellY,
-    width,
-    height,
-    TERRAIN_CONFIG.broadScale,
-    17,
-  );
-  const detail = periodicNoise(
-    seed,
-    cellX,
-    cellY,
-    width,
-    height,
-    TERRAIN_CONFIG.detailScale,
-    31,
-  );
-  const moisture = periodicNoise(
-    seed,
-    cellX,
-    cellY,
-    width,
-    height,
-    TERRAIN_CONFIG.broadScale,
-    47,
-  );
+  const broad = periodicNoise(seed, cellX, cellY, width, height, TERRAIN_CONFIG.broadScale, 17);
+  const detail = periodicNoise(seed, cellX, cellY, width, height, TERRAIN_CONFIG.detailScale, 31);
+  const moisture = periodicNoise(seed, cellX, cellY, width, height, TERRAIN_CONFIG.broadScale, 47);
   const elevationRatio = broad * 0.72 + detail * 0.28;
-  const elevation = Math.round(
-    elevationRatio * TERRAIN_CONFIG.maximumElevation,
-  );
-  if (elevationRatio < TERRAIN_CONFIG.waterThreshold)
-    return { terrain: TERRAIN.water, elevation: 0 };
-  if (
-    elevationRatio > TERRAIN_CONFIG.rockyElevationThreshold &&
-    moisture < TERRAIN_CONFIG.rockyMoistureThreshold
-  ) {
+  const elevation = Math.round(elevationRatio * TERRAIN_CONFIG.maximumElevation);
+  if (elevationRatio < TERRAIN_CONFIG.waterThreshold) return { terrain: TERRAIN.water, elevation: 0 };
+  if (elevationRatio > TERRAIN_CONFIG.rockyElevationThreshold && moisture < TERRAIN_CONFIG.rockyMoistureThreshold) {
     return { terrain: TERRAIN.rockyGround, elevation };
   }
   return { terrain: TERRAIN.grassland, elevation };
@@ -156,26 +109,18 @@ function chooseClearings(
   for (const candidate of candidates) {
     if (plans.length >= desiredCount) break;
     const centerCellX = normalizeCell(
-      candidate.x * CLEARING.minimumCenterDistance +
-        CLEARING.minimumCenterDistance / 2,
+      candidate.x * CLEARING.minimumCenterDistance + CLEARING.minimumCenterDistance / 2,
       width,
     );
     const centerCellY = normalizeCell(
-      candidate.y * CLEARING.minimumCenterDistance +
-        CLEARING.minimumCenterDistance / 2,
+      candidate.y * CLEARING.minimumCenterDistance + CLEARING.minimumCenterDistance / 2,
       height,
     );
     if (
       plans.some(
         (plan) =>
-          toroidalChebyshev(
-            centerCellX,
-            centerCellY,
-            plan.centerCellX,
-            plan.centerCellY,
-            width,
-            height,
-          ) < CLEARING.minimumCenterDistance,
+          toroidalChebyshev(centerCellX, centerCellY, plan.centerCellX, plan.centerCellY, width, height) <
+          CLEARING.minimumCenterDistance,
       )
     )
       continue;
@@ -187,9 +132,7 @@ function chooseClearings(
     });
   }
   if (plans.length < desiredCount) {
-    throw new Error(
-      `Unable to place ${desiredCount} clearings in world ${width}x${height}`,
-    );
+    throw new Error(`Unable to place ${desiredCount} clearings in world ${width}x${height}`);
   }
   return plans;
 }
@@ -198,13 +141,8 @@ function chooseClearings(
  * Generates a world exactly once. The transaction advisory lock makes concurrent
  * callers harmless; a failed transaction leaves the world pending and writable.
  */
-export async function generateWorld(
-  transaction: Transaction<Database>,
-  worldId: string,
-): Promise<void> {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`world-generation:${worldId}`}, 0))`.execute(
-    transaction,
-  );
+export async function generateWorld(transaction: Transaction<Database>, worldId: string): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`world-generation:${worldId}`}, 0))`.execute(transaction);
   await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(transaction);
   const world = await transaction
     .selectFrom('worlds')
@@ -214,23 +152,14 @@ export async function generateWorld(
     .executeTakeFirstOrThrow();
   if (world.generationStatus === 'ready') return;
 
-  await transaction
-    .updateTable('worlds')
-    .set({ generationStatus: 'generating' })
-    .where('id', '=', worldId)
-    .execute();
+  await transaction.updateTable('worlds').set({ generationStatus: 'generating' }).where('id', '=', worldId).execute();
   const seed = Number(world.seed);
   const villages = await transaction
     .selectFrom('villages')
     .select(['id', 'anchorCellX', 'anchorCellY'])
     .where('worldId', '=', worldId)
     .execute();
-  const clearings = chooseClearings(
-    seed,
-    world.widthCells,
-    world.heightCells,
-    villages,
-  );
+  const clearings = chooseClearings(seed, world.widthCells, world.heightCells, villages);
   const clearingCells = new Set<string>();
   const transitionDensity = new Map<string, number>();
   for (const clearing of clearings) {
@@ -244,12 +173,8 @@ export async function generateWorld(
         const distance = Math.max(Math.abs(dx), Math.abs(dy));
         if (distance <= CLEARING.innerRadius) clearingCells.add(key);
         else {
-          const density =
-            (distance - CLEARING.innerRadius) / CLEARING.transitionRadius;
-          transitionDensity.set(
-            key,
-            Math.min(transitionDensity.get(key) ?? 1, density),
-          );
+          const density = (distance - CLEARING.innerRadius) / CLEARING.transitionRadius;
+          transitionDensity.set(key, Math.min(transitionDensity.get(key) ?? 1, density));
         }
       }
     }
@@ -282,13 +207,7 @@ export async function generateWorld(
         for (let localX = 0; localX < world.chunkSize; localX += 1) {
           const cellX = chunkX * world.chunkSize + localX;
           const cellY = chunkY * world.chunkSize + localY;
-          const base = terrainAt(
-            seed,
-            cellX,
-            cellY,
-            world.widthCells,
-            world.heightCells,
-          );
+          const base = terrainAt(seed, cellX, cellY, world.widthCells, world.heightCells);
           const clearing = clearingCells.has(worldCellKey(cellX, cellY));
           terrainCodes.push(clearing ? TERRAIN.grassland : base.terrain);
           elevations.push(clearing ? 0 : base.elevation);
@@ -329,18 +248,9 @@ export async function generateWorld(
   }> = [];
   for (let cellY = 0; cellY < world.heightCells; cellY += 1) {
     for (let cellX = 0; cellX < world.widthCells; cellX += 1) {
-      if (
-        clearingCells.has(worldCellKey(cellX, cellY)) ||
-        existingOccupancies.has(worldCellKey(cellX, cellY))
-      )
+      if (clearingCells.has(worldCellKey(cellX, cellY)) || existingOccupancies.has(worldCellKey(cellX, cellY)))
         continue;
-      const base = terrainAt(
-        seed,
-        cellX,
-        cellY,
-        world.widthCells,
-        world.heightCells,
-      );
+      const base = terrainAt(seed, cellX, cellY, world.widthCells, world.heightCells);
       if (base.terrain !== TERRAIN.grassland) continue;
       const roll = fraction(seed, cellX, cellY, 211);
       const density = transitionDensity.get(worldCellKey(cellX, cellY)) ?? 1;
@@ -406,23 +316,47 @@ export async function generateWorld(
           role: 'body',
         })),
       )
-      .onConflict((conflict) =>
-        conflict.columns(['worldId', 'cellX', 'cellY']).doNothing(),
-      )
+      .onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing())
       .execute();
     const stones = batch.filter((feature) => feature.featureTypeCode === 'stone_outcrop');
     const woods = batch.filter((feature) => feature.featureTypeCode === 'woodland');
-    if (woods.length) await transaction.insertInto('woodlandDeposits').values(woods.map(feature => ({
-      worldId, featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY,
-      initialAmount: 300, remainingAmount: 300, reservedAmount: 0, revision: 1,
-      regrowthPeriodMs: 1_209_600_000, regrowthUpdatedAt: sql`statement_timestamp()`,
-      updatedAt: sql`statement_timestamp()`,
-    }))).onConflict(oc => oc.columns(['worldId', 'featureId']).doNothing()).execute();
-    if (stones.length) await transaction.insertInto('stoneDeposits').values(stones.map((feature) => ({
-      worldId, featureId: feature.id, cellX: feature.cellX, cellY: feature.cellY,
-      initialAmount: stoneDepositAmount(feature.variantSeed), remainingAmount: stoneDepositAmount(feature.variantSeed),
-      reservedAmount: 0, revision: 1, updatedAt: sql`transaction_timestamp()`,
-    }))).execute();
+    if (woods.length)
+      await transaction
+        .insertInto('woodlandDeposits')
+        .values(
+          woods.map((feature) => ({
+            worldId,
+            featureId: feature.id,
+            cellX: feature.cellX,
+            cellY: feature.cellY,
+            initialAmount: 300,
+            remainingAmount: 300,
+            reservedAmount: 0,
+            revision: 1,
+            regrowthPeriodMs: 1_209_600_000,
+            regrowthUpdatedAt: sql`statement_timestamp()`,
+            updatedAt: sql`statement_timestamp()`,
+          })),
+        )
+        .onConflict((oc) => oc.columns(['worldId', 'featureId']).doNothing())
+        .execute();
+    if (stones.length)
+      await transaction
+        .insertInto('stoneDeposits')
+        .values(
+          stones.map((feature) => ({
+            worldId,
+            featureId: feature.id,
+            cellX: feature.cellX,
+            cellY: feature.cellY,
+            initialAmount: stoneDepositAmount(feature.variantSeed),
+            remainingAmount: stoneDepositAmount(feature.variantSeed),
+            reservedAmount: 0,
+            revision: 1,
+            updatedAt: sql`transaction_timestamp()`,
+          })),
+        )
+        .execute();
   }
   await transaction
     .updateTable('worlds')

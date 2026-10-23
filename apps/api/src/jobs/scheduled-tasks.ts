@@ -11,11 +11,16 @@ export interface ProcessScheduledTaskResult {
   outcome: 'completed' | 'retry-scheduled';
 }
 
-export type ScheduledWorkerObservation = { kind: 'poll' | 'idle' | 'error' | 'stopped' }
+export type ScheduledWorkerObservation =
+  | { kind: 'poll' | 'idle' | 'error' | 'stopped' }
   | { kind: 'processed'; outcome: ProcessScheduledTaskResult['outcome'] };
 type Observer = (event: ScheduledWorkerObservation) => void;
 function observe(observer: Observer | undefined, event: ScheduledWorkerObservation): void {
-  try { observer?.(event); } catch { /* Monitoring must never change task handling. */ }
+  try {
+    observer?.(event);
+  } catch {
+    /* Monitoring must never change task handling. */
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -29,7 +34,8 @@ export async function processNextScheduledTask(
   retryDelayMs = 1_000,
 ): Promise<ProcessScheduledTaskResult | null> {
   return db.transaction().execute(async (transaction) => {
-    const task = await transaction.selectFrom('scheduledTasks')
+    const task = await transaction
+      .selectFrom('scheduledTasks')
       .selectAll()
       .where('completedAt', 'is', null)
       .where('dueAt', '<=', sql<Date>`transaction_timestamp()`)
@@ -56,7 +62,8 @@ export async function processNextScheduledTask(
       // Persistent failures back off up to five minutes; their intentions and
       // original deadlines stay intact, and healthy tasks remain eligible.
       const delayMs = Math.min(300_000, retryDelayMs * 2 ** Math.min(task.attempts, 20));
-      await transaction.updateTable('scheduledTasks')
+      await transaction
+        .updateTable('scheduledTasks')
         .set({
           attempts: sql`attempts + 1`,
           lastError: errorMessage(error),
@@ -67,7 +74,8 @@ export async function processNextScheduledTask(
       return { taskId: task.id, outcome: 'retry-scheduled' };
     }
 
-    await transaction.updateTable('scheduledTasks')
+    await transaction
+      .updateTable('scheduledTasks')
       .set({ completedAt: sql`transaction_timestamp()`, lastError: null })
       .where('id', '=', task.id)
       .where('completedAt', 'is', null)
@@ -108,9 +116,16 @@ export function startScheduledTaskWorker(
     if (stopped || currentRun) return;
     observe(observer, { kind: 'poll' });
     currentRun = drainScheduledTasks(db, handlers, 50, observer)
-      .then(() => { observe(observer, { kind: 'idle' }); })
-      .catch(error => { observe(observer, { kind: 'error' }); onError(error); })
-      .finally(() => { currentRun = null; });
+      .then(() => {
+        observe(observer, { kind: 'idle' });
+      })
+      .catch((error) => {
+        observe(observer, { kind: 'error' });
+        onError(error);
+      })
+      .finally(() => {
+        currentRun = null;
+      });
   };
 
   const timer = setInterval(() => void poll(), pollIntervalMs);

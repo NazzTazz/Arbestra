@@ -14,7 +14,11 @@
       "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
-    "./world-geography": {"types":"./src/world-geography.ts","import":"./dist/world-geography.js"}, "./geography-prototype": {
+    "./world-geography": {
+      "types": "./src/world-geography.ts",
+      "import": "./dist/world-geography.js"
+    },
+    "./geography-prototype": {
       "types": "./src/geography-prototype.ts",
       "import": "./dist/geography-prototype.js"
     }

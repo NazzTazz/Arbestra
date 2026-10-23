@@ -2,7 +2,7 @@ import { sql, type Kysely } from 'kysely';
 
 /** Staged after complete writer coverage. Existing scopes keep their epoch and
  * revision; a new scope starts at zero and requires an explicit snapshot. */
-export async function up(db:Kysely<unknown>):Promise<void>{
+export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     insert into game_sync_streams(world_id,stream_kind,scope_key)
     select world_id,stream_kind,scope_key from (

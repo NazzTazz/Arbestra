@@ -34,6 +34,6 @@ export default defineConfig({
       url: 'http://localhost:5274',
       reuseExistingServer: false,
       timeout: 60_000,
-    }
+    },
   ],
 });

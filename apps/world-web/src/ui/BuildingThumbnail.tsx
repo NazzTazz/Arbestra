@@ -7,12 +7,27 @@ export function BuildingThumbnail({ code, level = 1 }: { code: string; level?: n
   const key = `${code}:${level}`;
   const src = peekBuildingThumbnail(code, level) ?? (image?.key === key ? image.src : undefined);
   useEffect(() => {
-    let live = true; setFailed(false);
-    void buildingThumbnail(code, level)
-      .then(src => { if (live) setImage({ key, src }); }, () => { if (live) setFailed(true); });
-    return () => { live = false; };
+    let live = true;
+    setFailed(false);
+    void buildingThumbnail(code, level).then(
+      (src) => {
+        if (live) setImage({ key, src });
+      },
+      () => {
+        if (live) setFailed(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
   }, [code, level, key]);
-  return <span className="building-thumbnail" aria-hidden="true">
-    {src ? <img src={src} alt="" draggable={false} /> : <small>{failed ? 'Aperçu indisponible' : 'Préparation de l’aperçu…'}</small>}
-  </span>;
+  return (
+    <span className="building-thumbnail" aria-hidden="true">
+      {src ? (
+        <img src={src} alt="" draggable={false} />
+      ) : (
+        <small>{failed ? 'Aperçu indisponible' : 'Préparation de l’aperçu…'}</small>
+      )}
+    </span>
+  );
 }

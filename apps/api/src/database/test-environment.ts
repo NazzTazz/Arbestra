@@ -9,7 +9,8 @@ try {
 
 export function testDatabaseUrl(environment: NodeJS.ProcessEnv = process.env): string {
   const databaseUrl = environment.TEST_DATABASE_URL;
-  if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required for database tests. Copy .env.test.example to .env.test.');
+  if (!databaseUrl)
+    throw new Error('TEST_DATABASE_URL is required for database tests. Copy .env.test.example to .env.test.');
   const databaseName = new URL(databaseUrl).pathname.slice(1);
   if (!databaseName.endsWith('_test')) {
     throw new Error(`Refusing to use a non-test database for tests: ${databaseName || '(missing database name)'}`);

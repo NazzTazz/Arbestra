@@ -2,7 +2,7 @@ export type PopulationActivity = 'idle' | 'working' | 'resting';
 
 export interface EnergyState {
   energy: number;
-/** Signed energy points retained at a scale divisible by every current rate. */
+  /** Signed energy points retained at a scale divisible by every current rate. */
   progress: number;
   activity: PopulationActivity;
   restingSince: Date | null;
@@ -19,7 +19,9 @@ const RATE_PER_MILLISECOND: Record<PopulationActivity, number> = {
 };
 const REST_RESET_MS = 5 * 60 * 60 * 1_000;
 
-function clampEnergy(value: number) { return Math.max(0, Math.min(10, value)); }
+function clampEnergy(value: number) {
+  return Math.max(0, Math.min(10, value));
+}
 
 /** Advances energy lazily. `progress` carries sub-point work across actions. */
 export function advanceEnergy(state: EnergyState, through: Date): EnergyState {
@@ -90,8 +92,12 @@ export function feedEnergy(state: EnergyState): EnergyState | null {
   if (state.foodUsedSinceRest >= 2) return null;
   const exact = Math.min(10 * UNITS, state.energy * UNITS + state.progress + UNITS);
   if (exact === state.energy * UNITS + state.progress) return null;
-  return { ...state, energy: Math.floor(exact / UNITS), progress: exact % UNITS,
-    foodUsedSinceRest: state.foodUsedSinceRest + 1 };
+  return {
+    ...state,
+    energy: Math.floor(exact / UNITS),
+    progress: exact % UNITS,
+    foodUsedSinceRest: state.foodUsedSinceRest + 1,
+  };
 }
 
 export function beginRest(state: EnergyState): EnergyState | null {

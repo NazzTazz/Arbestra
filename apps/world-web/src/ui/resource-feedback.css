@@ -1,44 +1,99 @@
-.resource { position:relative; }
-.resource-feedback { position:absolute; inset:0; pointer-events:none; }
+.resource {
+  position: relative;
+}
+.resource-feedback {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
 .resource-change {
-  position:absolute;
-  left:50%;
-  bottom:calc(100% + 10px + var(--resource-stagger,0px));
-  color:var(--resource-color);
-  font-size:20px;
-  font-weight:800;
-  font-variant-numeric:tabular-nums;
-  line-height:1.2;
-  white-space:nowrap;
-  -webkit-text-stroke:1px #000;
-  paint-order:stroke fill;
-  text-shadow:0 1px 2px #000;
-  animation:resource-escape 2.4s ease-out both;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px + var(--resource-stagger, 0px));
+  color: var(--resource-color);
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+  -webkit-text-stroke: 1px #000;
+  paint-order: stroke fill;
+  text-shadow: 0 1px 2px #000;
+  animation: resource-escape 2.4s ease-out both;
 }
-.resource--wood { --resource-color:#dfb681; }
-.resource--timber { --resource-color:#edc68d; }
-.resource--carrot { --resource-color:#99e37b; }
-.resource--stone { --resource-color:#e0e3e6; }
-.resource--cut-stone { --resource-color:#e7decb; }
-.resource-change-label { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.resource--wood {
+  --resource-color: #dfb681;
+}
+.resource--timber {
+  --resource-color: #edc68d;
+}
+.resource--carrot {
+  --resource-color: #99e37b;
+}
+.resource--stone {
+  --resource-color: #e0e3e6;
+}
+.resource--cut-stone {
+  --resource-color: #e7decb;
+}
+.resource-change-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 @keyframes resource-escape {
-  0% { opacity:0; transform:translate(calc(-50% + var(--resource-lane) * 8px),calc(var(--resource-lane) * -24px + 8px)) scale(.9); }
-  12% { opacity:1; transform:translate(calc(-50% + var(--resource-lane) * 8px),calc(var(--resource-lane) * -24px)) scale(1.05); }
-  68% { opacity:1; }
-  100% { opacity:0; transform:translate(calc(-50% + var(--resource-lane) * 8px),calc(var(--resource-lane) * -24px - 42px)) scale(1); }
+  0% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--resource-lane) * 8px), calc(var(--resource-lane) * -24px + 8px)) scale(0.9);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--resource-lane) * 8px), calc(var(--resource-lane) * -24px)) scale(1.05);
+  }
+  68% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--resource-lane) * 8px), calc(var(--resource-lane) * -24px - 42px)) scale(1);
+  }
 }
-@media(max-width:580px) {
-  .resource-change { font-size:17px; }
-  .resource--timber, .resource--stone { --resource-stagger:24px; }
+@media (max-width: 580px) {
+  .resource-change {
+    font-size: 17px;
+  }
+  .resource--timber,
+  .resource--stone {
+    --resource-stagger: 24px;
+  }
 }
-@media(max-width:520px) {
-  .top-bar .world-identity { display:none; }
-  .top-bar .resource { flex-shrink:0; min-width:min-content; }
+@media (max-width: 520px) {
+  .top-bar .world-identity {
+    display: none;
+  }
+  .top-bar .resource {
+    flex-shrink: 0;
+    min-width: min-content;
+  }
 }
-@media(prefers-reduced-motion:reduce) {
-  .resource-change { animation-name:resource-fade; animation-duration:2.4s!important; }
+@media (prefers-reduced-motion: reduce) {
+  .resource-change {
+    animation-name: resource-fade;
+    animation-duration: 2.4s !important;
+  }
   @keyframes resource-fade {
-    0%,80% { opacity:1; transform:translate(-50%,calc(var(--resource-lane) * -24px)); }
-    100% { opacity:0; transform:translate(-50%,calc(var(--resource-lane) * -24px)); }
+    0%,
+    80% {
+      opacity: 1;
+      transform: translate(-50%, calc(var(--resource-lane) * -24px));
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, calc(var(--resource-lane) * -24px));
+    }
   }
 }

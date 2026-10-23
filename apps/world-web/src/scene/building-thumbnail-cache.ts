@@ -37,16 +37,22 @@ export class BuildingThumbnailCache {
     const pending = this.inFlight.get(key);
     if (pending) return pending;
 
-    const result = this.queue.then(() => this.render(code, level)).then(image => {
-      this.remember(key, image);
-      this.persist();
-      return image;
-    });
+    const result = this.queue
+      .then(() => this.render(code, level))
+      .then((image) => {
+        this.remember(key, image);
+        this.persist();
+        return image;
+      });
     this.inFlight.set(key, result);
     // A failed render neither poisons this key nor blocks later requests.
     this.queue = result.then(
-      () => { this.inFlight.delete(key); },
-      () => { this.inFlight.delete(key); },
+      () => {
+        this.inFlight.delete(key);
+      },
+      () => {
+        this.inFlight.delete(key);
+      },
     );
     return result;
   }
@@ -72,13 +78,25 @@ export class BuildingThumbnailCache {
       const raw = this.storage().getItem(THUMBNAIL_STORAGE_KEY);
       if (!raw || raw.length * 2 > THUMBNAIL_MAX_BYTES) return;
       const stored: unknown = JSON.parse(raw);
-      if (!stored || typeof stored !== 'object' || !('revision' in stored) || stored.revision !== this.revision
-        || !('entries' in stored) || !Array.isArray(stored.entries)) return;
+      if (
+        !stored ||
+        typeof stored !== 'object' ||
+        !('revision' in stored) ||
+        stored.revision !== this.revision ||
+        !('entries' in stored) ||
+        !Array.isArray(stored.entries)
+      )
+        return;
       for (const entry of stored.entries.slice(-THUMBNAIL_MAX_ENTRIES)) {
         if (!Array.isArray(entry) || entry.length !== 2) continue;
         const [key, image] = entry as unknown[];
-        if (typeof key !== 'string' || !/^[a-z-]+:[1-9]\d*$/.test(key)
-          || typeof image !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) continue;
+        if (
+          typeof key !== 'string' ||
+          !/^[a-z-]+:[1-9]\d*$/.test(key) ||
+          typeof image !== 'string' ||
+          !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)
+        )
+          continue;
         this.remember(key, image);
       }
     } catch {
@@ -87,7 +105,10 @@ export class BuildingThumbnailCache {
   }
 
   private persist(): void {
-    try { this.storage().setItem(THUMBNAIL_STORAGE_KEY, this.serialize()); }
-    catch { /* Quota/private mode: the in-memory cache remains usable. */ }
+    try {
+      this.storage().setItem(THUMBNAIL_STORAGE_KEY, this.serialize());
+    } catch {
+      /* Quota/private mode: the in-memory cache remains usable. */
+    }
   }
 }

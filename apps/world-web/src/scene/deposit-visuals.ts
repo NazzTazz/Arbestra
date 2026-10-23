@@ -12,8 +12,10 @@ export function stoneVisualSignature(feature: WorldFeature, origin: string): str
 export function changedStoneFeatures(previous: ReadonlyMap<string, string>, features: WorldFeature[], origin: string) {
   const stones = features.filter((feature) => feature.type === 'stone_outcrop');
   const ids = new Set(stones.map((feature) => feature.id));
-  return { removed: [...previous.keys()].filter((id) => !ids.has(id)),
-    changed: stones.filter((feature) => previous.get(feature.id) !== stoneVisualSignature(feature, origin)) };
+  return {
+    removed: [...previous.keys()].filter((id) => !ids.has(id)),
+    changed: stones.filter((feature) => previous.get(feature.id) !== stoneVisualSignature(feature, origin)),
+  };
 }
 
 /** Visual round trip only: quarter out, half at work, quarter back. */

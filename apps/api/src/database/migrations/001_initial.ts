@@ -32,11 +32,20 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('worldId', 'uuid', (column) => column.notNull().references('worlds.id').onDelete('cascade'))
     .addColumn('ownerAccountId', 'uuid', (column) => column.notNull().references('accounts.id').onDelete('cascade'))
     .addColumn('name', 'text', (column) => column.notNull())
-    .addColumn('wood', 'integer', (column) => column.notNull().defaultTo(100).check(sql`wood >= 0`))
+    .addColumn('wood', 'integer', (column) =>
+      column
+        .notNull()
+        .defaultTo(100)
+        .check(sql`wood >= 0`),
+    )
     .addColumn('createdAt', 'timestamptz', (column) => column.notNull().defaultTo(db.fn('now')))
     .execute();
 
-  await db.schema.createIndex('villages_world_owner_index').on('villages').columns(['worldId', 'ownerAccountId']).execute();
+  await db.schema
+    .createIndex('villages_world_owner_index')
+    .on('villages')
+    .columns(['worldId', 'ownerAccountId'])
+    .execute();
 
   await db.schema
     .createTable('buildingSites')
@@ -50,7 +59,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable('buildings')
     .addColumn('id', 'uuid', (column) => column.primaryKey().defaultTo(db.fn('gen_random_uuid')))
-    .addColumn('siteId', 'uuid', (column) => column.notNull().unique().references('buildingSites.id').onDelete('cascade'))
+    .addColumn('siteId', 'uuid', (column) =>
+      column.notNull().unique().references('buildingSites.id').onDelete('cascade'),
+    )
     .addColumn('buildingType', 'text', (column) => column.notNull())
     .addColumn('createdAt', 'timestamptz', (column) => column.notNull().defaultTo(db.fn('now')))
     .addCheckConstraint('buildings_type_check', sql`building_type in ('town-hall', 'dwelling')`)

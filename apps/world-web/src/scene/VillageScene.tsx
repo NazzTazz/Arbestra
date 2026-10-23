@@ -1,9 +1,9 @@
-import {observationCameraReader} from '../observation';
-import type {ObservationPose} from '@arbestra/contracts';
-import type {SceneTransport} from './scene-transport';
-import type {StarterGhost} from '../spawn-map/starter-controller';
-import type {InfrastructureGesture} from './infrastructure-renderer';
-import type {InfrastructureOperation,SubPoint} from '@arbestra/contracts';
+import { observationCameraReader } from '../observation';
+import type { ObservationPose } from '@arbestra/contracts';
+import type { SceneTransport } from './scene-transport';
+import type { StarterGhost } from '../spawn-map/starter-controller';
+import type { InfrastructureGesture } from './infrastructure-renderer';
+import type { InfrastructureOperation, SubPoint } from '@arbestra/contracts';
 import type { RepresentativeInfo } from './village-workers';
 import type { InhabitantCameraMode } from './inhabitant-camera';
 import type { VillageArrival } from './village-arrival';
@@ -21,11 +21,13 @@ import type { AreaPreview, Cell } from './construction-selection';
 import type { ActiveWorldMode } from '../ui/world-mode';
 
 interface VillageSceneProps {
-  transport?:SceneTransport|undefined;
-  observationPose?:ObservationPose|null|undefined;
-  onManualCamera?:(()=>void)|undefined;
+  transport?: SceneTransport | undefined;
+  observationPose?: ObservationPose | null | undefined;
+  onManualCamera?: (() => void) | undefined;
   onInitialLoad?: ((progress: InitialLoadProgress) => void) | undefined;
-  preparing?:boolean; starterGhost?:StarterGhost|null; onStarterManual?:(()=>void)|undefined;
+  preparing?: boolean;
+  starterGhost?: StarterGhost | null;
+  onStarterManual?: (() => void) | undefined;
   worldMode: ActiveWorldMode;
   populationFocus?: string | null;
   populationFilter?: string;
@@ -42,8 +44,8 @@ interface VillageSceneProps {
   paletteOpen?: boolean;
   devOpen?: boolean;
   constructionType?: string | null;
-  constructionQuarterTurns?:number;
-  constructionHouseVariant?:'stone'|'logs'|'beams';
+  constructionQuarterTurns?: number;
+  constructionHouseVariant?: 'stone' | 'logs' | 'beams';
   constructionAction?: 'build' | 'upgrade' | 'extend' | null;
   onBuildingHover?: (id: string | null) => void;
   selectingArea: boolean;
@@ -59,13 +61,87 @@ interface VillageSceneProps {
   onEyesFound?: () => void;
   onViewChanged?: (mode: TerrainViewMode) => void;
 }
-export interface TerrainHandle { terrainVertexHeight:(x:number,y:number)=>number|null; terraformPreview:(value:import('./terraform-preview').TerraformVisual|null)=>void; focusCell:(cell:Cell)=>void; viewCenter:()=>Cell|null; naturalFeatures:()=>NaturalFeature[]; ready:()=>boolean; infrastructureTool:(handler:((gesture:InfrastructureGesture)=>void)|null)=>void; infrastructurePreview:(operation:InfrastructureOperation|null,invalid?:boolean,preparedPlan?:import('@arbestra/contracts').InfrastructurePlan,preparedSurface?:ReadonlyMap<string,import('@arbestra/contracts').RoadPixel>)=>void; equipmentAt:(point:SubPoint,pickedId?:string)=>{id:string;version:number;position:SubPoint;quarterTurns:number}|null; selectRepresentative:(id:string|null)=>void; representativeInfo:(id:string)=>RepresentativeInfo|null; projectRepresentative:(id:string)=>ScreenAnchor|null; representativeCamera:(mode:'pov'|'follow'|'village')=>void; representativeCameraMode:()=>InhabitantCameraMode; cancelGesture: () => void; resetCosmology: () => void; projectPopulation: (id: string) => ScreenAnchor | null; featuresAt: (cell: Cell) => NaturalFeature[]; acceptDeposit: (deposit: StoneDeposit) => void; showVillage: () => void; projectCell: (cell: Cell) => ScreenAnchor | null; setWorldMode: (mode: ActiveWorldMode) => void }
+export interface TerrainHandle {
+  terrainVertexHeight: (x: number, y: number) => number | null;
+  terraformPreview: (value: import('./terraform-preview').TerraformVisual | null) => void;
+  focusCell: (cell: Cell) => void;
+  viewCenter: () => Cell | null;
+  naturalFeatures: () => NaturalFeature[];
+  ready: () => boolean;
+  infrastructureTool: (handler: ((gesture: InfrastructureGesture) => void) | null) => void;
+  infrastructurePreview: (
+    operation: InfrastructureOperation | null,
+    invalid?: boolean,
+    preparedPlan?: import('@arbestra/contracts').InfrastructurePlan,
+    preparedSurface?: ReadonlyMap<string, import('@arbestra/contracts').RoadPixel>,
+  ) => void;
+  equipmentAt: (
+    point: SubPoint,
+    pickedId?: string,
+  ) => { id: string; version: number; position: SubPoint; quarterTurns: number } | null;
+  selectRepresentative: (id: string | null) => void;
+  representativeInfo: (id: string) => RepresentativeInfo | null;
+  projectRepresentative: (id: string) => ScreenAnchor | null;
+  representativeCamera: (mode: 'pov' | 'follow' | 'village') => void;
+  representativeCameraMode: () => InhabitantCameraMode;
+  cancelGesture: () => void;
+  resetCosmology: () => void;
+  projectPopulation: (id: string) => ScreenAnchor | null;
+  featuresAt: (cell: Cell) => NaturalFeature[];
+  acceptDeposit: (deposit: StoneDeposit) => void;
+  showVillage: () => void;
+  projectCell: (cell: Cell) => ScreenAnchor | null;
+  setWorldMode: (mode: ActiveWorldMode) => void;
+}
 
-export function VillageScene({ transport, observationPose, onManualCamera, onInitialLoad, preparing=false, starterGhost=null, onStarterManual, worldMode, noclip=false, populationFocus = null, populationFilter = 'all', state, serverOffsetMs, terrainRef, pendingHarvestCells, highlightedSiteIds, constructionMode = false, showTravelPaths = false, selectedRouteId = null, cosmologyDebug = false, devOpen = false, paletteOpen = true, constructionAction = null, constructionType = null, constructionQuarterTurns=0, constructionHouseVariant='stone', onBuildingHover, selectingArea, preview, previewInvalid, onAreaGesture, onGardenHarvest, onWorldGestureCancelled, onSiteSelected, onCameraMoved, onFeatureSelected, onViewChanged, onArrivalActive, onEyesFound }: VillageSceneProps) {
+export function VillageScene({
+  transport,
+  observationPose,
+  onManualCamera,
+  onInitialLoad,
+  preparing = false,
+  starterGhost = null,
+  onStarterManual,
+  worldMode,
+  noclip = false,
+  populationFocus = null,
+  populationFilter = 'all',
+  state,
+  serverOffsetMs,
+  terrainRef,
+  pendingHarvestCells,
+  highlightedSiteIds,
+  constructionMode = false,
+  showTravelPaths = false,
+  selectedRouteId = null,
+  cosmologyDebug = false,
+  devOpen = false,
+  paletteOpen = true,
+  constructionAction = null,
+  constructionType = null,
+  constructionQuarterTurns = 0,
+  constructionHouseVariant = 'stone',
+  onBuildingHover,
+  selectingArea,
+  preview,
+  previewInvalid,
+  onAreaGesture,
+  onGardenHarvest,
+  onWorldGestureCancelled,
+  onSiteSelected,
+  onCameraMoved,
+  onFeatureSelected,
+  onViewChanged,
+  onArrivalActive,
+  onEyesFound,
+}: VillageSceneProps) {
   const [arrival, setArrival] = useState<VillageArrival | null>(null);
-  const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad }); callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad };
+  const callbacks = useRef({ onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad });
+  callbacks.current = { onArrivalActive, onEyesFound, onWorldGestureCancelled, onInitialLoad };
   const [devTarget, setDevTarget] = useState<HTMLElement | null>(null);
-  useEffect(() => { setDevTarget(devOpen ? document.getElementById('dev-cosmology-slot') : null); }, [devOpen, cosmologyDebug]);
+  useEffect(() => {
+    setDevTarget(devOpen ? document.getElementById('dev-cosmology-slot') : null);
+  }, [devOpen, cosmologyDebug]);
   const [loading, setLoading] = useState<TerrainStatus>(null);
   const [viewMode, setViewMode] = useState<TerrainViewMode>('village');
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -97,17 +173,21 @@ export function VillageScene({ transport, observationPose, onManualCamera, onIni
       (cell, newGesture, previewOnly) => harvestHandlerRef.current(cell, newGesture, previewOnly),
       () => callbacks.current.onWorldGestureCancelled?.(),
       setLoading,
-      mode => { setViewMode(mode); viewHandlerRef.current?.(mode); },
-      value => {
+      (mode) => {
+        setViewMode(mode);
+        viewHandlerRef.current?.(mode);
+      },
+      (value) => {
         if (!value && document.activeElement?.closest('.village-arrival')) canvas.focus();
-        setArrival(value); callbacks.current.onArrivalActive?.(value !== null);
+        setArrival(value);
+        callbacks.current.onArrivalActive?.(value !== null);
       },
       () => callbacks.current.onEyesFound?.(),
-      progress => callbacks.current.onInitialLoad?.(progress),
+      (progress) => callbacks.current.onInitialLoad?.(progress),
       transport,
     );
     sceneRef.current = scene;
-    const stopObservation=transport?.readOnly?()=>{}:observationCameraReader(()=>scene.observationPose());
+    const stopObservation = transport?.readOnly ? () => {} : observationCameraReader(() => scene.observationPose());
     return () => {
       stopObservation();
       callbacks.current.onArrivalActive?.(false);
@@ -122,41 +202,117 @@ export function VillageScene({ transport, observationPose, onManualCamera, onIni
     const frame = requestAnimationFrame(() => {
       sceneRef.current?.setPreparation(preparing);
       sceneRef.current?.update(state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId);
-      sceneRef.current?.updateAreaSelection(selectingArea,preview,previewInvalid);
-      sceneRef.current?.setStarterGhost(starterGhost,onStarterManual??null);
-      sceneRef.current?.updateConstructionGhost(selectingArea?constructionType:null,preview,previewInvalid,constructionQuarterTurns,constructionHouseVariant);
+      sceneRef.current?.updateAreaSelection(selectingArea, preview, previewInvalid);
+      sceneRef.current?.setStarterGhost(starterGhost, onStarterManual ?? null);
+      sceneRef.current?.updateConstructionGhost(
+        selectingArea ? constructionType : null,
+        preview,
+        previewInvalid,
+        constructionQuarterTurns,
+        constructionHouseVariant,
+      );
     });
     return () => cancelAnimationFrame(frame);
   }, [state, preparing, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId, BabylonVillageScene]);
 
-  const followed=useRef(observationPose);followed.current=observationPose;
-  useEffect(()=>{if(!transport?.readOnly)return;let frame=0;const tick=()=>{if(followed.current)sceneRef.current?.applyObservationPose(followed.current);frame=requestAnimationFrame(tick);};frame=requestAnimationFrame(tick);return()=>cancelAnimationFrame(frame);},[transport]);
+  const followed = useRef(observationPose);
+  followed.current = observationPose;
+  useEffect(() => {
+    if (!transport?.readOnly) return;
+    let frame = 0;
+    const tick = () => {
+      if (followed.current) sceneRef.current?.applyObservationPose(followed.current);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [transport]);
 
-  useImperativeHandle(terrainRef, () => ({ ready:()=>Boolean(sceneRef.current), infrastructureTool:handler=>sceneRef.current?.infrastructureTool(handler),infrastructurePreview:(op,invalid,preparedPlan,preparedSurface)=>sceneRef.current?.infrastructurePreview(op,invalid,preparedPlan,preparedSurface),equipmentAt:(p,pickedId)=>sceneRef.current?.equipmentAt(p,pickedId)??null,selectRepresentative:id=>sceneRef.current?.selectRepresentative(id), representativeInfo:id=>sceneRef.current?.representativeInfo(id)??null, projectRepresentative:id=>sceneRef.current?.projectRepresentative(id)??null, representativeCamera:mode=>sceneRef.current?.representativeCamera(mode), representativeCameraMode:()=>sceneRef.current?.representativeCameraMode??'village', cancelGesture: () => sceneRef.current?.cancelGesture(), resetCosmology: () => { sceneRef.current?.setCosmologyPhase(null); sceneRef.current?.setCosmologyPeriod(28800); }, featuresAt: cell => sceneRef.current?.featuresAt(cell) ?? [], acceptDeposit: deposit => sceneRef.current?.acceptDeposit(deposit),
-    projectPopulation: id => sceneRef.current?.projectPopulation(id) ?? null,
-    showVillage: () => sceneRef.current?.showVillage(), projectCell: cell => sceneRef.current?.projectCell(cell) ?? null,
-    focusCell:cell=>sceneRef.current?.focusCell(cell),viewCenter:()=>sceneRef.current?.viewCenter()??null,naturalFeatures:()=>sceneRef.current?.naturalFeatures()??[],
-    terrainVertexHeight:(x,y)=>sceneRef.current?.terrainVertexHeight(x,y)??null,
-    terraformPreview:value=>sceneRef.current?.terraformPreview(value),
-    setWorldMode: mode => sceneRef.current?.setWorldMode(mode) }), []);
-  useEffect(() => { sceneRef.current?.setWorldMode(worldMode); }, [worldMode, state.world.id, BabylonVillageScene]);
-  useEffect(() => { sceneRef.current?.setNoclip(noclip); }, [noclip,state.world.id,BabylonVillageScene]);
-  useEffect(() => { sceneRef.current?.setPopulationFocus(populationFocus, populationFilter); }, [populationFocus, populationFilter, state.world.id, BabylonVillageScene]);
+  useImperativeHandle(
+    terrainRef,
+    () => ({
+      ready: () => Boolean(sceneRef.current),
+      infrastructureTool: (handler) => sceneRef.current?.infrastructureTool(handler),
+      infrastructurePreview: (op, invalid, preparedPlan, preparedSurface) =>
+        sceneRef.current?.infrastructurePreview(op, invalid, preparedPlan, preparedSurface),
+      equipmentAt: (p, pickedId) => sceneRef.current?.equipmentAt(p, pickedId) ?? null,
+      selectRepresentative: (id) => sceneRef.current?.selectRepresentative(id),
+      representativeInfo: (id) => sceneRef.current?.representativeInfo(id) ?? null,
+      projectRepresentative: (id) => sceneRef.current?.projectRepresentative(id) ?? null,
+      representativeCamera: (mode) => sceneRef.current?.representativeCamera(mode),
+      representativeCameraMode: () => sceneRef.current?.representativeCameraMode ?? 'village',
+      cancelGesture: () => sceneRef.current?.cancelGesture(),
+      resetCosmology: () => {
+        sceneRef.current?.setCosmologyPhase(null);
+        sceneRef.current?.setCosmologyPeriod(28800);
+      },
+      featuresAt: (cell) => sceneRef.current?.featuresAt(cell) ?? [],
+      acceptDeposit: (deposit) => sceneRef.current?.acceptDeposit(deposit),
+      projectPopulation: (id) => sceneRef.current?.projectPopulation(id) ?? null,
+      showVillage: () => sceneRef.current?.showVillage(),
+      projectCell: (cell) => sceneRef.current?.projectCell(cell) ?? null,
+      focusCell: (cell) => sceneRef.current?.focusCell(cell),
+      viewCenter: () => sceneRef.current?.viewCenter() ?? null,
+      naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],
+      terrainVertexHeight: (x, y) => sceneRef.current?.terrainVertexHeight(x, y) ?? null,
+      terraformPreview: (value) => sceneRef.current?.terraformPreview(value),
+      setWorldMode: (mode) => sceneRef.current?.setWorldMode(mode),
+    }),
+    [],
+  );
+  useEffect(() => {
+    sceneRef.current?.setWorldMode(worldMode);
+  }, [worldMode, state.world.id, BabylonVillageScene]);
+  useEffect(() => {
+    sceneRef.current?.setNoclip(noclip);
+  }, [noclip, state.world.id, BabylonVillageScene]);
+  useEffect(() => {
+    sceneRef.current?.setPopulationFocus(populationFocus, populationFilter);
+  }, [populationFocus, populationFilter, state.world.id, BabylonVillageScene]);
 
-  useEffect(() => { sceneRef.current?.updateHarvestPending(pendingHarvestCells); }, [state, pendingHarvestCells]);
+  useEffect(() => {
+    sceneRef.current?.updateHarvestPending(pendingHarvestCells);
+  }, [state, pendingHarvestCells]);
 
   useEffect(() => {
     sceneRef.current?.updateAreaSelection(selectingArea, preview, previewInvalid);
   }, [selectingArea, preview, previewInvalid]);
-  useEffect(() => { sceneRef.current?.setStarterGhost(starterGhost,onStarterManual??null); sceneRef.current?.updateConstructionGhost(selectingArea ? constructionType : null, preview, previewInvalid,constructionQuarterTurns,constructionHouseVariant); }, [starterGhost, onStarterManual, constructionType, selectingArea, preview, previewInvalid,constructionQuarterTurns,constructionHouseVariant]);
-  useEffect(() => { sceneRef.current?.setConstructionAction(constructionAction, id => onBuildingHover?.(id)); }, [constructionAction, onBuildingHover]);
-  useEffect(() => { sceneRef.current?.setCosmologyDebug(cosmologyDebug); }, [cosmologyDebug, state.world.id]);
-  useEffect(() => { sceneRef.current?.setCosmologyServerOffset(serverOffsetMs); }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
+  useEffect(() => {
+    sceneRef.current?.setStarterGhost(starterGhost, onStarterManual ?? null);
+    sceneRef.current?.updateConstructionGhost(
+      selectingArea ? constructionType : null,
+      preview,
+      previewInvalid,
+      constructionQuarterTurns,
+      constructionHouseVariant,
+    );
+  }, [
+    starterGhost,
+    onStarterManual,
+    constructionType,
+    selectingArea,
+    preview,
+    previewInvalid,
+    constructionQuarterTurns,
+    constructionHouseVariant,
+  ]);
+  useEffect(() => {
+    sceneRef.current?.setConstructionAction(constructionAction, (id) => onBuildingHover?.(id));
+  }, [constructionAction, onBuildingHover]);
+  useEffect(() => {
+    sceneRef.current?.setCosmologyDebug(cosmologyDebug);
+  }, [cosmologyDebug, state.world.id]);
+  useEffect(() => {
+    sceneRef.current?.setCosmologyServerOffset(serverOffsetMs);
+  }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
 
   const keyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
-    if(worldMode==='terraform'&&['+','-','=','_','ArrowUp','ArrowDown'].includes(event.key))return;
+    if (worldMode === 'terraform' && ['+', '-', '=', '_', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     onManualCamera?.();
-    if (event.key === 'Escape' && viewMode === 'world') { sceneRef.current?.showRegion(); event.preventDefault(); }
+    if (event.key === 'Escape' && viewMode === 'world') {
+      sceneRef.current?.showRegion();
+      event.preventDefault();
+    }
     if (event.key === '+' || event.key === '=') {
       if (viewMode === 'world') sceneRef.current?.showRegion();
       else sceneRef.current?.showVillage();
@@ -168,24 +324,76 @@ export function VillageScene({ transport, observationPose, onManualCamera, onIni
       event.preventDefault();
     }
     if (viewMode === 'world' && event.key.startsWith('Arrow')) {
-      sceneRef.current?.rotateWorld(event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0,
-        event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0);
+      sceneRef.current?.rotateWorld(
+        event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0,
+        event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0,
+      );
       event.preventDefault();
     }
-    if (viewMode === 'world' && event.key === 'Enter') { sceneRef.current?.selectWorldCenter(); event.preventDefault(); }
+    if (viewMode === 'world' && event.key === 'Enter') {
+      sceneRef.current?.selectWorldCenter();
+      event.preventDefault();
+    }
   };
 
-  return <><canvas ref={canvasRef} className="village-canvas" data-testid="village-canvas" aria-label="Vue stratégique du village" tabIndex={0} onPointerDownCapture={()=>{if(transport?.readOnly)canvasRef.current?.focus({preventScroll:true});onManualCamera?.();}} onWheelCapture={()=>onManualCamera?.()} onKeyDown={keyDown} data-view-mode={viewMode} />
-    {arrival && <div className="village-arrival" role="dialog" aria-label={`Arrivée à ${arrival.name}`} onClick={event => { event.stopPropagation(); sceneRef.current?.skipArrival(true); }}
-      onWheel={event => { event.stopPropagation(); sceneRef.current?.zoomDuringArrival(event.deltaY); }}
-      onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); sceneRef.current?.skipArrival(true); } }}>
-      <div className="village-arrival-veil" style={{ backdropFilter: `blur(${arrival.veil * 1.15}px)` }} />
-      {arrival.time === 'Nuit' && <div className="village-arrival-mist" style={{ opacity: arrival.veil * .12 }} />}
-      <div className="village-arrival-black" style={{ opacity: arrival.black }} />
-      <div className="village-arrival-title" style={{ opacity: arrival.title }}><strong>{arrival.name}</strong><span>({arrival.time})</span></div>
-      <button autoFocus type="button" onClick={() => sceneRef.current?.skipArrival(true)}>Passer</button>
-    </div>}
-    {cosmologyDebug && devOpen && devTarget && createPortal(<CosmologyDebug scene={getScene} />, devTarget)}
-    {worldMode === 'exploration' && viewMode === 'village' && !arrival && !cosmologyDebug && paletteOpen && <VillageSolarPreview scene={getScene} onChoose={() => {}} />}
-    {loading && viewMode !== 'world' ? <div className="terrain-loading" role="status">{loading === 'retry' ? 'Terrain : connexion interrompue' : 'Chargement du terrain…'}{loading === 'retry' ? <button onClick={() => sceneRef.current?.retryTerrain()}>Réessayer</button> : null}</div> : null}</>;
+  return (
+    <>
+      <canvas
+        ref={canvasRef}
+        className="village-canvas"
+        data-testid="village-canvas"
+        aria-label="Vue stratégique du village"
+        tabIndex={0}
+        onPointerDownCapture={() => {
+          if (transport?.readOnly) canvasRef.current?.focus({ preventScroll: true });
+          onManualCamera?.();
+        }}
+        onWheelCapture={() => onManualCamera?.()}
+        onKeyDown={keyDown}
+        data-view-mode={viewMode}
+      />
+      {arrival && (
+        <div
+          className="village-arrival"
+          role="dialog"
+          aria-label={`Arrivée à ${arrival.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            sceneRef.current?.skipArrival(true);
+          }}
+          onWheel={(event) => {
+            event.stopPropagation();
+            sceneRef.current?.zoomDuringArrival(event.deltaY);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              sceneRef.current?.skipArrival(true);
+            }
+          }}
+        >
+          <div className="village-arrival-veil" style={{ backdropFilter: `blur(${arrival.veil * 1.15}px)` }} />
+          {arrival.time === 'Nuit' && <div className="village-arrival-mist" style={{ opacity: arrival.veil * 0.12 }} />}
+          <div className="village-arrival-black" style={{ opacity: arrival.black }} />
+          <div className="village-arrival-title" style={{ opacity: arrival.title }}>
+            <strong>{arrival.name}</strong>
+            <span>({arrival.time})</span>
+          </div>
+          <button autoFocus type="button" onClick={() => sceneRef.current?.skipArrival(true)}>
+            Passer
+          </button>
+        </div>
+      )}
+      {cosmologyDebug && devOpen && devTarget && createPortal(<CosmologyDebug scene={getScene} />, devTarget)}
+      {worldMode === 'exploration' && viewMode === 'village' && !arrival && !cosmologyDebug && paletteOpen && (
+        <VillageSolarPreview scene={getScene} onChoose={() => {}} />
+      )}
+      {loading && viewMode !== 'world' ? (
+        <div className="terrain-loading" role="status">
+          {loading === 'retry' ? 'Terrain : connexion interrompue' : 'Chargement du terrain…'}
+          {loading === 'retry' ? <button onClick={() => sceneRef.current?.retryTerrain()}>Réessayer</button> : null}
+        </div>
+      ) : null}
+    </>
+  );
 }

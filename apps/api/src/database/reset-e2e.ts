@@ -10,7 +10,9 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
   testDatabaseUrl({ TEST_DATABASE_URL: databaseUrl });
   const db = createDatabase(databaseUrl);
   try {
-    const generatedWorld = await db.selectFrom('worlds').select('id')
+    const generatedWorld = await db
+      .selectFrom('worlds')
+      .select('id')
       .where('id', '=', DEVELOPMENT_IDS.world)
       .where('generationStatus', '=', 'ready')
       .executeTakeFirst();
@@ -31,88 +33,182 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await transaction.deleteFrom('sessions').execute();
       await transaction.deleteFrom('scheduledTasks').execute();
       await transaction.deleteFrom('villageEconomyCatchups').execute();
-      await transaction.deleteFrom('infrastructureReceipts').where('worldId','=',DEVELOPMENT_IDS.world).execute();
-      await transaction.deleteFrom('villageInfrastructure').where('worldId','=',DEVELOPMENT_IDS.world).execute();
-      await transaction.deleteFrom('worldFactorySettings').where('worldId','=',DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('infrastructureReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('villageInfrastructure').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('worldFactorySettings').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('populationCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      await transaction.deleteFrom('hudWorkforceReceipts').where('worldId','=',DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('hudWorkforceReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('villageAccomplishments').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('populationCohorts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('tradeOffers').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('tradeReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      await transaction.updateTable('villagePopulations').set({nextArrivalAt:null,growthStartedAt:sql`statement_timestamp()`})
-        .where('worldId','=',DEVELOPMENT_IDS.world).execute();
+      await transaction
+        .updateTable('villagePopulations')
+        .set({ nextArrivalAt: null, growthStartedAt: sql`statement_timestamp()` })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .execute();
       await transaction.deleteFrom('processingOrders').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('marketExchanges').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('processingCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      await transaction.updateTable('villages').set({ economyActivatedAt: sql`statement_timestamp()` })
-        .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      await transaction.updateTable('villageResources').set({ amount: 0 }).where('worldId', '=', DEVELOPMENT_IDS.world)
-        .where('resourceCode', 'in', ['timber','cut-stone','rings']).execute();
+      await transaction
+        .updateTable('villages')
+        .set({ economyActivatedAt: sql`statement_timestamp()` })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .execute();
+      await transaction
+        .updateTable('villageResources')
+        .set({ amount: 0 })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('resourceCode', 'in', ['timber', 'cut-stone', 'rings'])
+        .execute();
       await transaction.deleteFrom('sciencePlaces').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('scienceActivities').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('playerScience').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('gardenHarvests').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('depositExtractions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('extractionWorksites').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      await transaction.deleteFrom('extractionPools').where('worldId','=',DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('extractionPools').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('exploitationOrders').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('buildingCommandReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('buildingHiddenSupplies').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      await transaction.deleteFrom('buildings')
+      await transaction
+        .deleteFrom('buildings')
         .where('worldId', '=', DEVELOPMENT_IDS.world)
         .where('id', '!=', DEVELOPMENT_IDS.townHall)
         .execute();
-      await transaction.updateTable('buildings').set({
-        level: 1, targetLevel: null, status: 'completed', constructionStartedAt: null,
-        visualLayout: null,quarterTurns:0,
-        constructionCompletesAt: null, completedAt: sql`transaction_timestamp()`,
-      }).where('id', '=', DEVELOPMENT_IDS.townHall).execute();
-      await transaction.deleteFrom('worldCellOccupancies')
+      await transaction
+        .updateTable('buildings')
+        .set({
+          level: 1,
+          targetLevel: null,
+          status: 'completed',
+          constructionStartedAt: null,
+          visualLayout: null,
+          quarterTurns: 0,
+          constructionCompletesAt: null,
+          completedAt: sql`transaction_timestamp()`,
+        })
+        .where('id', '=', DEVELOPMENT_IDS.townHall)
+        .execute();
+      await transaction
+        .deleteFrom('worldCellOccupancies')
         .where('worldId', '=', DEVELOPMENT_IDS.world)
         .where('buildingId', '=', DEVELOPMENT_IDS.townHall)
         .execute();
-      await transaction.insertInto('worldCellOccupancies').values({
-        worldId: DEVELOPMENT_IDS.world, ...DEVELOPMENT_CELLS.townHall,
-        buildingId: DEVELOPMENT_IDS.townHall, featureId: null, role: 'anchor',
-      }).execute();
-      await transaction.updateTable('villageResources').set({ amount: 2000 })
-        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
-        .where('resourceCode', '=', 'wood').execute();
-      await transaction.updateTable('villageResources').set({ amount: 50 })
-        .where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
-        .where('resourceCode', '=', 'carrot').execute();
-      await transaction.insertInto('villageResources').values({ worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-        resourceCode: 'stone', amount: 0 }).onConflict((conflict) => conflict.columns(['worldId','villageId','resourceCode']).doUpdateSet({ amount:0 })).execute();
+      await transaction
+        .insertInto('worldCellOccupancies')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          ...DEVELOPMENT_CELLS.townHall,
+          buildingId: DEVELOPMENT_IDS.townHall,
+          featureId: null,
+          role: 'anchor',
+        })
+        .execute();
+      await transaction
+        .updateTable('villageResources')
+        .set({ amount: 2000 })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('villageId', '=', DEVELOPMENT_IDS.village)
+        .where('resourceCode', '=', 'wood')
+        .execute();
+      await transaction
+        .updateTable('villageResources')
+        .set({ amount: 50 })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('villageId', '=', DEVELOPMENT_IDS.village)
+        .where('resourceCode', '=', 'carrot')
+        .execute();
+      await transaction
+        .insertInto('villageResources')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+          resourceCode: 'stone',
+          amount: 0,
+        })
+        .onConflict((conflict) => conflict.columns(['worldId', 'villageId', 'resourceCode']).doUpdateSet({ amount: 0 }))
+        .execute();
       // Only rows a test changed: each rewritten row is republished to its
       // spatial scope, and this fixture world spans about 1900 of them.
-      await transaction.updateTable('stoneDeposits').set({
-        remainingAmount: sql.ref('initialAmount'), reservedAmount: 0, revision: 1, updatedAt: sql`transaction_timestamp()`,
-      }).where('worldId', '=', DEVELOPMENT_IDS.world)
-        .where(sql<boolean>`remaining_amount <> initial_amount or reserved_amount <> 0 or revision <> 1`).execute();
-      await transaction.updateTable('worldFeatures').set({ state: 'available', updatedAt: sql`transaction_timestamp()` })
-        .where('worldId', '=', DEVELOPMENT_IDS.world).where('featureTypeCode', '=', 'stone_outcrop')
-        .where('state', '<>', 'available').execute();
-      const deposits = await transaction.selectFrom('stoneDeposits').select(['featureId', 'cellX', 'cellY'])
-        .where('worldId', '=', DEVELOPMENT_IDS.world).execute();
-      if (deposits.length > 0) await transaction.insertInto('worldCellOccupancies').values(deposits.map((deposit) => ({
-        worldId: DEVELOPMENT_IDS.world, cellX: deposit.cellX, cellY: deposit.cellY,
-        buildingId: null, featureId: deposit.featureId, role: 'body', pendingExpansionId: null,
-      }))).onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing()).execute();
-      await transaction.updateTable('villageResourceFlows').set({
-        baseRatePerHour: 0, remainder: 0, productionUpdatedAt: sql`transaction_timestamp()`,
-      }).where('worldId', '=', DEVELOPMENT_IDS.world).where('villageId', '=', DEVELOPMENT_IDS.village)
-        .where('resourceCode', '=', 'wood').execute();
-      await transaction.insertInto('populationCohorts').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village,
-        originVillageId: DEVELOPMENT_IDS.village, memberCount: 15, activity: 'idle', energy: 10,
-        energyProgress: 0, energyUpdatedAt: sql`transaction_timestamp()`, restingSince: null,
-        foodUsedSinceRest: 0, harvestId: null, extractionId: null,
-      }).execute();
-      await transaction.insertInto('buildingHiddenSupplies').values({
-        worldId: DEVELOPMENT_IDS.world, villageId: DEVELOPMENT_IDS.village, buildingId: DEVELOPMENT_IDS.townHall,
-        resourceCode: 'carrot', amount: 2000, claimedAt: null,
-      }).execute();
+      await transaction
+        .updateTable('stoneDeposits')
+        .set({
+          remainingAmount: sql.ref('initialAmount'),
+          reservedAmount: 0,
+          revision: 1,
+          updatedAt: sql`transaction_timestamp()`,
+        })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where(sql<boolean>`remaining_amount <> initial_amount or reserved_amount <> 0 or revision <> 1`)
+        .execute();
+      await transaction
+        .updateTable('worldFeatures')
+        .set({ state: 'available', updatedAt: sql`transaction_timestamp()` })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('featureTypeCode', '=', 'stone_outcrop')
+        .where('state', '<>', 'available')
+        .execute();
+      const deposits = await transaction
+        .selectFrom('stoneDeposits')
+        .select(['featureId', 'cellX', 'cellY'])
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .execute();
+      if (deposits.length > 0)
+        await transaction
+          .insertInto('worldCellOccupancies')
+          .values(
+            deposits.map((deposit) => ({
+              worldId: DEVELOPMENT_IDS.world,
+              cellX: deposit.cellX,
+              cellY: deposit.cellY,
+              buildingId: null,
+              featureId: deposit.featureId,
+              role: 'body',
+              pendingExpansionId: null,
+            })),
+          )
+          .onConflict((conflict) => conflict.columns(['worldId', 'cellX', 'cellY']).doNothing())
+          .execute();
+      await transaction
+        .updateTable('villageResourceFlows')
+        .set({
+          baseRatePerHour: 0,
+          remainder: 0,
+          productionUpdatedAt: sql`transaction_timestamp()`,
+        })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where('villageId', '=', DEVELOPMENT_IDS.village)
+        .where('resourceCode', '=', 'wood')
+        .execute();
+      await transaction
+        .insertInto('populationCohorts')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+          originVillageId: DEVELOPMENT_IDS.village,
+          memberCount: 15,
+          activity: 'idle',
+          energy: 10,
+          energyProgress: 0,
+          energyUpdatedAt: sql`transaction_timestamp()`,
+          restingSince: null,
+          foodUsedSinceRest: 0,
+          harvestId: null,
+          extractionId: null,
+        })
+        .execute();
+      await transaction
+        .insertInto('buildingHiddenSupplies')
+        .values({
+          worldId: DEVELOPMENT_IDS.world,
+          villageId: DEVELOPMENT_IDS.village,
+          buildingId: DEVELOPMENT_IDS.townHall,
+          resourceCode: 'carrot',
+          amount: 2000,
+          claimedAt: null,
+        })
+        .execute();
       // Public streams exist from world creation (055/057) but are only
       // touched by later writes; restore them if a suite removed them.
       await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values

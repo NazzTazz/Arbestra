@@ -1,11 +1,18 @@
-import {withinDepositRange} from '@arbestra/contracts';
+import { withinDepositRange } from '@arbestra/contracts';
 import { sql, type Transaction, type Selectable } from 'kysely';
 import type { DepositDetails, Extraction, StoneDeposit } from '@arbestra/contracts';
 import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts, projectCohorts, releaseWorkers, clearWorksiteRotation } from '../population/work.js';
+import {
+  assignWorkers,
+  eligibleWorkers,
+  materializeCohorts,
+  projectCohorts,
+  releaseWorkers,
+  clearWorksiteRotation,
+} from '../population/work.js';
 import { beginRest, canWorkFor } from '../population/energy.js';
 import { normalizeCell, toroidalChebyshev } from '../worlds/coordinates.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
@@ -25,37 +32,68 @@ export interface ExtractionVillage {
 }
 
 export function stoneExtractionDuration(workerCount: number, amount = STONE_EXTRACTION_LOT): number {
-  return Math.ceil(STONE_EXTRACTION_BASE_MS * amount / (STONE_EXTRACTION_LOT * workerCount));
+  return Math.ceil((STONE_EXTRACTION_BASE_MS * amount) / (STONE_EXTRACTION_LOT * workerCount));
 }
 
 async function readRangeFootprints(tx: Transaction<Database>, village: ExtractionVillage) {
-  return tx.selectFrom('worldCellOccupancies').innerJoin('buildings', (join) => join
-    .onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId')
-    .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'))
+  return tx
+    .selectFrom('worldCellOccupancies')
+    .innerJoin('buildings', (join) =>
+      join
+        .onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId')
+        .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId'),
+    )
     .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
-    .where('worldCellOccupancies.worldId', '=', village.worldId).where('buildings.villageId', '=', village.villageId)
-    .where('buildings.status', '=', 'completed').where('worldCellOccupancies.pendingExpansionId', 'is', null).execute();
+    .where('worldCellOccupancies.worldId', '=', village.worldId)
+    .where('buildings.villageId', '=', village.villageId)
+    .where('buildings.status', '=', 'completed')
+    .where('worldCellOccupancies.pendingExpansionId', 'is', null)
+    .execute();
 }
 
-async function isOnStoneBoundary(tx: Transaction<Database>, village: ExtractionVillage, cellX: number, cellY: number): Promise<boolean> {
+async function isOnStoneBoundary(
+  tx: Transaction<Database>,
+  village: ExtractionVillage,
+  cellX: number,
+  cellY: number,
+): Promise<boolean> {
   const neighbours = [
-    [cellX - 1, cellY], [cellX + 1, cellY], [cellX, cellY - 1], [cellX, cellY + 1],
+    [cellX - 1, cellY],
+    [cellX + 1, cellY],
+    [cellX, cellY - 1],
+    [cellX, cellY + 1],
   ].map(([x, y]) => ({ cellX: normalizeCell(x!, village.widthCells), cellY: normalizeCell(y!, village.heightCells) }));
-  const occupied = await tx.selectFrom('stoneDeposits').select(['cellX', 'cellY', 'remainingAmount'])
-    .where('worldId', '=', village.worldId).where((eb) => eb.or(neighbours.map((cell) => eb.and([
-      eb('cellX', '=', cell.cellX), eb('cellY', '=', cell.cellY),
-    ])))).execute();
-  return neighbours.some((cell) => !occupied.some((stone) => stone.cellX === cell.cellX && stone.cellY === cell.cellY && Number(stone.remainingAmount) > 0));
+  const occupied = await tx
+    .selectFrom('stoneDeposits')
+    .select(['cellX', 'cellY', 'remainingAmount'])
+    .where('worldId', '=', village.worldId)
+    .where((eb) =>
+      eb.or(neighbours.map((cell) => eb.and([eb('cellX', '=', cell.cellX), eb('cellY', '=', cell.cellY)]))),
+    )
+    .execute();
+  return neighbours.some(
+    (cell) =>
+      !occupied.some(
+        (stone) => stone.cellX === cell.cellX && stone.cellY === cell.cellY && Number(stone.remainingAmount) > 0,
+      ),
+  );
 }
 
 async function readProtectedClearings(tx: Transaction<Database>, village: ExtractionVillage) {
-  return tx.selectFrom('worldClearings').select(['centerCellX', 'centerCellY', 'innerRadius', 'status'])
-    .where('worldId', '=', village.worldId).where('status', '=', 'protected').execute();
+  return tx
+    .selectFrom('worldClearings')
+    .select(['centerCellX', 'centerCellY', 'innerRadius', 'status'])
+    .where('worldId', '=', village.worldId)
+    .where('status', '=', 'protected')
+    .execute();
 }
 
 /** Reuse only within one selection, before any geometry/economic mutation. */
 export async function readDepositAccessContext(tx: Transaction<Database>, village: ExtractionVillage) {
-  const [footprints, clearings] = await Promise.all([readRangeFootprints(tx, village), readProtectedClearings(tx, village)]);
+  const [footprints, clearings] = await Promise.all([
+    readRangeFootprints(tx, village),
+    readProtectedClearings(tx, village),
+  ]);
   return { footprints, clearings };
 }
 type DepositAccessContext = Awaited<ReturnType<typeof readDepositAccessContext>>;
@@ -66,61 +104,153 @@ export function safeAmount(value: string | number): number {
   return amount;
 }
 
-export async function readStoneDeposit(tx: Transaction<Database>, worldId: string, featureId: string): Promise<StoneDeposit> {
-  const row = await tx.selectFrom('resourceDeposits').selectAll().where('worldId', '=', worldId)
-    .where('featureId', '=', featureId).executeTakeFirst();
+export async function readStoneDeposit(
+  tx: Transaction<Database>,
+  worldId: string,
+  featureId: string,
+): Promise<StoneDeposit> {
+  const row = await tx
+    .selectFrom('resourceDeposits')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', featureId)
+    .executeTakeFirst();
   if (!row) throw new HttpError(404, 'DEPOSIT_NOT_FOUND', 'Gisement introuvable.');
-  const remainingAmount = safeAmount(row.remainingAmount), reservedAmount = safeAmount(row.reservedAmount);
-  const wood = row.resourceCode === 'wood' ? await tx.selectFrom('woodlandDeposits').selectAll()
-    .where('worldId', '=', worldId).where('featureId', '=', featureId).executeTakeFirstOrThrow() : null;
-  return { featureId, resourceCode: row.resourceCode, blocksCell: row.blocksCell, cellX: row.cellX, cellY: row.cellY,
-    initialAmount: safeAmount(row.initialAmount), remainingAmount, reservedAmount,
-    availableAmount: remainingAmount - reservedAmount, state: row.cleared || remainingAmount === 0 ? 'depleted' : 'available',
-    ...(wood ? { cleared: wood.cleared, canClear: !wood.cleared && !row.blocksCell,
-      regrowthPerHour: Number(wood.initialAmount) * 3_600_000 / Number(wood.regrowthPeriodMs) } : {}),
-    revision: safeAmount(row.revision), updatedAt: row.updatedAt.toISOString() };
+  const remainingAmount = safeAmount(row.remainingAmount),
+    reservedAmount = safeAmount(row.reservedAmount);
+  const wood =
+    row.resourceCode === 'wood'
+      ? await tx
+          .selectFrom('woodlandDeposits')
+          .selectAll()
+          .where('worldId', '=', worldId)
+          .where('featureId', '=', featureId)
+          .executeTakeFirstOrThrow()
+      : null;
+  return {
+    featureId,
+    resourceCode: row.resourceCode,
+    blocksCell: row.blocksCell,
+    cellX: row.cellX,
+    cellY: row.cellY,
+    initialAmount: safeAmount(row.initialAmount),
+    remainingAmount,
+    reservedAmount,
+    availableAmount: remainingAmount - reservedAmount,
+    state: row.cleared || remainingAmount === 0 ? 'depleted' : 'available',
+    ...(wood
+      ? {
+          cleared: wood.cleared,
+          canClear: !wood.cleared && !row.blocksCell,
+          regrowthPerHour: (Number(wood.initialAmount) * 3_600_000) / Number(wood.regrowthPeriodMs),
+        }
+      : {}),
+    revision: safeAmount(row.revision),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
-export async function readExtraction(tx: Transaction<Database>, worldId: string, villageId: string, id: string): Promise<Extraction> {
-  const row = await tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', worldId)
-    .where('villageId', '=', villageId).where('id', '=', id).executeTakeFirstOrThrow();
+export async function readExtraction(
+  tx: Transaction<Database>,
+  worldId: string,
+  villageId: string,
+  id: string,
+): Promise<Extraction> {
+  const row = await tx
+    .selectFrom('depositExtractions')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('villageId', '=', villageId)
+    .where('id', '=', id)
+    .executeTakeFirstOrThrow();
   const deposit = await readStoneDeposit(tx, worldId, row.featureId);
-  return extractionProjection(row,deposit);
+  return extractionProjection(row, deposit);
 }
 
-function extractionProjection(row:Selectable<Database['depositExtractions']>,deposit:{cellX:number;cellY:number}):Extraction {
-  return { id: row.id, resourceCode: row.resourceCode, featureId: row.featureId, cellX: deposit.cellX, cellY: deposit.cellY,
-    workerCount: row.workerCount, reservedAmount: safeAmount(row.reservedAmount),
-    status: row.status, startedAt: row.startedAt.toISOString(), completesAt: row.completesAt.toISOString(),
+function extractionProjection(
+  row: Selectable<Database['depositExtractions']>,
+  deposit: { cellX: number; cellY: number },
+): Extraction {
+  return {
+    id: row.id,
+    resourceCode: row.resourceCode,
+    featureId: row.featureId,
+    cellX: deposit.cellX,
+    cellY: deposit.cellY,
+    workerCount: row.workerCount,
+    reservedAmount: safeAmount(row.reservedAmount),
+    status: row.status,
+    startedAt: row.startedAt.toISOString(),
+    completesAt: row.completesAt.toISOString(),
     completedAt: row.completedAt?.toISOString() ?? null,
-    transportMs: row.transportMs, path: row.pathCells ?? [] };
+    transportMs: row.transportMs,
+    path: row.pathCells ?? [],
+  };
 }
 /** Batch projection only: no materialization, locks or cached economic data. */
-export async function readExtractions(tx:Transaction<Database>,worldId:string,villageId:string,worksiteIds?:readonly string[],extractionIds?:readonly string[]):Promise<Array<{worksiteId:string|null;extraction:Extraction}>> {
- if(extractionIds&&!extractionIds.length)return [];
- if(extractionIds&&extractionIds.length>1024)throw new RangeError('Too many extraction ids');
- if(worksiteIds&&!worksiteIds.length)return [];
- let query=tx.selectFrom('depositExtractions').innerJoin('resourceDeposits',j=>j.onRef('resourceDeposits.worldId','=','depositExtractions.worldId').onRef('resourceDeposits.featureId','=','depositExtractions.featureId'))
-  .selectAll('depositExtractions').select(['resourceDeposits.cellX','resourceDeposits.cellY'])
-  .where('depositExtractions.worldId','=',worldId).where('depositExtractions.villageId','=',villageId).where('depositExtractions.status','=','in-progress');
- if(worksiteIds)query=query.where('depositExtractions.worksiteId','in',worksiteIds);
- if(extractionIds)query=query.where('depositExtractions.id','in',extractionIds);
- return (await query.execute()).map(row=>({worksiteId:row.worksiteId,extraction:extractionProjection(row,row)}));
+export async function readExtractions(
+  tx: Transaction<Database>,
+  worldId: string,
+  villageId: string,
+  worksiteIds?: readonly string[],
+  extractionIds?: readonly string[],
+): Promise<Array<{ worksiteId: string | null; extraction: Extraction }>> {
+  if (extractionIds && !extractionIds.length) return [];
+  if (extractionIds && extractionIds.length > 1024) throw new RangeError('Too many extraction ids');
+  if (worksiteIds && !worksiteIds.length) return [];
+  let query = tx
+    .selectFrom('depositExtractions')
+    .innerJoin('resourceDeposits', (j) =>
+      j
+        .onRef('resourceDeposits.worldId', '=', 'depositExtractions.worldId')
+        .onRef('resourceDeposits.featureId', '=', 'depositExtractions.featureId'),
+    )
+    .selectAll('depositExtractions')
+    .select(['resourceDeposits.cellX', 'resourceDeposits.cellY'])
+    .where('depositExtractions.worldId', '=', worldId)
+    .where('depositExtractions.villageId', '=', villageId)
+    .where('depositExtractions.status', '=', 'in-progress');
+  if (worksiteIds) query = query.where('depositExtractions.worksiteId', 'in', worksiteIds);
+  if (extractionIds) query = query.where('depositExtractions.id', 'in', extractionIds);
+  return (await query.execute()).map((row) => ({
+    worksiteId: row.worksiteId,
+    extraction: extractionProjection(row, row),
+  }));
 }
 
-async function access(tx: Transaction<Database>, village: ExtractionVillage, deposit: StoneDeposit,
-  context?: DepositAccessContext) {
-  const { footprints, clearings } = context ?? await readDepositAccessContext(tx, village);
-  return { inRange: withinDepositRange(footprints, deposit, village)
-      || await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit),
-    protected: clearings.some(c => toroidalChebyshev(deposit.cellX, deposit.cellY, c.centerCellX, c.centerCellY,
-      village.widthCells, village.heightCells) <= c.innerRadius),
-    onBoundary: deposit.resourceCode === 'wood' || await isOnStoneBoundary(tx, village, deposit.cellX, deposit.cellY) };
+async function access(
+  tx: Transaction<Database>,
+  village: ExtractionVillage,
+  deposit: StoneDeposit,
+  context?: DepositAccessContext,
+) {
+  const { footprints, clearings } = context ?? (await readDepositAccessContext(tx, village));
+  return {
+    inRange:
+      withinDepositRange(footprints, deposit, village) ||
+      (await hasRecognizedDepositAccess(tx, village.worldId, village.villageId, deposit)),
+    protected: clearings.some(
+      (c) =>
+        toroidalChebyshev(
+          deposit.cellX,
+          deposit.cellY,
+          c.centerCellX,
+          c.centerCellY,
+          village.widthCells,
+          village.heightCells,
+        ) <= c.innerRadius,
+    ),
+    onBoundary: deposit.resourceCode === 'wood' || (await isOnStoneBoundary(tx, village, deposit.cellX, deposit.cellY)),
+  };
 }
 
 /** Spatial selection needs access and stock identity, not ten staffing quotes. */
-export async function readDepositAccess(tx: Transaction<Database>, village: ExtractionVillage, featureId: string,
-  context?: DepositAccessContext) {
+export async function readDepositAccess(
+  tx: Transaction<Database>,
+  village: ExtractionVillage,
+  featureId: string,
+  context?: DepositAccessContext,
+) {
   const deposit = await readStoneDeposit(tx, village.worldId, featureId);
   return { deposit, eligibility: await access(tx, village, deposit, context) };
 }
@@ -134,146 +264,337 @@ function refusal(deposit: StoneDeposit, eligibility: Awaited<ReturnType<typeof a
 }
 
 /** Eligibility projection only; departures revalidate under village/target locks. */
-export async function stoneDepositDetails(tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy, featureId: string, transportMs = 0, pathReachable = true): Promise<DepositDetails> {
+export async function stoneDepositDetails(
+  tx: Transaction<Database>,
+  village: ExtractionVillage,
+  economy: VillageEconomy,
+  featureId: string,
+  transportMs = 0,
+  pathReachable = true,
+): Promise<DepositDetails> {
   const { deposit, eligibility } = await readDepositAccess(tx, village, featureId);
   const reason = refusal(deposit, eligibility);
-  const activeWood = deposit.resourceCode === 'wood' && await tx.selectFrom('depositExtractions').select('id')
-    .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).where('featureId', '=', featureId)
-    .where('status', '=', 'in-progress').executeTakeFirst();
+  const activeWood =
+    deposit.resourceCode === 'wood' &&
+    (await tx
+      .selectFrom('depositExtractions')
+      .select('id')
+      .where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId)
+      .where('featureId', '=', featureId)
+      .where('status', '=', 'in-progress')
+      .executeTakeFirst());
   const cohorts = await projectCohorts(tx, village.worldId, village.villageId, economy.through);
   const workerOptions = Array.from({ length: STONE_EXTRACTION_MAX_WORKERS }, (_, i) => {
-    const workerCount = i + 1, durationMs = stoneExtractionDuration(workerCount) + transportMs * 2;
+    const workerCount = i + 1,
+      durationMs = stoneExtractionDuration(workerCount) + transportMs * 2;
     const availableWorkers = eligibleWorkers(cohorts, durationMs).reduce((sum, row) => sum + row.memberCount, 0);
-    const reasonCode = reason ?? (activeWood ? 'WOODLAND_MISSION_IN_PROGRESS' : !pathReachable ? 'DESTINATION_UNREACHABLE' : availableWorkers < workerCount ? 'WORKERS_UNAVAILABLE' : null);
+    const reasonCode =
+      reason ??
+      (activeWood
+        ? 'WOODLAND_MISSION_IN_PROGRESS'
+        : !pathReachable
+          ? 'DESTINATION_UNREACHABLE'
+          : availableWorkers < workerCount
+            ? 'WORKERS_UNAVAILABLE'
+            : null);
     return { workerCount, durationMs, availableWorkers, canStart: reasonCode === null, reasonCode };
   });
-  return { serverTime: economy.through.toISOString(), deposit, transportMs,
-    eligibility: { ...eligibility, lotAmount: Math.min(STONE_EXTRACTION_LOT, deposit.availableAmount), workerOptions } };
+  return {
+    serverTime: economy.through.toISOString(),
+    deposit,
+    transportMs,
+    eligibility: { ...eligibility, lotAmount: Math.min(STONE_EXTRACTION_LOT, deposit.availableAmount), workerOptions },
+  };
 }
 
 export async function startStoneExtraction(
-  tx: Transaction<Database>, village: ExtractionVillage, economy: VillageEconomy,
-  featureId: string, commandId: string, workerCount: number,
-  path: TravelCell[] = [], transportMs = 0,
+  tx: Transaction<Database>,
+  village: ExtractionVillage,
+  economy: VillageEconomy,
+  featureId: string,
+  commandId: string,
+  workerCount: number,
+  path: TravelCell[] = [],
+  transportMs = 0,
   worksite?: { id: string; amount: number; preferredCohortId?: string },
 ): Promise<string> {
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > STONE_EXTRACTION_MAX_WORKERS)
     throw new HttpError(400, 'EXTRACTION_WORKER_COUNT_INVALID', 'Effectif d’extraction invalide.');
-  const repeated = await tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', village.worldId)
-    .where('villageId', '=', village.villageId).where('commandId', '=', commandId).executeTakeFirst();
+  const repeated = await tx
+    .selectFrom('depositExtractions')
+    .selectAll()
+    .where('worldId', '=', village.worldId)
+    .where('villageId', '=', village.villageId)
+    .where('commandId', '=', commandId)
+    .executeTakeFirst();
   if (repeated) {
     if (repeated.featureId !== featureId.toLowerCase() || repeated.workerCount !== workerCount)
       throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée différemment.');
     return repeated.id;
   }
   const deposit = await readStoneDeposit(tx, village.worldId, featureId);
-  if (deposit.resourceCode === 'wood' && await tx.selectFrom('depositExtractions').select('id')
-    .where('worldId', '=', village.worldId).where('villageId', '=', village.villageId).where('featureId', '=', featureId)
-    .where('status', '=', 'in-progress').executeTakeFirst())
-    throw new HttpError(409, 'WOODLAND_MISSION_IN_PROGRESS', 'Une coupe est déjà en cours sur ce bosquet pour votre village.');
+  if (
+    deposit.resourceCode === 'wood' &&
+    (await tx
+      .selectFrom('depositExtractions')
+      .select('id')
+      .where('worldId', '=', village.worldId)
+      .where('villageId', '=', village.villageId)
+      .where('featureId', '=', featureId)
+      .where('status', '=', 'in-progress')
+      .executeTakeFirst())
+  )
+    throw new HttpError(
+      409,
+      'WOODLAND_MISSION_IN_PROGRESS',
+      'Une coupe est déjà en cours sur ce bosquet pour votre village.',
+    );
   const reason = refusal(deposit, await access(tx, village, deposit));
   if (reason) throw new HttpError(409, reason, 'Ce gisement ne peut pas être exploité actuellement.');
   const available = deposit.availableAmount;
   const amount = worksite?.amount ?? Math.min(STONE_EXTRACTION_LOT, available);
-  if (amount < 1 || amount > STONE_EXTRACTION_LOT || amount > available) throw new HttpError(409, 'DEPOSIT_FULLY_COMMITTED', 'Lot indisponible.');
+  if (amount < 1 || amount > STONE_EXTRACTION_LOT || amount > available)
+    throw new HttpError(409, 'DEPOSIT_FULLY_COMMITTED', 'Lot indisponible.');
   const durationMs = stoneExtractionDuration(workerCount, worksite ? amount : STONE_EXTRACTION_LOT) + transportMs * 2;
   const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
-  const candidates = eligibleWorkers(cohorts, durationMs).filter(c => (!worksite?.preferredCohortId || c.id === worksite.preferredCohortId)
-    && (!worksite||c.avoidWorksiteId!==worksite.id));
+  const candidates = eligibleWorkers(cohorts, durationMs).filter(
+    (c) =>
+      (!worksite?.preferredCohortId || c.id === worksite.preferredCohortId) &&
+      (!worksite || c.avoidWorksiteId !== worksite.id),
+  );
   if (candidates.reduce((total, cohort) => total + cohort.memberCount, 0) < workerCount)
     throw new HttpError(409, 'WORKERS_UNAVAILABLE', 'Habitants disponibles et reposés insuffisants.');
-  const extraction = await tx.insertInto('depositExtractions').values({ worldId: village.worldId, villageId: village.villageId,
-    featureId, resourceCode: deposit.resourceCode, commandId, worksiteId: worksite?.id ?? null, status: 'in-progress', startedAt: economy.through,
-    completesAt: new Date(economy.through.getTime() + durationMs), completedAt: null,
-    workerCount, reservedAmount: amount,
-    transportMs, pathCells: sql`${JSON.stringify(path)}::jsonb` }).returning('id').executeTakeFirstOrThrow();
+  const extraction = await tx
+    .insertInto('depositExtractions')
+    .values({
+      worldId: village.worldId,
+      villageId: village.villageId,
+      featureId,
+      resourceCode: deposit.resourceCode,
+      commandId,
+      worksiteId: worksite?.id ?? null,
+      status: 'in-progress',
+      startedAt: economy.through,
+      completesAt: new Date(economy.through.getTime() + durationMs),
+      completedAt: null,
+      workerCount,
+      reservedAmount: amount,
+      transportMs,
+      pathCells: sql`${JSON.stringify(path)}::jsonb`,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
   await assignWorkers(tx, candidates, workerCount, { harvestId: null, extractionId: extraction.id });
-  if(worksite)await clearWorksiteRotation(tx,village.worldId,village.villageId,worksite.id);
-  const reserved = await tx.updateTable(deposit.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits').set({ reservedAmount: sql`reserved_amount + ${amount}::bigint`,
-    revision: sql`revision + 1`, updatedAt: sql`statement_timestamp()` }).where('worldId', '=', village.worldId)
-    .where('featureId', '=', featureId).where(sql<boolean>`remaining_amount - reserved_amount >= ${amount}::bigint`).executeTakeFirst();
+  if (worksite) await clearWorksiteRotation(tx, village.worldId, village.villageId, worksite.id);
+  const reserved = await tx
+    .updateTable(deposit.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits')
+    .set({
+      reservedAmount: sql`reserved_amount + ${amount}::bigint`,
+      revision: sql`revision + 1`,
+      updatedAt: sql`statement_timestamp()`,
+    })
+    .where('worldId', '=', village.worldId)
+    .where('featureId', '=', featureId)
+    .where(sql<boolean>`remaining_amount - reserved_amount >= ${amount}::bigint`)
+    .executeTakeFirst();
   if (Number(reserved.numUpdatedRows) !== 1) throw new Error('Stone deposit reservation invariant failed');
   const dueAt = new Date(economy.through.getTime() + durationMs);
-  await tx.insertInto('scheduledTasks').values({ worldId: village.worldId, taskType: COMPLETE_STONE_EXTRACTION_TASK,
-    subjectId: extraction.id, payload: {}, dueAt, availableAt: dueAt, lastError: null, completedAt: null }).execute();
+  await tx
+    .insertInto('scheduledTasks')
+    .values({
+      worldId: village.worldId,
+      taskType: COMPLETE_STONE_EXTRACTION_TASK,
+      subjectId: extraction.id,
+      payload: {},
+      dueAt,
+      availableAt: dueAt,
+      lastError: null,
+      completedAt: null,
+    })
+    .execute();
   return extraction.id;
 }
 
-export async function completeStoneExtractionAt(tx: Transaction<Database>, worldId: string, villageId: string, extractionId: string, through: Date): Promise<void> {
-  const extraction = await tx.selectFrom('depositExtractions').selectAll().where('worldId', '=', worldId)
-    .where('villageId', '=', villageId).where('id', '=', extractionId).forUpdate().executeTakeFirst();
-  if (!extraction || extraction.status !== 'in-progress' || extraction.completesAt.getTime() !== through.getTime()) return;
+export async function completeStoneExtractionAt(
+  tx: Transaction<Database>,
+  worldId: string,
+  villageId: string,
+  extractionId: string,
+  through: Date,
+): Promise<void> {
+  const extraction = await tx
+    .selectFrom('depositExtractions')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('villageId', '=', villageId)
+    .where('id', '=', extractionId)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!extraction || extraction.status !== 'in-progress' || extraction.completesAt.getTime() !== through.getTime())
+    return;
   if (extraction.resourceCode === 'wood') await materializeWoodland(tx, worldId, extraction.featureId, through);
-  const deposit = await tx.selectFrom(extraction.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits').selectAll().where('worldId', '=', worldId)
-    .where('featureId', '=', extraction.featureId).forUpdate().executeTakeFirstOrThrow();
+  const deposit = await tx
+    .selectFrom(extraction.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', extraction.featureId)
+    .forUpdate()
+    .executeTakeFirstOrThrow();
   const cohorts = await materializeCohorts(tx, worldId, villageId, through);
   const workers = cohorts.filter((cohort) => cohort.extractionId === extraction.id);
   if (workers.reduce((total, cohort) => total + cohort.memberCount, 0) !== extraction.workerCount)
     throw new Error('Stone extraction workforce invariant failed');
   const amount = Number(extraction.reservedAmount);
-  if (extraction.resourceCode === 'stone' && (Number(deposit.reservedAmount) < amount || Number(deposit.remainingAmount) < amount))
+  if (
+    extraction.resourceCode === 'stone' &&
+    (Number(deposit.reservedAmount) < amount || Number(deposit.remainingAmount) < amount)
+  )
     throw new Error('Stone extraction material invariant failed');
-  const debited = extraction.resourceCode === 'wood' ? null : await tx.updateTable('stoneDeposits').set({ remainingAmount: sql`remaining_amount - ${amount}::bigint`,
-    reservedAmount: sql`reserved_amount - ${amount}::bigint`, revision: sql`revision + 1`, updatedAt: sql`statement_timestamp()` })
-    .where('worldId', '=', worldId).where('featureId', '=', extraction.featureId)
-    .where('remainingAmount', '>=', String(amount)).where('reservedAmount', '>=', String(amount)).executeTakeFirstOrThrow();
+  const debited =
+    extraction.resourceCode === 'wood'
+      ? null
+      : await tx
+          .updateTable('stoneDeposits')
+          .set({
+            remainingAmount: sql`remaining_amount - ${amount}::bigint`,
+            reservedAmount: sql`reserved_amount - ${amount}::bigint`,
+            revision: sql`revision + 1`,
+            updatedAt: sql`statement_timestamp()`,
+          })
+          .where('worldId', '=', worldId)
+          .where('featureId', '=', extraction.featureId)
+          .where('remainingAmount', '>=', String(amount))
+          .where('reservedAmount', '>=', String(amount))
+          .executeTakeFirstOrThrow();
   if (debited && Number(debited.numUpdatedRows) !== 1) throw new Error('Stone extraction material invariant failed');
-  const credited = await tx.updateTable('villageResources').set({ amount: sql`amount + ${amount}::bigint` })
-    .where('worldId', '=', worldId).where('villageId', '=', villageId).where('resourceCode', '=', extraction.resourceCode)
-    .where('amount', '<=', String(Number.MAX_SAFE_INTEGER - amount)).executeTakeFirstOrThrow();
+  const credited = await tx
+    .updateTable('villageResources')
+    .set({ amount: sql`amount + ${amount}::bigint` })
+    .where('worldId', '=', worldId)
+    .where('villageId', '=', villageId)
+    .where('resourceCode', '=', extraction.resourceCode)
+    .where('amount', '<=', String(Number.MAX_SAFE_INTEGER - amount))
+    .executeTakeFirstOrThrow();
   if (Number(credited.numUpdatedRows) !== 1) throw new Error('Stone extraction credit invariant failed');
   await releaseWorkers(tx, workers, extraction.workerCount, through);
   if (extraction.worksiteId) {
-    const site = await tx.selectFrom('extractionWorksites').select(['status', 'workerCap'])
-      .where('id', '=', extraction.worksiteId).executeTakeFirstOrThrow();
-    const target = await tx.selectFrom('extractionWorksiteTargets').select(['status', 'thresholdReachedAt'])
-      .where('worksiteId', '=', extraction.worksiteId).where('featureId', '=', extraction.featureId)
+    const site = await tx
+      .selectFrom('extractionWorksites')
+      .select(['status', 'workerCap'])
+      .where('id', '=', extraction.worksiteId)
+      .executeTakeFirstOrThrow();
+    const target = await tx
+      .selectFrom('extractionWorksiteTargets')
+      .select(['status', 'thresholdReachedAt'])
+      .where('worksiteId', '=', extraction.worksiteId)
+      .where('featureId', '=', extraction.featureId)
       .executeTakeFirstOrThrow();
     const afterDeposit = await readStoneDeposit(tx, worldId, extraction.featureId);
     const threshold = extraction.resourceCode === 'wood' ? afterDeposit.initialAmount / 10 : 0;
-    const finished = target.thresholdReachedAt !== null || afterDeposit.remainingAmount <= threshold || afterDeposit.cleared;
+    const finished =
+      target.thresholdReachedAt !== null || afterDeposit.remainingAmount <= threshold || afterDeposit.cleared;
     if (target.status === 'pending' && finished) {
-      await tx.updateTable('extractionWorksiteTargets').set({ status: 'completed', completedAt: through,
-        reason: 'goal-reached' }).where('worksiteId', '=', extraction.worksiteId)
-        .where('featureId', '=', extraction.featureId).execute();
+      await tx
+        .updateTable('extractionWorksiteTargets')
+        .set({ status: 'completed', completedAt: through, reason: 'goal-reached' })
+        .where('worksiteId', '=', extraction.worksiteId)
+        .where('featureId', '=', extraction.featureId)
+        .execute();
       if (site.status === 'paused') {
-        const remainingTarget = await tx.selectFrom('extractionWorksiteTargets').select('featureId')
-          .where('worksiteId', '=', extraction.worksiteId).where('status', '=', 'pending').executeTakeFirst();
-        if (!remainingTarget) await tx.updateTable('extractionWorksites').set({ status: 'completed', updatedAt: through.toISOString() })
-          .where('id', '=', extraction.worksiteId).execute();
+        const remainingTarget = await tx
+          .selectFrom('extractionWorksiteTargets')
+          .select('featureId')
+          .where('worksiteId', '=', extraction.worksiteId)
+          .where('status', '=', 'pending')
+          .executeTakeFirst();
+        if (!remainingTarget)
+          await tx
+            .updateTable('extractionWorksites')
+            .set({ status: 'completed', updatedAt: through.toISOString() })
+            .where('id', '=', extraction.worksiteId)
+            .execute();
       }
     }
     if (site.status === 'running' && !finished) {
       const nextAmount = Math.min(STONE_EXTRACTION_LOT, Math.max(1, afterDeposit.availableAmount));
-      const nextDuration = stoneExtractionDuration(Math.min(site.workerCap, extraction.workerCount), nextAmount)
-        + 2 * extraction.transportMs;
+      const nextDuration =
+        stoneExtractionDuration(Math.min(site.workerCap, extraction.workerCount), nextAmount) +
+        2 * extraction.transportMs;
       for (const worker of workers) {
-        if (worker.pendingRelease!==null||worker.activity === 'resting' || canWorkFor({ energy: worker.energy, progress: worker.energyProgress,
-          activity: 'idle', restingSince: null, foodUsedSinceRest: worker.foodUsedSinceRest,
-          updatedAt: through }, nextDuration)) continue;
-        const rest = beginRest({ energy: worker.energy, progress: worker.energyProgress,
-          activity: 'idle', restingSince: null, foodUsedSinceRest: worker.foodUsedSinceRest,
-          updatedAt: through });
-        if (rest) await tx.updateTable('populationCohorts').set({ activity: rest.activity, restingSince: rest.restingSince })
-          .where('worldId', '=', worldId).where('id', '=', worker.id).execute();
+        if (
+          worker.pendingRelease !== null ||
+          worker.activity === 'resting' ||
+          canWorkFor(
+            {
+              energy: worker.energy,
+              progress: worker.energyProgress,
+              activity: 'idle',
+              restingSince: null,
+              foodUsedSinceRest: worker.foodUsedSinceRest,
+              updatedAt: through,
+            },
+            nextDuration,
+          )
+        )
+          continue;
+        const rest = beginRest({
+          energy: worker.energy,
+          progress: worker.energyProgress,
+          activity: 'idle',
+          restingSince: null,
+          foodUsedSinceRest: worker.foodUsedSinceRest,
+          updatedAt: through,
+        });
+        if (rest)
+          await tx
+            .updateTable('populationCohorts')
+            .set({ activity: rest.activity, restingSince: rest.restingSince })
+            .where('worldId', '=', worldId)
+            .where('id', '=', worker.id)
+            .execute();
       }
     }
   }
-  await tx.updateTable('depositExtractions').set({ status: 'completed', completedAt: through }).where('id', '=', extraction.id).executeTakeFirstOrThrow();
+  await tx
+    .updateTable('depositExtractions')
+    .set({ status: 'completed', completedAt: through })
+    .where('id', '=', extraction.id)
+    .executeTakeFirstOrThrow();
   if (extraction.worksiteId) {
-    await tx.updateTable('extractionWorksites').set({ deliveredAmount: sql`delivered_amount + ${amount}::bigint`, updatedAt: through.toISOString() })
-      .where('worldId', '=', worldId).where('villageId', '=', villageId).where('id', '=', extraction.worksiteId).executeTakeFirstOrThrow();
+    await tx
+      .updateTable('extractionWorksites')
+      .set({ deliveredAmount: sql`delivered_amount + ${amount}::bigint`, updatedAt: through.toISOString() })
+      .where('worldId', '=', worldId)
+      .where('villageId', '=', villageId)
+      .where('id', '=', extraction.worksiteId)
+      .executeTakeFirstOrThrow();
   }
   if (extraction.resourceCode === 'wood') {
-    await tx.insertInto('villageAccomplishments').values({ worldId, villageId, code: 'first-woodcut', completedAt: through })
-      .onConflict(oc => oc.columns(['worldId', 'villageId', 'code']).doNothing()).execute();
+    await tx
+      .insertInto('villageAccomplishments')
+      .values({ worldId, villageId, code: 'first-woodcut', completedAt: through })
+      .onConflict((oc) => oc.columns(['worldId', 'villageId', 'code']).doNothing())
+      .execute();
     return;
   }
-  const after = await tx.selectFrom('stoneDeposits').select('remainingAmount').where('worldId', '=', worldId)
-    .where('featureId', '=', extraction.featureId).executeTakeFirstOrThrow();
+  const after = await tx
+    .selectFrom('stoneDeposits')
+    .select('remainingAmount')
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', extraction.featureId)
+    .executeTakeFirstOrThrow();
   if (Number(after.remainingAmount) === 0) {
-    await tx.updateTable('worldFeatures').set({ state: 'depleted', updatedAt: sql`transaction_timestamp()` })
-      .where('worldId', '=', worldId).where('id', '=', extraction.featureId).execute();
-    await tx.deleteFrom('worldCellOccupancies').where('worldId', '=', worldId).where('featureId', '=', extraction.featureId).execute();
+    await tx
+      .updateTable('worldFeatures')
+      .set({ state: 'depleted', updatedAt: sql`transaction_timestamp()` })
+      .where('worldId', '=', worldId)
+      .where('id', '=', extraction.featureId)
+      .execute();
+    await tx
+      .deleteFrom('worldCellOccupancies')
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', extraction.featureId)
+      .execute();
   }
 }

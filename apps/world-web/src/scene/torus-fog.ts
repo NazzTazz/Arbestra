@@ -126,50 +126,110 @@ export class TorusFog {
     `;
     const bytes = new Uint8Array(32 ** 3);
     let seed = 0x464f4721;
-    for (let i = 0; i < bytes.length; i++) { seed = (Math.imul(seed,1664525)+1013904223) >>> 0; bytes[i] = seed >>> 24; }
-    const noise = new RawTexture3D(bytes,32,32,32,Constants.TEXTUREFORMAT_R,scene,false,false,Texture.BILINEAR_SAMPLINGMODE);
-    noise.wrapU=noise.wrapV=noise.wrapR=Texture.WRAP_ADDRESSMODE;
-    const depth = scene.enableDepthRenderer(camera,false,true,Texture.NEAREST_SAMPLINGMODE,true);
-    const original = new PassPostProcess('fog-original',1,camera);
-    const volume = new PostProcess('torus-fog','arbestraTorusFog',
-      ['inverseVP','eye','forward','sun','clock','wind','ready'],['sceneDepth','weatherField','noiseVolume'],
-      .5,camera,Texture.BILINEAR_SAMPLINGMODE,scene.getEngine(),false,null,Constants.TEXTURETYPE_HALF_FLOAT);
+    for (let i = 0; i < bytes.length; i++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      bytes[i] = seed >>> 24;
+    }
+    const noise = new RawTexture3D(
+      bytes,
+      32,
+      32,
+      32,
+      Constants.TEXTUREFORMAT_R,
+      scene,
+      false,
+      false,
+      Texture.BILINEAR_SAMPLINGMODE,
+    );
+    noise.wrapU = noise.wrapV = noise.wrapR = Texture.WRAP_ADDRESSMODE;
+    const depth = scene.enableDepthRenderer(camera, false, true, Texture.NEAREST_SAMPLINGMODE, true);
+    const original = new PassPostProcess('fog-original', 1, camera);
+    const volume = new PostProcess(
+      'torus-fog',
+      'arbestraTorusFog',
+      ['inverseVP', 'eye', 'forward', 'sun', 'clock', 'wind', 'ready'],
+      ['sceneDepth', 'weatherField', 'noiseVolume'],
+      0.5,
+      camera,
+      Texture.BILINEAR_SAMPLINGMODE,
+      scene.getEngine(),
+      false,
+      null,
+      Constants.TEXTURETYPE_HALF_FLOAT,
+    );
     const inverse = Matrix.Identity();
-    volume.onApply = effect => {
+    volume.onApply = (effect) => {
       camera.getTransformationMatrix().invertToRef(inverse);
-      effect.setMatrix('inverseVP',inverse); effect.setVector3('eye',camera.globalPosition);
-      effect.setVector3('forward',camera.getForwardRay().direction); effect.setVector3('sun',this.#sun);
-      effect.setFloat2('clock',this.#weather?.seconds ?? 0,this.#phase);
-      const seconds=this.#weather?.seconds ?? 0;
-      if(this.#weather?.circulation)effect.setFloat3('wind',0,0,0);
-      else effect.setFloat3('wind',((seconds*10/WEATHER_DRIFT_SECONDS)%1)*TAU,
-        (seconds/WEATHER_DRIFT_SECONDS)%1,(seconds/(WEATHER_DRIFT_SECONDS*2))%1);
-      effect.setFloat('ready',this.#weather ? 1 : 0);
-      effect.setTexture('sceneDepth',depth.getDepthMap()); effect.setTexture('noiseVolume',noise);
-      if (this.#weather) effect.setTexture('weatherField',this.#weather.texture);
+      effect.setMatrix('inverseVP', inverse);
+      effect.setVector3('eye', camera.globalPosition);
+      effect.setVector3('forward', camera.getForwardRay().direction);
+      effect.setVector3('sun', this.#sun);
+      effect.setFloat2('clock', this.#weather?.seconds ?? 0, this.#phase);
+      const seconds = this.#weather?.seconds ?? 0;
+      if (this.#weather?.circulation) effect.setFloat3('wind', 0, 0, 0);
+      else
+        effect.setFloat3(
+          'wind',
+          (((seconds * 10) / WEATHER_DRIFT_SECONDS) % 1) * TAU,
+          (seconds / WEATHER_DRIFT_SECONDS) % 1,
+          (seconds / (WEATHER_DRIFT_SECONDS * 2)) % 1,
+        );
+      effect.setFloat('ready', this.#weather ? 1 : 0);
+      effect.setTexture('sceneDepth', depth.getDepthMap());
+      effect.setTexture('noiseVolume', noise);
+      if (this.#weather) effect.setTexture('weatherField', this.#weather.texture);
     };
     // This input target receives the preceding volume pass; final composite draws to the full viewport.
-    const composite = new PostProcess('fog-composite','arbestraFogComposite',[],['originalScene'],.5,camera,
-      Texture.BILINEAR_SAMPLINGMODE,scene.getEngine(),false,null,Constants.TEXTURETYPE_HALF_FLOAT);
-    composite.onApply = effect => effect.setTextureFromPostProcess('originalScene',original);
-    this.#disposeResources=()=>{composite.dispose(camera);volume.dispose(camera);original.dispose(camera);noise.dispose();scene.disableDepthRenderer(camera);};
+    const composite = new PostProcess(
+      'fog-composite',
+      'arbestraFogComposite',
+      [],
+      ['originalScene'],
+      0.5,
+      camera,
+      Texture.BILINEAR_SAMPLINGMODE,
+      scene.getEngine(),
+      false,
+      null,
+      Constants.TEXTURETYPE_HALF_FLOAT,
+    );
+    composite.onApply = (effect) => effect.setTextureFromPostProcess('originalScene', original);
+    this.#disposeResources = () => {
+      composite.dispose(camera);
+      volume.dispose(camera);
+      original.dispose(camera);
+      noise.dispose();
+      scene.disableDepthRenderer(camera);
+    };
   }
-  dispose(): void { this.#disposeResources?.(); this.#disposeResources=null; this.#weather=null; }
+  dispose(): void {
+    this.#disposeResources?.();
+    this.#disposeResources = null;
+    this.#weather = null;
+  }
   update(phase: number, sun: Vector3, weather: WeatherMap | null): void {
-    this.#weather=weather; this.#phase=cyclePhases(phase).torus; this.#sun.copyFrom(sun);
+    this.#weather = weather;
+    this.#phase = cyclePhases(phase).torus;
+    this.#sun.copyFrom(sun);
   }
   /** Conservative observation guard; never discover the eyes through a dense bank. */
   obscures(start: Vector3, end: Vector3): boolean {
     if (!this.#weather) return false;
-    const c=Math.cos(this.#phase), s=Math.sin(this.#phase);
-    for (let i=0;i<=96;i++) {
-      const p=Vector3.Lerp(start,end,i/96), x=c*p.x+s*p.z, z=-s*p.x+c*p.z;
-      const tube=Math.hypot(Math.hypot(x,z)-2.4,p.y);
-      if (tube<1.015 || tube>1.52) continue;
-      const u=Math.atan2(z,x), v=Math.atan2(p.y,Math.hypot(x,z)-2.4);
-      const angle=((this.#weather.seconds*10/WEATHER_DRIFT_SECONDS)%1)*TAU, sourceU=u-angle;
-      const sourceV=v-2*angle+.35*(Math.sin(3*sourceU)-Math.sin(3*u));
-      if (weatherAt(sourceU/TAU,(sourceV-Math.PI)/TAU,COSMOLOGY.epochMs,this.#weather.seed).cloud>.35) return true;
+    const c = Math.cos(this.#phase),
+      s = Math.sin(this.#phase);
+    for (let i = 0; i <= 96; i++) {
+      const p = Vector3.Lerp(start, end, i / 96),
+        x = c * p.x + s * p.z,
+        z = -s * p.x + c * p.z;
+      const tube = Math.hypot(Math.hypot(x, z) - 2.4, p.y);
+      if (tube < 1.015 || tube > 1.52) continue;
+      const u = Math.atan2(z, x),
+        v = Math.atan2(p.y, Math.hypot(x, z) - 2.4);
+      const angle = (((this.#weather.seconds * 10) / WEATHER_DRIFT_SECONDS) % 1) * TAU,
+        sourceU = u - angle;
+      const sourceV = v - 2 * angle + 0.35 * (Math.sin(3 * sourceU) - Math.sin(3 * u));
+      if (weatherAt(sourceU / TAU, (sourceV - Math.PI) / TAU, COSMOLOGY.epochMs, this.#weather.seed).cloud > 0.35)
+        return true;
     }
     return false;
   }

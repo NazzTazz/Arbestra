@@ -19,12 +19,7 @@ export const WORLD_GENERATION_V2 = {
   features: {
     woodlandDensity: 0.018,
     stoneOutcropDensity: 0.003,
-    clearingDeposits: [
-      'woodland',
-      'woodland',
-      'stone_outcrop',
-      'woodland',
-    ],
+    clearingDeposits: ['woodland', 'woodland', 'stone_outcrop', 'woodland'],
   },
 } as const;
 

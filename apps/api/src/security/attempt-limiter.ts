@@ -12,7 +12,9 @@ export class AttemptLimiter {
     private readonly now: () => number = Date.now,
   ) {}
 
-  get size(): number { return this.entries.size; }
+  get size(): number {
+    return this.entries.size;
+  }
 
   consume(buckets: readonly { key: string; maximum: number }[]): void {
     const now = this.now();
@@ -21,12 +23,15 @@ export class AttemptLimiter {
       if (entry.until > now) break;
       this.entries.delete(key);
     }
-    const keys = buckets.map(bucket => ({
-      key: createHash('sha256').update(bucket.key).digest('hex'), maximum: bucket.maximum,
+    const keys = buckets.map((bucket) => ({
+      key: createHash('sha256').update(bucket.key).digest('hex'),
+      maximum: bucket.maximum,
     }));
-    const missing = new Set(keys.filter(bucket => !this.entries.has(bucket.key)).map(bucket => bucket.key));
-    if (this.entries.size + missing.size > this.maxEntries || keys.some(bucket =>
-      (this.entries.get(bucket.key)?.count ?? 0) >= bucket.maximum)) {
+    const missing = new Set(keys.filter((bucket) => !this.entries.has(bucket.key)).map((bucket) => bucket.key));
+    if (
+      this.entries.size + missing.size > this.maxEntries ||
+      keys.some((bucket) => (this.entries.get(bucket.key)?.count ?? 0) >= bucket.maximum)
+    ) {
       throw new HttpError(429, 'TOO_MANY_ATTEMPTS', 'Trop de tentatives. Réessayez dans quelques minutes.');
     }
     for (const { key } of keys) {

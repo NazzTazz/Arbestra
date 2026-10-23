@@ -16,8 +16,7 @@ export interface ClearingFeaturePlan {
 const { clearing: clearingConfig, features } = WORLD_GENERATION_V2;
 
 function hash(seed: number, x: number, y: number, salt: number): number {
-  let value =
-    (seed ^ Math.imul(x, 0x45d9f3b) ^ Math.imul(y, 0x27d4eb2d) ^ salt) >>> 0;
+  let value = (seed ^ Math.imul(x, 0x45d9f3b) ^ Math.imul(y, 0x27d4eb2d) ^ salt) >>> 0;
   value = Math.imul(value ^ (value >>> 16), 0x7feb352d) >>> 0;
   value = Math.imul(value ^ (value >>> 15), 0x846ca68b) >>> 0;
   return (value ^ (value >>> 16)) >>> 0;
@@ -39,22 +38,10 @@ export function planClearingFeatures(
   const reservedCells = new Set(occupiedCells);
   for (const clearing of clearings) {
     const candidates: Array<{ cellX: number; cellY: number; order: number }> = [];
-    for (
-      let dy = -clearingConfig.depositOuterRadius;
-      dy <= clearingConfig.depositOuterRadius;
-      dy += 1
-    ) {
-      for (
-        let dx = -clearingConfig.depositOuterRadius;
-        dx <= clearingConfig.depositOuterRadius;
-        dx += 1
-      ) {
+    for (let dy = -clearingConfig.depositOuterRadius; dy <= clearingConfig.depositOuterRadius; dy += 1) {
+      for (let dx = -clearingConfig.depositOuterRadius; dx <= clearingConfig.depositOuterRadius; dx += 1) {
         const distance = Math.max(Math.abs(dx), Math.abs(dy));
-        if (
-          distance <= clearingConfig.spawnCoreRadius ||
-          distance > clearingConfig.depositOuterRadius
-        )
-          continue;
+        if (distance <= clearingConfig.spawnCoreRadius || distance > clearingConfig.depositOuterRadius) continue;
         const cellX = normalizeCell(clearing.centerCellX + dx, width);
         const cellY = normalizeCell(clearing.centerCellY + dy, height);
         candidates.push({
@@ -71,15 +58,7 @@ export function planClearingFeatures(
       const candidate = candidates.find(({ cellX, cellY }) => {
         if (reservedCells.has(worldCellKey(cellX, cellY))) return false;
         return selected.every(
-          (feature) =>
-            toroidalChebyshev(
-              cellX,
-              cellY,
-              feature.cellX,
-              feature.cellY,
-              width,
-              height,
-            ) >= 2,
+          (feature) => toroidalChebyshev(cellX, cellY, feature.cellX, feature.cellY, width, height) >= 2,
         );
       });
       if (!candidate) break;

@@ -36,7 +36,12 @@ export const DEV_TIMING_PHASES = {
   sql: 'Appels du driver SQL',
 } as const;
 export type DevTimingPhase = keyof typeof DEV_TIMING_PHASES;
-export interface DevTimingMetric { phase: DevTimingPhase; durationMs: number; selfMs: number; count: number }
+export interface DevTimingMetric {
+  phase: DevTimingPhase;
+  durationMs: number;
+  selfMs: number;
+  count: number;
+}
 
 export function parseDevServerTiming(header: string | null): DevTimingMetric[] {
   if (!header || header.length > 12_000) return [];
@@ -44,13 +49,23 @@ export function parseDevServerTiming(header: string | null): DevTimingMetric[] {
   for (const entry of header.split(',')) {
     const match = /^\s*arb_([a-z0-9_]+);dur=([\d.]+);desc="(\d+)"\s*$/.exec(entry);
     if (!match) continue;
-    const duration = Number(match[2]), count = Number(match[3]);
-    if (!Number.isFinite(duration) || duration < 0 || duration > 86_400_000 || !Number.isSafeInteger(count) || count < 1) continue;
+    const duration = Number(match[2]),
+      count = Number(match[3]);
+    if (
+      !Number.isFinite(duration) ||
+      duration < 0 ||
+      duration > 86_400_000 ||
+      !Number.isSafeInteger(count) ||
+      count < 1
+    )
+      continue;
     values.set(match[1]!, { duration, count });
   }
-  return (Object.keys(DEV_TIMING_PHASES) as DevTimingPhase[]).flatMap(phase => {
-    const inclusive = values.get(phase), self = values.get(phase + '_self');
-    return inclusive && self && self.count === inclusive.count && self.duration <= inclusive.duration + .002
-      ? [{ phase, durationMs: inclusive.duration, selfMs: self.duration, count: inclusive.count }] : [];
+  return (Object.keys(DEV_TIMING_PHASES) as DevTimingPhase[]).flatMap((phase) => {
+    const inclusive = values.get(phase),
+      self = values.get(phase + '_self');
+    return inclusive && self && self.count === inclusive.count && self.duration <= inclusive.duration + 0.002
+      ? [{ phase, durationMs: inclusive.duration, selfMs: self.duration, count: inclusive.count }]
+      : [];
   });
 }
