@@ -1,6 +1,8 @@
 # Reprise Claude — 23 octobre 2026, pose V2 affichée dès la confirmation
 
-060 déployé en staging et alpha (`*-2026.10.23.4`, contrôles publics OK).
+060 déployé en staging et alpha (`*-2026.10.23.4`) ; ce correctif aussi (`8415fe0`, `*-2026.10.23.5`), contrôles publics OK.
+
+**Ouvert (Tristan, après déploiement) : la pose d'un bâtiment neuf reste lente à son ressenti — remis à plus tard, documenté en priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes)** (mesures, écart navigateur/serveur inexpliqué, pistes).
 
 Retour de Tristan sur staging : l'amélioration d'une maison est quasi immédiate, la pose d'un bâtiment neuf « encore un peu longue ». Mesure locale (base de test) : pose V2 53–66 ms côté serveur, mais le client attendait la relecture de présentation (283–348 ms), dont 200–237 ms de recalcul du réseau de trajets (3 ms en cache) ; une amélioration ne change pas d'emprise, donc pas de relecture. Correctif client (`presentationWithPlacement`, `processing-v2.ts`) : la pose confirmée s'affiche aussitôt sur les cases posées, mêmes rôles/état que le serveur (`anchor`/`extension`, `reserved`) ; jardins exclus (fusion possible) ; la présentation recalculée prend le relais. Tests : unitaire 3/3 ; e2e `village-sync-v2-placement.spec.ts` (relecture retenue 20 s) vert avec le correctif, rouge sans. Le recalcul des trajets (~200 ms serveur par pose) reste à optimiser. Le Chromium headless local est trop lent (rendu logiciel) pour mesurer le ressenti ; à constater sur staging.
 
