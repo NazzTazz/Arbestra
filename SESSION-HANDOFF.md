@@ -26,6 +26,7 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 - Tests de concurrence `economy` (« serializes two workers… », « starts an upgrade while another worker holds… ») et préparation `infrastructure` : expirations de barrière (5 s) ou de hook (10 s) de plus en plus fréquentes, **à l'identique sur le code d'avant formatage** ; instabilité d'environnement à traiter (barrières trop serrées pour ce portable).
 - Purge : deux passes concurrentes peuvent laisser un vecteur de dépendances orphelin (sans incidence de lecture).
 - Aucune recette métier distante faite par l'agent (installation RC1, pose, atelier sur staging/alpha).
+- [Revue d'architecture du 23 octobre](docs/REVUE-ARCHITECTURE-2026-10-23.md) (étude, rien d'implémenté) : refonte proposée du pathfinding et de l'économie, contraintes à respecter pendant la migration V2, points à trancher par Tristan.
 
 ## Suite proposée
 
