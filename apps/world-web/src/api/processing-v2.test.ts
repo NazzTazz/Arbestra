@@ -5,7 +5,12 @@ import {
   type ProcessingOrder,
   type SyncV2State,
 } from '@arbestra/contracts';
-import { presentationWithPlacement, processingCommandBuilding, processingOrdersV2 } from './processing-v2';
+import {
+  presentationReadNeeded,
+  presentationWithPlacement,
+  processingCommandBuilding,
+  processingOrdersV2,
+} from './processing-v2';
 import type { ResolvedVillagePresentation } from '@arbestra/contracts';
 
 const worldId = '11111111-1111-4111-8111-111111111111',
@@ -145,4 +150,27 @@ it('shows a confirmed placement with the server roles and leaves gardens and unk
       cells: [{ cellX: 9, cellY: 9 }],
     }),
   ).toBeNull();
+});
+
+it('rereads the presentation once per structural revision, not again for the stream echo of an acknowledged command', () => {
+  const group = (component: string, toRevision: string) => ({
+    stream: { kind: 'village', key: 'v', epoch: 'e' },
+    fromRevision: toRevision,
+    toRevision,
+    changes: [{ component, upsert: [{ id: 'x' }], remove: [] }],
+  });
+  const batch = (coverage: string, ...groups: unknown[]) =>
+    ({ coverage, groups }) as unknown as Parameters<typeof presentationReadNeeded>[0];
+  // The ACK of a placement at revision 7 triggers a read covering 7.
+  expect(presentationReadNeeded(batch('effects', group('buildings', '7')), null)).toEqual({
+    needed: true,
+    through: 7n,
+  });
+  // The same commit delivered by the stream needs no second read.
+  expect(presentationReadNeeded(batch('delta', group('buildings', '7')), 7n)).toEqual({ needed: false, through: null });
+  // A later structural change does; economic changes never do.
+  expect(presentationReadNeeded(batch('delta', group('buildings', '8')), 7n)).toEqual({ needed: true, through: 8n });
+  expect(presentationReadNeeded(batch('delta', group('resources', '9')), 7n)).toEqual({ needed: false, through: null });
+  // A scope snapshot always rereads and restarts the coverage.
+  expect(presentationReadNeeded(batch('scope-snapshot'), 7n)).toEqual({ needed: true, through: null });
 });

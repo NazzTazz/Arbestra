@@ -62,7 +62,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
     },
   });
   await app.register(cookie);
-  instrumentDevTimings(app, config.isProduction);
+  instrumentDevTimings(app);
   const operations = new OperationsTelemetry(Date.now, true, {
     slowThresholdMs: config.nocHttpSlowMs ?? 2000,
     httpLogger: httpLogging.diagnostics(app.log),

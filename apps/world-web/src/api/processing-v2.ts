@@ -75,6 +75,29 @@ export function presentationWithPlacement(
   };
 }
 
+/** Whether a batch changes the presentation beyond what an already
+ * requested read covers. A read started after revision R reflects R: the
+ * stream's later delivery of the same changes (after their ACK) is skipped.
+ * A scope snapshot always rereads. */
+export function presentationReadNeeded(
+  batch: SyncV2Batch,
+  covered: bigint | null,
+): { needed: boolean; through: bigint | null } {
+  if (batch.coverage === 'scope-snapshot') return { needed: true, through: null };
+  let through: bigint | null = null;
+  for (const group of batch.groups) {
+    const structural = group.changes.some(
+      (change) =>
+        (VILLAGE_PRESENTATION_COMPONENTS as readonly string[]).includes(change.component) &&
+        (change.upsert.length > 0 || change.remove.length > 0),
+    );
+    if (!structural) continue;
+    const revision = BigInt(group.toRevision);
+    if (covered === null || revision > covered) through = through === null || revision > through ? revision : through;
+  }
+  return { needed: through !== null, through };
+}
+
 export type ProcessingV2Status = 'off' | 'starting' | 'ready' | 'unavailable';
 type Options = {
   worldSlug: string;
@@ -108,6 +131,9 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
     }
     let presentation: ResolvedVillagePresentation | null = null,
       latest: { state: SyncV2State; observedAt: string } | null = null;
+    // Highest private-stream revision a requested presentation read already
+    // covers: the stream echo of an acknowledged command needs no second read.
+    let covered: bigint | null = null;
     let loading = false,
       stale = false;
     const emit = () => {
@@ -167,18 +193,13 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
         if (!village) return;
         // An ACK carries its command time, possibly before the last delta.
         latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
-        const structural =
-          batch.coverage === 'scope-snapshot' ||
-          batch.groups.some((group) =>
-            group.changes.some(
-              (change) =>
-                (VILLAGE_PRESENTATION_COMPONENTS as readonly string[]).includes(change.component) &&
-                (change.upsert.length > 0 || change.remove.length > 0),
-            ),
-          );
+        const read = presentationReadNeeded(batch, covered);
         // Never show a building without its footprint: wait for the new read.
-        if (structural || !presentation) void loadPresentation();
-        else emit();
+        if (read.needed || !presentation) {
+          // A snapshot (possibly a new epoch) restarts the coverage.
+          if (read.needed) covered = read.through;
+          void loadPresentation();
+        } else emit();
       },
     };
     // The first village state may already come from V2: adopt that session.

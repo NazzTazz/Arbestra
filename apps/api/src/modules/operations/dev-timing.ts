@@ -109,8 +109,9 @@ const routes = new Set([
   '/api/worlds/:worldSlug/terrain/overview/villages',
 ]);
 
-export function instrumentDevTimings(app: FastifyInstance, isProduction: boolean) {
-  if (isProduction) return;
+/** Opt-in per request (header), production included: a player diagnosing a
+ * slow gesture reads its phases in the browser. Durations only, no data. */
+export function instrumentDevTimings(app: FastifyInstance) {
   const traces = new WeakMap<FastifyRequest, DevTimingTrace>();
   app.addHook('onRequest', (request, _reply, done) => {
     const route = request.routeOptions.url ?? '';

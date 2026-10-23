@@ -16,6 +16,16 @@ import {
 import { SyncV2Session, SyncV2ResyncRequired, SyncV2SessionExpired } from './sync-v2-session';
 
 let nextGeneration = 0;
+
+/** Opt-in server phases (Server-Timing) for diagnosing a gesture, production
+ * included: localStorage arbestra:timing=1, then the browser's Network tab. */
+const timingHeader = (): Record<string, string> => {
+  try {
+    return localStorage.getItem('arbestra:timing') === '1' ? { 'x-arbestra-dev-timing': '1' } : {};
+  } catch {
+    return {};
+  }
+};
 export class SyncV2HttpError extends Error {
   constructor(
     readonly status: number,
@@ -66,7 +76,7 @@ export class SyncV2Transport {
         `/api/worlds/${encodeURIComponent(worldSlug)}/village/bootstrap?generation=${generation}${includeQuery(options)}`,
         {
           credentials: 'same-origin',
-          headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': String(generation) },
+          headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': String(generation), ...timingHeader() },
         },
       ),
     );
@@ -112,6 +122,7 @@ export class SyncV2Transport {
           'content-type': 'application/json',
           'x-arbestra-protocol': '2',
           'x-arbestra-generation': String(this.generation),
+          ...timingHeader(),
           ...init.headers,
         },
       }),
@@ -334,7 +345,11 @@ export class SyncV2Transport {
       {
         credentials: 'same-origin',
         signal: this.controller.signal,
-        headers: { 'x-arbestra-protocol': '2', ...(version ? { 'if-none-match': `"${version}"` } : {}) },
+        headers: {
+          'x-arbestra-protocol': '2',
+          ...timingHeader(),
+          ...(version ? { 'if-none-match': `"${version}"` } : {}),
+        },
       },
     );
     if (response.status === 304) return null;

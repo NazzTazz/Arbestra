@@ -106,7 +106,7 @@ describe('development timing', () => {
 
   it('isolates overlapping HTTP requests and includes actual serialization', async () => {
     const app = Fastify();
-    instrumentDevTimings(app, false);
+    instrumentDevTimings(app);
     app.setSerializerCompiler(({ schema }) => {
       const compiled = buildSerializer(schema as buildSerializer.Schema);
       return (value) => devTimeSync('serialize', () => compiled(value));
@@ -156,10 +156,10 @@ describe('development timing', () => {
     }
   });
 
-  it('requires opt-in, excludes unrelated routes and is disabled in production', async () => {
-    for (const production of [false, true]) {
+  it('requires opt-in and excludes unrelated routes, in production too', async () => {
+    {
       const app = Fastify();
-      instrumentDevTimings(app, production);
+      instrumentDevTimings(app);
       for (const method of ['GET', 'POST'] as const)
         app.route({
           method,
@@ -176,9 +176,7 @@ describe('development timing', () => {
         ] as const) {
           const response = await app.inject({ method, url, headers: optIn ? { 'x-arbestra-dev-timing': '1' } : {} });
           expect(response.statusCode).toBe(200);
-          expect(Boolean(response.headers['server-timing'])).toBe(
-            !production && optIn && method === 'GET' && url !== '/other',
-          );
+          expect(Boolean(response.headers['server-timing'])).toBe(optIn && method === 'GET' && url !== '/other');
         }
       } finally {
         await app.close();
@@ -187,9 +185,9 @@ describe('development timing', () => {
   });
 
   it('measures opted-in village commands and previews while excluding streams', async () => {
-    for (const production of [false, true]) {
+    {
       const app = Fastify();
-      instrumentDevTimings(app, production);
+      instrumentDevTimings(app);
       for (const action of ['processing', 'market/preview', 'population/gestures'])
         app.post('/api/worlds/:worldSlug/villages/:villageId/' + action, () =>
           devTimeSync('auth', () => ({ ok: true })),
@@ -204,7 +202,7 @@ describe('development timing', () => {
               headers: optIn ? { 'x-arbestra-dev-timing': '1' } : {},
             });
             expect(response.statusCode).toBe(200);
-            expect(Boolean(response.headers['server-timing'])).toBe(!production && optIn && action !== 'events');
+            expect(Boolean(response.headers['server-timing'])).toBe(optIn && action !== 'events');
             if (response.headers['server-timing'])
               expect(
                 parseDevServerTiming(String(response.headers['server-timing'])).some((m) => m.phase === 'auth'),
