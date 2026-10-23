@@ -11,6 +11,7 @@ import * as gameSyncPublicTrafficMigration from './migrations/057_game_sync_publ
 import * as gameSyncRc1BatchVerticesMigration from './migrations/058_game_sync_rc1_batch_vertices.js';
 import * as gameSyncBatchDependenciesMigration from './migrations/059_game_sync_batch_dependencies.js';
 import * as bulkInsertTriggersMigration from './migrations/060_bulk_insert_triggers.js';
+import * as bulkSciencePlacesMigration from './migrations/061_bulk_science_places.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -130,6 +131,7 @@ const migrationProvider: MigrationProvider = {
       '058_game_sync_rc1_batch_vertices': gameSyncRc1BatchVerticesMigration,
       '059_game_sync_batch_dependencies': gameSyncBatchDependenciesMigration,
       '060_bulk_insert_triggers': bulkInsertTriggersMigration,
+      '061_bulk_science_places': bulkSciencePlacesMigration,
     };
   },
 };

@@ -16,7 +16,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-// The row triggers 060 replaced for plain inserts, as created by 041/042/053/054.
+// The row triggers 060/061 replaced for plain inserts, as created by 041/042/053/054.
 const historical = `
   drop trigger game_sync_shared_building on world_cell_occupancies;
   drop trigger game_sync_private_indirect_expansion on world_cell_occupancies;
@@ -42,7 +42,12 @@ const historical = `
     }
   `,
     )
-    .join('')}`;
+    .join('')}
+  drop trigger bulk_insert_collect on science_places;
+  drop trigger game_sync_shared on science_places;
+  create trigger game_sync_shared after insert or update or delete on science_places for each row execute function game_sync_shared_change();
+  drop trigger village_sync_change on science_places;
+  create trigger village_sync_change after insert or update or delete on science_places for each row execute function mark_village_sync_change();`;
 
 /** Every collected reference of the current transaction, as sorted text. */
 async function collected(client: pg.PoolClient) {
@@ -167,6 +172,20 @@ async function scenario(variant: 'statement' | 'historical') {
       ($1,40,40,null,$2,'body',null),($1,41,40,null,$2,'body',null),($1,31,32,null,$3,'body',null),
       ($1,10,10,$4,null,'anchor',null),($1,11,10,$4,null,'extension',$5)`,
       [ids.world, ids.stone, ids.grove, ids.building, ids.expansion],
+    );
+    // Survey of a completed building: cells with a feature occupancy, a
+    // stone deposit, a grove, and bare ground; one already known (update).
+    await client.query(`insert into player_science(world_id,account_id) values($1,$2)`, [ids.world, ids.account]);
+    await client.query(
+      `insert into science_places(world_id,account_id,cell_x,cell_y,terrain_code,elevation,observed_at,surveyed)
+      values($1,$2,5,5,1,0,now(),false)`,
+      [ids.world, ids.account],
+    );
+    await step(
+      `insert into science_places(world_id,account_id,cell_x,cell_y,terrain_code,elevation,observed_at,surveyed)
+      select $1,$2,x,y,1,0,now(),true from (values (40,40),(41,40),(31,31),(63,0),(12,12),(5,5)) cells(x,y)
+      on conflict(world_id,account_id,cell_x,cell_y) do update set surveyed=excluded.surveyed`,
+      [ids.world, ids.account],
     );
     return steps;
   } finally {

@@ -4,16 +4,16 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 
 ## État
 
-- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. Staging et alpha déployés à `8415fe0` (tags `*-2026.10.23.5`), contrôles publics OK.
+- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. Staging et alpha déployés à 061 (tags `*-2026.10.23.6`), contrôles publics OK.
 - Autorisations durables de Tristan : commits, push, fusion dans `main`, déploiements staging/alpha et enchaînement des tranches, sans aval de routine. Restent à lui demander : gameplay, base de développement locale, actions destructives sur données joueurs.
-- Migrations 051–060 appliquées en test, staging et alpha ; **pas sur la base de développement locale** (sauvegarde et commande à lancer par Tristan : `corepack pnpm db:migrate`).
+- Migrations 051–061 appliquées en test, staging et alpha ; **pas sur la base de développement locale** (sauvegarde et commande à lancer par Tristan : `corepack pnpm db:migrate`).
 
 ## Livré (V2, commandes bornées)
 
 - Village complet synchronisé en V2 sur staging et alpha (`VITE_SYNC_V2=1` dans `ops/deploy/build.sh` ; option locale `arbestra:sync-v2` en développement). Atelier et pose de bâtiment répondent sur le contrat V2 ; extension et amélioration restent V1 suivies d'une relecture V2.
 - Présentation versionnée (région versionnée, `knownRegion`), convois publics (flux `traffic`, 057).
 - Journal V2 : purge bornée (7 jours / 10 000 entrées par flux, `sync-v2-retention.ts`), dépendances de lot stockées une fois (059).
-- Coût des insertions en masse (058, 060) : première installation RC1 en test 205 s → 11 s.
+- Coût des insertions en masse (058, 060, 061) : première installation RC1 en test 205 s → 11 s ; achèvement d'un bâtiment (relevé `science_places`) 3,0–3,5 s → 0,9 s de verrou village.
 - Pose V2 affichée dès la confirmation, sans attendre la relecture de présentation.
 - Prettier sur tout le code (`16ca6cc` outillage, `102c5f4` formatage seul, ignoré par `git blame` via `.git-blame-ignore-revs`) ; règle dans AGENTS.md.
 
@@ -23,7 +23,7 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 
 - **Pose d'un bâtiment neuf encore lente au ressenti de Tristan** — remis à plus tard ; mesures et pistes en priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes).
 - Risques signalés par Astra, non reproduits : boucle client si une epoch change en cours de session (la purge ne change jamais l'epoch) ; snapshot plafonné à 4 096 références.
-- Tests de concurrence `economy` (« serializes two workers… », « starts an upgrade while another worker holds… ») et préparation `infrastructure` : expirations de barrière (5 s) ou de hook (10 s) de plus en plus fréquentes, **à l'identique sur le code d'avant formatage** ; instabilité d'environnement à traiter (barrières trop serrées pour ce portable).
+- Tests de concurrence `economy` stabilisés : leurs échecs révélaient un achèvement de bâtiment trop long (relevé `science_places` ligne par ligne) dépassant le `lock_timeout` de 2 s d'un second worker ; corrigé par 061. `hookTimeout` vitest porté à 30 s (reset après construction). Suite complète verte (1384).
 - Purge : deux passes concurrentes peuvent laisser un vecteur de dépendances orphelin (sans incidence de lecture).
 - Aucune recette métier distante faite par l'agent (installation RC1, pose, atelier sur staging/alpha).
 
