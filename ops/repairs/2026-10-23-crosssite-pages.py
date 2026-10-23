@@ -40,10 +40,10 @@ def main():
         path.write_text(before.replace(OLD, NEW))
         try:
             subprocess.run(['/usr/local/bin/arbestra-caddy', 'validate', '--config', str(path), '--adapter', 'caddyfile'], check=True)
-            subprocess.run(['systemctl', 'reload', 'arbestra-web@' + environment], check=True)
+            subprocess.run(['systemctl', 'restart', 'arbestra-web@' + environment], check=True)
         except Exception:
             path.write_text(before)
-            subprocess.run(['systemctl', 'reload', 'arbestra-web@' + environment], check=False)
+            subprocess.run(['systemctl', 'restart', 'arbestra-web@' + environment], check=False)
             raise
         print(environment, 'cross-site rule restricted to /api/*; backup', backup)
 
