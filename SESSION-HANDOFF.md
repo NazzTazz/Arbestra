@@ -11,7 +11,7 @@ Suite : implémentation et validations de concurrence/reprise **à autoriser sé
 
 # Reprise Claude — 22–23 octobre 2026, déploiement staging V2
 
-Tristan a autorisé la modification des scripts de déploiement et le déploiement en staging. `ops/deploy/build.sh` passe `VITE_SYNC_V2=1` en staging (village complet en V2), `0` en alpha. La branche `wip/v2-commandes-bornees` est fusionnée dans `main` pour le tag `staging-*` ; alpha n'est pas redéployé.
+Tristan a autorisé la modification des scripts de déploiement et le déploiement en staging. `ops/deploy/build.sh` passe `VITE_SYNC_V2=1` en staging puis, après recette staging et accord de Tristan le 23/10, en alpha (village complet en V2). La branche `wip/v2-commandes-bornees` est fusionnée dans `main` pour le tag `staging-*` ; alpha n'est pas redéployé.
 
 Correctifs de performance trouvés par la suite complète avant déploiement :
 - **058** : l'insertion des ~2000 groupes RC1 réexpandait l'artefact du monde (3,5 Mo) une fois par ligne (≈52 ms chacune) ; désormais une fois par instruction et par monde (déclencheur d'instruction à table de transition), et plus du tout pour un groupe supprimé. Première installation RC1 en test : 205 s → 37–41 s (98 s mesurés une fois sur base gonflée). Équivalence des sommets et références spatiales testée (`sync-v2-shared-writers`, 8/8).

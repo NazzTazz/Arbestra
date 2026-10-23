@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 case "${1:-}" in
-  alpha) lobby=https://play.arbestra.world; world=https://alpha.arbestra.world; sync_v2=0 ;;
-  # Staging runs the whole village on the V2 synchronization, opt-in elsewhere.
+  # Deployed clients run the whole village on the V2 synchronization (opt-in in development).
+  alpha) lobby=https://play.arbestra.world; world=https://alpha.arbestra.world; sync_v2=1 ;;
   staging) lobby=https://play-beta.arbestra.world; world=https://beta.arbestra.world; sync_v2=1 ;;
   *) echo 'Expected alpha or staging' >&2; exit 2 ;;
 esac
