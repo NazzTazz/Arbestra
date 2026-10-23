@@ -1,0 +1,16 @@
+# Code only: documentation prose and tables keep their hand layout.
+*.md
+*.yml
+*.yaml
+pnpm-lock.yaml
+**/dist/
+**/coverage/
+test-results/
+playwright-report/
+node_modules/
+# Generated or byte-sensitive data (studies, baked assets, manifests).
+apps/*/public/
+apps/world-web/src/scene/building-assets-manifest.json
+art-sol/
+crates/
+docs-lore/
