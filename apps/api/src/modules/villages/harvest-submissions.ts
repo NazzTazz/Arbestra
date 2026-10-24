@@ -8,6 +8,7 @@ import { HttpError } from '../../errors.js';
 import { ownedVillage } from './service.js';
 import { acceptHarvestIntent } from './harvest-intents.js';
 export const HARVEST_SUBMISSION_TASK = 'harvest.intent';
+const MAX_ATTEMPTS = 8;
 const pending = (commandId: string): HarvestReceipt => ({ commandId, pending: true, accepted: [], refused: [] });
 export async function receiveHarvestIntent(
   db: Kysely<Database>,
@@ -105,7 +106,10 @@ export async function processHarvestSubmission(tx: Transaction<Database>, task: 
   } catch (error) {
     await sql`rollback to savepoint harvest_submission`.execute(tx);
     await sql`release savepoint harvest_submission`.execute(tx);
-    if (!(error instanceof HttpError) || error.statusCode >= 500) throw error;
+    // A server failure is retried with backoff, but not forever: a route that
+    // never finishes held the navigation lane and the scheduler every five
+    // minutes (alpha, 24 October). After ~4 min of tries the player is told.
+    if (!(error instanceof HttpError) || (error.statusCode >= 500 && task.attempts < MAX_ATTEMPTS)) throw error;
     receipt = {
       commandId: row.commandId,
       accepted: [],
