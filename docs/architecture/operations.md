@@ -214,10 +214,10 @@ Le navigateur ne reçoit aucun secret de configuration ni droit SQL. L’héberg
 
 ## Hôtes publics
 
-Chaque monde est servi sur le sous-domaine de son slug : `alpha-rc1.arbestra.world/village`, sans `?world=`. Alpha vit sur `arbestra.world` (`play.`, `noc.`), staging sur `arbestra.fr` (`play.`, `noc.`, `beta-rc1.`). La source unique est `ops/deploy/sites.py` : bootstrap, passerelle et réparations en dérivent ; un slug ne peut prendre un label réservé (`play`, `noc`, `www`, `api`, anciens hôtes).
+Chaque monde est servi sur le sous-domaine de son slug, sans `?world=` : `alpha.arbestra.world/village` (monde `alpha`) et `staging.arbestra.fr/village` (monde `staging`), renommés le 24 octobre depuis `alpha-rc1` et `beta-rc1`, dont les hôtes redirigent. Alpha vit sur `arbestra.world` (`play.`, `noc.`), staging sur `arbestra.fr` (`play.`, `noc.`). La source unique est `ops/deploy/sites.py` : bootstrap, passerelle et réparations en dérivent ; un slug ne peut prendre un label réservé (`play`, `noc`, `www`, `api`, anciens hôtes de staging).
 
 - Le DNS est un wildcard `*.arbestra.world` / `*.arbestra.fr` vers le VPS. La passerelle partagée, sans challenge DNS, liste explicitement chaque hôte : relancer `configure-gateway.py` après l’ouverture d’un monde.
-- Le client lit le monde dans son hôte (`VITE_WORLD_HOST`, posé par `build.sh`) ; sans ce modèle, en local, il garde `?world=`. Une ancienne adresse `alpha.arbestra.world/village?world=…` est redirigée vers le sous-domaine en conservant le reste de l’adresse ; `play-beta`/`noc-beta.arbestra.world` redirigent vers `arbestra.fr`.
+- Le client lit le monde dans son hôte (`VITE_WORLD_HOST`, posé par `build.sh`) ; sans ce modèle, en local, il garde `?world=`. Une ancienne adresse `…/village?world=…` est redirigée vers le sous-domaine en conservant le reste de l’adresse ; `play-beta`/`noc-beta.arbestra.world` redirigent vers `arbestra.fr`.
 - L’API garde le monde dans son chemin (`/api/worlds/:slug/…`) ; seul l’hôte de la page change.
 - Bascule des environnements existants : `ops/repairs/2026-10-24-world-hosts.py` (`hosts`, puis `env` une fois déployée une API qui accepte le modèle `{world}`).
 

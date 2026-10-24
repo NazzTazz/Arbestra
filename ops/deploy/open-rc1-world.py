@@ -18,7 +18,7 @@ def main():
     if os.geteuid() != 0 or not re.fullmatch(r'[0-9a-f-]{36}', args.owner_account_id):
         raise ValueError('Root access and an existing account UUID are required')
     environment = args.environment
-    slug, name = ('alpha-rc1', 'Arbestra Alpha') if environment == 'alpha' else ('beta-rc1', 'Arbestra Bêta')
+    slug, name = ('alpha', 'Arbestra Alpha') if environment == 'alpha' else ('staging', 'Arbestra Bêta')
     lock = open('/run/lock/arbestra-deploy.lock', 'w')
     fcntl.flock(lock, fcntl.LOCK_EX)
     release = (Path('/srv/arbestra') / environment / 'current').resolve(strict=True)

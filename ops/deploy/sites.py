@@ -1,24 +1,34 @@
 """Public host names of each Arbestra environment.
 
 Each world is served on its own subdomain, named after its slug
-(alpha-rc1.arbestra.world); the lobby and the NOC take reserved labels. Shared
+(alpha.arbestra.world, staging.arbestra.fr); the lobby and the NOC take reserved labels. Shared
 by the bootstrap, the gateway configuration and the host repairs.
 """
 import re
 import subprocess
 
 ENVIRONMENTS = {
-    'alpha': {'port': 3100, 'domain': 'arbestra.world', 'legacy_world': 'alpha.arbestra.world', 'redirects': {}},
+    'alpha': {
+        'port': 3100,
+        'domain': 'arbestra.world',
+        'legacy_world': 'alpha.arbestra.world',
+        # The world was named alpha-rc1 until 24 October.
+        'redirects': {'alpha-rc1.arbestra.world': 'alpha.arbestra.world'},
+    },
     'staging': {
         'port': 3200,
         'domain': 'arbestra.fr',
         # Former staging hosts, before staging moved to its own domain.
         'legacy_world': 'beta.arbestra.world',
-        'redirects': {'play-beta.arbestra.world': 'play.arbestra.fr', 'noc-beta.arbestra.world': 'noc.arbestra.fr'},
+        'redirects': {
+            'play-beta.arbestra.world': 'play.arbestra.fr',
+            'noc-beta.arbestra.world': 'noc.arbestra.fr',
+            'beta-rc1.arbestra.fr': 'staging.arbestra.fr',
+        },
     },
 }
 # Labels a world slug can never take: they name other sites.
-RESERVED = {'play', 'noc', 'www', 'api', 'alpha', 'beta', 'play-beta', 'noc-beta', 'start'}
+RESERVED = {'play', 'noc', 'www', 'api', 'beta', 'play-beta', 'noc-beta', 'start'}
 SLUG = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*')
 
 
@@ -47,7 +57,8 @@ def gateway_hosts(environment, slugs):
     names = [*hosts(environment).values()][:2]
     names += [world_host(environment, slug) for slug in slugs]
     names += [ENVIRONMENTS[environment]['legacy_world'], *ENVIRONMENTS[environment]['redirects']]
-    return names
+    # The alpha world now owns the former shared host.
+    return list(dict.fromkeys(names))
 
 
 WEB_TEMPLATE = '''{

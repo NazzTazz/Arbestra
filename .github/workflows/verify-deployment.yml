@@ -24,7 +24,7 @@ jobs:
           environment = os.environ['DEPLOY_ENVIRONMENT']
           assert environment in ('staging', 'alpha')
           # Each world on its own subdomain (ops/deploy/sites.py).
-          domain, world = ('arbestra.fr', 'beta-rc1') if environment == 'staging' else ('arbestra.world', 'alpha-rc1')
+          domain, world = ('arbestra.fr', 'staging') if environment == 'staging' else ('arbestra.world', 'alpha')
           lobby, game, noc = 'play', world, 'noc'
           checks = [(lobby, '/', 200), (game, '/', 200), (noc, '/', 401),
                     (game, '/api/health', 200), (game, '/api/admin/session', 404),
