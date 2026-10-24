@@ -491,13 +491,6 @@
   },
   {
     "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/harvest",
-    "actions": [],
-    "lot": "E",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/upgrade",
     "actions": [],
     "lot": "D",
@@ -553,27 +546,6 @@
     "role": "read"
   },
   {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/features/:featureId/clear",
-    "actions": [],
-    "lot": "E",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/features/:featureId/extractions",
-    "actions": [],
-    "lot": "E",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/garden-harvests",
-    "actions": [],
-    "lot": "E",
-    "role": "mutation"
-  },
-  {
     "method": "GET",
     "url": "/api/worlds/:worldSlug/villages/:villageId/harvest-intents",
     "actions": [],
@@ -616,22 +588,8 @@
     "role": "read"
   },
   {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/market",
-    "actions": [],
-    "lot": "F",
-    "role": "mutation"
-  },
-  {
     "method": "GET",
     "url": "/api/worlds/:worldSlug/villages/:villageId/market/offers",
-    "actions": [],
-    "lot": "F",
-    "role": "read"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/market/preview",
     "actions": [],
     "lot": "F",
     "role": "read"
@@ -673,22 +631,8 @@
   },
   {
     "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/population/feed",
-    "actions": [],
-    "lot": "C",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/population/gestures",
     "actions": ["feed", "release", "rest"],
-    "lot": "C",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/population/rest",
-    "actions": [],
     "lot": "C",
     "role": "mutation"
   },
@@ -757,23 +701,9 @@
   },
   {
     "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/worksites",
-    "actions": [],
-    "lot": "E",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/worksites/:worksiteId",
     "actions": ["pause", "resume", "set-cap", "stop"],
     "lot": "E",
     "role": "mutation"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/worksites/preview",
-    "actions": [],
-    "lot": "E",
-    "role": "read"
   }
 ]
