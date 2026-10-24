@@ -4,6 +4,8 @@ on:
     branches: [main, 'wip/**']
   pull_request:
   workflow_dispatch:
+  # Each deployment reruns the suite on its exact commit before deploying.
+  workflow_call:
 permissions:
   contents: read
 concurrency:

@@ -9,7 +9,11 @@ concurrency:
   group: deploy-alpha
   cancel-in-progress: false
 jobs:
+  # A red suite never reaches players: the deployment waits for it.
+  tests:
+    uses: ./.github/workflows/test.yml
   deploy:
+    needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment:
