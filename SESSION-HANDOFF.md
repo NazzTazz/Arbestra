@@ -29,6 +29,10 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 - Tests de concurrence `economy` stabilisés : leurs échecs révélaient un achèvement de bâtiment trop long (relevé `science_places` ligne par ligne) dépassant le `lock_timeout` de 2 s d'un second worker ; corrigé par 061. `hookTimeout` vitest porté à 30 s (reset après construction). Suite complète verte (1384).
 - Purge : deux passes concurrentes peuvent laisser un vecteur de dépendances orphelin (sans incidence de lecture).
 - Aucune recette métier distante faite par l'agent (installation RC1, pose, atelier sur staging/alpha).
+- [Revue d'architecture du 23 octobre](docs/REVUE-ARCHITECTURE-2026-10-23.md) (étude, rien d'implémenté) : refonte proposée du pathfinding et de l'économie, contraintes à respecter pendant la migration V2, points à trancher par Tristan.
+- [Spec de refonte navigation/économie](docs/SPEC-REFONTE-NAVIGATION-ECONOMIE.md) (étude, rien d'implémenté) : constats de la revue vérifiés sur `5c1fb33`, quatre cibles avec lots et critères, huit décisions en section 8 à trancher par Tristan avant les lots N3, N4, E2, E4.
+- [Audit de concurrence économique](docs/AUDIT-CONCURRENCE-ECONOMIE-2026-10-23.md) : aucune inversion d'ordre de verrous trouvée (lecture seule, non prouvé par test). L'explication des tests instables est à corriger : `lock_timeout` de test 4 s et barrière 5 s, pas 2 s ; 061 réduit la fenêtre sans sortir le relevé du verrou village. Risque principal : `finaliseExpedition` (exclusif, 500 ms) derrière des partagés longs. Correctifs minimaux en section 7.
+- [Audit de la sync V2](docs/AUDIT-SYNC-V2-2026-10-23.md) : **boucle client réelle** si l'epoch change (restauration de sauvegarde) — `refresh(true)` applique le snapshot dans la même session, rejeté à `sync-v2.ts:516`, réessai toutes les 2 s avec snapshot complet, sans message ; correctif de quelques lignes côté client. Orphelins de purge réels mais bornés, référence pendante impossible (FK 059). Plafonds 4 096/1 024 : `RangeError` → 500, village inchargeable au-delà ; pagination prévue par la spec non implémentée.
 
 ## Suite proposée
 
