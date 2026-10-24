@@ -1,7 +1,7 @@
 import { claimWoodlandCell } from '../deposits/woodland.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { type Kysely, type Transaction } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 import {
   terraformCells,
   terraformQuote,
@@ -87,6 +87,27 @@ async function prepare(
       : fixedBuildingFootprint(request.buildingType, request.anchor, request.quarterTurns, v);
   } catch {
     throw new HttpError(400, 'INVALID_TERRAFORM_SELECTION', 'Sélection ou hauteur invalide.');
+  }
+  // Same instance limit as the placement: never mobilize workers to level a
+  // footprint for a building the village cannot place.
+  if (!free) {
+    const limit = await tx
+      .selectFrom('buildingTypes')
+      .select([
+        'instanceLimitPerVillage',
+        (eb) =>
+          eb
+            .selectFrom('buildings')
+            .select(sql<number>`count(*)::int`.as('n'))
+            .where('worldId', '=', v.worldId)
+            .where('villageId', '=', v.villageId)
+            .where('buildingType', '=', request.buildingType)
+            .as('instances'),
+      ])
+      .where('code', '=', request.buildingType)
+      .executeTakeFirst();
+    if (limit?.instanceLimitPerVillage != null && Number(limit.instances) >= limit.instanceLimitPerVillage)
+      throw new HttpError(409, 'BUILDING_LIMIT_REACHED', 'Limite atteinte pour ce bâtiment.');
   }
   // Same rights, reach, water, trees, deposits, roads and engaged passages as construction.
   await assertBuildableCells(tx, v, cells);

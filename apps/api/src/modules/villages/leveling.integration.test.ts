@@ -494,3 +494,40 @@ it('reserves a dry university pad, spends labour once, persists the level ground
     true,
   );
 }, 120000);
+
+it('refuses to level a footprint for a building already at its village limit, before mobilizing anyone', async () => {
+  // One stonemason per village (catalogue limit 1).
+  const mason = await db
+    .insertInto('buildings')
+    .values({
+      worldId,
+      villageId,
+      buildingType: 'stonemason',
+      level: 1,
+      status: 'completed',
+      completedAt: new Date(),
+      constructionStartedAt: null,
+      constructionCompletesAt: null,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  try {
+    const jobs = async () =>
+      (await db.selectFrom('levelingJobs').select('id').where('villageId', '=', villageId).execute()).length;
+    const before = await jobs();
+    const second = { ...request, buildingType: 'stonemason' as const };
+    await expect(previewLeveling(db, accountId, slug, villageId, second)).rejects.toMatchObject({
+      code: 'BUILDING_LIMIT_REACHED',
+    });
+    await expect(
+      commandLeveling(db, accountId, slug, villageId, {
+        ...second,
+        commandId: randomUUID(),
+        expected: {} as LevelingCommand['expected'],
+      }),
+    ).rejects.toMatchObject({ code: 'BUILDING_LIMIT_REACHED' });
+    expect(await jobs()).toBe(before);
+  } finally {
+    await db.deleteFrom('buildings').where('id', '=', mason.id).execute();
+  }
+}, 60000);
