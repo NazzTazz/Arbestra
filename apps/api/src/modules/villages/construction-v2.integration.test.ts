@@ -464,3 +464,66 @@ it('bootstraps a village with more than 1 024 single-member cohorts (one per arr
     await db.deleteFrom('populationCohorts').where('villageId', '=', ids.village).execute();
   }
 }, 60000);
+
+it('bootstraps a village whose finished extraction history exceeds the snapshot bound', async () => {
+  // Reproduction of alpha (Catmark, 24 October): 3 227 finished extractions
+  // pushed the private snapshot past 4 096 references.
+  const featureId = randomUUID(),
+    started = new Date(Date.now() - 7200000),
+    done = new Date(Date.now() - 3600000);
+  try {
+    await db
+      .insertInto('worldFeatures')
+      .values({
+        id: featureId,
+        worldId: ids.world,
+        featureTypeCode: 'stone_outcrop',
+        state: 'depleted',
+        variantSeed: 1,
+      })
+      .execute();
+    await db
+      .insertInto('stoneDeposits')
+      .values({
+        worldId: ids.world,
+        featureId,
+        cellX: 100,
+        cellY: 100,
+        initialAmount: 4200,
+        remainingAmount: 0,
+        reservedAmount: 0,
+        revision: 1,
+        updatedAt: done,
+      })
+      .execute();
+    await db
+      .insertInto('depositExtractions')
+      .values(
+        Array.from({ length: 4200 }, () => ({
+          worldId: ids.world,
+          villageId: ids.village,
+          featureId,
+          commandId: randomUUID(),
+          status: 'completed' as const,
+          startedAt: started,
+          completesAt: done,
+          completedAt: done,
+          workerCount: 1,
+          reservedAmount: 1,
+        })),
+      )
+      .execute();
+    const initial = await captureSyncV2(db, ids.account, slug, ids.village, {
+      protocol: 2,
+      generation: 5,
+      scopes: [],
+      cursors: [],
+    });
+    const extractions = initial.groups.flatMap((g) => g.changes).filter((c) => c.component === 'extractions');
+    expect(extractions.flatMap((c) => c.upsert)).toEqual([]);
+  } finally {
+    await db.deleteFrom('depositExtractions').where('featureId', '=', featureId).execute();
+    await db.deleteFrom('stoneDeposits').where('featureId', '=', featureId).execute();
+    await db.deleteFrom('worldFeatures').where('id', '=', featureId).execute();
+  }
+}, 60000);

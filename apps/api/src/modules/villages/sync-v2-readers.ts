@@ -57,9 +57,7 @@ export async function readPrivateScopeSnapshot(
     ['restHousing', 'buildings', 'id'],
     ['buildings', 'buildings', 'id'],
     ['accomplishments', 'village_accomplishments', 'code'],
-    ['gardenHarvests', 'garden_harvests', 'id'],
     ['buildingExpansions', 'building_expansions', 'id'],
-    ['extractions', 'deposit_extractions', 'id'],
     ['worksites', 'extraction_worksites', 'id'],
     ['exploitationOrders', 'exploitation_orders', 'id'],
     ['levelingJobs', 'leveling_jobs', 'id'],
@@ -73,6 +71,12 @@ export async function readPrivateScopeSnapshot(
     select ${sql.lit(component)}::text as component, ${sql.id(column)}::text as key from ${sql.id(table)}
     where world_id=${worldId} and village_id=${villageId}`,
   );
+  // Their readers return only running entries: finished history (thousands of
+  // rows in an old village) would only inflate the snapshot past its bound.
+  queries.push(sql`select 'gardenHarvests'::text as component,id::text as key from garden_harvests
+    where world_id=${worldId} and village_id=${villageId} and status='in-progress'`);
+  queries.push(sql`select 'extractions'::text as component,id::text as key from deposit_extractions
+    where world_id=${worldId} and village_id=${villageId} and status='in-progress'`);
   queries.push(sql`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
     from garden_plots where world_id=${worldId} and village_id=${villageId}`);
   queries.push(sql`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
