@@ -415,3 +415,39 @@ it('answers bodyless village gestures on the V2 contract with their effects, and
   expect(science.statusCode).toBeGreaterThanOrEqual(400);
   expect(science.statusCode).toBeLessThan(500);
 }, 60000);
+
+it('bootstraps a village with more than 1 024 single-member cohorts (one per arrival) on V2', async () => {
+  const now = new Date();
+  await db
+    .insertInto('populationCohorts')
+    .values(
+      Array.from({ length: 1100 }, (_, i) => ({
+        worldId: ids.world,
+        villageId: ids.village,
+        originVillageId: ids.village,
+        memberCount: 1,
+        activity: 'idle' as const,
+        energy: 10,
+        energyProgress: 0,
+        energyUpdatedAt: new Date(now.getTime() - i * 1000),
+        restingSince: null,
+        foodUsedSinceRest: 0,
+      })),
+    )
+    .execute();
+  try {
+    const initial = await captureSyncV2(db, ids.account, slug, ids.village, {
+      protocol: 2,
+      generation: 4,
+      scopes: [],
+      cursors: [],
+    });
+    const cohorts = initial.groups
+      .flatMap((group) => group.changes)
+      .filter((change) => change.component === 'cohorts')
+      .reduce((n, change) => n + change.upsert.length, 0);
+    expect(cohorts).toBeGreaterThanOrEqual(1100);
+  } finally {
+    await db.deleteFrom('populationCohorts').where('villageId', '=', ids.village).execute();
+  }
+}, 60000);

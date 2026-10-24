@@ -119,7 +119,9 @@ export async function readCohortProjection(
   ids: readonly string[],
 ) {
   if (!ids.length) return [];
-  if (ids.length > 1024) throw new RangeError('Too many cohort ids');
+  // Every arrival is its own cohort: a large village exceeds 1 024 cohorts.
+  // The private snapshot already bounds the whole scope to 4 096 references.
+  if (ids.length > 4096) throw new RangeError('Too many cohort ids');
   const cohorts = await tx
     .selectFrom('populationCohorts')
     .selectAll()
