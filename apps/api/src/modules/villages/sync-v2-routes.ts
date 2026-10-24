@@ -38,6 +38,18 @@ export async function assertSyncV2Available(db: Kysely<Database>): Promise<void>
   if (!ready) throw new HttpError(503, 'SYNC_V2_UNAVAILABLE', 'Synchronisation V2 indisponible.');
 }
 
+/** A scope beyond the reader bounds (4 096 references) is a typed, explicit
+ * refusal rather than an internal error; pagination is not implemented yet. */
+async function bounded<T>(read: Promise<T>): Promise<T> {
+  try {
+    return await read;
+  } catch (error) {
+    if (error instanceof RangeError)
+      throw new HttpError(503, 'SYNC_SCOPE_TOO_LARGE', 'Ce village dépasse la taille synchronisable.');
+    throw error;
+  }
+}
+
 export async function registerSyncV2Routes(
   app: FastifyInstance,
   db: Kysely<Database>,
@@ -63,7 +75,7 @@ export async function registerSyncV2Routes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const presentation = await readVillagePresentation(db, account.id, worldSlug, villageId, navigation);
+      const presentation = await bounded(readVillagePresentation(db, account.id, worldSlug, villageId, navigation));
       const etag = `"${presentation.version}"`;
       reply.header('Cache-Control', 'private, no-cache').header('ETag', etag);
       if (request.headers['if-none-match'] === etag) return reply.status(304).send();
@@ -96,13 +108,15 @@ export async function registerSyncV2Routes(
     reply.serializer(JSON.stringify);
     const query = request.query as { generation: number; include?: string };
     const include = [...new Set(query.include?.split(',') as SyncV2SharedInclude[] | undefined)];
-    return captureSyncV2(
-      db,
-      account.id,
-      worldSlug,
-      economy.villageId,
-      { protocol: 2, generation: query.generation, scopes: [], cursors: [] },
-      { include },
+    return bounded(
+      captureSyncV2(
+        db,
+        account.id,
+        worldSlug,
+        economy.villageId,
+        { protocol: 2, generation: query.generation, scopes: [], cursors: [] },
+        { include },
+      ),
     );
   };
   app.get(
@@ -157,7 +171,7 @@ export async function registerSyncV2Routes(
         reply.header('Cache-Control', 'no-store');
         if (operation === 'read') {
           reply.serializer(JSON.stringify);
-          return captureSyncV2(db, account.id, worldSlug, villageId, body);
+          return bounded(captureSyncV2(db, account.id, worldSlug, villageId, body));
         }
         const close = () => reply.raw.destroy();
         streams.add(close);
@@ -167,7 +181,7 @@ export async function registerSyncV2Routes(
             body,
             async (next) => {
               const current = await authenticate(db, token);
-              return captureSyncV2(db, current.id, worldSlug, villageId, next);
+              return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next));
             },
             {
               onError: () => app.log.warn({ code: 'SYNC_V2_STREAM_INTERRUPTED' }, 'Synchronization stream interrupted'),

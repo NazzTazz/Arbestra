@@ -48,7 +48,7 @@ export async function readWorksites(
   selected?: readonly string[],
 ): Promise<ExtractionWorksite[]> {
   if (selected?.length === 0) return [];
-  if (selected && selected.length > 1024) throw new RangeError('Too many worksite ids');
+  if (selected && selected.length > 4096) throw new RangeError('Too many worksite ids');
   const query = tx
     .selectFrom('extractionWorksites')
     .selectAll()

@@ -415,7 +415,7 @@ export async function projectGardenPlots(
   cells?: readonly { cellX: number; cellY: number }[],
 ): Promise<ProjectedGardenPlot[]> {
   if (cells?.length === 0) return [];
-  if (cells && cells.length > 1024) throw new RangeError('Too many garden plots');
+  if (cells && cells.length > 4096) throw new RangeError('Too many garden plots');
   const { rows } = await sql<{
     buildingId: string;
     cellX: number;

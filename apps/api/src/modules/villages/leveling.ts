@@ -618,7 +618,7 @@ export async function levelingSnapshot(
   selected?: readonly string[],
 ): Promise<LevelingJob[]> {
   if (selected?.length === 0) return [];
-  if (selected && selected.length > 1024) throw new RangeError('Too many leveling ids');
+  if (selected && selected.length > 4096) throw new RangeError('Too many leveling ids');
   const query = tx
     .selectFrom('levelingJobs')
     .selectAll()

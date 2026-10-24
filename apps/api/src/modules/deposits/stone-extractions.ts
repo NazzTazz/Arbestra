@@ -196,7 +196,7 @@ export async function readExtractions(
   extractionIds?: readonly string[],
 ): Promise<Array<{ worksiteId: string | null; extraction: Extraction }>> {
   if (extractionIds && !extractionIds.length) return [];
-  if (extractionIds && extractionIds.length > 1024) throw new RangeError('Too many extraction ids');
+  if (extractionIds && extractionIds.length > 4096) throw new RangeError('Too many extraction ids');
   if (worksiteIds && !worksiteIds.length) return [];
   let query = tx
     .selectFrom('depositExtractions')

@@ -104,7 +104,7 @@ export async function readSpatialChanges(
   const changes: SyncV2Change[] = [];
   for (const [component, selected] of selections) {
     const ids = [...selected].sort();
-    if (ids.length > 1024) throw new RangeError('Spatial component selection too large');
+    if (ids.length > 4096) throw new RangeError('Spatial component selection too large');
     if (component === 'spatialGround') {
       if (ids.length !== 1 || ids[0] !== '*') throw Error('Invalid ground key');
       const data = await readSelectedGround(tx, worldId, chunkX, chunkY);

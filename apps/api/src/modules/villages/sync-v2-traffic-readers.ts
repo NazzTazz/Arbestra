@@ -22,9 +22,9 @@ export async function readTrafficScopeSnapshot(tx: Transaction<Database>, contex
     .where('worldId', '=', context.worldId)
     .where('returnsAt', '>', context.through)
     .orderBy('id')
-    .limit(1025)
+    .limit(4097)
     .execute();
-  if (rows.length > 1024) throw new RangeError('Traffic snapshot requires pagination');
+  if (rows.length > 4096) throw new RangeError('Traffic snapshot requires pagination');
   const changes = await readTrafficChanges(
     tx,
     context,
@@ -43,7 +43,7 @@ export async function readTrafficChanges(
   if (!references.length) return [];
   if (references.some((reference) => reference.component !== 'convoys')) throw Error('Component outside traffic scope');
   const ids = [...new Set(references.map((reference) => reference.key))].sort();
-  if (ids.length > 1024) throw new RangeError('Too many convoy ids');
+  if (ids.length > 4096) throw new RangeError('Too many convoy ids');
   const rows = await tx
     .selectFrom('tradeJourneys')
     .selectAll()

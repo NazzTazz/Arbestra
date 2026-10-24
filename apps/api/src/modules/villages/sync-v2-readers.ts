@@ -147,7 +147,7 @@ export async function readRegisteredPrivateChanges(
       void _housing;
       changes.push({ component, upsert: [{ id: '*', ...summary }], remove: [] });
     } else if (component === 'restHousing') {
-      if (ids.length > 1024) throw new RangeError('Too many housing ids');
+      if (ids.length > 4096) throw new RangeError('Too many housing ids');
       const [homes, cohorts] = await Promise.all([
         tx
           .selectFrom('buildings')
@@ -176,7 +176,7 @@ export async function readRegisteredPrivateChanges(
         }));
       changes.push({ component, upsert: rows, remove: ids.filter((id) => !rows.some((row) => row.buildingId === id)) });
     } else if (component === 'buildings') {
-      if (ids.length > 1024) throw new RangeError('Too many building ids');
+      if (ids.length > 4096) throw new RangeError('Too many building ids');
       const rows = await tx
         .selectFrom('buildings')
         .selectAll('buildings')
@@ -249,7 +249,7 @@ export async function readRegisteredPrivateChanges(
       const rows = await readPrivateTradeJourneys(tx, context, ids);
       changes.push({ component, upsert: rows, remove: ids.filter((id) => !rows.some((row) => row.id === id)) });
     } else if (component === 'marketExchanges') {
-      if (ids.length > 1024) throw new RangeError('Too many exchange ids');
+      if (ids.length > 4096) throw new RangeError('Too many exchange ids');
       const rows = await tx
         .selectFrom('marketExchanges')
         .selectAll()
@@ -273,7 +273,7 @@ export async function readRegisteredPrivateChanges(
         remove: ids.filter((id) => !rows.some((row) => row.id === id)),
       });
     } else if (component === 'scienceActivities') {
-      if (ids.length > 1024) throw new RangeError('Too many science activity ids');
+      if (ids.length > 4096) throw new RangeError('Too many science activity ids');
       const rows = await tx
         .selectFrom('scienceActivities')
         .selectAll()
@@ -300,7 +300,7 @@ export async function readRegisteredPrivateChanges(
         remove: ids.filter((id) => !rows.some((row) => row.id === id)),
       });
     } else if (component === 'scienceContributions') {
-      if (ids.length > 1024) throw new RangeError('Too many science contribution ids');
+      if (ids.length > 4096) throw new RangeError('Too many science contribution ids');
       const rows = await tx
         .selectFrom('scienceContributions')
         .selectAll()
@@ -377,7 +377,7 @@ export async function readRegisteredPrivateChanges(
       });
       changes.push({ component, upsert, remove: ids.filter((id) => !upsert.some((row) => row.id === id)) });
     } else if (component === 'gardenHarvests') {
-      if (ids.length > 1024) throw new RangeError('Too many harvest ids');
+      if (ids.length > 4096) throw new RangeError('Too many harvest ids');
       const rows = await tx
         .selectFrom('gardenHarvests')
         .selectAll()
@@ -406,7 +406,7 @@ export async function readRegisteredPrivateChanges(
         remove: ids.filter((id) => !rows.some((row) => row.id === id)),
       });
     } else if (component === 'buildingExpansions') {
-      if (ids.length > 1024) throw new RangeError('Too many expansion ids');
+      if (ids.length > 4096) throw new RangeError('Too many expansion ids');
       const rows = await tx
         .selectFrom('buildingExpansions')
         .selectAll()

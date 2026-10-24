@@ -274,7 +274,7 @@ export async function ownTradeOffers(
   selected?: readonly string[],
 ): Promise<TradeOffer[]> {
   if (selected?.length === 0) return [];
-  if (selected && selected.length > 1024) throw new RangeError('Too many trade offer ids');
+  if (selected && selected.length > 4096) throw new RangeError('Too many trade offer ids');
   const query = tx
     .selectFrom('tradeOffers as t')
     .innerJoin('villages as v', (j) => j.onRef('v.worldId', '=', 't.worldId').onRef('v.id', '=', 't.villageId'))
@@ -317,7 +317,7 @@ export async function readPrivateTradeJourneys(
   ids: readonly string[],
 ): Promise<MarketJourney[]> {
   if (!ids.length) return [];
-  if (ids.length > 1024) throw new RangeError('Too many journey ids');
+  if (ids.length > 4096) throw new RangeError('Too many journey ids');
   const rows = await tx
     .selectFrom('tradeJourneys')
     .selectAll()
