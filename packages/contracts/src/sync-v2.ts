@@ -394,6 +394,24 @@ export const ConstructionConfirmationV2Schema = Type.Object(
   { additionalProperties: false },
 );
 export type ConstructionConfirmationV2 = Static<typeof ConstructionConfirmationV2Schema>;
+/** A village gesture with no domain result (science, discoveries): the same
+ * envelope, the private effects of the commit and nothing else. A retried
+ * naturally idempotent gesture applies nothing and carries no effects. */
+export const VillageCommandConfirmationV2Schema = Type.Object(
+  {
+    protocol: Type.Literal(2),
+    worldId: id,
+    villageId: id,
+    commandId: id,
+    status: Type.Literal('applied'),
+    commandTime: time,
+    effects: Type.Optional(SyncV2BatchSchema),
+  },
+  { additionalProperties: false },
+);
+export type VillageCommandConfirmationV2 = Static<typeof VillageCommandConfirmationV2Schema>;
+export const villageCommandConfirmationV2IsValid = (value: unknown): value is VillageCommandConfirmationV2 =>
+  Value.Check(VillageCommandConfirmationV2Schema, value);
 export const constructionConfirmationV2IsValid = (value: unknown): value is ConstructionConfirmationV2 =>
   Value.Check(ConstructionConfirmationV2Schema, value);
 export const syncV2BatchIsValid = (value: unknown): value is SyncV2Batch => Value.Check(SyncV2BatchSchema, value);

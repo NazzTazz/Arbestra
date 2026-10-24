@@ -1746,13 +1746,14 @@ export async function commandVillageScience<Mode extends ConstructionReplyMode =
   villageId: string,
   command: ScienceCommand,
   replyMode: Mode = 'snapshot' as Mode,
+  afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionResult<Mode>> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await scienceCommand(tx, economy, command);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode);
+    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, undefined, afterWrites);
   });
 }
 
@@ -3058,8 +3059,24 @@ export async function startVillageExploitation(
   worldSlug: string,
   villageId: string,
   rawRequest: ExploitationRequest,
-): Promise<VillageState> {
-  return db.transaction().execute(async (tx) => {
+): Promise<VillageState>;
+export async function startVillageExploitation(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  rawRequest: ExploitationRequest,
+  afterWrites: AfterConstructionWrites,
+): Promise<ConstructionCommit>;
+export async function startVillageExploitation(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  rawRequest: ExploitationRequest,
+  afterWrites?: AfterConstructionWrites,
+): Promise<VillageState | ConstructionCommit> {
+  return db.transaction().execute(async (tx): Promise<VillageState | ConstructionCommit> => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const request = canonicalExploitation(rawRequest, village);
     const economy = await beginVillageEconomy(
@@ -3080,6 +3097,8 @@ export async function startVillageExploitation(
     if (previous) {
       if (!isDeepStrictEqual(previous.request, request))
         throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée différemment.');
+      // A V2 replay publishes nothing; its effects were sent with the original.
+      if (afterWrites) return { worldId: village.worldId, villageId, through: economy.through };
       return state(tx, accountId, worldSlug, economy);
     }
     if (!request.gardens.length && !request.wood.length && !request.stone.length)
@@ -3168,16 +3187,32 @@ export async function startVillageExploitation(
           order.id,
         );
       }
-    const snapshot = await state(tx, accountId, worldSlug, economy);
-    if (
-      request.initialAdmission === 'required' &&
-      !snapshot.village.exploitationOrders?.find((item) => item.id === order.id)?.mobilized
-    )
-      throw new HttpError(
-        409,
-        'EXPLOITATION_INITIAL_DEPARTURE_UNAVAILABLE',
-        'Aucune équipe ne peut partir maintenant ; aucune activité n’a été lancée.',
+    const departed = (mobilized: number | undefined) => {
+      if (request.initialAdmission === 'required' && !mobilized)
+        throw new HttpError(
+          409,
+          'EXPLOITATION_INITIAL_DEPARTURE_UNAVAILABLE',
+          'Aucune équipe ne peut partir maintenant ; aucune activité n’a été lancée.',
+        );
+    };
+    // V2: the admission runs in the commit finalizer; the order alone is
+    // read back before the terminal publication, in the same transaction.
+    if (afterWrites)
+      return villageCommandResult(
+        tx,
+        accountId,
+        worldSlug,
+        village,
+        economy,
+        'commit',
+        undefined,
+        async (tx, economy) => {
+          departed((await readExploitationOrders(tx, economy, undefined, [order.id]))[0]?.mobilized);
+          await afterWrites(tx, economy);
+        },
       );
+    const snapshot = await state(tx, accountId, worldSlug, economy);
+    departed(snapshot.village.exploitationOrders?.find((item) => item.id === order.id)?.mobilized);
     return snapshot;
   });
 }
@@ -3335,10 +3370,31 @@ export async function discoverBuildingSuppliesInTransaction(
   worldSlug: string,
   villageId: string,
   buildingId: string,
-): Promise<VillageState> {
+): Promise<VillageState>;
+export async function discoverBuildingSuppliesInTransaction(
+  tx: Transaction<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  buildingId: string,
+  afterWrites: AfterConstructionWrites,
+): Promise<ConstructionCommit>;
+export async function discoverBuildingSuppliesInTransaction(
+  tx: Transaction<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  buildingId: string,
+  afterWrites?: AfterConstructionWrites,
+): Promise<VillageState | ConstructionCommit> {
   const village = await ownedVillage(tx, accountId, worldSlug, villageId);
   if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
   const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+  // The V2 contract answers with the commit's effects instead of a village state.
+  const reply = () =>
+    afterWrites
+      ? villageCommandResult(tx, accountId, worldSlug, village, economy, 'commit', undefined, afterWrites)
+      : state(tx, accountId, worldSlug, economy);
   const supply = await tx
     .selectFrom('buildingHiddenSupplies')
     .selectAll()
@@ -3357,7 +3413,7 @@ export async function discoverBuildingSuppliesInTransaction(
     .executeTakeFirst();
   if (accomplishment) {
     if (!supply.claimedAt) throw new Error('Town-hall supplies accomplishment has no matching claim');
-    return state(tx, accountId, worldSlug, economy);
+    return reply();
   }
   if (supply.claimedAt) throw new Error('Claimed town-hall supplies have no matching accomplishment');
   await tx
@@ -3383,7 +3439,7 @@ export async function discoverBuildingSuppliesInTransaction(
     .where('villageId', '=', village.villageId)
     .where('resourceCode', '=', supply.resourceCode)
     .execute();
-  return state(tx, accountId, worldSlug, economy);
+  return reply();
 }
 
 export async function discoverBuildingSupplies(
@@ -3557,7 +3613,26 @@ export async function restPopulation(
 }
 
 /** Visual discovery is reported by the client; ownership, time and uniqueness are authoritative. */
-export async function discoverCatEyes(db: Kysely<Database>, accountId: string, worldSlug: string, villageId: string) {
+export async function discoverCatEyes(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+): Promise<{ newlyCompleted: boolean; villageState: VillageState }>;
+export async function discoverCatEyes(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  afterWrites: AfterConstructionWrites,
+): Promise<ConstructionCommit>;
+export async function discoverCatEyes(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  afterWrites?: AfterConstructionWrites,
+) {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
@@ -3573,6 +3648,8 @@ export async function discoverCatEyes(db: Kysely<Database>, accountId: string, w
       .onConflict((oc) => oc.columns(['worldId', 'villageId', 'code']).doNothing())
       .returning('code')
       .execute();
+    if (afterWrites)
+      return villageCommandResult(tx, accountId, worldSlug, village, economy, 'commit', undefined, afterWrites);
     return { newlyCompleted: inserted.length > 0, villageState: await state(tx, accountId, worldSlug, economy) };
   });
 }

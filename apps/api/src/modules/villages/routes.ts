@@ -65,7 +65,10 @@ import {
   type VillageSyncBase,
 } from '@arbestra/contracts';
 import { readConstructionConfirmation } from './service.js';
-import type { ConstructionCommit } from './service.js';
+import type { AfterConstructionWrites, ConstructionCommit } from './service.js';
+import { discoverBuildingSuppliesInTransaction } from './service.js';
+import { VillageCommandConfirmationV2Schema } from '@arbestra/contracts';
+import { villageCommandV2 } from './command-v2.js';
 import type { VillageSyncProjections } from './sync-projections.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
 import { villageSyncRevision } from './sync-revision.js';
@@ -142,6 +145,16 @@ const ProcessingHeadersSchema = Type.Object(
   },
   { additionalProperties: true },
 );
+/** V2 gestures without a body identifier carry the client's UUID in a header. */
+const VillageCommandV2HeadersSchema = Type.Object(
+  {
+    ...VillageSyncHeadersSchema.properties,
+    'x-arbestra-protocol': Type.Optional(Type.Literal('2')),
+    'x-arbestra-generation': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
+    'x-arbestra-command': Type.Optional(Type.String({ format: 'uuid' })),
+  },
+  { additionalProperties: true },
+);
 const InfrastructureHeadersSchema = Type.Object(
   { ...VillageSyncHeadersSchema.properties, 'x-infrastructure-confirmation': Type.Optional(Type.Literal('1')) },
   { additionalProperties: true },
@@ -182,6 +195,22 @@ export async function registerVillageRoutes(
   navigation: TravelNetworkExecutor,
 ): Promise<void> {
   const hudResponse = HudWorkforceConfirmationSchema;
+  /** Answers a gesture on the V2 contract when the client asked for it. */
+  const villageV2 = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    run: (afterWrites: AfterConstructionWrites) => Promise<ConstructionCommit>,
+    commandId = request.headers['x-arbestra-command'] as string | undefined,
+  ) => {
+    await assertSyncV2Available(db);
+    const confirmation = await villageCommandV2(
+      commandId,
+      Number(request.headers['x-arbestra-generation'] ?? '0'),
+      run,
+    );
+    observationCommitted(request);
+    return reply.serializer(JSON.stringify).send(confirmation);
+  };
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/extraction-pools',
     {
@@ -340,12 +369,26 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/market/trades',
     {
-      schema: { params: VillageParametersSchema, body: TradeCommandSchema, response: { 200: VillageStateSchema } },
+      schema: {
+        params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        body: TradeCommandSchema,
+        response: { 200: Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]) },
+      },
     },
-    async (request) => {
+    async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return commandPlayerMarket(db, account.id, worldSlug, villageId, request.body as TradeCommand, tradeNavigation);
+      const command = request.body as TradeCommand;
+      if (request.headers['x-arbestra-protocol'] === '2')
+        return villageV2(
+          request,
+          reply,
+          (afterWrites) =>
+            commandPlayerMarket(db, account.id, worldSlug, villageId, command, tradeNavigation, afterWrites),
+          command.commandId,
+        );
+      return commandPlayerMarket(db, account.id, worldSlug, villageId, command, tradeNavigation);
     },
   );
   app.get(
@@ -556,13 +599,28 @@ export async function registerVillageRoutes(
       {
         schema: {
           params: VillageParametersSchema,
+          headers: VillageCommandV2HeadersSchema,
           body: ExploitationRequestSchema,
-          response: { 200: preview ? ExploitationPreviewSchema : VillageStateSchema },
+          response: {
+            200: preview
+              ? ExploitationPreviewSchema
+              : Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]),
+          },
         },
       },
-      async (request) => {
+      async (request, reply) => {
         const account = await authenticate(db, request.cookies[config.cookieName]);
         const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+        const order = request.body as ExploitationRequest;
+        if (!preview && request.headers['x-arbestra-protocol'] === '2') {
+          // The order's own UUID identifies the gesture.
+          return villageV2(
+            request,
+            reply,
+            (afterWrites) => startVillageExploitation(db, account.id, worldSlug, villageId, order, afterWrites),
+            order.commandId,
+          );
+        }
         return (preview ? previewVillageExploitation : startVillageExploitation)(
           db,
           account.id,
@@ -577,10 +635,10 @@ export async function registerVillageRoutes(
     {
       schema: {
         params: VillageParametersSchema,
-        headers: VillageSyncHeadersSchema,
+        headers: VillageCommandV2HeadersSchema,
         body: ScienceCommandSchema,
         response: {
-          200: Type.Union([VillageMutationResponseSchema, ExpeditionReceiptSchema]),
+          200: Type.Union([VillageMutationResponseSchema, ExpeditionReceiptSchema, VillageCommandConfirmationV2Schema]),
           202: ExpeditionReceiptSchema,
         },
       },
@@ -598,6 +656,10 @@ export async function registerVillageRoutes(
           .serializer(reply.compileSerializationSchema(ExpeditionReceiptSchema))
           .send(receipt);
       }
+      if (request.headers['x-arbestra-protocol'] === '2')
+        return villageV2(request, reply, (afterWrites) =>
+          commandVillageScience(db, account.id, worldSlug, villageId, command, 'commit', afterWrites),
+        );
       const options = villageReplyOptions(request.headers);
       const result = await commandVillageScience(db, account.id, worldSlug, villageId, command, options.replyMode);
       observationCommitted(request);
@@ -651,11 +713,19 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes',
     {
-      schema: { params: VillageParametersSchema, response: { 200: CatDiscoveryResponseSchema } },
+      schema: {
+        params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        response: { 200: Type.Union([CatDiscoveryResponseSchema, VillageCommandConfirmationV2Schema]) },
+      },
     },
-    async (request) => {
+    async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+      if (request.headers['x-arbestra-protocol'] === '2')
+        return villageV2(request, reply, (afterWrites) =>
+          discoverCatEyes(db, account.id, worldSlug, villageId, afterWrites),
+        );
       return discoverCatEyes(db, account.id, worldSlug, villageId);
     },
   );
@@ -1041,15 +1111,27 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/discover-supplies',
     {
-      schema: { params: BuildingParametersSchema, response: { 200: VillageStateSchema } },
+      schema: {
+        params: BuildingParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        response: { 200: Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]) },
+      },
     },
-    async (request) => {
+    async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId, buildingId } = request.params as {
         worldSlug: string;
         villageId: string;
         buildingId: string;
       };
+      if (request.headers['x-arbestra-protocol'] === '2')
+        return villageV2(request, reply, (afterWrites) =>
+          db
+            .transaction()
+            .execute((tx) =>
+              discoverBuildingSuppliesInTransaction(tx, account.id, worldSlug, villageId, buildingId, afterWrites),
+            ),
+        );
       return discoverBuildingSupplies(db, account.id, worldSlug, villageId, buildingId);
     },
   );

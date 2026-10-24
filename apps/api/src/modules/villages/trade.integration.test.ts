@@ -18,6 +18,7 @@ import { wakeTrade } from './complete-construction.js';
 import { assertNoInfrastructure } from './infrastructure.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
 import { spawnSpatialState } from '../onboarding/spawn-state.js';
+import { publishPrivateEffects } from './sync-v2-effects.js';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url);
@@ -296,6 +297,32 @@ it('reserves at publication, replays exactly and returns the reserve only once o
   await commandPlayerMarket(db, ids.account, slug, ids.village, cancellation);
   expect(await amount(ids.village, 'wood')).toBe(2000);
   expect((await offer()).status).toBe('cancelled');
+});
+it('answers a publication on the V2 contract with its effects, then replays without publishing', async () => {
+  const command = publication();
+  const published: string[] = [];
+  const commit = await commandPlayerMarket(
+    db,
+    ids.account,
+    slug,
+    ids.village,
+    command,
+    undefined,
+    async (tx, economy) => {
+      published.push(JSON.stringify(await publishPrivateEffects(tx, economy, 1)));
+    },
+  );
+  expect(commit).toMatchObject({ worldId: ids.world, villageId: ids.village });
+  expect(await amount(ids.village, 'wood')).toBe(1500);
+  // The effects alone carry the reserved stock.
+  expect(published).toHaveLength(1);
+  expect(published[0]).toContain('"amount":1500');
+  const replay = await commandPlayerMarket(db, ids.account, slug, ids.village, command, undefined, async () => {
+    published.push('replay');
+  });
+  expect(replay).toMatchObject({ worldId: ids.world, villageId: ids.village });
+  expect(published).toHaveLength(1);
+  expect(await amount(ids.village, 'wood')).toBe(1500);
 });
 it('takes the entire lot, delivers at arrival and return, and releases exactly the porters at return', async () => {
   await commandPlayerMarket(db, ids.account, slug, ids.village, publication());

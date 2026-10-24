@@ -433,3 +433,50 @@ it('sends upgrades and expansions on the V2 contract to their building routes', 
     transport.close();
   }
 });
+
+it('sends bodyless gestures with their identity in a header and refuses a foreign confirmation', async () => {
+  const sent: Array<{ path: string; command: string | null; body: unknown }> = [];
+  let foreign = false;
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream'))
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const headers = new Headers(init?.headers);
+    if (String(url).endsWith('/sync/read')) return json(bootstrap(Number(headers.get('x-arbestra-generation'))));
+    const commandId = headers.get('x-arbestra-command');
+    sent.push({
+      path: String(url).replace(/.*villages\/[^/]+/, ''),
+      command: commandId,
+      body: JSON.parse(String(init?.body)),
+    });
+    return json({
+      protocol: 2,
+      worldId,
+      villageId: foreign ? worldId : villageId,
+      commandId,
+      status: 'applied',
+      commandTime: '2026-10-23T00:00:00Z',
+    });
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: () => undefined,
+    expired: () => undefined,
+  });
+  try {
+    await transport.start(true);
+    const command = '88888888-8888-4888-8888-888888888888';
+    await expect(transport.discoverSupplies(epoch, command)).resolves.toMatchObject({ commandId: command });
+    await expect(transport.discoverCatEyes(command)).resolves.toMatchObject({ status: 'applied' });
+    await transport.science({ action: 'train', buildingId: epoch }, command);
+    expect(sent).toEqual([
+      { path: `/buildings/${epoch}/discover-supplies`, command, body: {} },
+      { path: '/discover-cat-eyes', command, body: {} },
+      { path: '/science', command, body: { action: 'train', buildingId: epoch } },
+    ]);
+    foreign = true;
+    await expect(transport.discoverCatEyes(command)).rejects.toThrow('Confirmation de commande invalide.');
+  } finally {
+    transport.close();
+  }
+});

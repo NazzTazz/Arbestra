@@ -1,4 +1,4 @@
-# Reprise — état au 23 octobre 2026
+# Reprise — état au 24 octobre 2026
 
 Index court. L'historique détaillé (preuves, mesures, sessions précédentes) est archivé dans [docs/HANDOFF-ARCHIVE-2026-10-23.md](docs/HANDOFF-ARCHIVE-2026-10-23.md).
 
@@ -16,6 +16,7 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 - Journal V2 : purge bornée (7 jours / 10 000 entrées par flux, `sync-v2-retention.ts`), dépendances de lot stockées une fois (059).
 - Coût des insertions en masse (058, 060, 061) : première installation RC1 en test 205 s → 11 s ; achèvement d'un bâtiment (relevé `science_places`) 3,0–3,5 s → 0,9 s de verrou village.
 - Pose V2 affichée dès la confirmation, sans attendre la relecture de présentation.
+- Retrait V1, tranche 1 (24 octobre) : science (programmes, formation, pause, rappel), fouille des réserves, yeux du Chat, exploitation mixte et marché joueurs répondent sur le contrat V2 générique `VillageCommandConfirmationV2` (effets privés, aucun état complet ; `command-v2.ts`, `SyncV2Transport.gesture`). UUID de geste : celui du reçu existant (exploitation, marché) ou l'en-tête `x-arbestra-command` (gestes sans reçu, naturellement idempotents). L'exploitation vérifie le départ initial par lecture ciblée de l'ordre avant la publication terminale.
 - Prettier sur tout le code (`16ca6cc` outillage, `102c5f4` formatage seul, ignoré par `git blame` via `.git-blame-ignore-revs`) ; règle dans AGENTS.md.
 
 Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md). Étude Astra : [docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md](docs/ETUDE-JOURNAL-SYNC-DEPENDANCES.md). Arbitrages : [docs/ARBITRAGES-OUVERTS-V2.md](docs/ARBITRAGES-OUVERTS-V2.md) (aucun ouvert).
@@ -36,4 +37,6 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 
 ## Suite proposée
 
-Retrait progressif du V1 (lecture `GET /village`, SSE historique, chemins de commande V1 encore utilisés par les autres gestes) ; recenser d'abord les gestes encore V1. La lenteur de pose reprend quand Tristan le décide.
+Inventaire V1 (24 octobre) — gestes encore V1 côté client en mode V2 : modification de chantier (`worksites/:id`, renvoie l'état complet), nivellement et terraformation (`admitLeveling`, état complet ; un devis changé renvoie un aperçu à modéliser en V2), voirie (déjà compacte : confirmation dédiée puis lecture V2), HUD (déjà compact), expéditions et intentions de récolte (reçus compacts), usine de dev. Routes sans appelant dans l'interface, à supprimer avec réécriture des tests qui s'en servent : `population/feed|rest`, `buildings/:id/harvest`, `garden-harvests`, `features/:id/clear`, `features/:id/extractions`, `market` + `market/preview` (oracle direct, remplacé le 18 octobre par le marché joueurs), `worksites` + `worksites/preview`. Restent ensuite `GET /village` (repli et chargement initial), le SSE historique et les projections V1.
+
+Ordre retenu : tranche D (nivellement, terraformation, chantiers), suppression des routes mortes, puis lots de [la spec de Fable](docs/SPEC-REFONTE-NAVIGATION-ECONOMIE.md) §7 sans décision produit (P1, L1, N1, E1) avant les lots V2 E–F ; correctifs C de [l'audit sync](docs/AUDIT-SYNC-V2-2026-10-23.md) avant le lot H. Décisions §8 de la spec en attente de Tristan. La lenteur de pose reprend quand Tristan le décide.

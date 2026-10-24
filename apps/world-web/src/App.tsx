@@ -219,6 +219,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     construct?: ReturnType<typeof useVillageSyncV2>['construct'];
     upgrade?: ReturnType<typeof useVillageSyncV2>['upgrade'];
     expand?: ReturnType<typeof useVillageSyncV2>['expand'];
+    science?: ReturnType<typeof useVillageSyncV2>['science'];
+    discoverSupplies?: ReturnType<typeof useVillageSyncV2>['discoverSupplies'];
+    discoverCatEyes?: ReturnType<typeof useVillageSyncV2>['discoverCatEyes'];
+    exploit?: ReturnType<typeof useVillageSyncV2>['exploit'];
+    trade?: ReturnType<typeof useVillageSyncV2>['trade'];
   }>({ ready: false, refresh: () => {} });
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -423,6 +428,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     construct: villageV2.construct,
     upgrade: villageV2.upgrade,
     expand: villageV2.expand,
+    science: villageV2.science,
+    discoverSupplies: villageV2.discoverSupplies,
+    discoverCatEyes: villageV2.discoverCatEyes,
+    exploit: villageV2.exploit,
+    trade: villageV2.trade,
   };
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
@@ -430,6 +440,12 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       return;
     catRequest.current = true;
     try {
+      const v2 = villageV2Ref.current;
+      // On V2 the confirmation's effects carry the accomplishment.
+      if (v2.ready && v2.discoverCatEyes) {
+        await v2.discoverCatEyes();
+        return;
+      }
       const result = await discoverCatEyes(current.world.slug, current.village.id);
       if (stateRef.current?.village.id !== current.village.id) return;
       applySnapshot(result);
@@ -934,7 +950,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     clearPreview();
   }
   async function runAction(
-    action: () => Promise<TimedVillageUpdate>,
+    action: () => Promise<TimedVillageUpdate | void>,
     success?: string,
     exit = false,
   ): Promise<boolean> {
@@ -943,7 +959,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setPendingAction(true);
     setError(null);
     try {
-      applySnapshot(await action());
+      // A V2 gesture has already updated the session through its effects.
+      const result = await action();
+      if (result) applySnapshot(result);
       markOracleProgress();
       if (exit) exitConstruction();
       if (success) pushNotification(success);
@@ -1658,8 +1676,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setExploitationIntentState('submitting');
     sessionStorage.setItem(pendingExploitationKey(current.village.id), JSON.stringify(request));
     try {
-      const snapshot = await startExploitation(worldSlug, current.village.id, request);
-      applySnapshot(snapshot);
+      const v2 = villageV2Ref.current;
+      // On V2 the confirmation's effects have already updated the village.
+      if (v2.ready && v2.exploit) await v2.exploit(request);
+      else applySnapshot(await startExploitation(worldSlug, current.village.id, request));
+      const after = stateRef.current?.village.id === current.village.id ? stateRef.current : null;
       markOracleProgress();
       succeeded = true;
       sessionStorage.removeItem(pendingExploitationKey(current.village.id));
@@ -1670,7 +1691,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       setMixedPreview(null);
       setMixedCells([]);
       setExploitationIntentState('idle');
-      const order = snapshot.state.village.exploitationOrders?.find(
+      const order = after?.village.exploitationOrders?.find(
         (item) =>
           item.workerCap === request.workerCap &&
           !current.village.exploitationOrders?.some((old) => old.id === item.id),
@@ -1683,7 +1704,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Lancement impossible.';
       setError(message);
-      if (reason instanceof ApiError && reason.status < 500) {
+      if ((reason instanceof ApiError || reason instanceof SyncV2HttpError) && reason.status < 500) {
         sessionStorage.removeItem(pendingExploitationKey(current.village.id));
         uncertainRequest.current = null;
         releasedExploitation.current = null;
@@ -1799,10 +1820,14 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setPendingAction(true);
     setError(null);
     try {
-      const result = await discoverOrRefreshSupplies(worldSlug, currentState.village.id, buildingId);
-      applySnapshot(result.snapshot);
+      const v2 = villageV2Ref.current;
+      if (v2.ready && v2.discoverSupplies) await v2.discoverSupplies(buildingId);
+      else {
+        const result = await discoverOrRefreshSupplies(worldSlug, currentState.village.id, buildingId);
+        applySnapshot(result.snapshot);
+        if (result.alreadyDiscovered) pushNotification('Les réserves avaient déjà été fouillées');
+      }
       markOracleProgress();
-      if (result.alreadyDiscovered) pushNotification('Les réserves avaient déjà été fouillées');
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Fouille impossible.';
       setError(message);
@@ -2187,10 +2212,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                   expeditions.submit(command);
                   return;
                 }
-                void runAction(
-                  () => commandScience(worldSlug, state.village.id, command),
-                  'Université · commande prise en compte',
-                );
+                void runAction(async () => {
+                  const v2 = villageV2Ref.current;
+                  if (!v2.ready || !v2.science) return commandScience(worldSlug, state.village.id, command);
+                  await v2.science(command);
+                }, 'Université · commande prise en compte');
               }}
             />
           )}
@@ -2360,7 +2386,13 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 revision={state.serverTime}
                 pending={pendingAction}
                 error={error}
-                onCommand={(command) => runAction(() => commandPlayerMarket(worldSlug, state.village.id, command))}
+                onCommand={(command) =>
+                  runAction(async () => {
+                    const v2 = villageV2Ref.current;
+                    if (!v2.ready || !v2.trade) return commandPlayerMarket(worldSlug, state.village.id, command);
+                    await v2.trade(command);
+                  })
+                }
                 onUpgrade={() => {
                   const quote = upgradePreview(state, selectedSiteId);
                   if (!quote || quote.error) {

@@ -5,8 +5,10 @@ import type { FastifyInstance } from 'fastify';
 import {
   applySyncV2Batch,
   constructionConfirmationV2IsValid,
+  villageCommandConfirmationV2IsValid,
   visibleSyncV2Scope,
   type ConstructionConfirmationV2,
+  type VillageCommandConfirmationV2,
 } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
@@ -328,3 +330,88 @@ it('answers an upgrade and a garden expansion on the V2 contract, replays withou
   expect((await post(`/buildings/${houseId}/upgrade`, { expectedLevel: 3 })).statusCode).toBe(400);
   expect((await post(`/buildings/${gardenId}/expansions`, { cells: [{ cellX: 66, cellY: 68 }] })).statusCode).toBe(400);
 }, 120000);
+
+it('answers bodyless village gestures on the V2 contract with their effects, and requires a gesture identity', async () => {
+  const hall = await db
+    .selectFrom('buildings')
+    .select('id')
+    .where('villageId', '=', ids.village)
+    .where('buildingType', '=', 'town-hall')
+    .executeTakeFirstOrThrow();
+  await db
+    .insertInto('buildingHiddenSupplies')
+    .values({ worldId: ids.world, villageId: ids.village, buildingId: hall.id, resourceCode: 'carrot', amount: 40 })
+    .execute();
+  const carrots = async () =>
+    Number(
+      (
+        await db
+          .selectFrom('villageResources')
+          .select('amount')
+          .where('villageId', '=', ids.village)
+          .where('resourceCode', '=', 'carrot')
+          .executeTakeFirstOrThrow()
+      ).amount,
+    );
+  const gesture = (path: string, commandId?: string) =>
+    app.inject({
+      method: 'POST',
+      url: root + path,
+      cookies: { session: token },
+      headers: {
+        'x-arbestra-protocol': '2',
+        'x-arbestra-generation': '4',
+        ...(commandId ? { 'x-arbestra-command': commandId } : {}),
+      },
+    });
+  const base = await v2Base();
+  const before = await carrots();
+  // Without an identity nothing is claimed.
+  expect((await gesture(`/buildings/${hall.id}/discover-supplies`)).statusCode).toBe(400);
+  expect(await carrots()).toBe(before);
+
+  const commandId = randomUUID();
+  const supplies = await gesture(`/buildings/${hall.id}/discover-supplies`, commandId);
+  expect(supplies.statusCode, supplies.body).toBe(200);
+  const confirmation = supplies.json<VillageCommandConfirmationV2>();
+  expect(villageCommandConfirmationV2IsValid(confirmation)).toBe(true);
+  expect(confirmation).toMatchObject({ commandId, worldId: ids.world, villageId: ids.village, status: 'applied' });
+  expect(await carrots()).toBe(before + 40);
+  // The effects alone carry the credited stock and the accomplishment.
+  const applied = applySyncV2Batch(base, confirmation.effects);
+  expect(applied.kind).toBe('applied');
+  if (applied.kind !== 'applied') return;
+  const visible = visibleSyncV2Scope(applied.state.scopes.get(`village:${ids.village}`)!);
+  expect(visible.get('resources:carrot')).toMatchObject({ amount: before + 40 });
+  expect(visible.get('accomplishments:town-hall-supplies')).toBeDefined();
+  // A retry is naturally idempotent: no second credit.
+  const retry = await gesture(`/buildings/${hall.id}/discover-supplies`, commandId);
+  expect(retry.statusCode, retry.body).toBe(200);
+  expect(await carrots()).toBe(before + 40);
+
+  const eyes = await gesture('/discover-cat-eyes', randomUUID());
+  expect(eyes.statusCode, eyes.body).toBe(200);
+  const seen = eyes.json<VillageCommandConfirmationV2>();
+  const next = applySyncV2Batch(applied.state, seen.effects);
+  expect(next.kind).toBe('applied');
+  if (next.kind !== 'applied') return;
+  expect(
+    visibleSyncV2Scope(next.state.scopes.get(`village:${ids.village}`)!).get('accomplishments:cat-eyes'),
+  ).toBeDefined();
+  const revisions = await streamRevisions();
+  const again = await gesture('/discover-cat-eyes', randomUUID());
+  expect(again.statusCode).toBe(200);
+  expect(again.json<VillageCommandConfirmationV2>().effects).toBeUndefined();
+  expect(await streamRevisions()).toEqual(revisions);
+
+  // A science refusal keeps the business error of the historical contract.
+  const science = await app.inject({
+    method: 'POST',
+    url: root + '/science',
+    cookies: { session: token },
+    headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '4', 'x-arbestra-command': randomUUID() },
+    payload: { action: 'train', buildingId: hall.id },
+  });
+  expect(science.statusCode).toBeGreaterThanOrEqual(400);
+  expect(science.statusCode).toBeLessThan(500);
+}, 60000);

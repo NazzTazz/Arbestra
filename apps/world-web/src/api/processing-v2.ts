@@ -1,3 +1,4 @@
+import { randomUUID } from '../random-uuid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   visibleSyncV2Scope,
@@ -311,9 +312,50 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
     if (!current) throw Error('Synchronisation indisponible.');
     return current.expand(buildingId, body);
   }, []);
+  const science = useCallback((command: Parameters<SyncV2Transport['science']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.science(command, randomUUID());
+  }, []);
+  const discoverSupplies = useCallback((buildingId: string) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.discoverSupplies(buildingId, randomUUID());
+  }, []);
+  const discoverCatEyes = useCallback(() => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.discoverCatEyes(randomUUID());
+  }, []);
+  const exploit = useCallback((request: Parameters<SyncV2Transport['exploit']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.exploit(request);
+  }, []);
+  const trade = useCallback((command: Parameters<SyncV2Transport['trade']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.trade(command);
+  }, []);
   /** Immediate delta read, e.g. after a command still answered by V1. */
   const refresh = useCallback(() => {
     transport.current?.reconnect();
   }, []);
-  return { status, villageReady, orders, unresolved, command, discard, refresh, construct, upgrade, expand };
+  return {
+    status,
+    villageReady,
+    orders,
+    unresolved,
+    command,
+    discard,
+    refresh,
+    construct,
+    upgrade,
+    expand,
+    science,
+    discoverSupplies,
+    discoverCatEyes,
+    exploit,
+    trade,
+  };
 }

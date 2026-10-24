@@ -5,7 +5,12 @@ import {
   commandReceiptReadResponseIsValid,
   villagePresentationIsValid,
   constructionConfirmationV2IsValid,
+  villageCommandConfirmationV2IsValid,
   type ConstructionConfirmationV2,
+  type ExploitationRequest,
+  type ScienceCommand,
+  type TradeCommand,
+  type VillageCommandConfirmationV2,
   type VillagePresentation,
   type ProcessingCommand,
   type ProcessingConfirmationV2,
@@ -374,15 +379,56 @@ export class SyncV2Transport {
       input.villageId !== this.villageId
     )
       throw Error('Confirmation de construction invalide.');
-    if (!this.closed && input.effects) {
-      try {
-        this.session.apply(input.effects);
-      } catch (error) {
-        if (!(error instanceof SyncV2ResyncRequired)) throw error;
-        this.reconnect();
-      }
-    }
+    this.applyEffects(input.effects);
     return input;
+  }
+  /** University command (programs, training, pause, recall) on the V2 contract. */
+  science(command: ScienceCommand, commandId: string): Promise<VillageCommandConfirmationV2> {
+    return this.gesture('/science', commandId, command);
+  }
+  /** Town-hall supplies discovery; a retry is idempotent on the server. */
+  discoverSupplies(buildingId: string, commandId: string): Promise<VillageCommandConfirmationV2> {
+    return this.gesture(`/buildings/${encodeURIComponent(buildingId)}/discover-supplies`, commandId);
+  }
+  discoverCatEyes(commandId: string): Promise<VillageCommandConfirmationV2> {
+    return this.gesture('/discover-cat-eyes', commandId);
+  }
+  /** Player market (publish, cancel, accept, oracle) with its receipt UUID. */
+  trade(command: TradeCommand): Promise<VillageCommandConfirmationV2> {
+    return this.gesture('/market/trades', command.commandId, command);
+  }
+  /** Mixed exploitation order; its own UUID identifies the gesture. */
+  exploit(request: ExploitationRequest): Promise<VillageCommandConfirmationV2> {
+    return this.gesture('/exploitation', request.commandId, request);
+  }
+  /** A gesture without a domain result: the UUID travels in a header, the
+   * commit's effects update the session at once. */
+  private async gesture(path: string, commandId: string, body?: object): Promise<VillageCommandConfirmationV2> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    // A JSON request needs a body; bodyless gestures send an empty object.
+    const input = await this.json(path, {
+      method: 'POST',
+      headers: { 'x-arbestra-command': commandId },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (
+      !villageCommandConfirmationV2IsValid(input) ||
+      input.commandId !== commandId ||
+      input.worldId !== this.worldId ||
+      input.villageId !== this.villageId
+    )
+      throw Error('Confirmation de commande invalide.');
+    this.applyEffects(input.effects);
+    return input;
+  }
+  private applyEffects(effects: SyncV2Batch | undefined) {
+    if (this.closed || !effects || !this.session) return;
+    try {
+      this.session.apply(effects);
+    } catch (error) {
+      if (!(error instanceof SyncV2ResyncRequired)) throw error;
+      this.reconnect();
+    }
   }
   /** Versioned presentation read; null when the given version is current.
    * With `knownRegion`, an unchanged terrain window comes back as null. */
