@@ -23,7 +23,7 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 
 ## Ouvert
 
-- Tests : la suite complète tourne en CI (`test.yml`, 4 tranches, ~4 min, verte au 24 octobre sur `wip/v2-commandes-bornees`). Le déploiement n'attend pas encore la CI : décision de Tristan en attente (recommandation : bloquer). En local, préférer les tests ciblés ; la suite série reste disponible (~30 min).
+- Tests : la suite complète tourne en CI (`test.yml`, 4 tranches, ~4 min, verte au 24 octobre sur `wip/v2-commandes-bornees`). Les workflows de déploiement rejouent la suite sur le commit taggé (`workflow_call`) et ne déploient que si elle passe (décision de Tristan du 24 octobre ; premier déploiement gardé : staging `staging-2026.10.24.4`, tests 4 min puis déploiement 1 min 20). En local, préférer les tests ciblés ; la suite série reste disponible (~30 min).
 
 - Gros villages (alpha, Catmark : 1 515 habitants en 1 513 cohortes, 39 M de mises à jour de lignes cumulées, 5 triggers par ligne) : chaque commande et tâche réécrivait toutes les cohortes, et le lecteur V2 refusait plus de 1 024 cohortes (bootstrap 500, repli silencieux V1). Corrigé : plafond du lecteur porté à 4 096 (`085f105`, déployé), puis fusion des cohortes inactives par point d'énergie (règle dans [économie](docs/architecture/economy.md)). Reste à mesurer sur alpha après déploiement ; les triggers par ligne de `population_cohorts` (statement-level, comme 060/061) restent une piste si le coût persiste.
 

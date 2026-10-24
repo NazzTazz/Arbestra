@@ -143,7 +143,7 @@ Options locales utiles : `localStorage['arbestra:sync-v2']` (V2 en développemen
 | Une erreur métier renvoyée au joueur | rechercher son code (`'EXPLOITATION_EMPTY'`…) : il est unique |
 | Le contrat d'une réponse | `packages/contracts/src/<domaine>.ts`, schéma `…Schema` |
 | Pourquoi une requête est lente en prod | activer `arbestra:timing`, lire `arb_*`, `arbsql_n` dans `Server-Timing` ; [operations.md](architecture/operations.md) |
-| Déployer | tags `staging-*` / `alpha-*` sur `main` ; [DEPLOIEMENT-VPS.md](DEPLOIEMENT-VPS.md) |
+| Déployer | tags `staging-*` / `alpha-*` sur `main` : la suite est rejouée et doit passer avant le déploiement ; [DEPLOIEMENT-VPS.md](DEPLOIEMENT-VPS.md) |
 
 ## 8. Pièges connus
 
