@@ -14,7 +14,7 @@ import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-map.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected construction test DB');
 const statements: string[] = [];
 const errors: Error[] = [];

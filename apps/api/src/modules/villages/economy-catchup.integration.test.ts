@@ -13,7 +13,7 @@ import { commandVillageProcessing } from './service.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected catch-up test database');
 const schema = 'catchup_test_' + randomUUID().replaceAll('-', ''),
   admin = new Pool({ connectionString: url, max: 1 });

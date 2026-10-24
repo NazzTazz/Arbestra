@@ -19,7 +19,7 @@ import { up as rc1BatchVertices } from '../../database/migrations/058_game_sync_
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected shared-writer database');
 const schema = 'shared_writers_test_' + randomUUID().replaceAll('-', '');
 const admin = new pg.Pool({ connectionString: url, max: 1 });

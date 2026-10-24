@@ -16,7 +16,7 @@ import { browsePlayerMarket } from './trade-service.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected preview test database');
 const db = createDatabase(url);
 let workshopId: string, dueId: string;

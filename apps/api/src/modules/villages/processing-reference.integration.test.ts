@@ -19,7 +19,8 @@ import type { state as stateType } from './service.js';
 const enabled = process.env.ARBESTRA_HISTORICAL_ORACLE === '1';
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test') throw Error('Unexpected oracle database');
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
+  throw Error('Unexpected oracle database');
 const db = createDatabase(url),
   through = new Date('2026-10-21T12:00:00Z');
 afterAll(() => db.destroy());

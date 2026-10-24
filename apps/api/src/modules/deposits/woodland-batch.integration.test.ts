@@ -7,7 +7,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { materializeWoodland, materializeWoodlands } from './woodland.js';
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected woodland batch fixture DB');
 let queries = 0;
 const db = createDatabase(url).withPlugin({

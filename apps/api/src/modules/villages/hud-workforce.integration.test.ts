@@ -22,7 +22,7 @@ import { up as migrateHud } from '../../database/migrations/050_hud_workforce.js
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected HUD test database');
 const db = createDatabase(url),
   worldId = DEVELOPMENT_IDS.world,

@@ -16,7 +16,7 @@ const url = testDatabaseUrl(),
   target = new URL(url);
 if (
   target.hostname !== '127.0.0.1' ||
-  target.pathname !== '/arbestra_test' ||
+  !/^\/arbestra(_\d+)?_test$/.test(target.pathname) ||
   (target.port && target.port !== '5432')
 ) {
   throw Error('Unexpected private NOC test database');

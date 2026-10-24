@@ -4,7 +4,7 @@ import { createDatabase } from './connection.js';
 import { testDatabaseUrl } from './test-environment.js';
 it('survives a transaction timeout during an application gap and replaces the dead connection', async () => {
   const target = new URL(testDatabaseUrl());
-  if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+  if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
     throw Error('Expected local test database');
   const errors: Error[] = [],
     db = createDatabase(target.href, (e) => errors.push(e));

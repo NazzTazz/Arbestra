@@ -8,7 +8,7 @@ import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-compute-protocol.js'
 import { readRc1Ground } from './rc1-ground.js';
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected isolated RC1 ground DB');
 const db = createDatabase(url),
   account = randomUUID(),

@@ -15,7 +15,7 @@ import { spawnSpatialState } from './spawn-state.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected spawn-map test target');
 const db = createDatabase(url),
   config = loadConfig({ ...process.env, DATABASE_URL: url, NODE_ENV: 'test' });

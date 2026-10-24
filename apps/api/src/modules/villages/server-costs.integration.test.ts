@@ -34,7 +34,7 @@ const receiptsOnly = process.env.ARBESTRA_AUDIT_RECEIPTS === '1';
 const v2 = process.env.ARBESTRA_AUDIT_V2 === '1';
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected cost audit database');
 class ObservedDialect extends PostgresDialect {
   override createDriver() {

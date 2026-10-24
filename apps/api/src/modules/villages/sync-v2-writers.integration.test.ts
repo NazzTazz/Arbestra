@@ -14,7 +14,7 @@ import { privateReaderComponents } from './sync-v2-readers.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected writer-test database');
 const schema = `sync_writers_test_${randomUUID().replaceAll('-', '')}`;
 const admin = new pg.Pool({ connectionString: url, max: 1 });

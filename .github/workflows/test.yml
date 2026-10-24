@@ -1,0 +1,65 @@
+name: Tests
+on:
+  push:
+    branches: [main, 'wip/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24.22.0'
+      - run: npm install --global pnpm@10.15.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @arbestra/contracts build
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+  # The suite runs serially on one database per machine; four machines take
+  # a quarter of the files each (vitest --shard).
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: arbestra
+          POSTGRES_PASSWORD: arbestra
+          POSTGRES_DB: arbestra_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U arbestra -d arbestra_test"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      # Throwaway CI service, not a secret.
+      TEST_DATABASE_URL: postgres://arbestra:arbestra@127.0.0.1:5432/arbestra_test
+      ARBESTRA_TEST_WORKERS: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24.22.0'
+      - run: npm install --global pnpm@10.15.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @arbestra/contracts build
+      - name: Migrate and seed the test database
+        run: pnpm --filter @arbestra/api db:migrate:test && pnpm --filter @arbestra/api db:reset-e2e
+      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/4

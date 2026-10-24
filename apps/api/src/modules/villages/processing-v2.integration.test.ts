@@ -22,7 +22,7 @@ import { captureSyncV2 } from './sync-v2-capture.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected processing V2 test database');
 const db = createDatabase(url);
 const ids = { world: randomUUID(), village: randomUUID(), account: randomUUID() },

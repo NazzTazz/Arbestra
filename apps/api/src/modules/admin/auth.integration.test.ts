@@ -18,7 +18,7 @@ import type { HttpRequestsPage } from '@arbestra/contracts';
 
 const databaseUrl = testDatabaseUrl();
 const target = new URL(databaseUrl);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected administrator fixture DB');
 const db = createDatabase(databaseUrl);
 const adminId = randomUUID(),

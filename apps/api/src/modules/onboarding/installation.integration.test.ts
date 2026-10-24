@@ -39,7 +39,7 @@ import { installVillage, poseRemainingStarter, readInstallation } from './instal
 import type { GeneratedLandscape, SpawnPoseRequest } from '@arbestra/contracts';
 const url = testDatabaseUrl(),
   target = new URL(url);
-if (target.hostname !== '127.0.0.1' || target.pathname !== '/arbestra_test')
+if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
   throw Error('Unexpected installation test database');
 const db = createDatabase(url),
   compute = new SpawnCompute(),
