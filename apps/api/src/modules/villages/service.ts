@@ -466,7 +466,8 @@ export async function stoneTravelPath(
     }),
   );
   const routeState = {
-    world: { widthCells: village.widthCells, heightCells: village.heightCells },
+    // The command lane checks the ground belongs to this world.
+    world: { id: village.worldId, widthCells: village.widthCells, heightCells: village.heightCells },
     village: { anchorCellX: village.anchorCellX, anchorCellY: village.anchorCellY },
     region: {
       originCellX,
