@@ -187,7 +187,7 @@ beforeAll(async () => {
     await authenticate(db, request.cookies.arbestra_session);
     return receiveHarvestIntent(db, owner, slug, village, request.body as Parameters<typeof receiveHarvestIntent>[4]);
   });
-  app.post('/api/worlds/:worldSlug/villages/:villageId/market', async (request) => {
+  app.post('/api/worlds/:worldSlug/villages/:villageId/market/trades', async (request) => {
     await authenticate(db, request.cookies.arbestra_session);
     await ownedVillage(db, owner, slug, village);
     await db.transaction().execute(async (tx) => {
@@ -423,7 +423,7 @@ it('keeps the persisted mixed harvest receipt separate from its successful HTTP 
 it('retains a proven commit when response preparation fails', async () => {
   const response = await app.inject({
     method: 'POST',
-    url: '/api/worlds/' + slug + '/villages/' + village + '/market',
+    url: '/api/worlds/' + slug + '/villages/' + village + '/market/trades',
     headers: playerHeaders,
     payload: {},
   });
@@ -436,7 +436,7 @@ it('retains a proven commit when response preparation fails', async () => {
     .executeTakeFirstOrThrow();
   expect(Number(stored.amount)).toBe(2100);
   expect(hub.status(lease.id, admin).actions.at(-1)).toMatchObject({
-    kind: 'market',
+    kind: 'market/trades',
     businessOutcome: 'accepted',
     httpOutcome: 'finished',
     statusCode: 500,
@@ -592,7 +592,7 @@ it('opens the world client using a one-use grant, isolated read cookie and revoc
     ).toBe(401);
     const command = await app.inject({
       method: 'POST',
-      url: '/api/worlds/' + slug + '/villages/' + village + '/market',
+      url: '/api/worlds/' + slug + '/villages/' + village + '/market/trades',
       headers: view,
       payload: {},
     });

@@ -3,7 +3,6 @@ import { travelDuration } from '@arbestra/contracts';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabase } from '../../database/connection.js';
-import { buildApp } from '../../app.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import {
   up as migrateStone,
@@ -558,53 +557,6 @@ describe.sequential('stone regression proofs', () => {
     } finally {
       release.resolve();
       await worker;
-    }
-  }, 40000);
-
-  it('E: HTTP retry returns the same work before/after completion and rejects extra fields', async () => {
-    const id = await stone();
-    const app = await buildApp(
-      {
-        databaseUrl,
-        host: '127.0.0.1',
-        port: 0,
-        isProduction: false,
-        cookieName: 'test_session',
-        sessionTtlDays: 1,
-        constructionDurationOverrideMs: 0,
-        scheduledTaskPollIntervalMs: 250,
-      },
-      db,
-    );
-    try {
-      const login = await app.inject({
-        method: 'POST',
-        url: '/api/auth/login',
-        payload: { email: 'player@arbestra.local', password: 'arbestra' },
-      });
-      const cookies = { test_session: login.cookies[0]!.value },
-        url = `/api/worlds/aube/villages/${villageId}/features/${id}/extractions`;
-      const payload = { commandId: randomUUID(), workerCount: 2 };
-      const first = await app.inject({ method: 'POST', url, cookies, payload });
-      expect(first.statusCode, first.body).toBe(200);
-      const retry = await app.inject({ method: 'POST', url, cookies, payload });
-      expect(retry.statusCode, retry.body).toBe(200);
-      expect(retry.json().extraction.id).toBe(first.json().extraction.id);
-      await settle(new Date(first.json().extraction.completesAt));
-      const done = await app.inject({ method: 'POST', url, cookies, payload });
-      expect(done.statusCode, done.body).toBe(200);
-      expect(done.json().extraction).toMatchObject({ id: first.json().extraction.id, status: 'completed' });
-      expect(await stock()).toBe(100);
-      expect((await rows()).works).toHaveLength(1);
-      expect(
-        (await app.inject({ method: 'POST', url, cookies, payload: { ...payload, workerCount: 1 } })).json().code,
-      ).toBe('COMMAND_ID_CONFLICT');
-      for (const body of [undefined, { ...payload, workerCount: 0 }, { ...payload, quantity: 1000 }]) {
-        const result = await app.inject({ method: 'POST', url, cookies, ...(body ? { payload: body } : {}) });
-        expect(result.statusCode, result.body).toBe(400);
-      }
-    } finally {
-      await app.close();
     }
   }, 40000);
 

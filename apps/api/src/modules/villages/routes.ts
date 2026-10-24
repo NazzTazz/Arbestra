@@ -44,19 +44,9 @@ import { commandProcessingV2 } from './processing-v2.js';
 import { expandGardenV2, placeBuildingV2, upgradeBuildingV2 } from './construction-v2.js';
 import type { BuildingType } from '@arbestra/contracts';
 import { assertSyncV2Available } from './sync-v2-routes.js';
-import {
-  MarketRequestSchema,
-  MarketCommandSchema,
-  MarketPreviewSchema,
-  type MarketRequest,
-  type MarketCommand,
-} from '@arbestra/contracts';
-import { commandVillageMarket, previewVillageMarket } from './service.js';
 import { TradeCommandSchema, TradePageSchema, TradePreviewSchema, type TradeCommand } from '@arbestra/contracts';
 import { commandPlayerMarket, browsePlayerMarket, previewPlayerTrade } from './trade-service.js';
 import type { NavigationExecutor } from '../navigation/compute.js';
-import { GardenSelectionHarvestRequestSchema, type TravelCell } from '@arbestra/contracts';
-import { harvestGardenSelection } from './service.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   ConstructionConfirmationSchema,
@@ -79,18 +69,12 @@ import {
   BuildRequestSchema,
   DepositDetailsSchema,
   ExpansionRequestSchema,
-  ExtractionRequestSchema,
-  ExtractionResponseSchema,
   ExtractionWorksiteResponseSchema,
-  ExtractionWorksiteSelectionSchema,
-  StartExtractionWorksiteRequestSchema,
   ChangeExtractionWorksiteRequestSchema,
-  HarvestRequestSchema,
-  PopulationCommandRequestSchema,
   UpgradeRequestSchema,
   VillageStateSchema,
 } from '@arbestra/contracts';
-import type { StartExtractionWorksiteRequest, ChangeExtractionWorksiteRequest } from '@arbestra/contracts';
+import type { ChangeExtractionWorksiteRequest } from '@arbestra/contracts';
 import { ExploitationRequestSchema, ExploitationPreviewSchema, type ExploitationRequest } from '@arbestra/contracts';
 import { previewVillageExploitation, startVillageExploitation } from './service.js';
 
@@ -99,20 +83,13 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
 import {
-  clearVillageWoodland,
   discoverCatEyes,
   constructBuilding,
   constructBuildingArea,
   discoverBuildingSupplies,
   expandGarden,
-  feedPopulation,
   getStoneDepositDetails,
   getVillageState,
-  harvestGarden,
-  restPopulation,
-  startVillageStoneExtraction,
-  startVillageWorksite,
-  previewVillageWorksite,
   changeVillageWorksite,
   upgradeBuilding,
 } from './service.js';
@@ -461,43 +438,6 @@ export async function registerVillageRoutes(
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
       return receiveHarvestIntent(db, account.id, worldSlug, villageId, request.body as HarvestIntent);
-    },
-  );
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/market/preview',
-    {
-      schema: { params: VillageParametersSchema, body: MarketRequestSchema, response: { 200: MarketPreviewSchema } },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return previewVillageMarket(db, account.id, worldSlug, villageId, request.body as MarketRequest);
-    },
-  );
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/market',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        headers: VillageSyncHeadersSchema,
-        body: MarketCommandSchema,
-        response: { 200: VillageMutationResponseSchema },
-      },
-    },
-    async (request, reply) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const options = villageReplyOptions(request.headers);
-      const result = await commandVillageMarket(
-        db,
-        account.id,
-        worldSlug,
-        villageId,
-        request.body as MarketCommand,
-        options.replyMode,
-      );
-      observationCommitted(request);
-      return commandResponse(reply, account.id, worldSlug, result, options.base);
     },
   );
   app.post(
@@ -983,39 +923,6 @@ export async function registerVillageRoutes(
     },
   );
 
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/garden-harvests',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        body: GardenSelectionHarvestRequestSchema,
-        response: { 200: VillageStateSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const { commandId, cells } = request.body as { commandId: string; cells: TravelCell[] };
-      return harvestGardenSelection(db, account.id, worldSlug, villageId, cells, commandId);
-    },
-  );
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/harvest',
-    {
-      schema: { params: BuildingParametersSchema, body: HarvestRequestSchema, response: { 200: VillageStateSchema } },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId, buildingId } = request.params as {
-        worldSlug: string;
-        villageId: string;
-        buildingId: string;
-      };
-      const { commandId, cellX, cellY } = request.body as { commandId: string; cellX: number; cellY: number };
-      return harvestGarden(db, account.id, worldSlug, villageId, buildingId, cellX, cellY, commandId);
-    },
-  );
-
   app.get(
     '/api/worlds/:worldSlug/villages/:villageId/features/:featureId',
     {
@@ -1032,73 +939,6 @@ export async function registerVillageRoutes(
         featureId: string;
       };
       return getStoneDepositDetails(db, account.id, worldSlug, villageId, featureId);
-    },
-  );
-
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/features/:featureId/extractions',
-    {
-      preValidation: async (request) => {
-        if (
-          request.body &&
-          typeof request.body === 'object' &&
-          Object.keys(request.body).some((key) => key !== 'commandId' && key !== 'workerCount')
-        )
-          throw new HttpError(400, 'VALIDATION_ERROR', 'Champs de commande interdits.');
-      },
-      schema: {
-        params: Type.Object({ ...VillageParametersSchema.properties, featureId: Type.String({ format: 'uuid' }) }),
-        body: ExtractionRequestSchema,
-        response: { 200: ExtractionResponseSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId, featureId } = request.params as {
-        worldSlug: string;
-        villageId: string;
-        featureId: string;
-      };
-      const { commandId, workerCount } = request.body as { commandId: string; workerCount: number };
-      return startVillageStoneExtraction(db, account.id, worldSlug, villageId, featureId, commandId, workerCount);
-    },
-  );
-
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/worksites',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        body: StartExtractionWorksiteRequestSchema,
-        response: { 200: ExtractionWorksiteResponseSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return startVillageWorksite(db, account.id, worldSlug, villageId, request.body as StartExtractionWorksiteRequest);
-    },
-  );
-
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/worksites/preview',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        body: StartExtractionWorksiteRequestSchema,
-        response: { 200: ExtractionWorksiteSelectionSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return previewVillageWorksite(
-        db,
-        account.id,
-        worldSlug,
-        villageId,
-        request.body as StartExtractionWorksiteRequest,
-      );
     },
   );
 
@@ -1139,25 +979,6 @@ export async function registerVillageRoutes(
   );
 
   app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/features/:featureId/clear',
-    {
-      schema: {
-        params: Type.Object({ ...VillageParametersSchema.properties, featureId: Type.String({ format: 'uuid' }) }),
-        response: { 200: VillageStateSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId, featureId } = request.params as {
-        worldSlug: string;
-        villageId: string;
-        featureId: string;
-      };
-      return clearVillageWoodland(db, account.id, worldSlug, villageId, featureId);
-    },
-  );
-
-  app.post(
     '/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/discover-supplies',
     {
       schema: {
@@ -1184,26 +1005,4 @@ export async function registerVillageRoutes(
       return discoverBuildingSupplies(db, account.id, worldSlug, villageId, buildingId);
     },
   );
-
-  for (const [action, handler] of [
-    ['feed', feedPopulation],
-    ['rest', restPopulation],
-  ] as const) {
-    app.post(
-      `/api/worlds/:worldSlug/villages/:villageId/population/${action}`,
-      {
-        schema: {
-          params: VillageParametersSchema,
-          body: PopulationCommandRequestSchema,
-          response: { 200: VillageStateSchema },
-        },
-      },
-      async (request) => {
-        const account = await authenticate(db, request.cookies[config.cookieName]);
-        const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-        const { commandId, count } = request.body as { commandId: string; count: number };
-        return handler(db, account.id, worldSlug, villageId, commandId, count);
-      },
-    );
-  }
 }

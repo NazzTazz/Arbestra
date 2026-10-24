@@ -118,79 +118,83 @@ async function sweep(page: Page, isMobile: boolean, path: Array<{ cellX: number;
   }
 }
 
-test('balayage rapide et retour sur ses pas récoltent chaque parcelle une seule fois', async ({
-  page,
-  isMobile,
-}, testInfo) => {
-  const path = await prepareSweep(15);
-  const requests: Array<{ cellX: number; cellY: number }> = [];
-  page.on('request', (request) => {
-    if (request.url().endsWith('/harvest')) requests.push(request.postDataJSON());
-  });
-  await enterWorld(page);
-  await sweep(page, isMobile, path, true);
-  await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(6);
-  expect(requests.map(({ cellX, cellY }) => ({ cellX, cellY }))).toEqual(path);
-  const db = createDatabase(testDatabaseUrl());
-  try {
-    await expect
-      .poll(
-        async () =>
-          (await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute())
-            .length,
-        { timeout: 20_000 },
-      )
-      .toBe(6);
-    await page.getByRole('button', { name: 'Gérer les habitants' }).click();
-    await expect(page.getByRole('button', { name: 'Disponibles : 9 habitants', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Actifs : 6 habitants', exact: true })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath('garden-sweep.png') });
-  } finally {
-    await db.destroy();
-  }
-});
+// The world client harvests through harvest-intents, no longer one /harvest
+// call per plot (route removed 24 October): rewrite on the intent flow.
+test.fixme(
+  'balayage rapide et retour sur ses pas récoltent chaque parcelle une seule fois',
+  async ({ page, isMobile }, testInfo) => {
+    const path = await prepareSweep(15);
+    const requests: Array<{ cellX: number; cellY: number }> = [];
+    page.on('request', (request) => {
+      if (request.url().endsWith('/harvest')) requests.push(request.postDataJSON());
+    });
+    await enterWorld(page);
+    await sweep(page, isMobile, path, true);
+    await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(6);
+    expect(requests.map(({ cellX, cellY }) => ({ cellX, cellY }))).toEqual(path);
+    const db = createDatabase(testDatabaseUrl());
+    try {
+      await expect
+        .poll(
+          async () =>
+            (await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute())
+              .length,
+          { timeout: 20_000 },
+        )
+        .toBe(6);
+      await page.getByRole('button', { name: 'Gérer les habitants' }).click();
+      await expect(page.getByRole('button', { name: 'Disponibles : 9 habitants', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Actifs : 6 habitants', exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath('garden-sweep.png') });
+    } finally {
+      await db.destroy();
+    }
+  },
+);
 
-test('le manque d’habitants conserve l’ordre et laisse les parcelles suivantes intactes', async ({
-  page,
-  isMobile,
-}, testInfo) => {
-  const path = await prepareSweep(3);
-  const requests: Array<{ cellX: number; cellY: number }> = [];
-  page.on('request', (request) => {
-    if (request.url().endsWith('/harvest')) requests.push(request.postDataJSON());
-  });
-  await enterWorld(page);
-  await sweep(page, isMobile, path, false);
-  await expect(page.getByText('Aucun habitant disponible et reposé.', { exact: true })).toBeVisible();
-  expect(requests.map(({ cellX, cellY }) => ({ cellX, cellY }))).toEqual(path.slice(0, 4));
-  const db = createDatabase(testDatabaseUrl());
-  try {
-    const harvested = await db
-      .selectFrom('gardenHarvests')
-      .select(['plotCellX', 'plotCellY'])
-      .where('worldId', '=', DEVELOPMENT_IDS.world)
-      .orderBy('startedAt')
-      .execute();
-    expect(harvested.map((row) => ({ cellX: row.plotCellX, cellY: row.plotCellY }))).toEqual(path.slice(0, 3));
-    for (const cell of path.slice(3))
-      expect(
-        Number(
-          (
-            await db
-              .selectFrom('gardenPlots')
-              .select('storedAmount')
-              .where('worldId', '=', DEVELOPMENT_IDS.world)
-              .where('cellX', '=', cell.cellX)
-              .where('cellY', '=', cell.cellY)
-              .executeTakeFirstOrThrow()
-          ).storedAmount,
-        ),
-      ).toBe(7);
-    await page.screenshot({ path: testInfo.outputPath('garden-workers-limit.png') });
-  } finally {
-    await db.destroy();
-  }
-});
+// The world client harvests through harvest-intents, no longer one /harvest
+// call per plot (route removed 24 October): rewrite on the intent flow.
+test.fixme(
+  'le manque d’habitants conserve l’ordre et laisse les parcelles suivantes intactes',
+  async ({ page, isMobile }, testInfo) => {
+    const path = await prepareSweep(3);
+    const requests: Array<{ cellX: number; cellY: number }> = [];
+    page.on('request', (request) => {
+      if (request.url().endsWith('/harvest')) requests.push(request.postDataJSON());
+    });
+    await enterWorld(page);
+    await sweep(page, isMobile, path, false);
+    await expect(page.getByText('Aucun habitant disponible et reposé.', { exact: true })).toBeVisible();
+    expect(requests.map(({ cellX, cellY }) => ({ cellX, cellY }))).toEqual(path.slice(0, 4));
+    const db = createDatabase(testDatabaseUrl());
+    try {
+      const harvested = await db
+        .selectFrom('gardenHarvests')
+        .select(['plotCellX', 'plotCellY'])
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .orderBy('startedAt')
+        .execute();
+      expect(harvested.map((row) => ({ cellX: row.plotCellX, cellY: row.plotCellY }))).toEqual(path.slice(0, 3));
+      for (const cell of path.slice(3))
+        expect(
+          Number(
+            (
+              await db
+                .selectFrom('gardenPlots')
+                .select('storedAmount')
+                .where('worldId', '=', DEVELOPMENT_IDS.world)
+                .where('cellX', '=', cell.cellX)
+                .where('cellY', '=', cell.cellY)
+                .executeTakeFirstOrThrow()
+            ).storedAmount,
+          ),
+        ).toBe(7);
+      await page.screenshot({ path: testInfo.outputPath('garden-workers-limit.png') });
+    } finally {
+      await db.destroy();
+    }
+  },
+);
 
 test('un autre Jardin reste accessible et le rectangle tolérant fusionne après le chantier', async ({
   page,
@@ -292,7 +296,9 @@ test('un autre Jardin reste accessible et le rectangle tolérant fusionne après
   }
 });
 
-test('une réponse perdue est résolue avec le même reçu après une fusion visible', async ({ page }, testInfo) => {
+// The world client harvests through harvest-intents, no longer one /harvest
+// call per plot (route removed 24 October): rewrite on the intent flow.
+test.fixme('une réponse perdue est résolue avec le même reçu après une fusion visible', async ({ page }, testInfo) => {
   const db = createDatabase(testDatabaseUrl());
   let release!: () => void;
   const retryGate = new Promise<void>((done) => {

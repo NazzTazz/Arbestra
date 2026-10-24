@@ -1,3 +1,4 @@
+import { startVillageWorksite } from './service.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -325,8 +326,6 @@ it.runIf(enabled && !repeated)(
     await request('harvest receipts', '/harvest-intents?ids=' + randomUUID());
     await request('expedition receipts', '/science/expeditions');
     await request('market offers', '/market/offers');
-    const market = { offeredResource: 'wood', requestedResource: 'stone', amount: 100 };
-    const quote = await request('market preview', '/market/preview', market);
     await request('processing preview', '/processing/preview', { buildingId: workshopId, workerCount: 1 });
     const pool = { commandId: randomUUID(), resource: 'wood', action: 'sites-up' };
     await request('pool add', '/extraction-pools', pool);
@@ -344,9 +343,6 @@ it.runIf(enabled && !repeated)(
     const resting = { commandId: randomUUID(), action: 'rest' };
     await request('population rest', '/population/gestures', resting);
     await request('population retry', '/population/gestures', resting);
-    const trade = { ...market, commandId: randomUUID(), expectedReceivedAmount: quote.receivedAmount };
-    await request('market exchange', '/market', trade);
-    await request('market retry', '/market', trade);
     const process = { action: 'start', commandId: randomUUID(), buildingId: workshopId, lots: 2, workerCount: 1 };
     const processing = await request('processing start', '/processing', process);
     await request('processing retry', '/processing', process);
@@ -372,7 +368,6 @@ it.runIf(enabled && !repeated)(
       'x-village-revision': String(base.syncRevision),
       'x-village-server-time': base.serverTime,
     };
-    await request('market incremental retry', '/market', trade, 200, syncHeaders);
     await request('processing incremental retry', '/processing', process, 200, syncHeaders);
     await request(
       'house upgrade ack',
@@ -419,12 +414,15 @@ it.runIf(enabled && !repeated)(
       stone: [featureIds[2]!],
     };
     await request('stone details', `/features/${featureIds[0]}`);
-    await request('worksite preview', '/worksites/preview', site);
     await request('exploitation preview stone', '/exploitation/preview', exploit);
-    const extraction = { commandId: randomUUID(), workerCount: 1 };
-    await request('stone extraction', `/features/${featureIds[0]}/extractions`, extraction);
-    await request('stone extraction retry', `/features/${featureIds[0]}/extractions`, extraction);
-    const startedSite = await request('worksite start', '/worksites', site);
+    // Worksites start through exploitation orders; the fixture creates one directly.
+    const startedSite = await startVillageWorksite(
+      db,
+      accountId,
+      slug,
+      villageId,
+      site as Parameters<typeof startVillageWorksite>[4],
+    );
     await request('worksite pause', `/worksites/${startedSite.worksite.id}`, {
       commandId: randomUUID(),
       action: 'pause',
@@ -473,17 +471,6 @@ it.runIf(enabled && !repeated)(
       syncHeaders,
     );
     await request('science pause', '/science', { action: 'pause', programCode: 'mathematics-1' }, 200, syncHeaders);
-    const marketBase = await request('market modern base', `/api/worlds/${slug}/village`);
-    const marketHeaders = {
-      'x-village-sync': '1',
-      'x-village-revision': String(marketBase.syncRevision),
-      'x-village-server-time': marketBase.serverTime,
-    };
-    const modernTrade = { ...trade, commandId: randomUUID() };
-    expect((await request('market incremental exchange', '/market', modernTrade, 200, marketHeaders)).kind).toBe(
-      'frame',
-    );
-    await request('market incremental confirmed retry', '/market', modernTrade, 200, marketHeaders);
     const processingBase = await request('processing modern base', `/api/worlds/${slug}/village`);
     const processingHeaders = {
       'x-village-sync': '1',

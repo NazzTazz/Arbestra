@@ -3,12 +3,11 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase } from '../../database/connection.js';
-import { buildApp } from '../../app.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { up as migrateVillageAccomplishments } from '../../database/migrations/014_village_accomplishments.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import type { Database } from '../../database/schema.js';
-import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
+import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import {
   discoverBuildingSupplies,
@@ -136,82 +135,6 @@ describe.sequential('population with PostgreSQL', () => {
       // Equal state must also avoid a new physical row version and its row triggers.
       expect(await tuples()).toEqual(before);
     });
-  });
-
-  it('rejects a bodyless harvest through HTTP without an internal error', async () => {
-    const app = await buildApp(
-      {
-        databaseUrl,
-        host: '127.0.0.1',
-        port: 0,
-        isProduction: false,
-        cookieName: 'test_session',
-        sessionTtlDays: 1,
-        constructionDurationOverrideMs: 0,
-        scheduledTaskPollIntervalMs: 250,
-      },
-      db,
-    );
-    try {
-      const login = await app.inject({
-        method: 'POST',
-        url: '/api/auth/login',
-        payload: { email: 'player@arbestra.local', password: 'arbestra' },
-      });
-      expect(login.statusCode).toBe(200);
-      const response = await app.inject({
-        method: 'POST',
-        url: `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/buildings/${DEVELOPMENT_IDS.townHall}/harvest`,
-        cookies: { test_session: login.cookies[0]!.value },
-      });
-      expect(response.statusCode).toBe(400);
-      expect(response.json().code).toBe('VALIDATION_ERROR');
-      const cookies = { test_session: login.cookies[0]!.value };
-      const base = `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/buildings`;
-      const built = await app.inject({
-        method: 'POST',
-        url: base,
-        cookies,
-        payload: { buildingType: 'garden', ...DEVELOPMENT_CELLS.garden },
-      });
-      expect(built.statusCode, built.body).toBe(201);
-      const buildingId = built
-        .json()
-        .cells.find((cell: { building?: { type: string } }) => cell.building?.type === 'garden').building.id;
-      // Placement acknowledges the building; the normal read wake completes it.
-      await getVillageState(db, DEVELOPMENT_IDS.account, 'aube');
-      await db.updateTable('gardenPlots').set({ storedAmount: 100 }).where('buildingId', '=', buildingId).execute();
-      const harvested = await app.inject({
-        method: 'POST',
-        url: `${base}/${buildingId}/harvest`,
-        cookies,
-        payload: { commandId: feedId, ...DEVELOPMENT_CELLS.garden },
-      });
-      expect(harvested.statusCode, harvested.body).toBe(200);
-      expect(harvested.json().village.carrots).toBe(50);
-      expect(
-        harvested.json().cells.find((cell: { building?: { id: string } }) => cell.building?.id === buildingId).building
-          .garden.plots[0].harvest,
-      ).toMatchObject({ reservedCarrots: 100 });
-      const nextCell = harvested.json().cells.find((cell: { canBuild: boolean }) => cell.canBuild);
-      const secondGarden = await app.inject({
-        method: 'POST',
-        url: base,
-        cookies,
-        payload: { buildingType: 'garden', cellX: nextCell.cellX, cellY: nextCell.cellY },
-      });
-      expect(secondGarden.statusCode, secondGarden.body).toBe(201);
-      const conflicted = await app.inject({
-        method: 'POST',
-        url: `${base}/${buildingId}/harvest`,
-        cookies,
-        payload: { commandId: feedId, cellX: nextCell.cellX, cellY: nextCell.cellY },
-      });
-      expect(conflicted.statusCode).toBe(409);
-      expect(conflicted.json().code).toBe('COMMAND_ID_CONFLICT');
-    } finally {
-      await app.close();
-    }
   });
 
   it('initializes fifteen rested inhabitants and the town-hall capacity', async () => {

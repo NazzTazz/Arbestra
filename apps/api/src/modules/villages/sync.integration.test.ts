@@ -1224,7 +1224,7 @@ const config = {
   scheduledTaskPollIntervalMs: 250,
 };
 
-it.each(['market', 'processing', 'science'] as const)(
+it.each(['processing', 'science'] as const)(
   'publishes %s frames after commit while another command can lock the village',
   async (family) => {
     const workshopId = randomUUID();
@@ -1314,25 +1314,10 @@ it.each(['market', 'processing', 'science'] as const)(
     try {
       const base = await snapshot(server),
         commandId = randomUUID();
-      const quote = await server.inject({
-        method: 'POST',
-        url: `/api/worlds/${slug}/villages/${villageId}/market/preview`,
-        cookies: { arbestra_session: token },
-        payload: { offeredResource: 'wood', requestedResource: 'stone', amount: 100 },
-      });
-      expect(quote.statusCode, quote.body).toBe(200);
       const payload =
-        family === 'market'
-          ? {
-              commandId,
-              offeredResource: 'wood',
-              requestedResource: 'stone',
-              amount: 100,
-              expectedReceivedAmount: quote.json().receivedAmount,
-            }
-          : family === 'processing'
-            ? { commandId, action: 'start', buildingId: workshopId, lots: 2, workerCount: 1 }
-            : { action: 'pause', programCode: 'mathematics-1' };
+        family === 'processing'
+          ? { commandId, action: 'start', buildingId: workshopId, lots: 2, workerCount: 1 }
+          : { action: 'pause', programCode: 'mathematics-1' };
       armed = true;
       deadline = setTimeout(() => {
         expired = true;
@@ -1353,10 +1338,6 @@ it.each(['market', 'processing', 'science'] as const)(
       ]);
       expect(expired).toBe(false);
       // The change is already visible from a separate connection, before reply computation.
-      if (family === 'market')
-        expect(
-          await db.selectFrom('marketExchanges').select('id').where('worldId', '=', worldId).execute(),
-        ).toHaveLength(1);
       if (family === 'processing')
         expect(
           await db.selectFrom('processingOrders').select('id').where('worldId', '=', worldId).execute(),
@@ -1389,7 +1370,6 @@ it.each(['market', 'processing', 'science'] as const)(
       expect(result.kind).toBe('frame');
       if (result.kind !== 'frame') throw Error('Expected incremental reply');
       const next = applied(base, result);
-      if (family === 'market') expect(next.village.wood).toBe(base.village.wood - 100);
       if (family === 'processing') expect(next.village.processingOrders).toHaveLength(1);
       if (family === 'science')
         expect(next.science!.programs.find((p) => p.code === 'mathematics-1')?.status).toBe('paused');

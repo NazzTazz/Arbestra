@@ -903,7 +903,7 @@ describe('HTTP worksite contract', () => {
       await tx.deleteFrom('worldFeatures').where('worldId', '=', worldId).where('id', '=', featureId).execute();
     });
   }, 60000);
-  it('serves the authenticated preview and worksite commands through the JSON contract', async () => {
+  it('serves the worksite change command through the JSON contract', async () => {
     if (!app) throw Error('HTTP fixture did not start');
     const login = await app.inject({
       method: 'POST',
@@ -913,14 +913,10 @@ describe('HTTP worksite contract', () => {
     expect(login.statusCode).toBe(200);
     const cookies = { test_session: login.cookies[0]!.value };
     const base = `/api/worlds/aube/villages/${villageId}/worksites`;
-    const order = { commandId: randomUUID(), mode: 'cut', workerCap: 2, featureIds: [featureId] };
-    const preview = await app.inject({ method: 'POST', url: `${base}/preview`, cookies, payload: order });
-    expect(preview.statusCode, preview.body).toBe(200);
-    expect(preview.json().included.map((target: { featureId: string }) => target.featureId)).toEqual([featureId]);
-    const started = await app.inject({ method: 'POST', url: base, cookies, payload: order });
-    expect(started.statusCode, started.body).toBe(200);
-    const siteId = started.json().worksite.id as string;
-    expect(started.json().villageState.village.worksites[0].id).toBe(siteId);
+    // Worksites start through exploitation orders; this fixture creates one directly.
+    const order = { commandId: randomUUID(), mode: 'cut' as const, workerCap: 2, featureIds: [featureId] };
+    const started = await startVillageWorksite(db, DEVELOPMENT_IDS.account, 'aube', villageId, order);
+    const siteId = started.worksite.id;
     const paused = await app.inject({
       method: 'POST',
       url: `${base}/${siteId}`,
