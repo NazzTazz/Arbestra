@@ -40,12 +40,10 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: arbestra
-          POSTGRES_PASSWORD: arbestra
-          POSTGRES_DB: arbestra_test
+          POSTGRES_PASSWORD: postgres
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U arbestra -d arbestra_test"
+          --health-cmd "pg_isready -U postgres"
           --health-interval 2s --health-timeout 3s --health-retries 30
     env:
       # Throwaway CI service, not a secret.
@@ -62,6 +60,13 @@ jobs:
       - run: npm install --global pnpm@10.15.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @arbestra/contracts build
+      # Like local and production: the application role is not a superuser
+      # (tests revoke its rights to prove production behaviour).
+      - name: Create the test role and database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1             -c "create role arbestra login password 'arbestra' nosuperuser createdb"             -c "create database arbestra_test owner arbestra"
       - name: Migrate and seed the test database
         run: pnpm --filter @arbestra/api db:migrate:test && pnpm --filter @arbestra/api db:reset-e2e
       - run: pnpm exec vitest run --shard=${{ matrix.shard }}/4

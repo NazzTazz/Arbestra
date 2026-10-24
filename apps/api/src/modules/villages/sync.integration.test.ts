@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   sql,
   CamelCasePlugin,
@@ -1179,8 +1179,8 @@ it('returns a construction frame from the client exact HTTP base instead of a fu
   });
   expect(initial.statusCode).toBe(200);
   const base = initial.json<VillageState>();
-  if (process.env.RC1_HTTP_BROWSER_FIXTURE === '1')
-    writeFileSync('test-results/http-construction-browser-state.json', JSON.stringify(base));
+  if (process.env.RC1_HTTP_BROWSER_FIXTURE === '1') mkdirSync('test-results', { recursive: true });
+  writeFileSync('test-results/http-construction-browser-state.json', JSON.stringify(base));
   const payload = {
     commandId: randomUUID(),
     buildingType: 'dwelling',
@@ -2178,6 +2178,7 @@ it('road optimization: measures valid legacy and incremental commands on the sam
       baseBytes: Buffer.byteLength(JSON.stringify(base)),
     });
   }
+  mkdirSync('test-results', { recursive: true });
   writeFileSync(
     'test-results/road-command-measures.json',
     JSON.stringify({ world: 'isolated v1 flat 512x256, no reset', results }, null, 2),
