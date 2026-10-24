@@ -139,6 +139,10 @@ function percentile(values: number[]): number {
   return [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * 0.95)]!;
 }
 
+/** Inputs compared by identity: unchanged references mean unchanged content. */
+function sameInputs(previous: readonly unknown[], next: readonly unknown[]): boolean {
+  return previous.length === next.length && previous.every((value, index) => value === next[index]);
+}
 export class BabylonVillageScene {
   readonly #engine: Engine;
   readonly #scene: Scene;
@@ -320,6 +324,9 @@ export class BabylonVillageScene {
   #villageBraziers: VillageBraziers | null = null;
   #villageNight = false;
   #lastTravelSignature = '';
+  #lastTravelCells = '';
+  #travelCells: { routes: VillageState['travelRoutes']; selected: string | null; json: string } | null = null;
+  #brazierInputs: unknown[] = [];
   #selectedSiteId: string | null = null;
   #highlightedSiteIds = new Set<string>();
   #constructionMode = false;
@@ -2791,18 +2798,14 @@ export class BabylonVillageScene {
   }
 
   #travelDerived: {
+    state: VillageState;
     signature: string;
     accesses: ReturnType<typeof buildingAccesses>;
     occupied: Set<string>;
     displayRoutes: ReturnType<typeof villageRoadDisplayRoutes>;
     fires: ReturnType<typeof automaticBraziers>;
   } | null = null;
-  #updateTravelPaths(
-    state: VillageState,
-    visible: boolean,
-    selectedRouteId: string | null,
-    frame?: FrameTimings,
-  ): void {
+  #deriveTravel(state: VillageState): void {
     const derivedSignature = JSON.stringify([
       state.world.id,
       state.travelRoutes,
@@ -2826,28 +2829,40 @@ export class BabylonVillageScene {
       state.region.terrainCodes,
       state.region.features.map((f) => [f.cellX, f.cellY, f.deposit?.blocksCell, f.deposit?.cleared, f.deposit?.state]),
     ]);
-    if (this.#travelDerived?.signature !== derivedSignature) {
-      const accesses = state.cells.flatMap((c) => (c.building ? buildingAccesses(state, c.building.id) : []));
-      this.#infrastructureBarriers = state.infrastructure
-        ? infrastructureBlockedPixels(state.infrastructure, state.world, accesses)
-        : new Set();
-      const fires = automaticBraziers(state);
-      this.#infrastructureEquipment = [
-        ...(state.infrastructure?.equipment ?? []).map((e) => ({ x: e.x, y: e.y })),
-        ...fires.map((e) => e.position),
-      ];
-      const occupied = new Set(
-        state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`),
-      );
-      this.#travelDerived = {
-        signature: derivedSignature,
-        accesses,
-        occupied,
-        fires,
-        displayRoutes: villageRoadDisplayRoutes(state),
-      };
+    if (this.#travelDerived?.signature === derivedSignature) {
+      this.#travelDerived.state = state;
+      return;
     }
-    const { accesses, occupied, fires, displayRoutes } = this.#travelDerived;
+    const accesses = state.cells.flatMap((c) => (c.building ? buildingAccesses(state, c.building.id) : []));
+    this.#infrastructureBarriers = state.infrastructure
+      ? infrastructureBlockedPixels(state.infrastructure, state.world, accesses)
+      : new Set();
+    const fires = automaticBraziers(state);
+    this.#infrastructureEquipment = [
+      ...(state.infrastructure?.equipment ?? []).map((e) => ({ x: e.x, y: e.y })),
+      ...fires.map((e) => e.position),
+    ];
+    const occupied = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`));
+    this.#travelDerived = {
+      state,
+      signature: derivedSignature,
+      accesses,
+      occupied,
+      fires,
+      displayRoutes: villageRoadDisplayRoutes(state),
+    };
+  }
+  #updateTravelPaths(
+    state: VillageState,
+    visible: boolean,
+    selectedRouteId: string | null,
+    frame?: FrameTimings,
+  ): void {
+    // Snapshots are replaced, never mutated: streamed terrain versions reuse the
+    // derived data by identity instead of serializing the whole village again
+    // (~1 s per camera rotation on alpha Catmark, browser profile).
+    if (this.#travelDerived?.state !== state) this.#deriveTravel(state);
+    const { accesses, occupied, fires, displayRoutes } = this.#travelDerived!;
     const groundIdentity = this.#store
       ? JSON.stringify([
           state.world.id,
@@ -2878,6 +2893,18 @@ export class BabylonVillageScene {
     frame?.mark('roadsManual');
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
+    // Braziers and automatic roads depend on the snapshot (campus fires follow
+    // university levels) and on published ground, not on which units are visible.
+    const brazierInputs = [
+      state,
+      this.#travelDerived,
+      this.#space,
+      this.#space?.version,
+      this.#renderer?.groundVersion,
+      this.#store?.groundRevision,
+    ];
+    const braziersCurrent = sameInputs(this.#brazierInputs, brazierInputs);
+    this.#brazierInputs = brazierInputs;
     const campusFires = state.cells.flatMap((site) => {
       if (site.building?.type !== 'university' || site.building.status !== 'completed' || site.building.level !== 3)
         return [];
@@ -2896,42 +2923,46 @@ export class BabylonVillageScene {
         })),
       );
     });
-    this.#villageBraziers.update(
-      displayRoutes,
-      this.#space!,
-      (cell) =>
-        this.#renderer!.hasGround(cell.cellX, cell.cellY) ? this.#store!.ground(cell.cellX, cell.cellY) : null,
-      occupied,
-      campusFires,
-      state.infrastructure,
-      state,
-      fires,
-    );
+    if (!braziersCurrent)
+      this.#villageBraziers.update(
+        displayRoutes,
+        this.#space!,
+        (cell) =>
+          this.#renderer!.hasGround(cell.cellX, cell.cellY) ? this.#store!.ground(cell.cellX, cell.cellY) : null,
+        occupied,
+        campusFires,
+        state.infrastructure,
+        state,
+        fires,
+      );
     frame?.mark('braziers');
     this.#villageRoads ??= new VillageRoads(this.#scene);
-    this.#villageRoads.update(
-      JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion, displayRoutes]),
-      displayRoutes,
-      this.#space!,
-      (cell) =>
-        this.#renderer!.hasGround(cell.cellX, cell.cellY) ? this.#store!.ground(cell.cellX, cell.cellY) : null,
-      state.world.generationVersion === 3,
-      groundIdentity,
-      groundCellIdentity,
-    );
+    if (!braziersCurrent)
+      this.#villageRoads.update(
+        JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion, displayRoutes]),
+        displayRoutes,
+        this.#space!,
+        (cell) =>
+          this.#renderer!.hasGround(cell.cellX, cell.cellY) ? this.#store!.ground(cell.cellX, cell.cellY) : null,
+        state.world.generationVersion === 3,
+        groundIdentity,
+        groundCellIdentity,
+      );
     frame?.mark('roadsAutomatic');
     const routes = selectedRouteId
       ? state.travelRoutes.filter((route) => route.id === selectedRouteId)
       : state.travelRoutes;
-    const signature = JSON.stringify([
-      visible,
-      selectedRouteId,
-      this.#space?.version,
-      this.#renderer?.version,
-      routes.map((route) => route.cells),
-    ]);
-    if (signature === this.#lastTravelSignature) return;
+    // Same identity rule: the route cells are serialized once per snapshot.
+    if (this.#travelCells?.routes !== state.travelRoutes || this.#travelCells.selected !== selectedRouteId)
+      this.#travelCells = {
+        routes: state.travelRoutes,
+        selected: selectedRouteId,
+        json: JSON.stringify(routes.map((route) => route.cells)),
+      };
+    const signature = JSON.stringify([visible, selectedRouteId, this.#space?.version, this.#renderer?.version]);
+    if (signature === this.#lastTravelSignature && this.#travelCells.json === this.#lastTravelCells) return;
     this.#lastTravelSignature = signature;
+    this.#lastTravelCells = this.#travelCells.json;
     this.#travelLines?.dispose();
     this.#travelSurface?.dispose(false, true);
     this.#travelLines = null;
