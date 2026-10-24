@@ -147,6 +147,8 @@ export async function projectVillageResources(
   cross join lateral (select ${directProductionRate()} as rate) p
   where r.world_id=${worldId} and r.village_id=${villageId}
     ${codes ? sql`and r.resource_code in (${sql.join([...new Set(codes)])})` : sql``}
+  -- A stable order: without it rows follow the heap, which updates reshuffle.
+  order by r.resource_code
  `.execute(transaction);
   return result.rows.map((row) => ({
     ...row,
