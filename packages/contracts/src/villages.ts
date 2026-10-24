@@ -452,12 +452,6 @@ export const HarvestRequestSchema = Type.Object(
 );
 export type HarvestRequest = Static<typeof HarvestRequestSchema>;
 
-export const PopulationCommandRequestSchema = Type.Object({
-  commandId: Type.String({ format: 'uuid' }),
-  count: Type.Integer({ minimum: 1 }),
-});
-export type PopulationCommandRequest = Static<typeof PopulationCommandRequestSchema>;
-
 export const ExtractionRequestSchema = Type.Object(
   {
     commandId: Type.String({ format: 'uuid' }),

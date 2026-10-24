@@ -17,12 +17,10 @@ import { completeStoneExtraction } from '../villages/complete-construction.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from '../villages/reconcile-economy.js';
 import {
   constructBuilding,
-  feedPopulation,
   getStoneDepositDetails,
   getVillageState,
   state,
   harvestGarden,
-  restPopulation,
   startVillageStoneExtraction,
 } from '../villages/service.js';
 import { advanceEnergy } from '../population/energy.js';
@@ -767,12 +765,6 @@ describe.sequential('stone regression proofs', () => {
     await expect(harvestGarden(db, DEVELOPMENT_IDS.account, 'aube', villageId, otherGardenId)).rejects.toMatchObject({
       code: 'HARVESTERS_UNAVAILABLE',
     });
-    await expect(feedPopulation(db, DEVELOPMENT_IDS.account, 'aube', villageId, randomUUID(), 1)).rejects.toMatchObject(
-      { code: 'POPULATION_FOOD_UNAVAILABLE' },
-    );
-    await expect(restPopulation(db, DEVELOPMENT_IDS.account, 'aube', villageId, randomUUID(), 1)).rejects.toMatchObject(
-      { code: 'POPULATION_REST_UNAVAILABLE' },
-    );
     const unavailable = await getStoneDepositDetails(db, DEVELOPMENT_IDS.account, 'aube', villageId, id);
     expect(unavailable.eligibility.workerOptions.every((option) => !option.canStart)).toBe(true);
     // Releasing every group leaves fifteen people; past-rest eligibility must be projected,

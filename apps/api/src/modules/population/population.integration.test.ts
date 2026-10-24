@@ -12,15 +12,12 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import {
   discoverBuildingSupplies,
   discoverBuildingSuppliesInTransaction,
-  feedPopulation,
   getVillageState,
-  restPopulation,
 } from '../villages/service.js';
 import { materializeCohorts } from './work.js';
 
 const databaseUrl = testDatabaseUrl();
 let db: Kysely<Database>;
-const feedId = '11111111-1111-4111-8111-111111111111';
 
 async function economicRows(executor: Kysely<Database>) {
   const tables = [
@@ -148,40 +145,6 @@ describe.sequential('population with PostgreSQL', () => {
     });
     expect(state.village.population.energyCounts[10]).toBe(15);
     expect(state.village.accomplishments).toEqual([]);
-  });
-
-  it('feeds exactly the requested inhabitants once and keeps the receipt idempotent', async () => {
-    await db
-      .updateTable('populationCohorts')
-      .set({ energy: 8, energyProgress: 0, foodUsedSinceRest: 0, energyUpdatedAt: sql`transaction_timestamp()` })
-      .where('worldId', '=', DEVELOPMENT_IDS.world)
-      .execute();
-    const fed = await feedPopulation(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, feedId, 2);
-    expect(fed.village.carrots).toBe(48);
-    expect(fed.village.population.energyCounts[9]).toBe(2);
-    const retried = await feedPopulation(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, feedId, 2);
-    expect(retried.village.carrots).toBe(48);
-    await expect(
-      feedPopulation(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village, feedId, 3),
-    ).rejects.toMatchObject({ code: 'COMMAND_ID_CONFLICT' });
-    const total = await db
-      .selectFrom('populationCohorts')
-      .select(sql<number>`sum(member_count)::integer`.as('count'))
-      .where('worldId', '=', DEVELOPMENT_IDS.world)
-      .executeTakeFirstOrThrow();
-    expect(total.count).toBe(15);
-  });
-
-  it('starts a voluntary rest without changing the population total', async () => {
-    const state = await restPopulation(
-      db,
-      DEVELOPMENT_IDS.account,
-      'aube',
-      DEVELOPMENT_IDS.village,
-      '22222222-2222-4222-8222-222222222222',
-      4,
-    );
-    expect(state.village.population).toMatchObject({ total: 15, available: 11, resting: 4 });
   });
 
   it('makes short-rest and legacy full-energy cohorts available in the village snapshot', async () => {

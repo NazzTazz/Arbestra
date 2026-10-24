@@ -70,7 +70,6 @@ import {
 } from './reconcile-economy.js';
 import { requestEconomyCatchup, ScopeCatchingUp } from './economy-catchup.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
-import { beginRest, feedEnergy } from '../population/energy.js';
 import { startGardenHarvest } from '../population/garden-harvest.js';
 import { startGardenTour } from '../population/garden-tour.js';
 import { planGardenTour } from '@arbestra/contracts';
@@ -110,8 +109,8 @@ import {
 import { readExtractionPools } from '../deposits/extraction-pools.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
 import { commandProcessing, previewProcessing, processingSnapshot } from './processing.js';
-import { commandMarket, previewMarket, marketSnapshot } from './market.js';
-import type { MarketCommand, MarketRequest } from '@arbestra/contracts';
+import { marketSnapshot } from './market.js';
+import type { MarketCommand } from '@arbestra/contracts';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
 
@@ -1834,37 +1833,6 @@ export async function commandVillageProcessing<Mode extends ConstructionReplyMod
     });
 }
 
-export async function commandVillageMarket<Mode extends ConstructionReplyMode = 'snapshot'>(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  command: MarketCommand,
-  replyMode: Mode = 'snapshot' as Mode,
-): Promise<ConstructionResult<Mode>> {
-  if (replyMode === 'commit') {
-    const replay = await replayVillageCommand(db, accountId, worldSlug, villageId, command, 'marketExchanges');
-    if (replay) return replay as ConstructionResult<Mode>;
-  }
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    await commandMarket(tx, economy, command);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, command.commandId);
-  });
-}
-export async function previewVillageMarket(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  request: MarketRequest,
-) {
-  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy) =>
-    previewMarket(tx, economy, request),
-  );
-}
-
 export async function previewVillageProcessing(
   db: Kysely<Database>,
   accountId: string,
@@ -3332,18 +3300,6 @@ export async function prepareWorksiteSelection(
   return { included, excluded };
 }
 
-export async function previewVillageWorksite(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  request: StartExtractionWorksiteRequest,
-): Promise<ExtractionWorksiteSelection> {
-  return withVillageProjection(db, accountId, worldSlug, villageId, async (tx, economy, village) => {
-    return prepareWorksiteSelection(tx, village, economy, request);
-  });
-}
-
 export async function changeVillageWorksite(
   db: Kysely<Database>,
   accountId: string,
@@ -3472,164 +3428,6 @@ export async function discoverBuildingSupplies(
   return db
     .transaction()
     .execute((tx) => discoverBuildingSuppliesInTransaction(tx, accountId, worldSlug, villageId, buildingId));
-}
-
-async function populationCommand(
-  tx: Transaction<Database>,
-  village: OwnedVillage,
-  economy: VillageEconomy,
-  commandId: string,
-  count: number,
-  type: 'feed' | 'rest',
-) {
-  if (!Number.isInteger(count) || count < 1) throw new HttpError(400, 'POPULATION_COUNT_INVALID', 'Effectif invalide.');
-  const repeated = await tx
-    .selectFrom('populationCommandReceipts')
-    .selectAll()
-    .where('worldId', '=', village.worldId)
-    .where('villageId', '=', village.villageId)
-    .where('commandId', '=', commandId)
-    .executeTakeFirst();
-  if (repeated) {
-    if (repeated.commandType !== type || repeated.memberCount !== count)
-      throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée différemment.');
-    return;
-  }
-  const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
-  let remaining = count;
-  const eligible = cohorts
-    .filter((cohort) => cohort.activity === 'idle' && withoutAssignment(cohort))
-    .filter((cohort) =>
-      type === 'feed'
-        ? feedEnergy({
-            energy: cohort.energy,
-            progress: cohort.energyProgress,
-            activity: cohort.activity,
-            restingSince: cohort.restingSince,
-            foodUsedSinceRest: cohort.foodUsedSinceRest,
-            updatedAt: cohort.energyUpdatedAt,
-          }) !== null
-        : beginRest({
-            energy: cohort.energy,
-            progress: cohort.energyProgress,
-            activity: cohort.activity,
-            restingSince: cohort.restingSince,
-            foodUsedSinceRest: cohort.foodUsedSinceRest,
-            updatedAt: cohort.energyUpdatedAt,
-          }) !== null,
-    );
-  if (eligible.reduce((total, cohort) => total + cohort.memberCount, 0) < remaining)
-    throw new HttpError(
-      409,
-      type === 'feed' ? 'POPULATION_FOOD_UNAVAILABLE' : 'POPULATION_REST_UNAVAILABLE',
-      'Habitants éligibles insuffisants.',
-    );
-  if (type === 'feed') {
-    const carrots = await tx
-      .selectFrom('villageResources')
-      .select('amount')
-      .where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId)
-      .where('resourceCode', '=', 'carrot')
-      .forUpdate()
-      .executeTakeFirstOrThrow();
-    if (number(carrots.amount) < count) throw new HttpError(409, 'CARROTS_INSUFFICIENT', 'Carottes insuffisantes.');
-    await tx
-      .updateTable('villageResources')
-      .set({ amount: sql`amount - ${count}::bigint` })
-      .where('worldId', '=', village.worldId)
-      .where('villageId', '=', village.villageId)
-      .where('resourceCode', '=', 'carrot')
-      .execute();
-  }
-  for (const cohort of eligible) {
-    if (remaining === 0) break;
-    const memberCount = Math.min(remaining, cohort.memberCount);
-    const initial = {
-      energy: cohort.energy,
-      progress: cohort.energyProgress,
-      activity: cohort.activity,
-      restingSince: cohort.restingSince,
-      foodUsedSinceRest: cohort.foodUsedSinceRest,
-      updatedAt: cohort.energyUpdatedAt,
-    };
-    const next = type === 'feed' ? feedEnergy(initial)! : beginRest(initial)!;
-    const values = {
-      activity: next.activity,
-      energy: next.energy,
-      energyProgress: next.progress,
-      restingSince: next.restingSince,
-      foodUsedSinceRest: next.foodUsedSinceRest,
-      energyUpdatedAt: next.updatedAt,
-    };
-    if (memberCount === cohort.memberCount)
-      await tx.updateTable('populationCohorts').set(values).where('id', '=', cohort.id).execute();
-    else {
-      await tx
-        .updateTable('populationCohorts')
-        .set({ memberCount: cohort.memberCount - memberCount })
-        .where('id', '=', cohort.id)
-        .execute();
-      await tx
-        .insertInto('populationCohorts')
-        .values({
-          worldId: village.worldId,
-          villageId: village.villageId,
-          originVillageId: cohort.originVillageId,
-          memberCount,
-          ...values,
-          harvestId: null,
-          extractionId: null,
-          cartographer: cohort.cartographer,
-        })
-        .execute();
-    }
-    remaining -= memberCount;
-  }
-  await tx
-    .insertInto('populationCommandReceipts')
-    .values({
-      worldId: village.worldId,
-      villageId: village.villageId,
-      commandId,
-      commandType: type,
-      memberCount: count,
-    })
-    .execute();
-}
-
-export async function feedPopulation(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  commandId: string,
-  count: number,
-): Promise<VillageState> {
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    await populationCommand(tx, village, economy, commandId, count, 'feed');
-    return state(tx, accountId, worldSlug, economy);
-  });
-}
-
-export async function restPopulation(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  commandId: string,
-  count: number,
-): Promise<VillageState> {
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    await populationCommand(tx, village, economy, commandId, count, 'rest');
-    return state(tx, accountId, worldSlug, economy);
-  });
 }
 
 /** Visual discovery is reported by the client; ownership, time and uniqueness are authoritative. */

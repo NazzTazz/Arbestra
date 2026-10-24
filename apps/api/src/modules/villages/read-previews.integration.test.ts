@@ -5,13 +5,7 @@ import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
-import {
-  getStoneDepositDetails,
-  previewVillageExploitation,
-  previewVillageMarket,
-  previewVillageProcessing,
-  previewVillageWorksite,
-} from './service.js';
+import { getStoneDepositDetails, previewVillageExploitation, previewVillageProcessing } from './service.js';
 import { browsePlayerMarket } from './trade-service.js';
 
 const url = testDatabaseUrl(),
@@ -107,10 +101,10 @@ async function stored() {
     ),
   );
 }
-it.each(['market', 'processing', 'offers', 'deposit', 'worksite', 'exploitation'] as const)(
+it.each(['processing', 'offers', 'deposit', 'exploitation'] as const)(
   '%s preview does not settle unrelated work, stocks, energy or notifications',
   async (kind) => {
-    if (['deposit', 'worksite', 'exploitation'].includes(kind)) {
+    if (['deposit', 'exploitation'].includes(kind)) {
       const occupied = new Set(
         (
           await db
@@ -156,15 +150,7 @@ it.each(['market', 'processing', 'offers', 'deposit', 'worksite', 'exploitation'
         .execute();
     }
     const before = await stored();
-    if (kind === 'market')
-      expect(
-        await previewVillageMarket(db, ids.account, 'aube', ids.village, {
-          offeredResource: 'wood',
-          requestedResource: 'stone',
-          amount: 100,
-        }),
-      ).toMatchObject({ valid: true, receivedAmount: 70 });
-    else if (kind === 'processing')
+    if (kind === 'processing')
       expect(await previewVillageProcessing(db, ids.account, 'aube', ids.village, workshopId, 1)).toMatchObject({
         valid: true,
       });
@@ -174,17 +160,6 @@ it.each(['market', 'processing', 'offers', 'deposit', 'worksite', 'exploitation'
       expect(
         (await getStoneDepositDetails(db, ids.account, 'aube', ids.village, featureId!)).eligibility.workerOptions[0],
       ).toMatchObject({ canStart: true, availableWorkers: 15 });
-    else if (kind === 'worksite')
-      expect(
-        (
-          await previewVillageWorksite(db, ids.account, 'aube', ids.village, {
-            commandId: randomUUID(),
-            featureIds: [featureId!],
-            mode: 'extract',
-            workerCap: 2,
-          })
-        ).included.map((f) => f.featureId),
-      ).toEqual([featureId]);
     else
       expect(
         (

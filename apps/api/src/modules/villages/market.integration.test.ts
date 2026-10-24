@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { sql, type Transaction } from 'kysely';
+import { type Transaction } from 'kysely';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import type { MarketCommand } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
@@ -10,7 +10,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import type { Database } from '../../database/schema.js';
 import { commandMarket, previewMarket, marketSnapshot, COMPLETE_MARKET_TASK } from './market.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
-import { getVillageState, upgradeBuilding, commandVillageMarket } from './service.js';
+import { getVillageState, upgradeBuilding } from './service.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { deliverMarket } from './complete-construction.js';
 
@@ -241,67 +241,4 @@ it('worker delivery is authoritative even for an old notification and only ackno
   expect(tasks.filter((t) => t.completedAt)).toHaveLength(1);
   await processNextScheduledTask(db, { [COMPLETE_MARKET_TASK]: deliverMarket });
   expect(await amount('stone')).toBe(140);
-});
-it('checks ownership and world before admitting trades', async () => {
-  await open();
-  await expect(commandVillageMarket(db, randomUUID(), 'aube', ids.village, request())).rejects.toMatchObject({
-    statusCode: 404,
-  });
-  await expect(commandVillageMarket(db, ids.account, 'missing-world', ids.village, request())).rejects.toMatchObject({
-    statusCode: 404,
-  });
-  expect(await db.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(0);
-});
-it('serializes two competing debits while a village lock is held', async () => {
-  await open();
-  await db
-    .updateTable('villageResources')
-    .set({ amount: 100 })
-    .where('villageId', '=', ids.village)
-    .where('resourceCode', '=', 'wood')
-    .execute();
-  let release!: () => void, acquired!: () => void;
-  const barrier = new Promise<void>((resolve) => {
-      acquired = resolve;
-    }),
-    gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-  const holder = locked(async () => {
-    acquired();
-    await gate;
-  });
-  await barrier;
-  const a = commandVillageMarket(db, ids.account, 'aube', ids.village, request());
-  const b = commandVillageMarket(db, ids.account, 'aube', ids.village, request());
-  const results = Promise.allSettled([a, b]);
-  const timeout = setTimeout(release, 8000);
-  try {
-    let waiting = false;
-    for (let n = 0; n < 100; n++) {
-      const locks = await sql<{
-        count: string;
-      }>`select count(*)::text as count from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%"villages"%'`.execute(
-        db,
-      );
-      if (Number(locks.rows[0]!.count) >= 2) {
-        waiting = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    expect(waiting).toBe(true);
-  } finally {
-    release();
-    clearTimeout(timeout);
-    await holder;
-    await results;
-  }
-  const settled = await results;
-  expect(settled.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-  expect(settled.filter((r) => r.status === 'rejected')).toHaveLength(1);
-  const rejected = settled.find((r) => r.status === 'rejected');
-  if (rejected?.status === 'rejected') expect(rejected.reason).toMatchObject({ code: 'MARKET_UNAVAILABLE' });
-  expect(await amount('wood')).toBe(0);
-  expect(await db.selectFrom('marketExchanges').selectAll().where('worldId', '=', ids.world).execute()).toHaveLength(1);
 });
