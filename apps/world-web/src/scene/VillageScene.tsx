@@ -86,6 +86,7 @@ export interface TerrainHandle {
   representativeCameraMode: () => InhabitantCameraMode;
   cancelGesture: () => void;
   resetCosmology: () => void;
+  renderLab: () => import('./render-lab').RenderLab | null;
   projectPopulation: (id: string) => ScreenAnchor | null;
   featuresAt: (cell: Cell) => NaturalFeature[];
   acceptDeposit: (deposit: StoneDeposit) => void;
@@ -247,6 +248,7 @@ export function VillageScene({
         sceneRef.current?.setCosmologyPeriod(28800);
       },
       featuresAt: (cell) => sceneRef.current?.featuresAt(cell) ?? [],
+      renderLab: () => sceneRef.current?.renderLab() ?? null,
       acceptDeposit: (deposit) => sceneRef.current?.acceptDeposit(deposit),
       projectPopulation: (id) => sceneRef.current?.projectPopulation(id) ?? null,
       showVillage: () => sceneRef.current?.showVillage(),

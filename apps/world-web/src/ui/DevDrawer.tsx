@@ -3,6 +3,52 @@ import type { VillageState } from '@arbestra/contracts';
 import { useState, useSyncExternalStore } from 'react';
 import { setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from '../dev/statistics';
 import { DEFAULT_BUILDING_LOD, getBuildingLodSettings, setBuildingLodSettings } from '../scene/building-lod-settings';
+import { devToolsEnabled } from '../dev/dev-tools';
+import { RENDER_SWITCHES, type MeshFamily, type RenderLab, type RenderSwitch } from '../scene/render-lab';
+
+/** Compare the GPU time of the statistics overlay with and without each layer. */
+function RenderLabControls({ lab }: { lab: () => RenderLab | null }) {
+  const [, refresh] = useState(0);
+  const current = lab();
+  if (!current) return null;
+  const switches = current.switches();
+  const families: MeshFamily[] = current.families().slice(0, 24);
+  return (
+    <section>
+      <strong>Rendu</strong>
+      <small>Couper une couche puis lire le temps GPU de l’overlay. Rien n’est conservé au rechargement.</small>
+      {(Object.keys(RENDER_SWITCHES) as RenderSwitch[]).map((key) => (
+        <label key={key}>
+          <input
+            type="checkbox"
+            checked={switches[key]}
+            onChange={(event) => {
+              current.setSwitch(key, event.target.checked);
+              refresh((n) => n + 1);
+            }}
+          />{' '}
+          {RENDER_SWITCHES[key]}
+        </label>
+      ))}
+      <button type="button" onClick={() => refresh((n) => n + 1)}>
+        Recompter les familles de meshes
+      </button>
+      {families.map((f) => (
+        <label key={f.family}>
+          <input
+            type="checkbox"
+            checked={!f.hidden}
+            onChange={(event) => {
+              current.setFamilyHidden(f.family, !event.target.checked);
+              refresh((n) => n + 1);
+            }}
+          />{' '}
+          {f.family} · {f.enabled}/{f.meshes} · {Math.round(f.vertices / 1000)} k sommets
+        </label>
+      ))}
+    </section>
+  );
+}
 
 function BuildingLodControls() {
   const [settings, update] = useState(getBuildingLodSettings);
@@ -61,6 +107,7 @@ export function DevDrawer({
   onCosmology,
   onReset,
   onFactory,
+  renderLab,
 }: {
   noclip: boolean;
   onNoclip: (value: boolean) => void;
@@ -76,9 +123,10 @@ export function DevDrawer({
   onTravelPaths: (value: boolean) => void;
   onRoute: (id: string | null) => void;
   onCosmology: (value: boolean) => void;
+  renderLab: () => RenderLab | null;
 }) {
   const statistics = useSyncExternalStore(subscribeStatistics, statisticsEnabled, () => false);
-  if (!import.meta.env.DEV) return null;
+  if (!devToolsEnabled()) return null;
   return (
     <aside className={`dev-shell${open ? ' is-open' : ''}`} aria-label="Outils développeur">
       {open && (
@@ -89,17 +137,19 @@ export function DevDrawer({
               Fermer
             </button>
           </header>
-          <section>
-            <strong>Ateliers</strong>
-            <label>
-              <input
-                type="checkbox"
-                checked={Boolean(state.factoryEnabled)}
-                onChange={(event) => onFactory(event.target.checked)}
-              />{' '}
-              Activer les ateliers Bâtiments et Infrastructure
-            </label>
-          </section>
+          {import.meta.env.DEV && (
+            <section>
+              <strong>Ateliers</strong>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={Boolean(state.factoryEnabled)}
+                  onChange={(event) => onFactory(event.target.checked)}
+                />{' '}
+                Activer les ateliers Bâtiments et Infrastructure
+              </label>
+            </section>
+          )}
           <section>
             <strong>Visualisations</strong>
             <label>
@@ -136,10 +186,12 @@ export function DevDrawer({
                 ))}
               </select>
             )}
-            <label>
-              <input type="checkbox" checked={cosmology} onChange={(event) => onCosmology(event.target.checked)} />{' '}
-              Laboratoire cosmologique
-            </label>
+            {import.meta.env.DEV && (
+              <label>
+                <input type="checkbox" checked={cosmology} onChange={(event) => onCosmology(event.target.checked)} />{' '}
+                Laboratoire cosmologique
+              </label>
+            )}
           </section>
           <section>
             <strong>Métriques courantes</strong>
@@ -151,6 +203,7 @@ export function DevDrawer({
               Repères : {state.region.features.length} · routes : {state.travelRoutes.length}
             </span>
           </section>
+          <RenderLabControls lab={renderLab} />
           <div id="dev-cosmology-slot" />
           <BuildingLodControls />
           <button type="button" onClick={onReset}>

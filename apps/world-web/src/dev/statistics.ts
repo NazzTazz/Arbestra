@@ -1,11 +1,12 @@
 import { DEV_TIMING_HEADER, parseDevServerTiming, type DevTimingMetric } from '@arbestra/contracts';
+import { devToolsEnabled } from './dev-tools';
 
 const storageKey = 'arbestra.dev.statistics';
 let enabled: boolean | undefined,
   generation = 0;
 const listeners = new Set<() => void>();
 export function statisticsEnabled(): boolean {
-  if (!import.meta.env.DEV) return false;
+  if (!devToolsEnabled()) return false;
   if (enabled === undefined) {
     try {
       enabled = localStorage.getItem(storageKey) === '1';
@@ -22,7 +23,7 @@ export function subscribeStatistics(listener: () => void) {
   };
 }
 export function setStatisticsEnabled(value: boolean) {
-  enabled = import.meta.env.DEV && value;
+  enabled = devToolsEnabled() && value;
   generation++;
   requests.clear();
   clientCosts.clear();

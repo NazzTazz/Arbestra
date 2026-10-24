@@ -955,7 +955,9 @@ export class BabylonVillageScene {
     this.#engine.setHardwareScalingLevel(Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5));
     this.#scene = new Scene(this.#engine);
     this.#sceneStats =
-      import.meta.env.DEV || import.meta.env.MODE === 'e2e' ? new SceneInstrumentation(this.#scene) : null;
+      import.meta.env.DEV || import.meta.env.MODE === 'e2e' || devToolsEnabled()
+        ? new SceneInstrumentation(this.#scene)
+        : null;
     if (this.#sceneStats) {
       this.#sceneStats.captureActiveMeshesEvaluationTime = true;
       this.#sceneStats.captureRenderTime = true;
@@ -2127,7 +2129,7 @@ export class BabylonVillageScene {
     return this.#inhabitantCamera.mode;
   }
   public setNoclip(enabled: boolean) {
-    this.#inhabitantCamera.noclip = import.meta.env.DEV && enabled;
+    this.#inhabitantCamera.noclip = devToolsEnabled() && enabled;
   }
   public projectRepresentative(id: string) {
     const pose = this.#workers.representativePose(id);
@@ -2851,6 +2853,12 @@ export class BabylonVillageScene {
       fires,
       displayRoutes: villageRoadDisplayRoutes(state),
     };
+  }
+  #renderLab: RenderLab | null = null;
+  /** Measurement switches, only for opted-in developer tools. */
+  renderLab(): RenderLab | null {
+    if (!devToolsEnabled()) return null;
+    return (this.#renderLab ??= new RenderLab(this.#scene));
   }
   #updateTravelPaths(
     state: VillageState,
@@ -4513,3 +4521,5 @@ export class BabylonVillageScene {
   }
 }
 import type { TerrainResponse } from '@arbestra/contracts';
+import { devToolsEnabled } from '../dev/dev-tools';
+import { RenderLab } from './render-lab';

@@ -5,6 +5,7 @@ import { HUD_RESOURCES, hudResourceAmounts, type ResourceFeedback } from './reso
 import './resource-feedback.css';
 import { usePresentationClock } from './use-presentation-clock';
 import { formatResourceAmount as format, projectedWood } from './resource-counter';
+import { devToolsEnabled } from '../dev/dev-tools';
 
 export function Hud({
   readOnly = false,
@@ -115,7 +116,7 @@ export function Hud({
         ) : null}
       </button>
       <NotificationStack notifications={notifications} />
-      {import.meta.env.DEV && (
+      {devToolsEnabled() && (
         <button className="dev-toggle resource-dev" type="button" aria-expanded={devOpen} onClick={onDev}>
           DEV{devActive ? ' · actif' : ''}
         </button>

@@ -2252,6 +2252,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             setShowTravelPaths(false);
             setSelectedRouteId(null);
           }}
+          renderLab={() => terrainRef.current?.renderLab() ?? null}
         />
         <WorkforceHud
           key={`${state.world.id}:${state.village.id}`}

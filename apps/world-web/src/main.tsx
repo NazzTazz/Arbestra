@@ -22,6 +22,7 @@ import { WorldLoading, WorldLoadingBoundary } from './ui/WorldLoading';
 import { initialVillageRead, initialWorldName } from './api/initial-village';
 import { startObservation } from './api/observation-client';
 import { addressRedirect } from './api/world-address';
+import { devToolsEnabled } from './dev/dev-tools';
 // A former shared-host address (`?world=`) moves to the world's own subdomain.
 if (addressRedirect) location.replace(addressRedirect);
 const observing =
@@ -46,7 +47,7 @@ if (
 if (!addressRedirect)
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      {import.meta.env.DEV && <StatisticsOverlay />}
+      {devToolsEnabled() && <StatisticsOverlay />}
       {observing ? (
         <WorldLoadingBoundary>
           <Suspense fallback={<WorldLoading message="Ouverture du village observé" />}>
