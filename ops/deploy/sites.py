@@ -72,10 +72,11 @@ http://:WEB_PORT {
     -Server
   }
   encode zstd gzip
-  # The lobby, the NOC and every world page are subdomains of one domain.
+  # The lobby, the NOC and every world page are subdomains of one domain; the
+  # former shared host still loads its scripts (modules send Origin) to redirect.
   @foreignOrigin {
     header Origin *
-    not header_regexp Origin ^https://[a-z0-9-]+\\.DOMAIN_PATTERN$
+    not header_regexp Origin ^https://([a-z0-9-]+\\.DOMAIN_PATTERN|LEGACY_PATTERN)$
   }
   # Cross-site calls are refused on the API only: a player following a link
   # (Discord, search engine) must still load the pages.
@@ -142,6 +143,7 @@ def web_caddyfile(environment, gate_hash):
         ('NOC', names['noc']),
         ('LEGACY_WORLD', settings['legacy_world']),
         ('DOMAIN_PATTERN', re.escape(settings['domain'])),
+        ('LEGACY_PATTERN', re.escape(settings['legacy_world'])),
         ('DOMAIN', settings['domain']),
         ('REDIRECTS', redirects),
     ]:
