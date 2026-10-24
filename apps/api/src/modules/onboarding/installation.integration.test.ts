@@ -483,8 +483,14 @@ describe('effective RC1 installation on isolated worlds', () => {
         });
         expect(rejected.accepted).toEqual([]);
         expect(rejected.refused[0]?.reason).toBe('not-found');
+        // Compared as whole lists: PostgreSQL guarantees no row order without ORDER BY.
         const stock = () =>
-          tx.selectFrom('villageResources').select(['resourceCode', 'amount']).where('worldId', '=', f.id).execute();
+          tx
+            .selectFrom('villageResources')
+            .select(['resourceCode', 'amount'])
+            .where('worldId', '=', f.id)
+            .orderBy('resourceCode')
+            .execute();
         const before = await stock();
         expect(Number(before.find((s) => s.resourceCode === 'stone')!.amount)).toBe(0);
         const task = await tx
