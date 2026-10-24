@@ -235,7 +235,11 @@ parentPort!.on(
               },
             })
           : undefined;
-        const network = refinement ? (route ? [route] : []) : buildTravelNetwork(state, [], ground, checkpoint);
+        const network = refinement
+          ? route
+            ? [route]
+            : []
+          : buildTravelNetwork(state, job.network.woodlandTargets ?? [], ground, checkpoint);
         while (sources.size > 2) sources.delete(sources.keys().next().value!);
         parentPort!.postMessage({ id: job.id, network, contexts: [...contexts.keys()], sources: [...sources.keys()] });
         return;

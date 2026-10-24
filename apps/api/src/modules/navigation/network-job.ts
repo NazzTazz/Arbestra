@@ -5,6 +5,8 @@ import type { Rc1NetworkEdits } from './rc1-network-ground.js';
 export interface NetworkJob {
   state: TravelNetworkState;
   refinement?: TravelRoute;
+  /** Woodlands to route to besides every building and garden plot. */
+  woodlandTargets?: string[];
   ground?: { sourceId: string; artifact?: string; edits: Rc1NetworkEdits };
 }
 export type NetworkLoader = (known: { sources: ReadonlySet<string> }) => Promise<NetworkJob>;

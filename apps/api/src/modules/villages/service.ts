@@ -10,7 +10,7 @@ import { readRc1Source } from '../worlds/rc1-source.js';
 import { villageSyncRevision } from './sync-revision.js';
 import { VillageReadReconciliations } from './read-reconciliation.js';
 import { networkJob, networkState, type NetworkJob, type TravelNetworkExecutor } from '../navigation/network-job.js';
-import { transactionRefiner } from '../navigation/transaction-refinement.js';
+import { commandTravelNetwork, transactionRefiner } from '../navigation/transaction-refinement.js';
 import { naturalFeaturesQuery } from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -30,7 +30,6 @@ import type {
   ExtractionWorksiteSelection,
 } from '@arbestra/contracts';
 import {
-  buildTravelNetwork,
   exploitationAdmissionCap,
   travelDuration,
   refineTravelRoute,
@@ -487,7 +486,7 @@ export async function stoneTravelPath(
     },
     cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
   } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
-  const path = buildTravelNetwork(routeState, [featureId], rc1?.navigation).find(
+  const path = (await commandTravelNetwork(tx, routeState, rc1, [featureId])).find(
     (route) => route.id === featureId,
   )?.cells;
   if (path) return refineVillagePath(tx, village, path, featureId, rc1 ?? undefined);
@@ -1067,7 +1066,7 @@ export async function readInfrastructureSpatialState(
     travelRoutes: [],
   };
   if (needsRoutes) {
-    context.travelRoutes = buildTravelNetwork({ ...context, infrastructure: navigation }, [], ground.rc1?.navigation);
+    context.travelRoutes = await commandTravelNetwork(tx, { ...context, infrastructure: navigation }, ground.rc1);
     for (const { extraction } of extractionRows)
       if (extraction.resourceCode === 'wood' && extraction.path.length)
         context.travelRoutes.push({
@@ -1476,8 +1475,10 @@ export async function state(
         deferNavigation(networkState({ ...villageState, infrastructure: navigationInfrastructure }), ground.rc1);
         villageState.travelRoutes = [];
       } else
-        villageState.travelRoutes = devTimeSync('navigation', () =>
-          buildTravelNetwork({ ...villageState, infrastructure: navigationInfrastructure }, [], ground.rc1?.navigation),
+        villageState.travelRoutes = await commandTravelNetwork(
+          tx,
+          { ...villageState, infrastructure: navigationInfrastructure },
+          ground.rc1,
         );
     }
     // Reuse committed mission paths; do not search routes to every woodland in the snapshot.

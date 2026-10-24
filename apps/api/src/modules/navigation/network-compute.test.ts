@@ -11,6 +11,8 @@ import {
 } from '@arbestra/contracts';
 import { NavigationCompute } from './compute.js';
 import { networkState } from './network-job.js';
+import { bindTransactionRefiner, commandTravelNetwork } from './transaction-refinement.js';
+import { createDatabase } from '../../database/connection.js';
 
 const state: TravelNetworkState = {
   world: { id: 'world', widthCells: 16, heightCells: 16 },
@@ -529,4 +531,33 @@ it('transfers spatial fields without economic or support data', () => {
   expect(projected.village).toEqual(state.village);
   expect(projected.world).toEqual(state.world);
   expect(JSON.stringify(projected)).not.toMatch(/private|remainingAmount|wood|science|secret/);
+});
+it('routes a command network, woodland targets included, on its bound lane', async () => {
+  const wooded: TravelNetworkState = {
+    ...state,
+    region: {
+      ...state.region,
+      features: [{ id: 'wood', type: 'woodland', cellX: 9, cellY: 9, deposit: { state: 'available' } }],
+    },
+  };
+  const expected = buildTravelNetwork(wooded, ['wood']);
+  expect(expected.some((route) => route.id === 'wood')).toBe(true);
+  const db = createDatabase('postgres://unused/command_lane_test'),
+    compute = new NavigationCompute();
+  try {
+    // Unbound (transactional tests): inline, same result.
+    expect(await commandTravelNetwork(db, wooded, undefined, ['wood'])).toEqual(expected);
+    await compute.start();
+    const network = vi.fn((load: Parameters<NavigationCompute['network']>[0]) => compute.network(load));
+    const unbind = bindTransactionRefiner(db, { refine: network, network });
+    try {
+      expect(await commandTravelNetwork(db, wooded, undefined, ['wood'])).toEqual(expected);
+      expect(network).toHaveBeenCalledTimes(1);
+    } finally {
+      unbind();
+    }
+  } finally {
+    await compute.close();
+    await db.destroy();
+  }
 });

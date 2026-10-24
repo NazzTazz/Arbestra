@@ -116,9 +116,25 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
     await wakeups.close();
     throw error;
   }
-  const unbindRefiner = bindTransactionRefiner(db, navigation);
+  // Commands holding a village lock route on their own lane: they queue behind
+  // other commands only, never behind a read whose loader still needs SQL, and
+  // the API thread keeps answering during a large village's network.
+  const commandNavigation = new NavigationCompute(1, { waiting: 16, waitMs: 30000, computeMs: 30000 });
+  try {
+    await commandNavigation.start();
+  } catch (error) {
+    await commandNavigation.close();
+    await navigation.close();
+    await wakeups.close();
+    throw error;
+  }
+  const unbindRefiner = bindTransactionRefiner(db, {
+    refine: (load) => commandNavigation.network(load),
+    network: (load) => commandNavigation.network(load),
+  });
   app.addHook('onClose', async () => {
     unbindRefiner();
+    await commandNavigation.close();
   });
   let expeditionErrorAt: string | null = null;
   const coordinator = new ExpeditionCoordinator(db, navigation, () => {
