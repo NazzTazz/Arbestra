@@ -112,6 +112,9 @@ interface Step {
   via?: TravelCell[];
 }
 const networkCache = new Map<string, TravelRoute[]>();
+// A large village network (alpha Catmark: 691 routes, 54 341 cells) took 9 s
+// to rebuild on every command while it stayed just above the former 50 000.
+const MAX_CACHED_ROUTE_CELLS = 400_000;
 // Exact input aliases skip rasterization, but never outlive the authoritative result cache.
 const networkAliases = new Map<string, string>();
 const MAX_NETWORK_ALIASES = 16,
@@ -490,11 +493,12 @@ export function buildTravelNetwork(
         return refined ? [refined] : [];
       })
     : routes;
-  if (result.reduce((n, r) => n + r.cells.length, 0) <= 50_000) {
+  if (result.reduce((n, r) => n + r.cells.length, 0) <= MAX_CACHED_ROUTE_CELLS) {
     networkCache.set(signature, copyNetwork(result));
     while (
       networkCache.size > 8 ||
-      [...networkCache.values()].reduce((n, list) => n + list.reduce((m, r) => m + r.cells.length, 0), 0) > 50_000
+      [...networkCache.values()].reduce((n, list) => n + list.reduce((m, r) => m + r.cells.length, 0), 0) >
+        MAX_CACHED_ROUTE_CELLS
     )
       networkCache.delete(networkCache.keys().next().value!);
     rememberNetworkAlias(input, signature);
