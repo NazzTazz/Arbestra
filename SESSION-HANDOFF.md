@@ -23,6 +23,8 @@ Spec : [docs/SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md](docs/SPEC-COMMAND
 
 ## Ouvert
 
+- Tests : la suite complète tourne en CI (`test.yml`, 4 tranches, ~4 min, verte au 24 octobre sur `wip/v2-commandes-bornees`). Le déploiement n'attend pas encore la CI : décision de Tristan en attente (recommandation : bloquer). En local, préférer les tests ciblés ; la suite série reste disponible (~30 min).
+
 - Gros villages (alpha, Catmark : 1 515 habitants en 1 513 cohortes, 39 M de mises à jour de lignes cumulées, 5 triggers par ligne) : chaque commande et tâche réécrivait toutes les cohortes, et le lecteur V2 refusait plus de 1 024 cohortes (bootstrap 500, repli silencieux V1). Corrigé : plafond du lecteur porté à 4 096 (`085f105`, déployé), puis fusion des cohortes inactives par point d'énergie (règle dans [économie](docs/architecture/economy.md)). Reste à mesurer sur alpha après déploiement ; les triggers par ligne de `population_cohorts` (statement-level, comme 060/061) restent une piste si le coût persiste.
 
 - Pose d'un bâtiment neuf : **résolue sur staging** (mesure navigateur réelle : 4,9 s → 0,27 s). Causes : V2 inactive en prod (ci-dessus), JIT PostgreSQL sur une requête composite (pool API en `jit=off`) et contrôle de croisement des trajets réécrit. Détails : priorité 5 de [l'audit des coûts](docs/AUDIT-COUTS-SERVEUR-2026-10-21.md#priorités-restantes).

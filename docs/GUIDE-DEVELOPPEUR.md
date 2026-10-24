@@ -30,6 +30,8 @@ corepack pnpm dev               # api + clients en parallèle
 ```
 
 - Tests : `corepack pnpm test` (vitest, fichiers en série) ; ciblé : `corepack pnpm exec vitest run <fichier> -t '<cas>'`. Les tests DB visent `TEST_DATABASE_URL` (suffixe `_test` obligatoire). **Jamais deux suites DB en parallèle** sur la même base.
+- CI : `.github/workflows/test.yml` rejoue toute la suite à chaque push sur `main` et `wip/**`, en 4 tranches (`vitest --shard`) sur 4 machines avec chacune son PostgreSQL 17, plus un job format/lint/typecheck : environ 4 minutes, contre 30 en local. Résultats : `gh run list --workflow test.yml`.
+- Parallélisme local (facultatif) : `ARBESTRA_TEST_WORKERS=3` clone la base de test par worker (`database/test-workers.ts`, le rôle doit avoir `CREATEDB`). Sur le portable, le gain est faible et les tests de concurrence chronométrés décrochent : la valeur par défaut reste 1.
 - Navigateur : `corepack pnpm test:e2e` (Playwright).
 - Qualité : `corepack pnpm lint`, `corepack pnpm typecheck`, `corepack pnpm format` (Prettier, 120 colonnes, guillemets simples). Le reformatage de masse `102c5f4` est ignoré par `git blame` via `.git-blame-ignore-revs` (`git config blame.ignoreRevsFile .git-blame-ignore-revs`).
 - Ne jamais réinitialiser la base de développement : `db:setup` re-seed, `db:test:setup` vise la base de test.
