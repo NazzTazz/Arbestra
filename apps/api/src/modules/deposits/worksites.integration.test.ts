@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { villageCommandConfirmationV2IsValid } from '@arbestra/contracts';
 import { travelDuration } from '@arbestra/contracts';
 import { sql, type Transaction } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -928,5 +929,23 @@ describe('HTTP worksite contract', () => {
     });
     expect(paused.statusCode, paused.body).toBe(200);
     expect(paused.json().worksite.status).toBe('paused');
+    // V2: a resume is answered by its confirmation and effects, not a village state.
+    const commandId = randomUUID();
+    const resumed = await app.inject({
+      method: 'POST',
+      url: `${base}/${siteId}`,
+      cookies,
+      headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' },
+      payload: { commandId, action: 'resume' },
+    });
+    expect(resumed.statusCode, resumed.body).toBe(200);
+    const confirmation = resumed.json();
+    expect(villageCommandConfirmationV2IsValid(confirmation)).toBe(true);
+    expect(confirmation).toMatchObject({ commandId, status: 'applied' });
+    expect(JSON.stringify(confirmation.effects)).toContain(siteId);
+    expect(
+      (await db.selectFrom('extractionWorksites').select('status').where('id', '=', siteId).executeTakeFirstOrThrow())
+        .status,
+    ).not.toBe('paused');
   }, 40000);
 });

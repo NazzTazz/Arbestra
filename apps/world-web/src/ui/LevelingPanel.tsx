@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { LevelingCommand, LevelingPreview, LevelingRequest } from '@arbestra/contracts';
 import { ApiError, commandLeveling, previewLeveling, type TimedVillageState } from '../api/client';
+import { SyncV2HttpError } from '../api/sync-v2-transport';
 import { randomUUID } from '../random-uuid';
 import { BuildingThumbnail } from './BuildingThumbnail';
 import './leveling.css';
@@ -14,7 +15,10 @@ export function LevelingPanel({
   onClose,
   onStarted,
   onPreview,
+  submit: send,
 }: {
+  /** V2 when the village is synchronized by it: the effects update the state. */
+  submit?: (command: LevelingCommand) => Promise<TimedVillageState | void>;
   onPreview: (preview: LevelingPreview) => void;
   slug: string;
   villageId: string;
@@ -57,11 +61,16 @@ export function LevelingPanel({
     setPending(true);
     setError(null);
     try {
-      onSnapshot(await commandLeveling(slug, villageId, command));
+      const result = await (send ?? ((c: LevelingCommand) => commandLeveling(slug, villageId, c)))(command);
+      if (result) onSnapshot(result);
       onStarted();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Résultat inconnu. Vérifiez la même commande.');
-      if (reason instanceof ApiError && reason.status >= 400 && reason.status < 500) {
+      if (
+        (reason instanceof ApiError || reason instanceof SyncV2HttpError) &&
+        reason.status >= 400 &&
+        reason.status < 500
+      ) {
         setRetry(null);
         setPreview(null);
       }

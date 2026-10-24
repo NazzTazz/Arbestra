@@ -85,6 +85,7 @@ import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
 import { commandScience } from './api/client';
+import { commandLeveling, commandTerraform } from './api/client';
 import { DevDrawer } from './ui/DevDrawer';
 import {
   configuredExploitation,
@@ -224,6 +225,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     discoverCatEyes?: ReturnType<typeof useVillageSyncV2>['discoverCatEyes'];
     exploit?: ReturnType<typeof useVillageSyncV2>['exploit'];
     trade?: ReturnType<typeof useVillageSyncV2>['trade'];
+    level?: ReturnType<typeof useVillageSyncV2>['level'];
+    terraform?: ReturnType<typeof useVillageSyncV2>['terraform'];
+    changeWorksite?: ReturnType<typeof useVillageSyncV2>['changeWorksite'];
   }>({ ready: false, refresh: () => {} });
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -433,6 +437,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     discoverCatEyes: villageV2.discoverCatEyes,
     exploit: villageV2.exploit,
     trade: villageV2.trade,
+    level: villageV2.level,
+    terraform: villageV2.terraform,
+    changeWorksite: villageV2.changeWorksite,
   };
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
@@ -1901,13 +1908,12 @@ export function App({ starter }: { starter?: StarterController } = {}) {
 
   function commandWorksite(id: string, action: 'pause' | 'resume' | 'stop' | 'set-cap', cap?: number) {
     if (!state || modeRef.current !== 'exploitation') return;
-    void runAction(() =>
-      changeWorksite(worldSlug, state.village.id, id, {
-        commandId: randomUUID(),
-        action,
-        ...(cap === undefined ? {} : { workerCap: cap }),
-      }),
-    );
+    const change = { commandId: randomUUID(), action, ...(cap === undefined ? {} : { workerCap: cap }) };
+    void runAction(async () => {
+      const v2 = villageV2Ref.current;
+      if (!v2.ready || !v2.changeWorksite) return changeWorksite(worldSlug, state.village.id, id, change);
+      await v2.changeWorksite(id, change);
+    });
   }
 
   if (loading)
@@ -2562,6 +2568,12 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             state={state}
             scene={terrainRef}
             onSnapshot={applySnapshot}
+            submit={(command) => {
+              const v2 = villageV2Ref.current;
+              return v2.ready && v2.terraform
+                ? v2.terraform(command)
+                : commandTerraform(state.world.slug, state.village.id, command);
+            }}
             onStarted={() => pushNotification('Chantier de terraformation lancé.')}
           />
         )}
@@ -2572,6 +2584,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             request={leveling}
             onPreview={setLevelingPreview}
             onSnapshot={applySnapshot}
+            submit={async (command) => {
+              const v2 = villageV2Ref.current;
+              if (!v2.ready || !v2.level) return commandLeveling(state.world.slug, state.village.id, command);
+              await v2.level(command);
+            }}
             onClose={() => {
               setLeveling(null);
               setLevelingPreview(null);

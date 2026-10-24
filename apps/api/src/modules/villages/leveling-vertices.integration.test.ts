@@ -1,4 +1,8 @@
-import { sql } from 'kysely';
+import type { VillageState } from '@arbestra/contracts';
+import { sql, type Transaction } from 'kysely';
+import type { Database } from '../../database/schema.js';
+import { publishPrivateEffects } from './sync-v2-effects.js';
+import type { VillageEconomy } from './reconcile-economy.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -345,6 +349,14 @@ it('certifies a local free-terrain quote without reserving on mismatch, admits 5
       ),
     );
   const before = await rows();
+  // V2: an adjusted quote rolls back before any publication.
+  const published: string[] = [];
+  const publish = async (tx: Transaction<Database>, economy: VillageEconomy) => {
+    published.push(JSON.stringify(await publishPrivateEffects(tx, economy, 1)));
+  };
+  expect((await commandTerraform(db, accountId, slug, villageId, command, publish)).status).toBe('changed');
+  expect(published).toEqual([]);
+  expect(await rows()).toEqual(before);
   const adjusted = await commandTerraform(db, accountId, slug, villageId, command);
   expect(adjusted.status).toBe('changed');
   expect(await rows()).toEqual(before);
@@ -363,14 +375,16 @@ it('certifies a local free-terrain quote without reserving on mismatch, admits 5
   };
   expect(serverQuote.durationMs).toBeGreaterThan(accepted.expected.durationMs);
   expect(serverQuote.durationMs).toBeLessThanOrEqual(accepted.expected.durationMs * 1.1);
-  const result = await commandTerraform(db, accountId, slug, villageId, accepted);
+  // Started on the V2 contract: the commit's effects carry the new site.
+  const result = await commandTerraform(db, accountId, slug, villageId, accepted, publish);
   expect(result.status).toBe('started');
   const job = await db.selectFrom('levelingJobs').selectAll().where('worldId', '=', worldId).executeTakeFirstOrThrow();
   expect(job.workerCount).toBe(50);
   expect(job.request.buildingType).toBe('terrain');
   expect(job.quote).toEqual(serverQuote);
   expect(job.completesAt.getTime() - job.startedAt.getTime()).toBe(serverQuote.durationMs);
-  expect(result.status === 'started' && result.state.village.levelingJobs?.some((j) => j.id === job.id)).toBe(true);
+  expect(published).toHaveLength(1);
+  expect(published[0]).toContain(job.id);
   expect(
     await db
       .selectFrom('worldCellOccupancies')
@@ -380,6 +394,8 @@ it('certifies a local free-terrain quote without reserving on mismatch, admits 5
       .execute(),
   ).toHaveLength(expected.affectedCells!.length);
   await commandTerraform(db, accountId, slug, villageId, accepted);
+  await commandTerraform(db, accountId, slug, villageId, accepted, publish);
+  expect(published).toHaveLength(1);
   expect(await db.selectFrom('levelingJobs').select('id').where('worldId', '=', worldId).execute()).toHaveLength(1);
   await expect(commandTerraform(db, accountId, slug, villageId, { ...accepted, height: 0.75 })).rejects.toMatchObject({
     code: 'COMMAND_REUSED',
@@ -493,7 +509,7 @@ it('reserves the shared-corner ring, rolls back changed vertices, finishes once 
     results = await attempts;
   }
   expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
-  const launched = (results[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof commandLeveling>>>).value;
+  const launched = (results[0] as PromiseFulfilledResult<VillageState>).value;
   expect(launched.village.levelingJobs).toHaveLength(1);
   expect(launched.village.population.working).toBe(2);
   expect(launched.village.resources.map((r) => [r.code, r.amount])).toEqual(

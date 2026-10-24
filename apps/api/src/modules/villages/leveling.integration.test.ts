@@ -1,3 +1,4 @@
+import type { VillageState } from '@arbestra/contracts';
 import { sql } from 'kysely';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -330,7 +331,7 @@ it('reserves a dry university pad, spends labour once, persists the level ground
     results = await attempts;
   }
   expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
-  const launched = (results[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof commandLeveling>>>).value;
+  const launched = (results[0] as PromiseFulfilledResult<VillageState>).value;
   expect(launched.village.levelingJobs).toHaveLength(1);
   expect(launched.village.population.working).toBe(2);
   expect(launched.village.resources.map((r) => [r.code, r.amount])).toEqual(

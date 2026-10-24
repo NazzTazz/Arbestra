@@ -11,6 +11,7 @@ import type { TerrainHandle } from '../scene/VillageScene';
 import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { cellsAlongSegment, cellKey } from '../scene/construction-selection';
 import { ApiError, commandTerraform, type TimedVillageState } from '../api/client';
+import { SyncV2HttpError } from '../api/sync-v2-transport';
 import { randomUUID } from '../random-uuid';
 import { localTerraform, terrainBrushHeight, terraformSelectionVisual } from './terraform-draft';
 import './terraform.css';
@@ -25,7 +26,12 @@ export function TerraformPanel({
   scene,
   onSnapshot,
   onStarted,
+  submit: send,
 }: {
+  /** V2 when the village is synchronized by it: no snapshot comes back. */
+  submit?: (
+    command: TerraformCommand,
+  ) => Promise<{ status: 'changed'; preview: LevelingPreview } | { status: 'started'; snapshot?: TimedVillageState }>;
   state: VillageState;
   scene: RefObject<TerrainHandle | null>;
   onSnapshot: (s: TimedVillageState) => void;
@@ -225,13 +231,15 @@ export function TerraformPanel({
       }
     };
     try {
-      const result = await commandTerraform(state.world.slug, state.village.id, command);
+      const result = await (send ?? ((c: TerraformCommand) => commandTerraform(state.world.slug, state.village.id, c)))(
+        command,
+      );
       forget();
       if (result.status === 'changed') {
         setCertified(result.preview);
         setError(result.preview.message ?? 'Le serveur a ajusté le devis et le trajet. Confirmez ces valeurs.');
       } else {
-        onSnapshot(result.snapshot);
+        if (result.snapshot) onSnapshot(result.snapshot);
         stroke.current = null;
         set(null);
         onStarted();
@@ -239,7 +247,7 @@ export function TerraformPanel({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Résultat inconnu. Vérifiez le même chantier.');
       if (
-        reason instanceof ApiError &&
+        (reason instanceof ApiError || reason instanceof SyncV2HttpError) &&
         reason.status >= 400 &&
         reason.status < 500 &&
         ![401, 403, 408, 429].includes(reason.status)

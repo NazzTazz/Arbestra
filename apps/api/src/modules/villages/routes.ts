@@ -187,6 +187,9 @@ function villageReplyOptions(headers: FastifyRequest['headers']) {
   return { replyMode, base };
 }
 
+/** Internal signal: a terraform quote changed, nothing was committed. */
+class TerraformQuoteChanged extends Error {}
+
 export async function registerVillageRoutes(
   app: FastifyInstance,
   db: Kysely<Database>,
@@ -298,30 +301,67 @@ export async function registerVillageRoutes(
     {
       schema: {
         params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
         body: TerraformCommandSchema,
         response: {
           200: Type.Union([
             TerraformChangedSchema,
             Type.Object({ status: Type.Literal('started'), state: VillageStateSchema }),
+            VillageCommandConfirmationV2Schema,
           ]),
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return commandTerraform(db, account.id, worldSlug, villageId, request.body as TerraformCommand);
+      const command = request.body as TerraformCommand;
+      if (request.headers['x-arbestra-protocol'] === '2') {
+        // An adjusted quote rolled back without effects keeps its compact answer.
+        let changed: unknown;
+        const sent = await villageV2(
+          request,
+          reply,
+          async (afterWrites) => {
+            const result = await commandTerraform(db, account.id, worldSlug, villageId, command, afterWrites);
+            if (result.status === 'changed') {
+              changed = result;
+              throw new TerraformQuoteChanged();
+            }
+            return result.state;
+          },
+          command.commandId,
+        ).catch((error) => {
+          if (error instanceof TerraformQuoteChanged) return undefined;
+          throw error;
+        });
+        return sent ?? reply.serializer(JSON.stringify).send(changed);
+      }
+      return commandTerraform(db, account.id, worldSlug, villageId, command);
     },
   );
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/leveling',
     {
-      schema: { params: VillageParametersSchema, body: LevelingCommandSchema, response: { 200: VillageStateSchema } },
+      schema: {
+        params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        body: LevelingCommandSchema,
+        response: { 200: Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]) },
+      },
     },
-    async (request) => {
+    async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return commandLeveling(db, account.id, worldSlug, villageId, request.body as LevelingCommand);
+      const command = request.body as LevelingCommand;
+      if (request.headers['x-arbestra-protocol'] === '2')
+        return villageV2(
+          request,
+          reply,
+          (afterWrites) => commandLeveling(db, account.id, worldSlug, villageId, command, afterWrites),
+          command.commandId,
+        );
+      return commandLeveling(db, account.id, worldSlug, villageId, command);
     },
   );
   const tradeNavigation = navigation as TravelNetworkExecutor & NavigationExecutor;
@@ -1067,17 +1107,26 @@ export async function registerVillageRoutes(
     {
       schema: {
         params: Type.Object({ ...VillageParametersSchema.properties, worksiteId: Type.String({ format: 'uuid' }) }),
+        headers: VillageCommandV2HeadersSchema,
         body: ChangeExtractionWorksiteRequestSchema,
-        response: { 200: ExtractionWorksiteResponseSchema },
+        response: { 200: Type.Union([ExtractionWorksiteResponseSchema, VillageCommandConfirmationV2Schema]) },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId, worksiteId } = request.params as {
         worldSlug: string;
         villageId: string;
         worksiteId: string;
       };
+      const change = request.body as ChangeExtractionWorksiteRequest;
+      if (request.headers['x-arbestra-protocol'] === '2')
+        return villageV2(
+          request,
+          reply,
+          (afterWrites) => changeVillageWorksite(db, account.id, worldSlug, villageId, worksiteId, change, afterWrites),
+          change.commandId,
+        );
       return changeVillageWorksite(
         db,
         account.id,

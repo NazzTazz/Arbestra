@@ -480,3 +480,42 @@ it('sends bodyless gestures with their identity in a header and refuses a foreig
     transport.close();
   }
 });
+
+it('routes leveling, worksite changes and terraforming, passing an adjusted terraform quote through', async () => {
+  const paths: string[] = [];
+  let changed = false;
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream'))
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const headers = new Headers(init?.headers);
+    if (String(url).endsWith('/sync/read')) return json(bootstrap(Number(headers.get('x-arbestra-generation'))));
+    paths.push(String(url).replace(/.*villages\/[^/]+/, ''));
+    if (changed) return json({ status: 'changed', preview: { valid: true, message: null, quote: {} } });
+    return json({
+      protocol: 2,
+      worldId,
+      villageId,
+      commandId: headers.get('x-arbestra-command'),
+      status: 'applied',
+      commandTime: '2026-10-24T00:00:00Z',
+    });
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: () => undefined,
+    expired: () => undefined,
+  });
+  try {
+    await transport.start(true);
+    const commandId = '99999999-9999-4999-8999-999999999999';
+    await transport.level({ commandId } as never);
+    await transport.changeWorksite(epoch, { commandId, action: 'pause' });
+    await expect(transport.terraform({ commandId } as never)).resolves.toEqual({ status: 'started' });
+    changed = true;
+    await expect(transport.terraform({ commandId } as never)).resolves.toMatchObject({ status: 'changed' });
+    expect(paths).toEqual(['/leveling', `/worksites/${epoch}`, '/terraform', '/terraform']);
+  } finally {
+    transport.close();
+  }
+});

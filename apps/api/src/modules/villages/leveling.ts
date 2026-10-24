@@ -38,7 +38,16 @@ import {
   projectCohorts,
   releaseWorkers,
 } from '../population/work.js';
-import { ownedVillage, state, assertBuildableCells, withVillageProjection, type OwnedVillage } from './service.js';
+import {
+  ownedVillage,
+  state,
+  assertBuildableCells,
+  villageCommandResult,
+  withVillageProjection,
+  type AfterConstructionWrites,
+  type ConstructionCommit,
+  type OwnedVillage,
+} from './service.js';
 import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { readNavigationInfrastructure } from './infrastructure.js';
 
@@ -372,8 +381,24 @@ export function commandLeveling(
   slug: string,
   villageId: string,
   command: LevelingCommand,
+): Promise<VillageState>;
+export function commandLeveling(
+  db: Kysely<Database>,
+  accountId: string,
+  slug: string,
+  villageId: string,
+  command: LevelingCommand,
+  afterWrites: AfterConstructionWrites,
+): Promise<ConstructionCommit>;
+export function commandLeveling(
+  db: Kysely<Database>,
+  accountId: string,
+  slug: string,
+  villageId: string,
+  command: LevelingCommand,
+  afterWrites?: AfterConstructionWrites,
 ) {
-  return admitLeveling(db, accountId, slug, villageId, command);
+  return admitLeveling(db, accountId, slug, villageId, command, afterWrites);
 }
 export async function commandTerraform(
   db: Kysely<Database>,
@@ -381,9 +406,28 @@ export async function commandTerraform(
   slug: string,
   villageId: string,
   command: TerraformCommand,
+): Promise<{ status: 'started'; state: VillageState } | { status: 'changed'; preview: LevelingPreview }>;
+export async function commandTerraform(
+  db: Kysely<Database>,
+  accountId: string,
+  slug: string,
+  villageId: string,
+  command: TerraformCommand,
+  afterWrites: AfterConstructionWrites,
+): Promise<{ status: 'started'; state: ConstructionCommit } | { status: 'changed'; preview: LevelingPreview }>;
+export async function commandTerraform(
+  db: Kysely<Database>,
+  accountId: string,
+  slug: string,
+  villageId: string,
+  command: TerraformCommand,
+  afterWrites?: AfterConstructionWrites,
 ) {
   try {
-    return { status: 'started' as const, state: await admitLeveling(db, accountId, slug, villageId, command) };
+    return {
+      status: 'started' as const,
+      state: await admitLeveling(db, accountId, slug, villageId, command, afterWrites),
+    };
   } catch (error) {
     if (error instanceof ChangedTerraformQuote) return { status: 'changed' as const, preview: error.preview };
     throw error;
@@ -395,8 +439,9 @@ async function admitLeveling(
   slug: string,
   villageId: string,
   command: LevelingCommand | TerraformCommand,
-) {
-  return db.transaction().execute(async (tx) => {
+  afterWrites?: AfterConstructionWrites,
+): Promise<VillageState | ConstructionCommit> {
+  return db.transaction().execute(async (tx): Promise<VillageState | ConstructionCommit> => {
     const v = await ownedVillage(tx, accountId, slug, villageId);
     const ctx = await beginVillageEconomy(tx, v.worldId, v.villageId, undefined, [], [], true);
     const prior = await tx
@@ -409,6 +454,8 @@ async function admitLeveling(
     if (prior) {
       if (!isDeepStrictEqual(prior.request, command))
         throw new HttpError(409, 'COMMAND_REUSED', 'Identifiant déjà utilisé pour un autre chantier.');
+      // A V2 replay publishes nothing; its effects were sent with the original.
+      if (afterWrites) return ctx;
     } else {
       const { commandId, expected, ...request } = command;
       const { preview, workers, path } = await prepare(tx, v, ctx, accountId, request);
@@ -489,6 +536,7 @@ async function admitLeveling(
         })
         .execute();
     }
+    if (afterWrites) return villageCommandResult(tx, accountId, slug, v, ctx, 'commit', undefined, afterWrites);
     return state(tx, accountId, slug, ctx);
   });
 }

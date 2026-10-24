@@ -3351,12 +3351,32 @@ export async function changeVillageWorksite(
   villageId: string,
   worksiteId: string,
   request: ChangeExtractionWorksiteRequest,
+): Promise<{ villageState: VillageState; worksite: VillageState['village']['worksites'][number] }>;
+export async function changeVillageWorksite(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  worksiteId: string,
+  request: ChangeExtractionWorksiteRequest,
+  afterWrites: AfterConstructionWrites,
+): Promise<ConstructionCommit>;
+export async function changeVillageWorksite(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  worksiteId: string,
+  request: ChangeExtractionWorksiteRequest,
+  afterWrites?: AfterConstructionWrites,
 ) {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await changeWorksite(tx, economy, worksiteId, request);
+    if (afterWrites)
+      return villageCommandResult(tx, accountId, worldSlug, village, economy, 'commit', undefined, afterWrites);
     const villageState = await state(tx, accountId, worldSlug, economy);
     const worksite = villageState.village.worksites.find((site) => site.id === worksiteId);
     if (!worksite) throw new Error('Changed worksite missing from snapshot');
