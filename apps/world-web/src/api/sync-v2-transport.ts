@@ -450,6 +450,10 @@ export class SyncV2Transport {
     )
       throw Error('Confirmation de commande invalide.');
     this.applyEffects(input.effects);
+    // The ACK carries only private effects. Science programs (knowledge),
+    // the other village of a trade or public convoys change in other streams:
+    // read their deltas now rather than at the next stream poll.
+    this.reconnect();
     return input;
   }
   private applyEffects(effects: SyncV2Batch | undefined) {

@@ -519,3 +519,38 @@ it('routes leveling, worksite changes and terraforming, passing an adjusted terr
     transport.close();
   }
 });
+
+it('rereads the other streams right after a gesture confirmation (science lives in knowledge)', async () => {
+  let reads = 0;
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream'))
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const headers = new Headers(init?.headers);
+    if (String(url).endsWith('/sync/read')) {
+      reads++;
+      return json(bootstrap(Number(headers.get('x-arbestra-generation'))));
+    }
+    return json({
+      protocol: 2,
+      worldId,
+      villageId,
+      commandId: headers.get('x-arbestra-command'),
+      status: 'applied',
+      commandTime: '2026-10-24T00:00:00Z',
+    });
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: () => undefined,
+    expired: () => undefined,
+  });
+  try {
+    await transport.start(true);
+    const before = reads;
+    await transport.science({ action: 'train', buildingId: epoch }, '12121212-1212-4212-8212-121212121212');
+    await vi.waitFor(() => expect(reads).toBe(before + 1));
+  } finally {
+    transport.close();
+  }
+});
