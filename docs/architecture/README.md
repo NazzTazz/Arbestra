@@ -1,5 +1,7 @@
 # Architecture autoritaire
 
+Nouveau venu dans le code : commencer par le [guide développeur](../GUIDE-DEVELOPPEUR.md) (carte des modules, cycle d'une commande, « où trouver… »).
+
 **Cible proposée, non implémentée — 21 octobre :** [transition complète vers des commandes bornées et une synchronisation ciblée](../SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md). Catalogue des actions, dépendances économiques, confirmations HTTP, journal/SSE par périmètre, reprise, budgets et neuf lots de migration jusqu'au retrait V1. Les descriptions ci-dessous restent celles de l'existant.
 
 **Version courante alpha/staging du 21 octobre : `a3ae90d`, tags `alpha-2026.10.21.3` et `staging-2026.10.21.3`.** [Audit des coûts serveur : mesures, corrections, validations et priorités restantes](../AUDIT-COUTS-SERVEUR-2026-10-21.md). Projections consultatives, regroupements SQL, réponses marché/atelier/science après commit, réutilisation des contrôles de sélection et des sérialiseurs, recherche de trajets bornée par son détour existant. Builds CI, contrôles publics et révisions/services VPS vérifiés ; aucune migration nouvelle.

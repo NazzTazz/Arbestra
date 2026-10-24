@@ -16,6 +16,7 @@ import { migrateToLatest } from '../../database/migrate.js';
 import { buildApp } from '../../app.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { captureSyncV2 } from './sync-v2-capture.js';
+import { materializeCohorts } from '../population/work.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -447,6 +448,18 @@ it('bootstraps a village with more than 1 024 single-member cohorts (one per arr
       .filter((change) => change.component === 'cohorts')
       .reduce((n, change) => n + change.upsert.length, 0);
     expect(cohorts).toBeGreaterThanOrEqual(1100);
+    // Materialization regroups the arrivals per energy point without losing anyone.
+    const members = async () =>
+      await db
+        .selectFrom('populationCohorts')
+        .select([sql<number>`count(*)::int`.as('rows'), sql<number>`sum(member_count)::int`.as('members')])
+        .where('villageId', '=', ids.village)
+        .executeTakeFirstOrThrow();
+    const before = await members();
+    await db.transaction().execute((tx) => materializeCohorts(tx, ids.world, ids.village, new Date()));
+    const after = await members();
+    expect(after.members).toBe(before.members);
+    expect(after.rows).toBeLessThanOrEqual(20);
   } finally {
     await db.deleteFrom('populationCohorts').where('villageId', '=', ids.village).execute();
   }

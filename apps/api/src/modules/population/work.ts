@@ -45,6 +45,79 @@ function projectCohort(cohort: Cohort, through: Date): Cohort {
   };
 }
 
+/** Idle, unassigned inhabitants without a skill who share an origin, an
+ * energy point and a food count form one cohort (Tristan, 24 October): one
+ * cohort per energy level rather than one per arrival. Skilled inhabitants
+ * (cartographers) and cohorts named by a pending initial departure stay
+ * apart. Every cohort must already be projected to the same instant. */
+function mergeKey(cohort: Cohort, referenced: ReadonlySet<string>): string | null {
+  if (
+    cohort.activity !== 'idle' ||
+    !withoutAssignment(cohort) ||
+    cohort.pendingRelease !== null ||
+    cohort.avoidWorksiteId !== null ||
+    cohort.restBuildingId !== null ||
+    cohort.restingSince !== null ||
+    cohort.cartographer ||
+    referenced.has(cohort.id)
+  )
+    return null;
+  return [cohort.originVillageId, cohort.energy, cohort.foodUsedSinceRest, cohort.energyUpdatedAt.getTime()].join(':');
+}
+
+/** The survivor keeps the oldest identity, so an established group keeps its
+ * ID when an arrival joins it. Sub-point progress is the member-weighted
+ * mean, floored: the group keeps its energy point and loses less than one
+ * energy unit in total. */
+export function mergeCohorts(cohorts: readonly Cohort[], referenced: ReadonlySet<string> = new Set()) {
+  const groups = new Map<string, Cohort[]>();
+  for (const cohort of cohorts) {
+    const key = mergeKey(cohort, referenced);
+    if (key !== null) groups.set(key, [...(groups.get(key) ?? []), cohort]);
+  }
+  const absorbed = new Set<string>(),
+    merged = new Map<string, Cohort>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const [survivor, ...rest] = [...group].sort(
+      (a, b) =>
+        new Date(a.createdAt as unknown as string).getTime() - new Date(b.createdAt as unknown as string).getTime() ||
+        a.id.localeCompare(b.id),
+    );
+    const members = group.reduce((n, c) => n + c.memberCount, 0);
+    const progress = Math.floor(group.reduce((n, c) => n + c.energyProgress * c.memberCount, 0) / members);
+    merged.set(survivor!.id, { ...survivor!, memberCount: members, energyProgress: progress });
+    for (const cohort of rest) absorbed.add(cohort.id);
+  }
+  return {
+    cohorts: cohorts.filter((c) => !absorbed.has(c.id)).map((c) => merged.get(c.id) ?? c),
+    absorbed: [...absorbed],
+  };
+}
+
+/** Cohorts named by a stored reference keep their identity: a pending
+ * initial departure, or the team a running workshop order continues with. */
+async function referencedCohorts(tx: Transaction<Database>, worldId: string, villageId: string) {
+  const [initial, teams] = await Promise.all([
+    tx
+      .selectFrom('exploitationOrders')
+      .select('cohortId')
+      .where('worldId', '=', worldId)
+      .where('villageId', '=', villageId)
+      .where('cohortId', 'is not', null)
+      .where('initialRemaining', '>', 0)
+      .execute(),
+    tx
+      .selectFrom('processingOrders')
+      .select('workerIds')
+      .where('worldId', '=', worldId)
+      .where('villageId', '=', villageId)
+      .where('status', 'not in', ['completed', 'cancelled'])
+      .execute(),
+  ]);
+  return new Set([...initial.map((row) => row.cohortId!), ...teams.flatMap((row) => row.workerIds)]);
+}
+
 /** The same eligibility clock as departures, without assigning beds or writing cursors. */
 export async function projectCohorts(tx: Transaction<Database>, worldId: string, villageId: string, through: Date) {
   const cohorts = await tx
@@ -54,7 +127,11 @@ export async function projectCohorts(tx: Transaction<Database>, worldId: string,
     .where('villageId', '=', villageId)
     .orderBy('id')
     .execute();
-  return cohorts.map((cohort) => projectCohort(cohort, through));
+  // The same grouping as the next materialization: previewed IDs survive it.
+  return mergeCohorts(
+    cohorts.map((cohort) => projectCohort(cohort, through)),
+    await referencedCohorts(tx, worldId, villageId),
+  ).cohorts;
 }
 
 /** A successful replacement departure makes idle former members eligible again.
@@ -96,7 +173,7 @@ export function withoutAssignment(
 
 /** The village lock and chronological reconciliation protect every cursor. */
 export async function materializeCohorts(tx: Transaction<Database>, worldId: string, villageId: string, through: Date) {
-  const cohorts = await tx
+  const locked = await tx
     .selectFrom('populationCohorts')
     .selectAll()
     .where('worldId', '=', worldId)
@@ -104,19 +181,30 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
     .orderBy('id')
     .forUpdate()
     .execute();
-  for (const cohort of cohorts) {
+  for (const cohort of locked) {
     Object.assign(cohort, projectCohort(cohort, through));
   }
+  const merge = mergeCohorts(locked, await referencedCohorts(tx, worldId, villageId)),
+    cohorts = merge.cohorts;
+  if (merge.absorbed.length)
+    await tx
+      .deleteFrom('populationCohorts')
+      .where('worldId', '=', worldId)
+      .where('villageId', '=', villageId)
+      .where('id', 'in', merge.absorbed)
+      .execute();
   // All rows were locked in canonical order above. Persist the same per-cohort
   // projections together instead of one round trip per inhabitant group.
   if (cohorts.length)
     await sql`
-    update population_cohorts c set energy=v.energy, energy_progress=v.energy_progress, activity=v.activity,
+    update population_cohorts c set member_count=v.member_count, energy=v.energy, energy_progress=v.energy_progress,
+      activity=v.activity,
       resting_since=v.resting_since, food_used_since_rest=v.food_used_since_rest,
       energy_updated_at=v.energy_updated_at, rest_building_id=v.rest_building_id, avoid_worksite_id=v.avoid_worksite_id
     from jsonb_to_recordset(${JSON.stringify(
       cohorts.map((c) => ({
         id: c.id,
+        member_count: c.memberCount,
         energy: c.energy,
         energy_progress: c.energyProgress,
         activity: c.activity,
@@ -127,12 +215,12 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
         avoid_worksite_id: c.avoidWorksiteId,
       })),
     )}::jsonb)
-      as v(id uuid,energy integer,energy_progress integer,activity text,resting_since timestamptz,
+      as v(id uuid,member_count integer,energy integer,energy_progress integer,activity text,resting_since timestamptz,
         food_used_since_rest integer,energy_updated_at timestamptz,rest_building_id uuid,avoid_worksite_id uuid)
     where c.world_id=${worldId} and c.village_id=${villageId} and c.id=v.id
-      and (c.energy,c.energy_progress,c.activity,c.resting_since,c.food_used_since_rest,
+      and (c.member_count,c.energy,c.energy_progress,c.activity,c.resting_since,c.food_used_since_rest,
         c.energy_updated_at,c.rest_building_id,c.avoid_worksite_id) is distinct from
-        (v.energy,v.energy_progress,v.activity,v.resting_since,v.food_used_since_rest,
+        (v.member_count,v.energy,v.energy_progress,v.activity,v.resting_since,v.food_used_since_rest,
         v.energy_updated_at,v.rest_building_id,v.avoid_worksite_id)
   `.execute(tx);
   return allocateRestHousing(tx, worldId, villageId, cohorts);

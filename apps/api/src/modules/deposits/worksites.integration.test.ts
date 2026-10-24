@@ -768,10 +768,19 @@ it('rests only the returning exhausted team and sends an available relief team',
           .executeTakeFirstOrThrow()
       ).activity,
     ).toBe('resting');
+    // The relief may have joined another idle cohort with the same energy
+    // point (cohort merge): an available inhabitant with energy remains.
     expect(
-      (await tx.selectFrom('populationCohorts').select('activity').where('id', '=', reliefId).executeTakeFirstOrThrow())
-        .activity,
-    ).toBe('idle');
+      await tx
+        .selectFrom('populationCohorts')
+        .select('id')
+        .where('worldId', '=', worldId)
+        .where('villageId', '=', villageId)
+        .where('activity', '=', 'idle')
+        .where('energy', '>', 0)
+        .where('extractionId', 'is', null)
+        .execute(),
+    ).not.toHaveLength(0);
     await admitWorksites(tx, { ...economy, through: first.completesAt }, village, path);
     const second = (await current(tx, id))!;
     const relief = await tx
