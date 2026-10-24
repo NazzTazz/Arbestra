@@ -5,7 +5,8 @@ export default defineConfig(({ mode }) => {
   const environment = loadEnv(mode, process.cwd(), '');
   return {
     plugins: [react()],
-    build: { rollupOptions: { input: { main: 'index.html', workshop: 'factory-preview.html' } } },
+    // Public maps (the game is open source): field profiles stay readable.
+    build: { sourcemap: true, rollupOptions: { input: { main: 'index.html', workshop: 'factory-preview.html' } } },
     server: {
       host: mode === 'development' ? '0.0.0.0' : 'localhost',
       proxy: { '/api': { target: environment.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3000', changeOrigin: false } },

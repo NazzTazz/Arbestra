@@ -127,6 +127,8 @@ REDIRECTS  handle /api/* {
     file_server
   }
   handle @world {
+    # Allows the JS Self-Profiling API (in-page profiles of the 3D client).
+    header Document-Policy js-profiling
     root * /srv/arbestra/ENVIRONMENT/current/web/world
     try_files {path} /index.html
     file_server
