@@ -1179,8 +1179,10 @@ it('returns a construction frame from the client exact HTTP base instead of a fu
   });
   expect(initial.statusCode).toBe(200);
   const base = initial.json<VillageState>();
-  if (process.env.RC1_HTTP_BROWSER_FIXTURE === '1') mkdirSync('test-results', { recursive: true });
-  writeFileSync('test-results/http-construction-browser-state.json', JSON.stringify(base));
+  if (process.env.RC1_HTTP_BROWSER_FIXTURE === '1') {
+    mkdirSync('test-results', { recursive: true });
+    writeFileSync('test-results/http-construction-browser-state.json', JSON.stringify(base));
+  }
   const payload = {
     commandId: randomUUID(),
     buildingType: 'dwelling',
