@@ -465,8 +465,8 @@ export async function stoneTravelPath(
       return chunk.terrainCodes[(y % village.chunkSize) * village.chunkSize + (x % village.chunkSize)]!;
     }),
   );
-  const routeState = {
-    // The command lane checks the ground belongs to this world.
+  // Typed, not cast: the command lane rejects a ground whose world differs.
+  const routeState: TravelNetworkState = {
     world: { id: village.worldId, widthCells: village.widthCells, heightCells: village.heightCells },
     village: { anchorCellX: village.anchorCellX, anchorCellY: village.anchorCellY },
     region: {
@@ -485,8 +485,9 @@ export async function stoneTravelPath(
         },
       ],
     },
-    cells: occupied.map((cell) => ({ ...cell, footprint: {} })),
-  } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells'>;
+    // An anonymous footprint only blocks the cell.
+    cells: occupied.map((cell) => ({ ...cell, footprint: { buildingId: '' }, building: null })),
+  };
   const path = (await commandTravelNetwork(tx, routeState, rc1, [featureId])).find(
     (route) => route.id === featureId,
   )?.cells;
