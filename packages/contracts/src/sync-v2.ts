@@ -90,16 +90,27 @@ export const SyncV2IdentitySchema = Type.Object(
   { id, name: Type.String(), anchorCellX: Type.Integer(), anchorCellY: Type.Integer() },
   { additionalProperties: false },
 );
+/** One entity per building (the journal key): a building contributes to
+ * several programs, each its own row server-side. */
 export const SyncV2ContributionSchema = Type.Object(
   {
     id,
-    programCode: Type.String(),
-    workerCap: Type.Integer(),
-    requestedAt: time,
-    lastStartedAt: Type.Union([time, Type.Null()]),
+    programs: Type.Array(
+      Type.Object(
+        {
+          programCode: Type.String(),
+          workerCap: Type.Integer(),
+          requestedAt: time,
+          lastStartedAt: Type.Union([time, Type.Null()]),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1, maxItems: 64 },
+    ),
   },
   { additionalProperties: false },
 );
+export type SyncV2Contribution = Static<typeof SyncV2ContributionSchema>;
 export const SyncV2BuildingSchema = Type.Omit(BuildingSchema, ['garden'], { additionalProperties: false });
 const cell = Type.Object(
   { cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) },

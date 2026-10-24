@@ -527,3 +527,54 @@ it('bootstraps a village whose finished extraction history exceeds the snapshot 
     await db.deleteFrom('worldFeatures').where('id', '=', featureId).execute();
   }
 }, 60000);
+
+it('publishes one contribution entity per building when it serves several programs', async () => {
+  // Reproduction of alpha (Catmark, 24 October): a university contributing to
+  // three programs gave three entities under one building key, and the client
+  // reducer refused the whole snapshot (fallback to the V1 read).
+  const hall = await db
+    .selectFrom('buildings')
+    .select('id')
+    .where('villageId', '=', ids.village)
+    .where('buildingType', '=', 'town-hall')
+    .executeTakeFirstOrThrow();
+  const now = new Date();
+  try {
+    await sql`insert into player_science(world_id, account_id) values (${ids.world}, ${ids.account}) on conflict do nothing`.execute(
+      db,
+    );
+    for (const [code, discipline] of [
+      ['mathematics-1', 'mathematics'],
+      ['geography-1', 'geography'],
+    ])
+      await sql`insert into science_programs(world_id, account_id, code, discipline, level, created_at, worker_cap)
+        values (${ids.world}, ${ids.account}, ${code}, ${discipline}, 1, ${now}, 5)`.execute(db);
+    for (const code of ['mathematics-1', 'geography-1'])
+      await sql`insert into science_contributions(world_id, village_id, building_id, account_id, program_code, worker_cap, requested_at)
+        values (${ids.world}, ${ids.village}, ${hall.id}, ${ids.account}, ${code}, 5, ${now})`.execute(db);
+    const initial = await captureSyncV2(db, ids.account, slug, ids.village, {
+      protocol: 2,
+      generation: 6,
+      scopes: [],
+      cursors: [],
+    });
+    const state = { worldId: ids.world, villageId: ids.village, generation: 6, scopes: new Map() };
+    expect(applySyncV2Batch(state, initial).kind).toBe('applied');
+    const contributions = initial.groups
+      .flatMap((g) => g.changes)
+      .filter((c) => c.component === 'scienceContributions')
+      .flatMap((c) => c.upsert);
+    expect(contributions).toEqual([
+      expect.objectContaining({
+        id: hall.id,
+        programs: [
+          expect.objectContaining({ programCode: 'geography-1' }),
+          expect.objectContaining({ programCode: 'mathematics-1' }),
+        ],
+      }),
+    ]);
+  } finally {
+    await sql`delete from science_contributions where village_id = ${ids.village}`.execute(db);
+    await sql`delete from science_programs where world_id = ${ids.world} and account_id = ${ids.account}`.execute(db);
+  }
+}, 60000);

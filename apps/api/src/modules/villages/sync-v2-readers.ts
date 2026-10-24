@@ -1,5 +1,5 @@
 import { sql, type Transaction } from 'kysely';
-import { SYNC_V2_PRIVATE_COMPONENTS, type SyncV2Change } from '@arbestra/contracts';
+import { SYNC_V2_PRIVATE_COMPONENTS, type SyncV2Change, type SyncV2Contribution } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { projectVillageResources, projectGardenPlots } from './economy.js';
 import { readProcessingOrders } from './processing.js';
@@ -312,16 +312,22 @@ export async function readRegisteredPrivateChanges(
         .where('villageId', '=', villageId)
         .where('buildingId', 'in', ids)
         .orderBy('buildingId')
+        .orderBy('programCode')
         .execute();
+      const buildings = new Map<string, SyncV2Contribution['programs'][number][]>();
+      for (const row of rows)
+        buildings.set(row.buildingId, [
+          ...(buildings.get(row.buildingId) ?? []),
+          {
+            programCode: row.programCode,
+            workerCap: row.workerCap,
+            requestedAt: row.requestedAt.toISOString(),
+            lastStartedAt: row.lastStartedAt?.toISOString() ?? null,
+          },
+        ]);
       changes.push({
         component,
-        upsert: rows.map((row) => ({
-          id: row.buildingId,
-          programCode: row.programCode,
-          workerCap: row.workerCap,
-          requestedAt: row.requestedAt.toISOString(),
-          lastStartedAt: row.lastStartedAt?.toISOString() ?? null,
-        })),
+        upsert: [...buildings].map(([id, programs]) => ({ id, programs })),
         remove: ids.filter((id) => !rows.some((row) => row.buildingId === id)),
       });
     } else if (component === 'identity') {
