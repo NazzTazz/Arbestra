@@ -18,12 +18,12 @@ import { materializeWoodlands } from '../deposits/woodland.js';
 import {
   ownedVillage,
   stoneTravelPath,
-  startVillageStoneExtraction,
   constructBuilding,
   constructBuildingArea,
   getVillageState,
   readVillageProjection,
 } from '../villages/service.js';
+import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
 import { getTerrain, getTerrainUpdates } from '../worlds/terrain.js';
 import { readFileSync } from 'node:fs';
 import { sql } from 'kysely';

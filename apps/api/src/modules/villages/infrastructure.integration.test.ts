@@ -15,13 +15,8 @@ import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import type { Database } from '../../database/schema.js';
-import {
-  getVillageState,
-  constructBuilding,
-  constructBuildingArea,
-  startVillageStoneExtraction,
-  upgradeBuilding,
-} from './service.js';
+import { getVillageState, constructBuilding, constructBuildingArea, upgradeBuilding } from './service.js';
+import { startVillageStoneExtraction } from './legacy-commands.fixture.js';
 import {
   infrastructureCommand,
   infrastructurePreview,

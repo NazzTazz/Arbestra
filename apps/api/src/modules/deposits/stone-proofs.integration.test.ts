@@ -15,14 +15,8 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { completeStoneExtraction } from '../villages/complete-construction.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from '../villages/reconcile-economy.js';
-import {
-  constructBuilding,
-  getStoneDepositDetails,
-  getVillageState,
-  state,
-  harvestGarden,
-  startVillageStoneExtraction,
-} from '../villages/service.js';
+import { constructBuilding, getStoneDepositDetails, getVillageState, state } from '../villages/service.js';
+import { harvestGarden, startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
 import { advanceEnergy } from '../population/energy.js';
 import { materializeCohorts, energyState } from '../population/work.js';
 import { startGardenHarvest } from '../population/garden-harvest.js';

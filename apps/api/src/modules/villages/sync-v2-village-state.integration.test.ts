@@ -13,13 +13,8 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { randomUUID } from 'node:crypto';
-import {
-  commandVillageProcessing,
-  constructBuilding,
-  expandGarden,
-  harvestGardenSelection,
-  readVillageProjection,
-} from './service.js';
+import { commandVillageProcessing, constructBuilding, expandGarden, readVillageProjection } from './service.js';
+import { harvestGardenSelection } from './legacy-commands.fixture.js';
 import { villagePresentation } from './presentation.js';
 import { captureSyncV2 } from './sync-v2-capture.js';
 

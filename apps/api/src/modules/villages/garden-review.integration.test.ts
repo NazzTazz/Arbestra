@@ -9,13 +9,8 @@ import { createDatabase } from '../../database/connection.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
-import {
-  constructBuildingArea,
-  expandGarden,
-  getVillageState,
-  harvestGarden,
-  harvestGardenSelection,
-} from './service.js';
+import { constructBuildingArea, expandGarden, getVillageState } from './service.js';
+import { harvestGarden, harvestGardenSelection } from './legacy-commands.fixture.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { projectGardenPlot } from './economy.js';
 

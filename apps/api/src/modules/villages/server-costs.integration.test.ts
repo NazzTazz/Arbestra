@@ -1,4 +1,4 @@
-import { startVillageWorksite } from './service.js';
+import { startVillageWorksite } from './legacy-commands.fixture.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, it } from 'vitest';

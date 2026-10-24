@@ -34,6 +34,7 @@ corepack pnpm dev               # api + clients en parallèle
 - Parallélisme local (facultatif) : `ARBESTRA_TEST_WORKERS=3` clone la base de test par worker (`database/test-workers.ts`, le rôle doit avoir `CREATEDB`). Sur le portable, le gain est faible et les tests de concurrence chronométrés décrochent : la valeur par défaut reste 1.
 - Navigateur : `corepack pnpm test:e2e` (Playwright).
 - Qualité : `corepack pnpm lint`, `corepack pnpm typecheck`, `corepack pnpm format` (Prettier, 120 colonnes, guillemets simples). Le reformatage de masse `102c5f4` est ignoré par `git blame` via `.git-blame-ignore-revs` (`git config blame.ignoreRevsFile .git-blame-ignore-revs`).
+- Fixtures de scénario : `villages/legacy-commands.fixture.ts` regroupe d'anciens gestes unitaires (récolte d'une parcelle, extraction directe, chantier, défrichage) sans route HTTP, réservés aux tests. Ne pas les importer depuis le code de production.
 - Ne jamais réinitialiser la base de développement : `db:setup` re-seed, `db:test:setup` vise la base de test.
 
 ## 3. Serveur (`apps/api/src`)

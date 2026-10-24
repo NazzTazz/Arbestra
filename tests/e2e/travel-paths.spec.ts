@@ -5,7 +5,8 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
-import { constructBuildingArea, harvestGarden } from '../../apps/api/src/modules/villages/service';
+import { constructBuildingArea } from '../../apps/api/src/modules/villages/service';
+import { harvestGarden } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 
 test.setTimeout(90_000);
 test('la carte affiche les habitants low-poly et les chemins de débogage', async ({ page, isMobile }) => {

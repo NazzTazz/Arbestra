@@ -22,14 +22,8 @@ import {
 } from './complete-construction.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { materializeVillageResource, projectVillageResource, projectVillageResources } from './economy.js';
-import {
-  constructBuilding,
-  constructBuildingArea,
-  expandGarden,
-  getVillageState,
-  harvestGarden,
-  upgradeBuilding,
-} from './service.js';
+import { constructBuilding, constructBuildingArea, expandGarden, getVillageState, upgradeBuilding } from './service.js';
+import { harvestGarden } from './legacy-commands.fixture.js';
 
 const databaseUrl = testDatabaseUrl();
 const handlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction, [COMPLETE_EXPANSION_TASK]: completeExpansion };

@@ -11,12 +11,8 @@ import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { clearWoodland, materializeWoodland, materializeWoodlands } from './woodland.js';
 import { completeStoneExtractionAt, readStoneDeposit, startStoneExtraction } from './stone-extractions.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
-import {
-  readVillageDepositDetails,
-  ownedVillage,
-  startVillageStoneExtraction,
-  clearVillageWoodland,
-} from '../villages/service.js';
+import { readVillageDepositDetails, ownedVillage } from '../villages/service.js';
+import { startVillageStoneExtraction, clearVillageWoodland } from '../villages/legacy-commands.fixture.js';
 import { getTerrainUpdates } from '../worlds/terrain.js';
 import { completeGardenHarvestAt } from '../population/garden-harvest.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts } from '../population/work.js';

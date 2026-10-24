@@ -10,7 +10,7 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { startGardenTour } from './garden-tour.js';
 import { completeGardenHarvestAt, startGardenHarvest } from './garden-harvest.js';
-import { harvestGardenSelection, harvestGarden } from '../villages/service.js';
+import { harvestGardenSelection, harvestGarden } from '../villages/legacy-commands.fixture.js';
 import { materializeGardenPlot } from '../villages/economy.js';
 const url = testDatabaseUrl(),
   db = createDatabase(url),
