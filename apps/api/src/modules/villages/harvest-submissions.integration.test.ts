@@ -92,8 +92,7 @@ it('refuses a submission whose route keeps failing instead of retrying it foreve
       attempts,
       lastError: null,
       completedAt: null,
-      createdAt: new Date(),
-    }) satisfies ScheduledTask;
+    }) as unknown as ScheduledTask;
   const receipt = async () =>
     (
       await db
