@@ -17,6 +17,18 @@ describe('administrator and proxy configuration', () => {
     ])
       expect(() => loadConfig({ ...base, WORLD_ORIGIN })).toThrow();
   });
+  it('accepts a per-world subdomain template only as the first host label', () => {
+    expect(loadConfig({ ...base, WORLD_ORIGIN: 'https://{world}.arbestra.world/' }).worldOrigin).toBe(
+      'https://{world}.arbestra.world',
+    );
+    for (const WORLD_ORIGIN of [
+      'http://{world}.arbestra.world',
+      'https://arbestra.world/{world}',
+      'https://play.{world}.arbestra.world',
+      'https://{world}.arbestra.world/village',
+    ])
+      expect(() => loadConfig({ ...base, WORLD_ORIGIN })).toThrow();
+  });
   it('enables safe HTTP anomaly logs in both environments and validates all diagnostic settings', () => {
     for (const NODE_ENV of ['development', 'production']) {
       expect(loadConfig({ ...base, NODE_ENV })).toMatchObject({ nocHttpSlowMs: 2000, nocHttpLogMode: 'anomalies' });

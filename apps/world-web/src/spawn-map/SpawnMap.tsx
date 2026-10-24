@@ -14,6 +14,7 @@ import '../world-generator/world-generator.css';
 import './spawn-map.css';
 import { createInspectionQueue } from './inspection-queue';
 import { periodicMapLines } from './periodic-lines';
+import { addressedWorld } from '../api/world-address';
 
 const reasonLabels = {
   water: 'Eau sous une emprise',
@@ -84,7 +85,7 @@ function Luminosity({ point, width, height }: { point: SpawnPoint; width: number
 }
 /** Internal receipt route; no lobby link until playable installation is connected. */
 export function SpawnMap() {
-  const slug = new URLSearchParams(location.search).get('world') ?? '';
+  const slug = addressedWorld ?? '';
   const [map, setMap] = useState<MapData | null>(null),
     [error, setError] = useState('');
   const [reload, setReload] = useState(0);

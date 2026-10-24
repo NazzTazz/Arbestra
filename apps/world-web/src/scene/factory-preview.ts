@@ -25,12 +25,13 @@ import { buildStonemason } from './stonemason-factory';
 import { CAMPUS_SUBDIVISIONS, MATHEMATICS_CROWN_WIDTH } from './mathematics-factory';
 import { buildUniversity } from './university-factory';
 import { CELL_UNITS } from './world-space';
+import { addressedWorld, worldPage } from '../api/world-address';
 import { buildInfrastructurePresentation, type InfrastructureRecipe } from './infrastructure-factory';
 import { RESOURCE_RECIPES, buildResourcePresentation, isResourceRecipe } from './resource-factory';
 
 async function openWorkshop() {
   const query = new URLSearchParams(location.search),
-    world = query.get('world') ?? 'aube';
+    world = addressedWorld ?? 'aube';
   const capability = await fetch(`/api/worlds/${encodeURIComponent(world)}/factory-access`, {
     credentials: 'same-origin',
   });
@@ -69,7 +70,7 @@ async function openWorkshop() {
     const link = document.createElement('a');
     link.textContent = label;
     link.style.color = '#f4eedb';
-    link.href = `/factory-preview.html?world=${encodeURIComponent(world)}${domain === 'buildings' ? '' : `&domain=${domain}`}`;
+    link.href = worldPage('/factory-preview.html', world, domain === 'buildings' ? {} : { domain });
     if ((query.get('domain') ?? 'buildings') === domain) link.setAttribute('aria-current', 'page');
     domains.append(link);
   }

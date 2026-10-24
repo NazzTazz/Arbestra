@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import subprocess
 
+import sites as hosts
+
 
 def main():
     path = Path('/opt/gateway/caddy/Caddyfile')
@@ -13,11 +15,10 @@ def main():
     if (start in before) != (end in before):
         raise ValueError('Unbalanced Arbestra marker')
     sites = []
-    for domains, port in [
-        ('play.arbestra.world alpha.arbestra.world noc.arbestra.world', 3101),
-        ('play-beta.arbestra.world beta.arbestra.world noc-beta.arbestra.world', 3201),
-    ]:
-        sites.append(domains.replace(' ', ', ') + ' {\n  reverse_proxy 172.18.0.1:' + str(port) + '\n}\n')
+    # One host per world: rerun after opening a world (open-rc1-world.py).
+    for environment, settings in hosts.ENVIRONMENTS.items():
+        domains = hosts.gateway_hosts(environment, hosts.world_slugs(environment))
+        sites.append(', '.join(domains) + ' {\n  reverse_proxy 172.18.0.1:' + str(settings['port'] + 1) + '\n}\n')
     block = start + '\n' + '\n'.join(sites) + end
     after = re.sub(re.escape(start) + r'.*?' + re.escape(end), lambda _: block, before, flags=re.S) if start in before else before.rstrip() + '\n\n' + block + '\n'
     if after == before:

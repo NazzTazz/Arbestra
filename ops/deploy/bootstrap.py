@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import urllib.request
 
+import sites
+
 SOURCE = Path(__file__).resolve().parent
 CONFIG = Path('/etc/arbestra')
 NODE_VERSION = '24.22.0'
@@ -75,10 +77,9 @@ def setup():
     backups.mkdir(mode=0o700, exist_ok=True)
     access_file = CONFIG / 'private-access.json'
     access = json.loads(access_file.read_text()) if access_file.exists() else {}
-    for environment, port, lobby, world, noc in [
-        ('alpha', 3100, 'play.arbestra.world', 'alpha.arbestra.world', 'noc.arbestra.world'),
-        ('staging', 3200, 'play-beta.arbestra.world', 'beta.arbestra.world', 'noc-beta.arbestra.world'),
-    ]:
+    for environment, settings in sites.ENVIRONMENTS.items():
+        port, names = settings['port'], sites.hosts(environment)
+        lobby, noc, world = names['lobby'], names['noc'], settings['legacy_world']
         database = 'arbestra_' + environment
         owner, app = database + '_owner', database + '_app'
         owner_password, app_password = secrets.token_hex(32), secrets.token_hex(32)
@@ -90,7 +91,8 @@ def setup():
             sql('postgres', f"CREATE ROLE {owner} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '{owner_password}'; CREATE ROLE {app} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE CONNECTION LIMIT 24 PASSWORD '{app_password}';")
             sql('postgres', f'CREATE DATABASE {database} OWNER {owner};')
             sql(database, f'REVOKE ALL ON DATABASE {database} FROM PUBLIC; GRANT CONNECT ON DATABASE {database} TO {app}; REVOKE ALL ON SCHEMA public FROM PUBLIC;')
-        common = f'NODE_ENV=production\nHOST=127.0.0.1\nPORT={port}\nCOOKIE_NAME=__Secure-arbestra_{environment}\nCOOKIE_DOMAIN=.arbestra.world\nADMIN_ORIGIN=https://{noc}\nWORLD_ORIGIN=https://{world}\nADMIN_ACCOUNT_IDS=\nTRUSTED_PROXY_CIDRS=127.0.0.1\nEXPEDITION_WORKERS=1\nSCHEDULED_TASK_POLL_INTERVAL_MS=1000\nWORLD_GENERATOR_MEMORY_MB=384\n'
+        hosted = ''.join(key + '=' + value + '\n' for key, value in sites.environment_settings(environment).items())
+        common = f'NODE_ENV=production\nHOST=127.0.0.1\nPORT={port}\nCOOKIE_NAME=__Secure-arbestra_{environment}\n{hosted}ADMIN_ACCOUNT_IDS=\nTRUSTED_PROXY_CIDRS=127.0.0.1\nEXPEDITION_WORKERS=1\nSCHEDULED_TASK_POLL_INTERVAL_MS=1000\nWORLD_GENERATOR_MEMORY_MB=384\n'
         if not exists:
             private(CONFIG / (environment + '.env'), f'DATABASE_URL=postgresql://{app}:{app_password}@127.0.0.1:5432/{database}\n' + common)
             private(CONFIG / (environment + '-migration.env'), f'DATABASE_URL=postgresql://{owner}:{owner_password}@127.0.0.1:5432/{database}\nNODE_ENV=production\n')
@@ -100,85 +102,7 @@ def setup():
         hashed = subprocess.check_output(['/usr/local/bin/arbestra-caddy', 'hash-password'], input=(gate_password + '\n').encode()).decode().strip()
         access[environment] = {'http_user': 'arbestra', 'http_password': gate_password, 'lobby': 'https://' + lobby, 'game': 'https://' + world, 'noc': 'https://' + noc}
         private(access_file, json.dumps(access, indent=2) + '\n')
-        web_config = '''{
-  auto_https off
-  admin off
-  servers {
-    trusted_proxies static 172.18.0.3/32
-    trusted_proxies_strict
-    client_ip_headers X-Forwarded-For
-  }
-}
-http://:WEB_PORT {
-  bind 172.18.0.1
-  basic_auth @noc {
-    arbestra GATE_HASH
-  }
-  header {
-    X-Robots-Tag "noindex, nofollow"
-    X-Content-Type-Options nosniff
-    Referrer-Policy same-origin
-    Cache-Control "private, no-store"
-    -Server
-  }
-  encode zstd gzip
-  @foreignOrigin {
-    header Origin *
-    not {
-      header Origin https://LOBBY
-      header Origin https://WORLD
-      header Origin https://NOC
-    }
-  }
-  # Cross-site calls are refused on the API only: a player following a link
-  # (Discord, search engine) must still load the pages.
-  @crossSite {
-    header Sec-Fetch-Site cross-site
-    path /api/*
-  }
-  @adminOnPlayer {
-    path /api/admin /api/admin/*
-    not host NOC
-  }
-  @lobby host LOBBY
-  @noc host NOC
-  @world host WORLD
-  route {
-  respond @foreignOrigin 403
-  respond @crossSite 403
-  respond @adminOnPlayer 404
-  handle /api/* {
-    reverse_proxy 127.0.0.1:API_PORT {
-      header_up X-Forwarded-Proto https
-      header_up X-Forwarded-Host {http.request.host}
-      header_up X-Forwarded-For {client_ip}
-      header_up -Authorization
-      flush_interval -1
-    }
-  }
-  handle @lobby {
-    root * /srv/arbestra/ENVIRONMENT/current/web/play
-    try_files {path} /index.html
-    file_server
-  }
-  handle @noc {
-    root * /srv/arbestra/ENVIRONMENT/current/web/admin
-    try_files {path} /index.html
-    file_server
-  }
-  handle @world {
-    root * /srv/arbestra/ENVIRONMENT/current/web/world
-    try_files {path} /index.html
-    file_server
-  }
-  handle {
-    respond 404
-  }
-  }
-}
-'''
-        for old, new in [('WEB_PORT', str(port + 1)), ('API_PORT', str(port)), ('GATE_HASH', hashed), ('ENVIRONMENT', environment), ('LOBBY', lobby), ('WORLD', world), ('NOC', noc)]:
-            web_config = web_config.replace(old, new)
+        web_config = sites.web_caddyfile(environment, hashed)
         private(CONFIG / (environment + '.Caddyfile'), web_config, 0o640)
         run(['chown', 'root:arbestra-web', str(CONFIG / (environment + '.Caddyfile'))])
         run(['/usr/local/bin/arbestra-caddy', 'validate', '--config', str(CONFIG / (environment + '.Caddyfile')), '--adapter', 'caddyfile'])

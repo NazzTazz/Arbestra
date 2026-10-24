@@ -94,3 +94,23 @@ it('does not consume a grant from another origin, and never grants it to an ordi
   });
   hub.closeAll();
 });
+it('opens the observed world on its own subdomain and refuses another world', async () => {
+  const hosted = { ...config, worldOrigin: 'http://{world}.localhost' },
+    hub = new ObservationHub(),
+    access = new ObservationAccess(hub),
+    lease = hub.create(actor, target),
+    launch = (cfg = hosted) => access.launch(cfg, lease, actor, 'hash'),
+    token = (url: string) => new URLSearchParams(new URL(url).hash.slice(1)).get('observationToken')!,
+    at = (host: string) => ({ ...request, host, headers: { origin: 'http://' + host } }) as FastifyRequest;
+  const first = new URL(launch().url);
+  expect(first.origin).toBe('http://test.localhost');
+  expect(first.searchParams.has('world')).toBe(false);
+  // Another world's subdomain is refused before the grant is consumed.
+  await expect(access.exchange(at('other.localhost'), db, hosted, token(first.href))).rejects.toMatchObject({
+    statusCode: 403,
+  });
+  await expect(access.exchange(at('test.localhost'), db, hosted, token(first.href))).resolves.toMatchObject({
+    lease: { id: lease.id },
+  });
+  hub.closeAll();
+});

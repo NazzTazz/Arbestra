@@ -11,6 +11,7 @@ import { AtlasMap } from './AtlasMap';
 import { Luminosity } from './Luminosity';
 import { createInspectionQueue } from './inspection-queue';
 import './atlas.css';
+import { addressedWorld } from '../api/world-address';
 
 const labels = {
   water: 'Eau sous une emprise',
@@ -31,7 +32,7 @@ async function response<T>(r: Response): Promise<T> {
   return body as T;
 }
 export function SpawnMap() {
-  const slug = new URLSearchParams(location.search).get('world') ?? '',
+  const slug = addressedWorld ?? '',
     base = `/api/worlds/${encodeURIComponent(slug)}/spawn-map`;
   const atlasUrl = `/api/worlds/${encodeURIComponent(slug)}/spawn-atlas`;
   const [map, setMap] = useState<Omit<MapData, 'landscape'> | null>(null),

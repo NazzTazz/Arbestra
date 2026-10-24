@@ -7,7 +7,7 @@ afterEach(() => {
   getVillage.mockReset();
 });
 it('shares the early read with App and repeated development mounts', async () => {
-  vi.stubGlobal('location', { search: '?world=another-world' });
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=another-world' });
   let release!: (value: unknown) => void;
   getVillage.mockImplementation(
     () =>
@@ -27,7 +27,7 @@ it('shares the early read with App and repeated development mounts', async () =>
   expect(await mounted).toBe(snapshot);
 });
 it('keeps a failed early read observable by App without silently starting another request', async () => {
-  vi.stubGlobal('location', { search: '?world=unavailable' });
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=unavailable' });
   getVillage.mockRejectedValue(new Error('offline'));
   const { initialVillageRead } = await import('./initial-village');
   await expect(initialVillageRead()).rejects.toThrow('offline');

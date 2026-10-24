@@ -98,6 +98,7 @@ import {
 import { WorldLoading } from './ui/WorldLoading';
 import type { InitialLoadProgress } from './scene/initial-village-load';
 import { initialVillageRead, initialWorldName, requestedWorldSlug } from './api/initial-village';
+import { worldPage } from './api/world-address';
 let sceneModule: Promise<typeof import('./scene/VillageScene')> | undefined;
 const loadScene = () => (sceneModule ??= import('./scene/VillageScene'));
 const VillageScene = lazy(() => loadScene().then((module) => ({ default: module.VillageScene })));
@@ -2607,7 +2608,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             {state.factoryEnabled ? (
               <iframe
                 title={`Atelier ${workshop}`}
-                src={`/factory-preview.html?world=${encodeURIComponent(state.world.slug)}&domain=${workshop}`}
+                src={worldPage('/factory-preview.html', state.world.slug, { domain: workshop })}
               />
             ) : (
               <p>L’accès aux ateliers a été désactivé.</p>

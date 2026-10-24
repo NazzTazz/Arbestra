@@ -16,6 +16,7 @@ import { previewCells } from '../scene/construction-selection';
 import type { Cell } from '../scene/construction-selection';
 import { preparationState } from './preparation-state';
 import { villageRoute } from './starter-route';
+import { addressedWorld, worldPage } from '../api/world-address';
 import './placement.css';
 async function read<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(
@@ -41,7 +42,7 @@ const label = (type: string) =>
   type === 'town-hall' ? 'Hôtel de ville' : type === 'garden' ? 'Jardin' : 'Maison en troncs';
 export function SpawnPlacement() {
   const params = new URLSearchParams(location.search),
-    slug = params.get('world') ?? '',
+    slug = addressedWorld ?? '',
     base = `/api/worlds/${encodeURIComponent(slug)}`;
   const initial = useRef<SpawnPoint>({
     x: Math.max(0, Math.min(511, Number(params.get('x')) || 0)),
@@ -378,7 +379,7 @@ export function SpawnPlacement() {
               onClick={(e) => {
                 if (pending || request.current) e.preventDefault();
               }}
-              href={'/spawn-map?world=' + encodeURIComponent(slug)}
+              href={worldPage('/spawn-map', slug)}
             >
               Revenir à la carte
             </a>

@@ -1,7 +1,7 @@
+import { worldPage } from '../api/world-address';
+
 export function villageRoute(slug: string, continueStarter = false): string {
-  const params = new URLSearchParams({ world: slug });
-  if (continueStarter) params.set('starter', '1');
-  return `/village?${params}`;
+  return worldPage('/village', slug, continueStarter ? { starter: '1' } : {});
 }
 
 export function isStarterRoute(pathname: string, search: string): boolean {

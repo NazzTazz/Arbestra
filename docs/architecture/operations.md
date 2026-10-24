@@ -136,7 +136,7 @@ Les types d’activité sont `expedition`, `science` et `task`. Les recherches e
 
 Depuis la fiche village, **Observer le village** ouvre un nouvel onglet lanceur `#/observe?worldId=…&villageId=…`, puis le client monde `/village?world=…&observe=…#observationToken=…`. `POST /api/admin/observations/launch` délivre un jeton aléatoire à usage unique, valable 30 s, lié au bail et à la session admin. Le client retire immédiatement le fragment et l’échange via `POST /api/observation/exchange` contre un cookie observateur HttpOnly, hôte seul, SameSite Strict, Secure en production et `Path=/api/observation/<bail>`. La session admin ne quitte pas le NOC. Copier l’URL nettoyée ne transmet aucun accès ; avant consommation, le lien est sensible. Le rechargement utilise le cookie dédié.
 
-`WORLD_ORIGIN` doit contenir l’origine HTTPS du client monde en production (`https://alpha.arbestra.world` ou `https://beta.arbestra.world`) ; la création d’un lien est refusée sans elle. Le bootstrap natif la renseigne pour les installations nouvelles ; compléter les environnements existants avant promotion. En développement loopback seulement, le port 5174 sert de valeur de repli. Les lecteurs utilisent `/api/observation/:id` et ses sous-routes, avec les mêmes handlers de lecture que `/api/admin/observations`, revalidation de la session admin et contrôle du bail exact à chaque requête. L’échange du jeton n’attend aucune lecture de projection ; les routes de données revalident la propriété avant livraison. Aucune migration requise.
+`WORLD_ORIGIN` doit contenir l’origine HTTPS du client monde en production, sous forme de modèle par monde (`https://{world}.arbestra.world`, `https://{world}.arbestra.fr` pour staging) : le lien ouvre le sous-domaine du monde observé, et l’échange comme les lectures refusent le sous-domaine d’un autre monde ; la création d’un lien est refusée sans elle. Le bootstrap natif la renseigne pour les installations nouvelles ; compléter les environnements existants avant promotion. En développement loopback seulement, le port 5174 sert de valeur de repli. Les lecteurs utilisent `/api/observation/:id` et ses sous-routes, avec les mêmes handlers de lecture que `/api/admin/observations`, revalidation de la session admin et contrôle du bail exact à chaque requête. L’échange du jeton n’attend aucune lecture de projection ; les routes de données revalident la propriété avant livraison. Aucune migration requise.
 
 La scène réside dans `world-web`, avec les mêmes `VillageScene`, HUD, écran de chargement, renderer et assets que le joueur. `ObservationEntry` fournit seulement le contrôle d’observation et le transport `readOnly`. Le contrôleur joueur et ses prélectures ne sont pas montés, aucune commande ni source caméra joueur n’est raccordée. Le NOC ne contient plus de renderer ni de copie d’assets. Le joueur conserve sa session et une bannière d’assistance ; ses POST `/api/worlds/:worldSlug/villages/:villageId/observation/{status,sources,camera}` vérifient origine, session et propriété.
 
@@ -211,6 +211,15 @@ Le dépôt fournit le frontend et l’API. Il ne configure pas automatiquement D
 7. Pour l’alpha, ajouter une protection indépendante par VPN ou contrôle d’accès au proxy. La liste d’UUID applicative reste nécessaire derrière cette protection. Régler la rétention, la rotation et l’accès aux journaux dans l’infrastructure d’hébergement.
 
 Le navigateur ne reçoit aucun secret de configuration ni droit SQL. L’hébergement statique ne doit pas rendre accessibles les sources, les fichiers d’environnement ou les journaux serveur.
+
+## Hôtes publics
+
+Chaque monde est servi sur le sous-domaine de son slug : `alpha-rc1.arbestra.world/village`, sans `?world=`. Alpha vit sur `arbestra.world` (`play.`, `noc.`), staging sur `arbestra.fr` (`play.`, `noc.`, `beta-rc1.`). La source unique est `ops/deploy/sites.py` : bootstrap, passerelle et réparations en dérivent ; un slug ne peut prendre un label réservé (`play`, `noc`, `www`, `api`, anciens hôtes).
+
+- Le DNS est un wildcard `*.arbestra.world` / `*.arbestra.fr` vers le VPS. La passerelle partagée, sans challenge DNS, liste explicitement chaque hôte : relancer `configure-gateway.py` après l’ouverture d’un monde.
+- Le client lit le monde dans son hôte (`VITE_WORLD_HOST`, posé par `build.sh`) ; sans ce modèle, en local, il garde `?world=`. Une ancienne adresse `alpha.arbestra.world/village?world=…` est redirigée vers le sous-domaine en conservant le reste de l’adresse ; `play-beta`/`noc-beta.arbestra.world` redirigent vers `arbestra.fr`.
+- L’API garde le monde dans son chemin (`/api/worlds/:slug/…`) ; seul l’hôte de la page change.
+- Bascule des environnements existants : `ops/repairs/2026-10-24-world-hosts.py` (`hosts`, puis `env` une fois déployée une API qui accepte le modèle `{world}`).
 
 ## Journaux et vérification d’exploitation
 

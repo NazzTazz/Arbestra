@@ -1,8 +1,8 @@
 import { getVillage, type TimedVillageState } from './client';
 import { SYNC_V2_VILLAGE, initialSyncV2Read } from './sync-v2-initial';
+import { addressedWorld } from './world-address';
 
-export const requestedWorldSlug =
-  new URLSearchParams(location.search).get('world') ?? import.meta.env.VITE_DEFAULT_WORLD_SLUG ?? 'aube';
+export const requestedWorldSlug = addressedWorld ?? import.meta.env.VITE_DEFAULT_WORLD_SLUG ?? 'aube';
 let initial: Promise<TimedVillageState> | undefined;
 /** Start once alongside the lazy UI download; neither StrictMode nor App repeats it. */
 // In V2 village mode, a server that does not negotiate V2 keeps the historical read.

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 case "${1:-}" in
-  # Deployed clients run the whole village on the V2 synchronization (opt-in in development).
-  alpha) lobby=https://play.arbestra.world; world=https://alpha.arbestra.world; sync_v2=1 ;;
-  staging) lobby=https://play-beta.arbestra.world; world=https://beta.arbestra.world; sync_v2=1 ;;
+  # Each world is served on its own subdomain (ops/deploy/sites.py).
+  alpha) domain=arbestra.world ;;
+  staging) domain=arbestra.fr ;;
   *) echo 'Expected alpha or staging' >&2; exit 2 ;;
 esac
-export VITE_LOBBY_URL="$lobby"
-export VITE_WORLD_CLIENT_URL="$world/village"
-export VITE_SYNC_V2="$sync_v2"
+export VITE_LOBBY_URL="https://play.$domain"
+export VITE_WORLD_CLIENT_URL="https://{world}.$domain/village"
+export VITE_WORLD_HOST="{world}.$domain"
+# Deployed clients run the whole village on the V2 synchronization.
+export VITE_SYNC_V2=1
 pnpm build
 # A portable Linux production dependency tree; no install or compilation on VPS.
 bundle=$(mktemp -d)

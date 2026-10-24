@@ -65,6 +65,14 @@ function adminOrigin(value: string | undefined, production: boolean, enabled: bo
   return origin.origin;
 }
 
+/** `https://{world}.arbestra.world`: each world is served on the subdomain named after its slug. */
+function worldOriginTemplate(value: string | undefined, production: boolean): string | undefined {
+  if (!value?.includes('{world}')) return adminOrigin(value, production, false);
+  if (!/^https?:\/\/\{world\}\.[^{}]+$/.test(value))
+    throw new Error('WORLD_ORIGIN must name the world as its first host label: https://{world}.example');
+  return adminOrigin(value.replace('{world}', 'w'), production, false)!.replace('//w.', '//{world}.');
+}
+
 function trustedProxyCidrs(value: string | undefined): readonly string[] {
   if (!value?.trim()) return [];
   const entries = value.split(',').map((entry) => entry.trim());
@@ -93,7 +101,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   const isProduction = environment.NODE_ENV === 'production';
   const admins = adminAccountIds(environment.ADMIN_ACCOUNT_IDS);
   const origin = adminOrigin(environment.ADMIN_ORIGIN, isProduction, admins.length > 0);
-  const worldOrigin = adminOrigin(environment.WORLD_ORIGIN, isProduction, false);
+  const worldOrigin = worldOriginTemplate(environment.WORLD_ORIGIN, isProduction);
   const slowText = environment.NOC_HTTP_SLOW_MS ?? '2000';
   if (!/^\d+$/.test(slowText) || Number(slowText) < 250 || Number(slowText) > 60_000) {
     throw new Error('NOC_HTTP_SLOW_MS must be an integer between 250 and 60000');

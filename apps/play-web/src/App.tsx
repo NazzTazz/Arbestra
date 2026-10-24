@@ -4,10 +4,9 @@ import { getSession, getWorlds, joinWorld, login, logout, register } from './api
 
 const WORLD_CLIENT_URL =
   import.meta.env.VITE_WORLD_CLIENT_URL ?? `${window.location.protocol}//${window.location.hostname}:5174/village`;
-function worldUrl(slug: string, villageId?: string): string {
+function worldUrl(slug: string): string {
   const url = new URL(WORLD_CLIENT_URL.replace('{world}', encodeURIComponent(slug)), window.location.href);
   if (!WORLD_CLIENT_URL.includes('{world}')) url.searchParams.set('world', slug);
-  if (villageId) url.searchParams.set('villageId', villageId);
   return url.href;
 }
 export function App() {
@@ -77,11 +76,11 @@ export function App() {
         window.location.assign(url.href);
         return;
       }
-      const result = await joinWorld(chosen, {
+      await joinWorld(chosen, {
         playerName: String(form.get('playerName')).trim(),
         villageName: String(form.get('villageName')).trim(),
       });
-      window.location.assign(worldUrl(chosen, result.villageId));
+      window.location.assign(worldUrl(chosen));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Impossible de créer le village.');
       setPending(false);

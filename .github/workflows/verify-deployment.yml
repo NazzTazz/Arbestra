@@ -23,13 +23,15 @@ jobs:
           import json, os, time, urllib.request, urllib.error
           environment = os.environ['DEPLOY_ENVIRONMENT']
           assert environment in ('staging', 'alpha')
-          lobby, game, noc = ('play-beta', 'beta', 'noc-beta') if environment == 'staging' else ('play', 'alpha', 'noc')
+          # Each world on its own subdomain (ops/deploy/sites.py).
+          domain, world = ('arbestra.fr', 'beta-rc1') if environment == 'staging' else ('arbestra.world', 'alpha-rc1')
+          lobby, game, noc = 'play', world, 'noc'
           checks = [(lobby, '/', 200), (game, '/', 200), (noc, '/', 401),
                     (game, '/api/health', 200), (game, '/api/admin/session', 404),
                     (game, '/api/observation/00000000-0000-4000-8000-000000000001/snapshot', 401)]
           failed = False
           for host, path, expected in checks:
-              url = 'https://' + host + '.arbestra.world' + path
+              url = 'https://' + host + '.' + domain + path
               for attempt in range(3):
                   started = time.monotonic()
                   try:
