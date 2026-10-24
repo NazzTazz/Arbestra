@@ -489,6 +489,7 @@ export class BabylonVillageScene {
   #selectedRoute: string | null = null;
   #projectionVersion = -1;
   #projectionGroundRevision = -1;
+  #projectionGroundKey = '';
   #demandAt = 0;
   #metricsAt = 0;
   #frameMs: number[] = [];
@@ -1319,6 +1320,7 @@ export class BabylonVillageScene {
             }
             this.#refreshBuildingGround();
             this.#workers.reproject();
+            this.#projectionGroundKey = this.#groundKey();
             this.#updateTravelPaths(this.#state!, this.#showTravel, this.#selectedRoute, frame);
             this.#projectionVersion = this.#renderer!.version;
             this.#projectionGroundRevision = this.#store!.groundRevision;
@@ -3264,6 +3266,9 @@ export class BabylonVillageScene {
     const cells = site.building ? this.#state!.cells.filter((c) => c.footprint?.buildingId === site.building!.id) : [];
     return Math.max(...(cells.length ? cells : [site]).map((c) => this.#store?.ground(c.cellX, c.cellY)?.height ?? 0));
   }
+  #groundKey(): string {
+    return `${this.#renderer?.groundVersion}:${this.#store?.groundRevision}:${this.#space?.version}`;
+  }
   #refreshBuildingGround(): void {
     if (!this.#state) return;
     const bases = new Map<string, number>();
@@ -4343,8 +4348,15 @@ export class BabylonVillageScene {
       }
       this.#projectionVersion = this.#renderer.version;
       this.#projectionGroundRevision = this.#store.groundRevision;
-      this.#refreshBuildingGround();
-      this.#workers.reproject();
+      // Buildings and workers follow the published ground and the coordinate
+      // origin, not which terrain units are visible: reprojecting them on every
+      // visibility change cost ~340 ms per rotation step on alpha Catmark.
+      const groundKey = this.#groundKey();
+      if (groundKey !== this.#projectionGroundKey) {
+        this.#projectionGroundKey = groundKey;
+        this.#refreshBuildingGround();
+        this.#workers.reproject();
+      }
       // Streaming and origin changes can arrive after the pointer stopped moving.
       if (this.#ghostRequest) this.updateConstructionGhost(...this.#ghostRequest);
       if (this.#areaRequest) {
