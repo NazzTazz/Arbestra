@@ -98,6 +98,16 @@ export interface BuildingPlan {
   bounds: { halfX: number; halfZ: number };
 }
 export const CELL_UNITS = 2.5;
+const placementFields = new Set(['id', 'origin', 'rotation', 'entry', 'accesses']);
+/**
+ * Generated geometry depends on a plan's shape only: buildings that differ by
+ * identity, placement or accesses share one template.
+ */
+export function planShapeKey(plan: BuildingPlan): string {
+  return JSON.stringify(plan, function (this: unknown, key: string, value: unknown) {
+    return this === plan && placementFields.has(key) ? undefined : value;
+  });
+}
 export const FACES: Face[] = ['-x', '+x', '-z', '+z'];
 export const HALL_RECIPE: BuildingRecipe = {
   id: 'town-hall',

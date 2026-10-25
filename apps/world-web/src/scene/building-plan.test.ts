@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildingPlan,
+  planShapeKey,
   entranceConnector,
   HALL_RECIPE,
   HOUSE_RECIPE,
@@ -176,4 +177,22 @@ describe('modular building factory', () => {
       band.every((s) => Math.abs(s.height - (HOUSE_RECIPE.floorThickness - HOUSE_RECIPE.module.joint)) < 1e-8),
     ).toBe(true);
   });
+});
+
+it('keys generated geometry by shape, not by identity or placement', () => {
+  const plan = buildingPlan(input),
+    moved = buildingPlan({
+      ...input,
+      id: 'other-hall',
+      anchor: { cellX: 20, cellY: 3 },
+      cells: [
+        { cellX: 20, cellY: 3 },
+        { cellX: 20, cellY: 4 },
+      ],
+    });
+  expect(planShapeKey(moved)).toBe(planShapeKey(plan));
+  expect(planShapeKey({ ...plan, rotation: plan.rotation + Math.PI })).toBe(planShapeKey(plan));
+  expect(planShapeKey({ ...plan, origin: { x: 4, y: 1, z: -3 } })).toBe(planShapeKey(plan));
+  expect(planShapeKey(buildingPlan({ ...input, recipe: { ...HALL_RECIPE, levels: 2 } }))).not.toBe(planShapeKey(plan));
+  expect(planShapeKey({ ...plan, phase: 'works' })).not.toBe(planShapeKey(plan));
 });

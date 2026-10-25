@@ -121,6 +121,7 @@ import { WorkerObstacles } from './worker-obstacles';
 const TOWN_HALL_DOOR_Z = -1.1;
 import {
   buildingPlan,
+  planShapeKey,
   recipeFor,
   entranceConnector,
   planForSite,
@@ -3427,7 +3428,13 @@ export class BabylonVillageScene {
     if (key) this.#loadBuildingAsset(body, key);
     else {
       this.#timberThatch ??= new TimberThatch(this.#scene);
-      buildProceduralBuildingLod(body, (root) => this.#timberThatch!.build(root, plan), this.#timberThatch);
+      // Identical houses share one generated template per level of detail.
+      buildCachedProceduralBuildingLod(
+        body,
+        'factory:' + planShapeKey(plan),
+        (root) => this.#timberThatch!.build(root, plan),
+        this.#timberThatch,
+      );
     }
     this.#createContactShadow(body, plan.width + 0.08, plan.depth + 0.08);
     return this.#registerStructure(body);
