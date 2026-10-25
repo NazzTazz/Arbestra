@@ -1,7 +1,6 @@
 {
-  "kit": "/garden/garden-kit-aba4c49fe3242833.abmesh.gz",
+  "kit": "/garden/garden-kit-0393739d4b1ec71d.abmesh.gz",
   "textures": {
-    "V8_terre": "/garden/garden-terre-e2ab04aecbc0bebd.png",
-    "V8_bois": "/garden/garden-bois-6b6b3749669756e1.png"
+    "OPUS_lointain": "/garden/garden-lointain-d00c81db923b13c0.png"
   }
 }

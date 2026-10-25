@@ -1,5 +1,5 @@
-// Converts Astra's V8 garden kit (GLB + assembly reference) into the game's
-// AB01 asset format, once, so the client needs no glTF loader.
+// Converts the « carré potager » garden kit (GLB + manifest placement rules)
+// into the game's AB01 asset format, once, so the client needs no glTF loader.
 // Usage: node scripts/convert-garden-kit.mjs
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,7 @@ import { TextDecoder, TextEncoder } from 'node:util';
 import { URL } from 'node:url';
 import console from 'node:console';
 
-const kitDir = new URL('../blender-elements/v8/', import.meta.url);
+const kitDir = new URL('../blender-elements/carre-potager/', import.meta.url);
 const outDir = new URL('../apps/world-web/public/garden/', import.meta.url);
 const manifestUrl = new URL('../apps/world-web/src/scene/garden-kit-manifest.json', import.meta.url);
 
@@ -76,8 +76,8 @@ function encode(scene) {
   return bytes;
 }
 
-const glb = readGlb(new Uint8Array(await readFile(new URL('assets/garden-kit.glb', kitDir))));
-const assembly = JSON.parse(await readFile(new URL('reference/assembly.json', kitDir), 'utf8'));
+const glb = readGlb(new Uint8Array(await readFile(new URL('assets/carre-potager.glb', kitDir))));
+const kitManifest = JSON.parse(await readFile(new URL('manifest.json', kitDir), 'utf8'));
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex').slice(0, 16);
 
 await mkdir(outDir, { recursive: true });
@@ -91,7 +91,7 @@ for (const material of glb.json.materials) {
   const image = glb.json.images[glb.json.textures[index].source],
     view = glb.json.bufferViews[image.bufferView],
     png = glb.bin.subarray(view.byteOffset ?? 0, (view.byteOffset ?? 0) + view.byteLength),
-    file = `garden-${material.name.replace(/^V8_/, '')}-${hash(png)}.png`;
+    file = `garden-${material.name.replace(/^OPUS_/, '')}-${hash(png)}.png`;
   await writeFile(new URL(file, outDir), png);
   textures[material.name] = file;
 }
@@ -122,32 +122,22 @@ for (const node of glb.json.nodes) {
   });
 }
 
-// Blender (x, y ground, z up) → scene (x, z up, y): a plot's corner at the
-// origin, rows along X, yaw negated for the left-handed Y rotation.
-const placement = (p) => ({
-  source: p.source,
-  role: p.role,
-  position: [p.position[0], p.position[2], p.position[1]],
-  rotationY: -p.yaw,
-  scale: p.scale,
-});
-const layouts = Object.fromEntries(
-  ['parcel_LOD0', 'parcel_LOD1', 'parcel_LOD2'].map((name) => [
-    name.replace('parcel_', ''),
-    assembly.placements[name].filter((p) => !['corde', 'piquet'].includes(p.role)).map(placement),
-  ]),
-);
-const fence = Object.fromEntries(
-  ['LOD0', 'LOD1'].map((lod) => {
-    const parcel = assembly.placements[`parcel_${lod}`];
-    return [
-      lod,
-      { rope: parcel.find((p) => p.role === 'corde').source, post: parcel.find((p) => p.role === 'piquet').source },
-    ];
-  }),
-);
+// Placement rules, Blender (x, y ground, z up) → scene (x, z up, y) from a
+// plot's corner; Blender Z rotations become negated Y rotations.
+const pose = kitManifest.pose;
+const placement = {
+  rows: pose.rangs_y,
+  columns: pose.touffes_x,
+  height: pose.touffes_z,
+  growth: pose.croissance.sort((a, b) => a.stade - b.stade).map((g) => ({ piece: g.piece, scale: g.echelle })),
+  crate: {
+    stage: pose.cagette.stade,
+    position: [pose.cagette.position[0], pose.cagette.position[2], pose.cagette.position[1]],
+    rotationY: -pose.cagette.rotation_z,
+  },
+};
 
-const asset = gzipSync(encode({ cellSize: assembly.cellSize, pieces, layouts, fence, geometries: { vertexData } }), {
+const asset = gzipSync(encode({ cellSize: kitManifest.cellule, pieces, placement, geometries: { vertexData } }), {
   level: 9,
 });
 const file = `garden-kit-${hash(asset)}.abmesh.gz`;

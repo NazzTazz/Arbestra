@@ -6,22 +6,13 @@ import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 import type { Scene } from '@babylonjs/core/scene';
+import type { VillageState } from '@arbestra/contracts';
 import { decodeBuildingAsset } from './building-asset-format';
 import manifest from './garden-kit-manifest.json';
 import { gardenTileStage } from './tile-appearance';
-import type { VillageState } from '@arbestra/contracts';
 
 type GardenPlot = NonNullable<NonNullable<VillageState['cells'][number]['building']>['garden']>['plots'][number];
-
-export type GardenLod = 0 | 1 | 2;
-type LodKey = 'LOD0' | 'LOD1' | 'LOD2';
-export interface GardenKitPlacement {
-  source: string;
-  role: string;
-  position: [number, number, number];
-  rotationY: number;
-  scale: number;
-}
+export type GardenLevel = 'near' | 'far';
 interface KitGeometry {
   id: string;
   positions: Float32Array;
@@ -30,11 +21,17 @@ interface KitGeometry {
   colors?: Float32Array;
   indices: Uint32Array;
 }
+/** The « carré potager » kit: pieces at the origin and the manifest's placement rules, in scene axes. */
 export interface GardenKitData {
   cellSize: number;
   pieces: Array<{ source: string; geometry: string; material: string }>;
-  layouts: Record<LodKey, GardenKitPlacement[]>;
-  fence: Record<'LOD0' | 'LOD1', { rope: string; post: string }>;
+  placement: {
+    rows: number[];
+    columns: number[];
+    height: number;
+    growth: Array<{ piece: string; scale: number }>;
+    crate: { stage: number; position: [number, number, number]; rotationY: number };
+  };
   geometries: { vertexData: KitGeometry[] };
 }
 /** A completed plot in scene coordinates; `open` marks sides facing another garden or none. */
@@ -44,17 +41,40 @@ export interface GardenPlotView {
   y: number;
   z: number;
   stage: number;
-  full: boolean;
   open: { west: boolean; east: boolean; south: boolean; north: boolean };
-  /** During a harvest: the harvested crop's stage and how many of its plants remain. */
+  /** During a harvest: the harvested crop's stage and how many of its tufts remain. */
   harvest?: { stage: number; remaining: number };
 }
 
-export const GARDEN_PLANTS = 48;
+/** Camera distance of the near model, with a margin against flicker. */
+export const GARDEN_NEAR_DISTANCE = 120;
+const HYSTERESIS = 1.1;
+export const GARDEN_PLANTS = 12;
+
+export async function fetchGardenKit(): Promise<GardenKitData> {
+  const response = await fetch(manifest.kit, { cache: 'force-cache' });
+  if (!response.ok) throw new Error(`Garden kit HTTP ${response.status}`);
+  // Static hosts may decode Content-Encoding themselves; do not decompress twice.
+  const buffer = response.headers.get('content-encoding')?.includes('gzip')
+    ? await response.arrayBuffer()
+    : await new Response(response.body!.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  return decodeBuildingAsset(buffer) as unknown as GardenKitData;
+}
+
+export function gardenLevel(distance: number, previous?: GardenLevel): GardenLevel {
+  const limit =
+    previous === 'near'
+      ? GARDEN_NEAR_DISTANCE * HYSTERESIS
+      : previous === 'far'
+        ? GARDEN_NEAR_DISTANCE / HYSTERESIS
+        : GARDEN_NEAR_DISTANCE;
+  return distance < limit ? 'near' : 'far';
+}
+
 /**
  * Display only, credits nothing: the server empties the plot when the harvest is
  * reserved, so the crop seen before is the reserved amount (plus regrowth). Its
- * plants disappear one by one over this plot's authoritative work window.
+ * tufts disappear one by one over this plot's authoritative work window.
  */
 export function gardenHarvestState(
   plot: GardenPlot,
@@ -80,87 +100,60 @@ export function gardenHarvestState(
   };
 }
 
-/** Camera distances of the detailed and simplified levels, with a margin against flicker. */
-export const GARDEN_LOD_DISTANCES = [32, 110] as const;
-const HYSTERESIS = 1.1;
-
-export async function fetchGardenKit(): Promise<GardenKitData> {
-  const response = await fetch(manifest.kit, { cache: 'force-cache' });
-  if (!response.ok) throw new Error(`Garden kit HTTP ${response.status}`);
-  // Static hosts may decode Content-Encoding themselves; do not decompress twice.
-  const buffer = response.headers.get('content-encoding')?.includes('gzip')
-    ? await response.arrayBuffer()
-    : await new Response(response.body!.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  return decodeBuildingAsset(buffer) as unknown as GardenKitData;
+/** Deterministic per plot and slot, so a tuft keeps its place, turn and size across stages. */
+export function slotVariation(plotId: string, slot: number) {
+  let h = 2166136261;
+  for (const c of `${plotId}#${slot}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  const next = () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return ((h ^= h >>> 16) >>> 0) / 4294967296;
+  };
+  return {
+    dx: (next() * 2 - 1) * 0.04,
+    dz: (next() * 2 - 1) * 0.03,
+    rotationY: next() * Math.PI * 2,
+    scale: 0.9 + next() * 0.2,
+  };
 }
 
-export function gardenLod(distance: number, previous?: GardenLod): GardenLod {
-  const [near, far] = GARDEN_LOD_DISTANCES;
-  const margin = (limit: number, level: GardenLod) =>
-    previous === undefined ? limit : previous <= level ? limit * HYSTERESIS : limit / HYSTERESIS;
-  return distance < margin(near, 0) ? 0 : distance < margin(far, 1) ? 1 : 2;
+/** Tuft slots in the gardener's serpentine: rows by depth, alternately left to right and back. */
+function harvestSlots(kit: Pick<GardenKitData, 'placement'>) {
+  const { rows, columns } = kit.placement;
+  return rows.flatMap((z, row) =>
+    columns
+      .map((x, column) => ({ x, z, slot: row * columns.length + column }))
+      .sort((a, b) => (row % 2 ? b.x - a.x : a.x - b.x)),
+  );
 }
 
-/** The gardener's serpentine: rows by depth, alternately left to right and back. */
-const harvestOrders = new WeakMap<GardenKitPlacement[], GardenKitPlacement[]>();
-function harvestOrder(layout: GardenKitPlacement[]): GardenKitPlacement[] {
-  let order = harvestOrders.get(layout);
-  if (!order) {
-    const plants = layout.filter((p) => p.role.startsWith('plant'));
-    const rows = [...new Set(plants.map((p) => Math.round(p.position[2] * 10)))].sort((a, b) => a - b);
-    order = rows.flatMap((row, index) =>
-      plants
-        .filter((p) => Math.round(p.position[2] * 10) === row)
-        .sort((a, b) => (index % 2 ? b.position[0] - a.position[0] : a.position[0] - b.position[0])),
-    );
-    harvestOrders.set(layout, order);
-  }
-  return order;
-}
-
-const stageSource = (source: string, stage: number) =>
-  source.replace(/STADE_\d\d/, `STADE_${String(Math.min(7, Math.max(1, stage))).padStart(2, '0')}`);
-
-/**
- * Exposed sides as two rope spans each, counter-clockwise from a plot corner,
- * in plot fractions; rotations are the scene's (left-handed) Y rotations.
- */
+/** Each exposed side's start corner, in plot fractions, and the scene's (left-handed) Y rotation. */
 const SIDES = {
-  south: [
-    [0, 0, 0],
-    [0.5, 0, 0],
-  ],
-  east: [
-    [1, 0, -Math.PI / 2],
-    [1, 0.5, -Math.PI / 2],
-  ],
-  north: [
-    [1, 1, Math.PI],
-    [0.5, 1, Math.PI],
-  ],
-  west: [
-    [0, 1, Math.PI / 2],
-    [0, 0.5, Math.PI / 2],
-  ],
+  south: [0, 0, 0],
+  east: [1, 0, -Math.PI / 2],
+  north: [1, 1, Math.PI],
+  west: [0, 1, Math.PI / 2],
 } as const;
 
 /**
- * Thin-instance matrices per kit source. Pure: plots and their levels in, flat
+ * Thin-instance matrices per kit piece. Pure: plots and their levels in, flat
  * 4×4 matrices out. Posts shared by neighbouring exposed sides are emitted once.
  */
 export function gardenInstances(
-  kit: Pick<GardenKitData, 'cellSize' | 'layouts' | 'fence'>,
+  kit: Pick<GardenKitData, 'cellSize' | 'placement'>,
   plots: readonly GardenPlotView[],
-  lods: ReadonlyMap<string, GardenLod>,
+  levels: ReadonlyMap<string, GardenLevel>,
 ): Map<string, number[]> {
   const result = new Map<string, number[]>(),
     size = kit.cellSize,
+    { placement } = kit,
     matrix = new Matrix(),
     rotation = new Quaternion(),
     scaling = new Vector3(),
     translation = new Vector3(),
-    posts = new Set<string>();
-  const emit = (source: string, x: number, y: number, z: number, rotationY: number, scale: number) => {
+    posts = new Set<string>(),
+    order = harvestSlots(kit);
+  const emit = (source: string, x: number, y: number, z: number, rotationY = 0, scale = 1) => {
     Quaternion.RotationYawPitchRollToRef(rotationY, 0, 0, rotation);
     scaling.setAll(scale);
     translation.set(x, y, z);
@@ -169,52 +162,51 @@ export function gardenInstances(
     if (!list) result.set(source, (list = []));
     for (const value of matrix.m) list.push(value);
   };
+  const stageOf = (stage: number) => Math.min(placement.growth.length, Math.max(1, stage));
   for (const plot of plots) {
-    const lod = lods.get(plot.id) ?? 2,
-      key = `LOD${lod}` as LodKey,
-      cornerX = plot.x - size / 2,
+    const cornerX = plot.x - size / 2,
       cornerZ = plot.z - size / 2;
-    const harvesting = plot.harvest && lod < 2;
-    for (const p of kit.layouts[key]) {
-      if (p.role === 'marqueur' && !plot.full) continue;
-      // A harvest shows the crop plant by plant, at both detailed levels.
-      if (harvesting && (p.role.startsWith('plant') || p.role === 'rang')) continue;
+    if ((levels.get(plot.id) ?? 'far') === 'far') {
+      emit(`LOINTAIN_STADE_${stageOf(plot.stage)}`, cornerX, plot.y, cornerZ);
+      continue;
+    }
+    emit('SOCLE', cornerX, plot.y, cornerZ);
+    // A harvest shows the harvested crop, its first tufts gone in the gardener's order.
+    const stage = stageOf(plot.harvest?.stage ?? plot.stage),
+      growth = placement.growth[stage - 1]!,
+      slots = plot.harvest
+        ? order.slice(order.length - Math.max(0, Math.min(order.length, plot.harvest.remaining)))
+        : order;
+    for (const { x, z, slot } of slots) {
+      const v = slotVariation(plot.id, slot);
       emit(
-        stageSource(p.source, plot.stage),
-        cornerX + p.position[0],
-        plot.y + p.position[1],
-        cornerZ + p.position[2],
-        p.rotationY,
-        p.scale,
+        growth.piece,
+        cornerX + x + v.dx,
+        plot.y + placement.height,
+        cornerZ + z + v.dz,
+        v.rotationY,
+        growth.scale * v.scale,
       );
     }
-    if (harvesting) {
-      const plants = harvestOrder(kit.layouts.LOD0);
-      for (const p of plants.slice(plants.length - Math.max(0, Math.min(plants.length, plot.harvest!.remaining))))
-        emit(
-          stageSource(p.source, plot.harvest!.stage),
-          cornerX + p.position[0],
-          plot.y + p.position[1],
-          cornerZ + p.position[2],
-          p.rotationY,
-          p.scale,
-        );
+    if (!plot.harvest && stage === placement.crate.stage) {
+      const [x, y, z] = placement.crate.position;
+      emit('CAGETTE', cornerX + x, plot.y + y, cornerZ + z, placement.crate.rotationY);
     }
-    if (lod === 2) continue;
-    const fence = kit.fence[key as 'LOD0' | 'LOD1'];
     for (const side of Object.keys(SIDES) as Array<keyof typeof SIDES>) {
       if (!plot.open[side]) continue;
-      for (const [u, v, rotationY] of SIDES[side])
-        emit(fence.rope, cornerX + u * size, plot.y, cornerZ + v * size, rotationY, 1);
-      const [[u0, v0], [u1, v1]] = SIDES[side],
-        end: [number, number] = [u1 * 2 - u0, v1 * 2 - v0];
-      for (const [u, v] of [[u0, v0], [u1, v1], end]) {
-        const x = cornerX + u! * size,
-          z = cornerZ + v! * size,
-          id = `${lod}:${Math.round(x * 1000)}:${Math.round(z * 1000)}`;
+      const [u, v, rotationY] = SIDES[side],
+        x = cornerX + u * size,
+        z = cornerZ + v * size;
+      emit('BORDURE', x, plot.y, z, rotationY);
+      // The border runs along its local X: the side's far end turns with it.
+      for (const [px, pz] of [
+        [x, z],
+        [x + Math.cos(rotationY) * size, z - Math.sin(rotationY) * size],
+      ] as const) {
+        const id = `${Math.round(px * 1000)}:${Math.round(pz * 1000)}`;
         if (posts.has(id)) continue;
         posts.add(id);
-        emit(fence.post, x, plot.y, z, 0, 1);
+        emit('POTEAU', px, plot.y, pz);
       }
     }
   }
@@ -226,11 +218,11 @@ export class GardenKitRenderer {
   readonly #sources = new Map<string, Mesh[]>();
   readonly #materials: StandardMaterial[] = [];
   #plots: readonly GardenPlotView[] = [];
-  #lods = new Map<string, GardenLod>();
+  #levels = new Map<string, GardenLevel>();
   #dirty = false;
   #visible = true;
   constructor(
-    private readonly scene: Scene,
+    scene: Scene,
     private readonly kit: GardenKitData,
   ) {
     const materials = new Map<string, StandardMaterial>();
@@ -267,7 +259,7 @@ export class GardenKitRenderer {
       list.push(mesh);
     }
   }
-  /** New plot views (state, ground or origin change). */
+  /** New plot views (state, ground, origin or harvest progress). */
   setPlots(plots: readonly GardenPlotView[]): void {
     const same =
       plots.length === this.#plots.length &&
@@ -279,7 +271,6 @@ export class GardenKitRenderer {
           p.y === q.y &&
           p.z === q.z &&
           p.stage === q.stage &&
-          p.full === q.full &&
           p.open.west === q.open.west &&
           p.open.east === q.open.east &&
           p.open.south === q.open.south &&
@@ -301,17 +292,17 @@ export class GardenKitRenderer {
   }
   /** Per frame: cheap distance test; buffers are rebuilt only when a level or a plot changes. */
   update(eye: Vector3): void {
-    const lods = new Map<string, GardenLod>();
-    let changed = this.#dirty || this.#lods.size !== this.#plots.length;
+    const levels = new Map<string, GardenLevel>();
+    let changed = this.#dirty || this.#levels.size !== this.#plots.length;
     for (const plot of this.#plots) {
-      const lod = gardenLod(Math.hypot(plot.x - eye.x, plot.y - eye.y, plot.z - eye.z), this.#lods.get(plot.id));
-      if (lod !== this.#lods.get(plot.id)) changed = true;
-      lods.set(plot.id, lod);
+      const level = gardenLevel(Math.hypot(plot.x - eye.x, plot.y - eye.y, plot.z - eye.z), this.#levels.get(plot.id));
+      if (level !== this.#levels.get(plot.id)) changed = true;
+      levels.set(plot.id, level);
     }
     if (!changed) return;
-    this.#lods = lods;
+    this.#levels = levels;
     this.#dirty = false;
-    const instances = gardenInstances(this.kit, this.#plots, lods);
+    const instances = gardenInstances(this.kit, this.#plots, levels);
     for (const [source, meshes] of this.#sources) {
       const values = instances.get(source);
       for (const mesh of meshes) {
@@ -325,11 +316,6 @@ export class GardenKitRenderer {
         mesh.setEnabled(this.#visible);
       }
     }
-  }
-  get instanceCounts(): Record<string, number> {
-    return Object.fromEntries(
-      [...this.#sources].map(([source, meshes]) => [source, meshes[0]!.isEnabled() ? meshes[0]!.thinInstanceCount : 0]),
-    );
   }
   dispose(): void {
     for (const meshes of this.#sources.values()) for (const mesh of meshes) mesh.dispose(false, false);

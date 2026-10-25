@@ -3581,7 +3581,6 @@ export class BabylonVillageScene {
           y: mesh.position.y,
           z: mesh.position.z,
           stage: harvest?.visibleStage ?? this.#gardenStages.get(id) ?? 1,
-          full: !harvest && this.#fullGardenSites.has(id),
           ...(harvest ? { harvest: { stage: harvest.stage, remaining: harvest.remaining } } : {}),
           open: {
             west: !members.has(key(plot.cellX - 1, plot.cellY)),
