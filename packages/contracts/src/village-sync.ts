@@ -67,7 +67,21 @@ export const constructionConfirmationIsValid = (value: unknown): value is Constr
   Value.Check(ConstructionConfirmationSchema, value);
 type Change = SynchronizationChange;
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** JSON-data equality, stopping at the first difference instead of serializing both sides. */
+function equal(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!equal(a[i], b[i])) return false;
+    return true;
+  }
+  if (!record(a) || !record(b)) return false;
+  // JSON omits undefined members; key order is not data.
+  const keys = Object.keys(a).filter((key) => a[key] !== undefined);
+  if (keys.length !== Object.keys(b).filter((key) => b[key] !== undefined).length) return false;
+  for (const key of keys) if (!equal(a[key], b[key])) return false;
+  return true;
+}
 function entityKey(v: unknown): string | null {
   if (!record(v)) return null;
   for (const key of ['id', 'featureId', 'code', 'buildingId'])
@@ -210,14 +224,32 @@ export function applyVillageFrame(state: VillageState, input: unknown): VillageF
 /** Preserve references on resets too, so presentation caches retain unchanged entities. */
 export function reconcileVillageSnapshot(before: VillageState | null, after: VillageState): VillageState {
   if (!before || before.world.id !== after.world.id || before.village.id !== after.village.id) return after;
+  // One bottom-up pass: a node whose members all kept their references is kept itself.
   function share(a: unknown, b: unknown): unknown {
-    if (equal(a, b)) return a;
+    if (a === b) return a;
     if (Array.isArray(a) && Array.isArray(b)) {
       const keyed = entities(a);
-      return b.map((v, i) => share(keyed?.get(entityKey(v) ?? '') ?? a[i], v));
+      let same = a.length === b.length;
+      const next = b.map((v, i) => {
+        const shared = share(keyed?.get(entityKey(v) ?? '') ?? a[i], v);
+        if (shared !== a[i]) same = false;
+        return shared;
+      });
+      return same ? a : next;
     }
-    if (record(a) && record(b)) return Object.fromEntries(Object.entries(b).map(([k, v]) => [k, share(a[k], v)]));
-    return b;
+    if (record(a) && record(b)) {
+      const entries = Object.entries(b);
+      let same = entries.length === Object.keys(a).length;
+      const next = Object.fromEntries(
+        entries.map(([k, v]) => {
+          const shared = share(a[k], v);
+          if (shared !== a[k] || !(k in a)) same = false;
+          return [k, shared];
+        }),
+      );
+      return same ? a : next;
+    }
+    return equal(a, b) ? a : b;
   }
   return share(before, after) as VillageState;
 }

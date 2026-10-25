@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { VillageState } from './villages.js';
 import {
   applyVillageFrame,
   latestVillageSnapshot,
   reconcileVillageSnapshot,
+  synchronizationChanges,
   villageFrame,
   villageSnapshotIsValid,
 } from './village-sync.js';
@@ -90,4 +91,29 @@ it('uses revision rather than response timestamp in both village snapshots', () 
   expect(latestVillageSnapshot(current, newer)).toBe(newer);
   const projection = { ...current, serverTime: '2026-10-11T18:00:00.000Z' };
   expect(latestVillageSnapshot(current, projection)).toBe(projection);
+});
+it('reconciles in one pass without serializing, keeping every unchanged reference', () => {
+  const before = fixture(),
+    after = completion(before);
+  const stringify = vi.spyOn(JSON, 'stringify');
+  try {
+    expect(reconcileVillageSnapshot(before, structuredClone(before))).toBe(before);
+    const next = reconcileVillageSnapshot(before, after);
+    expect(next).toEqual(after);
+    expect(next).not.toBe(before);
+    expect(next.cells[0]).toBe(before.cells[0]);
+    expect(next.region).toBe(before.region);
+    expect(next.cells[1]).not.toBe(before.cells[1]);
+    expect(next.cells[1]!.footprint).not.toBe(before.cells[1]!.footprint);
+    expect(stringify).not.toHaveBeenCalled();
+  } finally {
+    stringify.mockRestore();
+  }
+});
+it('compares data like JSON: member order and undefined members are not changes', () => {
+  expect(synchronizationChanges({ a: 1, b: { c: [1, 2] } }, { b: { c: [1, 2] }, a: 1 })).toEqual([]);
+  expect(synchronizationChanges({ a: 1, b: undefined }, { a: 1 })).toEqual([]);
+  expect(synchronizationChanges({ a: [1, 2] }, { a: [1, 2, 3] })).toEqual([
+    { kind: 'set', path: ['a'], value: [1, 2, 3] },
+  ]);
 });
