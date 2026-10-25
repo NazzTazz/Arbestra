@@ -118,12 +118,17 @@ export class HudIntentQueue {
   #save() {
     this.io.save({ confirmed: this.confirmed, items: this.items });
   }
-  synchronize(next: HudWorkforceState) {
+  /**
+   * `revisioned` is false for a V2 village state: it has no V1 revision to
+   * compare with a confirmation's, so only its server time orders it. A batch
+   * read just before a gesture's commit may then hide it until the next batch.
+   */
+  synchronize(next: HudWorkforceState, revisioned = true) {
     if (
       this.items.length ||
       next.worldId !== this.confirmed.worldId ||
       next.villageId !== this.confirmed.villageId ||
-      next.minimumRevision < this.confirmed.minimumRevision ||
+      (revisioned && next.minimumRevision < this.confirmed.minimumRevision) ||
       next.serverTime <= this.confirmed.serverTime
     )
       return;

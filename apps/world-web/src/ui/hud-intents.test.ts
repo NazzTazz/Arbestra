@@ -158,3 +158,29 @@ it('bounds the next gesture against all requested settings while leaving real mi
   expect(canAdjustPool(full, full.extractionPools, 'wood', 'sites-up')).toBe(false);
   expect(canAdjustPool(full, full.extractionPools, 'wood', 'sites-down')).toBe(true);
 });
+
+it('follows a later V2 village state after a gesture, although it carries no V1 revision', () => {
+  const q = new HudIntentQueue(state(1, 30), [], {
+    send: async () => reply('unused', 1),
+    save: () => {},
+    changed: () => {},
+    settled: () => {},
+    failed: () => false,
+  });
+  try {
+    const v2 = (time: number, working: number): HudWorkforceState => ({
+      ...state(1, time),
+      minimumRevision: 0,
+      population: { ...state().population, working },
+    });
+    // A V1 snapshot keeps its revision guard against the confirmation's revision 30.
+    q.synchronize(v2(40, 2));
+    expect(q.confirmed.population.working).toBe(0);
+    q.synchronize(v2(40, 1), false);
+    expect(q.confirmed.population.working).toBe(1);
+    q.synchronize(v2(35, 0), false);
+    expect(q.confirmed.population.working).toBe(1);
+  } finally {
+    q.stop();
+  }
+});

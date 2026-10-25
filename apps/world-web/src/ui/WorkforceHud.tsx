@@ -141,7 +141,7 @@ export function WorkforceHud({
     };
   }, [state.world.id, state.world.slug, state.village.id]);
   useEffect(() => {
-    queue.current?.synchronize(hudFromVillage(state));
+    queue.current?.synchronize(hudFromVillage(state), state.syncRevision !== undefined);
   }, [state]);
   const send = (intent: HudWorkforceIntent) => {
     try {
