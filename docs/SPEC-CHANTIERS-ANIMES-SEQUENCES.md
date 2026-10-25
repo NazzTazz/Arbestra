@@ -91,13 +91,24 @@ L'événement d'impact est émis au début de la tenue d'impact. La durée d'un 
 
 Source de vérité : [poses.json](../blender-elements/villageois/poses/poses.json), qui contient aussi la position des jambes.
 
+**Les bras sont portés par le buste** : leur angle par rapport au monde vaut « bras − buste ». Pencher le buste en avant ramène donc les bras vers l'arrière d'autant. Les angles d'impact ci-dessous en tiennent compte : l'outil arrive à la hauteur de sa cible au lieu de taper le sol.
+
+| Cible | Hauteur | Distance devant le villageois |
+|---|---:|---:|
+| Tronc | 0,3 m | 0,7 m |
+| Haut de bûche | 0,4 m | 0,77 m |
+| Paroi rocheuse | 0,2 m | 0,69 m |
+| Bloc | 0,2 m | 0,67 m |
+
+Le fer de la hache et du merlin est du côté qui frappe quand le bras s'abat.
+
 | Geste | Préparation : bras / buste | Impact : bras / buste | Cadence |
 |---|---|---|---|
-| Hache (abattage, ébranchage) | −2,7 / −0,15 | −0,9 / +0,38 | 1,6 s |
-| Fendre (bûche verticale) | −2,9 / −0,1 | −1,0 / +0,5 | 1,8 s |
-| Scie de long, à deux | −1,2 ± 0,25 / +0,25 ± 0,1 | alternance en opposition de phase avec le partenaire | 1,1 s par aller-retour |
-| Pioche | −2,4 / −0,1 | −0,45 / +0,45 | 1,7 s |
-| Masse (casser) | −2,2 / 0 | −0,4 / +0,42 | 1,5 s |
+| Hache (abattage, ébranchage) | −2,7 / −0,15 | −1,72 / +0,38 | 1,6 s |
+| Fendre (bûche verticale) | −2,9 / −0,1 | −2,02 / +0,5 | 1,8 s |
+| Scie de long, à deux | −1,75 ± 0,25 / +0,25 ± 0,1 | alternance en opposition de phase avec le partenaire | 1,1 s par aller-retour |
+| Pioche | −2,4 / −0,1 | −1,6 / +0,4 | 1,7 s |
+| Masse (casser) | −2,2 / 0 | −1,59 / +0,42 | 1,5 s |
 | Ramasser, déposer | −0,6 / +1,0 | — | 0,9 s |
 | Porter | −0,9 / −0,12, pas réduit de 30 % | — | marche |
 | Arracher une carotte | se pencher −0,5 / +0,95, puis tirer −1,1 / +0,6 | — | 0,7 s |

@@ -17,21 +17,25 @@ RATIO = dict(prep=0.40, hold=0.10, strike=0.08, impact=0.07)  # le reste = retou
 IMPACT_U = RATIO["prep"] + RATIO["hold"] + RATIO["strike"]
 BLEND = 0.25  # fondu entre deux segments
 
+# Le bras est porté par le buste : son angle au monde vaut bras − buste (un buste penché en avant
+# ramène le bras vers l'arrière). Les impacts visent la hauteur de la cible :
+# tronc 0,3 m à 0,7 m devant, haut de bûche 0,4 m à 0,77 m, paroi 0,2 m à 0,69 m, bloc 0,2 m à 0,67 m.
 GESTURES = {
-    "hache": dict(period=1.6, rest=dict(bR=-0.55, bL=-0.5, buste=0.1, jR=-0.18, jL=0.18),
+    "hache": dict(period=1.6, rest=dict(bR=-0.75, bL=-0.7, buste=0.1, jR=-0.18, jL=0.18),
                   prep=dict(bR=-2.7, bL=-2.6, buste=-0.15, jR=-0.18, jL=0.18),
-                  hit=dict(bR=-0.9, bL=-0.85, buste=0.38, jR=-0.18, jL=0.18)),
-    "fendre": dict(period=1.8, rest=dict(bR=-0.5, bL=-0.45, buste=0.15, jR=-0.12, jL=0.12),
+                  hit=dict(bR=-1.72, bL=-1.67, buste=0.38, jR=-0.18, jL=0.18)),
+    "fendre": dict(period=1.8, rest=dict(bR=-0.9, bL=-0.85, buste=0.15, jR=-0.12, jL=0.12),
                    prep=dict(bR=-2.9, bL=-2.85, buste=-0.1, jR=-0.12, jL=0.12),
-                   hit=dict(bR=-1.0, bL=-0.95, buste=0.5, jR=-0.12, jL=0.12)),
-    "pioche": dict(period=1.7, rest=dict(bR=-0.5, bL=-0.45, buste=0.1, jR=-0.2, jL=0.15),
+                   hit=dict(bR=-2.02, bL=-1.97, buste=0.5, jR=-0.12, jL=0.12)),
+    "pioche": dict(period=1.7, rest=dict(bR=-0.75, bL=-0.7, buste=0.1, jR=-0.2, jL=0.15),
                    prep=dict(bR=-2.4, bL=-2.35, buste=-0.1, jR=-0.2, jL=0.15),
-                   hit=dict(bR=-0.45, bL=-0.4, buste=0.45, jR=-0.2, jL=0.15)),
-    "masse": dict(period=1.5, rest=dict(bR=-0.4, bL=-0.35, buste=0.1, jR=-0.15, jL=0.15),
+                   hit=dict(bR=-1.6, bL=-1.55, buste=0.4, jR=-0.2, jL=0.15)),
+    "masse": dict(period=1.5, rest=dict(bR=-0.7, bL=-0.65, buste=0.1, jR=-0.15, jL=0.15),
                   prep=dict(bR=-2.2, bL=-2.15, buste=0.0, jR=-0.15, jL=0.15),
-                  hit=dict(bR=-0.4, bL=-0.35, buste=0.42, jR=-0.15, jL=0.15)),
+                  hit=dict(bR=-1.59, bL=-1.54, buste=0.42, jR=-0.15, jL=0.15)),
 }
-SAW = dict(period=1.1, arms=-1.2, arms_amp=0.25, buste=0.25, buste_amp=0.1)
+# mains à hauteur du tronc couché (0,43 m) : angle au monde ~1,5
+SAW = dict(period=1.1, arms=-1.75, arms_amp=0.25, buste=0.25, buste_amp=0.1)
 POSES = {
     "neutre": dict(bR=0, bL=0, buste=0, jR=0, jL=0),
     "porter": dict(bR=-0.9, bL=-0.9, buste=-0.12),
@@ -217,10 +221,11 @@ def tool_part(kind):
     hz = -0.225
     L = {"hache": 0.42, "merlin": 0.45, "pioche": 0.42, "masse": 0.4}[kind]
     p.add(cyl(0.014, hz - L, hz + 0.06, 5, TIMBER))
+    # Le fer est du côté +Y du bras : bras levé puis abattu, c'est le côté qui frappe.
     if kind == "hache":
-        box(p, 0, -0.05, hz - L + 0.04, 0.025, 0.12, 0.09, STEEL)
+        box(p, 0, 0.05, hz - L + 0.04, 0.025, 0.12, 0.09, STEEL)
     elif kind == "merlin":
-        box(p, 0, -0.035, hz - L + 0.04, 0.05, 0.13, 0.1, STEEL_DARK)
+        box(p, 0, 0.035, hz - L + 0.04, 0.05, 0.13, 0.1, STEEL_DARK)
     elif kind == "pioche":
         box(p, 0, 0, hz - L + 0.02, 0.035, 0.36, 0.035, STEEL)
     elif kind == "masse":
@@ -414,8 +419,9 @@ def put_part(sc, name, part, loc=(0, 0, 0), rot=(0, 0, 0), parent=None):
 
 def tree_part():
     p = Part()
-    p.add(cyl(0.075, 0.0, 0.9, 6, hexc("6b4a2e")))
-    for z0, r, h, col in ((0.55, 0.42, 0.7, hexc("3f7a34")), (0.95, 0.32, 0.6, hexc("4f8d3a")), (1.3, 0.2, 0.5, hexc("5fa042"))):
+    # fût dégagé jusqu'à 0,8 m : la zone d'impact de la hache reste visible depuis la caméra plongeante
+    p.add(cyl(0.075, 0.0, 1.1, 6, hexc("6b4a2e")))
+    for z0, r, h, col in ((0.8, 0.42, 0.7, hexc("3f7a34")), (1.2, 0.32, 0.6, hexc("4f8d3a")), (1.55, 0.2, 0.5, hexc("5fa042"))):
         rg = ring(z0, r, 8, phase=math.pi / 8)
         cap_top(p, rg, Vector((0, 0, z0 + h)), col)
         cap_bottom(p, rg, Vector((0, 0, z0)), mul(col, (0.6,) * 3))
@@ -455,7 +461,7 @@ def site_wood(sc, fx, O):
     # abatteur et arbre accessoire
     A = (0.0, 0.0)
     hA = heading_to((0, 0), (1, 1))
-    tree_at = ahead(A, hA, 0.7)
+    tree_at = ahead(A, hA, 0.62)  # le fer (0,7 m devant) entre dans le fût (rayon ~0,09)
     yaw = bpy.data.objects.new("bois_arbre_cap", None)
     sc.collection.objects.link(yaw)
     yaw.location = (ox + tree_at[0], oy + tree_at[1], 0)
@@ -492,7 +498,7 @@ def site_wood(sc, fx, O):
         y = (t - fall - 1.2) / 0.3
         return (math.pi / 2 - (0.08 * math.sin(math.pi * y) if y < 1 else 0), 0, 0)
     key_track(tilt, tilt_angle, 0, DUR, "rotation_euler")
-    top = ahead(tree_at, hA, 1.3)
+    top = ahead(tree_at, hA, 1.6)
     fx.dust(fall + 1.2, (ox + top[0], oy + top[1]), size=0.9, life=1.0)
     fx.dust(fall + 0.1, (ox + tree_at[0], oy + tree_at[1]), size=0.35)
     fx.leaves(fall + 1.1, (ox + top[0], oy + top[1]), 12, 0.6, spread=0.5)
@@ -613,7 +619,7 @@ def site_stone(sc, fx, O):
     hits_by = []
     for k, d in enumerate(((0.707, 0.707), (-0.2, 0.98))):
         dv = Vector((d[0], d[1], 0)).normalized()
-        at = C - dv * 1.4  # la pioche frappe la surface (rayon ~0,6), sans la traverser
+        at = C - dv * 1.22  # fer à 0,69 m devant le piocheur : il touche la paroi (rayon ~0,55 à 0,2 m de haut)
         h = heading_to(at, C)
         w = Worker(f"piocheur{k}", (at.x, at.y), h, 500 + k)
         if k == 0:
@@ -626,8 +632,8 @@ def site_stone(sc, fx, O):
         animate_worker(w, rig(sc, f"piocheur{k}", (at.x, at.y), h, [dict(skin=1, clothes=2, hair=1), dict(skin=0, clothes=1, hair=0)][k],
                               hat="casque", tool="pioche"), O)
         for i, t in enumerate(hits):
-            p = ahead((at.x, at.y), h, 0.78)
-            fx.bits(t, (ox + p[0], oy + p[1], 0.12), 3, "eclat", up=1.2)
+            p = ahead((at.x, at.y), h, 0.66)
+            fx.bits(t, (ox + p[0], oy + p[1], 0.2), 3, "eclat", up=1.2)
             fx.dust(t, (ox + p[0], oy + p[1]), size=0.3, life=0.6)
         hits_by.append((at, h, hits))
     # blocs détachés (réservoir de 3 au plus)
@@ -635,7 +641,7 @@ def site_stone(sc, fx, O):
         if len(hits) < 3:
             continue
         t0 = hits[2]
-        p = ahead((at.x, at.y), h, 0.7)
+        p = ahead((at.x, at.y), h, 0.62)
         side = ahead((at.x, at.y), h + math.pi / 2, 0.25)
         b = Part()
         box(b, 0, 0, 0, 0.16, 0.14, 0.12, hexc("8f918c"))
@@ -651,7 +657,7 @@ def site_stone(sc, fx, O):
     # casseur à la masse
     K = (1.75, -0.55)
     hK = heading_to(K, (K[0] - 1, K[1] - 1))
-    target = ahead(K, hK, 0.57)
+    target = ahead(K, hK, 0.67)
     kw = Worker("casseur", K, hK, 601)
     _, khits = kw.strikes(0.2, DUR, "masse")
     animate_worker(kw, rig(sc, "casseur", K, hK, dict(skin=2, clothes=0, hair=2), tool="masse"), O)

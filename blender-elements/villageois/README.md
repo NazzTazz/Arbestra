@@ -105,6 +105,12 @@ Signes : bras et jambes négatifs vers l'avant, **buste positif penché en avant
   - le casseur et le manutentionnaire, trop proches dans ce montage.
 - Les copeaux et les éclats ne se voient qu'au zoom rapproché, comme prévu par la spécification.
 
+**Corrections après la première recette de Tristan**
+- **Fer de la hache et du merlin** : il était tourné de 180°. Il est maintenant du côté qui frappe.
+- **Angles d'impact** : ils oubliaient que le bras est porté par le buste (angle au monde = bras − buste). Les outils tapaient le sol. Les impacts visent désormais la hauteur de leur cible : tronc, haut de bûche, paroi rocheuse, bloc.
+- **Positions** : les piocheurs sont rapprochés de la roche, et les mains des scieurs sont à la hauteur du tronc couché.
+- **Arbre accessoire** : le fût est dégagé jusqu'à 0,8 m, pour que la hache se voie entrer dans le tronc depuis la caméra du jeu.
+
 **Limites du prototype** : séquences écrites à la main sur 8 s, pas le planificateur par blocs de 30 s de la spécification ; pas de mesure de performance.
 
 ## Fichiers
