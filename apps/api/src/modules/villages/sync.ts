@@ -56,18 +56,34 @@ export async function reconcileSyncDeadline(
   snapshot: VillageState,
 ) {
   const at = (await db.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
+  if (!villageTransitionDue(snapshot, at) && !(await cohortActivityDue(db, snapshot.world.id, villageId, at))) return;
+  await reconcileVillageForRead(db, accountId, worldSlug, villageId);
+}
+
+/** Rest and fatigue change a cohort's activity at a time no task notifies. */
+async function cohortActivityDue(db: Kysely<Database>, worldId: string, villageId: string, at: Date) {
   const cohorts = await db
     .selectFrom('populationCohorts')
     .selectAll()
-    .where('worldId', '=', snapshot.world.id)
+    .where('worldId', '=', worldId)
     .where('villageId', '=', villageId)
     .execute();
-  if (
-    !villageTransitionDue(snapshot, at) &&
-    !cohorts.some((c) => advanceEnergy(energyState(c), at).activity !== c.activity)
-  )
-    return;
-  await reconcileVillageForRead(db, accountId, worldSlug, villageId);
+  return cohorts.some((c) => advanceEnergy(energyState(c), at).activity !== c.activity);
+}
+
+/** V2 stream tick: the change journal only carries written rows, so an
+ * activity change that came due is reconciled first, as the V1 stream did.
+ * Dated transitions reach the journal through their worker tasks. */
+export async function reconcileActivityDeadline(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+) {
+  const village = await ownedVillage(db, accountId, worldSlug, villageId);
+  const at = (await db.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
+  if (await cohortActivityDue(db, village.worldId, village.villageId, at))
+    await reconcileVillageForRead(db, accountId, worldSlug, villageId);
 }
 
 export type VillageSyncEvent =

@@ -13,6 +13,7 @@ import type { AppConfig } from '../../config.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
 import { reconcileVillageForRead } from './service.js';
+import { reconcileActivityDeadline } from './sync.js';
 import { captureSyncV2, type SyncV2SharedInclude } from './sync-v2-capture.js';
 import { serveSyncV2Stream } from './sync-v2-stream.js';
 import { readVillagePresentation } from './presentation.js';
@@ -181,6 +182,7 @@ export async function registerSyncV2Routes(
             body,
             async (next) => {
               const current = await authenticate(db, token);
+              await reconcileActivityDeadline(db, current.id, worldSlug, villageId);
               return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next));
             },
             {
