@@ -7,17 +7,18 @@ import {
 import type { TimedVillageState } from './client';
 import { SyncV2Transport } from './sync-v2-transport';
 
-// Whole-village V2 synchronization is opt-in until its browser validation:
-// localStorage arbestra:sync-v2=1 or VITE_SYNC_V2=1. The workshop already
-// negotiates V2 on its own whenever the server offers it.
-export const SYNC_V2_VILLAGE =
-  (() => {
-    try {
-      return localStorage.getItem('arbestra:sync-v2') === '1';
-    } catch {
-      return false;
-    }
-  })() || import.meta.env.VITE_SYNC_V2 === '1';
+// Whole-village V2 synchronization is the default (production since 23
+// October, development and browser tests since 24 October). During the V1
+// removal, localStorage arbestra:sync-v2=0 still selects the historical V1
+// transport for comparison; VITE_SYNC_V2=0 does the same for a whole build.
+export const SYNC_V2_VILLAGE = (() => {
+  try {
+    if (localStorage.getItem('arbestra:sync-v2') === '0') return false;
+  } catch {
+    /* Storage unavailable: keep the default. */
+  }
+  return import.meta.env.VITE_SYNC_V2 !== '0';
+})();
 export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic'] as const;
 
 type Latest = { state: SyncV2State; observedAt: string; batch: SyncV2Batch };
