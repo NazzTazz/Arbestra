@@ -315,7 +315,14 @@ export class VillageBraziers {
       flame.addColorGradient(0.35, new Color4(1, 0.38, 0.045, 0.5));
       flame.addColorGradient(1, new Color4(0.6, 0.08, 0.01, 0));
       flame.blendMode = ParticleSystem.BLENDMODE_ADD;
-      const light = new PointLight(`brazier-light-${index}`, new Vector3(p.x, p.y + 0.16, p.z), this.scene);
+      // The cluster takes its lights out of the scene at once. Registering them
+      // first walks every mesh three times per light (≈250 fires × 10 000 meshes).
+      const light = new PointLight(
+        `brazier-light-${index}`,
+        new Vector3(p.x, p.y + 0.16, p.z),
+        this.scene,
+        Boolean(this.#cluster),
+      );
       light.diffuse = new Color3(1, 0.51, 0.16);
       light.specular = Color3.Black();
       light.range = 5;

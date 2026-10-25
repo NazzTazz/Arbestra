@@ -386,3 +386,57 @@ it('lights building fires only at village night, and always in a workshop scene 
     vi.unstubAllGlobals();
   }
 });
+
+it('hands clustered fires to the cluster without registering each one in the scene', () => {
+  vi.stubGlobal(
+    'OffscreenCanvas',
+    class {
+      constructor(
+        public width: number,
+        public height: number,
+      ) {}
+      getContext() {
+        return { putImageData() {} };
+      }
+    },
+  );
+  vi.stubGlobal(
+    'ImageData',
+    class {
+      data: Uint8ClampedArray;
+      constructor(width: number, height: number) {
+        this.data = new Uint8ClampedArray(width * height * 4);
+      }
+    },
+  );
+  const engine = new NullEngine(),
+    scene = new Scene(engine);
+  Object.assign(engine.getCaps(), {
+    texelFetch: true,
+    colorBufferFloat: true,
+    blendFloat: true,
+    shaderFloatPrecision: 23,
+  });
+  Object.defineProperty(engine, 'version', { value: 2 });
+  const ground = MeshBuilder.CreateGround('receiver', { width: 20, height: 20 }, scene);
+  const braziers = new VillageBraziers(scene);
+  const added = vi.spyOn(scene, 'addLight');
+  try {
+    braziers.updatePoints(Array.from({ length: 5 }, (_, i) => ({ id: `fire-${i}`, x: i, y: 0, z: 0, seed: 0.4 })));
+    const cluster = scene.lights.find((light) => light instanceof ClusteredLightContainer) as ClusteredLightContainer;
+    // Only the first fire, which discovers cluster support, goes through the scene.
+    expect(added.mock.calls.filter(([light]) => light instanceof PointLight)).toHaveLength(1);
+    expect(cluster.lights).toHaveLength(5);
+    expect(scene.lights.filter((light) => light instanceof PointLight)).toHaveLength(0);
+    braziers.animate(1000, true, 1);
+    expect(ground.lightSources).toContain(cluster);
+    braziers.updatePoints([]);
+    expect(cluster.lights).toHaveLength(0);
+  } finally {
+    added.mockRestore();
+    braziers.dispose();
+    scene.dispose();
+    engine.dispose();
+    vi.unstubAllGlobals();
+  }
+});
