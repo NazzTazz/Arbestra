@@ -80,15 +80,18 @@ export function presentationWithPlacement(
  * requested read covers. A read started after revision R reflects R: the
  * stream's later delivery of the same changes (after their ACK) is skipped.
  * A scope snapshot always rereads. */
-/** Extractions only move woodland paths and deposit amounts: their reads can wait. */
+/** Extractions only move woodland paths and deposit amounts: their reads can
+ * wait. So does a building update (stock, buffer, supplies, upgrade) once its
+ * footprint is known: `buildings` reports the building's economic rows too. */
 export const PRESENTATION_EXTRACTION_DELAY_MS = 30_000;
 export function presentationReadNeeded(
   batch: SyncV2Batch,
   covered: bigint | null,
-): { needed: boolean; through: bigint | null; urgent: boolean } {
-  if (batch.coverage === 'scope-snapshot') return { needed: true, through: null, urgent: true };
+): { needed: boolean; through: bigint | null; urgent: boolean; buildings: boolean } {
+  if (batch.coverage === 'scope-snapshot') return { needed: true, through: null, urgent: true, buildings: false };
   let through: bigint | null = null,
-    urgent = false;
+    urgent = false,
+    buildings = false;
   for (const group of batch.groups) {
     const structural = group.changes.filter(
       (change) =>
@@ -99,10 +102,15 @@ export function presentationReadNeeded(
     const revision = BigInt(group.toRevision);
     if (covered === null || revision > covered) {
       through = through === null || revision > through ? revision : through;
-      urgent ||= structural.some((change) => change.component !== 'extractions');
+      // A removed building frees its cells at once.
+      urgent ||= structural.some(
+        (change) =>
+          change.component !== 'extractions' && (change.component !== 'buildings' || change.remove.length > 0),
+      );
+      buildings ||= structural.some((change) => change.component === 'buildings');
     }
   }
-  return { needed: through !== null, through, urgent };
+  return { needed: through !== null, through, urgent, buildings };
 }
 
 /** Whether every building of the private stream already has its footprint
@@ -159,6 +167,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
     let loading = false,
       stale = false,
       lastRead = 0,
+      // A provisional placement footprint: its real read never waits.
+      placing = false,
       deferred: ReturnType<typeof setTimeout> | null = null;
     const emit = () => {
       if (!presentation || !latest || transport.current !== current) return;
@@ -179,6 +189,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
         return;
       }
       loading = true;
+      placing = false;
       if (deferred) clearTimeout(deferred);
       deferred = null;
       lastRead = Date.now();
@@ -210,6 +221,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
       const patched = presentation && presentationWithPlacement(presentation, placement);
       if (patched && transport.current === current) {
         presentation = patched;
+        placing = true;
         emit();
       }
     };
@@ -227,7 +239,12 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
           if (read.needed) covered = read.through;
           // On a big village, worksites start and end extractions continuously:
           // a full presentation read each time kept the server busy. Batch them.
-          if (presentation && read.needed && !read.urgent) {
+          // A building without its footprint is never shown: read it now.
+          const urgent =
+            read.urgent ||
+            placing ||
+            (read.buildings && !!presentation && !footprintsKnown(state, villageId, presentation));
+          if (presentation && read.needed && !urgent) {
             deferred ??= setTimeout(
               () => void loadPresentation(),
               Math.max(0, lastRead + PRESENTATION_EXTRACTION_DELAY_MS - Date.now()),
