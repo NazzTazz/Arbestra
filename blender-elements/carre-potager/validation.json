@@ -1,0 +1,10 @@
+{
+  "pieces_verifiees": 17,
+  "materiaux_importes": [
+    "OPUS_lointain.001",
+    "OPUS_terroir.001"
+  ],
+  "exemple_L_triangles": 860,
+  "erreurs": [],
+  "passe": true
+}

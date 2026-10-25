@@ -1,0 +1,287 @@
+{
+  "kit": "carre-potager",
+  "version": 1,
+  "date": "2026-10-25",
+  "unites": "mètres ; coordonnées Blender (Z haut) dans ce manifeste, glTF Y haut dans les GLB",
+  "cellule": 2.5,
+  "materiaux": {
+    "OPUS_terroir": "éclairé, simple face, couleur = COLOR_0 (sRGB), rugosité 1, métal 0, sans texture",
+    "OPUS_lointain": "éclairé, simple face, couleur = textures/atlas-lointain.png"
+  },
+  "pieces": {
+    "SOCLE": {
+      "triangles": 62,
+      "materiau": "OPUS_terroir",
+      "origine": "Coin bas gauche de la cellule à l'origine ; sol + trois buttes fusionnés."
+    },
+    "SOL": {
+      "triangles": 32,
+      "materiau": "OPUS_terroir",
+      "origine": "Coin bas gauche ; sol nu (chantier ou cellule réservée)."
+    },
+    "BUTTE": {
+      "triangles": 10,
+      "materiau": "OPUS_terroir",
+      "origine": "Centre XY de la butte, base Z=0 ; grand axe X."
+    },
+    "BORDURE": {
+      "triangles": 10,
+      "materiau": "OPUS_terroir",
+      "origine": "Longe X de 0 à 2,5 m ; face extérieure à Y=0, intérieur vers +Y."
+    },
+    "POTEAU": {
+      "triangles": 10,
+      "materiau": "OPUS_terroir",
+      "origine": "Centré sur le coin canonique, pied Z=0."
+    },
+    "SEMIS": {
+      "triangles": 12,
+      "materiau": "OPUS_terroir",
+      "origine": "Pied au centre ; poser au sommet de la butte (Z=0,09)."
+    },
+    "TOUFFE_JEUNE": {
+      "triangles": 8,
+      "materiau": "OPUS_terroir",
+      "origine": "Pied au centre ; poser au sommet de la butte (Z=0,09)."
+    },
+    "TOUFFE_MURE": {
+      "triangles": 21,
+      "materiau": "OPUS_terroir",
+      "origine": "Pied au centre ; poser au sommet de la butte (Z=0,09)."
+    },
+    "CAGETTE": {
+      "triangles": 22,
+      "materiau": "OPUS_terroir",
+      "origine": "Centre de la caisse, fond Z=0."
+    },
+    "LOINTAIN_STADE_1": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_STADE_2": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_STADE_3": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_STADE_4": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_STADE_5": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_STADE_6": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_STADE_7": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    },
+    "LOINTAIN_SOL": {
+      "triangles": 2,
+      "materiau": "OPUS_lointain",
+      "origine": "Coin bas gauche de la cellule ; carré 2,5 x 2,5 m, Z=0."
+    }
+  },
+  "pose": {
+    "rangs_y": [
+      0.43,
+      1.25,
+      2.07
+    ],
+    "touffes_x": [
+      0.45,
+      0.98,
+      1.52,
+      2.05
+    ],
+    "touffes_z": 0.09,
+    "variation_touffe": "par emplacement, graine déterministe : décalage ±0,04 (X) ±0,03 (Y), rotation Z libre, échelle 0,9 à 1,1 ; conservée entre stades",
+    "croissance": [
+      {
+        "stade": 1,
+        "piece": "SEMIS",
+        "echelle": 1.0
+      },
+      {
+        "stade": 2,
+        "piece": "SEMIS",
+        "echelle": 1.45
+      },
+      {
+        "stade": 3,
+        "piece": "TOUFFE_JEUNE",
+        "echelle": 0.8
+      },
+      {
+        "stade": 4,
+        "piece": "TOUFFE_JEUNE",
+        "echelle": 1.05
+      },
+      {
+        "stade": 5,
+        "piece": "TOUFFE_MURE",
+        "echelle": 0.78
+      },
+      {
+        "stade": 6,
+        "piece": "TOUFFE_MURE",
+        "echelle": 0.9
+      },
+      {
+        "stade": 7,
+        "piece": "TOUFFE_MURE",
+        "echelle": 1.0
+      }
+    ],
+    "cagette": {
+      "stade": 7,
+      "position": [
+        2.12,
+        0.84,
+        0.0
+      ],
+      "rotation_z": 0.12
+    },
+    "bordure": "un côté de cellule reçoit BORDURE seulement si la cellule voisine n'est pas du même jardin ; rotations 0, 90, 180, -90° autour du coin d'origine du côté",
+    "poteaux": "aux extrémités de chaque côté exposé, dédupliqués par position canonique (topologie torique comprise)"
+  },
+  "atlas": {
+    "fichier": "textures/atlas-lointain.png",
+    "taille": [
+      512,
+      256
+    ],
+    "case": 128,
+    "contenu": 120,
+    "debord": 4,
+    "ordre": [
+      "stade-1",
+      "stade-2",
+      "stade-3",
+      "stade-4",
+      "stade-5",
+      "stade-6",
+      "stade-7",
+      "sol"
+    ],
+    "cases": {
+      "stade-1": {
+        "colonne": 0,
+        "ligne": 0,
+        "u": [
+          0.007812,
+          0.242188
+        ],
+        "v_blender": [
+          0.515625,
+          0.984375
+        ]
+      },
+      "stade-2": {
+        "colonne": 1,
+        "ligne": 0,
+        "u": [
+          0.257812,
+          0.492188
+        ],
+        "v_blender": [
+          0.515625,
+          0.984375
+        ]
+      },
+      "stade-3": {
+        "colonne": 2,
+        "ligne": 0,
+        "u": [
+          0.507812,
+          0.742188
+        ],
+        "v_blender": [
+          0.515625,
+          0.984375
+        ]
+      },
+      "stade-4": {
+        "colonne": 3,
+        "ligne": 0,
+        "u": [
+          0.757812,
+          0.992188
+        ],
+        "v_blender": [
+          0.515625,
+          0.984375
+        ]
+      },
+      "stade-5": {
+        "colonne": 0,
+        "ligne": 1,
+        "u": [
+          0.007812,
+          0.242188
+        ],
+        "v_blender": [
+          0.015625,
+          0.484375
+        ]
+      },
+      "stade-6": {
+        "colonne": 1,
+        "ligne": 1,
+        "u": [
+          0.257812,
+          0.492188
+        ],
+        "v_blender": [
+          0.015625,
+          0.484375
+        ]
+      },
+      "stade-7": {
+        "colonne": 2,
+        "ligne": 1,
+        "u": [
+          0.507812,
+          0.742188
+        ],
+        "v_blender": [
+          0.015625,
+          0.484375
+        ]
+      },
+      "sol": {
+        "colonne": 3,
+        "ligne": 1,
+        "u": [
+          0.757812,
+          0.992188
+        ],
+        "v_blender": [
+          0.015625,
+          0.484375
+        ]
+      }
+    },
+    "note": "vues du dessus sans bordure ni poteau, couleurs non ombrées ; UV exportées pour la convention glTF"
+  },
+  "budgets": {
+    "parcelle_pleine_isolee": 416,
+    "parcelle_stade_1_isolee": 286,
+    "L_plein": 1168,
+    "exemple_L": 860,
+    "lointain_par_cellule": 2
+  }
+}
