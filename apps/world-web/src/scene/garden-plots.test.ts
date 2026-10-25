@@ -17,8 +17,8 @@ function setup() {
     stem: new StandardMaterial('stem', scene),
   };
   const renderer = new GardenPlots(scene, materials);
-  const create = (id: string, x: number, stage: number, full = false) => {
-    const plot = renderer.create(id, x, 0, 0.4, stage, full);
+  const create = (id: string, x: number, stage: number, full = false, kit = false) => {
+    const plot = renderer.create(id, x, 0, 0.4, stage, full, kit);
     for (const mesh of [plot, ...plot.getChildMeshes()]) mesh.metadata = { siteId: id };
     return plot;
   };
@@ -84,6 +84,21 @@ it('preserves the open soil cap and uses bounded reusable templates across all g
     expect(scene.getMeshByName('garden-surface-new')!.receiveShadows).toBe(true);
     scene.dispose();
     expect(sources.every((m) => m.isDisposed())).toBe(true);
+  } finally {
+    scene.dispose();
+    engine.dispose();
+  }
+});
+it('keeps a kit-rendered plot pickable from above without drawing the former tile', () => {
+  const { engine, scene, create, pick } = setup();
+  try {
+    const plot = create('kit', 0, 7, true, true);
+    const meshes = plot.getChildMeshes();
+    expect(meshes).toHaveLength(1);
+    expect(meshes[0]!.layerMask).toBe(0);
+    expect(scene.getMeshByName('garden-full-kit')).toBeNull();
+    expect(pick(0)!.pickedMesh?.metadata?.siteId).toBe('kit');
+    expect(pick(2)!.pickedMesh).toBeNull();
   } finally {
     scene.dispose();
     engine.dispose();

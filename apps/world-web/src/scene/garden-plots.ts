@@ -18,7 +18,11 @@ export class GardenPlots {
     },
   ) {}
 
-  create(id: string, x: number, z: number, ground: number, stage: number, full: boolean): Mesh {
+  /**
+   * With `kit`, the garden kit renders the plot: only its top surface remains,
+   * as an unrendered (layerMask 0) collider that keeps picking and selection.
+   */
+  create(id: string, x: number, z: number, ground: number, stage: number, full: boolean, kit = false): Mesh {
     const plot = new Mesh(`garden-${id}`, this.scene);
     plot.position.set(x, ground + 0.11, z);
     const instance = (key: string, name: string, material: Material, create: () => Mesh) => {
@@ -37,6 +41,14 @@ export class GardenPlots {
       mesh.parent = plot;
       return mesh;
     };
+    if (kit) {
+      const collider = instance('collider', `garden-surface-${id}`, this.materials.soil, () =>
+        MeshBuilder.CreateGround('surface', { width: 2.5, height: 2.5 }, this.scene),
+      );
+      collider.position.y = 0.05;
+      collider.layerMask = 0;
+      return plot;
+    }
     instance('soil', `garden-soil-${id}`, this.materials.soil, () => {
       const mesh = new Mesh('soil', this.scene);
       const base = VertexData.CreateBox({ width: 2.5, depth: 2.5, height: 0.1 });

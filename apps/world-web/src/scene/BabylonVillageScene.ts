@@ -113,6 +113,7 @@ import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
+import { fetchGardenKit, GardenKitRenderer, type GardenPlotView } from './garden-kit';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
 import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
@@ -207,6 +208,10 @@ export class BabylonVillageScene {
   readonly #soilMaterial: StandardMaterial;
   readonly #gardenTileMaterials: StandardMaterial[];
   #gardenPlots: GardenPlots | null = null;
+  #gardenKit: GardenKitRenderer | null = null;
+  #gardenKitRequested = false;
+  #gardenKitInputs: unknown[] = [];
+  #lastUpdate: Parameters<BabylonVillageScene['update']> | null = null;
   #weather: WeatherMap | null = null;
   readonly #rain: LocalRain;
   #rainIntensity = 0;
@@ -1371,6 +1376,15 @@ export class BabylonVillageScene {
         this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
         setSceneNight(this.#scene, this.#villageNight);
         this.#villageBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
+        if (this.#gardenKit && this.#state) {
+          const inputs = [this.#state, this.#groundKey(), this.#buildingGenerationCount];
+          if (!sameInputs(this.#gardenKitInputs, inputs)) {
+            this.#gardenKitInputs = inputs;
+            this.#gardenKit.setPlots(this.#gardenPlotViews(this.#state));
+          }
+          this.#gardenKit.show(this.#mode !== 'world');
+          this.#gardenKit.update(this.#camera.globalPosition);
+        }
         this.#rain.update(
           this.#camera.target,
           this.#rainIntensity,
@@ -1584,6 +1598,7 @@ export class BabylonVillageScene {
     showTravelPaths = false,
     selectedRouteId: string | null = null,
   ): void {
+    this.#lastUpdate = [state, highlightedSiteIds, constructionMode, showTravelPaths, selectedRouteId];
     return clientTime('scene', () => {
       if (import.meta.env.DEV && new URLSearchParams(location.search).get('barracksPreview') === '1') {
         // Preview the new house kit without changing the server's persisted layouts.
@@ -1737,6 +1752,18 @@ export class BabylonVillageScene {
       if (!this.#initialLoad.ready) this.#streamTerrain(performance.now());
       const plots = state.cells.flatMap((cell) => cell.building?.garden?.plots ?? []);
       this.#gardenStages = new Map(plots.map((plot) => [cellKey(plot), gardenTileStage(plot)]));
+      if (!this.#gardenKitRequested && plots.length) {
+        this.#gardenKitRequested = true;
+        // The previous plots stay on screen until the kit arrives, then gardens alone rebuild.
+        void fetchGardenKit().then(
+          (kit) => {
+            if (this.#scene.isDisposed) return;
+            this.#gardenKit = new GardenKitRenderer(this.#scene, kit);
+            if (this.#lastUpdate) this.update(...this.#lastUpdate);
+          },
+          (error) => console.error('Garden kit failed', error),
+        );
+      }
       this.#harvestableSites = new Set(
         state.cells.flatMap((cell) =>
           cell.building?.garden && !cell.building.garden.harvest
@@ -1776,6 +1803,7 @@ export class BabylonVillageScene {
           this.#gardenStages.get(site.id),
           this.#fullGardenSites.has(site.id),
         ]),
+        gardenKit: this.#gardenKit !== null,
       });
       this.#refreshBuildingGround();
       if (visualSignature === this.#lastVisualSignature) return;
@@ -1814,6 +1842,9 @@ export class BabylonVillageScene {
           site.footprint?.state,
           this.#gardenStages.get(site.id),
           this.#fullGardenSites.has(site.id),
+          site.building?.type === 'garden' || site.footprint?.buildingType === 'garden'
+            ? this.#gardenKit !== null
+            : null,
           site.building?.type === 'university'
             ? [state.science?.levels.mathematics, state.science?.levels.astronomy]
             : null,
@@ -3512,8 +3543,44 @@ export class BabylonVillageScene {
       ground,
       reserved ? 0 : (this.#gardenStages.get(site.id) ?? 1),
       !reserved && this.#fullGardenSites.has(site.id),
+      !reserved && this.#gardenKit !== null,
     );
     return this.#registerStructure(plot);
+  }
+
+  /** Completed plots drawn by the garden kit, at their plot mesh's current place. */
+  #gardenPlotViews(state: VillageState): GardenPlotView[] {
+    const { widthCells: width, heightCells: height } = state.world,
+      key = (x: number, y: number) => `${((x % width) + width) % width}:${((y % height) + height) % height}`,
+      sites = new Map(state.cells.map((c) => [c.id, c])),
+      views: GardenPlotView[] = [];
+    for (const cell of state.cells) {
+      const building = cell.building;
+      if (building?.type !== 'garden' || building.status !== 'completed' || !building.garden) continue;
+      const members = new Set(building.garden.plots.map((p) => key(p.cellX, p.cellY)));
+      for (const plot of building.garden.plots) {
+        const id = cellKey(plot),
+          site = sites.get(id);
+        if (!site || site.footprint?.state === 'reserved') continue;
+        const mesh = this.#buildingCache.get(site.building?.id ?? site.id)?.mesh;
+        if (!mesh || mesh.isDisposed()) continue;
+        views.push({
+          id,
+          x: mesh.position.x,
+          y: mesh.position.y,
+          z: mesh.position.z,
+          stage: this.#gardenStages.get(id) ?? 1,
+          full: this.#fullGardenSites.has(id),
+          open: {
+            west: !members.has(key(plot.cellX - 1, plot.cellY)),
+            east: !members.has(key(plot.cellX + 1, plot.cellY)),
+            south: !members.has(key(plot.cellX, plot.cellY - 1)),
+            north: !members.has(key(plot.cellX, plot.cellY + 1)),
+          },
+        });
+      }
+    }
+    return views;
   }
 
   #createGardenExtension(site: VillageCell): Mesh {
