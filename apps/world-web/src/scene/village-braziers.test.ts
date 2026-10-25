@@ -11,6 +11,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { ShaderStore } from '@babylonjs/core/Engines/shaderStore';
 import { Particle } from '@babylonjs/core/Particles/particle';
 import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { bindBrazierLights, brazierBlocks, roadCorners, VillageBraziers } from './village-braziers';
 import type { TravelRoute } from '@arbestra/contracts';
 import { BrazierMeshIndex } from './brazier-mesh-index';
@@ -208,6 +209,20 @@ it.each(['equipment', 'decoration'])(
       expect(particle.position.equalsWithEpsilon(new Vector3(-70, 1.9, -60))).toBe(true);
       expect(scene.getLightByName('brazier-light-0')).toBe(light);
       expect(light.position.equalsWithEpsilon(lightPosition.add(shift))).toBe(true);
+      // A streamed brazier reuses the shared masonry geometry, placed by its own transform.
+      braziers.updatePoints([
+        { ...point, x: -70, y: 1.5, z: -60 },
+        { id: 'brazier-2', x: 4, y: 2, z: 6, seed: 0.7 },
+      ]);
+      const second = scene.meshes.find((m) => m.metadata?.equipmentId === 'brazier-2');
+      expect((second as Mesh).geometry).toBe((masonry as Mesh).geometry);
+      expect(
+        second!
+          .getBoundingInfo()
+          .boundingBox.centerWorld.subtract(new Vector3(4, 2, 6))
+          .length(),
+      ).toBeLessThan(0.2);
+      expect(scene.getMeshByName('brazier-masonry-template')!.isEnabled()).toBe(false);
       braziers.updatePoints([]);
       expect(masonry.isDisposed()).toBe(true);
       expect(scene.particleSystems).toHaveLength(0);

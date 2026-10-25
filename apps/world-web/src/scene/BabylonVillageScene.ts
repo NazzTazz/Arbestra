@@ -2949,7 +2949,7 @@ export class BabylonVillageScene {
     this.#villageRoads ??= new VillageRoads(this.#scene);
     if (!braziersCurrent)
       this.#villageRoads.update(
-        JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion, displayRoutes]),
+        JSON.stringify([state.world.id, this.#space?.version, this.#renderer?.groundVersion]),
         displayRoutes,
         this.#space!,
         (cell) =>

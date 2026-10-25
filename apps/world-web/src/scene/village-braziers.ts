@@ -167,6 +167,7 @@ export class VillageBraziers {
   #cluster: BrazierCluster | null = null;
   #clusterChecked = false;
   #meshIndex: BrazierMeshIndex | null = null;
+  #masonry: Mesh | null = null;
   readonly #stone: StandardMaterial;
   readonly #fire: DynamicTexture;
   constructor(private readonly scene: Scene) {
@@ -262,44 +263,16 @@ export class VillageBraziers {
         previous.delete(key);
         continue;
       }
-      const meshes: Mesh[] = [];
-      const scale = 0.085;
-      for (const [blockIndex, block] of brazierBlocks().entries()) {
-        const mesh = MeshBuilder.CreateBox(
-          'brazier-block',
-          { width: 3.25 * scale, height: 0.65 * scale, depth: 0.75 * scale },
-          this.scene,
-        );
-        const positions = mesh.getVerticesData(VertexBuffer.PositionKind)!;
-        // Identical corner coordinates get identical offsets on adjoining faces.
-        for (let v = 0; v < positions.length; v += 3) {
-          const corner =
-            (positions[v]! > 0 ? 1 : 0) + (positions[v + 1]! > 0 ? 2 : 0) + (positions[v + 2]! > 0 ? 4 : 0);
-          for (let axis = 0; axis < 3; axis++) {
-            const n = Math.sin((blockIndex * 8 + corner) * 127.1 + axis * 311.7) * 43758.5453;
-            positions[v + axis]! += (n - Math.floor(n) - 0.5) * scale * 0.12;
-          }
-        }
-        mesh.setVerticesData(VertexBuffer.PositionKind, positions);
-        const normals: number[] = [];
-        VertexData.ComputeNormals(positions, mesh.getIndices()!, normals);
-        mesh.setVerticesData(VertexBuffer.NormalKind, normals);
-        mesh.scaling.setAll(0.98);
-        const rim = (n: number) => Math.sign(n) * (Math.abs(n) < 1 ? 0.375 : 1.625) * scale;
-        mesh.position.set(p.x + rim(block.x), p.y + block.y * 0.65 * scale, p.z + rim(block.z));
-        mesh.rotation.y = block.angle;
-        mesh.material = this.#stone;
-        mesh.isPickable = false;
-        meshes.push(mesh);
-      }
-      const masonry = Mesh.MergeMeshes(meshes, true, false)!;
-      masonry.name = 'brazier-masonry';
+      // Every brazier has the same masonry: share one geometry instead of
+      // rebuilding and merging eight blocks per streamed brazier.
+      const masonry = this.#masonryTemplate().clone('brazier-masonry', null, true)!;
+      masonry.setEnabled(true);
+      masonry.position.set(p.x, p.y, p.z);
       masonry.isPickable = Boolean(p.id);
       masonry.metadata = p.id ? { equipmentId: p.id } : null;
       if (parent) masonry.setParent(parent);
       else freezeStaticHierarchy(masonry);
-      meshes.length = 0;
-      meshes.push(masonry);
+      const meshes: Mesh[] = [masonry];
       const flame = new ParticleSystem(`brazier-fire-${index}`, 24, this.scene);
       flame.particleTexture = this.#fire;
       flame.emitter = new Vector3(p.x, p.y + 0.1, p.z);
@@ -435,6 +408,43 @@ export class VillageBraziers {
       item.light.intensity = night ? 0.9 * flicker * alpha : 0;
     }
   }
+  #masonryTemplate(): Mesh {
+    if (this.#masonry) return this.#masonry;
+    const meshes: Mesh[] = [];
+    const scale = 0.085;
+    for (const [blockIndex, block] of brazierBlocks().entries()) {
+      const mesh = MeshBuilder.CreateBox(
+        'brazier-block',
+        { width: 3.25 * scale, height: 0.65 * scale, depth: 0.75 * scale },
+        this.scene,
+      );
+      const positions = mesh.getVerticesData(VertexBuffer.PositionKind)!;
+      // Identical corner coordinates get identical offsets on adjoining faces.
+      for (let v = 0; v < positions.length; v += 3) {
+        const corner = (positions[v]! > 0 ? 1 : 0) + (positions[v + 1]! > 0 ? 2 : 0) + (positions[v + 2]! > 0 ? 4 : 0);
+        for (let axis = 0; axis < 3; axis++) {
+          const n = Math.sin((blockIndex * 8 + corner) * 127.1 + axis * 311.7) * 43758.5453;
+          positions[v + axis]! += (n - Math.floor(n) - 0.5) * scale * 0.12;
+        }
+      }
+      mesh.setVerticesData(VertexBuffer.PositionKind, positions);
+      const normals: number[] = [];
+      VertexData.ComputeNormals(positions, mesh.getIndices()!, normals);
+      mesh.setVerticesData(VertexBuffer.NormalKind, normals);
+      mesh.scaling.setAll(0.98);
+      const rim = (n: number) => Math.sign(n) * (Math.abs(n) < 1 ? 0.375 : 1.625) * scale;
+      mesh.position.set(rim(block.x), block.y * 0.65 * scale, rim(block.z));
+      mesh.rotation.y = block.angle;
+      mesh.material = this.#stone;
+      mesh.isPickable = false;
+      meshes.push(mesh);
+    }
+    this.#masonry = Mesh.MergeMeshes(meshes, true, false)!;
+    this.#masonry.name = 'brazier-masonry-template';
+    this.#masonry.isPickable = false;
+    this.#masonry.setEnabled(false);
+    return this.#masonry;
+  }
   #clear(): void {
     for (const item of this.#items) {
       item.flame.dispose(false);
@@ -457,6 +467,8 @@ export class VillageBraziers {
       } else this.#cluster.light.setEnabled(this.#cluster.active.size > 0);
       this.#cluster = null;
     }
+    this.#masonry?.dispose(false, false);
+    this.#masonry = null;
     this.#stone.dispose();
     this.#fire.dispose();
   }

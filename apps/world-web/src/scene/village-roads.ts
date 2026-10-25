@@ -14,6 +14,7 @@ export { roadEdges } from './road-profile';
 export class VillageRoads {
   readonly #renderer: InfrastructureRenderer;
   #routeSignature = '';
+  #routes: readonly TravelRoute[] | null = null;
   #requestSignature = '';
   #revision = 0;
   #plan: InfrastructurePlan = emptyInfrastructure();
@@ -31,9 +32,15 @@ export class VillageRoads {
     groundCellIdentity?: (x: number, y: number) => string | number,
   ): void {
     const requestSignature = JSON.stringify([signature, groundIdentity]);
-    if (requestSignature === this.#requestSignature) return;
+    if (requestSignature === this.#requestSignature && routes === this.#routes) return;
     this.#requestSignature = requestSignature;
-    const routeSignature = JSON.stringify([space.width, space.height, routes.map((r) => r.cells)]);
+    // Streamed ground does not change the routes: serialize them only when the
+    // caller hands over another route list.
+    const routeSignature =
+      routes === this.#routes
+        ? this.#routeSignature
+        : JSON.stringify([space.width, space.height, routes.map((r) => r.cells)]);
+    this.#routes = routes;
     if (routeSignature !== this.#routeSignature) {
       this.#routeSignature = routeSignature;
       this.#plan = {
