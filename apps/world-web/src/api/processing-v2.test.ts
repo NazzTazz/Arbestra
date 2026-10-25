@@ -166,14 +166,36 @@ it('rereads the presentation once per structural revision, not again for the str
   expect(presentationReadNeeded(batch('effects', group('buildings', '7')), null)).toEqual({
     needed: true,
     through: 7n,
+    urgent: true,
   });
   // The same commit delivered by the stream needs no second read.
-  expect(presentationReadNeeded(batch('delta', group('buildings', '7')), 7n)).toEqual({ needed: false, through: null });
+  expect(presentationReadNeeded(batch('delta', group('buildings', '7')), 7n)).toEqual({
+    needed: false,
+    through: null,
+    urgent: false,
+  });
   // A later structural change does; economic changes never do.
-  expect(presentationReadNeeded(batch('delta', group('buildings', '8')), 7n)).toEqual({ needed: true, through: 8n });
-  expect(presentationReadNeeded(batch('delta', group('resources', '9')), 7n)).toEqual({ needed: false, through: null });
+  expect(presentationReadNeeded(batch('delta', group('buildings', '8')), 7n)).toEqual({
+    needed: true,
+    through: 8n,
+    urgent: true,
+  });
+  expect(presentationReadNeeded(batch('delta', group('resources', '9')), 7n)).toEqual({
+    needed: false,
+    through: null,
+    urgent: false,
+  });
+  // Extractions alone need a read that may wait; with a building it may not.
+  expect(presentationReadNeeded(batch('delta', group('extractions', '10')), 7n)).toEqual({
+    needed: true,
+    through: 10n,
+    urgent: false,
+  });
+  expect(
+    presentationReadNeeded(batch('delta', group('extractions', '11'), group('buildings', '11')), 7n),
+  ).toMatchObject({ needed: true, urgent: true });
   // A scope snapshot always rereads and restarts the coverage.
-  expect(presentationReadNeeded(batch('scope-snapshot'), 7n)).toEqual({ needed: true, through: null });
+  expect(presentationReadNeeded(batch('scope-snapshot'), 7n)).toEqual({ needed: true, through: null, urgent: true });
 });
 
 it('shows a state at once only when every building already has its footprint', () => {

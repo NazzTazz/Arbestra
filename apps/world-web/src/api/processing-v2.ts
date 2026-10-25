@@ -80,23 +80,29 @@ export function presentationWithPlacement(
  * requested read covers. A read started after revision R reflects R: the
  * stream's later delivery of the same changes (after their ACK) is skipped.
  * A scope snapshot always rereads. */
+/** Extractions only move woodland paths and deposit amounts: their reads can wait. */
+export const PRESENTATION_EXTRACTION_DELAY_MS = 30_000;
 export function presentationReadNeeded(
   batch: SyncV2Batch,
   covered: bigint | null,
-): { needed: boolean; through: bigint | null } {
-  if (batch.coverage === 'scope-snapshot') return { needed: true, through: null };
-  let through: bigint | null = null;
+): { needed: boolean; through: bigint | null; urgent: boolean } {
+  if (batch.coverage === 'scope-snapshot') return { needed: true, through: null, urgent: true };
+  let through: bigint | null = null,
+    urgent = false;
   for (const group of batch.groups) {
-    const structural = group.changes.some(
+    const structural = group.changes.filter(
       (change) =>
         (VILLAGE_PRESENTATION_COMPONENTS as readonly string[]).includes(change.component) &&
         (change.upsert.length > 0 || change.remove.length > 0),
     );
-    if (!structural) continue;
+    if (!structural.length) continue;
     const revision = BigInt(group.toRevision);
-    if (covered === null || revision > covered) through = through === null || revision > through ? revision : through;
+    if (covered === null || revision > covered) {
+      through = through === null || revision > through ? revision : through;
+      urgent ||= structural.some((change) => change.component !== 'extractions');
+    }
   }
-  return { needed: through !== null, through };
+  return { needed: through !== null, through, urgent };
 }
 
 /** Whether every building of the private stream already has its footprint
@@ -151,7 +157,9 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
     // covers: the stream echo of an acknowledged command needs no second read.
     let covered: bigint | null = null;
     let loading = false,
-      stale = false;
+      stale = false,
+      lastRead = 0,
+      deferred: ReturnType<typeof setTimeout> | null = null;
     const emit = () => {
       if (!presentation || !latest || transport.current !== current) return;
       const projected = villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
@@ -171,6 +179,9 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
         return;
       }
       loading = true;
+      if (deferred) clearTimeout(deferred);
+      deferred = null;
+      lastRead = Date.now();
       try {
         do {
           stale = false;
@@ -214,7 +225,14 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
         if (read.needed || !presentation) {
           // A snapshot (possibly a new epoch) restarts the coverage.
           if (read.needed) covered = read.through;
-          void loadPresentation();
+          // On a big village, worksites start and end extractions continuously:
+          // a full presentation read each time kept the server busy. Batch them.
+          if (presentation && read.needed && !read.urgent) {
+            deferred ??= setTimeout(
+              () => void loadPresentation(),
+              Math.max(0, lastRead + PRESENTATION_EXTRACTION_DELAY_MS - Date.now()),
+            );
+          } else void loadPresentation();
           // An upgrade or a stock change keeps every footprint: show it now,
           // the read refreshes routes and cells. A new building still waits.
           if (presentation && footprintsKnown(state, villageId, presentation)) emit();
@@ -266,6 +284,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
       })();
     }
     return () => {
+      if (deferred) clearTimeout(deferred);
       current.close();
       if (transport.current === current) transport.current = null;
       setOrders([]);
