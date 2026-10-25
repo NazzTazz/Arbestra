@@ -2,8 +2,8 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import type { VillageState } from '@arbestra/contracts';
-import { expect, it } from 'vitest';
+import type { TravelCell, VillageState } from '@arbestra/contracts';
+import { expect, it, vi } from 'vitest';
 import { VillageWorkers, type WorkerHooks } from './village-workers';
 import { gardenHarvestPoint, sampleWorkerPath, type TrafficActor } from './worker-motion';
 
@@ -83,7 +83,7 @@ function snapshot(id = 'lot-1', start = epoch, count = 10): VillageState {
     cells: [],
   } as unknown as VillageState;
 }
-function fixture(free: WorkerHooks['free'] = () => true) {
+function fixture(free: WorkerHooks['free'] = () => true, extra: Partial<WorkerHooks> = {}) {
   const engine = new NullEngine(),
     scene = new Scene(engine),
     material = new StandardMaterial('shared', scene);
@@ -107,6 +107,7 @@ function fixture(free: WorkerHooks['free'] = () => true) {
       free,
       key: (p) => `${p.x + shift}:${p.z}`,
       detailed: () => true,
+      ...extra,
     },
   );
   return {
@@ -1073,6 +1074,30 @@ it('reaches both work posts after the actual corner even if the leader occupies 
     for (let t = 0; t < 25000; t += 16) f.view.animate(epoch + t, true);
     expect(f.view.metrics.layouts[0]?.phases).toEqual(['work', 'work']);
     expect(f.view.figures.every((f) => f.root.isEnabled())).toBe(true);
+  } finally {
+    f.dispose();
+  }
+});
+it('recomputes a home itinerary only when its cell, the routes or the scene geometry change', () => {
+  let geometry = 'g1';
+  const leisurePath = vi.fn((_id: string, p: TravelCell[]) => p.map((c) => new Vector3(c.cellX, 0, c.cellY)));
+  const f = fixture(() => true, { leisurePath, leisureVersion: () => geometry });
+  try {
+    const state = idleSnapshot();
+    f.view.sync(state, epoch);
+    expect(leisurePath).toHaveBeenCalledTimes(2);
+    // A harvest or any unrelated update keeps the home cells and the routes.
+    f.view.sync({ ...state, village: { ...state.village } }, epoch + 1000);
+    expect(leisurePath).toHaveBeenCalledTimes(2);
+    const house = { ...state.cells[1]!, building: { ...state.cells[1]!.building! } };
+    f.view.sync({ ...state, cells: [state.cells[0]!, house] }, epoch + 2000);
+    expect(leisurePath).toHaveBeenCalledTimes(3);
+    expect(leisurePath.mock.calls[2]![0]).toBe('house');
+    geometry = 'g2';
+    f.view.sync({ ...state, cells: [state.cells[0]!, house] }, epoch + 3000);
+    expect(leisurePath).toHaveBeenCalledTimes(5);
+    f.view.sync({ ...state, cells: [state.cells[0]!, house], travelRoutes: [...state.travelRoutes] }, epoch + 4000);
+    expect(leisurePath).toHaveBeenCalledTimes(7);
   } finally {
     f.dispose();
   }

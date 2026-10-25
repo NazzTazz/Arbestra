@@ -42,6 +42,8 @@ export interface WorkerHooks {
   width?: (point: WorkerPoint) => number;
   localPath?: (path: TravelCell[]) => Vector3[];
   leisurePath?: (buildingId: string, path: TravelCell[]) => Vector3[];
+  /** Changes when projected positions or ground heights used by leisurePath change. */
+  leisureVersion?: () => string;
 }
 interface Mission {
   id: string;
@@ -130,6 +132,14 @@ export class VillageWorkers {
   #populationFocus: string | null = null;
   #populationFilter = 'all';
   #snapshot: VillageState | null = null;
+  // Home itineraries, recomputed per home only when its cell, the routes or the
+  // scene geometry change: state updates are mostly harvests, not new homes.
+  #leisure: {
+    routes: VillageState['travelRoutes'] | null;
+    geometry: string;
+    byDestination: Map<string, VillageState['travelRoutes'][number]>;
+    visits: Map<string, { cell: VillageState['cells'][number]; visit: IdleVisit | null }>;
+  } = { routes: null, geometry: '', byDestination: new Map(), visits: new Map() };
   #selectedRepresentative: string | null = null;
   #hiddenRepresentative: string | null = null;
   readonly #installationDistances = new WeakMap<WorksiteLayout, number>();
@@ -348,26 +358,40 @@ export class VillageWorkers {
     const homes = state.cells.filter(
       (c) => c.building?.status === 'completed' && ['dwelling', 'town-hall'].includes(c.building.type),
     );
+    const geometry = this.hooks.leisureVersion?.() ?? '';
+    if (homes.length && (this.#leisure.routes !== state.travelRoutes || this.#leisure.geometry !== geometry)) {
+      const byDestination = new Map<string, VillageState['travelRoutes'][number]>();
+      for (const r of state.travelRoutes) {
+        const key = `${r.destination.cellX}:${r.destination.cellY}`;
+        if (r.kind === 'building' && !byDestination.has(key)) byDestination.set(key, r);
+      }
+      this.#leisure = { routes: state.travelRoutes, geometry, byDestination, visits: new Map() };
+    }
+    const previous = this.#leisure.visits,
+      cached = new Map<string, { cell: VillageState['cells'][number]; visit: IdleVisit | null }>();
     const visits: IdleVisit[] = homes
       .flatMap((c) => {
-        const route = state.travelRoutes.find(
-          (r) => r.kind === 'building' && r.destination.cellX === c.cellX && r.destination.cellY === c.cellY,
-        );
+        const known = previous.get(c.building!.id);
+        if (known?.cell === c) {
+          cached.set(c.building!.id, known);
+          return known.visit ? [known.visit] : [];
+        }
+        const route = this.#leisure.byDestination.get(`${c.cellX}:${c.cellY}`);
         const path = c.building!.type === 'town-hall' ? [c] : route?.cells;
-        if (!path) return [];
-        const points = this.hooks.leisurePath!(c.building!.id, path);
-        return points.length
-          ? [
-              {
-                buildingId: c.building!.id,
-                path: points.map((v, i) =>
-                  this.#point(v, i === 0 || i === points.length - 1 ? 0.5 : (this.hooks.width?.(v) ?? 0.8)),
-                ),
-              },
-            ]
-          : [];
+        const points = path ? this.hooks.leisurePath!(c.building!.id, path) : [];
+        const visit = points.length
+          ? {
+              buildingId: c.building!.id,
+              path: points.map((v, i) =>
+                this.#point(v, i === 0 || i === points.length - 1 ? 0.5 : (this.hooks.width?.(v) ?? 0.8)),
+              ),
+            }
+          : null;
+        cached.set(c.building!.id, { cell: c, visit });
+        return visit ? [visit] : [];
       })
       .sort((a, b) => a.buildingId.localeCompare(b.buildingId));
+    this.#leisure.visits = cached;
     const result: Mission[] = [];
     let left = Math.min(8, Math.ceil((state.village.population?.available ?? 0) / 15));
     const cohorts = (state.village.population?.cohorts ?? [])

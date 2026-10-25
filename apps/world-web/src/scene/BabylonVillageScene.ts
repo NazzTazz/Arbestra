@@ -1068,7 +1068,7 @@ export class BabylonVillageScene {
       version: number;
       routes: Array<{ destination: TravelCell; points: ReturnType<WorldSpace['path']> }>;
     } | null = null;
-    let workerWidths: { state: VillageState; widths: Map<string, number> } | null = null;
+    let workerWidths: { routes: VillageState['travelRoutes']; widths: Map<string, number> } | null = null;
     const workerSpatial = new WorkerObstacles();
     this.#workers = new VillageWorkers(
       this.#scene,
@@ -1085,20 +1085,21 @@ export class BabylonVillageScene {
         project: (cell) => this.#space!.project(cell),
         localPath: (path) => this.#pathPoints(path),
         leisurePath: (buildingId, path) => this.#leisurePath(buildingId, path),
+        leisureVersion: () => this.#groundKey(),
         key: (point) => {
           const cell = this.#space!.inverse(point.x, point.z);
           return `${cell.cellX.toFixed(3)}:${cell.cellY.toFixed(3)}`;
         },
         width: (point) => {
           if (!this.#state || !this.#space) return 0.8;
-          if (workerWidths?.state !== this.#state) {
+          if (workerWidths?.routes !== this.#state.travelRoutes) {
             const widths = new Map<string, number>();
             for (const edge of roadEdges(this.#state.travelRoutes))
               for (const cell of [edge.from, edge.to]) {
                 const key = cellKey(cell);
                 widths.set(key, Math.max(widths.get(key) ?? 0, edge.kind === 'paved' ? ROAD_HALF_WIDTH * 2 : 0.8));
               }
-            workerWidths = { state: this.#state, widths };
+            workerWidths = { routes: this.#state.travelRoutes, widths };
           }
           const cell = this.#space.inverse(point.x, point.z);
           return (
