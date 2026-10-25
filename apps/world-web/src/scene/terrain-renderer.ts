@@ -38,7 +38,9 @@ export class TerrainRenderer {
   #ordered: Array<[string, Job]> = [];
   #orderDirty = true;
   #shown = true;
-  #roads = new Map<string, number>();
+  // Decoded once per road change: every streamed unit used to split every key.
+  #roadCells: Array<[key: string, value: number, cellX: number, cellY: number]> = [];
+  #routes: readonly TravelRoute[] | null = null;
   #roadSignature = '';
   #infrastructure: Map<string, RoadPixel> = new Map();
   #infrastructureRevision = -1;
@@ -61,11 +63,16 @@ export class TerrainRenderer {
     }
   }
   setRoads(routes: readonly TravelRoute[]): void {
+    if (routes === this.#routes) return;
+    this.#routes = routes;
     const next = pavedProfiles(routes, this.space.width, this.space.height);
     const signature = JSON.stringify([...next].sort(([a], [b]) => a.localeCompare(b)));
     if (signature === this.#roadSignature) return;
     this.#roadSignature = signature;
-    this.#roads = next;
+    this.#roadCells = [...next].map(([key, value]) => {
+      const [cellX, cellY] = key.split(':').map(Number);
+      return [key, value, cellX!, cellY!];
+    });
     for (const key of this.#visible) {
       const chunk = this.store.chunk(key);
       if (chunk && !chunk.rc1) this.#queue(key, chunk);
@@ -235,6 +242,19 @@ export class TerrainRenderer {
     const size = this.store.world.chunkSize;
     const focus = this.focus();
     const mask = this.#masks.get(chunkKey)!;
+    // Units are disjoint UNIT-aligned spans of the chunk: each road cell has one.
+    const unitRoads = new Map<string, Map<string, number>>();
+    for (const [key, value, cellX, cellY] of this.#roadCells) {
+      const dx = cellX - chunk.originCellX,
+        dy = cellY - chunk.originCellY;
+      if (dx < 0 || dy < 0) continue;
+      const ux = Math.floor(dx / UNIT) * UNIT,
+        uy = Math.floor(dy / UNIT) * UNIT;
+      if (ux >= size || uy >= size) continue;
+      let roads = unitRoads.get(`${ux}:${uy}`);
+      if (!roads) unitRoads.set(`${ux}:${uy}`, (roads = new Map()));
+      roads.set(key, value);
+    }
     const wantedFeature = (f: NaturalFeature) =>
       mask.has(
         `${Math.floor((f.cellX - chunk.originCellX) / UNIT) * UNIT}:${Math.floor((f.cellY - chunk.originCellY) / UNIT) * UNIT}`,
@@ -253,12 +273,7 @@ export class TerrainRenderer {
         ]);
         const cx = chunk.originCellX + x + (UNIT - 1) / 2,
           cy = chunk.originCellY + y + (UNIT - 1) / 2;
-        const roads = new Map(
-          [...this.#roads].filter(([key]) => {
-            const [cellX, cellY] = key.split(':').map(Number);
-            return inside({ cellX: cellX!, cellY: cellY! });
-          }),
-        );
+        const roads = unitRoads.get(`${x}:${y}`) ?? new Map<string, number>();
         // RC1 ground reads its immutable patch and terraces, never road decorations.
         const groundSignature = JSON.stringify(
           chunk.rc1

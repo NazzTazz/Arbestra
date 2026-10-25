@@ -5,6 +5,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { expect, it } from 'vitest';
 import { emptyInfrastructure, type TerrainChunk } from '@arbestra/contracts';
 import { TerrainRenderer } from './terrain-renderer';
+import { pavedProfiles } from './road-profile';
 import type { TerrainStore } from './terrain-store';
 import { WorldSpace, type ChunkDemand } from './world-space';
 import { TERRAIN_STREAMING } from './terrain-settings';
@@ -403,6 +404,72 @@ it('keeps RC1 ground after road and revision edits but rebuilds a changed terrac
     expect(initial.some((mesh) => mesh.isDisposed())).toBe(true);
     const ground = renderer.residents.get('0:0')!.units.get('ground:0:0')!.meshes[0]!;
     expect(Math.max(...ground.getVerticesData('position')!.filter((_, i) => i % 3 === 1))).toBeCloseTo(3.125);
+  } finally {
+    renderer.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
+it('hands each ground unit exactly its road cells, including a partial unit at the chunk edge', () => {
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    material = new StandardMaterial('ground', scene);
+  // Six cells per chunk and four per unit: the second unit spans cells 4..7 of the chunk.
+  const chunk: TerrainChunk = {
+    chunkX: 1,
+    chunkY: 0,
+    originCellX: 6,
+    originCellY: 0,
+    terrainCodes: Array(36).fill(1),
+    elevations: Array(36).fill(0),
+    features: [],
+    occupiedCells: [],
+  };
+  const demand = [{ key: '1:0', chunkX: 1, chunkY: 0, visible: true, distance: 0 }];
+  const store = {
+    world: { widthCells: 64, heightCells: 64, chunkSize: 6 },
+    changed: new Set<string>(),
+    demand,
+    chunk: () => chunk,
+    key: (x: number, y: number) => `${Math.floor(x / 6)}:${Math.floor(y / 6)}`,
+  };
+  const space = new WorldSpace(64, 64, { cellX: 0, cellY: 0 });
+  const renderer = new TerrainRenderer(
+    scene,
+    store as unknown as TerrainStore,
+    space,
+    material,
+    material,
+    () => [],
+    () => [],
+    () => [],
+  );
+  try {
+    const routes = [
+      {
+        id: 'automatic',
+        kind: 'building' as const,
+        destination: { cellX: 16, cellY: 1 },
+        cells: Array.from({ length: 14 }, (_, i) => ({ cellX: 3 + i, cellY: 1 })),
+      },
+    ];
+    renderer.setInfrastructure(emptyInfrastructure());
+    renderer.setRoads(routes);
+    renderer.demand(demand);
+    for (let frame = 0; renderer.queued && frame < 2000; frame++) renderer.tick();
+    const paved = [...pavedProfiles(routes, 64, 64)];
+    for (const x of [0, 4]) {
+      const expected = paved
+        .filter(([key]) => {
+          const [cellX, cellY] = key.split(':').map(Number);
+          return cellX! >= 6 + x && cellX! < 10 + x && cellY! >= 0 && cellY! < 4;
+        })
+        .sort(([a], [b]) => a.localeCompare(b));
+      const signature = renderer.residents.get('1:0')!.units.get(`ground:${x}:0`)!.signature;
+      expect(expected.length).toBeGreaterThan(0);
+      expect(JSON.parse(signature)[2]).toEqual(expected);
+    }
   } finally {
     renderer.dispose();
     scene.dispose();
