@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { VillageState } from '@arbestra/contracts';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { openVillage } from './world-interactions';
+import { chooseMode, devOption, openVillage } from './world-interactions';
 
 test.setTimeout(180_000);
 async function stats(page: Page) {
@@ -101,9 +101,9 @@ test('streaming au-delà du village, coins du tore, retour et conservation hors 
     await page.context().setOffline(false);
   }
   await center(page, x, y);
-  await page.getByRole('button', { name: 'Chemins · debug' }).click();
+  await devOption(page, 'Chemins et transports');
   await expect.poll(() => canvas.getAttribute('data-debug-travel-paths')).not.toBe('0');
-  await page.getByRole('button', { name: /Construire/ }).click();
+  await chooseMode(page, 'Constructions', isMobile);
   await expect
     .poll(async () => JSON.parse((await canvas.getAttribute('data-buildable-grid'))!).construction)
     .toBe(true);

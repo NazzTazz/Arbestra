@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { openVillage } from './world-interactions';
+import { chooseMode, openVillage } from './world-interactions';
 
 test.setTimeout(60_000);
 test.beforeEach(() => resetE2eState());
@@ -21,8 +21,10 @@ test('la grille Construire reste au-dessus du terrain texturÃ© et se retire aprÃ
     }
   });
   // Render-only elevated terrain fixture; eligibility remains the real server's.
-  await page.route('**/api/worlds/aube/village', async (route) => {
+  // V2 reads cells and terrain from the village presentation.
+  await page.route('**/api/worlds/aube/villages/*/presentation*', async (route) => {
     const response = await route.fetch();
+    if (response.status() !== 200) return route.fulfill({ response });
     const snapshot = await response.json();
     // Count the edges of server-authorized cells, excluding occupied footprints
     // and terrain outside the derived construction radius.
@@ -36,7 +38,8 @@ test('la grille Construire reste au-dessus du terrain texturÃ© et se retire aprÃ
     }
     expectedVertices = edges.size * 2;
     expectedAreaVertices = snapshot.cells.filter((cell: { canBuild: boolean }) => cell.canBuild).length * 4;
-    snapshot.region.elevations = snapshot.region.elevations.map(() => 40);
+    // A later read omits the unchanged region the client already holds.
+    if (snapshot.region) snapshot.region.elevations = snapshot.region.elevations.map(() => 40);
     await route.fulfill({ response, json: snapshot });
   });
   const canvas = await openVillage(page);
@@ -44,7 +47,7 @@ test('la grille Construire reste au-dessus du terrain texturÃ© et se retire aprÃ
     .poll(() => canvas.evaluate((element) => JSON.parse(element.dataset.buildableGrid ?? '{}').construction))
     .toBe(false);
   await page.screenshot({ path: testInfo.outputPath('grid-normal.png') });
-  await page.getByRole('button', { name: /Construire/ }).click();
+  await chooseMode(page, 'Constructions');
   await expect
     .poll(() => canvas.evaluate((element) => JSON.parse(element.dataset.buildableGrid ?? '{}').construction))
     .toBe(true);
@@ -59,7 +62,7 @@ test('la grille Construire reste au-dessus du terrain texturÃ© et se retire aprÃ
   expect(grid.minY).toBeGreaterThan(1);
   expect(grid.areaVertices).toBe(expectedAreaVertices);
   expect(grid.areaMinY).toBeGreaterThan(1);
-  await page.getByRole('button', { name: 'Annuler' }).click();
+  await chooseMode(page, 'Vue libre');
   await expect
     .poll(() => canvas.evaluate((element) => JSON.parse(element.dataset.buildableGrid ?? '{}').construction))
     .toBe(false);

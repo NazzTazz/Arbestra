@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { VillageState } from '@arbestra/contracts';
-import { openVillage } from './world-interactions';
+import { devOption, openVillage } from './world-interactions';
 
 test.setTimeout(90000);
 let closing = false;
@@ -17,6 +17,9 @@ test('une projection de mission attend le sol puis reprend à sa phase courante 
   // Visual-only fixture: no invented economic operation is persisted or credited.
   let startedAt = '';
   let anchor = { cellX: 0, cellY: 0 };
+  // The synthetic extraction rewrites the historical village read; V2 would
+  // need it in the change stream. To rewrite on a seeded extraction when V1 goes.
+  await page.addInitScript(() => localStorage.setItem('arbestra:sync-v2', '0'));
   await page.route('**/api/worlds/aube/village', async (route) => {
     try {
       const response = await route.fetch(),
@@ -96,7 +99,7 @@ test('une projection de mission attend le sol puis reprend à sa phase courante 
   await move(anchor.cellX + elapsed);
   await expect.poll(async () => (await workers())[0]!.enabled, { timeout: 20000 }).toBe(true);
   const firstShownAt = await expectPhase();
-  await page.getByRole('button', { name: 'Chemins · debug' }).click();
+  await devOption(page, 'Chemins et transports');
   await expect.poll(() => canvas.getAttribute('data-debug-travel-paths')).not.toBe('0');
   await move(anchor.cellX + 180);
   await expect.poll(async () => (await workers())[0]!.enabled).toBe(false);

@@ -5,7 +5,7 @@ import { replayGardenPlotMigrationForTest } from '../../apps/api/src/database/ga
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
-import { constructBuildingArea } from '../../apps/api/src/modules/villages/service';
+import { constructBuildingArea, reconcileVillageForRead } from '../../apps/api/src/modules/villages/service';
 import { harvestGarden } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 import { cellPoint, openVillage, selectRectangle } from './world-interactions';
 
@@ -32,6 +32,8 @@ test.beforeEach(async ({ page }) => {
       [DEVELOPMENT_CELLS.garden, DEVELOPMENT_CELLS.gardenNorth],
       0,
     );
+    // Plots appear when the reconciliation completes the zero-length worksite.
+    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
     await db
       .updateTable('gardenPlots')
       .set({ storedAmount: 12, remainder: 0, productionUpdatedAt: new Date() })
@@ -75,6 +77,8 @@ async function prepareSweep(workers: number) {
         [cell],
         0,
       );
+    // Plots appear when the reconciliation completes the zero-length worksite.
+    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
     await db
       .updateTable('gardenPlots')
       .set({ storedAmount: 7, remainder: 0, productionUpdatedAt: new Date() })
@@ -215,6 +219,8 @@ test('un autre Jardin reste accessible et le rectangle tolérant fusionne après
       [right],
       0,
     );
+    // Plots appear when the reconciliation completes the zero-length worksite.
+    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
     await db
       .updateTable('villageResourceFlows')
       .set({ baseRatePerHour: 0 })

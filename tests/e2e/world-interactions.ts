@@ -14,6 +14,44 @@ export async function waitForVillage(target: Page | Locator) {
   return canvas;
 }
 
+/** The mode bar shows only the active mode until that mode is pressed again. */
+export async function chooseMode(
+  page: Page,
+  label: 'Vue libre' | 'Constructions' | 'Population' | 'Exploitation',
+  isMobile = false,
+) {
+  const bar = page.getByRole('navigation', { name: 'Modes du monde' });
+  const press = (name: string) => {
+    const button = bar.getByRole('button', { name, exact: true });
+    return isMobile ? button.tap() : button.click();
+  };
+  if (await bar.evaluate((element) => element.classList.contains('is-minimal'))) {
+    await press((await bar.getByRole('button').first().locator('b').textContent())!);
+  }
+  if ((await bar.getByRole('button', { name: label, exact: true }).getAttribute('aria-pressed')) !== 'true')
+    await press(label);
+}
+
+/** Checks a developer-drawer option (« Chemins et transports », « Laboratoire cosmologique »…). */
+export async function devOption(page: Page, label: string, checked = true) {
+  const drawer = page.getByRole('complementary', { name: 'Outils développeur' });
+  if (!(await drawer.locator('.dev-drawer').count())) await page.getByRole('button', { name: 'DEV' }).click();
+  await drawer.getByRole('checkbox', { name: label }).setChecked(checked);
+}
+
+const VIEWS = ['village', 'region', 'world'] as const;
+/** Village, region and torus follow each other with + and − on the canvas. */
+export async function showView(canvas: Locator, view: (typeof VIEWS)[number]) {
+  for (let step = 0; step < 4; step++) {
+    const current = (await canvas.getAttribute('data-view-mode')) as (typeof VIEWS)[number];
+    if (current === view) return;
+    await canvas.focus();
+    await canvas.press(VIEWS.indexOf(view) > VIEWS.indexOf(current) ? '-' : '+');
+    await expect(canvas).not.toHaveAttribute('data-view-mode', current, { timeout: 60_000 });
+  }
+  await expect(canvas).toHaveAttribute('data-view-mode', view);
+}
+
 export async function openVillage(page: Page, email = 'player@arbestra.local') {
   await page.goto('/');
   await page.getByLabel('Adresse e-mail').fill(email);
