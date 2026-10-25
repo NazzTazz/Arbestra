@@ -1,11 +1,34 @@
 import { afterEach, expect, it, vi } from 'vitest';
 const getVillage = vi.hoisted(() => vi.fn());
+const v2 = vi.hoisted(() => ({ enabled: false, read: vi.fn() }));
 vi.mock('./client', () => ({ getVillage }));
+vi.mock('./sync-v2-initial', () => ({
+  get SYNC_V2_VILLAGE() {
+    return v2.enabled;
+  },
+  initialSyncV2Read: v2.read,
+}));
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
   getVillage.mockReset();
+  v2.read.mockReset();
+  v2.enabled = false;
 });
+it('shares the V2 bootstrap and keeps the historical read for a server without V2', async () => {
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=another-world' });
+  v2.enabled = true;
+  v2.read.mockRejectedValue(new Error('SYNC_V2_UNAVAILABLE'));
+  const snapshot = { state: { world: { id: 'world' } }, serverOffsetMs: 0 };
+  getVillage.mockResolvedValue(snapshot);
+  const { initialVillageRead } = await import('./initial-village');
+  const early = initialVillageRead();
+  expect(initialVillageRead()).toBe(early);
+  expect(await early).toBe(snapshot);
+  expect(v2.read).toHaveBeenCalledExactlyOnceWith('another-world');
+  expect(getVillage).toHaveBeenCalledExactlyOnceWith('another-world');
+});
+// Historical transport (localStorage arbestra:sync-v2=0 or VITE_SYNC_V2=0).
 it('shares the early read with App and repeated development mounts', async () => {
   vi.stubGlobal('location', { href: 'http://localhost/village?world=another-world' });
   let release!: (value: unknown) => void;
