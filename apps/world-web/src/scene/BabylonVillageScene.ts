@@ -113,7 +113,7 @@ import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
-import { fetchGardenKit, GardenKitRenderer, type GardenPlotView } from './garden-kit';
+import { fetchGardenKit, gardenHarvestState, GardenKitRenderer, type GardenPlotView } from './garden-kit';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
 import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
@@ -211,6 +211,7 @@ export class BabylonVillageScene {
   #gardenKit: GardenKitRenderer | null = null;
   #gardenKitRequested = false;
   #gardenKitInputs: unknown[] = [];
+  #gardenHarvesting = false;
   #lastUpdate: Parameters<BabylonVillageScene['update']> | null = null;
   #weather: WeatherMap | null = null;
   readonly #rain: LocalRain;
@@ -1377,7 +1378,13 @@ export class BabylonVillageScene {
         setSceneNight(this.#scene, this.#villageNight);
         this.#villageBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
         if (this.#gardenKit && this.#state) {
-          const inputs = [this.#state, this.#groundKey(), this.#buildingGenerationCount];
+          // A harvest removes plants over time: refresh its plots four times a second.
+          const inputs = [
+            this.#state,
+            this.#groundKey(),
+            this.#buildingGenerationCount,
+            this.#gardenHarvesting ? Math.floor((Date.now() - this.#serverOffsetMs) / 250) : 0,
+          ];
           if (!sameInputs(this.#gardenKitInputs, inputs)) {
             this.#gardenKitInputs = inputs;
             this.#gardenKit.setPlots(this.#gardenPlotViews(this.#state));
@@ -3553,7 +3560,9 @@ export class BabylonVillageScene {
     const { widthCells: width, heightCells: height } = state.world,
       key = (x: number, y: number) => `${((x % width) + width) % width}:${((y % height) + height) % height}`,
       sites = new Map(state.cells.map((c) => [c.id, c])),
+      now = Date.now() - this.#serverOffsetMs,
       views: GardenPlotView[] = [];
+    this.#gardenHarvesting = false;
     for (const cell of state.cells) {
       const building = cell.building;
       if (building?.type !== 'garden' || building.status !== 'completed' || !building.garden) continue;
@@ -3564,13 +3573,16 @@ export class BabylonVillageScene {
         if (!site || site.footprint?.state === 'reserved') continue;
         const mesh = this.#buildingCache.get(site.building?.id ?? site.id)?.mesh;
         if (!mesh || mesh.isDisposed()) continue;
+        const harvest = gardenHarvestState(plot, now);
+        if (harvest) this.#gardenHarvesting = true;
         views.push({
           id,
           x: mesh.position.x,
           y: mesh.position.y,
           z: mesh.position.z,
-          stage: this.#gardenStages.get(id) ?? 1,
-          full: this.#fullGardenSites.has(id),
+          stage: harvest?.visibleStage ?? this.#gardenStages.get(id) ?? 1,
+          full: !harvest && this.#fullGardenSites.has(id),
+          ...(harvest ? { harvest: { stage: harvest.stage, remaining: harvest.remaining } } : {}),
           open: {
             west: !members.has(key(plot.cellX - 1, plot.cellY)),
             east: !members.has(key(plot.cellX + 1, plot.cellY)),

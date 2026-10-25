@@ -8,6 +8,10 @@ import '@babylonjs/core/Meshes/thinInstanceMesh';
 import type { Scene } from '@babylonjs/core/scene';
 import { decodeBuildingAsset } from './building-asset-format';
 import manifest from './garden-kit-manifest.json';
+import { gardenTileStage } from './tile-appearance';
+import type { VillageState } from '@arbestra/contracts';
+
+type GardenPlot = NonNullable<NonNullable<VillageState['cells'][number]['building']>['garden']>['plots'][number];
 
 export type GardenLod = 0 | 1 | 2;
 type LodKey = 'LOD0' | 'LOD1' | 'LOD2';
@@ -42,6 +46,38 @@ export interface GardenPlotView {
   stage: number;
   full: boolean;
   open: { west: boolean; east: boolean; south: boolean; north: boolean };
+  /** During a harvest: the harvested crop's stage and how many of its plants remain. */
+  harvest?: { stage: number; remaining: number };
+}
+
+export const GARDEN_PLANTS = 48;
+/**
+ * Display only, credits nothing: the server empties the plot when the harvest is
+ * reserved, so the crop seen before is the reserved amount (plus regrowth). Its
+ * plants disappear one by one over this plot's authoritative work window.
+ */
+export function gardenHarvestState(
+  plot: GardenPlot,
+  now: number,
+): { stage: number; visibleStage: number; remaining: number } | null {
+  const h = plot.harvest;
+  if (!h) return null;
+  const start = Date.parse(h.startedAt),
+    stop = h.stops?.find((s) => s.cellX === plot.cellX && s.cellY === plot.cellY),
+    from = start + (stop ? stop.arrivesAfterMs : h.transportMs),
+    to = stop ? start + stop.workEndsAfterMs : Date.parse(h.completesAt) - h.transportMs,
+    reserved = stop ? stop.reservedCarrots : h.reservedCarrots,
+    progress = Math.max(0, Math.min(1, (now - from) / Math.max(1, to - from))),
+    stock = (amount: number) => ({
+      ...plot,
+      storedCarrots: amount,
+      full: plot.capacity > 0 && amount >= plot.capacity,
+    });
+  return {
+    stage: gardenTileStage(stock(plot.storedCarrots + reserved)),
+    visibleStage: gardenTileStage(stock(plot.storedCarrots + Math.floor(reserved * (1 - progress)))),
+    remaining: Math.round(GARDEN_PLANTS * (1 - progress)),
+  };
 }
 
 /** Camera distances of the detailed and simplified levels, with a margin against flicker. */
@@ -63,6 +99,23 @@ export function gardenLod(distance: number, previous?: GardenLod): GardenLod {
   const margin = (limit: number, level: GardenLod) =>
     previous === undefined ? limit : previous <= level ? limit * HYSTERESIS : limit / HYSTERESIS;
   return distance < margin(near, 0) ? 0 : distance < margin(far, 1) ? 1 : 2;
+}
+
+/** The gardener's serpentine: rows by depth, alternately left to right and back. */
+const harvestOrders = new WeakMap<GardenKitPlacement[], GardenKitPlacement[]>();
+function harvestOrder(layout: GardenKitPlacement[]): GardenKitPlacement[] {
+  let order = harvestOrders.get(layout);
+  if (!order) {
+    const plants = layout.filter((p) => p.role.startsWith('plant'));
+    const rows = [...new Set(plants.map((p) => Math.round(p.position[2] * 10)))].sort((a, b) => a - b);
+    order = rows.flatMap((row, index) =>
+      plants
+        .filter((p) => Math.round(p.position[2] * 10) === row)
+        .sort((a, b) => (index % 2 ? b.position[0] - a.position[0] : a.position[0] - b.position[0])),
+    );
+    harvestOrders.set(layout, order);
+  }
+  return order;
 }
 
 const stageSource = (source: string, stage: number) =>
@@ -121,8 +174,11 @@ export function gardenInstances(
       key = `LOD${lod}` as LodKey,
       cornerX = plot.x - size / 2,
       cornerZ = plot.z - size / 2;
+    const harvesting = plot.harvest && lod < 2;
     for (const p of kit.layouts[key]) {
       if (p.role === 'marqueur' && !plot.full) continue;
+      // A harvest shows the crop plant by plant, at both detailed levels.
+      if (harvesting && (p.role.startsWith('plant') || p.role === 'rang')) continue;
       emit(
         stageSource(p.source, plot.stage),
         cornerX + p.position[0],
@@ -131,6 +187,18 @@ export function gardenInstances(
         p.rotationY,
         p.scale,
       );
+    }
+    if (harvesting) {
+      const plants = harvestOrder(kit.layouts.LOD0);
+      for (const p of plants.slice(plants.length - Math.max(0, Math.min(plants.length, plot.harvest!.remaining))))
+        emit(
+          stageSource(p.source, plot.harvest!.stage),
+          cornerX + p.position[0],
+          plot.y + p.position[1],
+          cornerZ + p.position[2],
+          p.rotationY,
+          p.scale,
+        );
     }
     if (lod === 2) continue;
     const fence = kit.fence[key as 'LOD0' | 'LOD1'];
@@ -215,7 +283,9 @@ export class GardenKitRenderer {
           p.open.west === q.open.west &&
           p.open.east === q.open.east &&
           p.open.south === q.open.south &&
-          p.open.north === q.open.north
+          p.open.north === q.open.north &&
+          p.harvest?.stage === q.harvest?.stage &&
+          p.harvest?.remaining === q.harvest?.remaining
         );
       });
     if (same) return;

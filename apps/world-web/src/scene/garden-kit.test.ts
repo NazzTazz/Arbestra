@@ -4,7 +4,15 @@ import { expect, it } from 'vitest';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { decodeBuildingAsset } from './building-asset-format';
-import { gardenInstances, gardenLod, type GardenKitData, type GardenLod, type GardenPlotView } from './garden-kit';
+import {
+  gardenHarvestState,
+  gardenInstances,
+  gardenLod,
+  type GardenKitData,
+  type GardenLod,
+  type GardenPlotView,
+} from './garden-kit';
+import type { VillageState } from '@arbestra/contracts';
 import manifest from './garden-kit-manifest.json';
 
 const bytes = gunzipSync(readFileSync(new URL(`../../public${manifest.kit}`, import.meta.url)));
@@ -115,4 +123,62 @@ it('switches levels with hysteresis', () => {
   expect(gardenLod(500)).toBe(2);
   expect(gardenLod(33, 0)).toBe(0);
   expect(gardenLod(31, 1)).toBe(1);
+});
+
+type Plot = NonNullable<NonNullable<VillageState['cells'][number]['building']>['garden']>['plots'][number];
+const start = Date.parse('2026-10-25T10:00:00.000Z');
+const harvested = (extra: Partial<NonNullable<Plot['harvest']>> = {}): Plot => ({
+  cellX: 4,
+  cellY: 5,
+  storedCarrots: 0,
+  capacity: 40,
+  productionPerHour: 10,
+  productionUpdatedAt: '2026-10-25T10:00:00.000Z',
+  full: false,
+  harvest: {
+    id: '00000000-0000-4000-8000-000000000001',
+    startedAt: new Date(start).toISOString(),
+    completesAt: new Date(start + 70_000).toISOString(),
+    reservedCarrots: 40,
+    transportMs: 10_000,
+    path: [],
+    ...extra,
+  },
+});
+
+it('removes a harvested plot’s plants over its authoritative work window', () => {
+  const plot = harvested();
+  expect(gardenHarvestState(plot, start + 5_000)).toEqual({ stage: 7, visibleStage: 7, remaining: 48 });
+  // Work window: arrival after 10 s, departure 10 s before completion.
+  expect(gardenHarvestState(plot, start + 35_000)!.remaining).toBe(24);
+  expect(gardenHarvestState(plot, start + 60_000)).toEqual({ stage: 7, visibleStage: 1, remaining: 0 });
+  expect(gardenHarvestState({ ...plot, harvest: null }, start)).toBeNull();
+});
+
+it('uses this plot’s own stop of a garden tour', () => {
+  const plot = harvested({
+    reservedCarrots: 60,
+    stops: [
+      { cellX: 3, cellY: 5, path: [], arrivesAfterMs: 5_000, workEndsAfterMs: 15_000, reservedCarrots: 40 },
+      { cellX: 4, cellY: 5, path: [], arrivesAfterMs: 20_000, workEndsAfterMs: 40_000, reservedCarrots: 20 },
+    ],
+  });
+  expect(gardenHarvestState(plot, start + 15_000)).toEqual({ stage: 4, visibleStage: 4, remaining: 48 });
+  expect(gardenHarvestState(plot, start + 30_000)!.remaining).toBe(24);
+});
+
+it('shows the remaining plants individually, the first row’s plants going first', () => {
+  const plots = [plot('a', 0, 0, { stage: 1, full: false, harvest: { stage: 7, remaining: 40 } })];
+  for (const lod of [0, 1] as const) {
+    const instances = gardenInstances(kit, plots, lods(plots, lod));
+    const plants = instances.get('CAROTTE_STADE_07_LOD0')!;
+    expect(plants.length / 16).toBe(40);
+    expect([...instances.keys()].some((s) => s.startsWith('RANG_'))).toBe(false);
+    // The 8 removed plants are the start of the nearest row (lowest z), taken from the left.
+    const z = [];
+    for (let i = 0; i < plants.length; i += 16) z.push(plants[i + 14]!);
+    const firstRow = Math.min(...z);
+    expect(z.filter((v) => Math.abs(v - firstRow) < 0.2)).toHaveLength(8);
+  }
+  expect(counts(gardenInstances(kit, plots, lods(plots, 2)))).toEqual({ PARCELLE_STADE_01_LOD2: 1 });
 });
