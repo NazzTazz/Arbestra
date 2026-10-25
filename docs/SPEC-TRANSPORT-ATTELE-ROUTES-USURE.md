@@ -82,7 +82,7 @@ Première version, **limitée au commerce entre joueurs** : c'est le seul endroi
 
 Un cheval engagé, dans un convoi aujourd'hui ou dans un combat demain, n'est pas disponible pour une autre mission. Sa disponibilité suit la même affectation exclusive que les habitants (aujourd'hui `trade_journey_id`, demain `processes.team`).
 
-Ordre de grandeur, à confirmer : la migration 004 fixe une production de 60 carottes par heure, soit 1 440 par jour, de quoi nourrir 72 chevaux. Il reste à vérifier si ce débit vaut pour une parcelle ou pour un jardin entier.
+Ordre de grandeur : une parcelle de jardin produit 60 carottes par heure (migration 004, confirmé par Tristan), soit 1 440 par jour. **Une parcelle nourrit donc 72 chevaux**, à condition d'être récoltée régulièrement ; sa capacité de 600 carottes se remplit en 10 heures.
 
 ### 4.3 Routes commerciales
 
