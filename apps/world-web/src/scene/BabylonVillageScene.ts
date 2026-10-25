@@ -109,7 +109,7 @@ import { RENDER_UNIT_CELLS } from './terrain-unit';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { bakeScenery, cloneWoodland, type SceneryPart } from './scenery-batch';
 import { VillageRoads } from './village-roads';
-import { VillageBraziers } from './village-braziers';
+import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
@@ -1367,6 +1367,7 @@ export class BabylonVillageScene {
         }
         this.#weather?.update(Date.now() + this.#cosmologyServerOffsetMs);
         this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
+        setSceneNight(this.#scene, this.#villageNight);
         this.#villageBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
         this.#rain.update(
           this.#camera.target,

@@ -51,6 +51,19 @@ interface BrazierCluster {
   active: Set<VillageBraziers>;
 }
 const sceneClusters = new WeakMap<Scene, BrazierCluster>();
+const sceneNights = new WeakMap<Scene, boolean>();
+/** The village scene publishes its night for building fires. */
+export function setSceneNight(scene: Scene, night: boolean): void {
+  sceneNights.set(scene, night);
+}
+/**
+ * Building fires follow the village night: a fire lit by day keeps the shared
+ * light cluster, and its lighting cost, on for every material. A workshop scene
+ * without a solar clock shows them lit for the recipe.
+ */
+export function sceneNight(scene: Scene): boolean {
+  return sceneNights.get(scene) ?? true;
+}
 
 /** Full canonical topology, not the currently streamed subset. */
 export function roadCorners(routes: readonly TravelRoute[], width: number, height: number): TravelCell[] {

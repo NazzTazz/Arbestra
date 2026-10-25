@@ -12,7 +12,9 @@ import { ShaderStore } from '@babylonjs/core/Engines/shaderStore';
 import { Particle } from '@babylonjs/core/Particles/particle';
 import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { bindBrazierLights, brazierBlocks, roadCorners, VillageBraziers } from './village-braziers';
+import { bindBrazierLights, brazierBlocks, roadCorners, setSceneNight, VillageBraziers } from './village-braziers';
+import { buildStonemasonFire } from './stonemason-factory';
+import { TimberThatch } from './timber-thatch';
 import type { TravelRoute } from '@arbestra/contracts';
 import { BrazierMeshIndex } from './brazier-mesh-index';
 
@@ -331,5 +333,56 @@ it('builds two courses of four blocks with reversed joints and an open centre', 
     expect(blocks[i + 4]!.x).toBeCloseTo(-blocks[i]!.x);
     expect(blocks[i + 4]!.z).toBeCloseTo(blocks[i]!.z);
     expect(Math.max(Math.abs(blocks[i]!.x), Math.abs(blocks[i]!.z))).toBeCloseTo(1.5);
+  }
+});
+
+it('lights building fires only at village night, and always in a workshop scene without a clock', () => {
+  vi.stubGlobal(
+    'OffscreenCanvas',
+    class {
+      constructor(
+        public width: number,
+        public height: number,
+      ) {}
+      getContext() {
+        const noop = () => {};
+        return new Proxy({ canvas: this }, { get: (target, key) => (key in target ? Reflect.get(target, key) : noop) });
+      }
+    },
+  );
+  vi.stubGlobal(
+    'ImageData',
+    class {
+      data: Uint8ClampedArray;
+      constructor(width: number, height: number) {
+        this.data = new Uint8ClampedArray(width * height * 4);
+      }
+    },
+  );
+  const engine = new NullEngine();
+  const fire = (night?: boolean) => {
+    const scene = new Scene(engine),
+      root = MeshBuilder.CreateBox('stonemason', {}, scene);
+    if (night !== undefined) setSceneNight(scene, night);
+    buildStonemasonFire(root, new TimberThatch(scene));
+    scene.onBeforeRenderObservable.notifyObservers(scene);
+    return {
+      scene,
+      lit: () => scene.particleSystems[0]!.isStarted() && scene.getLightByName('brazier-light-0')!.intensity > 0,
+    };
+  };
+  try {
+    const village = fire(false);
+    expect(village.lit()).toBe(false);
+    setSceneNight(village.scene, true);
+    village.scene.onBeforeRenderObservable.notifyObservers(village.scene);
+    expect(village.lit()).toBe(true);
+    setSceneNight(village.scene, false);
+    village.scene.onBeforeRenderObservable.notifyObservers(village.scene);
+    expect(village.lit()).toBe(false);
+    expect(fire().lit()).toBe(true);
+  } finally {
+    engine.dispose();
+    vi.unstubAllGlobals();
   }
 });

@@ -4,7 +4,7 @@ import { buildingPlan, HALL_RECIPE, type BuildingRecipe } from './building-plan'
 import { TimberThatch, timberBeamGeometry } from './timber-thatch';
 import { glazeWindows } from './frosted-glass';
 import { buildMarketRoof } from './town-hall-market-roof';
-import { VillageBraziers } from './village-braziers';
+import { sceneNight, VillageBraziers } from './village-braziers';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { buildTownHallClock } from './town-hall-clock';
 import { prepareRoundedCorner, finishRoundedCorner } from './town-hall-rounded-corner';
@@ -166,7 +166,7 @@ export function buildTownHallMarket(
       });
       braziers.updatePoints(points, fireOwner);
       const observer = kit.scene.onBeforeRenderObservable.add(() =>
-        braziers.animate(performance.now(), true, fireOwner.isEnabled() ? 1 : 0),
+        braziers.animate(performance.now(), sceneNight(kit.scene), fireOwner.isEnabled() ? 1 : 0),
       );
       fireOwner.onDisposeObservable.addOnce(() => {
         kit.scene.onBeforeRenderObservable.remove(observer);

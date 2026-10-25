@@ -4,7 +4,7 @@ import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { CreateIcoSphereVertexData } from '@babylonjs/core/Meshes/Builders/icoSphereBuilder';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { VillageBraziers } from './village-braziers';
+import { sceneNight, VillageBraziers } from './village-braziers';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { BuildingGeometry } from './building-geometry';
@@ -419,7 +419,7 @@ export function buildStonemasonFire(root: Mesh, kit: TimberThatch) {
   const point = Vector3.TransformCoordinates(new Vector3(-1.18, 0.02, -0.45), root.computeWorldMatrix(true));
   braziers.updatePoints([{ x: point.x, y: point.y, z: point.z, seed: 0.4 }], root);
   const observer = kit.scene.onBeforeRenderObservable.add(() =>
-    braziers.animate(performance.now(), true, root.isEnabled() ? 1 : 0),
+    braziers.animate(performance.now(), sceneNight(kit.scene), root.isEnabled() ? 1 : 0),
   );
   root.onDisposeObservable.addOnce(() => {
     kit.scene.onBeforeRenderObservable.remove(observer);
