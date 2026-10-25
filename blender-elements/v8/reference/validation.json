@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "checked": [
+    "GLB header and lengths",
+    "triangle indices and finite positions",
+    "zero degenerate triangles",
+    "identity node transforms",
+    "LOD name suffixes",
+    "piece and assembly budgets",
+    "four materials maximum",
+    "single-sided and unlit base-color-only materials",
+    "embedded POT textures <=512",
+    "seven 256px bakes"
+  ],
+  "totals": {
+    "LOD0": {
+      "budgetPerParcel": 2500,
+      "isolatedMatureParcel": 2198,
+      "LThreeParcels": 6146,
+      "460IsolatedParcelsUpperBound": 1011080,
+      "includesFence": true,
+      "includesMarker": true
+    },
+    "LOD1": {
+      "budgetPerParcel": 600,
+      "isolatedMatureParcel": 578,
+      "LThreeParcels": 1574,
+      "460IsolatedParcelsUpperBound": 265880,
+      "includesFence": true,
+      "includesMarker": true
+    },
+    "LOD2": {
+      "budgetPerParcel": 2,
+      "isolatedMatureParcel": 2,
+      "LThreeParcels": 6,
+      "460IsolatedParcelsUpperBound": 920,
+      "includesFence": false,
+      "includesMarker": false
+    }
+  }
+}

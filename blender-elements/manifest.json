@@ -1,0 +1,841 @@
+{
+  "revision": "2026-10-25-v7-with-harvest-marker",
+  "status": "Blender prototype; not integrated or performance-validated in Babylon",
+  "cellSize": 2.5,
+  "sourceUp": "Z",
+  "gltfUp": "Y",
+  "assets": [
+    {
+      "file": "assets/garden-kit.glb",
+      "bytes": 2115856,
+      "sha256": "147b79d3fa3dce78586c547a8efbe2c3e38bf42d65465200a1b388e9a5d56ef3",
+      "nodes": [
+        {
+          "name": "CAROTTE_01_semis",
+          "mesh": 0,
+          "triangles": 8,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -0.02199999988079071,
+              0,
+              -0.010999999940395355
+            ],
+            "max": [
+              0.02199999988079071,
+              0.0010000000474974513,
+              0.010999999940395355
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "CAROTTE_02_cotyledons",
+          "mesh": 1,
+          "triangles": 8,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.03287804499268532,
+              0.00800000037997961,
+              -0.013854995369911194
+            ],
+            "max": [
+              0.03287804499268532,
+              0.028999999165534973,
+              0.013854995369911194
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "CAROTTE_03_jeune",
+          "mesh": 2,
+          "triangles": 16,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.051665499806404114,
+              0.00800000037997961,
+              -0.051665499806404114
+            ],
+            "max": [
+              0.051665499806404114,
+              0.04100000113248825,
+              0.051665499806404114
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "CAROTTE_04_feuillage",
+          "mesh": 3,
+          "triangles": 168,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.03427319601178169,
+              0.015209998935461044,
+              -0.03995581343770027
+            ],
+            "max": [
+              0.03427319601178169,
+              0.0665183886885643,
+              0.03995581343770027
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "CAROTTE_05_racine",
+          "mesh": 4,
+          "triangles": 222,
+          "primitives": 3,
+          "positionBounds": {
+            "min": [
+              -0.04547789692878723,
+              -0.007265700027346611,
+              -0.053018294274806976
+            ],
+            "max": [
+              0.04547789692878723,
+              0.08826479315757751,
+              0.053018294274806976
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "CAROTTE_06_presque_mure",
+          "mesh": 5,
+          "triangles": 222,
+          "primitives": 3,
+          "positionBounds": {
+            "min": [
+              -0.0560234971344471,
+              -0.008950500749051571,
+              -0.06531239300966263
+            ],
+            "max": [
+              0.0560234971344471,
+              0.10873199254274368,
+              0.06531239300966263
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "CAROTTE_07_mure",
+          "mesh": 6,
+          "triangles": 222,
+          "primitives": 3,
+          "positionBounds": {
+            "min": [
+              -0.06590999662876129,
+              -0.017550000920891762,
+              -0.07683810591697693
+            ],
+            "max": [
+              0.06590999662876129,
+              0.1279199868440628,
+              0.07683810591697693
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_butte_2m38",
+          "mesh": 7,
+          "triangles": 500,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -1.2400000095367432,
+              -0.014629816636443138,
+              -0.21290495991706848
+            ],
+            "max": [
+              1.2400000095367432,
+              0.22666074335575104,
+              0.21255603432655334
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_butte_naturelle_2",
+          "mesh": 8,
+          "triangles": 500,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -1.2400000095367432,
+              -0.014629816636443138,
+              -0.21241804957389832
+            ],
+            "max": [
+              1.2400000095367432,
+              0.22284288704395294,
+              0.21614444255828857
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_butte_naturelle_3",
+          "mesh": 9,
+          "triangles": 500,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -1.2400000095367432,
+              -0.014629816636443138,
+              -0.2086188793182373
+            ],
+            "max": [
+              1.2400000095367432,
+              0.2235957533121109,
+              0.2159576416015625
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_butte_naturelle_4",
+          "mesh": 10,
+          "triangles": 500,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -1.2400000095367432,
+              -0.014629816636443138,
+              -0.20824043452739716
+            ],
+            "max": [
+              1.2400000095367432,
+              0.22775094211101532,
+              0.2120467871427536
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_carotte_mature",
+          "mesh": 11,
+          "triangles": 222,
+          "primitives": 3,
+          "positionBounds": {
+            "min": [
+              -0.06590999662876129,
+              -0.017550000920891762,
+              -0.07683810591697693
+            ],
+            "max": [
+              0.06590999662876129,
+              0.1279199868440628,
+              0.07683810591697693
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_corde_1m25",
+          "mesh": 12,
+          "triangles": 344,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -0.0024290645960718393,
+              0.18912388384342194,
+              -0.00839999970048666
+            ],
+            "max": [
+              1.2524290084838867,
+              0.31285709142684937,
+              0.00839999970048666
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_motte",
+          "mesh": 13,
+          "triangles": 14,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -0.029144398868083954,
+              -0.00800000037997961,
+              -0.02433427982032299
+            ],
+            "max": [
+              0.033081766217947006,
+              0.027000000700354576,
+              0.031828805804252625
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_piquet_64cm",
+          "mesh": 14,
+          "triangles": 12,
+          "primitives": 1,
+          "positionBounds": {
+            "min": [
+              -0.01466399896889925,
+              0,
+              -0.014352000318467617
+            ],
+            "max": [
+              0.015600000508129597,
+              0.3840000033378601,
+              0.01341600064188242
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_planche_rustique_1",
+          "mesh": 15,
+          "triangles": 530,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.34435826539993286,
+              -0.00989999994635582,
+              -0.12512630224227905
+            ],
+            "max": [
+              0.3344285190105438,
+              0.010285000316798687,
+              0.12353715300559998
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_planche_rustique_2",
+          "mesh": 16,
+          "triangles": 482,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.4938626289367676,
+              -0.00989999994635582,
+              -0.15427477657794952
+            ],
+            "max": [
+              0.48400941491127014,
+              0.010285000316798687,
+              0.1463603973388672
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_planche_rustique_3",
+          "mesh": 17,
+          "triangles": 482,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.6789003014564514,
+              -0.00989999994635582,
+              -0.13738107681274414
+            ],
+            "max": [
+              0.6689620018005371,
+              0.010285000316798687,
+              0.1288081705570221
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_planche_rustique_4",
+          "mesh": 18,
+          "triangles": 482,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.8500005006790161,
+              -0.009900122880935669,
+              -0.14043591916561127
+            ],
+            "max": [
+              0.8400002717971802,
+              0.010285000316798687,
+              0.1436680406332016
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_planche_rustique_5",
+          "mesh": 19,
+          "triangles": 482,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.5642791390419006,
+              -0.00989999994635582,
+              -0.12042124569416046
+            ],
+            "max": [
+              0.5542515516281128,
+              0.010285000316798687,
+              0.11670410633087158
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "name": "KIT_planche_rustique_6",
+          "mesh": 20,
+          "triangles": 498,
+          "primitives": 2,
+          "positionBounds": {
+            "min": [
+              -0.42889267206192017,
+              -0.00989999994635582,
+              -0.1323074847459793
+            ],
+            "max": [
+              0.41905876994132996,
+              0.010285000316798687,
+              0.13322760164737701
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "imagesEmbedded": true,
+      "materials": [
+        {
+          "name": "Terre brune",
+          "doubleSided": true
+        },
+        {
+          "name": "Fanes vertes",
+          "doubleSided": true
+        },
+        {
+          "name": "Fanes lumineuses",
+          "doubleSided": true
+        },
+        {
+          "name": "Carotte orange",
+          "doubleSided": true
+        },
+        {
+          "name": "Terre des sillons",
+          "doubleSided": true
+        },
+        {
+          "name": "Corde chanvre",
+          "doubleSided": true
+        },
+        {
+          "name": "Bois tranche",
+          "doubleSided": true
+        },
+        {
+          "name": "Bois rustique 0.001",
+          "doubleSided": true
+        },
+        {
+          "name": "Fentes et veinage.001",
+          "doubleSided": true
+        },
+        {
+          "name": "Bois rustique 1.001",
+          "doubleSided": true
+        },
+        {
+          "name": "Bois rustique 2.001",
+          "doubleSided": true
+        },
+        {
+          "name": "Bois rustique 3.001",
+          "doubleSided": true
+        }
+      ]
+    },
+    {
+      "file": "assets/harvest-carrot.glb",
+      "bytes": 132144,
+      "sha256": "fe0c411f39a0dc690c2a6ad5f7ebc73d81c139079796f497a2855d467e6e5065",
+      "nodes": [
+        {
+          "name": "KIT_marqueur_carotte",
+          "mesh": 0,
+          "triangles": 2382,
+          "primitives": 4,
+          "positionBounds": {
+            "min": [
+              -0.36343908309936523,
+              0,
+              -0.3422034978866577
+            ],
+            "max": [
+              0.35108616948127747,
+              1.4205999374389648,
+              0.3664502799510956
+            ]
+          },
+          "translation": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "imagesEmbedded": true,
+      "materials": [
+        {
+          "name": "Carotte - orange dore",
+          "doubleSided": true
+        },
+        {
+          "name": "Carotte - stries ocre",
+          "doubleSided": true
+        },
+        {
+          "name": "Fanes - vert profond",
+          "doubleSided": true
+        },
+        {
+          "name": "Fanes - vert tendre",
+          "doubleSided": true
+        }
+      ]
+    }
+  ]
+}
