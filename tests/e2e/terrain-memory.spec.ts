@@ -6,9 +6,6 @@ import { waitForVillage } from './world-interactions';
 test.setTimeout(480_000);
 test.use({
   trace: 'off',
-  launchOptions: {
-    args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [],
-  },
 });
 test('mémoire bornée après déplacements répétés et rechargement à cadence normale', async ({ page }, info) => {
   test.skip(

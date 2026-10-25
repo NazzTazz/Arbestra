@@ -1,11 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { openVillage } from './world-interactions';
+import { openVillage, showView } from './world-interactions';
 
 test.setTimeout(120_000);
-test.use({
-  launchOptions: { args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [] },
-});
 
 test('regional zoom stops detailed requests and the real wheel reaches the torus', async ({ page }) => {
   await resetE2eState();
@@ -14,7 +11,7 @@ test('regional zoom stops detailed requests and the real wheel reaches the torus
     if (/\/terrain(?:\/updates)?\?chunks=/.test(request.url())) details.push(request.url());
   });
   const canvas = await openVillage(page);
-  await page.getByRole('button', { name: /Explorer la/ }).click();
+  await showView(canvas, 'region');
   await expect(canvas).toHaveAttribute('data-view-mode', 'region');
   await expect
     .poll(async () => JSON.parse((await canvas.getAttribute('data-terrain-streaming')) ?? '{}').overview, {
@@ -32,7 +29,7 @@ test('regional zoom stops detailed requests and the real wheel reaches the torus
   }
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 15_000 });
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
-  await page.getByRole('button', { name: 'Mon village' }).click();
+  await showView(canvas, 'village');
   await expect(canvas).toHaveAttribute('data-view-mode', 'village');
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
   await expect
@@ -90,8 +87,8 @@ test('village, torus et région gardent la cellule choisie et les commandes spat
   });
   const canvas = await openVillage(page);
   await expect(canvas).toHaveAttribute('data-view-mode', 'village');
-  await expect(page.getByRole('button', { name: /Construire/ })).toBeVisible();
-  await page.getByRole('button', { name: /Explorer la/ }).click();
+  await expect(page.getByRole('navigation', { name: 'Modes du monde' })).toBeVisible();
+  await showView(canvas, 'region');
   await expect(canvas).toHaveAttribute('data-view-mode', 'region');
   await expect
     .poll(async () => Number(await canvas.getAttribute('data-regional-villages')), { timeout: 30_000 })
@@ -109,10 +106,10 @@ test('village, torus et région gardent la cellule choisie et les commandes spat
       }
     }).observe(el, { attributes: true, attributeFilter: ['data-view-mode'] });
   });
-  await page.getByRole('button', { name: 'Monde torique' }).click();
+  await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
-  await expect(page.getByRole('button', { name: /Construire/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Vue libre', exact: true })).toHaveAttribute('aria-pressed', 'true');
   const bounds = (await canvas.boundingBox())!;
   let chosen: string | null = null;
   for (const [x, y] of [
@@ -127,15 +124,15 @@ test('village, torus et région gardent la cellule choisie et les commandes spat
   }
   expect(chosen).toMatch(/^\d+,\d+$/);
   expect(chosen).not.toBe('1024,512');
-  await page.getByRole('button', { name: /Voir cette/ }).click();
+  await canvas.press('+');
   await expect(canvas).toHaveAttribute('data-view-mode', 'region');
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
   await expect.poll(() => canvas.getAttribute('data-view-target')).toBe(chosen);
-  await expect(page.getByRole('button', { name: /Construire/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Mon village' }).click();
+  await expect(page.getByRole('button', { name: 'Vue libre', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await showView(canvas, 'village');
   await expect(canvas).toHaveAttribute('data-view-mode', 'village');
-  await expect(page.getByRole('button', { name: /Construire/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Monde torique' }).click();
+  await expect(page.getByRole('navigation', { name: 'Modes du monde' })).toBeVisible();
+  await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world');
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
   const transitions = await canvas.evaluate(

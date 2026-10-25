@@ -4,9 +4,6 @@ import { writeFile } from 'node:fs/promises';
 import { waitForVillage } from './world-interactions';
 
 test.setTimeout(90000);
-test.use({
-  launchOptions: { args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [] },
-});
 
 test('les arbres proches apparaissent rapidement après zoom, déplacement, rotation et dézoom sans recharger le sol en cache', async ({
   page,

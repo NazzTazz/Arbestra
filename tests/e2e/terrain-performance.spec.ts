@@ -6,9 +6,6 @@ import { waitForVillage } from './world-interactions';
 test.setTimeout(480_000);
 test.use({
   trace: 'off',
-  launchOptions: {
-    args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [],
-  },
 });
 test('budget terrain à cadence normale : pan 60 s, repos 60 s et parcours préchargé', async ({ page }, testInfo) => {
   test.skip(

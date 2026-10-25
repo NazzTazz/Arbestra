@@ -1,13 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { openVillage, waitForVillage } from './world-interactions';
+import { openVillage, showView, waitForVillage } from './world-interactions';
 
 test.setTimeout(240_000);
 test.skip(process.env.TERRAIN_PERF !== '1', 'Opt-in measured navigation on a single test database');
-test.use({
-  launchOptions: { args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [] },
-});
 test('twenty cosmology transitions retain one overview and bounded presentation resources', async ({ page }) => {
   await resetE2eState();
   const errors: string[] = [],
@@ -17,7 +14,7 @@ test('twenty cosmology transitions retain one overview and bounded presentation 
     if (r.url().endsWith('/terrain/overview') && r.ok()) overview.push(r.url());
   });
   const canvas = await openVillage(page);
-  await page.getByRole('button', { name: 'Monde torique' }).click();
+  await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   const session = await page.context().newCDPSession(page);
   await session.send('Performance.enable');
@@ -29,7 +26,7 @@ test('twenty cosmology transitions retain one overview and bounded presentation 
   };
   const rows = [await measure(0)];
   for (let i = 1; i <= 20; i++) {
-    await page.getByRole('button', { name: 'Voir cette région' }).click();
+    await canvas.press('+');
     const target = { cellX: (1024 + i * 37) % 2048, cellY: (512 + i * 23) % 1024, radius: 260 };
     await canvas.evaluate(
       (el, target) => el.dispatchEvent(new CustomEvent('terrain-camera', { detail: target })),
@@ -37,7 +34,7 @@ test('twenty cosmology transitions retain one overview and bounded presentation 
     );
     await expect.poll(() => canvas.getAttribute('data-view-target')).toBe(`${target.cellX},${target.cellY}`);
     await page.waitForTimeout(500);
-    await page.getByRole('button', { name: 'Monde torique' }).click();
+    await showView(canvas, 'world');
     await expect(canvas).toHaveAttribute('data-view-mode', 'world');
     await page.waitForTimeout(250);
     if (i % 5 === 0) rows.push(await measure(i));
@@ -72,7 +69,7 @@ test('twenty cosmology transitions retain one overview and bounded presentation 
   expect(new Set(rows.slice(1).map((row) => row.worldMeshes)).size).toBe(1);
   await page.reload();
   await waitForVillage(canvas);
-  await page.getByRole('button', { name: 'Monde torique' }).click();
+  await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   await page.waitForTimeout(250);
   const reloaded = await measure(21);

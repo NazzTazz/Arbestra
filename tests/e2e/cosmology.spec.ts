@@ -1,11 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { openVillage } from './world-interactions';
+import { devOption, openVillage, showView } from './world-interactions';
 
 test.setTimeout(120_000);
-test.use({
-  launchOptions: { args: process.env.TERRAIN_GPU === '1' && process.platform === 'win32' ? ['--use-angle=d3d11'] : [] },
-});
 test('cosmological pause, rotating torus picking and local return preserve navigation without commands', async ({
   page,
 }, info) => {
@@ -21,7 +18,7 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   page.on('request', (r) => {
     if (r.method() === 'POST' && r.url().includes('/api/')) commands.push(r.url());
   });
-  await page.getByRole('button', { name: 'Cosmologie · debug' }).click();
+  await devOption(page, 'Laboratoire cosmologique');
   await expect(page.getByRole('region', { name: 'Laboratoire cosmologique' })).toBeVisible();
   await page.getByRole('button', { name: 'Pause cosmologique' }).click();
   const phase = async () =>
@@ -49,7 +46,7 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   await expect(page.getByText('Tore : 60 s · Soleil : 90 s · Cycle combiné : 180 s')).toBeVisible();
   await page.getByLabel('Durée de rotation').fill('120');
   await expect.poll(async () => (await phase()).rotationPeriodMs).toBe(120_000);
-  await page.getByRole('button', { name: 'Monde torique' }).click();
+  await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
   const cameraState = async () =>
@@ -82,7 +79,8 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   });
   console.log(`Cosmology renderer (${info.project.name}): ${renderer}`);
   await page.screenshot({ path: `test-results/cosmology-debug-${info.project.name}.png` });
-  await page.getByRole('button', { name: 'Cosmologie · debug' }).click();
+  await devOption(page, 'Laboratoire cosmologique', false);
+  await page.getByRole('complementary', { name: 'Outils développeur' }).getByRole('button', { name: 'Fermer' }).click();
   const bounds = (await canvas.boundingBox())!;
   let chosen: string | null = null;
   for (const [x, y] of [
@@ -96,21 +94,22 @@ test('cosmological pause, rotating torus picking and local return preserve navig
     if (chosen && chosen !== 'none') break;
   }
   expect(chosen).toMatch(/^\d+,\d+$/);
-  await page.getByRole('button', { name: 'Voir cette région' }).click();
+  await canvas.press('+');
   await expect.poll(() => canvas.getAttribute('data-view-target')).toBe(chosen);
-  await page.getByRole('button', { name: 'Monde torique' }).click();
+  await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world');
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
-  await page.getByRole('button', { name: 'Cosmologie · debug' }).click();
+  await devOption(page, 'Laboratoire cosmologique');
   await page.getByRole('button', { name: 'Profil du huit' }).click();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `test-results/cosmology-profile-${info.project.name}.png` });
   await expect(page.getByRole('button', { name: 'Apercevoir le Chat' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Cosmologie · debug' }).click();
+  await devOption(page, 'Laboratoire cosmologique', false);
+  await page.getByRole('complementary', { name: 'Outils développeur' }).getByRole('button', { name: 'Fermer' }).click();
   await page.waitForTimeout(400);
   await expect.poll(async () => (await cameraState()).sticky).toBe(true);
   await page.screenshot({ path: `test-results/cosmology-sky-${info.project.name}.png` });
-  await page.getByRole('button', { name: 'Mon village' }).click();
+  await showView(canvas, 'village');
   await expect(canvas).toHaveAttribute('data-view-mode', 'village');
   expect((await phase()).paused).toBe(false);
   expect((await phase()).rotationPeriodMs).toBe(28_800_000);
