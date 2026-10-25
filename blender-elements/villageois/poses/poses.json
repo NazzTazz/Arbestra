@@ -1,0 +1,181 @@
+{
+  "convention": "rotation X en radians, repère de chaque articulation ; bras et jambes négatifs = vers l'avant ; buste positif = penché en avant. Même squelette et mêmes signes dans Babylon (worker-figure.ts).",
+  "pivots": {
+    "buste": {
+      "hauteur": 0.25
+    },
+    "bras": {
+      "x": 0.15,
+      "hauteur": 0.462
+    },
+    "jambes": {
+      "x": 0.065,
+      "hauteur": 0.23
+    }
+  },
+  "decoupage_coup": {
+    "prep": 0.4,
+    "hold": 0.1,
+    "strike": 0.08,
+    "impact": 0.07,
+    "retour": 0.35,
+    "impact_u": 0.58,
+    "variation_cadence": 0.12
+  },
+  "gestes": {
+    "hache": {
+      "period": 1.6,
+      "rest": {
+        "bR": -0.55,
+        "bL": -0.5,
+        "buste": 0.1,
+        "jR": -0.18,
+        "jL": 0.18
+      },
+      "prep": {
+        "bR": -2.7,
+        "bL": -2.6,
+        "buste": -0.15,
+        "jR": -0.18,
+        "jL": 0.18
+      },
+      "hit": {
+        "bR": -0.9,
+        "bL": -0.85,
+        "buste": 0.38,
+        "jR": -0.18,
+        "jL": 0.18
+      }
+    },
+    "fendre": {
+      "period": 1.8,
+      "rest": {
+        "bR": -0.5,
+        "bL": -0.45,
+        "buste": 0.15,
+        "jR": -0.12,
+        "jL": 0.12
+      },
+      "prep": {
+        "bR": -2.9,
+        "bL": -2.85,
+        "buste": -0.1,
+        "jR": -0.12,
+        "jL": 0.12
+      },
+      "hit": {
+        "bR": -1.0,
+        "bL": -0.95,
+        "buste": 0.5,
+        "jR": -0.12,
+        "jL": 0.12
+      }
+    },
+    "pioche": {
+      "period": 1.7,
+      "rest": {
+        "bR": -0.5,
+        "bL": -0.45,
+        "buste": 0.1,
+        "jR": -0.2,
+        "jL": 0.15
+      },
+      "prep": {
+        "bR": -2.4,
+        "bL": -2.35,
+        "buste": -0.1,
+        "jR": -0.2,
+        "jL": 0.15
+      },
+      "hit": {
+        "bR": -0.45,
+        "bL": -0.4,
+        "buste": 0.45,
+        "jR": -0.2,
+        "jL": 0.15
+      }
+    },
+    "masse": {
+      "period": 1.5,
+      "rest": {
+        "bR": -0.4,
+        "bL": -0.35,
+        "buste": 0.1,
+        "jR": -0.15,
+        "jL": 0.15
+      },
+      "prep": {
+        "bR": -2.2,
+        "bL": -2.15,
+        "buste": 0.0,
+        "jR": -0.15,
+        "jL": 0.15
+      },
+      "hit": {
+        "bR": -0.4,
+        "bL": -0.35,
+        "buste": 0.42,
+        "jR": -0.15,
+        "jL": 0.15
+      }
+    }
+  },
+  "scie": {
+    "period": 1.1,
+    "arms": -1.2,
+    "arms_amp": 0.25,
+    "buste": 0.25,
+    "buste_amp": 0.1
+  },
+  "poses": {
+    "neutre": {
+      "bR": 0,
+      "bL": 0,
+      "buste": 0,
+      "jR": 0,
+      "jL": 0
+    },
+    "porter": {
+      "bR": -0.9,
+      "bL": -0.9,
+      "buste": -0.12
+    },
+    "ramasser": {
+      "bR": -0.6,
+      "bL": -0.6,
+      "buste": 1.0,
+      "jR": -0.1,
+      "jL": 0.1
+    },
+    "penche": {
+      "bR": -0.5,
+      "bL": -0.5,
+      "buste": 0.95,
+      "jR": -0.1,
+      "jL": 0.1
+    },
+    "arrache": {
+      "bR": -1.1,
+      "bL": -0.3,
+      "buste": 0.6,
+      "jR": -0.1,
+      "jL": 0.1
+    },
+    "front": {
+      "bR": -2.0,
+      "bL": -0.1,
+      "buste": -0.08
+    },
+    "dos": {
+      "bR": 0.35,
+      "bL": 0.35,
+      "buste": -0.22
+    },
+    "regarde": {
+      "bR": -0.1,
+      "bL": -0.05,
+      "buste": 0.0
+    }
+  },
+  "fondu_segments_s": 0.25
+}

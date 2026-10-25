@@ -85,20 +85,24 @@ Référence de code : [village-workers.ts](../apps/world-web/src/scene/village-w
 
 L'événement d'impact est émis au début de la tenue d'impact. La durée d'un geste est tirée par villageois, avec ±12 % autour de la cadence du rôle.
 
-**Valeurs initiales à recetter** (radians ; les signes suivent la convention actuelle, négatif = vers l'avant) :
+**Valeurs initiales**, calées dans le prototype Blender (radians, rotation X de chaque articulation). Mêmes signes dans Babylon pour ce squelette, mais pas pour toutes les articulations :
+- bras et jambes : négatif = vers l'avant ;
+- buste : **positif = penché en avant**.
+
+Source de vérité : [poses.json](../blender-elements/villageois/poses/poses.json), qui contient aussi la position des jambes.
 
 | Geste | Préparation : bras / buste | Impact : bras / buste | Cadence |
 |---|---|---|---|
-| Hache (abattage, ébranchage) | −2,7 / +0,15 | −0,6 / −0,35 | 1,6 s |
-| Fendre (bûche verticale) | −2,9 / +0,1 | −0,3 / −0,5 | 1,8 s |
-| Scie de long, à deux | −1,2 ± 0,25 / −0,25 ± 0,1 | alternance en opposition de phase avec le partenaire | 1,1 s par aller-retour |
-| Pioche | −2,4 / +0,1 | −0,4 / −0,45 | 1,7 s |
-| Masse (casser) | −2,2 / 0 | −0,4 / −0,4 | 1,5 s |
-| Ramasser, déposer | −0,6 / −1,0 | — | 0,9 s |
-| Porter | −0,9 / +0,12, pas réduit de 30 % | — | marche |
-| Arracher une carotte | −0,5 → −1,1 / −0,95 → −0,6 | — | 0,7 s |
+| Hache (abattage, ébranchage) | −2,7 / −0,15 | −0,9 / +0,38 | 1,6 s |
+| Fendre (bûche verticale) | −2,9 / −0,1 | −1,0 / +0,5 | 1,8 s |
+| Scie de long, à deux | −1,2 ± 0,25 / +0,25 ± 0,1 | alternance en opposition de phase avec le partenaire | 1,1 s par aller-retour |
+| Pioche | −2,4 / −0,1 | −0,45 / +0,45 | 1,7 s |
+| Masse (casser) | −2,2 / 0 | −0,4 / +0,42 | 1,5 s |
+| Ramasser, déposer | −0,6 / +1,0 | — | 0,9 s |
+| Porter | −0,9 / −0,12, pas réduit de 30 % | — | marche |
+| Arracher une carotte | se pencher −0,5 / +0,95, puis tirer −1,1 / +0,6 | — | 0,7 s |
 
-**Micro-pauses.** Toutes les 4 à 9 frappes (tirage par bloc), le villageois fait une pause de 0,6 à 2,5 s : se redresser en cambrant le buste (+0,2), s'essuyer le front (bras −2,0 un instant), regarder la ressource (rotation de la racine de ±0,4), changer de prise, souffler. Les pauses ne sont jamais synchronisées entre villageois, sauf entre les deux scieurs d'un binôme.
+**Micro-pauses.** Toutes les 4 à 9 frappes (tirage par bloc), le villageois fait une pause de 0,6 à 2,5 s : se redresser en cambrant le buste (−0,22), s'essuyer le front (bras −2,0 un instant), regarder la ressource (rotation de la racine de ±0,4), changer de prise, souffler. Les pauses ne sont jamais synchronisées entre villageois, sauf entre les deux scieurs d'un binôme.
 
 **Lisibilité au zoom moyen.** Le geste doit dépasser la silhouette : outil au-dessus de la tête, buste qui suit, tenue visible en haut et à l'impact. Ce n'est qu'au zoom rapproché qu'on ajoute la carotte en main, l'orientation fine de l'outil et des particules nombreuses.
 
@@ -162,12 +166,12 @@ Le jardinier est seul ; la règle métier est inchangée.
 | Étape | Durée initiale |
 |---|---|
 | Marcher jusqu'à la touffe par l'allée la plus proche (y ≈ 0,84 ou 1,66 m, ou les bords) | 0 à 0,8 s |
-| Se pencher : buste −0,95 | 0,35 s |
-| Arracher (la touffe disparaît de l'affichage à cet instant) : buste −0,6, bras −1,1, carotte dans la main droite | 0,35 s |
+| Se pencher : buste +0,95 | 0,35 s |
+| Arracher (la touffe disparaît de l'affichage à cet instant) : buste +0,6, bras −1,1, carotte dans la main droite | 0,35 s |
 | Se redresser et déposer dans le panier | 0,4 s |
 
 Si l'intervalle `Δ = (W1 − W0) / 12` est inférieur à 2,4 s, la séquence est compressée : pas de marche si la touffe suivante est à moins de 0,6 m, gestes à 70 % de leur durée, minimum 0,8 s. Au-delà de la séquence, le temps restant est occupé par des actions de jardin, tirées par bloc :
-- désherber, accroupi sur le buste à −0,9 avec un petit geste répété ;
+- désherber, penché sur le buste à +0,9 avec un petit geste répété ;
 - tasser la terre ;
 - regarder le rang ;
 - s'étirer.

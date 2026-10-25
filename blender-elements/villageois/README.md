@@ -78,11 +78,41 @@ Avec le kit des spécialisations, on reste autour de 40 appels de dessin pour to
 - **La sélection** : elle passe aujourd'hui par `metadata` sur les maillages du corps et de la tête (`representativeId`). Avec des *thin instances*, il faut `thinInstanceEnablePicking` et une table d'indice d'instance vers villageois.
 - **Les mesures** : rien n'est mesuré sur MX230 ni sur Catmark.
 
+## Prototype des chantiers animés (25 octobre 2026)
+
+Prototype des gestes et des séquences de [SPEC-CHANTIERS-ANIMES-SEQUENCES.md](../../docs/SPEC-CHANTIERS-ANIMES-SEQUENCES.md), avec les figurines et un pivot de taille (le buste pivote à 0,25 m du sol, jambes fixes).
+
+**Contenu**
+- Scène `VIL chantiers` : 8 s à 24 i/s, trois chantiers qui travaillent en parallèle, chaque villageois à son propre rythme.
+  - **Bois** : abatteur à la hache et arbre accessoire qui tombe après trois coups, binôme de scie sur tronc couché (un tronçon tombe, pause, reprise plus loin), fendeur au billot, porteur qui empile.
+  - **Pierre** : deux piocheurs au front (éclats, poussière, blocs détachés), casseur à la masse dont le bloc rétrécit, manutentionnaire au panier.
+  - **Jardin** : le jardinier arrache trois touffes au moment exact de leur disparition, carotte en main, panier qui se remplit.
+- Scène `VIL planche poses` : les poses clés figées.
+
+**Vidéos et images**
+- [chantiers/zoom-moyen-17px.mp4](previews/chantiers/zoom-moyen-17px.mp4) : vue d'ensemble, villageois à 17 px.
+- Gros plans : [bois](previews/chantiers/bois-proche.mp4), [pierre](previews/chantiers/pierre-proche.mp4), [jardin](previews/chantiers/jardin-proche.mp4).
+- Deux images à 17 px agrandies ×3 sans lissage, à 2,4 s et 6,0 s ; la planche de poses [proche](poses/planche-poses-proche.png) et [à 17 px](poses/planche-poses-17px.png).
+
+**Poses exportées** : [poses/poses.json](poses/poses.json). On y trouve les angles de repos, de préparation et d'impact par geste, la scie, les poses de transport, de ramassage, d'arrachage et de pause, le découpage d'un coup et les pivots.
+
+Signes : bras et jambes négatifs vers l'avant, **buste positif penché en avant**. La spécification a été corrigée en conséquence : elle donnait le buste avec le signe inverse.
+
+**Lisibilité à 17 px**
+- **Se lit** : l'arbre debout puis couché, la hache levée au-dessus de la tête, la pioche armée, le chapeau de paille penché sur le rang, le tronc sur chevalets.
+- **Se lit mal**, à reprendre avant l'intégration :
+  - le sciage : la lame de 1,5 cm disparaît, et on ne voit que deux figures face à face. Il faudrait une scie plus épaisse et plus claire, et un balancement du buste plus ample ;
+  - le casseur et le manutentionnaire, trop proches dans ce montage.
+- Les copeaux et les éclats ne se voient qu'au zoom rapproché, comme prévu par la spécification.
+
+**Limites du prototype** : séquences écrites à la main sur 8 s, pas le planificateur par blocs de 30 s de la spécification ; pas de mesure de performance.
+
 ## Fichiers
 
 - `sources/build_villageois.py` : reproduction de la figure actuelle, figurine, coiffures, couvre-chefs de base, scènes de comparaison. `build(garden_ns)` renvoie les comptes de triangles.
 - `sources/tenues.py` : tenues, couvre-chefs et objets des spécialisations, Oracle, scène `VIL specialites`.
-- `sources/villageois.blend` : scènes `VIL actuel`, `VIL proposition` et `VIL specialites`.
+- `sources/poses.py` : pivot de taille, gestes, mini-planificateur, effets, trois chantiers animés, planche de poses, export JSON.
+- `sources/villageois.blend` : scènes `VIL actuel`, `VIL proposition`, `VIL specialites`, `VIL chantiers` (animée) et `VIL planche poses`.
 - `previews/` : rendus EEVEE éclairés par un soleil, sous la caméra des aperçus jardins.
 
 Pour régénérer, exécuter dans Blender, dans un même espace de noms :
