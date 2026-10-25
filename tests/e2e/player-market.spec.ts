@@ -5,6 +5,7 @@ import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { randomUUID } from 'node:crypto';
 import { publishTrade } from '../../apps/api/src/modules/villages/trade-economy';
 import { beginTradePair } from '../../apps/api/src/modules/villages/trade-service';
+import { waitForVillage } from './world-interactions';
 
 test('publie au toucher, échange avec Oracle et reçoit un convoi joueur à travers la couture torique', async ({
   page,
@@ -147,7 +148,7 @@ test('publie au toucher, échange avec Oracle et reçoit un convoi joueur à tra
     await touch(page.getByRole('button', { name: 'Se connecter' }));
     await page.locator(`a[href$="world=${slug}"]`).click();
     const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 120000 });
+    await waitForVillage(canvas);
     await touch(page.getByRole('button', { name: 'Vue libre', exact: true }));
     await touch(page.getByRole('button', { name: 'Exploitation', exact: true }));
     await expect(canvas).toHaveAttribute('data-world-interaction-ready', 'true', { timeout: 40000 });

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { VillageState } from '@arbestra/contracts';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(90000);
 let closing = false;
@@ -60,13 +61,7 @@ test('une projection de mission attend le sol puis reprend à sa phase courante 
       throw error;
     }
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40000 });
+  const canvas = await openVillage(page);
   const workers = () =>
     canvas.evaluate(
       (el) =>

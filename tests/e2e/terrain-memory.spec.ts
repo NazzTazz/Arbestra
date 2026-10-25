@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import type { VillageState } from '@arbestra/contracts';
+import { waitForVillage } from './world-interactions';
 
 test.setTimeout(480_000);
 test.use({
@@ -24,7 +25,7 @@ test('mémoire bornée après déplacements répétés et rechargement à cadenc
   await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
   await page.goto('http://localhost:5274/?world=aube&terrainPerf=1');
   const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40000 });
+  await waitForVillage(canvas);
   const state = (await (await page.request.get('/api/worlds/aube/village')).json()) as VillageState;
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
@@ -81,7 +82,7 @@ test('mémoire bornée après déplacements répétés et rechargement à cadenc
   expect(samples[2]!.geometries).toBeLessThanOrEqual(samples[0]!.geometries);
   expect(samples[2]!.materials).toBe(samples[0]!.materials);
   await page.reload();
-  await expect(canvas).toBeVisible({ timeout: 40000 });
+  await waitForVillage(canvas);
   await page.waitForTimeout(1200);
   await expect.poll(async () => (await stats()).queued, { timeout: 60000 }).toBe(0);
   await cdp.send('HeapProfiler.collectGarbage');

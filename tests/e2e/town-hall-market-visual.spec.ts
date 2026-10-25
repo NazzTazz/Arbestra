@@ -4,6 +4,7 @@ import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import type { Engine as BabylonEngine } from '@babylonjs/core/Engines/engine';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { openVillage } from './world-interactions';
 
 test('l’hôtel de ville niveau 2 affiche la maquette validée dans le village', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Recette visuelle desktop.');
@@ -19,13 +20,7 @@ test('l’hôtel de ville niveau 2 affiche la maquette validée dans le village'
       .where('villageId', '=', ids.village)
       .where('id', '=', ids.townHall)
       .execute();
-    await page.goto('/');
-    await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-    await page.getByLabel('Mot de passe').fill('arbestra');
-    await page.getByRole('button', { name: 'Se connecter' }).click();
-    await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-    const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 120000 });
+    const canvas = await openVillage(page);
     await page.getByRole('button', { name: 'Vue libre', exact: true }).click();
     const inspect = () =>
       page.evaluate(async () => {

@@ -1,13 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { openVillage } from './world-interactions';
 
 test('le zoom rapproche la caméra du plan du sol', async ({ page }) => {
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  const canvas = await openVillage(page);
   const bounds = await canvas.boundingBox();
   expect(bounds).not.toBeNull();
   await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);

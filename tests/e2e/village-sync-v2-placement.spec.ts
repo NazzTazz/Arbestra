@@ -4,7 +4,7 @@ import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { getVillageState } from '../../apps/api/src/modules/villages/service';
-import { clickCell } from './world-interactions';
+import { clickCell, openVillage } from './world-interactions';
 
 // A placement confirmed on the V2 contract shows its building at once, without
 // waiting for the presentation reread (whose travel network is recomputed).
@@ -49,13 +49,7 @@ test('une pose V2 apparaît dès la confirmation, avant la relecture de présent
           at: Date.now(),
         });
     });
-    await page.goto('/');
-    await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-    await page.getByLabel('Mot de passe').fill('arbestra');
-    await page.getByRole('button', { name: 'Se connecter' }).click();
-    await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-    const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 90_000 });
+    const canvas = await openVillage(page);
     const buildings = () =>
       canvas.evaluate((element) =>
         (JSON.parse(element.dataset.buildingScreens ?? '[]') as Array<{ id: string }>).map((b) => b.id),

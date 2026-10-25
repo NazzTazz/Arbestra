@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
+import { waitForVillage } from './world-interactions';
 const expect = baseExpect.configure({ timeout: 30000 });
 
 test('règle les deux ressources et accumule les gestes Population à la souris et au toucher', async ({
@@ -167,7 +168,7 @@ test('règle les deux ressources et accumule les gestes Population à la souris 
     ).toBe(true);
     await page.goto(`${worldBase}/?world=${slug}`);
     const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 90000 });
+    await waitForVillage(canvas);
     await expect(page.locator('.world-loading')).toBeHidden({ timeout: 90000 });
     await touch(page.getByRole('button', { name: 'Vue libre', exact: true }));
     await touch(page.getByRole('button', { name: 'Exploitation', exact: true }));

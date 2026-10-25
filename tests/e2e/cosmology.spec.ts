@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(120_000);
 test.use({
@@ -16,13 +17,7 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   page.on('response', (r) => {
     if (r.url().endsWith('/terrain/overview')) geography.push(r.url());
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  const canvas = await openVillage(page);
   page.on('request', (r) => {
     if (r.method() === 'POST' && r.url().includes('/api/')) commands.push(r.url());
   });

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import type { VillageState } from '@arbestra/contracts';
+import { waitForVillage } from './world-interactions';
 
 test.setTimeout(480_000);
 test.use({
@@ -37,7 +38,7 @@ test('budget terrain à cadence normale : pan 60 s, repos 60 s et parcours préc
   await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
   await page.goto('http://localhost:5274/?world=aube&terrainPerf=1');
   const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40000 });
+  await waitForVillage(canvas);
   const state = (await (await page.request.get('/api/worlds/aube/village')).json()) as VillageState;
   const x = state.village.anchorCellX,
     y = state.village.anchorCellY;

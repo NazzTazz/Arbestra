@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
+import { waitForVillage } from './world-interactions';
 
 test('fouille le coffre et ouvre le marché, les ateliers et les connaissances depuis la vue libre', async ({
   page,
@@ -161,7 +162,7 @@ test('fouille le coffre et ouvre le marché, les ateliers et les connaissances d
     await touch(page.getByRole('button', { name: 'Se connecter' }));
     await page.locator(`a[href$="world=${slug}"]`).click();
     const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 120000 });
+    await waitForVillage(canvas);
     await expect(page.locator('.world-loading')).toBeHidden({ timeout: 120000 });
     await expect(canvas).toHaveAttribute('data-world-interaction-ready', 'true', { timeout: 40000 });
     const oracleHint = page.getByRole('button', { name: 'Masquer', exact: true });

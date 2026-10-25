@@ -11,6 +11,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:5273',
     trace: 'retain-on-failure',
+    // Headless Chromium otherwise renders with SwiftShader: compiling the
+    // scene's shaders on the CPU held the first frame back 7 to 20 s.
+    ...(process.platform === 'win32' && {
+      launchOptions: { args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] },
+    }),
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

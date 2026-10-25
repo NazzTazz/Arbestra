@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { VillageState } from '@arbestra/contracts';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(180_000);
 async function stats(page: Page) {
@@ -36,13 +37,7 @@ test('streaming au-delà du village, coins du tore, retour et conservation hors 
   page.on('console', (message) => {
     if (message.type() === 'error' && /shader|Babylon|GLSL/i.test(message.text())) errors.push(message.text());
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40000 });
+  const canvas = await openVillage(page);
   const state = (await (
     await page.request.get('http://localhost:5274/api/worlds/aube/village')
   ).json()) as VillageState;

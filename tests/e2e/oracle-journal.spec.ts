@@ -5,17 +5,13 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { ORACLE_HINT } from '../../apps/world-web/src/ui/oracle-hint';
+import { openVillage, waitForVillage } from './world-interactions';
 
 test.setTimeout(90_000);
 test.beforeEach(() => resetE2eState());
 
 async function enterWorld(page: Page): Promise<void> {
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  await expect(page.getByTestId('village-canvas')).toBeVisible({ timeout: 15_000 });
+  await openVillage(page);
 }
 
 async function openTownHall(page: Page, isMobile: boolean): Promise<void> {
@@ -49,7 +45,7 @@ test('le coffre écrit une fois dans le grimoire et reste visible après recharg
 
   const otherTab = await context.newPage();
   await otherTab.goto('http://localhost:5274/?world=aube');
-  await expect(otherTab.getByTestId('village-canvas')).toBeVisible({ timeout: 15_000 });
+  await waitForVillage(otherTab);
 
   await page.bringToFront();
   await openTownHall(page, isMobile);
@@ -63,7 +59,7 @@ test('le coffre écrit une fois dans le grimoire et reste visible après recharg
   await expect(page.getByText("2 000 carottes découvertes dans l'Hôtel de ville.")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByTestId('village-canvas')).toBeVisible({ timeout: 15_000 });
+  await waitForVillage(page);
   await expect(page.getByRole('button', { name: "Ouvrir le grimoire de l'Oracle" }).locator('small')).toHaveText('1');
   await page.getByRole('button', { name: "Ouvrir le grimoire de l'Oracle" }).click();
   await expect(page.getByText('Les anciennes réserves')).toBeVisible();
@@ -140,7 +136,7 @@ test('l’indice attend la découverte libre et ne revient pas après F5', async
   await expect(page.getByText('Le grimoire ne porte encore aucune trace.')).toBeVisible();
   await page.clock.resume();
   await page.reload();
-  await expect(page.getByTestId('village-canvas')).toBeVisible();
+  await waitForVillage(page);
   await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));
   await page.clock.fastForward(91_000);
   await expect(page.getByText(ORACLE_HINT)).toBeHidden();
@@ -166,7 +162,7 @@ test('une action réussie annule l’indice même après rechargement', async ({
   await page.getByRole('button', { name: 'Au repos : 0 habitants', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Au repos : 10 habitants', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByTestId('village-canvas')).toBeVisible();
+  await waitForVillage(page);
   await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));
   await page.clock.fastForward(91_000);
   await expect(page.getByText(ORACLE_HINT)).toBeHidden();

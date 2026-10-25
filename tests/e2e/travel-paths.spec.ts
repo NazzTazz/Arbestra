@@ -7,6 +7,7 @@ import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../apps/api/src/database/
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { constructBuildingArea } from '../../apps/api/src/modules/villages/service';
 import { harvestGarden } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(90_000);
 test('la carte affiche les habitants low-poly et les chemins de débogage', async ({ page, isMobile }) => {
@@ -43,13 +44,7 @@ test('la carte affiche les habitants low-poly et les chemins de débogage', asyn
     await db.destroy();
   }
 
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  const canvas = await openVillage(page);
   await expect(canvas).toHaveAttribute('data-worker-model', 'low-poly');
   await expect(canvas).toHaveAttribute('data-worker-figures', '1');
   await expect.poll(async () => Number(await canvas.getAttribute('data-worker-vertices'))).toBeGreaterThan(0);

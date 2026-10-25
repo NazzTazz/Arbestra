@@ -1,17 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
+import { openVillage } from './world-interactions';
 
 test('le showroom expose directement les trois maisons et leurs matières', async ({ page }, testInfo) => {
   test.setTimeout(150_000);
   await resetE2eState();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  await expect(page.getByTestId('village-canvas')).toBeVisible({ timeout: 40_000 });
+  await openVillage(page);
   await page.getByRole('button', { name: 'Vue libre', exact: true }).click();
   await page.getByRole('button', { name: 'Constructions', exact: true }).click();
   const showroom = page.getByRole('region', { name: 'Modèles · Habitat' });

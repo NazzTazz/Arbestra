@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { TerrainResponse, VillageState } from '@arbestra/contracts';
 import { writeFile } from 'node:fs/promises';
+import { waitForVillage } from './world-interactions';
 
 test.setTimeout(90000);
 test.use({
@@ -41,7 +42,7 @@ test('les arbres proches apparaissent rapidement après zoom, déplacement, rota
   await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
   await page.goto('http://localhost:5274/?world=aube&terrainPerf=1');
   const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40000 });
+  await waitForVillage(canvas);
   const state = (await (await page.request.get('/api/worlds/aube/village')).json()) as VillageState;
   const cx = Math.floor((state.village.anchorCellX + 96) / state.world.chunkSize),
     cy = Math.floor((state.village.anchorCellY + 96) / state.world.chunkSize);

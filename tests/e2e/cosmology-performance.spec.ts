@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
+import { openVillage, waitForVillage } from './world-interactions';
 
 test.setTimeout(240_000);
 test.skip(process.env.TERRAIN_PERF !== '1', 'Opt-in measured navigation on a single test database');
@@ -15,13 +16,7 @@ test('twenty cosmology transitions retain one overview and bounded presentation 
   page.on('response', (r) => {
     if (r.url().endsWith('/terrain/overview') && r.ok()) overview.push(r.url());
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  const canvas = await openVillage(page);
   await page.getByRole('button', { name: 'Monde torique' }).click();
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   const session = await page.context().newCDPSession(page);
@@ -76,7 +71,7 @@ test('twenty cosmology transitions retain one overview and bounded presentation 
   expect(rows.at(-1)!.heap / rows[1]!.heap).toBeLessThan(1.2);
   expect(new Set(rows.slice(1).map((row) => row.worldMeshes)).size).toBe(1);
   await page.reload();
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  await waitForVillage(canvas);
   await page.getByRole('button', { name: 'Monde torique' }).click();
   await expect(canvas).toHaveAttribute('data-view-mode', 'world', { timeout: 60_000 });
   await page.waitForTimeout(250);

@@ -4,6 +4,7 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { constructBuilding } from '../../apps/api/src/modules/villages/service';
+import { waitForVillage } from './world-interactions';
 const expect = baseExpect.configure({ timeout: 30000 });
 
 // V2 village mode on a touch device, in a world created after the V2
@@ -140,7 +141,7 @@ test('le village V2 se charge et suit une construction extérieure sur mobile', 
     ).toBe(true);
     await page.goto(`${worldBase}/?world=${slug}`);
     const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 90000 });
+    await waitForVillage(canvas);
     await expect(page.locator('.world-loading')).toBeHidden({ timeout: 90000 });
     // Stocks from the V2 private stream (French grouping uses a narrow space).
     await expect(page.locator('[data-resource="stone"]').first()).toHaveAttribute('aria-label', /^2\s000\s/);

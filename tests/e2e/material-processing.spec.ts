@@ -5,6 +5,7 @@ import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { constructBuilding, getVillageState } from '../../apps/api/src/modules/villages/service';
+import { waitForVillage } from './world-interactions';
 
 test('le tailleur est inspectable en Exploitation et transforme un lot après sa pause', async ({
   page,
@@ -98,7 +99,7 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
     await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
     const canvas = page.getByTestId('village-canvas');
     // The full seed world renders 71 initial terrain units on cold headless Chromium.
-    await expect(canvas).toBeVisible({ timeout: 90_000 });
+    await waitForVillage(canvas);
     await page.getByRole('button', { name: 'Vue libre', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Exploitation', exact: true })).toBeEnabled({ timeout: 40_000 });
     await page.getByRole('button', { name: 'Exploitation', exact: true }).click();

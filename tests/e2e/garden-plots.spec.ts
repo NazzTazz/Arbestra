@@ -7,7 +7,7 @@ import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../apps/api/src/database/
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { constructBuildingArea } from '../../apps/api/src/modules/villages/service';
 import { harvestGarden } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
-import { cellPoint, selectRectangle } from './world-interactions';
+import { cellPoint, openVillage, selectRectangle } from './world-interactions';
 
 test.setTimeout(90_000);
 const browserErrors = new WeakMap<Page, string[]>();
@@ -389,12 +389,7 @@ test.fixme('une réponse perdue est résolue avec le même reçu après une fusi
 });
 
 async function enterWorld(page: Page) {
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  await expect(page.getByTestId('village-canvas')).toBeVisible({ timeout: 15_000 });
+  await openVillage(page);
 }
 
 test('un trajet global historique protège les parcelles puis livre une seule fois', async ({ page }, testInfo) => {

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(120_000);
 test.use({
@@ -12,13 +13,7 @@ test('regional zoom stops detailed requests and the real wheel reaches the torus
   page.on('request', (request) => {
     if (/\/terrain(?:\/updates)?\?chunks=/.test(request.url())) details.push(request.url());
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 40_000 });
+  const canvas = await openVillage(page);
   await page.getByRole('button', { name: /Explorer la/ }).click();
   await expect(canvas).toHaveAttribute('data-view-mode', 'region');
   await expect
@@ -56,13 +51,7 @@ test('wheel at regional limit records world intent while the overview is still l
     await route.continue();
   });
   try {
-    await page.goto('/');
-    await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-    await page.getByLabel('Mot de passe').fill('arbestra');
-    await page.getByRole('button', { name: 'Se connecter' }).click();
-    await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-    const canvas = page.getByTestId('village-canvas');
-    await expect(canvas).toBeVisible({ timeout: 40_000 });
+    const canvas = await openVillage(page);
     const bounds = (await canvas.boundingBox())!;
     await page.mouse.move(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.45);
     await page.mouse.wheel(0, 50_000);
@@ -99,14 +88,7 @@ test('village, torus et région gardent la cellule choisie et les commandes spat
   page.on('response', (response) => {
     if (response.url().endsWith('/terrain/overview')) overviews.push(response.url());
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-
-  const canvas = page.getByTestId('village-canvas');
-  await canvas.waitFor({ timeout: 40_000 });
+  const canvas = await openVillage(page);
   await expect(canvas).toHaveAttribute('data-view-mode', 'village');
   await expect(page.getByRole('button', { name: /Construire/ })).toBeVisible();
   await page.getByRole('button', { name: /Explorer la/ }).click();

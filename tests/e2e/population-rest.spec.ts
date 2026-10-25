@@ -3,6 +3,7 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(60_000);
 
@@ -16,11 +17,7 @@ test('un repos court rend les habitants disponibles sans attendre cinq heures', 
       .where('worldId', '=', DEVELOPMENT_IDS.world)
       .where('villageId', '=', DEVELOPMENT_IDS.village)
       .execute();
-    await page.goto('/');
-    await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-    await page.getByLabel('Mot de passe').fill('arbestra');
-    await page.getByRole('button', { name: 'Se connecter' }).click();
-    await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
+    await openVillage(page);
     await page.getByRole('button', { name: 'Gérer les habitants' }).click();
     await page.getByRole('button', { name: 'Disponibles : 15 habitants', exact: true }).click();
     await page.getByRole('button', { name: 'Au repos : 0 habitants', exact: true }).click();

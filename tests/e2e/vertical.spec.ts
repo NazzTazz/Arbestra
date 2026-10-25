@@ -1,7 +1,7 @@
 ﻿import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_CELLS } from '../../apps/api/src/database/seed';
-import { clickCell, selectRectangle } from './world-interactions';
+import { clickCell, openVillage, selectRectangle } from './world-interactions';
 
 test.setTimeout(90_000);
 test.beforeEach(() => resetE2eState());
@@ -9,13 +9,7 @@ test.beforeEach(() => resetE2eState());
 test('boucle économie : scierie verticale, jardin spatial et rechargements', async ({ page, isMobile }, testInfo) => {
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 15_000 });
+  const canvas = await openVillage(page);
   await expect(page.getByText(/\+60\/h/)).toBeVisible();
   await page.getByRole('button', { name: /Construire/ }).click();
   await page.getByRole('button', { name: 'Scierie', exact: true }).click();

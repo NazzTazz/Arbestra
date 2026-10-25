@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(60_000);
 test.beforeEach(() => resetE2eState());
@@ -38,13 +39,7 @@ test('la grille Construire reste au-dessus du terrain texturÃ© et se retire aprÃ
     snapshot.region.elevations = snapshot.region.elevations.map(() => 40);
     await route.fulfill({ response, json: snapshot });
   });
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 20_000 });
+  const canvas = await openVillage(page);
   await expect
     .poll(() => canvas.evaluate((element) => JSON.parse(element.dataset.buildableGrid ?? '{}').construction))
     .toBe(false);

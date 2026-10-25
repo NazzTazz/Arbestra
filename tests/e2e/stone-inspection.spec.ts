@@ -5,6 +5,7 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
+import { openVillage } from './world-interactions';
 
 test.setTimeout(150_000);
 
@@ -116,13 +117,7 @@ test('un geste pierre démarre une extraction sans attendre une inspection', asy
       await route.continue();
     },
   );
-  await page.goto('/');
-  await page.getByLabel('Adresse e-mail').fill('player@arbestra.local');
-  await page.getByLabel('Mot de passe').fill('arbestra');
-  await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
-  const canvas = page.getByTestId('village-canvas');
-  await expect(canvas).toBeVisible({ timeout: 90_000 });
+  const canvas = await openVillage(page);
   await page.getByRole('button', { name: 'Vue libre', exact: true }).click();
   await page.getByRole('button', { name: 'Exploitation', exact: true }).click();
   await expect(canvas).toHaveAttribute('data-world-interaction-ready', 'true', { timeout: 40_000 });

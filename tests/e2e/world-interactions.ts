@@ -1,4 +1,27 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+// The dev client reveals a village only after its modules, terrain, routes and
+// first frame: 20 to 40 s, more on a busy machine. Each load gets this budget
+// on top of the test's own, so a slow start never eats the scenario's time.
+const VILLAGE_LOAD_MS = 120_000;
+
+/** Waits for the village behind the loading screen (first open or reload). */
+export async function waitForVillage(target: Page | Locator) {
+  const canvas = 'goto' in target ? target.getByTestId('village-canvas') : target;
+  const info = test.info();
+  info.setTimeout(info.timeout + VILLAGE_LOAD_MS);
+  await expect(canvas).toBeVisible({ timeout: VILLAGE_LOAD_MS });
+  return canvas;
+}
+
+export async function openVillage(page: Page, email = 'player@arbestra.local') {
+  await page.goto('/');
+  await page.getByLabel('Adresse e-mail').fill(email);
+  await page.getByLabel('Mot de passe').fill('arbestra');
+  await page.getByRole('button', { name: 'Se connecter' }).click();
+  await page.getByRole('link', { name: /Monde de l'Aube/ }).click();
+  return waitForVillage(page);
+}
 
 export async function cellPoint(page: Page, cell: { cellX: number; cellY: number }) {
   const canvas = page.getByTestId('village-canvas');
