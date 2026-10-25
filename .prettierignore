@@ -11,6 +11,8 @@ node_modules/
 # Generated or byte-sensitive data (studies, baked assets, manifests).
 apps/*/public/
 apps/world-web/src/scene/building-assets-manifest.json
+apps/world-web/src/scene/garden-kit-manifest.json
+blender-elements/
 art-sol/
 crates/
 docs-lore/
