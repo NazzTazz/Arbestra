@@ -955,6 +955,7 @@ export class BabylonVillageScene {
     this.#engine.maxFPS = this.#reducedQuality ? 5 : 45;
     this.#engine.setHardwareScalingLevel(Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5));
     this.#scene = new Scene(this.#engine);
+    selectEnabledCandidates(this.#scene);
     this.#sceneStats =
       import.meta.env.DEV || import.meta.env.MODE === 'e2e' || devToolsEnabled()
         ? new SceneInstrumentation(this.#scene)
@@ -4535,3 +4536,4 @@ export class BabylonVillageScene {
 import type { TerrainResponse } from '@arbestra/contracts';
 import { devToolsEnabled } from '../dev/dev-tools';
 import { RenderLab } from './render-lab';
+import { selectEnabledCandidates } from './enabled-candidates';
