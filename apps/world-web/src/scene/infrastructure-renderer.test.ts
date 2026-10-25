@@ -341,7 +341,7 @@ it('drapes confirmed and preview masonry onto continuous RC1 relief at every ver
               .every((y) => y > 0),
           ).toBe(true);
         }
-        for (const mesh of renderer.meshes) {
+        const relativeRange = (mesh: (typeof renderer.meshes)[number]) => {
           const p = mesh.getVerticesData('position')!;
           let min = Infinity,
             max = -Infinity;
@@ -351,6 +351,25 @@ it('drapes confirmed and preview masonry onto continuous RC1 relief at every ver
             min = Math.min(min, relative);
             max = Math.max(max, relative);
           }
+          return { min, max };
+        };
+        // Rubble pebbles are a separate layer resting on the welded surface.
+        const pebbles = renderer.meshes.filter((m) => m.name === 'infrastructure-rubble-pebble');
+        expect(pebbles.length > 0).toBe(material === 'rubble' && !preview);
+        for (const mesh of pebbles) {
+          const { min, max } = relativeRange(mesh);
+          expect(min).toBeGreaterThan(-0.01);
+          expect(max).toBeLessThan(0.05);
+          // Visible from above: every pyramid face points outward and upward.
+          expect(
+            mesh
+              .getVerticesData('normal')!
+              .filter((_, i) => i % 3 === 1)
+              .every((y) => y > 0),
+          ).toBe(true);
+        }
+        for (const mesh of renderer.meshes.filter((m) => !pebbles.includes(m))) {
+          const { min, max } = relativeRange(mesh);
           expect(max).toBeCloseTo(preview ? 0.04 : 0.015, 4);
           expect(min).toBeCloseTo(preview ? 0.04 : -0.01, 4);
           expect(mesh.material?.name).toBe('infrastructure-' + (preview ? 'preview' : material));

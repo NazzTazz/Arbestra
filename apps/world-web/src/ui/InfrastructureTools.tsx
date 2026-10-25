@@ -13,6 +13,8 @@ import {
   type SubPoint,
   type RoadMaterial,
   subCellKey,
+  CART_ROAD_HALF_WIDTH,
+  snapToCellBoundary,
 } from '@arbestra/contracts';
 import {
   ApiError,
@@ -127,7 +129,13 @@ export function InfrastructureTools({
         : c.armed
           ? { kind: 'place', position: p, quarterTurns: c.turn }
           : null;
-    if (!first || (first.x === p.x && first.y === p.y)) return null;
+    if (!first) return null;
+    // A cart road's centreline follows cell boundaries, so it covers two whole cells.
+    if (c.width === CART_ROAD_HALF_WIDTH && c.family === 'Voirie' && !c.remove) {
+      first = snapToCellBoundary(first);
+      p = snapToCellBoundary(p);
+    }
+    if (first.x === p.x && first.y === p.y) return null;
     const points =
       first.x === p.x || first.y === p.y
         ? [first, p]
@@ -604,26 +612,30 @@ export function InfrastructureTools({
           onClose={() => setMenu(null)}
         >
           {menu.code === 'earth'
-            ? (['earth', 'rubble'] as const).map((code) => (
-                <button
-                  type="button"
-                  key={code}
-                  aria-pressed={material === code}
-                  onClick={() => {
-                    setMaterial(code);
-                    setWidth(4);
-                    setBorder(false);
-                    menu.anchor.focus();
-                    setMenu(null);
-                  }}
-                >
-                  <strong>{code === 'earth' ? 'Terre battue' : 'Gravats'}</strong>
-                  <InfrastructureThumbnail code={code} />
-                  <small>Gratuit</small>
-                </button>
-              ))
-            : ([4, 6] as const).flatMap((size) =>
-                [false, true].map((sidewalk) => (
+            ? (['earth', 'rubble'] as const).flatMap((code) =>
+                [false, true].map((cartRoad) => (
+                  <button
+                    type="button"
+                    key={code + ':' + cartRoad}
+                    aria-pressed={
+                      material === code && (width === CART_ROAD_HALF_WIDTH) === cartRoad && border === cartRoad
+                    }
+                    onClick={() => {
+                      setMaterial(code);
+                      setWidth(cartRoad ? CART_ROAD_HALF_WIDTH : 4);
+                      setBorder(cartRoad);
+                      menu.anchor.focus();
+                      setMenu(null);
+                    }}
+                  >
+                    <strong>{code === 'earth' ? 'Terre battue' : 'Gravats'}</strong>
+                    {cartRoad ? <small>Route charretière · 2 cases</small> : <InfrastructureThumbnail code={code} />}
+                    <small>{cartRoad ? 'Trottoirs en pierre' : 'Gratuit'}</small>
+                  </button>
+                )),
+              )
+            : ([4, 6, CART_ROAD_HALF_WIDTH] as const).flatMap((size) =>
+                (size === CART_ROAD_HALF_WIDTH ? [true] : [false, true]).map((sidewalk) => (
                   <button
                     type="button"
                     key={size + ':' + sidewalk}
@@ -636,8 +648,14 @@ export function InfrastructureTools({
                       setMenu(null);
                     }}
                   >
-                    <strong>{size} de large</strong>
-                    <small>{sidewalk ? 'Avec trottoirs' : 'Sans trottoir'}</small>
+                    <strong>{size === CART_ROAD_HALF_WIDTH ? 'Route charretière' : `${size} de large`}</strong>
+                    <small>
+                      {size === CART_ROAD_HALF_WIDTH
+                        ? '2 cases · trottoirs'
+                        : sidewalk
+                          ? 'Avec trottoirs'
+                          : 'Sans trottoir'}
+                    </small>
                   </button>
                 )),
               )}

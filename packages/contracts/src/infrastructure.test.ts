@@ -7,9 +7,13 @@ import {
   infrastructureSurface,
   infrastructureBorders,
   infrastructurePlanSurface,
+  infrastructureSidewalkSurface,
   prepareInfrastructureEdit,
   createInfrastructureEditContext,
   RoadStrokeSchema,
+  CART_ROAD_HALF_WIDTH,
+  snapToCellBoundary,
+  type RoadMaterial,
   type RoadStroke,
 } from './infrastructure.js';
 const world = { widthCells: 64, heightCells: 64 };
@@ -23,6 +27,54 @@ const stroke = (x0: number, x1: number, border = false): RoadStroke => ({
   material: 'stone-1',
   border,
   operation: 'paint',
+});
+describe('cart road (route charretière)', () => {
+  // Centreline on the boundary between cells 10 and 11 (subdivision 8 × 10 + 4), one cell long.
+  const cart = (material: RoadMaterial): RoadStroke => ({
+    id: 'cart',
+    points: [
+      { x: 80, y: 84 },
+      { x: 88, y: 84 },
+    ],
+    width: CART_ROAD_HALF_WIDTH,
+    material,
+    border: true,
+    operation: 'paint',
+  });
+  it('accepts half-width 12 and still rejects anything wider', () => {
+    expect(Value.Check(RoadStrokeSchema, cart('stone-1'))).toBe(true);
+    expect(Value.Check(RoadStrokeSchema, { ...cart('stone-1'), width: 13 })).toBe(false);
+  });
+  it('snaps both coordinates to the nearest cell boundary', () => {
+    expect(snapToCellBoundary({ x: 81, y: 87 })).toEqual({ x: 84, y: 84 });
+    expect(snapToCellBoundary({ x: 88, y: 0 })).toEqual({ x: 92, y: 4 });
+  });
+  it('fills exactly two cells with a 3.75 m roadway and its two sidewalks', () => {
+    const surface = infrastructureSurface([cart('stone-1')], world);
+    const ys = [...surface.values()].map((p) => p.y);
+    expect([Math.min(...ys), Math.max(...ys)]).toEqual([156, 179]); // 24 px = 3.75 m
+    const sidewalks = [...infrastructureSidewalkSurface(surface, world).values()].map((p) => p.y);
+    // Cells 10 and 11 span pixels 152 to 183 included: sidewalks fill the rest of both cells.
+    expect([Math.min(...sidewalks), Math.max(...sidewalks)]).toEqual([152, 183]);
+  });
+  it('quotes eight stones per paved cell of length with the validated rates', () => {
+    const a = emptyInfrastructure(),
+      b = applyInfrastructure(a, { kind: 'road', stroke: cart('stone-1') }, 'cart');
+    // 24 × 16 roadway pixels at 4 units, plus 2 × 16 sidewalk edges at 16 units.
+    expect(infrastructureQuote(a, b, world)).toEqual({
+      stoneUnits: 24 * 16 * 4 + 32 * 16,
+      stoneDebit: 8,
+      woodDebit: 0,
+      reserveAfter: 0,
+    });
+  });
+  it('charges only the sidewalks for earth and rubble cart roads', () => {
+    for (const material of ['earth', 'rubble'] as const) {
+      const a = emptyInfrastructure(),
+        b = applyInfrastructure(a, { kind: 'road', stroke: cart(material) }, 'cart');
+      expect(infrastructureQuote(a, b, world).stoneDebit).toBe(2);
+    }
+  });
 });
 describe('infrastructure geometry and payment', () => {
   it('quotes a half-cell-wide road and its two sides exactly', () => {

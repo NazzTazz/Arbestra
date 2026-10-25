@@ -89,7 +89,7 @@ Ordre de grandeur : une parcelle de jardin produit 60 carottes par heure (migrat
 - **Une route charretière** est une route manuelle de **deux tuiles de large** :
   - chaussée de 3,75 m, trottoirs de 0,625 m (4 pixels du moteur) avec bordure ;
   - segments axiaux et coudes à angle vif ; un congé en arc est possible en option graphique.
-- **Contrats** : la largeur de trait (`RoadStroke.width`) monte de 8 à 16 pixels, sur la même grille de 1/16 de case et avec les mêmes règles de coût. Pour une case de longueur pavée :
+- **Contrats** : `RoadStroke.width` est une **demi-largeur** en pixels de 1/16 de case, et les trottoirs s'ajoutent à l'extérieur. Sa borne monte de 8 à **12** (`CART_ROAD_HALF_WIDTH`) : 24 pixels de chaussée et 2 × 4 pixels de trottoir font 32 pixels, soit deux cases. L'axe est aligné sur une limite de cases (sous-division 8k + 4) pour que la route couvre deux cases entières. Même grille et mêmes règles de coût. Pour une case de longueur pavée :
   - 1,5 case de chaussée (3,75 m) à 4 pierres par case, soit 6 pierres ;
   - deux trottoirs, qui sont la « bordure » du moteur, à 1 pierre par côté, soit 2 pierres ;
   - total : 8 pierres, sans changer le barème validé.
@@ -185,7 +185,7 @@ D6 est tranché : **la durabilité seule** donne leur poids aux routes. Une vite
 
    Peut commencer tout de suite : ne dépend d'aucune décision.
 2. **Route charretière** :
-   - largeur jusqu'à 16 pixels dans les contrats, devis, atelier de voirie ;
+   - demi-largeur jusqu'à 12 pixels dans les contrats, devis, atelier de voirie ;
    - rendu des trois revêtements à l'état neuf.
 
    Dépend seulement de la validation de 4.3.

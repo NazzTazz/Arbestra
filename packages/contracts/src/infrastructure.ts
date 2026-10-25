@@ -11,10 +11,22 @@ export const RoadMaterialSchema = Type.Union(
 );
 export type RoadMaterial = Static<typeof RoadMaterialSchema>;
 export type SubPoint = Static<typeof SubPointSchema>;
+/**
+ * Cart road (route charretière): a 3.75 m roadway with its two 0.625 m sidewalks
+ * fills exactly two cells when its centreline lies on a cell boundary.
+ * `width` is a half-width in sixteenths of a cell; sidewalks are added outside it.
+ */
+export const CART_ROAD_HALF_WIDTH = 12;
+export const MAX_ROAD_HALF_WIDTH = CART_ROAD_HALF_WIDTH;
+/** Nearest cell boundary (subdivision 8k + 4), so a cart road covers two whole cells. */
+export function snapToCellBoundary(p: SubPoint): SubPoint {
+  const snap = (v: number) => Math.max(4, Math.round((v - 4) / SUBDIVISIONS) * SUBDIVISIONS + 4);
+  return { x: snap(p.x), y: snap(p.y) };
+}
 export const RoadStrokeSchema = Type.Object({
   id: Type.String(),
   points: Type.Array(SubPointSchema, { minItems: 2, maxItems: 3 }),
-  width: Type.Integer({ minimum: 2, maximum: 8 }),
+  width: Type.Integer({ minimum: 2, maximum: MAX_ROAD_HALF_WIDTH }),
   material: RoadMaterialSchema,
   border: Type.Boolean(),
   operation: Type.Union([Type.Literal('paint'), Type.Literal('border'), Type.Literal('remove')]),

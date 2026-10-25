@@ -17,6 +17,7 @@ import { BuildingGeometry } from './building-geometry';
 import { WorldSpace, CELL_UNITS } from './world-space';
 import { sidewalkPaving, type SidewalkStone } from './sidewalk-paving';
 import { flatRoadGeometry } from './infrastructure-surface-geometry';
+import { roadTone, rubblePebbles } from './road-surface-detail';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 
 interface GroundCell {
@@ -62,6 +63,7 @@ export class InfrastructureRenderer {
     for (const [code, color] of Object.entries({
       earth: '#795b3d',
       rubble: '#b7b8b2',
+      'rubble-pebble': '#8d877a',
       'stone-1': '#c5c6b8',
       'stone-2': '#d4d3c4',
       border: '#c5c6b8',
@@ -259,10 +261,56 @@ export class InfrastructureRenderer {
                 point = x + ':' + y;
               if (!group.has(point)) halo.push([point, pixels.has(point)]);
             }
+          // Beaten earth varies more than packed rubble; both shades come from world pixels.
+          const amplitude = code === 'earth' ? 0.07 : 0.04;
           layer(code + ':' + sector, [[...group.values()].map((p) => [p.x, p.y]), halo], (read) => {
-            const data = flatRoadGeometry(group, space, read, dimensions.followTerrain ?? false, 0.015, 0.025, pixels);
+            const data = flatRoadGeometry(
+              group,
+              space,
+              read,
+              dimensions.followTerrain ?? false,
+              0.015,
+              0.025,
+              pixels,
+              (x, y) => roadTone(x, y, amplitude),
+            );
             return data.indices?.length ? [this.#mesh(code, data)] : [];
           });
+          if (code === 'rubble')
+            layer('rubble-pebble:' + sector, [group.size, [...group.keys()]], (read) => {
+              // One flat-shaded four-sided pyramid per pebble: 12 vertices, no hidden base.
+              const positions: number[] = [],
+                indices: number[] = [];
+              for (const pebble of rubblePebbles(group.values())) {
+                const x = pebble.x / 16,
+                  y = pebble.y / 16,
+                  h = read(cell(x, space.width), cell(y, space.height));
+                if (h === null) continue;
+                const p = space.project({ cellX: x, cellY: y }),
+                  r = pebble.size / 2,
+                  // The road surface sits 0.015 m above the ground; the pebble rises above it.
+                  base = h + 0.012,
+                  apex = [p.x, base + pebble.size * 0.45, p.z];
+                const corners = [
+                  [p.x - r, base, p.z],
+                  [p.x, base, p.z + r * 0.8],
+                  [p.x + r, base, p.z],
+                  [p.x, base, p.z - r * 0.8],
+                ];
+                for (let i = 0; i < 4; i++) {
+                  const offset = positions.length / 3;
+                  // Left-handed winding as elsewhere in this renderer: outward, upward faces.
+                  positions.push(...corners[(i + 1) % 4]!, ...corners[i]!, ...apex);
+                  indices.push(offset, offset + 1, offset + 2);
+                }
+              }
+              if (!indices.length) return [];
+              const normals: number[] = [],
+                data = new VertexData();
+              VertexData.ComputeNormals(positions, indices, normals);
+              Object.assign(data, { positions, indices, normals });
+              return [this.#mesh('rubble-pebble', data)];
+            });
         }
       }
     const pavementHeight = dimensions.pavementHeight ?? 0.04,

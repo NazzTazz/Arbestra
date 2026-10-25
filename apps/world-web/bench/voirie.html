@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Banc voirie</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #1e2420;
+        color: #e8e6df;
+        font:
+          13px/1.4 system-ui,
+          sans-serif;
+      }
+      #vue {
+        width: 100%;
+        height: 82%;
+        display: block;
+      }
+      #etat {
+        margin: 0;
+        padding: 6px 10px;
+        font:
+          12px/1.35 ui-monospace,
+          monospace;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="vue"></canvas>
+    <pre id="etat">Préparation…</pre>
+    <script type="module" src="./voirie.ts"></script>
+  </body>
+</html>

@@ -15,9 +15,12 @@ export function flatRoadGeometry(
   topOffset: number,
   depth = 0,
   neighbours: ReadonlyMap<string, SurfacePixel> = pixels,
+  /** Optional shade per top corner, from canonical pixel coordinates (vertex colours). */
+  tone?: (x: number, y: number) => number,
 ): VertexData {
   const positions: number[] = [],
     indices: number[] = [],
+    colors: number[] = [],
     vertices = new Map<string, number>();
   const heights = new Map<string, number | null>();
   const wrap = (value: number, size: number) => ((value % size) + size) % size;
@@ -43,6 +46,10 @@ export function flatRoadGeometry(
     if (prior !== undefined) return prior;
     const id = positions.length / 3;
     positions.push(...p);
+    if (tone) {
+      const t = tone(wrap(x, space.width * 16), wrap(y, space.height * 16));
+      colors.push(t, t, t, 1);
+    }
     vertices.set(key, id);
     return id;
   };
@@ -95,6 +102,7 @@ export function flatRoadGeometry(
           offset = positions.length / 3;
         // Separate vertices preserve sharp curb normals without altering top lighting.
         positions.push(a[0], a[1] - depth, a[2], b[0], b[1] - depth, b[2], ...b, ...a);
+        if (tone) colors.push(0.82, 0.82, 0.82, 1, 0.82, 0.82, 0.82, 1, 0.9, 0.9, 0.9, 1, 0.9, 0.9, 0.9, 1);
         indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
       }
     }
@@ -102,6 +110,6 @@ export function flatRoadGeometry(
   const data = new VertexData(),
     normals: number[] = [];
   VertexData.ComputeNormals(positions, indices, normals);
-  Object.assign(data, { positions, indices, normals });
+  Object.assign(data, { positions, indices, normals }, tone ? { colors } : {});
   return data;
 }
