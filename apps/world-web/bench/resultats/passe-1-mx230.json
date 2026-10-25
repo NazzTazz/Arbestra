@@ -4,7 +4,21 @@
   "processeur": "Intel Core i7-1065G7",
   "navigateur": "Chrome (Claude in Chrome), onglet au premier plan, préférence high-performance",
   "parametres": { "mesure_s": 8, "chauffe_s": 3 },
-  "colonnes": ["mode", "lod", "n", "vue", "cpu_ms", "cpu_p95_ms", "image_ms", "ips", "gpu_ms", "complet_ms", "appels", "triangles", "preparation_ms"],
+  "colonnes": [
+    "mode",
+    "lod",
+    "n",
+    "vue",
+    "cpu_ms",
+    "cpu_p95_ms",
+    "image_ms",
+    "ips",
+    "gpu_ms",
+    "complet_ms",
+    "appels",
+    "triangles",
+    "preparation_ms"
+  ],
   "note": "Passe 1 : quelques lignes en texture sont perturbées par le premier chargement d'un niveau de détail pendant la chauffe (lod1 et lod2 à 50) et par des pics isolés (lod0 300 moyen, lod2 600). Voir la passe 2.",
   "lignes": [
     ["squelette", "lod0", 50, "proche", 28.09, 37.8, 29.06, 34.41, 1.87, 33.84, 328, 103922, 2469],

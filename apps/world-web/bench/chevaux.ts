@@ -94,7 +94,7 @@ function layout(n: number) {
     spacing = 1.5,
     out: { x: number; z: number; yaw: number }[] = [];
   let seed = 12345;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (let i = 0; i < n; i++)
     out.push({
       x: ((i % side) - (side - 1) / 2) * spacing,
@@ -130,7 +130,11 @@ function normalize(lod: Lod, root: TransformNode) {
       hi = Math.max(hi, box.maximumWorld.y);
     }
     scales.set(lod, HEIGHT_M / (hi - lo));
-    (window as unknown as { __mesure: unknown }).__mesure = { lod, hauteurBrute: hi - lo, echelle: HEIGHT_M / (hi - lo) };
+    (window as unknown as { __mesure: unknown }).__mesure = {
+      lod,
+      hauteurBrute: hi - lo,
+      echelle: HEIGHT_M / (hi - lo),
+    };
   }
   root.scaling.scaleInPlace(scales.get(lod)!);
 }
@@ -220,7 +224,11 @@ async function setupTexture(lod: Lod, n: number) {
     const matrices = new Float32Array(n * 16);
     places.forEach((p, i) => {
       // instance × monde du maillage = monde × rotation × translation
-      world.multiply(Matrix.RotationY(p.yaw)).multiply(Matrix.Translation(p.x, 0, p.z)).multiply(inverse).copyToArray(matrices, i * 16);
+      world
+        .multiply(Matrix.RotationY(p.yaw))
+        .multiply(Matrix.Translation(p.x, 0, p.z))
+        .multiply(inverse)
+        .copyToArray(matrices, i * 16);
     });
     part.thinInstanceSetBuffer('matrix', matrices, 16, true);
     part.thinInstanceSetBuffer('bakedVertexAnimationSettingsInstanced', settings.slice(), 4, true);
@@ -343,7 +351,8 @@ async function show(spec: string) {
     const c = await container((lodName as Lod) ?? 'lod0');
     c.addAllToScene();
     for (const g of c.animationGroups) g.stop();
-    if (clip !== 'aucune') (c.animationGroups.find((g) => g.name === (clip ?? 'Walk')) ?? pick(c.animationGroups, 'Walk')).start(true);
+    if (clip !== 'aucune')
+      (c.animationGroups.find((g) => g.name === (clip ?? 'Walk')) ?? pick(c.animationGroups, 'Walk')).start(true);
     const meshes = c.meshes.filter((m) => m.getTotalVertices() > 0);
     for (const m of meshes) m.refreshBoundingInfo({ applySkeleton: true, applyMorph: false });
     const { min, max } = meshes[0]!.getHierarchyBoundingVectors(true);
@@ -354,7 +363,10 @@ async function show(spec: string) {
     (window as unknown as { __brut: unknown }).__brut = {
       maillages: meshes.map((m) => ({ nom: m.name, os: m.skeleton?.bones.length ?? 0, parent: m.parent?.name })),
       racines: c.rootNodes.map((r) => ({ nom: r.name, echelle: (r as TransformNode).scaling?.asArray() })),
-      taille: max.subtract(min).asArray().map((v) => +v.toFixed(2)),
+      taille: max
+        .subtract(min)
+        .asArray()
+        .map((v) => +v.toFixed(2)),
     };
     status.textContent = `${renderer} — brut`;
     return;
@@ -382,7 +394,13 @@ async function run() {
   // précharge tous les niveaux : le chargement ne doit pas tomber dans une fenêtre de mesure
   for (const [, lod] of plans) await container(lod);
   const rows: Row[] = [];
-  const banc = { carte: renderer, preference: params.get('gpu') ?? 'high', minutageGpu: Boolean(engine.getCaps().timerQuery), rows, fini: false };
+  const banc = {
+    carte: renderer,
+    preference: params.get('gpu') ?? 'high',
+    minutageGpu: Boolean(engine.getCaps().timerQuery),
+    rows,
+    fini: false,
+  };
   (window as unknown as { __banc: typeof banc }).__banc = banc;
   for (const [mode, lod] of plans)
     for (const n of counts) {
@@ -393,7 +411,15 @@ async function run() {
       for (const v of views) {
         status.textContent = `${renderer} — mesure ${mode} ${lod} × ${n}, vue ${v}…`;
         view(v);
-        rows.push({ mode, lod, n, vue: v, ...(await measure()), preparation_ms: preparation, texture_ko: setup.textureKb });
+        rows.push({
+          mode,
+          lod,
+          n,
+          vue: v,
+          ...(await measure()),
+          preparation_ms: preparation,
+          texture_ko: setup.textureKb,
+        });
         output.textContent = table(rows);
       }
       setup.dispose();
