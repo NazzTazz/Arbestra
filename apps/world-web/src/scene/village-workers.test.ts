@@ -1056,6 +1056,22 @@ it('keeps a gardener on its row across missing ground instead of advancing its a
   }
 });
 
+it('starts figures created behind a long loading screen at their current phase', () => {
+  for (const [shownAfter, phase] of [
+    [18_000, 'outbound'],
+    [38_000, 'work'],
+  ] as const) {
+    const f = fixture();
+    try {
+      f.view.sync(snapshot('lot-1', epoch, 1), epoch + 2000);
+      f.view.animate(epoch + 2000 + shownAfter, true);
+      expect(f.view.metrics.layouts[0]?.phases).toEqual([phase]);
+    } finally {
+      f.dispose();
+    }
+  }
+});
+
 it('reaches both work posts after the actual corner even if the leader occupies the end gate first', () => {
   const f = fixture();
   try {

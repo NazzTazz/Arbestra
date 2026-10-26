@@ -548,6 +548,9 @@ export class BabylonVillageScene {
   #lastPreviewSignature = '';
   #lastVisualSignature = '';
   #serverOffsetMs = 0;
+  // Measured by the App when the state arrives; update() runs after network
+  // and module loading, so its own reading would lag by that delay.
+  #serverOffsetMeasured = false;
   #lastFrameAt = 0;
   #cameraFocus: { from: Cell; to: Cell; at: number; duration: number; radius: number; height: number } | null = null;
   #lastCameraRadius: number | null = null;
@@ -1754,7 +1757,7 @@ export class BabylonVillageScene {
         Math.max(80, Math.min(state.world.widthCells, state.world.heightCells) * TILE_SIZE * 0.7),
       );
       this.#deepGround.scaling.set(state.world.widthCells / 2048, 1, state.world.heightCells / 1024);
-      this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
+      if (!this.#serverOffsetMeasured) this.#serverOffsetMs = Date.now() - Date.parse(state.serverTime);
       // Start network transfers before the synchronous assembly of the campus.
       if (!this.#initialLoad.ready) this.#streamTerrain(performance.now());
       const plots = state.cells.flatMap((cell) => cell.building?.garden?.plots ?? []);
@@ -3761,8 +3764,11 @@ export class BabylonVillageScene {
       this.#cosmologyPeriod = COSMOLOGY.periodMs;
     }
   }
-  public setCosmologyServerOffset(offsetMs: number): void {
+  /** Server minus client clock, as measured on receipt of the state. */
+  public setServerOffset(offsetMs: number): void {
     this.#cosmologyServerOffsetMs = offsetMs;
+    this.#serverOffsetMs = -offsetMs;
+    this.#serverOffsetMeasured = true;
   }
   public setVillageSolarPreview(fraction: number | null): void {
     if (

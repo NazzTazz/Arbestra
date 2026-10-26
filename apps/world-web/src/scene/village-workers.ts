@@ -1329,7 +1329,10 @@ export class VillageWorkers {
       return;
     }
     const elapsed = this.#lastNow === null ? 0 : Math.max(0, (now - this.#lastNow) / 1000);
-    const resumed = elapsed > 30;
+    // Figures created behind a long loading screen were never shown: start
+    // them where they are now, as after a long absence.
+    const resumed =
+      elapsed > 30 || (this.#lastNow === null && [...this.#groups.values()].some((g) => now - g.createdAt > 30_000));
     this.#lastNow = now;
     if (resumed) {
       this.#traffic.reset();

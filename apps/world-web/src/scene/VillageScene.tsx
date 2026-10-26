@@ -305,7 +305,7 @@ export function VillageScene({
     sceneRef.current?.setCosmologyDebug(cosmologyDebug);
   }, [cosmologyDebug, state.world.id]);
   useEffect(() => {
-    sceneRef.current?.setCosmologyServerOffset(serverOffsetMs);
+    sceneRef.current?.setServerOffset(serverOffsetMs);
   }, [serverOffsetMs, state.world.id, state.world.generationVersion]);
 
   const keyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
