@@ -161,6 +161,31 @@ export function MarketPanel({
       });
     return () => controller.abort();
   }, [slug, villageId, market.unlocked, tab, revision, refresh]);
+  // Another village's offer changes nothing private: under V2 no village state
+  // re-reads an open list (the V1 stream did on every frame, every 2 s).
+  // Quiet: the list stays usable while it is re-read.
+  useEffect(() => {
+    if (!market.unlocked || tab === 'publish') return;
+    let flight: AbortController | null = null;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible' || flight) return;
+      const controller = (flight = new AbortController());
+      void browseMarket(slug, villageId, tab === 'mine', undefined, controller.signal)
+        .then((page) => {
+          if (controller.signal.aborted) return;
+          setOffers(page.offers);
+          setCursor(page.nextCursor);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (flight === controller) flight = null;
+        });
+    }, 5000);
+    return () => {
+      clearInterval(timer);
+      flight?.abort();
+    };
+  }, [slug, villageId, market.unlocked, tab]);
   useEffect(() => {
     setSelected(null);
     setPreview(null);
