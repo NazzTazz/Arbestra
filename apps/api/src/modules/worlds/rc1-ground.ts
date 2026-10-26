@@ -227,6 +227,11 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
     const geometry = { data: source.data, field, cell, patch, terraces, navigation, navigationEdits };
     if (key.length <= MAX_GEOMETRY_KEY) {
       geometries.delete(key);
+      // Every felled tree or levelled vertex makes a new key for the same world
+      // (about 15 MB each on alpha). Keep the previous one for transactions that
+      // still read it, not a history of past edits.
+      const sameWorld = [...geometries.keys()].filter((k) => k.startsWith(JSON.stringify([worldId]).slice(0, -1)));
+      for (const old of sameWorld.slice(0, Math.max(0, sameWorld.length - 1))) geometries.delete(old);
       geometries.set(key, geometry);
       while (geometries.size > MAX_GEOMETRIES) geometries.delete(geometries.keys().next().value!);
     }
