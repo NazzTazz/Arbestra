@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Banc villageois</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #1e2420;
+        color: #e8e6df;
+        font:
+          13px/1.4 system-ui,
+          sans-serif;
+      }
+      #vue {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #etat {
+        position: fixed;
+        left: 8px;
+        top: 6px;
+        background: #0008;
+        padding: 4px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="vue"></canvas>
+    <div id="etat">Préparation…</div>
+    <script type="module" src="./villageois.ts"></script>
+  </body>
+</html>
