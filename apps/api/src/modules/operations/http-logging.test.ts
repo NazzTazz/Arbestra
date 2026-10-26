@@ -111,6 +111,26 @@ describe('safe HTTP logging', () => {
       await h.close();
     }
   });
+  it('journals legacy village callers as bundled positions only', async () => {
+    const lines: string[] = [],
+      h = await harness((line, done) => {
+        lines.push(line);
+        done();
+      });
+    try {
+      h.app.log.warn({ code: 'LEGACY_VILLAGE_READ', frames: ['index-Bx9.js:1:48213', 'App.tsx:672:9'] }, 'read');
+      h.app.log.warn({ code: 'LEGACY_VILLAGE_READ', frames: ['index.js:1:2', 'secret text'] }, 'read');
+      await drain(h.diagnostics);
+      expect(JSON.parse(lines[0]!)).toMatchObject({
+        code: 'LEGACY_VILLAGE_READ',
+        frames: ['index-Bx9.js:1:48213', 'App.tsx:672:9'],
+      });
+      expect(JSON.parse(lines[1]!)).toMatchObject({ code: 'LEGACY_VILLAGE_READ' });
+      expect(lines[1]).not.toContain('frames');
+    } finally {
+      await h.close();
+    }
+  });
   for (const nodeEnv of ['development', 'production']) {
     it(`keeps secrets out of real Fastify/Pino output and correlates server UUIDs in ${nodeEnv}`, async () => {
       const lines: string[] = [];

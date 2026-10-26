@@ -32,6 +32,7 @@ const CODES = new Set([
   'POSTGRES_CONNECTION_INTERRUPTED',
   'SSE_INTERRUPTED',
   'SSE_RECEIPTS_INTERRUPTED',
+  'LEGACY_VILLAGE_READ',
 ]);
 const DIAGNOSTIC_CODES = new Set([
   'INTERNAL_ERROR',
@@ -81,6 +82,7 @@ const ACTIONS = new Set([
   'observe_follow',
 ]);
 const CAPTURE_SITES = new Set(['http.error-handler', 'http.on-error', 'http.finalize', 'admin.read']);
+const FRAME = /^[\w.-]{1,96}:\d{1,7}:\d{1,7}$/;
 const MAX_LINES = 256;
 const MAX_BYTES = 512 * 1024;
 
@@ -98,6 +100,15 @@ function number(value: unknown): number {
 }
 function date(value: unknown): string | null {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) ? value : null;
+}
+/** Bundled call positions (`index-abc.js:1:2345`) sent by a client; anything else is dropped. */
+export function callerFrames(value: unknown): string[] | undefined {
+  return Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 16 &&
+    value.every((frame) => typeof frame === 'string' && FRAME.test(frame))
+    ? [...(value as string[])]
+    : undefined;
 }
 function route(value: unknown): string {
   return typeof value === 'string' && value.length <= 256 && value.startsWith('/') && !/[?#\r\n]/.test(value)
@@ -168,6 +179,8 @@ function safeLog(value: unknown): Record<string, unknown> {
       'INTERNAL_ERROR',
     );
   if (source.action !== undefined) result.action = known(source.action, ACTIONS, 'read');
+  const frames = callerFrames(source.frames);
+  if (frames) result.frames = frames;
   if (uuid(source.actorId)) result.actorId = source.actorId;
   if (uuid(source.requestId)) result.requestId = source.requestId;
   if (OBSERVATION_AUDIT_EVENTS.has(event))

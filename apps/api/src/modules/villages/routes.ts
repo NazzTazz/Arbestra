@@ -82,6 +82,7 @@ import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
+import { callerFrames } from '../operations/http-logging.js';
 import {
   discoverCatEyes,
   constructBuilding,
@@ -680,6 +681,12 @@ export async function registerVillageRoutes(
     async (request) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug } = request.params as { worldSlug: string };
+      const caller = request.headers['x-arbestra-caller'];
+      if (typeof caller === 'string')
+        request.log.warn(
+          { code: 'LEGACY_VILLAGE_READ', frames: callerFrames(caller.split(' ')) },
+          'Legacy village read under V2',
+        );
       return getVillageState(
         db,
         account.id,

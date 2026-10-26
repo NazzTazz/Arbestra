@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { discoverOrRefreshSupplies } from './client';
 import { getStoneDepositDetails } from './client';
 import { buildBuilding, commandInfrastructure } from './client';
+import { getVillage } from './client';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -259,4 +260,14 @@ it('receives a small authoritative infrastructure confirmation without a village
   await expect(commandInfrastructure(state.world.slug, state.village.id, payload)).rejects.toThrow(
     'Réponse de synchronisation invalide',
   );
+});
+
+it('names the caller of a legacy village read by file positions', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ serverTime: '2026-10-26T10:00:00Z' })));
+  vi.stubGlobal('fetch', fetchMock);
+  await getVillage('aube', 'village');
+  const caller = new Headers(fetchMock.mock.calls[0]![1].headers).get('x-arbestra-caller')!;
+  expect(caller.split(' ')[0]).toMatch(/^client\.ts:\d+:\d+$/);
+  expect(caller).toMatch(/client\.test\.ts:\d+:\d+/);
+  for (const frame of caller.split(' ')) expect(frame).toMatch(/^[\w.-]+:\d+:\d+$/);
 });

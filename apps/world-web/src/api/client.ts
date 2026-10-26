@@ -65,6 +65,7 @@ export async function sendHarvestIntent(
 }
 import { randomUUID } from '../random-uuid';
 import { villageRequestGeneration } from './village-sync';
+import { SYNC_V2_VILLAGE } from './sync-v2-initial';
 import {
   constructionConfirmationIsValid,
   type ConstructionConfirmation,
@@ -385,10 +386,21 @@ async function requestVillageCommandState(
   return { state, requestGeneration, serverOffsetMs: Date.parse(state.serverTime) - (requestedAt + receivedAt) / 2 };
 }
 
+// Under V2 nothing should read the legacy snapshot any more. Each remaining
+// read names its caller by bundled file positions only (no names, no text),
+// which the build's source maps resolve; the API journals them.
+function legacyCaller(): Record<string, string> {
+  if (!SYNC_V2_VILLAGE) return {};
+  const frames = [...(new Error().stack ?? '').matchAll(/([\w.-]+\.[jt]sx?)(?:\?[^:\s)]*)?:(\d+):(\d+)/g)]
+    .slice(1, 17)
+    .map((frame) => `${frame[1]}:${frame[2]}:${frame[3]}`);
+  return frames.length ? { 'x-arbestra-caller': frames.join(' ') } : {};
+}
+
 export function getVillage(worldSlug: string, villageId?: string): Promise<TimedVillageState> {
   return requestState(
     `/api/worlds/${encodeURIComponent(worldSlug)}/village${villageId ? `?villageId=${encodeURIComponent(villageId)}` : ''}`,
-    { signal: AbortSignal.timeout(90_000) },
+    { signal: AbortSignal.timeout(90_000), headers: legacyCaller() },
   );
 }
 
