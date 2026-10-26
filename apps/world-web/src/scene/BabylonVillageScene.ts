@@ -172,6 +172,9 @@ export class BabylonVillageScene {
   #initialLoad = new InitialVillageLoad();
   #initialProgress: InitialLoadProgress | null = null;
   #initialRoutesReady = false;
+  // A state published after the initial routes were prepared: redraw them
+  // once the load completes rather than restart that long phase.
+  #initialRoutesStale = false;
   #initialRoutesAnnounced = false;
   #initialFailure: string | null = null;
   readonly #onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void;
@@ -1442,7 +1445,15 @@ export class BabylonVillageScene {
         this.#clouds.render(this.#transition.alpha, now);
         if (measureFrame) renderMs += performance.now() - cloudsAt;
         frame?.mark('clouds');
-        if (!this.#initialLoad.ready && this.#scene.isReady()) this.#observeInitialLoad(true);
+        if (
+          !this.#initialLoad.ready &&
+          this.#scene.isReady() &&
+          this.#observeInitialLoad(true).phase === 'ready' &&
+          this.#initialRoutesStale &&
+          this.#state
+        )
+          this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
+        if (this.#initialLoad.ready) this.#initialRoutesStale = false;
         const observing =
           this.#mode === 'world' &&
           !this.#flyover &&
@@ -1787,7 +1798,9 @@ export class BabylonVillageScene {
       if (this.#initialLoad.ready) this.#updateTravelPaths(state, showTravelPaths, selectedRouteId);
       else {
         if (state.infrastructure) this.#renderer?.setInfrastructure(state.infrastructure);
-        this.#initialRoutesReady = false;
+        // A big village publishes faster than its routes are prepared: resetting
+        // them here kept its loading screen up forever (Pinkystan, 26 October).
+        if (this.#initialRoutesReady) this.#initialRoutesStale = true;
       }
       this.#canvas.dataset.buildingCount = String(state.cells.filter((site) => site.building).length);
       this.#canvas.dataset.completedBuildingCount = String(
