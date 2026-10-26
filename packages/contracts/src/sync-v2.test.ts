@@ -185,3 +185,18 @@ it('rejects components in the wrong stream and spatial scopes outside the subscr
   message.groups[0]!.stream = { kind: 'spatial', key: '0,0', epoch };
   expect(applySyncV2Batch(state, message)).toEqual({ kind: 'resync', state });
 });
+
+it('accepts a village with more than 1024 homes, up to the snapshot bound', () => {
+  const homes = (count: number) => {
+    const value = batch('scope-snapshot', '0', '40');
+    const change = value.groups[0]!.changes.find((item) => item.component === 'restHousing')!;
+    change.upsert = Array.from({ length: count }, (_, i) => ({
+      buildingId: `44444444-4444-4444-8444-${String(i).padStart(12, '0')}`,
+      capacity: 5,
+      restingCount: 0,
+    }));
+    return value;
+  };
+  expect(applySyncV2Batch(empty(), homes(2000)).kind).toBe('applied');
+  expect(applySyncV2Batch(empty(), homes(4097)).kind).toBe('resync');
+});

@@ -36,6 +36,10 @@ if (!FormatRegistry.Has('date-time'))
 const revision = Type.String({ pattern: '^(0|[1-9][0-9]{0,18})$' });
 const id = Type.String({ format: 'uuid' });
 const time = Type.String({ format: 'date-time' });
+// Cohorts, buildings, homes, plots and contributions grow with the village and
+// have no finished history to leave out: they share the private snapshot's
+// own bound (4096 references) instead of the 1024 of history components.
+const LIVE_ENTITIES = 4096;
 export const SyncV2PopulationSummarySchema = Type.Object(
   {
     id: Type.Literal('*'),
@@ -188,8 +192,8 @@ export const SyncV2ChangeSchema = Type.Union([
   Type.Object(
     {
       component: Type.Literal('cohorts'),
-      upsert: Type.Array(SyncV2CohortSchema, { maxItems: 1024 }),
-      remove: Type.Array(id, { maxItems: 1024 }),
+      upsert: Type.Array(SyncV2CohortSchema, { maxItems: LIVE_ENTITIES }),
+      remove: Type.Array(id, { maxItems: LIVE_ENTITIES }),
     },
     { additionalProperties: false },
   ),
@@ -204,16 +208,16 @@ export const SyncV2ChangeSchema = Type.Union([
   Type.Object(
     {
       component: Type.Literal('restHousing'),
-      upsert: Type.Array(restHousing, { maxItems: 1024 }),
-      remove: Type.Array(id, { maxItems: 1024 }),
+      upsert: Type.Array(restHousing, { maxItems: LIVE_ENTITIES }),
+      remove: Type.Array(id, { maxItems: LIVE_ENTITIES }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       component: Type.Literal('buildings'),
-      upsert: Type.Array(SyncV2BuildingSchema, { maxItems: 1024 }),
-      remove: Type.Array(id, { maxItems: 1024 }),
+      upsert: Type.Array(SyncV2BuildingSchema, { maxItems: LIVE_ENTITIES }),
+      remove: Type.Array(id, { maxItems: LIVE_ENTITIES }),
     },
     { additionalProperties: false },
   ),
@@ -236,8 +240,8 @@ export const SyncV2ChangeSchema = Type.Union([
   Type.Object(
     {
       component: Type.Literal('gardenPlots'),
-      upsert: Type.Array(SyncV2GardenPlotSchema, { maxItems: 1024 }),
-      remove: Type.Array(Type.String({ pattern: '^[0-9]+,[0-9]+$' }), { maxItems: 1024 }),
+      upsert: Type.Array(SyncV2GardenPlotSchema, { maxItems: LIVE_ENTITIES }),
+      remove: Type.Array(Type.String({ pattern: '^[0-9]+,[0-9]+$' }), { maxItems: LIVE_ENTITIES }),
     },
     { additionalProperties: false },
   ),
@@ -324,8 +328,8 @@ export const SyncV2ChangeSchema = Type.Union([
   Type.Object(
     {
       component: Type.Literal('scienceContributions'),
-      upsert: Type.Array(SyncV2ContributionSchema, { maxItems: 1024 }),
-      remove: Type.Array(id, { maxItems: 1024 }),
+      upsert: Type.Array(SyncV2ContributionSchema, { maxItems: LIVE_ENTITIES }),
+      remove: Type.Array(id, { maxItems: LIVE_ENTITIES }),
     },
     { additionalProperties: false },
   ),

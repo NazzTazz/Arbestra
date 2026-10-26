@@ -1,4 +1,4 @@
-import { sql, type Transaction } from 'kysely';
+import { sql, type RawBuilder, type Transaction } from 'kysely';
 import { SYNC_V2_PRIVATE_COMPONENTS, type SyncV2Change, type SyncV2Contribution } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { projectVillageResources, projectGardenPlots } from './economy.js';
@@ -52,17 +52,10 @@ export async function readPrivateScopeSnapshot(
   const { worldId, villageId } = context;
   const sources = [
     ['resources', 'village_resources', 'resource_code'],
-    ['processingOrders', 'processing_orders', 'id'],
     ['cohorts', 'population_cohorts', 'id'],
     ['restHousing', 'buildings', 'id'],
     ['buildings', 'buildings', 'id'],
     ['accomplishments', 'village_accomplishments', 'code'],
-    ['buildingExpansions', 'building_expansions', 'id'],
-    ['worksites', 'extraction_worksites', 'id'],
-    ['levelingJobs', 'leveling_jobs', 'id'],
-    ['marketExchanges', 'market_exchanges', 'id'],
-    ['tradeOffers', 'trade_offers', 'id'],
-    ['scienceActivities', 'science_activities', 'id'],
     ['scienceContributions', 'science_contributions', 'building_id'],
   ] as const;
   const queries = sources.map(
@@ -70,12 +63,27 @@ export async function readPrivateScopeSnapshot(
     select ${sql.lit(component)}::text as component, ${sql.id(column)}::text as key from ${sql.id(table)}
     where world_id=${worldId} and village_id=${villageId}`,
   );
-  // Their readers return only running entries: finished history (thousands of
-  // rows in an old village) would only inflate the snapshot past its bound.
-  queries.push(sql`select 'gardenHarvests'::text as component,id::text as key from garden_harvests
-    where world_id=${worldId} and village_id=${villageId} and status='in-progress'`);
-  queries.push(sql`select 'extractions'::text as component,id::text as key from deposit_extractions
-    where world_id=${worldId} and village_id=${villageId} and status='in-progress'`);
+  // Only running entries, plus the recent history the historical read showed:
+  // finished rows (thousands in an old village) would push a component past
+  // its bound in the client schema, and the snapshot past its own.
+  const running = (component: string, table: string, condition: RawBuilder<unknown>) =>
+    sql`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
+    where world_id=${worldId} and village_id=${villageId} and ${condition}`;
+  const recent = (component: string, table: string, open: RawBuilder<unknown>, order: string, limit: number) =>
+    sql`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
+    where world_id=${worldId} and village_id=${villageId} and (${open} or id in (select id from ${sql.id(table)}
+      where world_id=${worldId} and village_id=${villageId} order by ${sql.id(order)} desc limit ${sql.lit(limit)}))`;
+  queries.push(
+    running('gardenHarvests', 'garden_harvests', sql`status='in-progress'`),
+    running('extractions', 'deposit_extractions', sql`status='in-progress'`),
+    running('buildingExpansions', 'building_expansions', sql`status='under-construction'`),
+    running('levelingJobs', 'leveling_jobs', sql`completed_at is null`),
+    running('tradeOffers', 'trade_offers', sql`status='open'`),
+    running('scienceActivities', 'science_activities', sql`status='in-progress'`),
+    recent('processingOrders', 'processing_orders', sql`status not in ('completed','cancelled')`, 'created_at', 20),
+    recent('marketExchanges', 'market_exchanges', sql`completed_at is null`, 'started_at', 20),
+    recent('worksites', 'extraction_worksites', sql`status in ('running','paused','stopping')`, 'created_at', 32),
+  );
   // Orders still open or with workers out (the status readExploitationOrders
   // derives), plus the 32 recent ones the historical read showed: Catmark held
   // 1222 completed orders, past the component bound of the client schema.
@@ -93,7 +101,8 @@ export async function readPrivateScopeSnapshot(
   queries.push(sql`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
     from garden_plots where world_id=${worldId} and village_id=${villageId}`);
   queries.push(sql`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
-    where world_id=${worldId} and (village_id=${villageId} or destination_village_id=${villageId})`);
+    where world_id=${worldId} and (village_id=${villageId} or destination_village_id=${villageId})
+    and returns_at > ${context.through}`);
   const rows = (await sql<SyncEntityReference>`${sql.join(queries, sql` union all `)} limit 4097`.execute(tx)).rows;
   const references: SyncEntityReference[] = [
     ...rows,
