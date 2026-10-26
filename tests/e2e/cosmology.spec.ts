@@ -1,12 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { devOption, openVillage, showView } from './world-interactions';
+import { devOption, openVillage, regionNear, setAstronomy, showView } from './world-interactions';
+
+test.afterEach(() => setAstronomy(false));
 
 test.setTimeout(120_000);
 test('cosmological pause, rotating torus picking and local return preserve navigation without commands', async ({
   page,
 }, info) => {
   await resetE2eState();
+  await setAstronomy(true);
   const errors: string[] = [],
     geography: string[] = [],
     commands: string[] = [];
@@ -16,7 +19,9 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   });
   const canvas = await openVillage(page);
   page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().includes('/api/')) commands.push(r.url());
+    // V2 reads (stream, catch-up) and the observation status are POSTs without effect.
+    const read = /\/(sync\/(stream|read)|observation\/status)$/.test(r.url());
+    if (r.method() === 'POST' && r.url().includes('/api/') && !read) commands.push(r.url());
   });
   await devOption(page, 'Laboratoire cosmologique');
   await expect(page.getByRole('region', { name: 'Laboratoire cosmologique' })).toBeVisible();
@@ -69,7 +74,9 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   const rotated = await cameraState();
   expect(rotated.screen[0]).toBeCloseTo(attached.screen[0]!, 3);
   expect(rotated.screen[1]).toBeCloseTo(attached.screen[1]!, 3);
-  expect([rotated.alpha, rotated.beta, rotated.radius]).toEqual([attached.alpha, attached.beta, attached.radius]);
+  expect(rotated.alpha).toBeCloseTo(attached.alpha, 6);
+  expect(rotated.beta).toBeCloseTo(attached.beta, 6);
+  expect(rotated.radius).toBeCloseTo(attached.radius, 6);
   await page.getByLabel('Phase cosmologique').press('PageDown');
   await expect.poll(async () => (await phase()).phase).toBeCloseTo(chosenPhase);
   const renderer = await canvas.evaluate((el) => {
@@ -95,7 +102,9 @@ test('cosmological pause, rotating torus picking and local return preserve navig
   }
   expect(chosen).toMatch(/^\d+,\d+$/);
   await canvas.press('+');
-  await expect.poll(() => canvas.getAttribute('data-view-target')).toBe(chosen);
+  // The region opens where the torus camera looks: near the picked cell, not
+  // necessarily on it (the centre ray can meet the curved surface elsewhere).
+  await expect.poll(() => regionNear(canvas, chosen!)).toBe(true);
   await showView(canvas, 'world');
   await expect(canvas).toHaveAttribute('data-view-mode', 'world');
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');

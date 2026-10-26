@@ -155,6 +155,15 @@ test('le tailleur est inspectable en Exploitation et transforme un lot après sa
       .where('villageId', '=', ids.village)
       .where('completedAt', 'is', null)
       .execute();
+    // The scheduler completes the lot, as in production; the V2 stream only
+    // relays its journal entries.
+    await db
+      .updateTable('scheduledTasks')
+      .set({ dueAt: new Date(Date.now() - 1000), availableAt: new Date(Date.now() - 1000) })
+      .where('worldId', '=', ids.world)
+      .where('taskType', '=', 'processing.complete')
+      .where('completedAt', 'is', null)
+      .execute();
     await expect(panel).toContainText('En pause · 1/6 lots achevés', { timeout: 15_000 });
     await expect(panel.getByRole('button', { name: 'Reprendre', exact: true })).toBeVisible();
     expect(

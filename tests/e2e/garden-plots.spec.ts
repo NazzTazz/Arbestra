@@ -201,63 +201,34 @@ test.fixme(
   },
 );
 
-test('un autre Jardin reste accessible et le rectangle tolérant fusionne après le chantier', async ({
-  page,
-  isMobile,
-}, testInfo) => {
-  const db = createDatabase(testDatabaseUrl());
-  const left = DEVELOPMENT_CELLS.garden,
-    right = { cellX: left.cellX + 2, cellY: left.cellY };
-  try {
-    await constructBuildingArea(
-      db,
-      DEVELOPMENT_IDS.account,
-      'aube',
-      DEVELOPMENT_IDS.village,
-      'garden',
-      right,
-      [right],
-      0,
-    );
-    // Plots appear when the reconciliation completes the zero-length worksite.
-    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
-    await db
-      .updateTable('villageResourceFlows')
-      .set({ baseRatePerHour: 0 })
-      .where('worldId', '=', DEVELOPMENT_IDS.world)
-      .execute();
-    const wood = Number(
-      (
-        await db
-          .selectFrom('villageResources')
-          .select('amount')
-          .where('villageId', '=', DEVELOPMENT_IDS.village)
-          .where('resourceCode', '=', 'wood')
-          .executeTakeFirstOrThrow()
-      ).amount,
-    );
-    await enterWorld(page);
-    await page.getByRole('button', { name: 'Gérer les Jardins' }).click();
-    await page.getByRole('button', { name: /Jardin 2/ }).click();
-    await expect(page.getByRole('button', { name: /Parcelle 1026, 512/ })).toBeVisible();
-    await page.getByRole('button', { name: /Étendre/ }).click();
-    await selectRectangle(page, left, { ...right, cellY: right.cellY + 1 }, isMobile);
-    await expect(page.getByText('3 cases · 150 wood')).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath('garden-extension-preview.png') });
-    await page.getByRole('button', { name: 'Confirmer' }).click();
-    await expect(page.getByText('Extension du Jardin lancée')).toBeVisible();
-    await expect
-      .poll(
-        async () =>
-          (await db.selectFrom('gardenPlots').select('cellX').where('worldId', '=', DEVELOPMENT_IDS.world).execute())
-            .length,
-        { timeout: 15_000 },
-      )
-      .toBe(6);
-    await page.getByRole('button', { name: 'Gérer les Jardins' }).click();
-    await expect(page.getByText('6 parcelles actives')).toBeVisible();
-    expect(
-      Number(
+// The garden manager (« Gérer les Jardins ») left the interface on 4 October
+// (2e0f94b): extension is « Étendre » on the garden in Constructions mode,
+// harvest a tour prepared in Exploitation. Rewrite on those flows.
+test.fixme(
+  'un autre Jardin reste accessible et le rectangle tolérant fusionne après le chantier',
+  async ({ page, isMobile }, testInfo) => {
+    const db = createDatabase(testDatabaseUrl());
+    const left = DEVELOPMENT_CELLS.garden,
+      right = { cellX: left.cellX + 2, cellY: left.cellY };
+    try {
+      await constructBuildingArea(
+        db,
+        DEVELOPMENT_IDS.account,
+        'aube',
+        DEVELOPMENT_IDS.village,
+        'garden',
+        right,
+        [right],
+        0,
+      );
+      // Plots appear when the reconciliation completes the zero-length worksite.
+      await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
+      await db
+        .updateTable('villageResourceFlows')
+        .set({ baseRatePerHour: 0 })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .execute();
+      const wood = Number(
         (
           await db
             .selectFrom('villageResources')
@@ -266,42 +237,74 @@ test('un autre Jardin reste accessible et le rectangle tolérant fusionne après
             .where('resourceCode', '=', 'wood')
             .executeTakeFirstOrThrow()
         ).amount,
-      ),
-    ).toBe(wood - 150);
-    await page.screenshot({ path: testInfo.outputPath('garden-fused.png') });
-    // Zoom and camera movement must remain available outside harvesting.
-    const canvas = page.getByTestId('village-canvas');
-    const before = await canvas.getAttribute('data-camera');
-    const empty = await cellPoint(page, { cellX: left.cellX - 1, cellY: left.cellY - 1 });
-    if (isMobile) {
-      const cdp = await page.context().newCDPSession(page);
-      try {
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...empty, id: 1 }] });
-        await cdp.send('Input.dispatchTouchEvent', {
-          type: 'touchMove',
-          touchPoints: [{ x: empty.x + 35, y: empty.y + 20, id: 1 }],
-        });
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      } finally {
-        await cdp.detach();
+      );
+      await enterWorld(page);
+      await page.getByRole('button', { name: 'Gérer les Jardins' }).click();
+      await page.getByRole('button', { name: /Jardin 2/ }).click();
+      await expect(page.getByRole('button', { name: /Parcelle 1026, 512/ })).toBeVisible();
+      await page.getByRole('button', { name: /Étendre/ }).click();
+      await selectRectangle(page, left, { ...right, cellY: right.cellY + 1 }, isMobile);
+      await expect(page.getByText('3 cases · 150 wood')).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath('garden-extension-preview.png') });
+      await page.getByRole('button', { name: 'Confirmer' }).click();
+      await expect(page.getByText('Extension du Jardin lancée')).toBeVisible();
+      await expect
+        .poll(
+          async () =>
+            (await db.selectFrom('gardenPlots').select('cellX').where('worldId', '=', DEVELOPMENT_IDS.world).execute())
+              .length,
+          { timeout: 15_000 },
+        )
+        .toBe(6);
+      await page.getByRole('button', { name: 'Gérer les Jardins' }).click();
+      await expect(page.getByText('6 parcelles actives')).toBeVisible();
+      expect(
+        Number(
+          (
+            await db
+              .selectFrom('villageResources')
+              .select('amount')
+              .where('villageId', '=', DEVELOPMENT_IDS.village)
+              .where('resourceCode', '=', 'wood')
+              .executeTakeFirstOrThrow()
+          ).amount,
+        ),
+      ).toBe(wood - 150);
+      await page.screenshot({ path: testInfo.outputPath('garden-fused.png') });
+      // Zoom and camera movement must remain available outside harvesting.
+      const canvas = page.getByTestId('village-canvas');
+      const before = await canvas.getAttribute('data-camera');
+      const empty = await cellPoint(page, { cellX: left.cellX - 1, cellY: left.cellY - 1 });
+      if (isMobile) {
+        const cdp = await page.context().newCDPSession(page);
+        try {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...empty, id: 1 }] });
+          await cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchMove',
+            touchPoints: [{ x: empty.x + 35, y: empty.y + 20, id: 1 }],
+          });
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } finally {
+          await cdp.detach();
+        }
+      } else {
+        await page.mouse.move(empty.x, empty.y);
+        await page.mouse.down({ button: 'right' });
+        await page.mouse.move(empty.x + 35, empty.y + 20);
+        await page.mouse.up({ button: 'right' });
       }
-    } else {
-      await page.mouse.move(empty.x, empty.y);
-      await page.mouse.down({ button: 'right' });
-      await page.mouse.move(empty.x + 35, empty.y + 20);
-      await page.mouse.up({ button: 'right' });
+      await expect.poll(() => canvas.getAttribute('data-camera')).not.toBe(before);
+      const afterPan = await canvas.getAttribute('data-camera');
+      await page.mouse.wheel(0, 180);
+      await expect.poll(() => canvas.getAttribute('data-camera')).not.toBe(afterPan);
+      expect(
+        await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute(),
+      ).toHaveLength(0);
+    } finally {
+      await db.destroy();
     }
-    await expect.poll(() => canvas.getAttribute('data-camera')).not.toBe(before);
-    const afterPan = await canvas.getAttribute('data-camera');
-    await page.mouse.wheel(0, 180);
-    await expect.poll(() => canvas.getAttribute('data-camera')).not.toBe(afterPan);
-    expect(
-      await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute(),
-    ).toHaveLength(0);
-  } finally {
-    await db.destroy();
-  }
-});
+  },
+);
 
 // The world client harvests through harvest-intents, no longer one /harvest
 // call per plot (route removed 24 October): rewrite on the intent flow.
@@ -398,135 +401,144 @@ async function enterWorld(page: Page) {
   await openVillage(page);
 }
 
-test('un trajet global historique protège les parcelles puis livre une seule fois', async ({ page }, testInfo) => {
-  const db = createDatabase(testDatabaseUrl());
-  try {
-    const plots = await db
-      .selectFrom('gardenPlots')
-      .selectAll()
-      .where('worldId', '=', DEVELOPMENT_IDS.world)
-      .orderBy('cellY')
-      .execute();
-    for (const plot of plots)
-      await harvestGarden(
-        db,
-        DEVELOPMENT_IDS.account,
-        'aube',
-        DEVELOPMENT_IDS.village,
-        plot.buildingId,
-        plot.cellX,
-        plot.cellY,
-        randomUUID(),
-      );
-    const work = await db
-      .selectFrom('gardenHarvests')
-      .selectAll()
-      .where('worldId', '=', DEVELOPMENT_IDS.world)
-      .orderBy('startedAt')
-      .execute();
-    // Reconstitute only the pre-015 Garden tables inside the test transaction,
-    // then run the actual migration before opening the browser session.
-    await db.transaction().execute(async (tx) => {
-      await tx
-        .selectFrom('villages')
-        .select('id')
-        .where('id', '=', DEVELOPMENT_IDS.village)
-        .forUpdate()
-        .executeTakeFirstOrThrow();
-      await tx
-        .updateTable('populationCohorts')
-        .set({ harvestId: work[0]!.id })
-        .where('harvestId', '=', work[1]!.id)
-        .execute();
-      await tx.deleteFrom('scheduledTasks').where('subjectId', '=', work[1]!.id).execute();
-      await tx.deleteFrom('gardenHarvests').where('id', '=', work[1]!.id).execute();
-      await tx
-        .updateTable('gardenHarvests')
-        .set({ workerCount: 2, reservedCarrots: 612 })
-        .where('id', '=', work[0]!.id)
-        .execute();
-      await tx
-        .updateTable('buildingResourceBuffers')
-        .set({ storedAmount: 52, remainder: 0.5, productionUpdatedAt: new Date(Date.now() + 3_600_000) })
-        .where('worldId', '=', DEVELOPMENT_IDS.world)
-        .where('buildingId', '=', plots[0]!.buildingId)
-        .where('resourceCode', '=', 'carrot')
-        .execute();
-      const before = await tx
-        .selectFrom('gardenHarvests')
-        .selectAll()
-        .where('id', '=', work[0]!.id)
-        .executeTakeFirstOrThrow();
-      await replayGardenPlotMigrationForTest(tx);
-      const after = await tx
-        .selectFrom('gardenHarvests')
-        .selectAll()
-        .where('id', '=', work[0]!.id)
-        .executeTakeFirstOrThrow();
-      expect(after).toEqual({ ...before, plotCellX: null, plotCellY: null });
-      expect(
-        Number(
-          (
-            await tx
-              .selectFrom('villageResources')
-              .select('amount')
-              .where('villageId', '=', DEVELOPMENT_IDS.village)
-              .where('resourceCode', '=', 'carrot')
-              .executeTakeFirstOrThrow()
-          ).amount,
-        ),
-      ).toBe(50);
-      const migrated = await tx
+// The garden manager (« Gérer les Jardins ») left the interface on 4 October
+// (2e0f94b): extension is « Étendre » on the garden in Constructions mode,
+// harvest a tour prepared in Exploitation. Rewrite on those flows.
+test.fixme(
+  'un trajet global historique protège les parcelles puis livre une seule fois',
+  async ({ page }, testInfo) => {
+    const db = createDatabase(testDatabaseUrl());
+    try {
+      const plots = await db
         .selectFrom('gardenPlots')
         .selectAll()
         .where('worldId', '=', DEVELOPMENT_IDS.world)
         .orderBy('cellY')
         .execute();
-      expect(migrated.map((plot) => Number(plot.storedAmount))).toEqual([26, 26]);
-      expect(migrated.map((plot) => Number(plot.remainder))).toEqual([0, 0.5]);
-    });
-    await enterWorld(page);
-    await page.getByRole('button', { name: 'Gérer les Jardins' }).click();
-    await expect(page.getByText('2 récolteurs · 612 carottes en transit')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Parcelle 1024, 512/ })).toBeDisabled();
-    await expect(page.getByRole('button', { name: /Parcelle 1024, 513/ })).toBeDisabled();
-    await page.screenshot({ path: testInfo.outputPath('garden-legacy-global.png') });
-    await db
-      .updateTable('gardenHarvests')
-      .set({ completesAt: new Date(Date.now() - 1) })
-      .where('id', '=', work[0]!.id)
-      .execute();
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect(page.getByRole('button', { name: /Parcelle 1024, 512 · 26 carottes/ })).toBeEnabled();
-    await expect(page.getByRole('button', { name: /Parcelle 1024, 513 · 26 carottes/ })).toBeEnabled();
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect
-      .poll(async () =>
-        Number(
-          (
-            await db
-              .selectFrom('villageResources')
-              .select('amount')
-              .where('villageId', '=', DEVELOPMENT_IDS.village)
-              .where('resourceCode', '=', 'carrot')
-              .executeTakeFirstOrThrow()
-          ).amount,
-        ),
-      )
-      .toBe(662);
-    expect(
-      await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute(),
-    ).toHaveLength(1);
-    expect(
-      await db.selectFrom('populationCohorts').select('id').where('harvestId', '=', work[0]!.id).execute(),
-    ).toHaveLength(0);
-    await page.screenshot({ path: testInfo.outputPath('garden-legacy-delivered.png') });
-  } finally {
-    await db.destroy();
-  }
-});
+      for (const plot of plots)
+        await harvestGarden(
+          db,
+          DEVELOPMENT_IDS.account,
+          'aube',
+          DEVELOPMENT_IDS.village,
+          plot.buildingId,
+          plot.cellX,
+          plot.cellY,
+          randomUUID(),
+        );
+      const work = await db
+        .selectFrom('gardenHarvests')
+        .selectAll()
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .orderBy('startedAt')
+        .execute();
+      // Reconstitute only the pre-015 Garden tables inside the test transaction,
+      // then run the actual migration before opening the browser session.
+      await db.transaction().execute(async (tx) => {
+        await tx
+          .selectFrom('villages')
+          .select('id')
+          .where('id', '=', DEVELOPMENT_IDS.village)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        await tx
+          .updateTable('populationCohorts')
+          .set({ harvestId: work[0]!.id })
+          .where('harvestId', '=', work[1]!.id)
+          .execute();
+        await tx.deleteFrom('scheduledTasks').where('subjectId', '=', work[1]!.id).execute();
+        await tx.deleteFrom('gardenHarvests').where('id', '=', work[1]!.id).execute();
+        await tx
+          .updateTable('gardenHarvests')
+          .set({ workerCount: 2, reservedCarrots: 612 })
+          .where('id', '=', work[0]!.id)
+          .execute();
+        await tx
+          .updateTable('buildingResourceBuffers')
+          .set({ storedAmount: 52, remainder: 0.5, productionUpdatedAt: new Date(Date.now() + 3_600_000) })
+          .where('worldId', '=', DEVELOPMENT_IDS.world)
+          .where('buildingId', '=', plots[0]!.buildingId)
+          .where('resourceCode', '=', 'carrot')
+          .execute();
+        const before = await tx
+          .selectFrom('gardenHarvests')
+          .selectAll()
+          .where('id', '=', work[0]!.id)
+          .executeTakeFirstOrThrow();
+        await replayGardenPlotMigrationForTest(tx);
+        const after = await tx
+          .selectFrom('gardenHarvests')
+          .selectAll()
+          .where('id', '=', work[0]!.id)
+          .executeTakeFirstOrThrow();
+        expect(after).toEqual({ ...before, plotCellX: null, plotCellY: null });
+        expect(
+          Number(
+            (
+              await tx
+                .selectFrom('villageResources')
+                .select('amount')
+                .where('villageId', '=', DEVELOPMENT_IDS.village)
+                .where('resourceCode', '=', 'carrot')
+                .executeTakeFirstOrThrow()
+            ).amount,
+          ),
+        ).toBe(50);
+        const migrated = await tx
+          .selectFrom('gardenPlots')
+          .selectAll()
+          .where('worldId', '=', DEVELOPMENT_IDS.world)
+          .orderBy('cellY')
+          .execute();
+        expect(migrated.map((plot) => Number(plot.storedAmount))).toEqual([26, 26]);
+        expect(migrated.map((plot) => Number(plot.remainder))).toEqual([0, 0.5]);
+      });
+      await enterWorld(page);
+      await page.getByRole('button', { name: 'Gérer les Jardins' }).click();
+      await expect(page.getByText('2 récolteurs · 612 carottes en transit')).toBeVisible();
+      await expect(page.getByRole('button', { name: /Parcelle 1024, 512/ })).toBeDisabled();
+      await expect(page.getByRole('button', { name: /Parcelle 1024, 513/ })).toBeDisabled();
+      await page.screenshot({ path: testInfo.outputPath('garden-legacy-global.png') });
+      await db
+        .updateTable('gardenHarvests')
+        .set({ completesAt: new Date(Date.now() - 1) })
+        .where('id', '=', work[0]!.id)
+        .execute();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(page.getByRole('button', { name: /Parcelle 1024, 512 · 26 carottes/ })).toBeEnabled();
+      await expect(page.getByRole('button', { name: /Parcelle 1024, 513 · 26 carottes/ })).toBeEnabled();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect
+        .poll(async () =>
+          Number(
+            (
+              await db
+                .selectFrom('villageResources')
+                .select('amount')
+                .where('villageId', '=', DEVELOPMENT_IDS.village)
+                .where('resourceCode', '=', 'carrot')
+                .executeTakeFirstOrThrow()
+            ).amount,
+          ),
+        )
+        .toBe(662);
+      expect(
+        await db.selectFrom('gardenHarvests').select('id').where('worldId', '=', DEVELOPMENT_IDS.world).execute(),
+      ).toHaveLength(1);
+      expect(
+        await db.selectFrom('populationCohorts').select('id').where('harvestId', '=', work[0]!.id).execute(),
+      ).toHaveLength(0);
+      await page.screenshot({ path: testInfo.outputPath('garden-legacy-delivered.png') });
+    } finally {
+      await db.destroy();
+    }
+  },
+);
 
-test('chaque parcelle se récolte au clavier sans vider sa voisine', async ({ page }, testInfo) => {
+// The garden manager (« Gérer les Jardins ») left the interface on 4 October
+// (2e0f94b): extension is « Étendre » on the garden in Constructions mode,
+// harvest a tour prepared in Exploitation. Rewrite on those flows.
+test.fixme('chaque parcelle se récolte au clavier sans vider sa voisine', async ({ page }, testInfo) => {
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   page.on('console', (message) => {

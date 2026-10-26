@@ -1,8 +1,97 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
+import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { openVillage, showView } from './world-interactions';
+import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
+import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
+import { openVillage, regionNear, setAstronomy, showView } from './world-interactions';
 
 test.setTimeout(120_000);
+
+// The development world holds a single village: the region needs a neighbour
+// to draw, removed afterwards because the reset keeps foreign villages.
+let neighbour: { account: string; village: string } | undefined;
+async function addNeighbour() {
+  const db = createDatabase(testDatabaseUrl()),
+    account = randomUUID(),
+    village = randomUUID(),
+    hall = randomUUID();
+  try {
+    const { passwordHash } = await db
+      .selectFrom('accounts')
+      .select('passwordHash')
+      .where('id', '=', DEVELOPMENT_IDS.account)
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto('accounts')
+      .values({ id: account, email: `${account}@region.test`, passwordHash })
+      .execute();
+    await db
+      .insertInto('worldMemberships')
+      .values({ worldId: DEVELOPMENT_IDS.world, accountId: account, playerName: 'Voisin régional' })
+      .execute();
+    await db
+      .insertInto('villages')
+      .values({
+        id: village,
+        worldId: DEVELOPMENT_IDS.world,
+        ownerAccountId: account,
+        name: 'Hameau voisin',
+        anchorCellX: 1100,
+        anchorCellY: 540,
+      })
+      .execute();
+    await db
+      .insertInto('buildings')
+      .values({
+        id: hall,
+        worldId: DEVELOPMENT_IDS.world,
+        villageId: village,
+        buildingType: 'town-hall',
+        level: 1,
+        status: 'completed',
+        completedAt: new Date(),
+        constructionStartedAt: null,
+        constructionCompletesAt: null,
+      })
+      .execute();
+    await db
+      .insertInto('worldCellOccupancies')
+      .values({
+        worldId: DEVELOPMENT_IDS.world,
+        cellX: 1099,
+        cellY: 540,
+        buildingId: hall,
+        featureId: null,
+        role: 'anchor',
+      })
+      .execute();
+    neighbour = { account, village };
+  } finally {
+    await db.destroy();
+  }
+}
+test.afterEach(async () => {
+  await setAstronomy(false);
+  if (!neighbour) return;
+  const db = createDatabase(testDatabaseUrl()),
+    { account, village } = neighbour;
+  neighbour = undefined;
+  try {
+    await db
+      .deleteFrom('worldCellOccupancies')
+      .where('worldId', '=', DEVELOPMENT_IDS.world)
+      .where('cellX', '=', 1099)
+      .where('cellY', '=', 540)
+      .execute();
+    await db.deleteFrom('buildings').where('villageId', '=', village).execute();
+    await db.deleteFrom('villages').where('id', '=', village).execute();
+    await db.deleteFrom('worldMemberships').where('accountId', '=', account).execute();
+    await db.deleteFrom('accounts').where('id', '=', account).execute();
+  } finally {
+    await db.destroy();
+  }
+});
 
 test('regional zoom stops detailed requests and the real wheel reaches the torus', async ({ page }) => {
   await resetE2eState();
@@ -79,6 +168,8 @@ test('village, torus et région gardent la cellule choisie et les commandes spat
   page,
 }, info) => {
   await resetE2eState();
+  await addNeighbour();
+  await setAstronomy(true);
   const errors: string[] = [],
     overviews: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -127,7 +218,9 @@ test('village, torus et région gardent la cellule choisie et les commandes spat
   await canvas.press('+');
   await expect(canvas).toHaveAttribute('data-view-mode', 'region');
   await expect(canvas).toHaveAttribute('data-cloud-cover', '0');
-  await expect.poll(() => canvas.getAttribute('data-view-target')).toBe(chosen);
+  // The region opens where the torus camera looks: near the picked cell, not
+  // necessarily on it (the centre ray can meet the curved surface elsewhere).
+  await expect.poll(() => regionNear(canvas, chosen!)).toBe(true);
   await expect(page.getByRole('button', { name: 'Vue libre', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await showView(canvas, 'village');
   await expect(canvas).toHaveAttribute('data-view-mode', 'village');
