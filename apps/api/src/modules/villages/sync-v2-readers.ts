@@ -59,7 +59,6 @@ export async function readPrivateScopeSnapshot(
     ['accomplishments', 'village_accomplishments', 'code'],
     ['buildingExpansions', 'building_expansions', 'id'],
     ['worksites', 'extraction_worksites', 'id'],
-    ['exploitationOrders', 'exploitation_orders', 'id'],
     ['levelingJobs', 'leveling_jobs', 'id'],
     ['marketExchanges', 'market_exchanges', 'id'],
     ['tradeOffers', 'trade_offers', 'id'],
@@ -77,6 +76,20 @@ export async function readPrivateScopeSnapshot(
     where world_id=${worldId} and village_id=${villageId} and status='in-progress'`);
   queries.push(sql`select 'extractions'::text as component,id::text as key from deposit_extractions
     where world_id=${worldId} and village_id=${villageId} and status='in-progress'`);
+  // Orders still open or with workers out (the status readExploitationOrders
+  // derives), plus the 32 recent ones the historical read showed: Catmark held
+  // 1222 completed orders, past the component bound of the client schema.
+  queries.push(sql`select 'exploitationOrders'::text as component,o.id::text as key from exploitation_orders o
+    where o.world_id=${worldId} and o.village_id=${villageId} and (o.garden_status='pending'
+      or o.id in (select id from exploitation_orders where world_id=${worldId} and village_id=${villageId}
+        order by confirmed_at desc limit 32)
+      or exists (select 1 from extraction_worksites w where w.world_id=o.world_id and w.village_id=o.village_id
+        and w.exploitation_order_id=o.id and w.status in ('running','paused'))
+      or exists (select 1 from garden_harvests h where h.world_id=o.world_id and h.village_id=o.village_id
+        and h.exploitation_order_id=o.id and h.status='in-progress')
+      or exists (select 1 from deposit_extractions d join extraction_worksites w on w.id=d.worksite_id
+        and w.world_id=d.world_id and w.village_id=d.village_id where d.world_id=o.world_id
+        and d.village_id=o.village_id and w.exploitation_order_id=o.id and d.status='in-progress'))`);
   queries.push(sql`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
     from garden_plots where world_id=${worldId} and village_id=${villageId}`);
   queries.push(sql`select 'tradeJourneys'::text as component,id::text as key from trade_journeys

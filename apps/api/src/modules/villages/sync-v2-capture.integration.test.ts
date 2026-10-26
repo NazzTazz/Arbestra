@@ -152,6 +152,38 @@ it('bootstraps only the private stream unless shared scopes are requested', asyn
   expect(resumed.groups.map((group) => group.stream.kind)).toEqual(['village']);
 }, 60000);
 
+it('bootstraps open exploitation orders and recent history, not every completed order', async () => {
+  const insert = (status: string, minutesAgo: number) =>
+    sql<{ id: string }>`insert into exploitation_orders
+    (world_id,village_id,command_id,request,worker_cap,confirmed_at,initial_remaining,garden_status)
+    values (${ids.world},${ids.village},gen_random_uuid(),'{}'::jsonb,1,now()-make_interval(mins=>${minutesAgo}),0,${status})
+    returning id`
+      .execute(db)
+      .then((result) => result.rows[0]!.id);
+  const open = await insert('pending', 100_000);
+  const completed: string[] = [];
+  for (let i = 0; i < 40; i++) completed.push(await insert('completed', i - 40));
+  try {
+    const batch = await captureSyncV2(db, ids.account, 'aube', ids.village, {
+      protocol: 2,
+      generation: 4,
+      scopes: [],
+      cursors: [],
+    });
+    const orders = batch.groups[0]!.changes.find((change) => change.component === 'exploitationOrders')!
+      .upsert as Array<{
+      id: string;
+    }>;
+    const sent = new Set(orders.map((order) => order.id));
+    expect(sent.has(open)).toBe(true);
+    // Confirmed in the future, the completed ones are newer than any seeded order.
+    expect(completed.slice(0, 32).every((id) => sent.has(id))).toBe(true);
+    expect(completed.slice(32).some((id) => sent.has(id))).toBe(false);
+  } finally {
+    await sql`delete from exploitation_orders where id = any(${[open, ...completed]}::uuid[])`.execute(db);
+  }
+}, 60000);
+
 it('recovers a committed change without notification through a pure coherent capture', async () => {
   const beforeTasks = await db
     .selectFrom('scheduledTasks')
