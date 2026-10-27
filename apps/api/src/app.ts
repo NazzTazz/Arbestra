@@ -108,7 +108,14 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   });
   await wakeups.start();
   app.addHook('preClose', () => wakeups.close());
-  const navigation = new NavigationCompute(config.expeditionWorkerCount);
+  // A big village's first network takes ~36 s on alpha (Pinkystan, 27
+  // October). A 30 s bound killed the worker and its caches, so every retry
+  // started cold and failed again.
+  const navigation = new NavigationCompute(config.expeditionWorkerCount, {
+    waiting: 4,
+    waitMs: 45000,
+    computeMs: 90000,
+  });
   try {
     await navigation.start();
   } catch (error) {
