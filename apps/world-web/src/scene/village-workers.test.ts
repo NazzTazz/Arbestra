@@ -1241,3 +1241,124 @@ it('turns compact latecomers back empty-handed when the team leaves before they 
     f.dispose();
   }
 });
+/** Walk the clock and record, per person of one lot, the return as shown. */
+function observeReturn(f: ReturnType<typeof fixture>, id: string, untilMs: number, onTick?: (t: number) => void) {
+  const inboundAt: number[] = [],
+    roadAt: number[] = [],
+    doneAt: number[] = [],
+    stall: number[] = [],
+    lastMove: number[] = [],
+    lastPos: string[] = [],
+    hidden: number[] = [],
+    unloaded: number[] = [],
+    faded: number[] = [];
+  let gone = -1,
+    count = 0;
+  for (let t = 0; t <= untilMs; t += 33) {
+    onTick?.(t);
+    f.view.animate(epoch + t, true);
+    const people = f.view.figures.filter((p) => p.root.name.startsWith(`worker-${id}-`));
+    if (!people.length) {
+      // The lot is disposed in the step that finishes its last person.
+      gone = t;
+      for (let i = 0; i < count; i++) doneAt[i] ??= t;
+      break;
+    }
+    count = people.length;
+    people.forEach((p, i) => {
+      const a = actorOf(p),
+        person = p as unknown as { exit: number; phase: string };
+      if (person.phase === 'inbound' && inboundAt[i] === undefined) inboundAt[i] = t;
+      if (person.phase === 'inbound' && person.exit === 0 && roadAt[i] === undefined) roadAt[i] = t;
+      if (person.phase === 'done' && doneAt[i] === undefined) doneAt[i] = t;
+      if (person.phase !== 'inbound') return;
+      const pos = `${a.position.x.toFixed(3)}:${a.position.z.toFixed(3)}`;
+      if (pos !== lastPos[i]) {
+        lastPos[i] = pos;
+        lastMove[i] = t;
+      } else stall[i] = Math.max(stall[i] ?? 0, t - (lastMove[i] ?? t));
+      if (!p.root.isEnabled() && !hidden.includes(i)) hidden.push(i);
+      const loaded = p.root.getChildTransformNodes().some((n) => n.name.endsWith('-cargo') && n.isEnabled());
+      if (p.root.isEnabled() && !loaded && !unloaded.includes(i)) unloaded.push(i);
+      if (t - inboundAt[i]! > 1000 && p.root.getChildMeshes()[0]!.visibility < 0.9 && !faded.includes(i)) faded.push(i);
+    });
+  }
+  return { count, inboundAt, roadAt, doneAt, stall, hidden, unloaded, faded, gone };
+}
+/** A wood lot at the end of the straight default road: posts around the tree, open layout. */
+function openTeam(id: string, completesAfterMs: number, start = epoch) {
+  const state = snapshot(id, start, 10),
+    e = state.village.extractions[0]!;
+  e.resourceCode = 'wood';
+  e.transportMs = 17302;
+  e.completesAt = new Date(start + completesAfterMs).toISOString();
+  return state;
+}
+const expectHomeInConvoy = (o: ReturnType<typeof observeReturn>, completesAt: number, lateMs: number) => {
+  const detail = JSON.stringify(o);
+  expect(o.count, detail).toBe(10);
+  // Everyone leaves loaded and in sight, reaches the road and walks it home.
+  expect(
+    o.inboundAt.filter((t) => t !== undefined),
+    detail,
+  ).toHaveLength(10);
+  expect(
+    o.roadAt.filter((t) => t !== undefined),
+    detail,
+  ).toHaveLength(10);
+  expect(
+    o.doneAt.filter((t) => t !== undefined),
+    detail,
+  ).toHaveLength(10);
+  expect(o.hidden, detail).toEqual([]);
+  expect(o.unloaded, detail).toEqual([]);
+  expect(o.faded, detail).toEqual([]);
+  expect(Math.max(...o.doneAt), detail).toBeLessThan(completesAt + lateMs);
+  expect(o.gone, detail).toBeLessThan(completesAt + lateMs);
+  // Nobody stands frozen on an exit: every exit either proceeds or steps back.
+  expect(Math.max(...o.stall), detail).toBeLessThan(2000);
+};
+it('brings a ten-person open-layout wood team home loaded, in convoy, without a frozen exit', () => {
+  const f = fixture();
+  try {
+    f.view.sync(openTeam('open-wood', 94_000), epoch);
+    f.view.animate(epoch, true);
+    expect(f.view.metrics.layouts[0]?.variant).toBe('front');
+    expectHomeInConvoy(observeReturn(f, 'open-wood', 140_000), 94_000, 6_000);
+  } finally {
+    f.dispose();
+  }
+});
+it('brings an open-layout team home when the next lot starts exactly at its completion', () => {
+  const f = fixture();
+  try {
+    f.view.sync(openTeam('open-wood', 94_000), epoch);
+    const o = observeReturn(f, 'open-wood', 140_000, (t) => {
+      if (t === 94_017) f.view.sync(openTeam('open-next', 94_000, epoch + 94_000), epoch + t);
+    });
+    expectHomeInConvoy(o, 94_000, 6_000);
+    f.view.animate(epoch + o.gone + 33, true);
+    expect(f.view.metrics.layouts[0]?.id).toBe('open-next');
+  } finally {
+    f.dispose();
+  }
+});
+it('brings a compact team home when the next lot starts exactly at its completion', () => {
+  const { f, state, completesAt } = gladeTeam(94_000);
+  try {
+    f.view.sync(state, epoch);
+    const o = observeReturn(f, 'glade-wood', 140_000, (t) => {
+      if (t !== 94_017) return;
+      const next = structuredClone(state),
+        e = next.village.extractions[0]!;
+      e.id = 'glade-next';
+      next.village.worksites[0]!.activeExtraction = { id: 'glade-next' } as never;
+      e.startedAt = new Date(epoch + completesAt).toISOString();
+      e.completesAt = new Date(epoch + completesAt * 2).toISOString();
+      f.view.sync(next, epoch + t);
+    });
+    expectHomeInConvoy(o, completesAt, 12_000);
+  } finally {
+    f.dispose();
+  }
+});
