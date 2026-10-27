@@ -120,7 +120,7 @@ function cycleKey(path: readonly WorkerPoint[]): string | null {
 }
 
 export function sampleWorkerPath(path: readonly WorkerPoint[], distance: number, lateral = 0) {
-  if (path.length < 2) return { ...(path[0] ?? { x: 0, z: 0 }), dx: 0, dz: 1, corner: 0, taper: 1 };
+  if (path.length < 2) return { ...(path[0] ?? { x: 0, z: 0 }), dx: 0, dz: 1, corner: 0 };
   let remaining = Math.max(0, distance);
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]!,
@@ -153,12 +153,11 @@ export function sampleWorkerPath(path: readonly WorkerPoint[], distance: number,
         dz,
         width,
         corner: edge,
-        taper,
       };
     }
     remaining -= length;
   }
-  return { ...path[path.length - 1]!, dx: 0, dz: 1, corner: 0, taper: 1 };
+  return { ...path[path.length - 1]!, dx: 0, dz: 1, corner: 0 };
 }
 
 /** Minimum distance between synchronously moving discs, including between frames. */
@@ -196,30 +195,15 @@ interface Passage {
   points: WorkerPoint[];
   owners: Set<string>;
   lastDirection: number;
-  lastMission: string;
-  /** Missions served in a row in `lastDirection`: a team's convoy is one turn. */
   served: number;
+  straight: boolean;
 }
-interface Chain {
-  passages: Passage[];
-  samples: Array<{ x: number; z: number; dx: number; dz: number }>;
-}
-/** An actor requests a passage from this distance of one of its points... */
-const PASSAGE_REQUEST = 1.15;
-/** ...and keeps it until it is beyond this distance of all of them. */
-const PASSAGE_RETAIN = 1.3;
-/** Lateral lane offset: the chain is walked along the centreline. */
-const PASSAGE_LANE = 0.25;
-/** Centrelines closer than this are one road; further apart, bodies pass each other. */
-const PASSAGE_SAME_ROAD = 0.6;
 
 /** Local right-of-way only. This class never knows resources or server credits. */
 export class WorkerTraffic {
   readonly passages = new Map<string, Passage>();
   blocked = 0;
   #waitOrder = new Map<string, number>();
-  /** Chains by path, passage and arc: a waiting actor asks the same one every step. */
-  #chains = new WeakMap<readonly WorkerPoint[], Map<string, Chain>>();
   rebuild(paths: readonly WorkerPoint[][]) {
     const nodes = new Map<string, { point: WorkerPoint; links: Set<string>; turn: boolean }>();
     for (const path of paths)
@@ -270,19 +254,23 @@ export class WorkerTraffic {
     const next = new Map<string, Passage>();
     for (const c of clusters) {
       const id = c.keys.sort().join('|');
-      const prior = this.passages.get(id);
+      const prior = this.passages.get(id),
+        a = c.points[0]!,
+        b = c.points.find((p) => Math.hypot(p.x - a.x, p.z - a.z) > 0.1) ?? a;
+      const straight =
+        c.points.length > 2 &&
+        c.points.every((p) => Math.abs((b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x)) < 0.01);
       next.set(id, {
         id,
         points: c.points,
         owners: prior?.owners ?? new Set(),
         lastDirection: prior?.lastDirection ?? 0,
-        lastMission: prior?.lastMission ?? '',
         served: prior?.served ?? 0,
+        straight,
       });
     }
     this.passages.clear();
     for (const [id, p] of next) this.passages.set(id, p);
-    this.#chains = new WeakMap();
   }
   shift(x: number, z: number) {
     for (const passage of this.passages.values())
@@ -290,84 +278,10 @@ export class WorkerTraffic {
         p.x -= x;
         p.z -= z;
       }
-    this.#chains = new WeakMap();
   }
   reset() {
     this.passages.clear();
     this.#waitOrder.clear();
-    this.#chains = new WeakMap();
-  }
-  /**
-   * The passages an actor entering `first` at `arc` along `path` will request
-   * before it has released every one of them: `first`, then each passage
-   * reached within PASSAGE_REQUEST of the centreline while still within
-   * PASSAGE_RETAIN of a passage already in the chain. Lane offsets widen both.
-   * `samples` is the centreline walked, with its headings.
-   */
-  #chain(first: Passage, path: readonly WorkerPoint[], arc: number): Chain {
-    const key = `${first.id}|${Math.round(arc / 0.25)}`;
-    let cache = this.#chains.get(path);
-    if (!cache) this.#chains.set(path, (cache = new Map()));
-    const known = cache.get(key);
-    if (known) return known;
-    const chain = this.#walkChain(first, path, arc);
-    cache.set(key, chain);
-    return chain;
-  }
-  #walkChain(first: Passage, path: readonly WorkerPoint[], arc: number): Chain {
-    const passages = [first],
-      samples: Chain['samples'] = [],
-      end = Math.min(pathLength(path), arc + 12);
-    const near = (passage: Passage, q: WorkerPoint, radius: number) =>
-      passage.points.some((r) => Math.hypot(q.x - r.x, q.z - r.z) < radius + PASSAGE_LANE);
-    for (let s = arc; s <= end; s += 0.2) {
-      const q = sampleWorkerPath(path, s);
-      samples.push(q);
-      for (const passage of this.passages.values())
-        if (!passages.includes(passage) && near(passage, q, PASSAGE_REQUEST)) passages.push(passage);
-      if (!passages.some((passage) => near(passage, q, PASSAGE_RETAIN))) break;
-    }
-    return { passages, samples };
-  }
-  /** The centreline an actor walks on from where it stands, with its headings. */
-  #forward(actor: TrafficActor): Chain['samples'] {
-    const samples: Chain['samples'] = [],
-      end = Math.min(pathLength(actor.path), actor.distance + 12);
-    for (let s = Math.max(0, actor.distance - 1); s <= end; s += 0.2) samples.push(sampleWorkerPath(actor.path, s));
-    return samples;
-  }
-  /**
-   * Whether a walker on `forward` comes through `samples` other than in
-   * file: the other way, or across them. Only then can the two meet inside a
-   * passage, or the walker come to need one behind the actor. A walker ahead
-   * going the same way, or leaving on another road, never does. Along a file
-   * its nearest points advance with the samples; they recede the other way,
-   * and several samples share an inner one of them where it crosses or joins.
-   */
-  #conflicts(forward: Chain['samples'], samples: Chain['samples']) {
-    let last = -1,
-      shared = 0;
-    for (const [i, sample] of samples.entries()) {
-      let nearest = -1,
-        gap = PASSAGE_SAME_ROAD;
-      forward.forEach((q, j) => {
-        const d = Math.hypot(q.x - sample.x, q.z - sample.z);
-        if (d < gap) {
-          gap = d;
-          nearest = j;
-        }
-      });
-      if (nearest < 0) continue;
-      if (nearest < last) return true;
-      // The first or last point of a forward walk gathers every sample
-      // approaching it from beyond the walk's reach, and a walk touching the
-      // actor's own first sample is beside it now, not across its way.
-      const interior = nearest > 0 && nearest < forward.length - 1 && i > 1;
-      shared = interior && nearest === last ? shared + 1 : 0;
-      if (shared >= 3) return true;
-      last = nearest;
-    }
-    return false;
   }
   step(
     actors: TrafficActor[],
@@ -377,20 +291,13 @@ export class WorkerTraffic {
     canOccupy: (point: WorkerPoint) => boolean = () => true,
   ) {
     this.blocked = 0;
-    const forwards = new Map<string, Chain['samples']>();
-    const forwardOf = (actor: TrafficActor) => {
-      let forward = forwards.get(actor.id);
-      if (!forward) forwards.set(actor.id, (forward = this.#forward(actor)));
-      return forward;
-    };
     const live = new Set(actors.filter((a) => !a.done).map((a) => a.id));
     for (const p of this.passages.values())
       for (const id of p.owners)
         if (
           !live.has(id) ||
           !actors.some(
-            (a) =>
-              a.id === id && p.points.some((q) => Math.hypot(a.position.x - q.x, a.position.z - q.z) < PASSAGE_RETAIN),
+            (a) => a.id === id && p.points.some((q) => Math.hypot(a.position.x - q.x, a.position.z - q.z) < 1.3),
           )
         )
           p.owners.delete(id);
@@ -449,20 +356,7 @@ export class WorkerTraffic {
         Math.hypot(partner.path[0]!.x - actor.path[0]!.x, partner.path[0]!.z - actor.path[0]!.z) < 0.1;
       const paired = Boolean(!opposite && !nearPassage && (base.width ?? 0.8) >= 0.8 && together);
       const batch = together ? [actor, partner] : [actor];
-      // The lane kept for an opposing walker is for the open road and the
-      // waiting line of a passage, where lanes are whole. Taken inside a
-      // turn's taper, it would pin the walker beside the one turning in
-      // front of it: neither could step.
-      const laneTarget = (a: TrafficActor, formation: number) => {
-        const here = sampleWorkerPath(
-          a.path,
-          Math.max(0, a.distance - (a.member ?? 0) * 0.5 * Math.cos(((a.formation ?? 0) * Math.PI) / 2)),
-        );
-        return opposite && here.taper >= 1
-          ? 0.22
-          : (a.member === 1 ? 0.22 : -0.22) * Math.sin((formation * Math.PI) / 2);
-      };
-      const propose = (a: TrafficActor, holdFormation = false, holdDistance = false, centre = false) => {
+      const propose = (a: TrafficActor, holdFormation = false, holdDistance = false) => {
         let formation =
           holdFormation || holdDistance
             ? (a.formation ?? 0)
@@ -488,28 +382,23 @@ export class WorkerTraffic {
           offset = 0.5 * Math.cos((formation * Math.PI) / 2);
           distance = a.distance;
         }
-        const target = centre ? 0 : laneTarget(a, formation);
+        const target = opposite ? 0.22 : (a.member === 1 ? 0.22 : -0.22) * Math.sin((formation * Math.PI) / 2);
         const lateral = holdFormation
           ? (a.lateral ?? 0)
           : (a.lateral ?? 0) + Math.max(-dt * 0.8, Math.min(dt * 0.8, target - (a.lateral ?? 0)));
-        const arc = Math.max(0, distance - offset);
         return {
           actor: a,
           distance,
           formation,
           lateral,
           visible: distance >= offset,
-          arc,
-          point: sampleWorkerPath(a.path, arc, lateral),
+          point: sampleWorkerPath(a.path, Math.max(0, distance - offset), lateral),
         };
       };
-      /** The walker whose body denied the last attempt, if any. */
-      let blocker: TrafficActor | undefined;
       const attempt = (proposals: ReturnType<typeof propose>[]) => {
         const batch = proposals.map((p) => p.actor);
         let denied = false;
         const leases: Passage[] = [];
-        blocker = undefined;
         for (const proposal of proposals) {
           const a = proposal.actor,
             p = proposal.point;
@@ -531,7 +420,6 @@ export class WorkerTraffic {
                 WORKER_CLEARANCE - 0.005
             ) {
               denied = true;
-              blocker = n.actor;
               break;
             }
           const other = proposals.find((v) => v.actor !== a && v.visible);
@@ -548,43 +436,24 @@ export class WorkerTraffic {
             denied = true;
             break;
           }
-          const opponents = (passage: Passage) =>
-            [...passage.owners].flatMap((id) => {
-              if (batch.some((a) => a.id === id)) return [];
-              const owner = actors.find((v) => v.id === id);
-              if (!owner) return [];
-              if (owner.mission === a.mission && (owner.direction === a.direction || owner.local || a.local)) return [];
-              // A connector walker stopped short of its post still holds the
-              // road passage it left; held against a queue waiting for that
-              // passage, nothing moves. Bodies keep the stopped walker safe.
-              if (owner.local && owner.waitingSince !== null) return [];
-              const cycle = cycleKey(a.path);
-              if (cycle !== null && cycle === cycleKey(owner.path)) return [];
-              return [owner];
-            });
-          const engaged = [...this.passages.values()].some((passage) => passage.owners.has(a.id));
           for (const passage of this.passages.values())
-            if (passage.points.some((q) => Math.hypot(p.x - q.x, p.z - q.z) < PASSAGE_REQUEST)) {
-              // Hold-and-wait: an actor keeps a passage until it is beyond
-              // PASSAGE_RETAIN of it, and requests the next from PASSAGE_REQUEST
-              // away. Two opposing walkers each holding one of two passages
-              // closer than that sum would wait for ever, nobody stepping
-              // back. Walk on only when no passage requested before this one
-              // is released is held by someone coming the other way, or
-              // across; a file going the same way shares it, kept apart by
-              // bodies.
-              const chain = this.#chain(passage, a.path, proposal.arc);
-              for (const next of chain.passages)
-                if (opponents(next).some((owner) => this.#conflicts(forwardOf(owner), chain.samples))) {
-                  denied = true;
-                  break;
-                }
-              if (denied) break;
-              // A free exit and the turn between directions are checked on
-              // entering the chain only. Holding one passage back for them
-              // would be the same hold-and-wait against whoever waits at
-              // the exit; an opposing walker waits at the chain's far end.
-              if (!engaged) {
+            if (passage.points.some((q) => Math.hypot(p.x - q.x, p.z - q.z) < 1.15)) {
+              const owners = [...passage.owners].filter((id) => !batch.some((a) => a.id === id));
+              const compatible = owners.every((id) => {
+                const owner = actors.find((v) => v.id === id);
+                if (!owner) return true;
+                if (owner.mission === a.mission && (owner.direction === a.direction || owner.local || a.local))
+                  return true;
+                const cycle = cycleKey(a.path);
+                if (cycle !== null && cycle === cycleKey(owner.path)) return true;
+                const tangent = sampleWorkerPath(owner.path, owner.distance);
+                return passage.straight && tangent.dx * p.dx + tangent.dz * p.dz > 0.98;
+              });
+              if (owners.length && !compatible) {
+                denied = true;
+                break;
+              }
+              if (!passage.owners.has(a.id)) {
                 const exit = sampleWorkerPath(a.path, Math.min(length, proposal.distance + 1));
                 if (
                   neighbours(exit).some(
@@ -602,9 +471,7 @@ export class WorkerTraffic {
                     v.direction !== a.direction &&
                     !v.local &&
                     v.waitingSince !== null &&
-                    chain.passages.some((next) =>
-                      next.points.some((q) => Math.hypot(v.position.x - q.x, v.position.z - q.z) < 1.6),
-                    ),
+                    passage.points.some((q) => Math.hypot(v.position.x - q.x, v.position.z - q.z) < 1.6),
                 );
                 if (passage.served >= 2 && passage.lastDirection === a.direction && opposingWait) {
                   denied = true;
@@ -629,14 +496,8 @@ export class WorkerTraffic {
         }
         for (const lease of new Set(leases)) {
           if (!batch.some((a) => lease.owners.has(a.id))) {
-            lease.served =
-              lease.lastDirection !== actor.direction
-                ? 1
-                : lease.lastMission === actor.mission
-                  ? lease.served
-                  : lease.served + 1;
+            lease.served = lease.lastDirection === actor.direction ? lease.served + 1 : 1;
             lease.lastDirection = actor.direction;
-            lease.lastMission = actor.mission;
           }
           for (const a of batch) lease.owners.add(a.id);
         }
@@ -650,30 +511,15 @@ export class WorkerTraffic {
         const following =
           (a.member ?? 0) > 0 &&
           actors.some((v) => v.mission === a.mission && v.rank === a.rank && v.member === 0 && !v.done);
-        const changingLane = a.visible && Math.abs((a.lateral ?? 0) - laneTarget(a, a.formation ?? 0)) > 0.00001;
-        if (attempt([propose(a)])) continue;
-        // Kept to its lane by an opposing walker, an actor leaving a corner
-        // drifts back out as the turn's taper fades, into the one that
-        // followed it there on the inside, or turns into the lane of the one
-        // beside it: neither can step. Straighten up on the spot instead; the
-        // lane is taken again once there is room. Never towards the blocker:
-        // a follower in the middle of the road would stand in the way of its
-        // leader's connector. Never for a walker coming the other way, who
-        // needs that lane.
-        const pinned = blocker,
-          straightened = pinned && Math.abs(a.lateral ?? 0) > 0.00001 ? propose(a, false, true, true) : undefined;
-        const yields = () => {
-          const h = sampleWorkerPath(
-              a.path,
-              Math.max(0, a.distance - (a.member ?? 0) * 0.5 * Math.cos(((a.formation ?? 0) * Math.PI) / 2)),
-            ),
-            theirs = sampleWorkerPath(pinned!.path, pinned!.distance);
-          const gap = (q: WorkerPoint) => Math.hypot(q.x - pinned!.position.x, q.z - pinned!.position.z);
-          return theirs.dx * h.dx + theirs.dz * h.dz > -0.5 && gap(straightened!.point) >= gap(a.position) - 1e-9;
-        };
+        const changingLane =
+          a.visible &&
+          Math.abs(
+            (a.lateral ?? 0) -
+              (opposite ? 0.22 : (a.member === 1 ? 0.22 : -0.22) * Math.sin(((a.formation ?? 0) * Math.PI) / 2)),
+          ) > 0.00001;
         if (
+          attempt([propose(a)]) ||
           (!following && attempt([propose(a, true)])) ||
-          (straightened && yields() && attempt([straightened])) ||
           (changingLane && attempt([propose(a, false, true)]))
         )
           continue;
