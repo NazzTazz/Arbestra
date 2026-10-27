@@ -1362,3 +1362,132 @@ it('brings a compact team home when the next lot starts exactly at its completio
     f.dispose();
   }
 });
+/**
+ * The hall exit as the scene builds it (entranceConnector): door and threshold
+ * on one narrow segment, a porch, then a corner onto the road junction 1.7 m
+ * further: two traffic passages, each requested from 1.15 m and kept to 1.3 m.
+ * The wood road runs north; garden plots sit on both sides of a westward
+ * road, one junction each, so gardeners and woodcutters share the hall exit
+ * only.
+ */
+const HALL_DOOR: TravelCell[] = [
+  { cellX: 1, cellY: 0 },
+  { cellX: 1, cellY: 0.5 },
+  { cellX: 1, cellY: 2.2 },
+  { cellX: 0, cellY: 2.2 },
+];
+function hallPlots(branchAt: number): TravelCell[][] {
+  const branch = branchAt === HALL_DOOR[HALL_DOOR.length - 1]!.cellY ? [] : [{ cellX: 0, cellY: branchAt }];
+  const junctions = Array.from({ length: 9 }, (_, i) => ({ cellX: -4 - i * 2.5, cellY: branchAt }));
+  return junctions.flatMap((junction, i) =>
+    [1, -1].map((side) => [
+      ...HALL_DOOR,
+      ...branch,
+      ...junctions.slice(0, i),
+      junction,
+      { cellX: junction.cellX, cellY: branchAt + side * 3.4 },
+    ]),
+  );
+}
+/**
+ * A wood lot of ten leaving the hall at `epoch` while `gardeners` harvests,
+ * started long before, walk back in through the same door from `firstBackMs`
+ * on, one every `everyMs`. Gardeners walk at one metre per second. Their road
+ * branches off the wood road at `branchAt`: the hall corner itself, or a
+ * junction of its own further up the road.
+ */
+function hallTraffic(gardeners: number, branchAt = 2.2, firstBackMs = 2000, everyMs = 1700) {
+  const state = openTeam('open-wood', 94_000),
+    e = state.village.extractions[0]!;
+  e.cellY = 9;
+  e.path = [...HALL_DOOR, { cellX: 0, cellY: 4.4 }, { cellX: 0, cellY: 6 }, { cellX: 0, cellY: 9 }];
+  const plots = hallPlots(branchAt);
+  expect(plots.length).toBeGreaterThanOrEqual(gardeners);
+  state.cells = plots.slice(0, gardeners).map((path, i) => {
+    let length = 0;
+    for (let k = 1; k < path.length; k++)
+      length += Math.hypot(path[k]!.cellX - path[k - 1]!.cellX, path[k]!.cellY - path[k - 1]!.cellY);
+    const walkMs = Math.round(length * 1000),
+      backAt = epoch + firstBackMs + i * everyMs - walkMs,
+      startedAt = epoch - 120_000 + i * 1500;
+    const plot = path[path.length - 1]!;
+    const harvest = {
+      id: `garden-${i}`,
+      startedAt: new Date(startedAt).toISOString(),
+      completesAt: new Date(backAt + walkMs).toISOString(),
+      transportMs: walkMs,
+      path,
+      stops: [{ ...plot, path, arrivesAfterMs: walkMs, workEndsAfterMs: backAt - startedAt, reservedCarrots: 10 }],
+      returnPath: [...path].reverse(),
+    };
+    return { building: { garden: { plots: [{ ...plot, harvest }] } } };
+  }) as unknown as VillageState['cells'];
+  return state;
+}
+/**
+ * Walk the clock; record when each woodcutter works, how late each gardener
+ * gets home after its authoritative completion, and the longest wait of
+ * anyone in sight.
+ */
+function observeHallExit(f: ReturnType<typeof fixture>, state: VillageState, id: string, untilMs: number) {
+  const workedAt: number[] = [],
+    waits = new Map<string, { since: number; longest: number }>(),
+    completesAt = new Map<string, number>(),
+    goneAt = new Map<string, number>(),
+    seen = new Set<string>();
+  for (const cell of state.cells)
+    for (const plot of cell.building?.garden?.plots ?? [])
+      if (plot.harvest) completesAt.set(plot.harvest.id, Date.parse(plot.harvest.completesAt) - epoch);
+  for (let t = 0; t <= untilMs; t += 33) {
+    f.view.animate(epoch + t, true);
+    const layouts = f.view.metrics.layouts;
+    layouts
+      .find((l) => l.id === id)
+      ?.phases.forEach((phase, i) => {
+        if (phase === 'work' && workedAt[i] === undefined) workedAt[i] = t;
+      });
+    for (const l of layouts) if (l.resource === 'garden') seen.add(l.id);
+    for (const gardenId of seen)
+      if (!goneAt.has(gardenId) && !layouts.some((l) => l.id === gardenId)) goneAt.set(gardenId, t);
+    for (const p of f.view.figures) {
+      const a = actorOf(p);
+      const w = waits.get(a.id) ?? { since: -1, longest: 0 };
+      if (a.waitingSince === null || !a.visible) w.since = -1;
+      else {
+        if (w.since < 0) w.since = t;
+        w.longest = Math.max(w.longest, t - w.since);
+      }
+      waits.set(a.id, w);
+    }
+  }
+  const homeLate = [...completesAt].map(([gardenId, at]) => (goneAt.get(gardenId) ?? Infinity) - at);
+  return { workedAt, longestWait: Math.max(0, ...[...waits.values()].map((w) => w.longest)), homeLate };
+}
+for (const [name, branchAt] of [
+  ['through the same door', 2.2],
+  ['through a junction two metres past the porch', 4.4],
+] as const)
+  it(`takes all ten woodcutters out of the hall while returning gardeners come in ${name}`, () => {
+    const f = fixture();
+    try {
+      const state = hallTraffic(18, branchAt);
+      f.view.sync(state, epoch);
+      f.view.animate(epoch, true);
+      expect(f.view.metrics.layouts.find((l) => l.id === 'open-wood')?.variant).toBe('front');
+      const o = observeHallExit(f, state, 'open-wood', 110_000),
+        detail = JSON.stringify(o);
+      // The team's road trip is 17.3 s: everyone has a post well before the
+      // 76.7 s return, instead of half the team held at the door until then.
+      expect(
+        o.workedAt.filter((t) => t !== undefined),
+        detail,
+      ).toHaveLength(10);
+      expect(Math.max(...o.workedAt), detail).toBeLessThan(35_000);
+      // Nobody freezes at the door until a stale mission is swept away: every
+      // gardener gets home before its 30 s cleanup, and a wait is a queue.
+      expect(Math.max(...o.homeLate), detail).toBeLessThan(28_000);
+      expect(o.longestWait, detail).toBeLessThan(20_000);
+    } finally {
+      f.dispose();
+    }
+  });
