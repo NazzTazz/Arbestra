@@ -50,8 +50,9 @@ test('la carte affiche les habitants low-poly et les chemins de débogage', asyn
   await expect(canvas).toHaveAttribute('data-worker-model', 'low-poly');
   await expect(canvas).toHaveAttribute('data-worker-figures', '1');
   await expect.poll(async () => Number(await canvas.getAttribute('data-worker-vertices'))).toBeGreaterThan(0);
-  // Eleven boxes since the face (18 October): body, head, hair, face, limbs, hidden tool and basket.
-  await expect.poll(async () => Number(await canvas.getAttribute('data-worker-vertices'))).toBeLessThan(300);
+  // Blender figurine since 26 October (1830 vertices with hidden tool and basket): pieces
+  // are clones sharing one geometry, this only guards against an unbounded kit.
+  await expect.poll(async () => Number(await canvas.getAttribute('data-worker-vertices'))).toBeLessThan(2500);
   if (!isMobile) await page.screenshot({ path: 'test-results/worker-low-poly.png' });
   await devOption(page, 'Chemins et transports');
   await expect(page.getByRole('complementary', { name: 'Outils développeur' }).getByRole('combobox')).toContainText(

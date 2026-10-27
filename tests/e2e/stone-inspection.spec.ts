@@ -211,7 +211,7 @@ test('un geste pierre démarre une extraction sans attendre une inspection', asy
   await expect(canvas).toHaveAttribute('data-worker-model', 'low-poly');
   await expect.poll(async () => Number(await canvas.getAttribute('data-worker-figures'))).toBeGreaterThan(0);
   const figures = Number(await canvas.getAttribute('data-worker-figures'));
-  // Shared figure: eight body boxes, two tool boxes and one cargo box (24 vertices each).
-  expect(Number(await canvas.getAttribute('data-worker-vertices')) / figures).toBeLessThanOrEqual(264);
+  // Shared Blender figurine with its tool and cargo (about 1550 vertices, clones of one geometry).
+  expect(Number(await canvas.getAttribute('data-worker-vertices')) / figures).toBeLessThanOrEqual(2500);
   await page.screenshot({ path: testInfo.outputPath('stone-gesture.png') });
 });
