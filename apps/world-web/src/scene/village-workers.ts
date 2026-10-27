@@ -17,6 +17,7 @@ import {
   workerAppearance,
   gardenHarvestPoint,
   workerPassagePath,
+  type DoorLane,
   type TrafficActor,
   type WorkerPoint,
   type WorkerRole,
@@ -68,8 +69,11 @@ interface Materials {
   /** Crown of the felled tree; timber when absent. */
   foliage?: StandardMaterial;
 }
+/** A presentation path point; door lanes carry their tag and file width. */
+export type PathPoint = Vector3 & { lane?: DoorLane; width?: number };
 export interface WorkerHooks {
-  path: (path: TravelCell[]) => Vector3[];
+  /** Hall journey outward; `lane` picks the door lane walked in that direction ('out' by default). */
+  path: (path: TravelCell[], lane?: DoorLane) => PathPoint[];
   project: (point: TravelCell) => WorkerPoint;
   ground: (point: WorkerPoint) => number | null;
   free: (point: WorkerPoint, radius: number, featureId: string | null, allowRoads?: boolean) => boolean;
@@ -77,7 +81,7 @@ export interface WorkerHooks {
   detailed: (point: WorkerPoint) => boolean;
   width?: (point: WorkerPoint) => number;
   localPath?: (path: TravelCell[]) => Vector3[];
-  leisurePath?: (buildingId: string, path: TravelCell[]) => Vector3[];
+  leisurePath?: (buildingId: string, path: TravelCell[], lane?: DoorLane) => PathPoint[];
   /** Changes when projected positions or ground heights used by leisurePath change. */
   leisureVersion?: () => string;
 }
@@ -469,15 +473,15 @@ export class VillageWorkers {
         }
         const route = this.#leisure.byDestination.get(`${c.cellX}:${c.cellY}`);
         const path = c.building!.type === 'town-hall' ? [c] : route?.cells;
-        const points = path ? this.hooks.leisurePath!(c.building!.id, path) : [];
-        const visit = points.length
-          ? {
-              buildingId: c.building!.id,
-              path: points.map((v, i) =>
-                this.#point(v, i === 0 || i === points.length - 1 ? 0.5 : (this.hooks.width?.(v) ?? 0.8)),
-              ),
-            }
-          : null;
+        const spoke = (lane: DoorLane) => {
+          const points = path ? this.hooks.leisurePath!(c.building!.id, path, lane) : [];
+          return points.map((v, i) =>
+            this.#point(v, v.width ?? (i === 0 || i === points.length - 1 ? 0.5 : (this.hooks.width?.(v) ?? 0.8))),
+          );
+        };
+        const points = spoke('out');
+        // Walked back towards the hall, a spoke ends on the door's entry lane.
+        const visit = points.length ? { buildingId: c.building!.id, path: points, back: spoke('in') } : null;
         cached.set(c.building!.id, { cell: c, visit });
         return visit ? [visit] : [];
       })
@@ -527,18 +531,25 @@ export class VillageWorkers {
     }
   }
   #point(p: WorkerPoint, width = 0.8): WorkerPoint {
-    return { x: p.x, z: p.z, width, key: this.hooks.key(p) };
+    const point: WorkerPoint = { x: p.x, z: p.z, width, key: this.hooks.key(p) };
+    if (p.lane) point.lane = p.lane;
+    return point;
   }
-  #route(m: Mission, stop = 0) {
+  /** Outward route of a stop; `lane` is the hall door lane it carries (the entry lane for a return). */
+  #route(m: Mission, stop = 0, lane: DoorLane = 'out') {
     if (m.leisure) return m.leisure[stop]!.path.map((p) => this.#point(p, p.width));
     const path = m.stops?.[stop]?.path ?? m.path;
-    const vectors =
-      stop > 0 || m.resource === 'trade' ? (this.hooks.localPath ?? this.hooks.path)(path) : this.hooks.path(path);
+    const vectors: PathPoint[] =
+      stop > 0 || m.resource === 'trade'
+        ? (this.hooks.localPath ?? this.hooks.path)(path)
+        : this.hooks.path(path, lane);
     const passage =
       m.resource === 'wood' || m.resource === 'stone' || m.resource === 'leveling'
         ? workerPassagePath(vectors)
         : vectors;
-    const p = passage.map((v, i) => this.#point(v, stop === 0 && i < 2 ? 0.5 : (this.hooks.width?.(v) ?? 0.8)));
+    const p = passage.map((v, i) =>
+      this.#point(v, v.width ?? (stop === 0 && i < 2 ? 0.5 : (this.hooks.width?.(v) ?? 0.8))),
+    );
     if (!p.length) p.push(this.#point(this.hooks.project(m.target)));
     if (
       m.resource !== 'garden' &&
@@ -855,7 +866,7 @@ export class VillageWorkers {
     if (now >= backStart) {
       p.phase = 'inbound';
       p.actor.direction = -1;
-      p.actor.path = [...g.route].reverse();
+      p.actor.path = this.#backRoute(g);
       p.actor.distance = Math.max(
         0,
         Math.min(pathLength(g.route), (p.actor.speed * (now - backStart)) / 1000 - Math.floor(p.index / 2) * 0.52),
@@ -881,13 +892,23 @@ export class VillageWorkers {
     p.last = { ...p.actor.position };
     p.previous = { ...p.actor.position };
   }
+  /** Homeward route: the same road, entering the hall by its entry lane. */
   #backRoute(g: Group): WorkerPoint[] {
     if (g.mission.returnPath?.length)
       return this.hooks
-        .path([...g.mission.returnPath].reverse())
+        .path([...g.mission.returnPath].reverse(), 'in')
         .reverse()
-        .map((v) => this.#point(v));
-    return [...g.route].reverse();
+        .map((v) => this.#point(v, v.width));
+    return [...this.#route(g.mission, g.stop, 'in')].reverse();
+  }
+  /**
+   * A retrace that reaches the door switches to the entry lane: the exit lane
+   * is walked outward only.
+   */
+  #homeward(retrace: WorkerPoint[], back: WorkerPoint[]): WorkerPoint[] {
+    const first = retrace.findIndex((q) => q.lane),
+      lane = back.findIndex((q) => q.lane);
+    return first < 0 || lane < 0 ? retrace : [...retrace.slice(0, first), ...back.slice(lane)];
   }
   #post(p: Person, g: Group, now: number, everyone = false): WorkerPoint {
     if (g.mission.resource === 'garden') {
@@ -1356,7 +1377,7 @@ export class VillageWorkers {
     const back = this.#backRoute(g);
     p.phase = 'inbound';
     p.phaseAt = now;
-    a.path = [{ ...a.position }, ...a.path.slice(0, segment).reverse()];
+    a.path = this.#homeward([{ ...a.position }, ...a.path.slice(0, segment).reverse()], back);
     a.distance = 0;
     a.done = false;
     a.member = 0;
@@ -1461,7 +1482,10 @@ export class VillageWorkers {
         g.stop = leg;
         g.route = this.#route(g.mission, leg);
         g.layout = this.#layout(g.mission, g.route, leg);
-        const door = g.route[0]!;
+        const door = g.route[0]!,
+          indoors = p.actor.path[p.actor.path.length - 1];
+        // Indoors behind a double door, the next leg starts on the exit lane.
+        if (indoors?.lane && door.lane) p.actor.position = { x: door.x, z: door.z };
         // A changed doorway needs a real connector; retain the reached position.
         if (Math.hypot(door.x - p.actor.position.x, door.z - p.actor.position.z) > 0.01) {
           const connector = worksiteConnector(p.actor.position, door, door, (q, r) => this.hooks.free(q, r, null));
@@ -1796,7 +1820,8 @@ export class VillageWorkers {
         [...this.#groups.values()].flatMap((g) =>
           g.mission.stops?.length
             ? [...g.mission.stops.map((_, i) => this.#route(g.mission, i)), this.#backRoute(g)]
-            : (g.mission.leisure?.map((l) => l.path) ?? [g.route]),
+            : (g.mission.leisure?.map((l) => l.path) ??
+              (g.mission.resource === 'trade' ? [g.route] : [g.route, this.#backRoute(g)])),
         ),
       );
       this.#graphDirty = false;

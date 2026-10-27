@@ -164,6 +164,43 @@ function simulate(traffic: WorkerTraffic, actors: TrafficActor[], seconds: numbe
   return min;
 }
 describe('local village circulation', () => {
+  it('never makes a door lane or its road merge a passage, so opposite lanes flow side by side', () => {
+    // The hall's exit lane (z = -0.42) and entry lane (z = +0.42) in metres
+    // from the door, each merging onto the northbound road at (2.5, 2.5) on
+    // its own side; the road itself bends at (2.5, 8).
+    const out: WorkerPoint[] = [
+      { x: 1.04, z: -0.42, width: 0.5, lane: 'out' },
+      { x: 1.12, z: -0.42, width: 0.5, lane: 'out' },
+      { x: 1.98, z: -0.42, width: 0.5, lane: 'out' },
+      { x: 2.72, z: -0.42, width: 0.8, lane: 'out' },
+      { x: 2.5, z: 2.5 },
+      { x: 2.5, z: 8 },
+      { x: 5, z: 8 },
+    ];
+    const back: WorkerPoint[] = [
+      { x: 5, z: 8 },
+      { x: 2.5, z: 8 },
+      { x: 2.5, z: 2.5 },
+      { x: 2.28, z: 0.42, width: 0.8, lane: 'in' },
+      { x: 1.98, z: 0.42, width: 0.5, lane: 'in' },
+      { x: 1.12, z: 0.42, width: 0.5, lane: 'in' },
+      { x: 1.04, z: 0.42, width: 0.5, lane: 'in' },
+    ];
+    const t = new WorkerTraffic();
+    t.rebuild([out, back]);
+    const points = [...t.passages.values()].flatMap((p) => p.points);
+    // No passage in the lanes nor at the merge: only the road bend and the far ends.
+    expect(points.some((p) => p.z < 3 && p.x < 4)).toBe(false);
+    expect(points.some((p) => Math.hypot(p.x - 2.5, p.z - 8) < 0.1)).toBe(true);
+    const people = [
+      ...Array.from({ length: 10 }, (_, i) => actor(`out-${i}`, out, { mission: 'wood', rank: i, startAt: i * 520 })),
+      ...Array.from({ length: 12 }, (_, i) =>
+        actor(`in-${i}`, back, { mission: `garden-${i}`, direction: -1, startAt: 1000 + i * 1500 }),
+      ),
+    ];
+    expect(simulate(t, people, 60)).toBeGreaterThanOrEqual(WORKER_CLEARANCE - 0.006);
+    expect(people.every((p) => p.done)).toBe(true);
+  });
   it('keeps a following file apart instead of overlapping the leader', () => {
     const path = [
         { x: 0, z: 0, width: 0.5 },

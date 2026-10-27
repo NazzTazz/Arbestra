@@ -4,9 +4,10 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { TravelCell, VillageState } from '@arbestra/contracts';
 import { expect, it, vi } from 'vitest';
-import { VillageWorkers, type WorkerHooks } from './village-workers';
-import { gardenHarvestPoint, sampleWorkerPath, type TrafficActor } from './worker-motion';
+import { VillageWorkers, type PathPoint, type WorkerHooks } from './village-workers';
+import { gardenHarvestPoint, sampleWorkerPath, type DoorLane, type TrafficActor } from './worker-motion';
 import { gardenStride } from './worker-gestures';
+import { buildingPlan, doorConnector, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE } from './building-plan';
 
 const epoch = Date.parse('2026-10-02T12:00:00Z');
 function gardenSnapshot(): VillageState {
@@ -1101,24 +1102,29 @@ it('reaches both work posts after the actual corner even if the leader occupies 
 });
 it('recomputes a home itinerary only when its cell, the routes or the scene geometry change', () => {
   let geometry = 'g1';
-  const leisurePath = vi.fn((_id: string, p: TravelCell[]) => p.map((c) => new Vector3(c.cellX, 0, c.cellY)));
+  const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
+    void lane;
+    return p.map((c) => new Vector3(c.cellX, 0, c.cellY));
+  });
   const f = fixture(() => true, { leisurePath, leisureVersion: () => geometry });
   try {
     const state = idleSnapshot();
     f.view.sync(state, epoch);
-    expect(leisurePath).toHaveBeenCalledTimes(2);
+    // Each home costs two spokes: walked out of the hall and walked back in.
+    expect(leisurePath).toHaveBeenCalledTimes(4);
+    expect(leisurePath.mock.calls.map((c) => c[2])).toEqual(['out', 'in', 'out', 'in']);
     // A harvest or any unrelated update keeps the home cells and the routes.
     f.view.sync({ ...state, village: { ...state.village } }, epoch + 1000);
-    expect(leisurePath).toHaveBeenCalledTimes(2);
+    expect(leisurePath).toHaveBeenCalledTimes(4);
     const house = { ...state.cells[1]!, building: { ...state.cells[1]!.building! } };
     f.view.sync({ ...state, cells: [state.cells[0]!, house] }, epoch + 2000);
-    expect(leisurePath).toHaveBeenCalledTimes(3);
-    expect(leisurePath.mock.calls[2]![0]).toBe('house');
+    expect(leisurePath).toHaveBeenCalledTimes(6);
+    expect(leisurePath.mock.calls.slice(4).map((c) => c[0])).toEqual(['house', 'house']);
     geometry = 'g2';
     f.view.sync({ ...state, cells: [state.cells[0]!, house] }, epoch + 3000);
-    expect(leisurePath).toHaveBeenCalledTimes(5);
+    expect(leisurePath).toHaveBeenCalledTimes(10);
     f.view.sync({ ...state, cells: [state.cells[0]!, house], travelRoutes: [...state.travelRoutes] }, epoch + 4000);
-    expect(leisurePath).toHaveBeenCalledTimes(7);
+    expect(leisurePath).toHaveBeenCalledTimes(14);
   } finally {
     f.dispose();
   }
@@ -1413,4 +1419,219 @@ it('wood site: shows the tree already down after a reload past its fall, and the
   } finally {
     f.dispose();
   }
+});
+
+/**
+ * The market hall as the scene plans it, facing +x with its double door, in
+ * the plan's own metres: mission paths start inside the body, reach the road
+ * in front of the door (2.5, 0) and go on. The wood road runs north; garden
+ * plots sit on both sides of a westward road branching off it, one junction
+ * each, so gardeners and woodcutters share the hall door and its road only.
+ */
+const MARKET_HALL = buildingPlan({
+  id: 'hall',
+  anchor: { cellX: 0, cellY: 0 },
+  cells: [
+    { cellX: 0, cellY: 0 },
+    { cellX: 0, cellY: 1 },
+  ],
+  world: { widthCells: 32, heightCells: 32 },
+  recipe: { ...HALL_RECIPE, entrance: { ...HALL_RECIPE.entrance, face: '+x', width: HALL_DOUBLE_DOOR_WIDTH } },
+});
+/** The scene's doorstep route: one lane of the double door, or the single connector when `lanes` is off. */
+function hallPath(lanes: boolean): WorkerHooks['path'] {
+  return (path, lane) => {
+    const points = path.map((c) => ({ x: c.cellX, y: 0, z: c.cellY }));
+    const toVector = (p: { x: number; z: number }) => new Vector3(p.x, 0, p.z);
+    const door = doorConnector(MARKET_HALL, points, lanes ? lane : undefined);
+    if (!door) return points.map(toVector);
+    const route: PathPoint[] = door.route.map((p) =>
+      Object.assign(toVector(p), { ...(p.lane ? { lane: p.lane } : {}), ...(p.width ? { width: p.width } : {}) }),
+    );
+    return [...route, ...points.slice(door.resume).map(toVector)];
+  };
+}
+const HALL_ROAD: TravelCell[] = [
+  { cellX: 0, cellY: 0 },
+  { cellX: 2.5, cellY: 0 },
+  { cellX: 2.5, cellY: 2.5 },
+];
+function marketPlots(branchAt: number): TravelCell[][] {
+  const junctions = Array.from({ length: 9 }, (_, i) => ({ cellX: -1.5 - i * 2.5, cellY: branchAt }));
+  return junctions.flatMap((junction, i) =>
+    [1, -1].map((side) => [
+      ...HALL_ROAD,
+      { cellX: 2.5, cellY: branchAt },
+      ...junctions.slice(0, i),
+      junction,
+      { cellX: junction.cellX, cellY: branchAt + side * 3.4 },
+    ]),
+  );
+}
+/**
+ * A wood lot of ten leaving the hall at `epoch` while `gardeners` harvests,
+ * started long before, walk back in through the same door from `firstBackMs`
+ * on, one every `everyMs`, at one metre per second. The garden road branches
+ * off the wood road at `branchAt`, north of the hall's road merge (2.5, 2.5).
+ */
+function marketTraffic(gardeners: number, branchAt: number, firstBackMs = 2000, everyMs = 1500) {
+  const state = openTeam('open-wood', 94_000),
+    e = state.village.extractions[0]!;
+  e.cellX = 2.5;
+  e.cellY = 16;
+  e.path = [...HALL_ROAD, { cellX: 2.5, cellY: 5 }, { cellX: 2.5, cellY: 9 }, { cellX: 2.5, cellY: 16 }];
+  const plots = marketPlots(branchAt);
+  expect(plots.length).toBeGreaterThanOrEqual(gardeners);
+  state.cells = plots.slice(0, gardeners).map((path, i) => {
+    let length = 0;
+    for (let k = 1; k < path.length; k++)
+      length += Math.hypot(path[k]!.cellX - path[k - 1]!.cellX, path[k]!.cellY - path[k - 1]!.cellY);
+    const walkMs = Math.round(length * 1000),
+      backAt = epoch + firstBackMs + i * everyMs - walkMs,
+      startedAt = epoch - 120_000 + i * 1500;
+    const plot = path[path.length - 1]!;
+    const harvest = {
+      id: `garden-${i}`,
+      startedAt: new Date(startedAt).toISOString(),
+      completesAt: new Date(backAt + walkMs).toISOString(),
+      transportMs: walkMs,
+      path,
+      stops: [{ ...plot, path, arrivesAfterMs: walkMs, workEndsAfterMs: backAt - startedAt, reservedCarrots: 10 }],
+      returnPath: [...path].reverse(),
+    };
+    return { building: { garden: { plots: [{ ...plot, harvest }] } } };
+  }) as unknown as VillageState['cells'];
+  return state;
+}
+/** Within the opening and the porch: from the indoor point to the lanes' end, before the road merge. */
+const atDoor = (p: { x: number; z: number }) => p.x < 2.1 && Math.abs(p.z) < 1.2;
+/**
+ * Walk the clock; record when each woodcutter works, how late each gardener
+ * gets home after its authoritative completion, the longest wait of anyone
+ * in sight, the longest wait at the door, and the mean animation cost.
+ */
+function observeMarketDoor(f: ReturnType<typeof fixture>, state: VillageState, id: string, untilMs: number) {
+  const workedAt: number[] = [],
+    waits = new Map<string, { since: number; longest: number; doorSince: number; doorLongest: number }>(),
+    completesAt = new Map<string, number>(),
+    goneAt = new Map<string, number>(),
+    seen = new Set<string>(),
+    lanes = new Set<DoorLane>();
+  for (const cell of state.cells)
+    for (const plot of cell.building?.garden?.plots ?? [])
+      if (plot.harvest) completesAt.set(plot.harvest.id, Date.parse(plot.harvest.completesAt) - epoch);
+  let frames = 0,
+    cost = 0;
+  for (let t = 0; t <= untilMs; t += 33) {
+    const started = performance.now();
+    f.view.animate(epoch + t, true);
+    cost += performance.now() - started;
+    frames++;
+    const layouts = f.view.metrics.layouts;
+    layouts
+      .find((l) => l.id === id)
+      ?.phases.forEach((phase, i) => {
+        if (phase === 'work' && workedAt[i] === undefined) workedAt[i] = t;
+      });
+    for (const l of layouts) if (l.resource === 'garden') seen.add(l.id);
+    for (const gardenId of seen)
+      if (!goneAt.has(gardenId) && !layouts.some((l) => l.id === gardenId)) goneAt.set(gardenId, t);
+    for (const p of f.view.figures) {
+      const a = actorOf(p);
+      if (a.visible && atDoor(a.position)) {
+        const here = sampleWorkerPath(a.path, a.distance);
+        // Every walker at the door is on the lane of its own direction.
+        const segment = a.path.find((q) => Math.hypot(q.x - here.x, q.z - here.z) < 0.9);
+        if (segment?.lane) {
+          lanes.add(segment.lane);
+          expect(segment.lane, `${a.id} ${JSON.stringify(a.position)}`).toBe(a.direction === 1 ? 'out' : 'in');
+        }
+      }
+      const w = waits.get(a.id) ?? { since: -1, longest: 0, doorSince: -1, doorLongest: 0 };
+      if (a.waitingSince === null || !a.visible) w.since = w.doorSince = -1;
+      else {
+        if (w.since < 0) w.since = t;
+        w.longest = Math.max(w.longest, t - w.since);
+        if (atDoor(a.position)) {
+          if (w.doorSince < 0) w.doorSince = t;
+          w.doorLongest = Math.max(w.doorLongest, t - w.doorSince);
+        } else w.doorSince = -1;
+      }
+      waits.set(a.id, w);
+    }
+  }
+  const homeLate = [...completesAt].map(([gardenId, at]) => (goneAt.get(gardenId) ?? Infinity) - at);
+  return {
+    workedAt,
+    longestWait: Math.max(0, ...[...waits.values()].map((w) => w.longest)),
+    doorWait: Math.max(0, ...[...waits.values()].map((w) => w.doorLongest)),
+    homeLate,
+    lanes: [...lanes].sort(),
+    updateMs: cost / frames,
+  };
+}
+function expectDoorFlows(o: ReturnType<typeof observeMarketDoor>) {
+  const detail = JSON.stringify(o);
+  expect(o.lanes, detail).toEqual(['in', 'out']);
+  // The team's road trip is 17.3 s: everyone has a post well before the
+  // 76.7 s return, instead of half the team held at the door until then.
+  expect(
+    o.workedAt.filter((t) => t !== undefined),
+    detail,
+  ).toHaveLength(10);
+  expect(Math.max(...o.workedAt), detail).toBeLessThan(35_000);
+  // Every gardener gets home before its 30 s cleanup; waits happen on the
+  // road at the merge, never for more than two seconds at the door.
+  expect(Math.max(...o.homeLate), detail).toBeLessThan(28_000);
+  expect(o.doorWait, detail).toBeLessThan(2000);
+  expect(o.longestWait, detail).toBeLessThan(20_000);
+}
+it('takes ten woodcutters out through the exit lane while twelve gardeners come in through the entry lane, nobody held at the door', () => {
+  const f = fixture(() => true, { path: hallPath(true) });
+  try {
+    const state = marketTraffic(12, 11);
+    f.view.sync(state, epoch);
+    f.view.animate(epoch, true);
+    expect(f.view.metrics.layouts.find((l) => l.id === 'open-wood')?.variant).toBe('front');
+    expectDoorFlows(observeMarketDoor(f, state, 'open-wood', 110_000));
+  } finally {
+    f.dispose();
+  }
+});
+/**
+ * The garden road branching three metres up the road from the hall's merge:
+ * with the merge a plain road point (each lane joins at a shallow angle on its
+ * own side), no file stops inside a passage's hold zone there, so the junction
+ * does not lock against the door's flows.
+ */
+it('takes both flows through a garden junction three metres past the road merge', () => {
+  const f = fixture(() => true, { path: hallPath(true) });
+  try {
+    const state = marketTraffic(12, 5.5);
+    f.view.sync(state, epoch);
+    expectDoorFlows(observeMarketDoor(f, state, 'open-wood', 110_000));
+  } finally {
+    f.dispose();
+  }
+});
+it('costs no more per frame with the double door than with the single door it replaces', () => {
+  const measure = (lanes: boolean) => {
+    const f = fixture(() => true, { path: hallPath(lanes) });
+    try {
+      const state = marketTraffic(12, 11);
+      f.view.sync(state, epoch);
+      return observeMarketDoor(f, state, 'open-wood', 60_000).updateMs;
+    } finally {
+      f.dispose();
+    }
+  };
+  // Warm up the JIT on the first variant, then compare the same scenario.
+  measure(false);
+  const single = measure(false),
+    double = measure(true);
+  console.log(`hall door animate cost: single door ${single.toFixed(3)} ms, double door ${double.toFixed(3)} ms`);
+  // Reported in the handoff; the bound only guards against a regression of the order of the passage chain.
+  expect(double, `single door ${single.toFixed(3)} ms, double door ${double.toFixed(3)} ms`).toBeLessThan(
+    single * 1.5 + 0.2,
+  );
 });

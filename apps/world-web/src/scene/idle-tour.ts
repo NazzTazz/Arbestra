@@ -1,7 +1,10 @@
 import { pathLength, type WorkerPoint } from './worker-motion';
 export interface IdleVisit {
   buildingId: string;
+  /** Spoke from the town hall to this door. */
   path: WorkerPoint[];
+  /** The same spoke as walked back to the hall (its entry lane), when it differs. */
+  back?: WorkerPoint[];
 }
 export interface IdleLeg {
   from: string;
@@ -26,7 +29,7 @@ export function idleTour(visits: IdleVisit[], key: string): IdleLeg[] {
     let common = 0;
     while (common < Math.min(a.path.length, b.path.length) && same(a.path[common]!, b.path[common]!)) common++;
     if (!common || (common === 1 && a.path.length > 1 && b.path.length > 1)) return [];
-    const path = [...a.path.slice(common - 1).reverse(), ...b.path.slice(common)];
+    const path = [...(a.back ?? a.path).slice(common - 1).reverse(), ...b.path.slice(common)];
     if (path.length < 2) return [];
     legs.push({
       from: a.buildingId,

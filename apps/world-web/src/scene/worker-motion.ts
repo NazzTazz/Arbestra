@@ -1,8 +1,12 @@
+/** The town hall's double door: `out` leaves on the walker's right, `in` enters on the walker's right. */
+export type DoorLane = 'in' | 'out';
 export interface WorkerPoint {
   x: number;
   z: number;
   width?: number;
   key?: string;
+  /** A one-way door lane: walked in one direction only, so it is never a traffic passage. */
+  lane?: DoorLane;
 }
 export type WorkerRole = 'axe' | 'saw' | 'wood-chop' | 'pick' | 'break' | 'carry' | 'garden' | 'walk';
 export const WORKER_RADIUS = 0.18;
@@ -110,6 +114,17 @@ export function gardenHarvestPoint(centre: WorkerPoint, progress: number): Worke
   return { x: centre.x + p.x, z: centre.z + p.z };
 }
 
+/**
+ * A bend a walker must straighten up for and that opposite files take in
+ * turn. A door lane merges onto the road at a shallow angle (a road point is
+ * at least a cell from the join) on its own side of it: that merge is no
+ * bend, the lane offset carries over with a jump under four centimetres.
+ */
+export function bendsAt(a: WorkerPoint, p: WorkerPoint, b: WorkerPoint): boolean {
+  if (a.lane || b.lane) return false;
+  return Math.abs((p.x - a.x) * (b.z - p.z) - (p.z - a.z) * (b.x - p.x)) > 0.01;
+}
+
 function cycleKey(path: readonly WorkerPoint[]): string | null {
   if (path.length < 4) return null;
   const key = (p: WorkerPoint) => p.key ?? `${p.x.toFixed(3)}:${p.z.toFixed(3)}`;
@@ -139,10 +154,7 @@ export function sampleWorkerPath(path: readonly WorkerPoint[], distance: number,
         const p = path[n - 1]!,
           q = path[n]!,
           r = path[n + 1]!;
-        return (
-          Math.min(p.width ?? 0.8, q.width ?? 0.8, r.width ?? 0.8) < 0.8 ||
-          Math.abs((q.x - p.x) * (r.z - q.z) - (q.z - p.z) * (r.x - q.x)) > 0.01
-        );
+        return Math.min(p.width ?? 0.8, q.width ?? 0.8, r.width ?? 0.8) < 0.8 || bendsAt(p, q, r);
       };
       const taper = Math.min(1, Math.min(turnAt(i - 1) ? t * length : 1, turnAt(i) ? (1 - t) * length : 1) / 0.7);
       const offset = Math.max(-width / 2 + WORKER_RADIUS, Math.min(width / 2 - WORKER_RADIUS, lateral)) * taper;
@@ -195,6 +207,8 @@ interface Passage {
   points: WorkerPoint[];
   owners: Set<string>;
   lastDirection: number;
+  lastMission: string;
+  /** Missions served in a row in `lastDirection`: a team's convoy is one turn. */
   served: number;
   straight: boolean;
 }
@@ -206,18 +220,17 @@ export class WorkerTraffic {
   #waitOrder = new Map<string, number>();
   rebuild(paths: readonly WorkerPoint[][]) {
     const nodes = new Map<string, { point: WorkerPoint; links: Set<string>; turn: boolean }>();
+    // A door lane carries one direction only: bodies keep their distance there,
+    // and no walker ever holds it against the opposite flow.
     for (const path of paths)
       for (let i = 0; i < path.length; i++) {
         const p = path[i]!,
           key = p.key ?? `${p.x.toFixed(3)}:${p.z.toFixed(3)}`;
+        if (p.lane) continue;
         const node = nodes.get(key) ?? { point: p, links: new Set<string>(), turn: i === 0 || i === path.length - 1 };
         for (const n of [path[i - 1], path[i + 1]])
-          if (n) node.links.add(n.key ?? `${n.x.toFixed(3)}:${n.z.toFixed(3)}`);
-        if (i > 0 && i < path.length - 1) {
-          const a = path[i - 1]!,
-            b = path[i + 1]!;
-          node.turn ||= Math.abs((p.x - a.x) * (b.z - p.z) - (p.z - a.z) * (b.x - p.x)) > 0.01;
-        }
+          if (n && !n.lane) node.links.add(n.key ?? `${n.x.toFixed(3)}:${n.z.toFixed(3)}`);
+        if (i > 0 && i < path.length - 1) node.turn ||= bendsAt(path[i - 1]!, p, path[i + 1]!);
         nodes.set(key, node);
       }
     const conflicts = [...nodes.entries()].filter(
@@ -228,7 +241,7 @@ export class WorkerTraffic {
       for (let i = 1; i < path.length; i++) {
         const a = path[i - 1]!,
           b = path[i]!;
-        if (Math.min(a.width ?? 0.8, b.width ?? 0.8) >= 0.8) continue;
+        if (a.lane || b.lane || Math.min(a.width ?? 0.8, b.width ?? 0.8) >= 0.8) continue;
         const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.6),
           edge = [a.key ?? `${a.x}:${a.z}`, b.key ?? `${b.x}:${b.z}`].sort().join('~');
         for (let n = 1; n < steps; n++) {
@@ -265,6 +278,7 @@ export class WorkerTraffic {
         points: c.points,
         owners: prior?.owners ?? new Set(),
         lastDirection: prior?.lastDirection ?? 0,
+        lastMission: prior?.lastMission ?? '',
         served: prior?.served ?? 0,
         straight,
       });
@@ -292,15 +306,28 @@ export class WorkerTraffic {
   ) {
     this.blocked = 0;
     const live = new Set(actors.filter((a) => !a.done).map((a) => a.id));
+    // A passage is kept to 1.3 m, or until the walker is through it and out of
+    // its turn: back on its own side of the road, it no longer bars the
+    // opposite file, whose head would otherwise hold the next passage against
+    // this walker's own file.
+    const through = (a: TrafficActor, p: Passage) => {
+      const heading = sampleWorkerPath(a.path, a.distance);
+      return p.points.every((q) => {
+        const dx = q.x - a.position.x,
+          dz = q.z - a.position.z;
+        return dx * heading.dx + dz * heading.dz < 0 && Math.hypot(dx, dz) >= 0.7 + WORKER_RADIUS;
+      });
+    };
     for (const p of this.passages.values())
-      for (const id of p.owners)
+      for (const id of p.owners) {
+        const owner = live.has(id) ? actors.find((a) => a.id === id) : undefined;
         if (
-          !live.has(id) ||
-          !actors.some(
-            (a) => a.id === id && p.points.some((q) => Math.hypot(a.position.x - q.x, a.position.z - q.z) < 1.3),
-          )
+          !owner ||
+          !p.points.some((q) => Math.hypot(owner.position.x - q.x, owner.position.z - q.z) < 1.3) ||
+          through(owner, p)
         )
           p.owners.delete(id);
+      }
     const ordered = actors
       .filter((a) => !a.done && now >= a.startAt)
       .sort((a, b) => {
@@ -437,7 +464,7 @@ export class WorkerTraffic {
             break;
           }
           for (const passage of this.passages.values())
-            if (passage.points.some((q) => Math.hypot(p.x - q.x, p.z - q.z) < 1.15)) {
+            if (passage.points.some((q) => Math.hypot(p.x - q.x, p.z - q.z) < 1.15) && !through(a, passage)) {
               const owners = [...passage.owners].filter((id) => !batch.some((a) => a.id === id));
               const compatible = owners.every((id) => {
                 const owner = actors.find((v) => v.id === id);
@@ -454,7 +481,9 @@ export class WorkerTraffic {
                 break;
               }
               if (!passage.owners.has(a.id)) {
-                const exit = sampleWorkerPath(a.path, Math.min(length, proposal.distance + 1));
+                // Where the walker will stand, on its own side of the road: an
+                // opposite file waiting across the road does not seal the exit.
+                const exit = sampleWorkerPath(a.path, Math.min(length, proposal.distance + 1), proposal.lateral);
                 if (
                   neighbours(exit).some(
                     (n) =>
@@ -496,8 +525,14 @@ export class WorkerTraffic {
         }
         for (const lease of new Set(leases)) {
           if (!batch.some((a) => lease.owners.has(a.id))) {
-            lease.served = lease.lastDirection === actor.direction ? lease.served + 1 : 1;
+            lease.served =
+              lease.lastDirection !== actor.direction
+                ? 1
+                : lease.lastMission === actor.mission
+                  ? lease.served
+                  : lease.served + 1;
             lease.lastDirection = actor.direction;
+            lease.lastMission = actor.mission;
           }
           for (const a of batch) lease.owners.add(a.id);
         }

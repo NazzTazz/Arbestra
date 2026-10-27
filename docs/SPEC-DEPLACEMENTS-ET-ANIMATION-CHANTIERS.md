@@ -116,7 +116,7 @@ Les règles suivantes sont **proposées** comme première politique déterminist
 | Passage étroit | Premier rang engagé prioritaire ; groupe opposé attend avant l'entrée. Réserver le passage et un dégagement de sortie avant d'y entrer. |
 | Intersection | Réserver ensemble les zones de conflit traversées par le rang ; premier arrivé au point d'attente prioritaire. Une trajectoire compatible peut avancer en parallèle. |
 | Égalité d'arrivée | Départage stable par clé de mission puis rang, jamais par ordre des meshes ou hasard par frame. |
-| Porte de l'hôtel de ville | Laisser finir un passage engagé ; priorité nominale aux retours sur les nouveaux départs. L'ancienneté d'attente protège néanmoins les sortants d'un flux continu de retours. |
+| Porte de l'hôtel de ville | Double porte (halle-marché, 27 octobre) : deux voies à sens unique, entrée à droite et sortie à gauche vu de l'extérieur, jusqu'au raccord à la route où chaque voie rejoint le côté droit de son flux. Les voies ne sont jamais un passage réservé : les corps seuls y tiennent la distance. Une halle à porte simple garde l'ancien connecteur unique et son passage étroit. |
 | Accès au poste | Libérer la sortie avant de prendre un poste ; ne pas attendre au milieu du chemin partagé. |
 
 Ne pas réserver un itinéraire entier. Réserver un conflit seulement si une place de sortie est réservée avec lui, puis le libérer quand le dernier membre l'a quitté. Fusionner les conflits rapprochés lorsqu'aucun rang ne tient entre eux : ils deviennent un seul passage contrôlé, avec places d'attente avant ses entrées. Les rangs attendent hors de ce passage, pas sur une intersection.

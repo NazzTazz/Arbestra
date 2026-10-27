@@ -1,6 +1,6 @@
 import type { Building, VillageCell, VillageState } from '@arbestra/contracts';
 import { delta, normalize } from './world-space';
-import { WORKER_CLEARANCE } from './worker-motion';
+import { WORKER_CLEARANCE, type DoorLane } from './worker-motion';
 
 export type Face = '-x' | '+x' | '-z' | '+z';
 export interface Point {
@@ -98,6 +98,11 @@ export interface BuildingPlan {
   bounds: { halfX: number; halfZ: number };
 }
 export const CELL_UNITS = 2.5;
+/** The market hall's double door, in masonry modules: two one-way lanes and a pier between them. */
+export const HALL_DOUBLE_DOOR_WIDTH = 6;
+/** Width of one door lane: a single file, no pair forms before the road. */
+export const DOOR_LANE_WIDTH = 0.5;
+export type LanePoint = Point & { lane?: DoorLane; width?: number };
 const placementFields = new Set(['id', 'origin', 'rotation', 'entry', 'accesses']);
 /**
  * Generated geometry depends on a plan's shape only: buildings that differ by
@@ -561,8 +566,10 @@ export function recipeFor(
   const level = building.status === 'under-construction' ? (building.targetLevel ?? building.level) : building.level;
   // Explicit recipes, rather than a universal level-to-floor mapping.
   const levels = base.id !== 'town-hall' && level === 2 ? 2 : 1;
+  // The market hall (level 2 and up) opens a double door; the baked level-1 hall keeps its single door.
+  const doorWidth = base.id === 'town-hall' && level >= 2 ? HALL_DOUBLE_DOOR_WIDTH : base.entrance.width;
   return {
-    recipe: { ...base, levels, entrance: { ...base.entrance, face: layout.entranceFace } },
+    recipe: { ...base, levels, entrance: { ...base.entrance, face: layout.entranceFace, width: doorWidth } },
     phase: building.status === 'under-construction' ? 'works' : 'finished',
     sourceLevels: building.targetLevel !== null ? (base.id !== 'town-hall' && building.level === 2 ? 2 : 1) : 0,
   };
@@ -604,23 +611,83 @@ export function planFocus(state: VillageState, site: VillageCell, plan: Building
   };
 }
 
-/** Local orthogonal connector around the body; never changes authoritative travel time. */
-export function entranceConnector(plan: BuildingPlan, join: Point): Point[] {
+/**
+ * Half spacing of the two one-way lanes through the principal door, or null
+ * when the opening fits one body only: lanes stay a body clearance apart and
+ * each file stays inside the opening.
+ */
+export function doorLaneSpacing(plan: BuildingPlan): number | null {
+  const door = plan.accesses.find((a) => a.principal);
+  if (!door) return null;
+  const opening = Math.min(door.width, plan.recipe.walls?.gateWidth ?? Infinity),
+    s = opening / 4;
+  return 2 * s >= WORKER_CLEARANCE && s + DOOR_LANE_WIDTH / 2 <= opening / 2 ? s : null;
+}
+/**
+ * Seen from outside, entering walkers take the right half of the opening and
+ * leaving walkers the left half: each keeps its right. Zero without lanes.
+ */
+export function doorLaneOffset(plan: BuildingPlan, lane: DoorLane): Point {
+  const s = doorLaneSpacing(plan);
+  if (s === null) return { x: 0, y: 0, z: 0 };
+  const n = plan.entry.normal,
+    sign = lane === 'in' ? 1 : -1;
+  return { x: -n.z * s * sign, y: 0, z: n.x * s * sign };
+}
+/** Parallel polyline on the walker's right (outward walk) at distance `d`; mitred corners. */
+function offsetPolyline(points: readonly Point[], d: number): Point[] {
+  const directions: Array<{ x: number; z: number } | null> = points.map((p, i) => {
+    const q = points[i + 1];
+    if (!q) return null;
+    const length = Math.hypot(q.x - p.x, q.z - p.z);
+    return length < 1e-9 ? null : { x: (q.x - p.x) / length, z: (q.z - p.z) / length };
+  });
+  const right = (v: { x: number; z: number }) => ({ x: v.z, z: -v.x });
+  return points.map((p, i) => {
+    let before: { x: number; z: number } | null = null;
+    for (let k = i - 1; k >= 0 && !before; k--) before = directions[k]!;
+    let after: { x: number; z: number } | null = null;
+    for (let k = i; k < directions.length && !after; k++) after = directions[k]!;
+    const ra = before ? right(before) : after ? right(after) : { x: 0, z: 0 },
+      rb = after ? right(after) : ra;
+    const dot = ra.x * rb.x + ra.z * rb.z,
+      scale = dot > -0.99 ? d / (1 + dot) : 0;
+    const o = dot > -0.99 ? { x: (ra.x + rb.x) * scale, z: (ra.z + rb.z) * scale } : { x: ra.x * d, z: ra.z * d };
+    return { x: p.x + o.x, y: p.y, z: p.z + o.z };
+  });
+}
+
+/**
+ * Local orthogonal connector around the body; never changes authoritative
+ * travel time. With a `lane`, the connector is one of the door's two one-way
+ * lanes, parallel to the single connector at the lane spacing, tagged for the
+ * traffic model, and stops short of the road join: the scene merges each lane
+ * onto the road beyond it.
+ */
+export function entranceConnector(plan: BuildingPlan, join: Point, lane?: DoorLane): LanePoint[] {
   const fenced = plan.murets.length > 0,
-    normal = plan.entry.normal;
-  const start = fenced
+    normal = plan.entry.normal,
+    spacing = lane ? doorLaneSpacing(plan) : null;
+  const porch = fenced
     ? { x: plan.entry.gate.x + normal.x * WORKER_CLEARANCE, y: 0, z: plan.entry.gate.z + normal.z * WORKER_CLEARANCE }
     : plan.entry.outside;
-  const hx = fenced
+  const bodyX = fenced
     ? Math.max(...plan.murets.flatMap((w) => [Math.abs(w.a.x), Math.abs(w.b.x)])) +
       plan.recipe.module.thickness / 2 +
       WORKER_CLEARANCE / 2
     : plan.width / 2 + WORKER_CLEARANCE / 2;
-  const hz = fenced
+  const bodyZ = fenced
     ? Math.max(...plan.murets.flatMap((w) => [Math.abs(w.a.z), Math.abs(w.b.z)])) +
       plan.recipe.module.thickness / 2 +
       WORKER_CLEARANCE / 2
     : plan.depth / 2 + WORKER_CLEARANCE / 2;
+  // Lanes run beside the single connector: the inner lane keeps the body
+  // clearance off the walls as long as the road join stays outside the margin.
+  const margin =
+    spacing === null ? 0 : Math.max(0, Math.min(spacing, Math.max(Math.abs(join.x) - bodyX, Math.abs(join.z) - bodyZ)));
+  const hx = bodyX + margin,
+    hz = bodyZ + margin;
+  const start = { x: porch.x + normal.x * margin, y: 0, z: porch.z + normal.z * margin };
   const inside = (p: Point) => Math.abs(p.x) < hx - 1e-8 && Math.abs(p.z) < hz - 1e-8;
   assert(!inside(join), 'connector destination inside building');
   const xs = [...new Set([start.x, join.x, -hx, hx])],
@@ -655,7 +722,71 @@ export function entranceConnector(plan: BuildingPlan, join: Point): Point[] {
   }
   const route: Point[] = [];
   for (let i = target; i !== -1; i = previous[i]!) route.unshift(nodes[i]!);
-  return [plan.entry.inside, plan.entry.threshold, ...(fenced ? [plan.entry.outside, plan.entry.gate] : []), ...route];
+  const centre = [
+    plan.entry.inside,
+    plan.entry.threshold,
+    ...(fenced ? [plan.entry.outside, plan.entry.gate] : []),
+    ...route,
+  ];
+  if (spacing === null) return centre;
+  // Each flow keeps its right: the exit lane lies right of the outward walk,
+  // the entry lane right of the inward walk, up to the lane's own road join.
+  const points = offsetPolyline(centre, lane === 'out' ? spacing : -spacing);
+  return points.map((p, i) => ({ ...p, lane: lane!, width: i === points.length - 1 ? 0.8 : DOOR_LANE_WIDTH }));
+}
+
+/** Keep-right offset of a walker on the road, as the traffic model drives it. */
+const ROAD_LANE_OFFSET = 0.22;
+/**
+ * Doorstep route of a hall journey in the plan's local frame: the connector
+ * (one lane when asked and the opening allows it), then the index of the first
+ * route point to resume at. A lane ends at its own road join, on its flow's
+ * right side of the road beyond, and rejoins that road at the next point when
+ * the straight merge from both lanes clears the body: the two flows then meet
+ * the road's two-way traffic there, a body clearance apart, rather than at one
+ * shared corner on the doorstep.
+ */
+export function doorConnector(
+  plan: BuildingPlan,
+  points: readonly Point[],
+  lane?: DoorLane,
+): { route: LanePoint[]; resume: number } | null {
+  const outside = points.findIndex(
+    (q) => Math.abs(q.x) > plan.width / 2 + 0.23 || Math.abs(q.z) > plan.depth / 2 + 0.23,
+  );
+  if (outside < 0) return null;
+  const join = points[outside]!;
+  if (!lane || doorLaneSpacing(plan) === null) return { route: entranceConnector(plan, join), resume: outside + 1 };
+  const route = entranceConnector(plan, join, lane),
+    other = entranceConnector(plan, join, lane === 'in' ? 'out' : 'in');
+  const next = points[outside + 1];
+  const hx = plan.width / 2 + WORKER_CLEARANCE / 2,
+    hz = plan.depth / 2 + WORKER_CLEARANCE / 2;
+  const clear = (a: Point, b: Point) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.1));
+    for (let n = 0; n <= steps; n++) {
+      const t = n / steps,
+        x = a.x + (b.x - a.x) * t,
+        z = a.z + (b.z - a.z) * t;
+      if (Math.abs(x) < hx && Math.abs(z) < hz) return false;
+    }
+    return true;
+  };
+  // Where the road beyond runs along the door face, each lane's join moves to
+  // its flow's right side of that road, so the merge legs never share a line.
+  const merged = (lane: LanePoint[], sign: number) => {
+    const length = next ? Math.hypot(next.x - join.x, next.z - join.z) : 0;
+    if (!next || length < 1e-6) return lane;
+    const u = { x: (next.x - join.x) / length, z: (next.z - join.z) / length },
+      n = plan.entry.normal,
+      side = (u.z * n.x - u.x * n.z) * sign * ROAD_LANE_OFFSET;
+    const last = lane[lane.length - 1]!;
+    return [...lane.slice(0, -1), { ...last, x: last.x + n.x * side, z: last.z + n.z * side }];
+  };
+  const mine = merged(route, lane === 'out' ? 1 : -1),
+    theirs = merged(other, lane === 'out' ? -1 : 1);
+  const merge = next && clear(mine[mine.length - 1]!, next) && clear(theirs[theirs.length - 1]!, next);
+  return merge ? { route: mine, resume: outside + 1 } : { route, resume: outside };
 }
 
 /** Shared boundary resolution in canonical world units; gates from either side win. */

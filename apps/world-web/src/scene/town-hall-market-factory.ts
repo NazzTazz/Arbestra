@@ -1,6 +1,6 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import { buildingPlan, HALL_RECIPE, type BuildingRecipe } from './building-plan';
+import { buildingPlan, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE, type BuildingRecipe } from './building-plan';
 import { TimberThatch, timberBeamGeometry } from './timber-thatch';
 import { glazeWindows } from './frosted-glass';
 import { buildMarketRoof } from './town-hall-market-roof';
@@ -42,7 +42,7 @@ export function buildTownHallMarket(
       ...input,
       recipe: {
         ...HALL_RECIPE,
-        entrance: { ...HALL_RECIPE.entrance, open: true, width: 4 },
+        entrance: { ...HALL_RECIPE.entrance, open: true, width: HALL_DOUBLE_DOOR_WIDTH },
         windows: {},
         windowOpenings: lowerBays,
         roof: { ...HALL_RECIPE.roof, style: 'flat-stone', overhang: 0, sideOverhang: 0, lengthExtraRatio: 0 },
@@ -60,6 +60,18 @@ export function buildTownHallMarket(
     base.position.y = lower.base;
     kit.build(base, lower);
     finishRoundedCorner(base, kit, lower, lowerCorner, false, false, true);
+    {
+      // Double door: a stone pier splits the wide opening into the entry and
+      // exit lanes (entering on the right, seen from outside).
+      const door = lower.openings.find((o) => o.face === '-x' && o.left < 0 && o.right > 0)!,
+        thickness = lower.recipe.module.thickness;
+      const pier = new Mesh('market-door-pier', kit.scene);
+      timberBeamGeometry(door.top - door.bottom - 0.01, thickness, thickness, true, 3, 0.1, 0.12).applyToMesh(pier);
+      pier.position.set(-lower.width / 2 + thickness / 2, (door.top + door.bottom) / 2, (door.left + door.right) / 2);
+      pier.parent = base;
+      pier.material = kit.stone;
+      pier.receiveShadows = true;
+    }
     if (phase === 'finished') buildTownHallStorefront(base, kit, lower, lowerCorner, storefront);
     for (const niche of niches) {
       const z = (niche.left + niche.right) / 2,

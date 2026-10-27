@@ -3,7 +3,7 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { buildingPlan, HALL_RECIPE, type BuildingPlan } from './building-plan';
+import { buildingPlan, recipeFor, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE, type BuildingPlan } from './building-plan';
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { TimberThatch } from './timber-thatch';
 
@@ -77,6 +77,22 @@ it('keeps the market physical entrance on the planned access face through all fo
         expect(physicalNormal.x).toBeCloseTo(accessNormal.x);
         expect(physicalNormal.z).toBeCloseTo(accessNormal.z);
       }
+      // The double door: one opening six modules wide, matching the scene's
+      // plan for a market hall, split by a stone pier between the two lanes.
+      const door = lower.openings.find((o) => o.face === '-x' && o.left < 0 && o.right > 0)!;
+      expect(door.right - door.left).toBeCloseTo(HALL_DOUBLE_DOOR_WIDTH * HALL_RECIPE.module.length);
+      expect(door.right - door.left).toBeCloseTo(
+        recipeFor({
+          visualLayout: { recipe: 'town-hall', version: 1, quarterTurns: 0, entranceFace: face, offset: [0, 0] },
+          status: 'completed',
+          targetLevel: null,
+          level: 2,
+        })!.recipe.entrance.width * HALL_RECIPE.module.length,
+      );
+      const pier = root.getChildMeshes().find((m) => m.name === 'market-door-pier')!;
+      expect(pier).toBeDefined();
+      expect(pier.position.z).toBeCloseTo((door.left + door.right) / 2);
+      expect(Math.abs(pier.position.x)).toBeCloseTo(lower.width / 2 - HALL_RECIPE.module.thickness / 2);
       parent.dispose(false, false);
     }
   } finally {

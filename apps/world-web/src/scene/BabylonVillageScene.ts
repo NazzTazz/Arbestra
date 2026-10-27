@@ -124,12 +124,14 @@ import {
   buildingPlan,
   planShapeKey,
   recipeFor,
-  entranceConnector,
+  doorConnector,
+  doorLaneOffset,
   planForSite,
   resolveMurets,
   transformPoint,
   type BuildingPlan,
 } from './building-plan';
+import type { DoorLane } from './worker-motion';
 const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
@@ -1095,10 +1097,10 @@ export class BabylonVillageScene {
         foliage: this.#leafMaterial,
       },
       {
-        path: (path) => this.#workerPath(path),
+        path: (path, lane) => this.#workerPath(path, lane),
         project: (cell) => this.#space!.project(cell),
         localPath: (path) => this.#pathPoints(path),
-        leisurePath: (buildingId, path) => this.#leisurePath(buildingId, path),
+        leisurePath: (buildingId, path, lane) => this.#leisurePath(buildingId, path, lane),
         leisureVersion: () => this.#groundKey(),
         key: (point) => {
           const cell = this.#space!.inverse(point.x, point.z);
@@ -2768,14 +2770,17 @@ export class BabylonVillageScene {
     });
   }
 
-  /** Doorstep presentation connector; server journey and work deadlines stay unchanged. */
-  #workerPath(path: TravelCell[]): Vector3[] {
+  /**
+   * Doorstep presentation connector; server journey and work deadlines stay
+   * unchanged. The hall's double door gives each direction its own lane.
+   */
+  #workerPath(path: TravelCell[], lane?: DoorLane): Array<Vector3 & { lane?: DoorLane; width?: number }> {
     const points = this.#pathPoints(path);
     if (path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY))) return points;
     const hall = this.#state?.cells.find((cell) => cell.building?.type === 'town-hall');
     if (!hall || points.length < 2) return points;
     const factoryPlan = planForSite(this.#state!, hall, (x, y) => this.#store?.ground(x, y)?.height ?? null);
-    if (factoryPlan) return this.#factoryDeparture(hall, factoryPlan, points);
+    if (factoryPlan) return this.#factoryDeparture(hall, factoryPlan, points, lane);
     const centre = this.#space!.project(hall);
     centre.x = points[0]!.x + delta(centre.x, points[0]!.x, this.#worldWidthUnits);
     centre.z = points[0]!.z + delta(centre.z, points[0]!.z, this.#worldHeightUnits);
@@ -2796,15 +2801,18 @@ export class BabylonVillageScene {
     return [...entrance, ...points.slice(firstOutside)];
   }
 
-  #leisurePath(buildingId: string, path: TravelCell[]): Vector3[] {
+  #leisurePath(buildingId: string, path: TravelCell[], lane?: DoorLane): Array<Vector3 & { lane?: DoorLane }> {
     const building = this.#state?.cells.find((c) => c.building?.id === buildingId);
     if (!building || !this.#space) return [];
     if (path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY))) return this.#pathPoints(path);
     const factoryPlan = planForSite(this.#state!, building, (x, y) => this.#store?.ground(x, y)?.height ?? null);
     if (factoryPlan) {
-      const points = this.#workerPath(path);
+      const points = this.#workerPath(path, lane);
       if (building.building!.type === 'town-hall') {
-        const p = transformPoint(factoryPlan, factoryPlan.entry.inside),
+        // The indoor point of the lane walked in that direction: spokes start on the exit lane.
+        const offset = doorLaneOffset(factoryPlan, lane ?? 'out'),
+          inside = factoryPlan.entry.inside;
+        const p = transformPoint(factoryPlan, { x: inside.x + offset.x, y: inside.y, z: inside.z + offset.z }),
           centre = this.#space.project(building);
         return [new Vector3(centre.x + p.x, p.y + 0.31, centre.z + p.z)];
       }
@@ -2837,7 +2845,12 @@ export class BabylonVillageScene {
     return [...points.slice(0, outside + 1), ...entrance];
   }
 
-  #factoryDeparture(site: VillageCell, plan: BuildingPlan, points: Vector3[]): Vector3[] {
+  #factoryDeparture(
+    site: VillageCell,
+    plan: BuildingPlan,
+    points: Vector3[],
+    lane?: DoorLane,
+  ): Array<Vector3 & { lane?: DoorLane; width?: number }> {
     if (!points.length) return points;
     const anchor = this.#space!.project(site),
       c = Math.cos(plan.rotation),
@@ -2849,16 +2862,16 @@ export class BabylonVillageScene {
         z = p.z - anchor.z - plan.origin.z;
       return { x: c * x - s * z, y: 0, z: s * x + c * z };
     };
-    const outside = points.findIndex((p) => {
-      const q = local(p);
-      return Math.abs(q.x) > plan.width / 2 + 0.23 || Math.abs(q.z) > plan.depth / 2 + 0.23;
-    });
-    if (outside < 0) return points;
-    const route = entranceConnector(plan, local(points[outside]!)).map((p) => {
+    const connector = doorConnector(plan, points.map(local), lane);
+    if (!connector) return points;
+    const route = connector.route.map((p) => {
       const q = transformPoint(plan, p);
-      return new Vector3(anchor.x + q.x, plan.origin.y + 0.31, anchor.z + q.z);
+      return Object.assign(new Vector3(anchor.x + q.x, plan.origin.y + 0.31, anchor.z + q.z), {
+        lane: p.lane,
+        width: p.width,
+      });
     });
-    return [...route, ...points.slice(outside + 1)];
+    return [...route, ...points.slice(connector.resume)];
   }
 
   #travelDerived: {
