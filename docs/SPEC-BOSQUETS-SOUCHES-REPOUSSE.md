@@ -19,7 +19,7 @@ Statut : **arbitrages de Tristan intégrés le 27 octobre, implémentation autor
 
 Données serveur par bosquet : `initialAmount` I (300), stock physique `remainingAmount` R (repousse comprise), nouveau `cutAmount` C (cumulé). N emplacements d'arbres : les arbres RC1 du bosquet, ou la disposition historique.
 
-- Part d'un emplacement : `B = I / N`. Ordre de coupe fixe : du plus proche au plus éloigné du centre du village, puis par indice.
+- Part d'un emplacement : `B = I / N`. Ordre de coupe fixe et commun à tous les villages (plusieurs villages exploitent le même bosquet) : l'ordre des arbres du bosquet (`treeIndices`, disposition historique : indice).
 - Souches : `S = min(N, ceil(C / B))`. Les S premiers emplacements portent une souche.
 - Arbres d'origine encore debout : les `N − S` autres, à pleine taille.
 - Emplacement en cours (le S-ième, si `C` n'est pas un multiple de `B`) : son tronc est **couché**, de longueur `1 − (C mod B) / B`.
@@ -53,6 +53,10 @@ Retour de Tristan (« ça agace tout le monde ») :
 3. Rendu du bosquet : souches, arbres d'origine, tronc couché, jeunes arbres (§2).
 4. Abattage du vrai arbre pendant un lot (§3), qui remplace l'arbre accessoire de la tranche 3 des chantiers.
 
-## 7. Hors périmètre
+## 7. Kit d'arbres
+
+Kit modulaire livré le 27 octobre (`origin/etude/kit-arbres`, `blender-elements/arbres/kit-arbres-b.json`, style B validé par Tristan) : sapins a/b/c et feuillu (un pour quatre sapins), chacun en fût et feuillage séparés, pousses (plant 0,36 m, arbuste 0,96 m), souches a/b, bûche, branche. Format du kit des villageois, un matériau à couleurs de sommet. Il remplace l'arbre procédural de `#buildWoodland`, les formes provisoires et l'arbre accessoire. Arbre couché sans feuillage : remonté de 0,19 × échelle.
+
+## 8. Hors périmètre
 
 Souches comme obstacles de navigation, récompense du défrichage, effets (feuilles, copeaux, poussière) : tranche 5 de la spec des chantiers.

@@ -505,14 +505,18 @@ describe('terrain cache authority and lifecycle', () => {
     h.advance(100);
     const grove = { ...feature(deposit(1)), id: 'stone', type: 'woodland' };
     const c = chunk();
-    c.features = [{ ...grove, rc1: { trees: [{ x: 1.2, y: 1.4, elevation: 8, size: 1, crown: 1 }], rocks: [] } } as NaturalFeature];
+    c.features = [
+      { ...grove, rc1: { trees: [{ x: 1.2, y: 1.4, elevation: 8, size: 1, crown: 1 }], rocks: [] } } as NaturalFeature,
+    ];
     await h.settle(0, c);
     const snapshot = state();
     snapshot.region.features = [grove];
     h.store.observe(snapshot);
     h.store.invalidate('0:0');
     expect(h.store.entries.get('0:0')?.freshAt).toBe(-Infinity);
-    expect(h.store.chunk('0:0')?.features[0]?.rc1?.trees).toEqual([{ x: 1.2, y: 1.4, elevation: 8, size: 1, crown: 1 }]);
+    expect(h.store.chunk('0:0')?.features[0]?.rc1?.trees).toEqual([
+      { x: 1.2, y: 1.4, elevation: 8, size: 1, crown: 1 },
+    ]);
   });
   it('preserves a tombstone against late terrain and an unrelated snapshot', async () => {
     const h = harness();
