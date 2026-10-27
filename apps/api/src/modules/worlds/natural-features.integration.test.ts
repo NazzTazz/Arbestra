@@ -62,6 +62,7 @@ function historicalNaturalFeaturesQuery(db: Kysely<Database>, worldId: string, a
       'resourceDeposits.resourceCode',
       'resourceDeposits.cleared',
       'resourceDeposits.blocksCell',
+      'resourceDeposits.cutAmount',
     ])
     .where('worldFeatures.worldId', '=', worldId);
 }
