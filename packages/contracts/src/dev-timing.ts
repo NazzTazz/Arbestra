@@ -21,6 +21,7 @@ export const DEV_TIMING_PHASES = {
   navigation: 'Calcul du réseau de trajets',
   navigation_queue: 'Attente / démarrage du worker trajets',
   navigation_input: 'Encodage / transfert vers le worker trajets',
+  presentation_revisions: 'Révisions couvrant la présentation en cache',
   sync: 'Contrôle de cohérence avant réponse',
   terrain: 'Lecture terrain · transaction comprise',
   knowledge: 'Connaissance géographique',

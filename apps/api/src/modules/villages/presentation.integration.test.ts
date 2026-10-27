@@ -9,8 +9,9 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { buildApp } from '../../app.js';
+import type { TravelNetworkExecutor } from '../navigation/network-job.js';
 import { constructBuilding, readVillageProjection } from './service.js';
-import { villagePresentation } from './presentation.js';
+import { VillagePresentationReader, villagePresentation } from './presentation.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -150,4 +151,86 @@ it('keeps its version through an economic change and renews it for a new footpri
     canBuild: false,
     footprint: { buildingType: 'stonemason', role: 'anchor', state: 'reserved' },
   });
+}, 120000);
+
+// Incident (Pinkystan, 659 buildings): every read queued for a CPU lane and
+// recomputed the whole travel network, so a slow village never loaded.
+it('reuses one capture while its journal streams stand still and recomputes the network only for a structural change', async () => {
+  let networks = 0,
+    arrived: (() => void) | undefined,
+    gate: Promise<void> = Promise.resolve();
+  const executor: TravelNetworkExecutor = {
+    network: async (load) => {
+      networks++;
+      await load({ sources: new Set() });
+      arrived?.();
+      await gate;
+      return [];
+    },
+  };
+  let clock = Date.now();
+  const reader = new VillagePresentationReader(db, executor, { freshMs: 60_000, now: () => clock });
+  const read = () => reader.read(ids.account, 'aube', ids.village);
+  const first = await read();
+  expect(networks).toBe(1);
+  expect(first.cells.some((cell) => cell.footprint?.buildingType === 'town-hall')).toBe(true);
+  // Unchanged village inside the freshness bound: the very same capture.
+  clock += 30_000;
+  expect(await read()).toBe(first);
+  expect(networks).toBe(1);
+  // An economic write moves the village stream: a new capture of the same
+  // content, without any routing work (the planner input is unchanged).
+  await db
+    .updateTable('villageResources')
+    .set({ amount: 777 })
+    .where('worldId', '=', ids.world)
+    .where('villageId', '=', ids.village)
+    .where('resourceCode', '=', 'carrot')
+    .execute();
+  const recaptured = await read();
+  expect(recaptured).not.toBe(first);
+  expect(recaptured.version).toBe(first.version);
+  expect(Date.parse(recaptured.observedAt)).toBeGreaterThan(Date.parse(first.observedAt));
+  expect(networks).toBe(1);
+  // Past the freshness bound, time-projected stocks are recaptured, again
+  // without routing.
+  clock += 60_000;
+  const refreshed = await read();
+  expect(refreshed).not.toBe(recaptured);
+  expect(Date.parse(refreshed.observedAt)).toBeGreaterThan(Date.parse(recaptured.observedAt));
+  expect(networks).toBe(1);
+  expect(await read()).toBe(refreshed);
+  // Ownership is checked on every read, cached or not.
+  await expect(reader.read(randomUUID(), 'aube', ids.village)).rejects.toMatchObject({ statusCode: 404 });
+  // A new footprint changes the planner input: one routing for both
+  // concurrent readers, held at the executor until both have joined.
+  const free = new Set(refreshed.cells.filter((cell) => cell.canBuild).map((cell) => `${cell.cellX}:${cell.cellY}`));
+  const anchor = refreshed.cells
+    .filter((cell) => [0, 1].every((dx) => [0, 1].every((dy) => free.has(`${cell.cellX + dx}:${cell.cellY + dy}`))))
+    .sort((a, b) => Math.hypot(a.cellX - 1024, a.cellY - 512) - Math.hypot(b.cellX - 1024, b.cellY - 512))[0]!;
+  await constructBuilding(db, ids.account, 'aube', ids.village, anchor.cellX, anchor.cellY, 'sawmill', 0);
+  let release!: () => void;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  const reads = [read(), read()] as const;
+  await Promise.race([
+    entered,
+    new Promise((_, reject) => setTimeout(() => reject(Error('Routing never started')), 30_000)),
+  ]);
+  expect(networks).toBe(2);
+  release();
+  const [a, b] = await Promise.all(reads);
+  expect(b).toBe(a);
+  expect(networks).toBe(2);
+  expect(a.version).not.toBe(refreshed.version);
+  expect(a.cells.find((cell) => cell.cellX === anchor.cellX && cell.cellY === anchor.cellY)).toMatchObject({
+    canBuild: false,
+    footprint: { buildingType: 'sawmill', role: 'anchor', state: 'reserved' },
+  });
+  expect(await read()).toBe(a);
+  expect(networks).toBe(2);
 }, 120000);

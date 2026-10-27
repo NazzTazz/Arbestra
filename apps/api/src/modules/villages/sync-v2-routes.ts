@@ -16,7 +16,7 @@ import { reconcileVillageForRead } from './service.js';
 import { reconcileActivityDeadline } from './sync.js';
 import { captureSyncV2, type SyncV2SharedInclude } from './sync-v2-capture.js';
 import { serveSyncV2Stream } from './sync-v2-stream.js';
-import { readVillagePresentation } from './presentation.js';
+import { VillagePresentationReader } from './presentation.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
 
 const params = Type.Object({
@@ -61,8 +61,10 @@ export async function registerSyncV2Routes(
   app.addHook('preClose', async () => {
     for (const close of streams) close();
   });
-  // Independent of the change journal: a pure read-only projection, refreshed
-  // by the client on invalidation. The ETag spares the transfer, not the work.
+  // A pure read-only projection, refreshed by the client on invalidation. The
+  // reader keeps one capture per village while the journal streams covering
+  // its inputs stand still; the ETag then spares the transfer as well.
+  const presentations = new VillagePresentationReader(db, navigation);
   app.get(
     `${prefix}/presentation`,
     {
@@ -76,7 +78,7 @@ export async function registerSyncV2Routes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const presentation = await bounded(readVillagePresentation(db, account.id, worldSlug, villageId, navigation));
+      const presentation = await bounded(presentations.read(account.id, worldSlug, villageId));
       const etag = `"${presentation.version}"`;
       reply.header('Cache-Control', 'private, no-cache').header('ETag', etag);
       if (request.headers['if-none-match'] === etag) return reply.status(304).send();
