@@ -86,6 +86,7 @@ export function naturalFeaturesQuery(
         'resourceDeposits.resourceCode',
         'resourceDeposits.cleared',
         'resourceDeposits.blocksCell',
+        'resourceDeposits.cutAmount',
       ])
       .where('worldFeatures.worldId', '=', worldId)
       .$if(excludeWoodlands, (q) => q.where('worldFeatures.featureTypeCode', '!=', 'woodland'))

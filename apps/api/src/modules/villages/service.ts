@@ -1308,6 +1308,7 @@ export async function state(
                   remainingAmount: safeAmount(feature.remainingAmount!),
                   reservedAmount: safeAmount(feature.reservedAmount!),
                   availableAmount: safeAmount(feature.remainingAmount!) - safeAmount(feature.reservedAmount!),
+                  ...(feature.resourceCode === 'wood' ? { cutAmount: safeAmount(feature.cutAmount!) } : {}),
                   state:
                     feature.cleared || feature.featureState === 'depleted'
                       ? ('depleted' as const)

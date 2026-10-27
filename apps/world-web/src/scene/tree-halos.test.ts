@@ -3,6 +3,7 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { vertexSurface, woodlandTrees } from '@arbestra/contracts';
+import { groveSlots } from './grove-trees';
 import type { NaturalFeature, VillageState } from '@arbestra/contracts';
 import { groveHalo, groveHaloTrees, TreeHalos, TREE_HALO_LIFT, treeHaloRadius } from './tree-halos';
 import { TerrainStore } from './terrain-store';
@@ -42,8 +43,9 @@ const grove = (over: Partial<NaturalFeature> = {}): NaturalFeature => ({
 
 it('offers a halo per drawn tree, none for a cleared grove, an empty stock or another resource', () => {
   const feature = grove();
+  // Full-grown trees: the stock removes trees, it no longer shrinks them.
   expect(groveHaloTrees(feature).map((t) => [t.x, t.y, t.scale])).toEqual(
-    woodlandTrees(feature).map((t) => [t.x, t.y, t.scale]),
+    groveSlots(feature).map((s) => [s.tree.x, s.tree.y, s.tree.scale]),
   );
   expect(groveHaloTrees(feature)).toHaveLength(3);
   expect(groveHaloTrees(grove({ deposit: deposit({ cleared: true }) }))).toEqual([]);
@@ -117,7 +119,7 @@ it('places one tinted instance at the foot of every tree, projected like the woo
     f.halos.setAvailable([groveHalo(feature, 32)!]);
     f.tick();
     f.settle();
-    const trees = woodlandTrees(feature);
+    const trees = groveSlots(feature).map((s) => s.tree);
     expect(f.halos.instanceCount).toBe(trees.length);
     expect(f.halos.mesh.isEnabled()).toBe(true);
     expect(f.halos.mesh.isPickable).toBe(false);

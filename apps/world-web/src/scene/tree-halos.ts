@@ -6,7 +6,8 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import type { Scene } from '@babylonjs/core/scene';
-import { woodlandTrees, type NaturalFeature, type WoodlandTree } from '@arbestra/contracts';
+import type { NaturalFeature, WoodlandTree } from '@arbestra/contracts';
+import { groveSlots } from './grove-trees';
 import type { Cell } from './construction-selection';
 import { haloTexture, RESOURCE_HALO_COLOURS, RESOURCE_HALO_OPACITY } from './resource-halos';
 import type { TerrainStore } from './terrain-store';
@@ -30,7 +31,10 @@ export type GroveFeature = Pick<NaturalFeature, 'id' | 'cellX' | 'cellY' | 'vari
 export function groveHaloTrees(feature: GroveFeature): WoodlandTree[] {
   const deposit = feature.deposit;
   if (!deposit || deposit.resourceCode !== 'wood' || deposit.cleared || deposit.availableAmount <= 0) return [];
-  return woodlandTrees(feature);
+  // Around what can be cut: original trees standing and the trunk lying down, not stumps.
+  return groveSlots(feature)
+    .filter((slot) => slot.standing || slot.lying > 0)
+    .map((slot) => slot.tree);
 }
 
 export function groveHalo(feature: GroveFeature, chunkSize: number): TreeHaloGrove | null {

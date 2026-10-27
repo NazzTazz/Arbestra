@@ -190,6 +190,7 @@ export async function readSpatialChanges(
                     remainingAmount: safeAmount(row.remainingAmount),
                     reservedAmount: safeAmount(row.reservedAmount!),
                     availableAmount: safeAmount(row.remainingAmount) - safeAmount(row.reservedAmount!),
+                    ...(row.resourceCode === 'wood' ? { cutAmount: safeAmount(row.cutAmount!) } : {}),
                     state:
                       row.cleared || safeAmount(row.remainingAmount) === 0
                         ? ('depleted' as const)

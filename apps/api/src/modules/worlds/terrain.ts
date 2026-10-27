@@ -297,6 +297,7 @@ export async function readTerrainProjection(
         resourceCode: null,
         cleared: null,
         blocksCell: null,
+        cutAmount: null,
       });
     }
   }
@@ -413,6 +414,7 @@ export async function readTerrainProjection(
                           remainingAmount,
                           reservedAmount,
                           availableAmount: remainingAmount - reservedAmount,
+                          ...(f.resourceCode === 'wood' ? { cutAmount: safeAmount(f.cutAmount!) } : {}),
                           state: f.cleared || remainingAmount === 0 ? ('depleted' as const) : ('available' as const),
                           revision: safeAmount(f.revision!),
                           updatedAt: f.updatedAt!.toISOString(),

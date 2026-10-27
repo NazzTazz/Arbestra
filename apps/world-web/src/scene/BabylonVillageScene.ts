@@ -10,7 +10,7 @@ import {
   timedJson,
 } from '../dev/statistics';
 import type { StarterGhost } from '../spawn-map/starter-controller';
-import { poseStarterElement, spawnDelta, woodlandTrees } from '@arbestra/contracts';
+import { poseStarterElement, spawnDelta } from '@arbestra/contracts';
 import {
   automaticBraziers,
   prepareInfrastructureEdit,
@@ -108,6 +108,7 @@ import { RegionalOverview, TorusOverview } from './terrain-overview-view';
 import { RENDER_UNIT_CELLS } from './terrain-unit';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { bakeScenery, cloneWoodland, type SceneryPart } from './scenery-batch';
+import { groveSlots, treePieceData, youngOffset, type TreePiece } from './grove-trees';
 import { VillageRoads } from './village-roads';
 import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
@@ -229,6 +230,7 @@ export class BabylonVillageScene {
   readonly #leafDarkMaterial: StandardMaterial;
   readonly #trunkMaterial: StandardMaterial;
   readonly #woodlandMaterial: MultiMaterial;
+  #treeKitMaterial: StandardMaterial | null = null;
   readonly #constructionMaterial: StandardMaterial;
   readonly #scaffoldMaterial: StandardMaterial;
   readonly #selectionMaterial: StandardMaterial;
@@ -2615,82 +2617,106 @@ export class BabylonVillageScene {
     return data;
   }
 
+  /**
+   * Groves from the tree kit (blender-elements/arbres): every slot shows its
+   * original tree, or a stump with a young tree beside it, and the slot being
+   * cut its trunk lying down (grove-trees.ts, from the server stock). One
+   * thin-instanced mesh per kit piece and grove group.
+   */
   #buildWoodland(features: NaturalFeature[]): Mesh[] {
     if (!features.length) return [];
-    let source = this.#sceneryGeometry.get('woodland-thin-source');
-    if (!source) {
-      const shape = (key: string, height: number, material: StandardMaterial): SceneryPart => ({
-        geometry: this.#shapeData(key, () =>
-          key === 'trunk'
-            ? MeshBuilder.CreateCylinder(
-                'scenery-trunk',
-                { height: 1.1, diameterTop: 0.22, diameterBottom: 0.38, tessellation: 6 },
-                this.#scene,
-              )
-            : key === 'lower'
-              ? MeshBuilder.CreateCylinder(
-                  'scenery-lower',
-                  { height: 1.55, diameterTop: 0.16, diameterBottom: 1.55, tessellation: 7 },
-                  this.#scene,
-                )
-              : MeshBuilder.CreateCylinder(
-                  'scenery-upper',
-                  { height: 1.25, diameterTop: 0.04, diameterBottom: 1.15, tessellation: 7 },
-                  this.#scene,
-                ),
-        ),
-        material,
-        position: new Vector3(0, height, 0),
-        scaling: Vector3.One(),
-        rotation: Vector3.Zero(),
-      });
-      source = bakeScenery(
-        this.#scene,
-        [
-          shape('trunk', 0.5, this.#trunkMaterial),
-          shape('lower', 1.48, this.#leafMaterial),
-          shape('upper', 2.22, this.#leafLightMaterial),
-        ],
-        this.#woodlandMaterial,
-      )[0]!;
-      source.name = 'woodland-thin-source';
-      source.setEnabled(false);
-      this.#sceneryGeometry.set('woodland-thin-source', source);
-    }
-    const transforms: number[] = [];
-    const instanceFeatureIds: string[] = [];
+    const pieces = new Map<TreePiece, { transforms: number[]; ids: string[] }>();
+    const put = (piece: TreePiece, transform: Matrix, featureId: string) => {
+      let entry = pieces.get(piece);
+      if (!entry) pieces.set(piece, (entry = { transforms: [], ids: [] }));
+      entry.transforms.push(...transform.toArray());
+      entry.ids.push(featureId);
+    };
+    const size = this.#store!.world.chunkSize;
     for (const feature of features) {
       if (feature.deposit?.cleared) continue;
       const ground = this.#store!.ground(feature.cellX, feature.cellY);
       if (!ground) continue;
-      const size = this.#store!.world.chunkSize;
-      for (const tree of woodlandTrees(feature)) {
-        const at = this.#space!.projectFrom(
-          { cellX: tree.x, cellY: tree.y },
-          { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size },
-        );
-        const transform = Matrix.Compose(
-          new Vector3(tree.scale, tree.heightScale, tree.scale),
-          Quaternion.RotationAxis(Vector3.Up(), tree.rotation),
-          new Vector3(at.x, tree.elevation === undefined ? ground.height : tree.elevation * TILE_SIZE, at.z),
-        );
-        transforms.push(...transform.toArray());
-        instanceFeatureIds.push(feature.id);
+      const anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size };
+      for (const slot of groveSlots(feature)) {
+        const { tree } = slot,
+          at = this.#space!.projectFrom({ cellX: tree.x, cellY: tree.y }, anchor),
+          y = tree.elevation === undefined ? ground.height : tree.elevation * TILE_SIZE,
+          // RC1 trees carry no rotation: turn each one from its slot.
+          yaw = tree.rotation || ((feature.variantSeed * 31 + slot.index * 97) % 360) * (Math.PI / 180),
+          turn = Quaternion.RotationAxis(Vector3.Up(), yaw);
+        const place = (scale: number, heightScale: number, x = at.x, z = at.z) =>
+          Matrix.Compose(new Vector3(scale, heightScale, scale), turn, new Vector3(x, y, z));
+        if (slot.standing) {
+          put(`${slot.variant}-fut`, place(tree.scale, tree.heightScale), feature.id);
+          put(`${slot.variant}-feuillage`, place(tree.scale, tree.heightScale), feature.id);
+        }
+        if (slot.stump) put(slot.stump, place(tree.scale, tree.heightScale), feature.id);
+        if (slot.lying > 0) {
+          // The trunk without its foliage, on its side and resting on the ground.
+          const lay = turn.multiply(Quaternion.RotationAxis(Vector3.Right(), Math.PI / 2));
+          put(
+            `${slot.variant}-fut`,
+            Matrix.Compose(
+              new Vector3(tree.scale, tree.heightScale * slot.lying, tree.scale),
+              lay,
+              new Vector3(at.x, y + 0.19 * tree.scale, at.z),
+            ),
+            feature.id,
+          );
+        }
+        if (slot.young) {
+          const offset = youngOffset(feature.variantSeed, slot.index),
+            beside = this.#space!.projectFrom({ cellX: tree.x + offset.x, cellY: tree.y + offset.y }, anchor),
+            scale = slot.young.scale;
+          const piece = slot.young.piece;
+          if (piece === slot.variant) {
+            put(`${piece}-fut`, place(tree.scale * scale, tree.heightScale * scale, beside.x, beside.z), feature.id);
+            put(
+              `${piece}-feuillage`,
+              place(tree.scale * scale, tree.heightScale * scale, beside.x, beside.z),
+              feature.id,
+            );
+          } else
+            put(
+              piece as TreePiece,
+              place(tree.scale * scale, tree.heightScale * scale, beside.x, beside.z),
+              feature.id,
+            );
+        }
       }
     }
-    if (!transforms.length) return [];
-    const mesh = cloneWoodland(source, `woodland-${features[0]!.id}`, new Float32Array(transforms));
-    mesh.metadata = {
-      woodlandId: features[0]!.id,
-      featureId: features[0]!.id,
-      instanceFeatureIds,
-      cellX: features[0]!.cellX,
-      cellY: features[0]!.cellY,
-    };
-    mesh.isPickable = true;
-    mesh.thinInstanceEnablePicking = true;
-    mesh.addLODLevel(250, null);
-    return [mesh];
+    const meshes: Mesh[] = [];
+    for (const [piece, entry] of pieces) {
+      const key = `tree-kit-${piece}`;
+      let source = this.#sceneryGeometry.get(key);
+      if (!source) {
+        source = new BabylonMesh(key, this.#scene);
+        treePieceData(piece).applyToMesh(source);
+        this.#treeKitMaterial ??= (() => {
+          const material = new StandardMaterial('tree-kit', this.#scene);
+          material.diffuseColor = Color3.White();
+          material.specularColor = new Color3(0.03, 0.03, 0.03);
+          return material;
+        })();
+        source.material = this.#treeKitMaterial;
+        source.setEnabled(false);
+        this.#sceneryGeometry.set(key, source);
+      }
+      const mesh = cloneWoodland(source, `woodland-${features[0]!.id}-${piece}`, new Float32Array(entry.transforms));
+      mesh.metadata = {
+        woodlandId: features[0]!.id,
+        featureId: features[0]!.id,
+        instanceFeatureIds: entry.ids,
+        cellX: features[0]!.cellX,
+        cellY: features[0]!.cellY,
+      };
+      mesh.isPickable = true;
+      mesh.thinInstanceEnablePicking = true;
+      mesh.addLODLevel(250, null);
+      meshes.push(mesh);
+    }
+    return meshes;
   }
 
   #buildFeature(feature: NaturalFeature): Mesh[] {
