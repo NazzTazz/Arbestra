@@ -1089,6 +1089,7 @@ export class BabylonVillageScene {
         clothes: WORKER_COLOURS.clothes.map((color, i) => this.#material(`worker-clothes-${i}`, color)),
         hair: WORKER_COLOURS.hair.map((color, i) => this.#material(`worker-hair-${i}`, color)),
         pants: this.#material('worker-pants', WORKER_COLOURS.pants),
+        white: this.#material('worker-white', '#ffffff'),
         timber: this.#trunkMaterial,
         stone: this.#stoneMaterial,
       },

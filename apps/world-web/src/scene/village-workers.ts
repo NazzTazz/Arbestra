@@ -1,5 +1,6 @@
 import { travelDuration } from '@arbestra/contracts';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { Mesh as BabylonMesh } from '@babylonjs/core/Meshes/mesh';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
@@ -22,13 +23,44 @@ import {
 } from './worker-motion';
 import { worksiteLayout, worksiteConnector, type WorksiteLayout } from './worksite-layout';
 import { idleTour, idleTourPhase, type IdleLeg, type IdleVisit } from './idle-tour';
-import { buildWorkerFigure } from './worker-figure';
+import {
+  buildWorkerFigure,
+  HAIR_STYLES,
+  villagerPieceData,
+  type PieceTint,
+  type VillagerHat,
+  type VillagerPiece,
+  type VillagerTool,
+} from './worker-figure';
+import {
+  ROLE_TOOL,
+  StrikePlan,
+  ROLE_GESTURE,
+  carryPose,
+  copyPose,
+  ease,
+  GESTURE_BLEND_S,
+  gardenPose,
+  gardenStride,
+  gestureSeed,
+  isGestureRole,
+  mixPose,
+  newPose,
+  sawPose,
+  sawStroke,
+  teamActivity,
+  walkPose,
+  type GestureName,
+  type Pose,
+} from './worker-gestures';
 
 interface Materials {
   skin: StandardMaterial[];
   clothes: StandardMaterial[];
   hair: StandardMaterial[];
   pants: StandardMaterial;
+  /** For pieces with absolute vertex colours: hats, tools, carried loads. */
+  white: StandardMaterial;
   timber: StandardMaterial;
   stone: StandardMaterial;
 }
@@ -85,9 +117,19 @@ interface Person extends VillageWorkerFigure {
   phaseAt: number;
   arrivedAt: number;
   limbs: TransformNode[];
-  tool: TransformNode;
+  waist: TransformNode;
+  tools: Map<VillagerTool, TransformNode>;
   cargo: TransformNode;
+  carrot: TransformNode | null;
+  basket: TransformNode | null;
   meshes: Mesh[];
+  /** Gesture seed and plans by gesture, the pose shown and the pose a transition blends from. */
+  seed: number;
+  plans: Map<GestureName, StrikePlan>;
+  pose: Pose;
+  blendFrom: Pose;
+  blendAt: number;
+  motion: string;
   angle: number;
   fade: number;
   visible: boolean;
@@ -107,12 +149,27 @@ interface Group {
   route: WorkerPoint[];
   layout: WorksiteLayout;
   root: TransformNode;
+  /** Gesture seeds, from the mission key: the team's task sharing and each saw pair. */
+  seed: number;
+  sawSeeds: Map<number, number>;
   saws: Mesh[];
   blocks: Mesh[];
   retired: boolean;
   createdAt: number;
   stop: number;
 }
+
+/** The hat tells the trade at a glance, at medium zoom (blender-elements/villageois). */
+const WORKER_HATS: Record<Mission['resource'], VillagerHat | null> = {
+  wood: 'bonnet',
+  stone: 'casque',
+  leveling: 'casque',
+  garden: 'paille',
+  survey: 'beret',
+  idle: null,
+  trade: null,
+};
+const scratchPose = newPose();
 
 /** All positions and short visual tails live here; no economic writes or timers. */
 export class VillageWorkers {
@@ -124,6 +181,7 @@ export class VillageWorkers {
   #graphDirty = true;
   #lastAnimation = 0;
   #boxSource: Mesh | null = null;
+  readonly #pieceSources = new Map<VillagerPiece, Mesh>();
   readonly #costs: number[] = [];
   readonly #finished = new Set<string>();
   readonly #pending = new Set<string>();
@@ -507,6 +565,8 @@ export class VillageWorkers {
       route,
       layout,
       root,
+      seed: gestureSeed(mission.key, -1),
+      sawSeeds: new Map(),
       people: [],
       saws: [],
       blocks: [],
@@ -539,6 +599,22 @@ export class VillageWorkers {
     mesh.isPickable = false;
     return mesh;
   }
+  /** A clone of the shared figurine piece: geometry is shared, tint comes from the material. */
+  #piece(name: string, piece: VillagerPiece, material: StandardMaterial, parent: TransformNode) {
+    let source = this.#pieceSources.get(piece);
+    if (!source) {
+      source = new BabylonMesh(`worker-piece-${piece}`, this.scene);
+      villagerPieceData(piece).applyToMesh(source);
+      source.setEnabled(false);
+      source.isPickable = false;
+      this.#pieceSources.set(piece, source);
+    }
+    const mesh = source.clone(name, parent)!;
+    mesh.setEnabled(true);
+    mesh.material = material;
+    mesh.isPickable = false;
+    return mesh;
+  }
   #person(group: Group, index: number, now: number): Person {
     const m = group.mission,
       appearance = workerAppearance(m.key, index),
@@ -547,22 +623,20 @@ export class VillageWorkers {
       skin = this.materials.skin[appearance.skin]!,
       clothes = this.materials.clothes[appearance.clothes]!,
       hair = this.materials.hair[appearance.hair]!;
-    const box = (
-      name: string,
-      w: number,
-      h: number,
-      d: number,
-      x: number,
-      y: number,
-      z: number,
-      mat: StandardMaterial,
-      parent = root,
-    ) => {
-      const mesh = this.#box(`${root.name}-${name}`, w, h, d, x, y, z, mat, parent);
+    const tints: Record<PieceTint, StandardMaterial> = {
+      skin,
+      clothes,
+      hair,
+      pants: this.materials.pants,
+      white: this.materials.white,
+    };
+    const piece = (name: VillagerPiece, tint: PieceTint, parent: TransformNode) => {
+      const mesh = this.#piece(`${root.name}-${name}`, name, tints[tint], parent);
       meshes.push(mesh);
       return mesh;
     };
-    const limbs = buildWorkerFigure(root, box, { skin, clothes, hair, pants: this.materials.pants });
+    const style = HAIR_STYLES[(appearance.skin + appearance.hair + index) % HAIR_STYLES.length]!;
+    const { limbs, waist } = buildWorkerFigure(root, piece, style, WORKER_HATS[m.resource]);
     const populationId = m.resource === 'idle' ? m.id.split(':')[3]! : m.id;
     for (const mesh of meshes.slice(0, 2))
       mesh.metadata = {
@@ -571,28 +645,18 @@ export class VillageWorkers {
         populationActivity: m.resource === 'idle' ? 'idle' : 'working',
         populationKind: m.resource === 'survey' ? 'science' : m.resource,
       };
-    const role = group.layout.stations[index]!.role,
-      tool = new TransformNode(`${root.name}-tool`, this.scene);
-    tool.parent = limbs[1]!;
-    box('handle', 0.035, 0.32, 0.035, 0, -0.18, 0.03, this.materials.timber, tool);
-    box('tool-head', role === 'pick' ? 0.3 : 0.15, 0.07, 0.05, 0.04, -0.33, 0.03, this.materials.stone, tool);
-    const cargo = new TransformNode(`${root.name}-cargo`, this.scene);
-    cargo.parent = root;
-    if (m.resource === 'wood') {
-      const log = MeshBuilder.CreateCylinder(
-        `${root.name}-log`,
-        { height: 0.42, diameter: 0.12, tessellation: 6 },
-        this.scene,
-      );
-      log.parent = cargo;
-      log.rotation.x = Math.PI / 2;
-      log.position.set(0.17, 0.24, 0);
-      log.material = this.materials.timber;
-      log.isPickable = false;
-      meshes.push(log);
-    } else box('basket', 0.22, 0.2, 0.2, 0.18, 0.19, 0.02, this.materials.timber, cargo);
-    tool.setEnabled(false);
-    cargo.setEnabled(false);
+    const role = group.layout.stations[index]!.role;
+    const attach = (name: string, pieceName: VillagerPiece, parent: TransformNode) => {
+      const node = new TransformNode(`${root.name}-${name}`, this.scene);
+      node.parent = parent;
+      piece(pieceName, 'white', node);
+      node.setEnabled(false);
+      return node;
+    };
+    const cargo = attach('cargo', m.resource === 'wood' ? 'charge-buches' : 'charge-panier', root);
+    const garden = m.resource === 'garden';
+    const carrot = garden ? attach('carrot', 'carotte', limbs[1]!) : null,
+      basket = garden ? attach('basket', 'panier-main', limbs[0]!) : null;
     root.setEnabled(false);
     const startAt = m.startedAt + Math.floor(index / 2) * 0.23 * 1000,
       actor: TrafficActor = {
@@ -621,9 +685,18 @@ export class VillageWorkers {
       phaseAt: startAt,
       arrivedAt: 0,
       limbs,
-      tool,
+      waist,
+      tools: new Map(),
       cargo,
+      carrot,
+      basket,
       meshes,
+      seed: gestureSeed(m.key, index),
+      plans: new Map(),
+      pose: newPose(),
+      blendFrom: newPose(),
+      blendAt: -Infinity,
+      motion: '',
       angle: 0,
       fade: 0,
       visible: false,
@@ -784,7 +857,7 @@ export class VillageWorkers {
       const end = stop ? g.mission.startedAt + stop.workEndsAfterMs : g.mission.completesAt - g.mission.transportMs;
       p.harvestProgress ??= Math.max(0, Math.min(1, (now - start) / Math.max(1, end - start)));
       p.working = true;
-      return gardenHarvestPoint(g.layout.stations[p.index]!, p.harvestProgress);
+      return gardenHarvestPoint(g.layout.stations[p.index]!, gardenStride(p.harvestProgress, (end - start) / 1000));
     }
     const station = g.layout.stations[p.index]!;
     if (!station.workAt || !station.slot) {
@@ -1414,18 +1487,19 @@ export class VillageWorkers {
       const detailed = this.hooks.detailed(g.layout.approach),
         animateLimbs = detailed || now - this.#lastAnimation > 120;
       for (const p of g.people) this.#renderPerson(p, g, now, animateLimbs);
+      const span = this.#workWindow(g),
+        t = (now - span.start) / 1000,
+        sawing = teamActivity(g.seed, g.mission.resource, g.mission.count, 'saw', t) === 'saw';
       for (const saw of g.saws) {
         const meta = saw.metadata as { x: number; z: number; pair: number };
         const station = g.layout.stations.find((s) => s.role === 'saw' && s.pair === meta.pair)!;
-        saw.setEnabled(
-          g.people.some((p) => p.role === 'saw' && this.#workingAtPost(p, g)) &&
-            (g.mission.count !== 2 || (now - g.mission.startedAt) % 12_000 < 8_000),
-        );
-        const height = this.hooks.ground(station);
+        saw.setEnabled(sawing && g.people.some((p) => p.role === 'saw' && this.#workingAtPost(p, g)));
+        const height = this.hooks.ground(station),
+          stroke = sawStroke(this.#sawSeed(g, meta.pair), t) * 0.12;
         saw.isVisible = height !== null;
         saw.position.y = (height ?? 0) + 0.43;
-        saw.position.x = meta.x + Math.cos(station.facing + Math.PI / 2) * Math.sin(now * 0.005 + meta.pair) * 0.12;
-        saw.position.z = meta.z + Math.sin(station.facing + Math.PI / 2) * Math.sin(now * 0.005 + meta.pair) * 0.12;
+        saw.position.x = meta.x + Math.cos(station.facing + Math.PI / 2) * stroke;
+        saw.position.z = meta.z + Math.sin(station.facing + Math.PI / 2) * stroke;
       }
       for (const block of g.blocks) {
         const point = { x: block.position.x + g.root.position.x, z: block.position.z + g.root.position.z },
@@ -1479,7 +1553,8 @@ export class VillageWorkers {
     const moving = travelling && movement > 0.00001;
     if (movement > 0.00001) p.angle = Math.atan2(dx, dz);
     else if (!moving && (p.phase === 'work' || p.phase === 'load')) p.angle = g.layout.stations[p.index]!.facing;
-    const angleDelta = Math.atan2(Math.sin(p.angle - p.root.rotation.y), Math.cos(p.angle - p.root.rotation.y));
+    const heading = p.angle + p.pose.yaw,
+      angleDelta = Math.atan2(Math.sin(heading - p.root.rotation.y), Math.cos(heading - p.root.rotation.y));
     p.root.rotation.y += angleDelta * 0.22;
     p.root.position.set(point.x, (height ?? 0) + 0.215, point.z);
     p.walk += movement * 6.3;
@@ -1487,50 +1562,92 @@ export class VillageWorkers {
     p.fade = Math.min(1, p.fade + 0.08);
     const opacity = p.retireAt !== null ? Math.max(0, 1 - (now - p.retireAt) / 350) : p.fade;
     for (const mesh of p.meshes) mesh.visibility = opacity;
-    const working = this.#workingAtPost(p, g);
-    const cycle = (now - g.mission.startedAt) % 12_000;
-    let role = p.role;
-    if (working && g.mission.resource === 'stone') {
-      if (g.mission.count === 1) role = cycle < 6_000 ? 'pick' : cycle < 10_000 ? 'break' : 'carry';
-      else if (g.mission.count === 2 && p.role === 'break') role = cycle < 8_000 ? 'break' : 'carry';
-    } else if (working && g.mission.resource === 'wood' && g.mission.count <= 2 && cycle >= 8_000) role = 'wood-chop';
+    const working = this.#workingAtPost(p, g),
+      span = this.#workWindow(g),
+      t = (now - span.start) / 1000,
+      duration = (span.end - span.start) / 1000;
+    const role = working ? teamActivity(g.seed, g.mission.resource, g.mission.count, p.role, t) : p.role;
     const loaded =
       g.mission.resource === 'trade' ||
       p.phase === 'load' ||
       p.phase === 'inbound' ||
-      (g.stop > 0 && g.mission.resource === 'garden') ||
+      (g.stop > 0 && g.mission.resource === 'garden' && !gardening) ||
       (working && role === 'carry' && (p.role !== 'carry' || p.actor.distance > 1.25));
     p.cargo.setEnabled(loaded && g.mission.resource !== 'survey' && g.mission.resource !== 'leveling');
-    p.tool.setEnabled(working && role !== 'saw' && role !== 'carry' && role !== 'walk');
+    this.#showTool(p, working && isGestureRole(role) ? ROLE_TOOL[role] : null);
+    p.basket?.setEnabled(gardening);
+    const pose = scratchPose;
+    let carrot = false,
+      motion: string;
+    if (gardening && !moving) {
+      carrot = gardenPose(p.seed, t, duration, pose);
+      motion = 'garden';
+    } else if (working && role === 'saw') {
+      const pair = g.layout.variant === 'compact' ? 0 : g.layout.stations[p.index]!.pair;
+      sawPose(sawStroke(this.#sawSeed(g, pair), t), this.#sawPartner(g, p, pair), pose);
+      motion = 'saw';
+    } else if (working && role === 'carry' && !moving) {
+      carryPose(pose);
+      motion = 'carry';
+    } else if (working && isGestureRole(role)) {
+      const gesture = ROLE_GESTURE[role];
+      let plan = p.plans.get(gesture);
+      if (!plan) p.plans.set(gesture, (plan = new StrikePlan(p.seed, gesture)));
+      plan.pose(t, duration, pose);
+      motion = gesture;
+    } else {
+      walkPose(moving ? p.walk : 0, loaded, pose);
+      motion = moving ? 'walk' : loaded ? 'loaded' : 'stand';
+    }
+    p.carrot?.setEnabled(carrot);
     if (!animateLimbs) return;
+    // A change of activity blends from the pose shown.
+    if (motion !== p.motion) {
+      if (p.motion) copyPose(p.pose, p.blendFrom);
+      else copyPose(pose, p.blendFrom);
+      p.blendAt = now;
+      p.motion = motion;
+    }
+    const blend = (now - p.blendAt) / (GESTURE_BLEND_S * 1000);
+    if (blend < 1) mixPose(p.blendFrom, pose, ease(blend), p.pose);
+    else copyPose(pose, p.pose);
     const [left, right, legL, legR] = p.limbs;
-    const swing = moving ? Math.sin(p.walk) * 0.55 : 0;
-    left!.rotation.set(swing, 0, 0);
-    right!.rotation.set(-swing, 0, 0);
-    legL!.rotation.x = -swing;
-    legR!.rotation.x = swing;
-    if (loaded) {
-      right!.rotation.x = -0.9;
-      left!.rotation.x = -0.3;
+    left!.rotation.set(p.pose.bL, 0, 0);
+    right!.rotation.set(p.pose.bR, 0, 0);
+    legL!.rotation.x = p.pose.jL;
+    legR!.rotation.x = p.pose.jR;
+    p.waist.rotation.x = p.pose.buste;
+  }
+  /** Server work window: the gestures' clock, the same for every player and after F5. */
+  #workWindow(g: Group) {
+    const m = g.mission,
+      stop = m.stops?.[g.stop];
+    return stop
+      ? { start: m.startedAt + stop.arrivesAfterMs, end: m.startedAt + stop.workEndsAfterMs }
+      : { start: m.startedAt + m.transportMs, end: m.completesAt - m.transportMs };
+  }
+  #sawSeed(g: Group, pair: number) {
+    let seed = g.sawSeeds.get(pair);
+    if (seed === undefined) g.sawSeeds.set(pair, (seed = gestureSeed(g.mission.key, 100 + pair)));
+    return seed;
+  }
+  /** The second sawyer of a pair pulls while the first pushes. */
+  #sawPartner(g: Group, p: Person, pair: number) {
+    return (
+      g.layout.stations.findIndex((s) => s.role === 'saw' && (g.layout.variant === 'compact' || s.pair === pair)) !==
+      p.index
+    );
+  }
+  #showTool(p: Person, tool: VillagerTool | null) {
+    if (tool && !p.tools.has(tool)) {
+      const node = new TransformNode(`${p.root.name}-tool`, this.scene);
+      node.parent = p.limbs[1]!;
+      const mesh = this.#piece(`${p.root.name}-outil-${tool}`, `outil-${tool}`, this.materials.white, node);
+      mesh.visibility = p.meshes[0]!.visibility;
+      p.meshes.push(mesh);
+      p.tools.set(tool, node);
     }
-    if (working) {
-      const cadence = role === 'break' ? 0.0065 : role === 'wood-chop' ? 0.0055 : role === 'garden' ? 0.0035 : 0.004;
-      const phase = now * cadence + p.index * 1.7;
-      if (role === 'saw') {
-        const pair = g.layout.variant === 'compact' ? 0 : g.layout.stations[p.index]!.pair,
-          v = Math.sin(now * 0.005 + pair) * (p.index % 2 ? -1 : 1);
-        left!.rotation.x = -1.15 + v * 0.2;
-        right!.rotation.x = -1.15 + v * 0.2;
-      } else if (role === 'carry') {
-        left!.rotation.x = -0.8;
-        right!.rotation.x = -0.8;
-      } else {
-        const strike = Math.pow((Math.sin(phase) + 1) / 2, 2),
-          arc = role === 'break' ? 1.15 : role === 'garden' ? 0.65 : 2.1;
-        right!.rotation.x = -0.2 - strike * arc;
-        left!.rotation.x = -0.25 - strike * arc * 0.43;
-      }
-    }
+    for (const [name, node] of p.tools) node.setEnabled(name === tool);
   }
   selectRepresentative(id: string | null) {
     this.#selectedRepresentative = id !== null && this.representativeInfo(id) ? id : null;
@@ -1669,6 +1786,8 @@ export class VillageWorkers {
     for (const g of this.#groups.values()) this.#disposeGroup(g);
     this.#boxSource?.dispose(false, false);
     this.#boxSource = null;
+    for (const source of this.#pieceSources.values()) source.dispose(false, false);
+    this.#pieceSources.clear();
     this.#groups.clear();
     this.#latest.clear();
     this.#pending.clear();

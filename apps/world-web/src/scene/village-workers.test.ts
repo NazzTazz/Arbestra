@@ -6,6 +6,7 @@ import type { TravelCell, VillageState } from '@arbestra/contracts';
 import { expect, it, vi } from 'vitest';
 import { VillageWorkers, type WorkerHooks } from './village-workers';
 import { gardenHarvestPoint, sampleWorkerPath, type TrafficActor } from './worker-motion';
+import { gardenStride } from './worker-gestures';
 
 const epoch = Date.parse('2026-10-02T12:00:00Z');
 function gardenSnapshot(): VillageState {
@@ -96,6 +97,7 @@ function fixture(free: WorkerHooks['free'] = () => true, extra: Partial<WorkerHo
       clothes: Array(5).fill(material),
       hair: Array(3).fill(material),
       pants: material,
+      white: material,
       timber: material,
       stone: material,
     },
@@ -441,7 +443,10 @@ it('releases meshes and nodes over repeated lots while retaining shared material
       expect(f.scene.meshes.length).toBeLessThan(150);
       f.view.animate(t + 90_000, true);
       expect(f.scene.meshes.filter((m) => m.isEnabled())).toHaveLength(0);
-      expect(f.scene.meshes).toHaveLength(1);
+      // The box source and one shared source per figurine piece used so far.
+      const sources = f.scene.meshes.filter((m) => m.name.startsWith('worker-piece-'));
+      expect(sources.length).toBeLessThanOrEqual(20);
+      expect(f.scene.meshes).toHaveLength(1 + sources.length);
       expect(f.scene.transformNodes).toHaveLength(0);
       expect(f.scene.materials).toEqual([f.material]);
     }
@@ -532,7 +537,7 @@ it('restores initial crop progress and preserves the row through short suspensio
     const now = epoch + 35000;
     f.view.sync(gardenSnapshot(), now);
     f.view.animate(now, true);
-    const expected = gardenHarvestPoint({ x: 0, z: 2 }, 33 / 60),
+    const expected = gardenHarvestPoint({ x: 0, z: 2 }, gardenStride(33 / 60, 60)),
       gardener = f.view.figures[0]!;
     expect(gardener.root.position.x).toBeCloseTo(expected.x, 8);
     expect(gardener.root.position.z).toBeCloseTo(expected.z, 8);

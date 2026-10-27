@@ -1,9 +1,10 @@
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Scene } from '@babylonjs/core/scene';
+import kit from './villager-kit.json';
 
 export const WORKER_COLOURS = {
   skin: ['#e2ba94', '#b98157', '#684532'],
@@ -11,47 +12,86 @@ export const WORKER_COLOURS = {
   hair: ['#2d231e', '#745039', '#c4a364'],
   pants: '#4b4033',
 } as const;
-type BodyMaterials = {
-  skin: StandardMaterial;
-  clothes: StandardMaterial;
-  hair: StandardMaterial;
-  pants: StandardMaterial;
-};
-type Box = (
-  name: string,
-  w: number,
-  h: number,
-  d: number,
-  x: number,
-  y: number,
-  z: number,
-  material: StandardMaterial,
-  parent?: TransformNode,
-) => Mesh;
 
-/** Shared body proportions for animated villagers and their factory portraits. */
-export function buildWorkerFigure(root: TransformNode, box: Box, materials: BodyMaterials): TransformNode[] {
-  const { skin, clothes, hair, pants } = materials,
+/** Figurine pieces exported by blender-elements/villageois/sources/export_jeu.py. */
+export type VillagerPiece = keyof typeof kit.pieces;
+export type HairStyle = 'court' | 'chignon' | 'long';
+export type VillagerHat = 'paille' | 'bonnet' | 'casque' | 'beret';
+export type VillagerTool = 'hache' | 'merlin' | 'pioche' | 'masse';
+/** Tinted pieces take their material's colour; `white` pieces carry absolute vertex colours. */
+export type PieceTint = 'skin' | 'clothes' | 'hair' | 'pants' | 'white';
+export const HAIR_STYLES: readonly HairStyle[] = ['court', 'chignon', 'long'];
+
+const decoded = new Map<VillagerPiece, VertexData>();
+/** Flat-shaded triangles of one piece, in the frame of the joint that carries it. */
+export function villagerPieceData(name: VillagerPiece): VertexData {
+  const cached = decoded.get(name);
+  if (cached) return cached;
+  const piece = kit.pieces[name],
+    count = piece.positions.length / 3;
+  const positions = new Float32Array(count * 3),
+    colors = new Float32Array(count * 4),
+    indices = new Uint32Array(count),
+    normals = new Float32Array(count * 3);
+  for (let i = 0; i < positions.length; i++) positions[i] = piece.positions[i]! * kit.units.position;
+  for (let v = 0; v < count; v++) {
+    const t = Math.floor(v / 3) * 3,
+      c = kit.units.color;
+    colors.set([piece.colors[t]! * c, piece.colors[t + 1]! * c, piece.colors[t + 2]! * c, 1], v * 4);
+  }
+  // Blender faces turn counter-clockwise seen from outside; the scene is left-handed.
+  for (let i = 0; i < count; i += 3) indices.set([i, i + 2, i + 1], i);
+  VertexData.ComputeNormals(positions, indices, normals);
+  const data = new VertexData();
+  Object.assign(data, { positions, colors, indices, normals });
+  decoded.set(name, data);
+  return data;
+}
+
+type Piece = (name: VillagerPiece, tint: PieceTint, parent: TransformNode) => Mesh;
+export interface VillagerRig {
+  /** Waist pivot: torso, head and arms lean together around X; legs stay. */
+  waist: TransformNode;
+  /** Left arm, right arm (carries the tool), left leg, right leg. */
+  limbs: TransformNode[];
+}
+
+/**
+ * Shared figurine for animated villagers and their factory portraits. The first
+ * two pieces are the tunic and the head, which carry selection metadata.
+ */
+export function buildWorkerFigure(
+  root: TransformNode,
+  piece: Piece,
+  style: HairStyle,
+  hat: VillagerHat | null,
+): VillagerRig {
+  const scene = root.getScene(),
+    { pivots } = kit,
     limbs: TransformNode[] = [];
-  box('body', 0.24, 0.27, 0.15, 0, 0.15, 0, clothes);
-  box('head', 0.15, 0.15, 0.15, 0, 0.36, 0, skin);
-  box('hair', 0.16, 0.045, 0.16, 0, 0.45, 0, hair);
-  box('face', 0.055, 0.035, 0.012, 0, 0.34, 0.08, hair);
+  const waist = new TransformNode(`${root.name}-waist`, scene);
+  waist.parent = root;
+  waist.position.y = pivots.waist;
+  piece('tunique', 'clothes', waist);
+  piece('tete', 'skin', waist);
+  piece(`cheveux-${style}`, 'hair', waist);
+  if (hat) piece(`chapeau-${hat}`, 'white', waist);
   for (const side of [-1, 1]) {
-    const arm = new TransformNode(`${root.name}-arm`, root.getScene());
-    arm.parent = root;
-    arm.position.set(side * 0.16, 0.27, 0);
-    box('arm', 0.075, 0.22, 0.075, 0, -0.11, 0, clothes, arm);
+    const arm = new TransformNode(`${root.name}-arm`, scene);
+    arm.parent = waist;
+    arm.position.set(side * pivots.arm[0]!, pivots.arm[1]!, 0);
+    piece('bras', 'clothes', arm);
+    piece('main', 'skin', arm);
     limbs.push(arm);
   }
   for (const side of [-1, 1]) {
-    const leg = new TransformNode(`${root.name}-leg`, root.getScene());
+    const leg = new TransformNode(`${root.name}-leg`, scene);
     leg.parent = root;
-    leg.position.set(side * 0.065, 0.015, 0);
-    box('leg', 0.085, 0.21, 0.09, 0, -0.105, 0, pants, leg);
+    leg.position.set(side * pivots.leg[0]!, pivots.leg[1]!, 0);
+    piece('jambe', 'pants', leg);
     limbs.push(leg);
   }
-  return limbs;
+  return { waist, limbs };
 }
 
 export function buildWorkerPresentation(scene: Scene, count: number): Mesh {
@@ -65,7 +105,8 @@ export function buildWorkerPresentation(scene: Scene, count: number): Mesh {
   const skin = WORKER_COLOURS.skin.map((c, i) => material(`portrait-skin-${i}`, c)),
     clothes = WORKER_COLOURS.clothes.map((c, i) => material(`portrait-clothes-${i}`, c)),
     hair = WORKER_COLOURS.hair.map((c, i) => material(`portrait-hair-${i}`, c)),
-    pants = material('portrait-pants', WORKER_COLOURS.pants);
+    pants = material('portrait-pants', WORKER_COLOURS.pants),
+    white = material('portrait-white', '#ffffff');
   const positions =
     count === 1
       ? [[0, 0]]
@@ -84,14 +125,15 @@ export function buildWorkerPresentation(scene: Scene, count: number): Mesh {
     root.parent = group;
     root.position.set(x!, 0, z!);
     root.rotation.y = Math.PI;
-    const box: Box = (name, w, h, d, bx, by, bz, mat, parent = root) => {
-      const mesh = MeshBuilder.CreateBox(`portrait-${i}-${name}`, { width: w, height: h, depth: d }, scene);
+    const materials = { skin: skin[i % 3]!, clothes: clothes[i % 3]!, hair: hair[i % 3]!, pants, white };
+    const piece: Piece = (name, tint, parent) => {
+      const mesh = new Mesh(`portrait-${i}-${name}`, scene);
+      villagerPieceData(name).applyToMesh(mesh);
       mesh.parent = parent;
-      mesh.position.set(bx, by, bz);
-      mesh.material = mat;
+      mesh.material = materials[tint];
       return mesh;
     };
-    buildWorkerFigure(root, box, { skin: skin[i % 3]!, clothes: clothes[i % 3]!, hair: hair[i % 3]!, pants });
+    buildWorkerFigure(root, piece, HAIR_STYLES[i % 3]!, null);
   });
   return group;
 }
