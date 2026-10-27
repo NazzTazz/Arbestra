@@ -242,16 +242,38 @@ export function sawStroke(seed: number, t: number) {
   }
   return 0;
 }
+/** Figurine arm chain, from the kit: waist pivot above the ground, waist → shoulder, shoulder → hand centre. */
+const WAIST_HEIGHT = 0.215 + kit.pivots.waist,
+  SHOULDER = kit.pivots.arm[1]!,
+  HAND = 0.225;
+/**
+ * Where the sawyers hold the saw: handle height above the ground, mean forward reach
+ * from the body axis and stroke amplitude, both along the saw line. The saw mesh uses
+ * the same values, so the handles stay in the hands.
+ */
+export const SAW_GRIP = { height: 0.42, reach: 0.26, stroke: 0.09 } as const;
+/** Hand position (forward, height above the ground) for a pose's waist and arm angles. */
+export function handPoint(buste: number, arm: number) {
+  return {
+    forward: SHOULDER * Math.sin(buste) - HAND * Math.sin(arm + buste),
+    height: WAIST_HEIGHT + SHOULDER * Math.cos(buste) - HAND * Math.cos(arm + buste),
+  };
+}
+/**
+ * The saw moves along the line between the sawyers: a positive stroke pushes it from
+ * the first sawyer towards the partner. The hands follow it at the handle height, the
+ * waist leaning into the push and back on the pull (two-link inverse kinematics).
+ */
 export function sawPose(stroke: number, partner: boolean, out: Pose) {
   const w = partner ? -stroke : stroke,
-    saw = kit.saw;
-  return setPose(out, {
-    bR: saw.arms + saw.arms_amp * w,
-    bL: saw.arms + saw.arms_amp * w,
-    buste: saw.buste + saw.buste_amp * w,
-    jR: -0.15,
-    jL: 0.15,
-  });
+    reach = SAW_GRIP.reach + SAW_GRIP.stroke * w,
+    up = SAW_GRIP.height - WAIST_HEIGHT,
+    d = Math.hypot(reach, up),
+    gamma = Math.acos(Math.min(1, (SHOULDER * SHOULDER + d * d - HAND * HAND) / (2 * SHOULDER * d))),
+    buste = Math.atan2(reach, up) - gamma,
+    alpha = Math.atan2(reach - SHOULDER * Math.sin(buste), SHOULDER * Math.cos(buste) - up),
+    arm = -alpha - buste;
+  return setPose(out, { bR: arm, bL: arm, buste, jR: -0.15 - 0.1 * w, jL: 0.15 });
 }
 
 export function walkPose(walk: number, loaded: boolean, out: Pose) {

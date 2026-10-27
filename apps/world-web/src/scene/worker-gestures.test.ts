@@ -3,11 +3,13 @@ import kit from './villager-kit.json';
 import {
   GESTURE_BLOCK_S,
   GARDEN_TUFTS,
+  SAW_GRIP,
   StrikePlan,
   gardenPose,
   gardenStride,
   gardenTuftTime,
   gestureSeed,
+  handPoint,
   newPose,
   sawPose,
   sawStroke,
@@ -90,7 +92,14 @@ describe('worksite gestures', () => {
       const stroke = sawStroke(seed, t);
       sawPose(stroke, false, a);
       sawPose(stroke, true, b);
-      expect(a.bR - kit.saw.arms).toBeCloseTo(-(b.bR - kit.saw.arms), 6);
+      // Both pairs of hands stay on the handles, which follow the saw along the line.
+      const handA = handPoint(a.buste, a.bR),
+        handB = handPoint(b.buste, b.bR);
+      expect(a.bL).toBe(a.bR);
+      expect(handA.height).toBeCloseTo(SAW_GRIP.height, 6);
+      expect(handB.height).toBeCloseTo(SAW_GRIP.height, 6);
+      expect(handA.forward).toBeCloseTo(SAW_GRIP.reach + SAW_GRIP.stroke * stroke, 6);
+      expect(handB.forward).toBeCloseTo(SAW_GRIP.reach - SAW_GRIP.stroke * stroke, 6);
       if (stroke === 0) paused++;
     }
     expect(paused).toBeGreaterThan(0);

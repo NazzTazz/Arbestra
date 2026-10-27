@@ -48,6 +48,7 @@ import {
   newPose,
   sawPose,
   sawStroke,
+  SAW_GRIP,
   teamActivity,
   walkPose,
   type GestureName,
@@ -170,6 +171,8 @@ const WORKER_HATS: Record<Mission['resource'], VillagerHat | null> = {
   trade: null,
 };
 const scratchPose = newPose();
+/** Two-man saw blade: centre height above the ground, its lower edge on the trunk's top (0.375 m). */
+const SAW_BLADE = { y: 0.4, height: 0.055 };
 
 /** All positions and short visual tails live here; no economic writes or timers. */
 export class VillageWorkers {
@@ -887,19 +890,37 @@ export class VillageWorkers {
         b = points[1]!,
         x = (a.x + b.x) / 2,
         z = (a.z + b.z) / 2;
+      // The saw lies on the line between the sawyers, its handles in their hands.
+      const length = Math.hypot(a.x - b.x, a.z - b.z),
+        ux = (b.x - a.x) / length,
+        uz = (b.z - a.z) / length,
+        blade = length - 2 * SAW_GRIP.reach;
       const saw = this.#box(
         `saw-${m.id}-${pair}`,
-        Math.hypot(a.x - b.x, a.z - b.z) + 0.06,
-        0.05,
-        0.018,
+        blade,
+        SAW_BLADE.height,
+        0.012,
         x,
-        0.58,
+        SAW_BLADE.y,
         z,
         this.materials.stone,
         g.root,
       );
-      saw.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
-      saw.metadata = { x, z, pair };
+      saw.rotation.y = -Math.atan2(uz, ux);
+      saw.metadata = { x, z, ux, uz, pair };
+      // Crosswise handles, in the blade's scaled frame.
+      for (const end of [-1, 1])
+        this.#box(
+          `saw-${m.id}-${pair}-handle-${end}`,
+          0.025 / blade,
+          0.035 / SAW_BLADE.height,
+          0.34 / 0.012,
+          end * 0.5,
+          (SAW_GRIP.height - SAW_BLADE.y) / SAW_BLADE.height,
+          0,
+          this.materials.timber,
+          saw,
+        );
       g.saws.push(saw);
       const trunk = MeshBuilder.CreateCylinder(
         `work-trunk-${m.id}-${pair}`,
@@ -907,7 +928,8 @@ export class VillageWorkers {
         this.scene,
       );
       trunk.parent = g.root;
-      trunk.rotation.x = Math.PI / 2;
+      // Across the saw line, its top under the blade.
+      trunk.rotation.set(Math.PI / 2, -Math.atan2(uz, ux), 0);
       trunk.position.set(x, 0.28, z);
       trunk.material = this.materials.timber;
       trunk.isPickable = false;
@@ -1491,15 +1513,16 @@ export class VillageWorkers {
         t = (now - span.start) / 1000,
         sawing = teamActivity(g.seed, g.mission.resource, g.mission.count, 'saw', t) === 'saw';
       for (const saw of g.saws) {
-        const meta = saw.metadata as { x: number; z: number; pair: number };
+        const meta = saw.metadata as { x: number; z: number; ux: number; uz: number; pair: number };
         const station = g.layout.stations.find((s) => s.role === 'saw' && s.pair === meta.pair)!;
         saw.setEnabled(sawing && g.people.some((p) => p.role === 'saw' && this.#workingAtPost(p, g)));
         const height = this.hooks.ground(station),
-          stroke = sawStroke(this.#sawSeed(g, meta.pair), t) * 0.12;
+          stroke = sawStroke(this.#sawSeed(g, meta.pair), t) * SAW_GRIP.stroke;
         saw.isVisible = height !== null;
-        saw.position.y = (height ?? 0) + 0.43;
-        saw.position.x = meta.x + Math.cos(station.facing + Math.PI / 2) * stroke;
-        saw.position.z = meta.z + Math.sin(station.facing + Math.PI / 2) * stroke;
+        for (const handle of saw.getChildMeshes()) handle.isVisible = saw.isVisible;
+        saw.position.y = (height ?? 0) + SAW_BLADE.y;
+        saw.position.x = meta.x + meta.ux * stroke;
+        saw.position.z = meta.z + meta.uz * stroke;
       }
       for (const block of g.blocks) {
         const point = { x: block.position.x + g.root.position.x, z: block.position.z + g.root.position.z },
