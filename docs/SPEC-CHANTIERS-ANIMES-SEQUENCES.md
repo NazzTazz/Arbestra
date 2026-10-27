@@ -147,6 +147,11 @@ Le fer de la hache et du merlin est du côté qui frappe quand le bras s'abat.
 
 Les tables de rôles validées restent inchangées. Seul ce que fait chaque rôle à chaque instant change.
 
+**Réalisé le 27 octobre (tranche 3, première partie)** : arbre accessoire, chute planifiée ou attendant l'abatteur, rebond, tronc consommé par tronçons, tas de 9 bûches sur 3 niveaux, tremblement à chaque coup de hache ; modèle pur `worksite-site.ts`, rendu dans `village-workers.ts`. Deux écarts assumés :
+- les tronçons sont coupés à pas égaux entre l'atterrissage de l'arbre et `W1`, pas aux seuils `p = k/6` de toute la fenêtre : sinon un tronçon disparaissait à l'instant même où l'arbre touche le sol. Le tronc reste entièrement consommé à `W1` ;
+- l'arbre du bûcheron seul tombe sur le côté, le long de la lisière : tombant dans le bosquet, il ne faisait que raccourcir à l'écran depuis la caméra habituelle. Celui d'un binôme de scieurs tombe en travers de la ligne de scie, côté bosquet, et remplace leur tronc de chevalet.
+Restent pour la tranche 5 : feuilles, copeaux, anneau de poussière de chute, demi-bûches de fente, *thin instances* (aujourd'hui 13 maillages clonés de plus par chantier de bois).
+
 ## 7. Pierre
 
 **Matière de chantier :**

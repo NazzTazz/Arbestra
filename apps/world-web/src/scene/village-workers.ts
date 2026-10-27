@@ -22,6 +22,7 @@ import {
   type WorkerRole,
 } from './worker-motion';
 import { worksiteLayout, worksiteConnector, type WorksiteLayout } from './worksite-layout';
+import { PILE_LOGS, WOOD_SECTIONS, pileSlot, woodFallAt, woodPlannedFall, woodSite } from './worksite-site';
 import { idleTour, idleTourPhase, type IdleLeg, type IdleVisit } from './idle-tour';
 import {
   buildWorkerFigure,
@@ -64,6 +65,8 @@ interface Materials {
   white: StandardMaterial;
   timber: StandardMaterial;
   stone: StandardMaterial;
+  /** Crown of the felled tree; timber when absent. */
+  foliage?: StandardMaterial;
 }
 export interface WorkerHooks {
   path: (path: TravelCell[]) => Vector3[];
@@ -159,10 +162,31 @@ interface Group {
   sawSeeds: Map<number, number>;
   saws: Mesh[];
   blocks: Mesh[];
+  /** Felled tree, trunk sections and log pile of a wood site (presentation only). */
+  wood: WoodProps | null;
   retired: boolean;
   createdAt: number;
   stop: number;
 }
+
+interface WoodProps {
+  /** At the tree's foot, turned towards its fall; `tilt` lays it down. */
+  heading: TransformNode;
+  tilt: TransformNode;
+  trunk: Mesh;
+  crown: Mesh;
+  logs: Mesh[];
+  base: WorkerPoint;
+  pile: WorkerPoint;
+  /** Index of the person whose arrival lets the tree fall, and when it got there (s from W0). */
+  feller: number;
+  fellerAt: number | null;
+  /** The pair's sawhorse trunk: the felled tree lies under the blade in its place. */
+  sawhorse: Mesh | null;
+}
+/** Accessory tree: height and diameter in scene units (a villager is about 0.5). */
+const TREE = { height: 1.6, diameter: 0.15, crown: 0.75 };
+const PILE_LOG = { length: 0.32, diameter: 0.075 };
 
 /** The hat tells the trade at a glance, at medium zoom (blender-elements/villageois). */
 const WORKER_HATS: Record<Mission['resource'], VillagerHat | null> = {
@@ -579,6 +603,7 @@ export class VillageWorkers {
       people: [],
       saws: [],
       blocks: [],
+      wood: null,
       retired: false,
       createdAt: now,
       stop,
@@ -987,7 +1012,92 @@ export class VillageWorkers {
         block.metadata = { station: i };
         g.blocks.push(block);
       }
+    if (m.resource === 'wood') g.wood = this.#woodProps(g);
     g.root.setEnabled(false);
+  }
+  /**
+   * The felled tree stands at the feller's post: before the axe of a lone
+   * woodcutter, or across the first saw line, where it then lies under the
+   * blade in place of the sawhorse trunk. The pile waits beside the road end.
+   */
+  #woodProps(g: Group): WoodProps | null {
+    const stations = g.layout.stations,
+      axe = stations.findIndex((s) => s.role === 'axe'),
+      saw = stations.findIndex((s) => s.role === 'saw' && s.pair === 0);
+    const feller = axe >= 0 ? axe : saw >= 0 ? saw : 0,
+      station = stations[feller];
+    if (!station) return null;
+    const at = station.workAt ?? station,
+      target = this.hooks.project(g.mission.target);
+    const pair = axe < 0 ? stations.filter((s) => s.role === 'saw' && s.pair === 0) : [];
+    const sawhorse = pair.length === 2 ? (g.blocks.find((b) => b.name.startsWith('work-trunk-')) ?? null) : null;
+    let base: WorkerPoint, fall: WorkerPoint;
+    if (sawhorse) {
+      const a = pair[0]!.workAt ?? pair[0]!,
+        b = pair[1]!.workAt ?? pair[1]!,
+        length = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      base = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+      // Across the saw line, on the grove's side.
+      fall = { x: -(b.z - a.z) / length, z: (b.x - a.x) / length };
+      if (fall.x * (target.x - base.x) + fall.z * (target.z - base.z) < 0) fall = { x: -fall.x, z: -fall.z };
+    } else {
+      // In front of the axe, falling sideways along the edge: falling into the
+      // grove, it would only shorten on screen from the usual camera.
+      const ahead = { x: Math.sin(station.facing), z: Math.cos(station.facing) };
+      base = { x: at.x + ahead.x * 0.45, z: at.z + ahead.z * 0.45 };
+      fall = { x: ahead.z, z: -ahead.x };
+    }
+    const heading = new TransformNode(`wood-tree-${g.mission.id}`, this.scene);
+    heading.parent = g.root;
+    heading.position.set(base.x, 0, base.z);
+    heading.rotation.y = Math.atan2(fall.x, fall.z);
+    const tilt = new TransformNode(`wood-tree-tilt-${g.mission.id}`, this.scene);
+    tilt.parent = heading;
+    const trunk = MeshBuilder.CreateCylinder(
+      `wood-tree-trunk-${g.mission.id}`,
+      { height: TREE.height, diameter: TREE.diameter, tessellation: 6 },
+      this.scene,
+    );
+    trunk.parent = tilt;
+    trunk.position.y = TREE.height / 2;
+    trunk.material = this.materials.timber;
+    trunk.isPickable = false;
+    const crown = MeshBuilder.CreateIcoSphere(
+      `wood-tree-crown-${g.mission.id}`,
+      { radius: TREE.crown / 2, subdivisions: 1 },
+      this.scene,
+    );
+    crown.parent = tilt;
+    crown.position.y = TREE.height * 0.92;
+    crown.scaling.y = 1.4;
+    crown.material = this.materials.foliage ?? this.materials.timber;
+    crown.isPickable = false;
+    // Beside the road end, crosswise to the arrival.
+    const approach = g.layout.approach,
+      ax = target.x - approach.x,
+      az = target.z - approach.z,
+      length = Math.hypot(ax, az) || 1;
+    const side = { x: -az / length, z: ax / length },
+      pile = { x: approach.x + side.x * 0.7, z: approach.z + side.z * 0.7 };
+    const logs: Mesh[] = [];
+    for (let i = 0; i < PILE_LOGS; i++) {
+      const slot = pileSlot(i),
+        log = this.#box(
+          `wood-pile-${g.mission.id}-${i}`,
+          PILE_LOG.diameter,
+          PILE_LOG.diameter,
+          PILE_LOG.length,
+          pile.x + side.x * slot.along * PILE_LOG.diameter * 1.1,
+          0,
+          pile.z + side.z * slot.along * PILE_LOG.diameter * 1.1,
+          this.materials.timber,
+          g.root,
+        );
+      log.rotation.y = Math.atan2(ax, az);
+      log.metadata = { level: slot.level };
+      logs.push(log);
+    }
+    return { heading, tilt, trunk, crown, logs, base, pile, feller, fellerAt: null, sawhorse };
   }
 
   reproject() {
@@ -1018,10 +1128,16 @@ export class VillageWorkers {
       g.root.position.z -= shift.z;
       if (JSON.stringify(oldLayout.stations) !== JSON.stringify(g.layout.stations)) {
         for (const mesh of g.root.getChildMeshes()) mesh.dispose(false, false);
+        // A rebuilt layout keeps when the feller arrived: the tree never stands up again.
+        const fellerAt = g.wood?.fellerAt ?? null;
+        g.wood?.heading.dispose(false, false);
+        g.wood = null;
         g.saws = [];
         g.blocks = [];
         g.root.position.setAll(0);
         this.#props(g);
+        const wood = g.wood as WoodProps | null;
+        if (wood) wood.fellerAt = fellerAt;
         for (const p of g.people)
           if (p.phase === 'work') {
             const destination = this.#post(p, g, this.#lastNow ?? g.createdAt);
@@ -1776,9 +1892,46 @@ export class VillageWorkers {
           block.position.z = p.actor.position.z - g.root.position.z + Math.cos(p.angle) * 0.29;
         }
       }
+      if (g.wood) this.#renderWood(g, g.wood, now);
     }
     if (now - this.#lastAnimation > 120) this.#lastAnimation = now;
     this.#admit(now);
+  }
+  #renderWood(g: Group, w: WoodProps, now: number) {
+    const span = this.#workWindow(g),
+      duration = (span.end - span.start) / 1000,
+      t = (now - span.start) / 1000,
+      seenFrom = (g.createdAt - span.start) / 1000;
+    const feller = g.people[w.feller];
+    if (w.fellerAt === null && feller && this.#workingAtPost(feller, g)) w.fellerAt = t;
+    // A fall already due when the site was first shown is never waited for (F5).
+    const planned = woodPlannedFall(duration),
+      fallAt = seenFrom >= planned ? planned : woodFallAt(duration, w.fellerAt);
+    const site = woodSite(duration, t, fallAt, seenFrom);
+    const groundAt = (q: WorkerPoint) => this.hooks.ground({ x: q.x + g.root.position.x, z: q.z + g.root.position.z });
+    const base = groundAt(w.base);
+    w.heading.setEnabled(base !== null && site.sections > 0);
+    w.heading.position.y = base ?? 0;
+    // A strike shakes the standing tree (±0.02 rad, damped in 0.4 s).
+    let shake = 0;
+    if (site.tilt === 0 && feller?.role === 'axe' && this.#workingAtPost(feller, g)) {
+      const age = feller.plans.get('hache')?.impactAge(t) ?? Infinity;
+      if (age < 0.4) shake = 0.02 * Math.sin(age * 45) * (1 - age / 0.4);
+    }
+    w.tilt.rotation.x = site.tilt + shake;
+    const share = site.sections / WOOD_SECTIONS;
+    w.trunk.scaling.y = Math.max(0.001, share);
+    w.trunk.position.y = (TREE.height * share) / 2;
+    w.crown.setEnabled(site.sections === WOOD_SECTIONS);
+    w.sawhorse?.setEnabled(false);
+    // The pile leaves with the carriers once loading starts.
+    const pile = groundAt(w.pile),
+      loaded = now >= span.end + 450;
+    for (const [i, log] of w.logs.entries()) {
+      log.setEnabled(pile !== null && !loaded && i < site.logs);
+      const level = (log.metadata as { level: number }).level;
+      log.position.y = (pile ?? 0) + PILE_LOG.diameter / 2 + level * PILE_LOG.diameter * 0.9;
+    }
   }
   #workingAtPost(p: Person, g: Group) {
     const station = g.layout.stations[p.index]!,

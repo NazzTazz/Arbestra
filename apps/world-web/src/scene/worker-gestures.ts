@@ -194,6 +194,14 @@ export class StrikePlan {
     }
     return this.#eval(t, out);
   }
+  /** Seconds since the impact of the strike under way at `t`, Infinity before it or between strikes. */
+  impactAge(t: number): number {
+    const segment = this.#at(t);
+    if (!segment || segment.pause >= 0) return Infinity;
+    const local = t - Math.floor(t / GESTURE_BLOCK_S) * GESTURE_BLOCK_S,
+      impact = segment.t0 + STRIKE.impact_u * (segment.t1 - segment.t0);
+    return local >= impact ? local - impact : Infinity;
+  }
   #rest(out: Pose) {
     return setPose(out, kit.gestures[this.gesture].rest);
   }

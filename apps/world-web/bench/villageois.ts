@@ -125,6 +125,7 @@ const workers = new VillageWorkers(
     white: material('worker-white', '#ffffff'),
     timber: material('trunk', '#523620'),
     stone: material('stone', '#8d8f8c'),
+    foliage: material('foliage', '#2f5a2c'),
   },
   {
     path: (p) => p.map((c) => new Vector3(c.cellX * CELL, 0, c.cellY * CELL)),

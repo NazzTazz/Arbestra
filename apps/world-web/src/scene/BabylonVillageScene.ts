@@ -1092,6 +1092,7 @@ export class BabylonVillageScene {
         white: this.#material('worker-white', '#ffffff'),
         timber: this.#trunkMaterial,
         stone: this.#stoneMaterial,
+        foliage: this.#leafMaterial,
       },
       {
         path: (path) => this.#workerPath(path),

@@ -1362,3 +1362,55 @@ it('brings a compact team home when the next lot starts exactly at its completio
     f.dispose();
   }
 });
+const woodTeam = (id: string, count: number) => {
+  const state = snapshot(id, epoch, count);
+  state.village.extractions[0]!.resourceCode = 'wood';
+  return state;
+};
+const tilt = (f: ReturnType<typeof fixture>, id: string) =>
+  f.scene.getTransformNodeByName(`wood-tree-tilt-${id}`)?.rotation.x ?? NaN;
+const logs = (f: ReturnType<typeof fixture>, id: string) =>
+  f.scene.meshes.filter((m) => m.name.startsWith(`wood-pile-${id}-`) && m.isEnabled()).length;
+
+it.each([1, 4])(
+  'wood site: fells the tree live, empties the trunk and fills the pile by W1 (%i woodcutters)',
+  (count) => {
+    const f = fixture();
+    try {
+      // Window: 8 s to 72 s, so the planned fall is 7.68 s after W0.
+      f.view.sync(woodTeam(`felling-${count}`, count), epoch);
+      let standing = 0,
+        falling = false,
+        lying = 0,
+        pileAtEnd = 0;
+      for (let t = 0; t <= 73_000; t += 33) {
+        f.view.animate(epoch + t, true);
+        const angle = tilt(f, `felling-${count}`);
+        if (t > 9_000 && t < 15_000 && Math.abs(angle) < 0.03) standing++;
+        if (angle > 0.2 && angle < 1.3) falling = true;
+        if (t > 40_000 && t < 70_000 && angle > 1.4) lying++;
+        if (t === 71_973) pileAtEnd = logs(f, `felling-${count}`);
+      }
+      expect(standing, 'the tree waits for its feller at the post').toBeGreaterThan(0);
+      expect(falling, 'the fall is played, not skipped').toBe(true);
+      expect(lying).toBeGreaterThan(0);
+      expect(pileAtEnd).toBeGreaterThanOrEqual(8);
+    } finally {
+      f.dispose();
+    }
+  },
+);
+
+it('wood site: shows the tree already down after a reload past its fall, and the pile gone once loaded', () => {
+  const f = fixture();
+  try {
+    f.view.sync(woodTeam('reloaded', 4), epoch + 40_000);
+    f.view.animate(epoch + 40_000, true);
+    expect(tilt(f, 'reloaded')).toBeCloseTo(Math.PI / 2);
+    expect(logs(f, 'reloaded')).toBeGreaterThan(0);
+    for (let t = 40_033; t <= 73_000; t += 33) f.view.animate(epoch + t, true);
+    expect(logs(f, 'reloaded')).toBe(0);
+  } finally {
+    f.dispose();
+  }
+});
