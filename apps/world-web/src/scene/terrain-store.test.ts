@@ -497,6 +497,23 @@ describe('terrain cache authority and lifecycle', () => {
     await h.settle(1, c);
     expect(h.store.chunk('0:0')?.occupiedCells).toEqual(c.occupiedCells);
   });
+  // Alpha, 27 October: groves jumped between their real trees and a generic
+  // three-tree layout whenever their chunk waited for a refresh.
+  it('keeps the chunk tree geometry of a grove when an invalidated chunk shows the snapshot feature', async () => {
+    const h = harness();
+    h.demand();
+    h.advance(100);
+    const grove = { ...feature(deposit(1)), id: 'stone', type: 'woodland' };
+    const c = chunk();
+    c.features = [{ ...grove, rc1: { trees: [{ x: 1.2, y: 1.4, size: 1, crown: 1 }], rocks: [] } } as NaturalFeature];
+    await h.settle(0, c);
+    const snapshot = state();
+    snapshot.region.features = [grove];
+    h.store.observe(snapshot);
+    h.store.invalidate('0:0');
+    expect(h.store.entries.get('0:0')?.freshAt).toBe(-Infinity);
+    expect(h.store.chunk('0:0')?.features[0]?.rc1?.trees).toEqual([{ x: 1.2, y: 1.4, size: 1, crown: 1 }]);
+  });
   it('preserves a tombstone against late terrain and an unrelated snapshot', async () => {
     const h = harness();
     h.demand();

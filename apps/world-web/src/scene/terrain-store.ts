@@ -389,9 +389,14 @@ export class TerrainStore {
       chunk = entry?.chunk;
     if (!chunk) return;
     const features = new Map(chunk.features.map((f) => [terrainFeatureKey(f), f]));
+    // A stale chunk shows the snapshot's features, which carry no RC1 tree
+    // geometry: keep the chunk's, or the grove jumps to a generic layout.
     if (entry!.freshAt === -Infinity)
       for (const f of this.#features.values())
-        if (this.key(f.cellX, f.cellY) === key) features.set(terrainFeatureKey(f), f);
+        if (this.key(f.cellX, f.cellY) === key) {
+          const rc1 = f.rc1 ?? features.get(terrainFeatureKey(f))?.rc1;
+          features.set(terrainFeatureKey(f), rc1 ? { ...f, rc1 } : f);
+        }
     const occupied = new Map(chunk.occupiedCells.map((c) => [`${c.cellX}:${c.cellY}`, c]));
     for (const k of this.#own) {
       const [cellX, cellY] = k.split(':').map(Number);
