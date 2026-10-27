@@ -126,7 +126,10 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   // Commands holding a village lock route on their own lane: they queue behind
   // other commands only, never behind a read whose loader still needs SQL, and
   // the API thread keeps answering during a large village's network.
-  const commandNavigation = new NavigationCompute(1, { waiting: 16, waitMs: 30000, computeMs: 30000 });
+  // Same cold-start trap as the read pool: Catmark's network needs more than
+  // 30 s once a deploy has emptied the worker's caches, and a timeout empties
+  // them again. Harvest intents failed in a loop and held every command.
+  const commandNavigation = new NavigationCompute(1, { waiting: 16, waitMs: 30000, computeMs: 90000 });
   try {
     await commandNavigation.start();
   } catch (error) {
