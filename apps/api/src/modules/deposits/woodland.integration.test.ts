@@ -585,3 +585,18 @@ it('serializes two villages on the woodland lock and preserves both reservations
     await db.deleteFrom('accounts').where('id', '=', otherAccount).execute();
   }
 });
+
+it('counts the wood ever cut from a grove: returned lots only, regrowth not subtracted', async () => {
+  await fixture(async (tx, id, t) => {
+    expect((await readStoneDeposit(tx, worldId, id)).cutAmount).toBe(0);
+    await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1);
+    // The lot is reserved, not cut, until its return.
+    expect((await readStoneDeposit(tx, worldId, id)).cutAmount).toBe(0);
+    const later = new Date(t.getTime() + 24 * 3600000);
+    await sql`select set_config('arbestra.economy_through', ${later.toISOString()}, true)`.execute(tx);
+    const after = await readStoneDeposit(tx, worldId, id);
+    expect(after.cutAmount).toBe(100);
+    // A day of regrowth gives back wood without reducing what was cut.
+    expect(after.remainingAmount).toBeGreaterThan(200);
+  });
+});

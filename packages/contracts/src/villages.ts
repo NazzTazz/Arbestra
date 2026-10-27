@@ -145,6 +145,8 @@ export const StoneDepositSchema = Type.Object({
   cleared: Type.Optional(Type.Boolean()),
   blocksCell: Type.Optional(Type.Boolean()),
   regrowthPerHour: Type.Optional(Type.Number({ minimum: 0 })),
+  /** Wood ever cut from a grove, regrowth included; never decreases (clearing destroys, it does not cut). */
+  cutAmount: Type.Optional(Type.Integer({ minimum: 0 })),
   cellX: Type.Integer({ minimum: 0 }),
   cellY: Type.Integer({ minimum: 0 }),
   initialAmount: Type.Integer({ minimum: 1 }),

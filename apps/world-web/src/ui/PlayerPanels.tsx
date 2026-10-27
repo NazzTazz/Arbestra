@@ -320,9 +320,16 @@ export function DepositPanel({
     <div className="building-details">
       <span>Ressource naturelle</span>
       <strong>{wood ? 'Bosquet' : 'Gisement de pierre'}</strong>
-      <p>
-        {format(details.deposit.availableAmount)} disponibles · {format(details.deposit.remainingAmount)} restantes
-      </p>
+      {wood ? (
+        <p>
+          Bois disponible : {format(details.deposit.availableAmount)} · Bois coupé :{' '}
+          {format(details.deposit.cutAmount ?? 0)}
+        </p>
+      ) : (
+        <p>
+          {format(details.deposit.availableAmount)} disponibles · {format(details.deposit.remainingAmount)} restantes
+        </p>
+      )}
       <p>Le trajet s’ajoute au temps de travail. Les paramètres de la prochaine mission restent dans la palette.</p>
       {!access && <p className="error">Ce gisement est hors de portée, protégé ou inaccessible.</p>}
       {wood ? (
