@@ -117,6 +117,8 @@ import { fetchGardenKit, gardenHarvestState, GardenKitRenderer, type GardenPlotV
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
 import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
+import { groveHalo, TreeHalos, type TreeHaloGrove } from './tree-halos';
+import { groveRayPredicate, pickedGrove, resourceOverlay } from './resource-overlay';
 import { WorkerObstacles } from './worker-obstacles';
 
 const TOWN_HALL_DOOR_Z = -1.1;
@@ -184,6 +186,7 @@ export class BabylonVillageScene {
   readonly #onWorldGestureCancelled: () => void;
   readonly #previewMeshes: Mesh[] = [];
   readonly #resourceHalos: ResourceHalos;
+  readonly #treeHalos: TreeHalos;
   readonly #levelingAreaMaterial: StandardMaterial;
   readonly #invalidAreaMaterial: StandardMaterial;
   readonly #resizeObserver: ResizeObserver;
@@ -926,6 +929,12 @@ export class BabylonVillageScene {
   }
 
   #continueHarvest(event: PointerEvent): void {
+    // A tree under the pointer selects its grove, whatever ground cell lies behind it.
+    const grove = this.#groveCellAtPointer(event);
+    if (grove && !this.#harvestVisited.has(cellKey(grove))) {
+      this.#harvestVisited.add(cellKey(grove));
+      this.#onGardenHarvest(grove, false);
+    }
     const last = this.#gridPointAtPointer(event),
       previous = this.#pointerDown?.lastPoint;
     if (!last || !previous || cellKey(last) === cellKey(previous)) return;
@@ -1228,6 +1237,7 @@ export class BabylonVillageScene {
     this.#clouds = new CloudTransition(this.#engine);
     for (const material of this.#scene.materials) material.freeze();
     this.#resourceHalos = new ResourceHalos(this.#scene);
+    this.#treeHalos = new TreeHalos(this.#scene);
 
     this.#selectionMarker = MeshBuilder.CreateBox(
       'selection-marker',
@@ -1371,14 +1381,12 @@ export class BabylonVillageScene {
         frame?.mark('visibility');
         const workerServerNow = Date.now() - this.#serverOffsetMs;
         this.#updateResourceOverlay(now);
-        if (this.#space && this.#store)
-          this.#resourceHalos.update(
-            now,
-            this.#space,
-            this.#store,
-            this.#worldMode === 'exploitation' && this.#mode === 'village',
-            1 - (this.#camera.radius - 110) / 50,
-          );
+        if (this.#space && this.#store) {
+          const halosEnabled = this.#worldMode === 'exploitation' && this.#mode === 'village',
+            zoomOpacity = 1 - (this.#camera.radius - 110) / 50;
+          this.#resourceHalos.update(now, this.#space, this.#store, halosEnabled, zoomOpacity);
+          this.#treeHalos.update(now, this.#space, this.#store, halosEnabled, zoomOpacity);
+        }
         if (import.meta.env.DEV && now - this.#workerDebugAt > 500) {
           this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);
           this.#workerDebugAt = now;
@@ -1551,7 +1559,10 @@ export class BabylonVillageScene {
             this.#camera.lowerBetaLimit,
             this.#camera.upperBetaLimit,
           ]);
-          this.#canvas.dataset.renderedPendingHarvests = String(this.#resourceHalos.pendingCount);
+          this.#canvas.dataset.renderedPendingHarvests = String(
+            this.#resourceHalos.pendingCount + this.#treeHalos.pendingCount,
+          );
+          this.#canvas.dataset.treeHalos = String(this.#treeHalos.instanceCount);
           this.#canvas.dataset.debugTravelPaths = String(this.#travelLines?.getTotalVertices() ?? 0);
           this.#canvas.dataset.workerPositions = JSON.stringify(
             [...this.#workers.figures].map((f) => ({
@@ -1656,6 +1667,7 @@ export class BabylonVillageScene {
       ) {
         this.#cameraFocus = null;
         this.#resourceHalos.clear();
+        this.#treeHalos.clear();
         this.#renderer?.dispose();
         this.#store?.dispose();
         this.#endFlyover();
@@ -2011,6 +2023,8 @@ export class BabylonVillageScene {
       const site = occupied.get(pick.pickedMesh?.metadata?.siteId);
       if (site) return { cellX: site.cellX, cellY: site.cellY };
     }
+    const grove = this.#groveCellAtPointer(event);
+    if (grove) return grove;
     const point = this.#gridPointAtPointer(event);
     if (!point) return null;
     return {
@@ -2115,29 +2129,62 @@ export class BabylonVillageScene {
     }
     if (!this.#space || !this.#store || now < this.#resourceOverlayAt) return;
     this.#resourceOverlayAt = now + 700;
-    const cells = new Map<string, ResourceHaloCell>();
-    for (const key of this.#harvestableSites) {
-      const [cellX, cellY] = key.split(':').map(Number);
-      cells.set(key, { cellX: cellX!, cellY: cellY!, garden: true, resource: 'carrot' });
+    const store = this.#store;
+    const features = store.demand.filter((d) => d.visible).flatMap((d) => store.chunk(d.key)?.features ?? []);
+    const { cells, groves } = resourceOverlay({
+      gardens: this.#harvestableSites,
+      features,
+      shown: (c) =>
+        Boolean(this.#renderer?.rendered(c.cellX, c.cellY)) && (store.ground(c.cellX, c.cellY)?.code ?? 0) > 0,
+      target: this.#space.inverse(this.#camera.target.x, this.#camera.target.z),
+      world: store.world,
+    });
+    this.#resourceHalos.setAvailable(cells);
+    this.#treeHalos.setAvailable(groves);
+  }
+
+  /**
+   * The grove under the pointer, through its woodland thin instances: a tall
+   * tree hides the ground cell behind it, so the ray picks the tree itself.
+   * At most one pick per rendered frame; pointer events share its result.
+   */
+  #grovePick: { frame: number; cell: Cell | null } | null = null;
+  #groveCellAtPointer(event: PointerEvent): Cell | null {
+    if (this.#worldMode !== 'exploitation' || this.#mode !== 'village' || !this.#store) return null;
+    const frame = this.#scene.getFrameId();
+    if (this.#grovePick?.frame === frame) return this.#grovePick.cell;
+    const bounds = this.#canvas.getBoundingClientRect();
+    const ray = this.#scene.createPickingRay(
+      event.clientX - bounds.left,
+      event.clientY - bounds.top,
+      Matrix.Identity(),
+      this.#camera,
+    );
+    const pick = this.#scene.pickWithRay(ray, groveRayPredicate(ray));
+    const grove = pick ? pickedGrove(pick) : null;
+    const feature = grove
+      ? this.#store
+          .chunk(this.#store.key(grove.hint.cellX, grove.hint.cellY))
+          ?.features.find((f) => f.id === grove.featureId)
+      : undefined;
+    const cell = feature ? { cellX: feature.cellX, cellY: feature.cellY } : null;
+    this.#grovePick = { frame, cell };
+    return cell;
+  }
+
+  /** The wood halos of a pending cell follow its grove's trees; other resources keep their cell halo. */
+  #pendingGroves(cells: Cell[]): { groves: TreeHaloGrove[]; others: Cell[] } {
+    const groves: TreeHaloGrove[] = [],
+      others: Cell[] = [];
+    for (const cell of cells) {
+      const wood = this.#gardenStages.has(cellKey(cell))
+        ? undefined
+        : this.featuresAt(cell).find((f) => f.deposit?.resourceCode === 'wood');
+      const grove = wood && this.#store ? groveHalo(wood, this.#store.world.chunkSize) : null;
+      if (grove) groves.push(grove);
+      else if (!wood) others.push(cell);
     }
-    for (const demand of this.#store.demand.filter((d) => d.visible))
-      for (const f of this.#store.chunk(demand.key)?.features ?? [])
-        if (f.deposit && !f.deposit.cleared && f.deposit.availableAmount > 0)
-          cells.set(cellKey(f), { ...f, resource: f.deposit.resourceCode });
-    const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
-    const visible = [...cells.values()]
-      .filter(
-        (c) => this.#renderer?.rendered(c.cellX, c.cellY) && (this.#store!.ground(c.cellX, c.cellY)?.code ?? 0) > 0,
-      )
-      .sort(
-        (a, b) =>
-          Math.abs(delta(a.cellX, target.cellX, this.#store!.world.widthCells)) +
-          Math.abs(delta(a.cellY, target.cellY, this.#store!.world.heightCells)) -
-          Math.abs(delta(b.cellX, target.cellX, this.#store!.world.widthCells)) -
-          Math.abs(delta(b.cellY, target.cellY, this.#store!.world.heightCells)),
-      )
-      .slice(0, 128);
-    this.#resourceHalos.setAvailable(visible);
+    return { groves, others };
   }
 
   public setPopulationFocus(focus: string | null, filter: string): void {
@@ -2456,14 +2503,18 @@ export class BabylonVillageScene {
   }
 
   public updateHarvestPending(cells: Cell[]): void {
+    const { groves, others } = this.#pendingGroves(cells);
+    this.#treeHalos.setPending(groves);
     this.#resourceHalos.setPending(
-      cells.map((cell) => ({
-        ...cell,
-        garden: this.#gardenStages.has(cellKey(cell)),
-        resource: this.#gardenStages.has(cellKey(cell))
-          ? 'carrot'
-          : this.featuresAt(cell).find((f) => f.deposit)?.deposit?.resourceCode,
-      })),
+      others.map(
+        (cell): ResourceHaloCell => ({
+          ...cell,
+          garden: this.#gardenStages.has(cellKey(cell)),
+          resource: this.#gardenStages.has(cellKey(cell))
+            ? 'carrot'
+            : this.featuresAt(cell).find((f) => f.deposit)?.deposit?.resourceCode,
+        }),
+      ),
     );
   }
 
@@ -4648,6 +4699,7 @@ export class BabylonVillageScene {
     this.#inhabitantCamera.dispose();
     this.#workers.dispose();
     this.#resourceHalos.dispose();
+    this.#treeHalos.dispose();
     this.#scene.dispose();
     this.#engine.dispose();
     this.#canvas.width = 0;

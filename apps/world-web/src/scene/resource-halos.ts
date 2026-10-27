@@ -26,7 +26,9 @@ export const RESOURCE_HALO_LIFT = 0.045;
 const RADIUS = 1.22,
   SEGMENTS = 4;
 const COLOURS = { wood: '#ac8056', stone: '#aeb3b8', carrot: '#ed9645' };
-const OPACITY = 0.65;
+export const RESOURCE_HALO_COLOURS: Readonly<typeof COLOURS> = COLOURS;
+export const RESOURCE_HALO_OPACITY = 0.65;
+const OPACITY = RESOURCE_HALO_OPACITY;
 const resource = (cell: ResourceHaloCell): Resource => cell.resource ?? (cell.garden ? 'carrot' : 'wood');
 
 /** A translucent footprint on the actual terrain triangles, rather than a ring at sea level. */
@@ -62,19 +64,22 @@ function footprint(cell: ResourceHaloCell, ground: Pick<TerrainStore, 'ground'>)
   return data;
 }
 
-function haloTexture(scene: Scene): RawTexture {
-  const size = 256,
-    pixels = new Uint8Array(size * size * 4);
+/** A white ring at 70 % of the quad, alpha only: the material tints it. */
+export function haloTexture(
+  scene: Scene,
+  { name = 'resource-halo-soft', size = 256, core = 0.015, soft = 0.035 } = {},
+): RawTexture {
+  const pixels = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
       const r = Math.hypot(((x + 0.5) / size) * 2 - 1, ((y + 0.5) / size) * 2 - 1);
-      const alpha = 0.9 * Math.exp(-Math.pow((r - 0.7) / 0.015, 2)) + 0.08 * Math.exp(-Math.pow((r - 0.7) / 0.035, 2));
+      const alpha = 0.9 * Math.exp(-Math.pow((r - 0.7) / core, 2)) + 0.08 * Math.exp(-Math.pow((r - 0.7) / soft, 2));
       const i = (y * size + x) * 4;
       pixels[i] = pixels[i + 1] = pixels[i + 2] = 255;
-      pixels[i + 3] = Math.round(alpha * 255);
+      pixels[i + 3] = Math.round(Math.min(1, alpha) * 255);
     }
   const texture = RawTexture.CreateRGBATexture(pixels, size, size, scene, true, false, Texture.TRILINEAR_SAMPLINGMODE);
-  texture.name = 'resource-halo-soft';
+  texture.name = name;
   texture.hasAlpha = true;
   texture.wrapU = texture.wrapV = Texture.CLAMP_ADDRESSMODE;
   return texture;
