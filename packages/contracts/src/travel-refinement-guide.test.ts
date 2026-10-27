@@ -152,15 +152,43 @@ describe('certified coarse guide refinement', () => {
       }
     },
   );
-  it('never certifies a blocked destination or turns a search limit into unreachability', () => {
+  it('never certifies a fully blocked destination cell or turns a search limit into unreachability', () => {
     const { state, ground, route } = fixture();
     ground.revision = 'blocked-destination';
-    ground.sample = (x, y) => ({ elevation: 1, dry: true, blocked: Math.abs(x - 90) < 0.2 && Math.abs(y - 10) < 0.2 });
+    ground.sample = (x, y) => ({ elevation: 1, dry: true, blocked: Math.abs(x - 90) < 0.5 && Math.abs(y - 10) < 0.5 });
     const onLimit = vi.fn();
     expect(
       refineTravelRoute(state, route, undefined, undefined, ground, undefined, { maxVisited: 2048, onLimit }),
     ).toBeNull();
     expect(onLimit).toHaveBeenCalledOnce();
+  });
+  // Alpha, 27/10/2026: 10 of 158 groves in range were refused "unreachable"
+  // because an RC1 trunk covered or sealed the exact centre point of the cell.
+  it('reaches a grove whose centre point sits inside a trunk, stopping inside the cell', () => {
+    const { state, ground, route } = fixture();
+    ground.revision = 'trunk-on-centre';
+    ground.sample = (x, y) => ({ elevation: 1, dry: true, blocked: Math.abs(x - 90) < 0.2 && Math.abs(y - 10) < 0.2 });
+    const result = refineTravelRoute(state, route, undefined, undefined, ground, undefined, {
+      maxVisited: 2048,
+      onLimit: () => {
+        throw Error('search exhausted');
+      },
+    });
+    expect(result).not.toBeNull();
+    const end = result!.cells.at(-1)!;
+    expect(end).not.toEqual(route.destination);
+    expect(Math.abs(end.cellX - 90)).toBeLessThanOrEqual(3 / 8);
+    expect(Math.abs(end.cellY - 10)).toBeLessThanOrEqual(3 / 8);
+    expect(ground.sample(end.cellX, end.cellY).blocked).toBe(false);
+    for (let i = 1; i < result!.cells.length; i++) {
+      const a = result!.cells[i - 1]!,
+        b = result!.cells[i]!;
+      expect(canWalkSpawnSegment(ground, { x: a.cellX, y: a.cellY }, { x: b.cellX, y: b.cellY })).toBe(true);
+    }
+    // A free centre keeps the exact destination point.
+    ground.revision = 'free-centre';
+    ground.sample = () => ({ elevation: 1, dry: true, blocked: false });
+    expect(refineTravelRoute(state, route, undefined, undefined, ground)!.cells.at(-1)).toEqual(route.destination);
   });
   it('does not reuse a certified guide after an obstacle changes, or expose mutable cached cells', () => {
     const { state, ground, route } = fixture();
@@ -174,6 +202,13 @@ describe('certified coarse guide refinement', () => {
     expect(refineTravelRoute(state, route, undefined, undefined, ground, checkpoint)).toEqual(saved);
     expect(checkpoint).toHaveBeenCalledTimes(1);
     state.infrastructure!.equipment.push({ id: 'closed-goal', x: 90 * 8, y: 10 * 8, quarterTurns: 0, version: 1 });
-    expect(refineTravelRoute(state, route, undefined, undefined, ground)).toBeNull();
+    // The centre point is now occupied: the grove cell is still the goal, but
+    // the route is recomputed and stops beside the equipment, not on it.
+    const changed = refineTravelRoute(state, route, undefined, undefined, ground);
+    expect(changed).not.toBeNull();
+    expect(changed).not.toEqual(saved);
+    expect(changed!.cells.at(-1)).not.toEqual(route.destination);
+    expect(Math.abs(changed!.cells.at(-1)!.cellX - 90)).toBeLessThanOrEqual(3 / 8);
+    expect(Math.abs(changed!.cells.at(-1)!.cellY - 10)).toBeLessThanOrEqual(3 / 8);
   });
 });

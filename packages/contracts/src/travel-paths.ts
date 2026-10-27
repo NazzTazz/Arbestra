@@ -725,6 +725,34 @@ export function refineTravelRoute(
     if (memo) landCache.set(latticeKey, result);
     return result;
   };
+  // land() admits a blocked destination cell for resource routes, but RC1
+  // trunks and rocks are sub-cell obstacles: one can cover the exact centre
+  // point of a grove or seal it from every lattice neighbour while most of the
+  // cell stays walkable. The felling destination is the cell, not its centre:
+  // when the centre cannot be entered, any point of that cell ends the route.
+  const enters = (p: TravelCell) =>
+    land(p) &&
+    [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ].some(([dx, dy]) => {
+      const n = { cellX: wrap(p.cellX - dx! / 8, world.widthCells), cellY: wrap(p.cellY - dy! / 8, world.heightCells) };
+      return local(n) && land(n) && walk(n, p);
+    });
+  const cellGoal = route.kind !== 'building' && !enters(destination);
+  // Enterable lattice points of the destination cell, for the coarse witness.
+  const cellGoals: TravelCell[] = [];
+  if (cellGoal)
+    for (let oy = -3; oy <= 3; oy++)
+      for (let ox = -3; ox <= 3; ox++) {
+        const p = {
+          cellX: wrap(destination.cellX + ox / 8, world.widthCells),
+          cellY: wrap(destination.cellY + oy / 8, world.heightCells),
+        };
+        if ((ox || oy) && enters(p)) cellGoals.push(p);
+      }
   let best: TravelCell[] | null = null,
     limited = false;
   // Door connections are part of the physical path too. Do not jump over an
@@ -827,7 +855,13 @@ export function refineTravelRoute(
   const direct =
     Math.abs(delta(destination.cellX, hall.cellX, world.widthCells)) +
     Math.abs(delta(destination.cellY, hall.cellY, world.heightCells));
-  if (ground && route.kind !== 'building' && local(route.destination) && direct > 16) {
+  if (
+    ground &&
+    route.kind !== 'building' &&
+    (!cellGoal || cellGoals.length) &&
+    local(route.destination) &&
+    direct > 16
+  ) {
     const id = 'resource-refinement',
       accesses = starts.map((a, i) => ({ id: String(i), path: [a.position, a.outside] }));
     const witness = planRoute(
@@ -847,7 +881,7 @@ export function refineTravelRoute(
         policyVersion: ROUTE_POLICY_VERSION,
         movementProfileId: 'pedestrian-v1',
         starts: accesses.map((a) => ({ kind: 'access', accessId: a.id })),
-        goals: [{ kind: 'point', ...destination }],
+        goals: (cellGoal ? cellGoals : [destination]).map((p) => ({ kind: 'point', ...p })),
         coarseFirst: true,
         limits: { maxNodes: Math.min(8192, search?.maxVisited ?? 8192), maxDurationMs: 1000 },
       },
@@ -927,7 +961,13 @@ export function refineTravelRoute(
         checkpoint?.();
         const cur = pending.pop();
         if (cur.cost > (seen.get(nodeKey(cur.cell)) ?? Infinity)) continue;
-        if (nodeKey(cur.cell) === nodeKey(to)) {
+        if (
+          nodeKey(cur.cell) === nodeKey(to) ||
+          (cellGoal &&
+            !end &&
+            Math.abs(delta(cur.cell.cellX, to.cellX, w)) <= 3 &&
+            Math.abs(delta(cur.cell.cellY, to.cellY, h)) <= 3)
+        ) {
           found = cur;
           break;
         }
