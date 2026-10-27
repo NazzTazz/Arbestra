@@ -187,6 +187,8 @@ export interface TrafficActor {
   member?: number;
   formation?: number;
   lateral?: number;
+  /** On a short connector around its worksite: shares the road's passages with its team, never a flow. */
+  local?: boolean;
 }
 interface Passage {
   id: string;
@@ -440,7 +442,8 @@ export class WorkerTraffic {
               const compatible = owners.every((id) => {
                 const owner = actors.find((v) => v.id === id);
                 if (!owner) return true;
-                if (owner.mission === a.mission && owner.direction === a.direction) return true;
+                if (owner.mission === a.mission && (owner.direction === a.direction || owner.local || a.local))
+                  return true;
                 const cycle = cycleKey(a.path);
                 if (cycle !== null && cycle === cycleKey(owner.path)) return true;
                 const tangent = sampleWorkerPath(owner.path, owner.distance);
@@ -466,6 +469,7 @@ export class WorkerTraffic {
                 const opposingWait = ordered.some(
                   (v) =>
                     v.direction !== a.direction &&
+                    !v.local &&
                     v.waitingSince !== null &&
                     passage.points.some((q) => Math.hypot(v.position.x - q.x, v.position.z - q.z) < 1.6),
                 );

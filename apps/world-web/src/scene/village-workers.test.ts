@@ -649,7 +649,7 @@ it('deploys a compact wood team from the doorway through empty waiting places an
     ].every(([dx, dz]) => {
       const x = p.x + dx!,
         z = p.z + dz!;
-      return (Math.abs(x) <= 1.15 && Math.abs(z) <= 1.15) || (x >= 0.8 && Math.abs(z) <= 0.95);
+      return (Math.abs(x) <= 1.15 && Math.abs(z) <= 1.15) || (x >= 0.8 && Math.abs(z) <= 1.2);
     }) && Math.hypot(p.x, p.z) >= 0.42 + r * 0.3;
   const f = fixture((p, r, _feature, allowRoads) => allowRoads === true && physical(p, r));
   try {
@@ -1119,6 +1119,124 @@ it('recomputes a home itinerary only when its cell, the routes or the scene geom
     expect(leisurePath).toHaveBeenCalledTimes(5);
     f.view.sync({ ...state, cells: [state.cells[0]!, house], travelRoutes: [...state.travelRoutes] }, epoch + 4000);
     expect(leisurePath).toHaveBeenCalledTimes(7);
+  } finally {
+    f.dispose();
+  }
+});
+/**
+ * A narrow forest track ending at a tree, with small waiting pockets on both
+ * sides of the road before the trunk: only the compact layout fits, the road
+ * itself is free to walk, and the work posts sit around the trunk.
+ */
+function gladeTeam(completesAfterMs: number) {
+  const inside = (x: number, z: number, roads: boolean) =>
+    (x >= -1.7 && x <= 1.4 && Math.abs(z) <= 1.3) ||
+    (x >= 1.2 && x <= 4.4 && Math.abs(z) >= 0.6 && Math.abs(z) <= 2.8) ||
+    (roads && x >= 0.8 && Math.abs(z) <= 0.6);
+  const f = fixture(
+    (p, r, _feature, allowRoads) =>
+      [
+        [0, 0],
+        [-r, -r],
+        [r, r],
+        [-r, r],
+        [r, -r],
+      ].every(([dx, dz]) => inside(p.x + dx!, p.z + dz!, allowRoads === true)) &&
+      Math.hypot(p.x, p.z) >= 0.42 + r * 0.3,
+  );
+  const state = snapshot('glade-wood', epoch, 10),
+    e = state.village.extractions[0]!;
+  e.resourceCode = 'wood';
+  e.cellX = 0;
+  e.cellY = 0;
+  e.transportMs = 17302;
+  e.completesAt = new Date(epoch + completesAfterMs).toISOString();
+  e.path = [
+    { cellX: 14, cellY: 0 },
+    { cellX: 3.75, cellY: 0 },
+    { cellX: 1.5, cellY: 0 },
+    { cellX: 0, cellY: 0 },
+  ];
+  return {
+    f,
+    state,
+    transportMs: e.transportMs,
+    returnAt: completesAfterMs - e.transportMs,
+    completesAt: completesAfterMs,
+  };
+}
+/** Walk the clock and record, per person, what the mission showed. */
+function observeTeam(f: ReturnType<typeof fixture>, untilMs: number, returnAt: number) {
+  const seenAt: number[] = [],
+    workedAt: number[] = [],
+    lateWork: number[] = [],
+    loadedWithoutWork: number[] = [],
+    outboundAfterReturn: number[] = [];
+  let variant: string | undefined,
+    allDone = -1;
+  for (let t = 0; t <= untilMs; t += 33) {
+    f.view.animate(epoch + t, true);
+    const layout = f.view.metrics.layouts[0];
+    variant ??= layout?.variant;
+    if (!layout) {
+      allDone = allDone < 0 ? t : allDone;
+      break;
+    }
+    f.view.figures.forEach((p, i) => {
+      const phase = layout.phases[i];
+      if (seenAt[i] === undefined && p.root.isEnabled()) seenAt[i] = t;
+      if (phase === 'work') {
+        if (workedAt[i] === undefined) {
+          workedAt[i] = t;
+          if (t >= returnAt) lateWork.push(i);
+        }
+      }
+      const loaded = p.root.getChildTransformNodes().some((n) => n.name.endsWith('-cargo') && n.isEnabled());
+      if (loaded && (workedAt[i] === undefined || workedAt[i]! >= returnAt) && !loadedWithoutWork.includes(i))
+        loadedWithoutWork.push(i);
+      if (phase === 'outbound' && t >= returnAt + 100 && !outboundAfterReturn.includes(i)) outboundAfterReturn.push(i);
+    });
+  }
+  return { variant, seenAt, workedAt, lateWork, loadedWithoutWork, outboundAfterReturn, allDone };
+}
+it('sends a ten-person compact wood team down a long road in convoy, keeps everyone and brings them all home', () => {
+  const { f, state, transportMs, returnAt, completesAt } = gladeTeam(94_000);
+  try {
+    f.view.sync(state, epoch);
+    const o = observeTeam(f, completesAt + 40_000, returnAt);
+    expect(o.variant).toBe('compact');
+    // The whole team leaves the door within seconds instead of one per road trip.
+    expect(o.seenAt).toHaveLength(10);
+    expect(Math.max(...o.seenAt)).toBeLessThan(10_000);
+    // Everyone reaches a post or a waiting place well inside the work window.
+    expect(o.workedAt.filter((t) => t !== undefined)).toHaveLength(10);
+    expect(Math.max(...o.workedAt)).toBeLessThan(transportMs + 30_000);
+    expect(o.lateWork).toEqual([]);
+    expect(o.loadedWithoutWork).toEqual([]);
+    expect(o.outboundAfterReturn).toEqual([]);
+    // The exit never jams: the team is home before the stale-mission cleanup.
+    expect(o.allDone).toBeGreaterThan(completesAt);
+    expect(o.allDone).toBeLessThan(completesAt + 25_000);
+  } finally {
+    f.dispose();
+  }
+});
+it('turns compact latecomers back empty-handed when the team leaves before they reach a post', () => {
+  const { f, state, transportMs, returnAt, completesAt } = gladeTeam(2 * 17302 + 15_000);
+  try {
+    f.view.sync(state, epoch);
+    const o = observeTeam(f, completesAt + 40_000, returnAt);
+    expect(o.variant).toBe('compact');
+    expect(o.seenAt).toHaveLength(10);
+    const stragglers = Array.from({ length: 10 }, (_, i) => i).filter(
+      (i) => o.workedAt[i] === undefined || o.workedAt[i]! >= returnAt,
+    );
+    expect(stragglers.length).toBeGreaterThan(0);
+    expect(stragglers.length).toBeLessThan(10);
+    expect(o.loadedWithoutWork).toEqual([]);
+    expect(o.outboundAfterReturn).toEqual([]);
+    expect(o.allDone).toBeGreaterThan(returnAt + transportMs / 2);
+    expect(o.allDone).toBeLessThan(completesAt + 25_000);
   } finally {
     f.dispose();
   }

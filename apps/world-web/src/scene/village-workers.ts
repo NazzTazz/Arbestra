@@ -138,6 +138,10 @@ interface Person extends VillageWorkerFigure {
   last: WorkerPoint;
   previous: WorkerPoint;
   working: boolean;
+  /** Reached a post: a latecomer joining the return never carries a load. */
+  worked: boolean;
+  /** Points of the exit connector at the head of an inbound path; 0 when none. */
+  exit: number;
   connectorRetry: number;
   retireAt: number | null;
   harvestProgress: number | null;
@@ -707,6 +711,8 @@ export class VillageWorkers {
       last: { ...actor.position },
       previous: { ...actor.position },
       working: false,
+      worked: false,
+      exit: 0,
       connectorRetry: 0,
       retireAt: null,
       harvestProgress: null,
@@ -744,11 +750,14 @@ export class VillageWorkers {
     p.actor.waitingSince = null;
     p.actor.done = false;
     p.actor.visible = false;
+    p.actor.local = false;
+    p.exit = 0;
     p.actor.member = p.index % 2;
     p.actor.formation = 0;
     p.actor.lateral = 0;
     p.visible = false;
     p.fade = 0;
+    p.worked = now >= (m.stops?.length ? m.startedAt + m.stops[0]!.arrivesAfterMs : outEnd);
     if (m.leisure) {
       const current = idleTourPhase(m.leisure, now, m.key);
       g.stop = current.leg;
@@ -805,7 +814,7 @@ export class VillageWorkers {
           p.actor.distance = Math.max(0, (p.actor.speed * (now - m.startedAt - legStart)) / 1000);
         } else {
           p.phase = 'work';
-          p.actor.position = { ...this.#post(p, g, now) };
+          p.actor.position = { ...this.#post(p, g, now, true) };
           p.actor.done = true;
           p.actor.visible = true;
           p.working = true;
@@ -829,7 +838,7 @@ export class VillageWorkers {
       p.phase = 'work';
       p.phaseAt = now;
       p.arrivedAt = outEnd;
-      p.actor.position = { ...this.#post(p, g, now) };
+      p.actor.position = { ...this.#post(p, g, now, true) };
       p.actor.visible = true;
       p.actor.member = 0;
       p.actor.done = true;
@@ -853,7 +862,7 @@ export class VillageWorkers {
         .map((v) => this.#point(v));
     return [...g.route].reverse();
   }
-  #post(p: Person, g: Group, now: number): WorkerPoint {
+  #post(p: Person, g: Group, now: number, everyone = false): WorkerPoint {
     if (g.mission.resource === 'garden') {
       const stop = g.mission.stops?.[g.stop],
         start = g.mission.startedAt + (stop?.arrivesAfterMs ?? g.mission.transportMs);
@@ -870,8 +879,25 @@ export class VillageWorkers {
     const peers = g.people.filter((v) => g.layout.stations[v.index]!.slot === station.slot);
     // Two seconds empty between turns gives the outgoing worker room to leave.
     const elapsed = Math.max(0, now - g.mission.startedAt - g.mission.transportMs),
-      turn = Math.floor(elapsed / 12_000);
-    p.working = elapsed % 12_000 >= 2_000 && peers[turn % Math.max(1, peers.length)]?.index === p.index;
+      turn = Math.floor(elapsed / 12_000),
+      turnStart = g.mission.startedAt + g.mission.transportMs + turn * 12_000,
+      chosen = peers[turn % Math.max(1, peers.length)];
+    // Arrivals feed the post before its queue: until the chosen peer is there,
+    // the first one present works, and a turn never swaps its holder.
+    const present = everyone ? peers : peers.filter((v) => ['install', 'work', 'rotate', 'load'].includes(v.phase));
+    const settled = present.filter((v) => v.arrivedAt <= turnStart),
+      pool = settled.length ? settled : present.length ? present : [p];
+    const holder =
+      chosen && pool.includes(chosen)
+        ? chosen
+        : pool.reduce<Person | undefined>(
+            (best, v) =>
+              !best || v.arrivedAt < best.arrivedAt || (v.arrivedAt === best.arrivedAt && v.index < best.index)
+                ? v
+                : best,
+            undefined,
+          );
+    p.working = elapsed % 12_000 >= 2_000 && holder === p;
     return p.working ? station.workAt : station;
   }
   #props(g: Group) {
@@ -1014,6 +1040,7 @@ export class VillageWorkers {
               p.actor.done = false;
               p.actor.speed = 1;
               p.actor.startAt = this.#lastNow ?? g.createdAt;
+              p.actor.local = true;
             }
           }
       }
@@ -1084,6 +1111,108 @@ export class VillageWorkers {
     const neighbours = g.people.filter((other) => other !== p && other.actor.visible);
     return [...this.#reservedPosts(p, g), ...neighbours.map((other) => other.actor.position)];
   }
+  /** Road left to walk, the rear member of a rank counted from its leader. */
+  #remaining(p: Person) {
+    const a = p.actor;
+    return pathLength(a.path) - a.distance + (a.member ?? 0) * 0.5 * Math.cos(((a.formation ?? 0) * Math.PI) / 2);
+  }
+  /** On a compact site, the foremost teammate on the road installs next, 1.5 m behind the previous one. */
+  #nextInstaller(p: Person, g: Group) {
+    const remaining = this.#remaining(p);
+    return g.people.every((other) => {
+      if (other === p) return true;
+      if (other.phase === 'install') return other.actor.distance >= WORKER_CLEARANCE * 2;
+      if (other.phase !== 'outbound' || !other.actor.visible) return true;
+      const ahead = remaining - this.#remaining(other);
+      return ahead <= 0 || ahead >= 1.5;
+    });
+  }
+  #returnSpeed(g: Group, back: WorkerPoint[]) {
+    const m = g.mission,
+      returnAt = m.stops?.length
+        ? m.startedAt + m.stops[m.stops.length - 1]!.workEndsAfterMs
+        : m.completesAt - m.transportMs;
+    return Math.max(
+      0.8,
+      pathLength(back) / Math.max(0.5, (m.stops?.length ? m.completesAt - returnAt : m.transportMs) / 1000),
+    );
+  }
+  /** The closest point of the return route and the route beyond it. */
+  #roadJoin(position: WorkerPoint, back: WorkerPoint[]) {
+    let best = {
+        point: back[0]!,
+        tail: back.slice(1),
+        along: 0,
+        gap: Math.hypot(position.x - back[0]!.x, position.z - back[0]!.z),
+      },
+      along = 0;
+    for (let i = 1; i < back.length; i++) {
+      const a = back[i - 1]!,
+        b = back[i]!,
+        dx = b.x - a.x,
+        dz = b.z - a.z,
+        length = Math.hypot(dx, dz);
+      const t =
+        length > 0
+          ? Math.max(0, Math.min(1, ((position.x - a.x) * dx + (position.z - a.z) * dz) / (length * length)))
+          : 0;
+      const point = t >= 1 ? b : { x: a.x + dx * t, z: a.z + dz * t },
+        gap = Math.hypot(position.x - point.x, position.z - point.z);
+      if (gap < best.gap - 0.01) best = { point, tail: back.slice(t >= 1 ? i + 1 : i), along: along + length * t, gap };
+      along += length;
+    }
+    return best;
+  }
+  /**
+   * On a compact site, the place joining the road furthest down it leaves first,
+   * once the previous leaver walks the road: nobody crosses a teammate's exit.
+   */
+  #nextLeaver(p: Person, g: Group, back: WorkerPoint[]) {
+    const order = (q: Person) => {
+      const join = this.#roadJoin(q.actor.position, back);
+      return [-join.along, join.gap, q.index];
+    };
+    const mine = order(p);
+    return g.people.every((other) => {
+      if (other === p) return true;
+      if (other.phase === 'inbound') return other.exit === 0;
+      if (other.phase !== 'load') return true;
+      const theirs = order(other);
+      for (let i = 0; i < 3; i++) if (theirs[i] !== mine[i]) return theirs[i]! > mine[i]!;
+      return true;
+    });
+  }
+  /** Retrace the road already walked, back to the door. */
+  #turnBack(p: Person, g: Group, now: number) {
+    const a = p.actor;
+    if (!a.visible) {
+      p.phase = 'done';
+      a.done = true;
+      return;
+    }
+    const distance = Math.max(0, a.distance - (a.member ?? 0) * 0.5 * Math.cos(((a.formation ?? 0) * Math.PI) / 2));
+    let length = 0,
+      segment = 1;
+    for (; segment < a.path.length; segment++) {
+      length += pathLength(a.path.slice(segment - 1, segment + 1));
+      if (length >= distance) break;
+    }
+    const back = this.#backRoute(g);
+    p.phase = 'inbound';
+    p.phaseAt = now;
+    a.path = [{ ...a.position }, ...a.path.slice(0, segment).reverse()];
+    a.distance = 0;
+    a.done = false;
+    a.member = 0;
+    a.formation = 0;
+    a.lateral = 0;
+    a.waitingSince = null;
+    a.startAt = now;
+    a.direction = -1;
+    a.rank = Math.floor(p.index / 2);
+    a.local = false;
+    a.speed = this.#returnSpeed(g, back);
+  }
   #installationDistance(g: Group) {
     let distance = this.#installationDistances.get(g.layout);
     if (distance === undefined) {
@@ -1116,28 +1245,6 @@ export class VillageWorkers {
       }
       p.cargo.setEnabled(p.actor.visible);
       return;
-    }
-    if (g.layout.variant === 'compact' && p.phase === 'outbound' && !p.actor.visible) {
-      // A compact site cannot accept the whole road formation at once. Admit
-      // one arrival at a time, filling each distinct work post before its queue.
-      const first = new Set<string>(),
-        order: Person[] = [],
-        queue: Person[] = [];
-      for (const person of g.people) {
-        const slot = g.layout.stations[person.index]!.slot!;
-        if (first.has(slot)) queue.push(person);
-        else {
-          first.add(slot);
-          order.push(person);
-        }
-      }
-      order.push(...queue);
-      if (
-        order.slice(0, order.indexOf(p)).some((person) => person.phase === 'outbound' || person.phase === 'install')
-      ) {
-        p.actor.startAt = now + WORKER_STEP * 1000;
-        return;
-      }
     }
     if (m.leisure) {
       if (p.phase === 'outbound' && p.actor.done) {
@@ -1185,59 +1292,80 @@ export class VillageWorkers {
       }
       return;
     }
+    const returnAt = m.stops?.length
+      ? m.startedAt + m.stops[m.stops.length - 1]!.workEndsAfterMs
+      : m.completesAt - m.transportMs;
+    const extraction = ['wood', 'stone', 'leveling'].includes(m.resource);
+    // A latecomer still on the road when the team leaves joins the return from
+    // where it stands, empty-handed, instead of walking in only to walk out loaded.
+    if (extraction && !m.stops?.length && now >= returnAt && p.phase === 'outbound') this.#turnBack(p, g, now);
     const roadArrival =
-      p.actor.done ||
-      (['wood', 'stone', 'leveling'].includes(m.resource) &&
-        p.actor.visible &&
-        pathLength(p.actor.path) -
-          p.actor.distance +
-          (p.actor.member ?? 0) * 0.5 * Math.cos(((p.actor.formation ?? 0) * Math.PI) / 2) <=
-          this.#installationDistance(g));
-    if (p.phase === 'outbound' && roadArrival && now >= p.connectorRetry) {
-      const from = { ...p.actor.position },
-        target = this.hooks.project(m.target);
-      const destination = g.layout.variant === 'compact' ? this.#post(p, g, now) : station;
-      const connector =
-        m.resource === 'garden' || m.resource === 'survey'
-          ? [from, destination]
-          : worksiteConnector(
-              from,
-              destination,
-              target,
-              (q, r) => this.#connectorFree(p, g, q, r),
-              this.#connectorPosts(p, g),
-            );
-      if (!connector) {
-        p.connectorRetry = now + 1000;
-        p.actor.waitingSince ??= now;
-        return;
+      p.actor.done || (extraction && p.actor.visible && this.#remaining(p) <= this.#installationDistance(g));
+    if (p.phase === 'outbound' && roadArrival) {
+      // A compact site admits one installation at a time, the foremost teammate
+      // first. The others wait in sight on the road, clear of every post,
+      // instead of unseen at the door until the previous one has walked it all.
+      // The admitted one leaves the road where it passes closest to its place.
+      const compact = g.layout.variant === 'compact',
+        destination = compact ? this.#post(p, g, now) : station;
+      if (compact) {
+        if (!this.#nextInstaller(p, g)) {
+          p.actor.startAt = now + WORKER_STEP * 1000;
+          return;
+        }
+        if (!p.actor.done && this.#remaining(p) > this.#roadJoin(destination, this.#backRoute(g)).along + 0.05) return;
       }
-      p.phase = 'install';
-      p.phaseAt = now;
-      p.arrivedAt = now;
-      p.harvestProgress = 0;
-      p.actor.waitingSince = null;
-      p.actor.path = connector;
-      p.actor.distance = 0;
-      p.actor.done = false;
-      p.actor.member = 0;
-      p.actor.formation = 0;
-      p.actor.startAt = now;
-      p.actor.rank = 100 + p.index;
-      p.actor.speed = 1.6;
+      if (now >= p.connectorRetry) {
+        const from = { ...p.actor.position },
+          target = this.hooks.project(m.target);
+        const connector =
+          m.resource === 'garden' || m.resource === 'survey'
+            ? [from, destination]
+            : worksiteConnector(
+                from,
+                destination,
+                target,
+                (q, r) => this.#connectorFree(p, g, q, r),
+                this.#connectorPosts(p, g),
+              );
+        if (connector) {
+          p.phase = 'install';
+          p.phaseAt = now;
+          p.arrivedAt = now;
+          p.harvestProgress = 0;
+          p.actor.waitingSince = null;
+          p.actor.path = connector;
+          p.actor.distance = 0;
+          p.actor.done = false;
+          p.actor.member = 0;
+          p.actor.formation = 0;
+          p.actor.startAt = now;
+          p.actor.rank = 100 + p.index;
+          p.actor.local = true;
+          p.actor.speed = 1.6;
+        } else {
+          p.connectorRetry = now + 1000;
+          p.actor.waitingSince ??= now;
+        }
+      }
+      if (p.phase === 'outbound') return; // Keep walking to the road end and retry from there.
     } else if ((p.phase === 'install' || p.phase === 'rotate') && p.actor.done) {
       p.phase = 'work';
       p.phaseAt = now;
+      p.worked ||= now < returnAt;
     }
+    // A connector blocked for 1.5 s is planned again around the bodies now
+    // present: on the way to a post, and on the way out before the road.
+    const leaving = p.phase === 'inbound' && p.exit > 0 && p.actor.distance < pathLength(p.actor.path.slice(0, p.exit));
     if (
-      (p.phase === 'install' || p.phase === 'rotate') &&
-      ['wood', 'stone', 'leveling'].includes(m.resource) &&
+      (p.phase === 'install' || p.phase === 'rotate' || leaving) &&
+      extraction &&
       p.actor.waitingSince !== null &&
       now - p.actor.waitingSince >= 1500 &&
       now >= p.connectorRetry
     ) {
       p.connectorRetry = now + 1500;
-      const goal = p.actor.path.at(-1)!,
+      const goal = leaving ? p.actor.path[p.exit - 1]! : p.actor.path.at(-1)!,
         connector = worksiteConnector(
           p.actor.position,
           goal,
@@ -1246,7 +1374,8 @@ export class VillageWorkers {
           this.#connectorPosts(p, g),
         );
       if (connector) {
-        p.actor.path = connector;
+        p.actor.path = leaving ? [...connector, ...p.actor.path.slice(p.exit)] : connector;
+        if (leaving) p.exit = connector.length;
         p.actor.distance = 0;
         p.actor.member = 0;
         p.actor.formation = 0;
@@ -1288,6 +1417,7 @@ export class VillageWorkers {
         p.actor.member = 0;
         p.actor.speed = 1;
         p.actor.rank = 100 + p.index;
+        p.actor.local = true;
       }
     } else if (p.phase === 'work') p.working = g.layout.variant !== 'blocked';
     if (p.phase === 'work' && p.role === 'carry' && p.actor.done && p.working && g.layout.variant !== 'compact') {
@@ -1362,25 +1492,29 @@ export class VillageWorkers {
       p.actor.rank = 0;
       return;
     }
-    const returnAt = m.stops?.length
-      ? m.startedAt + m.stops[m.stops.length - 1]!.workEndsAfterMs
-      : m.completesAt - m.transportMs;
-    if ((p.phase === 'work' || p.phase === 'rotate') && now >= Math.max(returnAt, p.arrivedAt + 600)) {
+    // A rotation in flight ends at its post first: a body stopped beside the
+    // road end would block every teammate's exit connector.
+    if (p.phase === 'work' && now >= Math.max(returnAt, p.arrivedAt + 600)) {
       p.phase = 'load';
       p.phaseAt = now;
     }
     if (p.phase === 'load' && now - p.phaseAt >= 450 && now >= p.connectorRetry) {
       const back = this.#backRoute(g),
-        connector =
-          m.resource === 'garden' || m.resource === 'survey'
-            ? [{ ...p.actor.position }, back[0]!]
-            : worksiteConnector(
-                p.actor.position,
-                back[0]!,
-                this.hooks.project(m.target),
-                (q, r) => this.#connectorFree(p, g, q, r),
-                this.#connectorPosts(p, g),
-              );
+        compact = extraction && g.layout.variant === 'compact';
+      // A compact site empties in convoy order, one connector at a time, each
+      // joining the road where it passes closest: crossing exits would block.
+      if (compact && !this.#nextLeaver(p, g, back)) return;
+      const join = compact ? this.#roadJoin(p.actor.position, back) : { point: back[0]!, tail: back.slice(1) };
+      const connector =
+        m.resource === 'garden' || m.resource === 'survey'
+          ? [{ ...p.actor.position }, join.point]
+          : worksiteConnector(
+              p.actor.position,
+              join.point,
+              this.hooks.project(m.target),
+              (q, r) => this.#connectorFree(p, g, q, r),
+              this.#connectorPosts(p, g),
+            );
       if (!connector) {
         p.connectorRetry = now + 1000;
         p.actor.waitingSince ??= now;
@@ -1388,7 +1522,8 @@ export class VillageWorkers {
       }
       p.phase = 'inbound';
       p.phaseAt = now;
-      p.actor.path = [...connector, ...back.slice(1)];
+      p.exit = compact ? connector.length : 0;
+      p.actor.path = [...connector, ...join.tail];
       p.actor.distance = 0;
       p.actor.done = false;
       p.actor.member = p.index % 2;
@@ -1396,10 +1531,18 @@ export class VillageWorkers {
       p.actor.startAt = now + Math.floor(p.index / 2) * 120;
       p.actor.direction = -1;
       p.actor.rank = Math.floor(p.index / 2);
-      p.actor.speed = Math.max(
-        0.8,
-        pathLength(back) / Math.max(0.5, (m.stops?.length ? m.completesAt - returnAt : m.transportMs) / 1000),
-      );
+      p.actor.local = p.exit > 0;
+      p.actor.speed = p.exit ? 1.6 : this.#returnSpeed(g, back);
+    }
+    if (
+      p.phase === 'inbound' &&
+      p.exit &&
+      p.actor.distance >= pathLength(p.actor.path.slice(0, p.exit)) + WORKER_CLEARANCE * 2
+    ) {
+      // On the road: walk at the convoy's pace and let the next teammate leave.
+      p.exit = 0;
+      p.actor.local = false;
+      p.actor.speed = this.#returnSpeed(g, this.#backRoute(g));
     }
     if (p.phase === 'inbound' && p.actor.done) {
       p.phase = 'done';
@@ -1592,8 +1735,7 @@ export class VillageWorkers {
     const role = working ? teamActivity(g.seed, g.mission.resource, g.mission.count, p.role, t) : p.role;
     const loaded =
       g.mission.resource === 'trade' ||
-      p.phase === 'load' ||
-      p.phase === 'inbound' ||
+      ((p.phase === 'load' || p.phase === 'inbound') && p.worked) ||
       (g.stop > 0 && g.mission.resource === 'garden' && !gardening) ||
       (working && role === 'carry' && (p.role !== 'carry' || p.actor.distance > 1.25));
     p.cargo.setEnabled(loaded && g.mission.resource !== 'survey' && g.mission.resource !== 'leveling');
