@@ -4,7 +4,7 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 
 ## État
 
-- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. **Alpha déployé à `alpha-2026.10.27.10`** (figurines, bosquets sans chemin, arrivées compactes, scie de long, retour en convoi, bornes du pool de lecture, présentation réutilisée ; correctif de sortie de halle annulé) ; staging resté à `staging-2026.10.25.4`.
+- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. **Alpha déployé à `alpha-2026.10.27.11`** (dont arbre abattu, tas de bûches et double porte de la halle-marché) (figurines, bosquets sans chemin, arrivées compactes, scie de long, retour en convoi, bornes du pool de lecture, présentation réutilisée ; correctif de sortie de halle annulé) ; staging resté à `staging-2026.10.25.4`.
 - **Jusqu'au 23 octobre ~17 h, la V2 n'a jamais tourné en prod** : son contrôle d'activation lisait `kysely_migration`, interdite au rôle applicatif (`deploy.py`) → 500 sur toutes les routes V2 et repli silencieux du client sur V1. Corrigé (`1383eb4`, contrôle par le catalogue, régression qui reproduit les droits de prod). Les recettes staging antérieures portaient donc sur la V1.
 - Autorisations durables de Tristan : commits, push, fusion dans `main`, déploiements staging/alpha et enchaînement des tranches, sans aval de routine. Restent à lui demander : gameplay, base de développement locale, actions destructives sur données joueurs.
 - Migrations 051–061 appliquées en test, staging, alpha et, le 27 octobre à la demande de Tristan, sur la base de développement locale (sauvegarde préalable `~/arbestra-dev-avant-migrations-20261027-1004.dump`).
