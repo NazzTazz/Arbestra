@@ -744,8 +744,16 @@ export interface Database {
     regrowthPeriodMs: ColumnType<string, number | string | undefined, number | string>;
     regrowthUpdatedAt: Timestamp;
     cleared: ColumnType<boolean, boolean | undefined, boolean>;
+    /** Wood ever cut: raised by each debit of a returned lot (062). */
+    cutAmount: ColumnType<string, number | string | undefined, number | string>;
   };
-  resourceDeposits: StoneDepositsTable & { resourceCode: 'stone' | 'wood'; cleared: boolean; blocksCell: boolean };
+  resourceDeposits: StoneDepositsTable & {
+    resourceCode: 'stone' | 'wood';
+    cleared: boolean;
+    blocksCell: boolean;
+    /** Stored cut plus the lots returned but not yet debited; 0 for stone. */
+    cutAmount: string;
+  };
   accounts: AccountsTable;
   worlds: WorldsTable;
   worldGenerationCandidates: WorldGenerationCandidatesTable;

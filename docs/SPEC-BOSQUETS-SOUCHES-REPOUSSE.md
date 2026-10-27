@@ -36,7 +36,7 @@ Un lot réserve `reservedAmount` (≤ 100) de bois au départ.
 
 ## 4. Serveur
 
-- **Sans migration** (réalisé le 27 octobre, `a26b061`) : les lots de bois sont conservés (`deposit_extractions`, jamais purgés hors remise à zéro e2e), donc le bois coupé est la somme des `reserved_amount` des lots de bois du bosquet revenus avant la borne économique de la transaction. Le défrichage n'y ajoute rien (le reliquat est détruit, pas coupé) ; la repousse ne le diminue jamais.
+- **Compteur stocké** (choix de Tristan, pour la performance avec beaucoup d'arbres) : migration 062, `woodland_deposits.cut_amount`, rempli exactement depuis les lots déjà débités (les lots sont conservés) puis augmenté à chaque débit d'un lot revenu, dans la même instruction que la réservation. La vue `resource_deposits` y ajoute les lots revenus pas encore débités, comme pour le stock. Le défrichage n'y ajoute rien (le reliquat est détruit, pas coupé) ; la repousse ne le diminue jamais.
 - Contrat : `StoneDeposit.cutAmount` optionnel, présent pour le bois. Fiche du bosquet (`readStoneDeposit`) : fait. Lecteurs de chunks, spatial V2 et présentation : à ajouter en tranche 3, par une agrégation groupée par bosquet.
 - Les trajets serveur ne changent pas : ils utilisent déjà des arbres adultes, indépendamment du stock.
 
@@ -49,7 +49,7 @@ Retour de Tristan (« ça agace tout le monde ») :
 ## 6. Tranches
 
 1. Mode Exploitation : cercles au pied des arbres, balayage sur les arbres. Client seul, le plus attendu.
-2. Serveur : `cutAmount` (somme des lots revenus), contrat ; compteurs dans la fiche du bosquet. **Fait.**
+2. Serveur : `cutAmount` stocké (migration 062), contrat ; compteurs dans la fiche du bosquet. **Fait.**
 3. Rendu du bosquet : souches, arbres d'origine, tronc couché, jeunes arbres (§2).
 4. Abattage du vrai arbre pendant un lot (§3), qui remplace l'arbre accessoire de la tranche 3 des chantiers.
 

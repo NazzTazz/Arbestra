@@ -598,5 +598,15 @@ it('counts the wood ever cut from a grove: returned lots only, regrowth not subt
     expect(after.cutAmount).toBe(100);
     // A day of regrowth gives back wood without reducing what was cut.
     expect(after.remainingAmount).toBeGreaterThan(200);
+    // Debiting the lot stores it on the grove, counted once.
+    await materializeWoodland(tx, worldId, id, later);
+    const stored = await tx
+      .selectFrom('woodlandDeposits')
+      .select('cutAmount')
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', id)
+      .executeTakeFirstOrThrow();
+    expect(Number(stored.cutAmount)).toBe(100);
+    expect((await readStoneDeposit(tx, worldId, id)).cutAmount).toBe(100);
   });
 });

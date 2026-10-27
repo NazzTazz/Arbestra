@@ -176,6 +176,9 @@ export async function materializeWoodland(
         reserved_amount=w.reserved_amount-coalesce((select sum(e.reserved_amount) from deposit_extractions e
           where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
             and e.wood_debited_at is null and e.completes_at<=${at}),0),
+        cut_amount=w.cut_amount+coalesce((select sum(e.reserved_amount) from deposit_extractions e
+          where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
+            and e.wood_debited_at is null and e.completes_at<=${at}),0),
         regrowth_updated_at=greatest(w.regrowth_updated_at,${at})
       where w.world_id=${worldId} and w.feature_id=${featureId}
     `.execute(tx);
@@ -242,6 +245,9 @@ export async function materializeWoodland(
   await sql`
     update woodland_deposits w set remaining_amount=woodland_stock_at(w,${through}),
       reserved_amount=w.reserved_amount-coalesce((select sum(e.reserved_amount) from deposit_extractions e
+        where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
+          and e.wood_debited_at is null and e.completes_at<=${through}),0),
+      cut_amount=w.cut_amount+coalesce((select sum(e.reserved_amount) from deposit_extractions e
         where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
           and e.wood_debited_at is null and e.completes_at<=${through}),0),
       regrowth_updated_at=greatest(w.regrowth_updated_at,${through})

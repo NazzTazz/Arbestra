@@ -127,23 +127,6 @@ export async function readStoneDeposit(
           .where('featureId', '=', featureId)
           .executeTakeFirstOrThrow()
       : null;
-  // Lots are kept: the wood ever cut is the reservation of every lot returned
-  // by the economy bound of this transaction.
-  const cut =
-    row.resourceCode === 'wood'
-      ? await tx
-          .selectFrom('depositExtractions')
-          .select(sql<string>`coalesce(sum(reserved_amount), 0)`.as('amount'))
-          .where('worldId', '=', worldId)
-          .where('featureId', '=', featureId)
-          .where('resourceCode', '=', 'wood')
-          .where(
-            'completesAt',
-            '<=',
-            sql<Date>`coalesce(nullif(current_setting('arbestra.economy_through', true), '')::timestamptz, statement_timestamp())`,
-          )
-          .executeTakeFirstOrThrow()
-      : null;
   return {
     featureId,
     resourceCode: row.resourceCode,
@@ -160,7 +143,7 @@ export async function readStoneDeposit(
           cleared: wood.cleared,
           canClear: !wood.cleared && !row.blocksCell,
           regrowthPerHour: (Number(wood.initialAmount) * 3_600_000) / Number(wood.regrowthPeriodMs),
-          cutAmount: safeAmount(cut!.amount),
+          cutAmount: safeAmount(row.cutAmount),
         }
       : {}),
     revision: safeAmount(row.revision),
