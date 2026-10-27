@@ -92,10 +92,12 @@ export function groveSlots(feature: GroveInput): GroveSlot[] {
   });
 }
 
+/** Kit stumps reach 0.4 with their roots: a young tree grows clear of them (Tristan, 27 October). */
+const YOUNG_OFFSET_CELLS = 0.3;
 /** Side offset of a young tree from its stump, in cells, so both stay readable. */
 export function youngOffset(seed: number, index: number) {
   const angle = hash(seed, index + 31) * Math.PI * 2;
-  return { x: Math.cos(angle) * 0.09, y: Math.sin(angle) * 0.09 };
+  return { x: Math.cos(angle) * YOUNG_OFFSET_CELLS, y: Math.sin(angle) * YOUNG_OFFSET_CELLS };
 }
 
 const decoded = new Map<TreePiece, VertexData>();
