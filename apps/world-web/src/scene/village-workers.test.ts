@@ -1487,6 +1487,13 @@ it('wood site: places pair 0 at the real tree in a dense forest, from the fellin
     f.view.animate(epoch, true);
     expect(f.view.metrics.woodPlans).toEqual([{ id: 'dense', kind: 'binome', fall: expect.any(Number) }]);
     expect(f.scene.getMeshByName('work-trunk-dense-0')).toBeNull();
+    // The whole team reaches its posts, not only those the ordinary test lets through.
+    let working = 0;
+    for (let t = 33; t <= 30_000; t += 33) {
+      f.view.animate(epoch + t, true);
+      working = Math.max(working, f.view.metrics.layouts[0]!.phases.filter((phase) => phase === 'work').length);
+    }
+    expect(working).toBe(4);
   } finally {
     f.dispose();
   }

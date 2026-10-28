@@ -1414,7 +1414,11 @@ export class VillageWorkers {
           !other.actor.visible ||
           Math.hypot(point.x - other.actor.position.x, point.z - other.actor.position.z) >= WORKER_CLEARANCE + margin,
       ) &&
-      this.hooks.free(point, radius, g.mission.featureId, true)
+      // Posts around a felled tree were chosen by the felling test: reach them by it too,
+      // or the ordinary test, refusing the grove's surroundings, leaves the team on the road.
+      (g.wood?.plan && this.hooks.stageFree
+        ? this.hooks.stageFree(point, radius)
+        : this.hooks.free(point, radius, g.mission.featureId, true))
     );
   }
   #connectorPosts(p: Person, g: Group) {
