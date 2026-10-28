@@ -59,9 +59,9 @@ Retour de Tristan (« ça agace tout le monde ») :
 
 1. **Clairière de travail** : s'il existe un carré de 2 × 2 tuiles libres à moins de 5 cases de l'arbre à abattre, ces 4 tuiles deviennent le chantier. Un seul bûcheron va abattre l'arbre. Ensuite, 4 bûcherons tirent le tronc jusqu'au carré, où l'équipe le débite sur une disposition fixe. Premier rendu de la traction sans Blender : les tireurs reculent, le tronc glisse derrière eux. Une passe Blender pourra venir ensuite.
 2. **Équipe complète autour du bosquet** : sans carré libre à proximité, la disposition autour de l'arbre réel ci-dessus, si la place suffit pour toute l'équipe.
-3. **Équipe réduite** : sinon, une équipe réduite (2 ou 4 bûcherons) travaille sur place. Le chantier porte un indicateur `small`, pour expliquer plus tard au joueur pourquoi ce chantier montre moins de bûcherons.
+3. **Équipe réduite** : sinon, une équipe réduite (2 ou 4 bûcherons) coupe et débite sur place. Les autres bûcherons du lot font des allers-retours vers l'hôtel de ville pour livrer le bois : personne ne flâne dans le village.
 
-Ouvert : l'équipe réduite est-elle seulement visuelle (le lot garde son effectif et sa production, et les autres bûcherons restent invisibles ou attendent en lisière) ou réduit-elle l'effectif réel du lot côté serveur ?
+L'équipe réduite est **seulement visuelle** (Tristan, 28 octobre) : le lot garde son effectif et sa production, le serveur ne change pas. Aucun indicateur n'est nécessaire, puisque la production n'est pas touchée.
 
 ## 7. Kit d'arbres
 
