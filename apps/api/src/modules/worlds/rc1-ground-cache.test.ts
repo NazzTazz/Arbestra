@@ -124,7 +124,7 @@ describe('RC1 ground geometry cache without database', () => {
     f.rows.edits[0]!.remainingAmount = '500';
     expect((await readRc1Ground(f.db, 'read-committed-intermediate')).field.intersectsTree(surface)).toBe(true);
   });
-  it('reuses geometry after version checks and invalidates terraces, tree removals, threshold, clearing and added groves', async () => {
+  it('reuses geometry after version checks and invalidates terraces, tree removals, clearing and added groves, never stock', async () => {
     const f = fixture(),
       tree = f.data.forest!.trees[0]!,
       surface = { x: tree.x, y: tree.y, halfWidth: 0, halfHeight: 0 };
@@ -154,9 +154,11 @@ describe('RC1 ground geometry cache without database', () => {
     expect((await readRc1Ground(f.db, 'cache-pure-main')).field).toBe(first.field);
     expect(first.field.intersectsTree(surface)).toBe(true);
     expect(first.navigation.sample(tree.x, tree.y).blocked).toBe(true);
-    f.rows.edits[0]!.remainingAmount = '50';
+    // No 10 % threshold: a case without wood keeps its stumps until cleared.
+    f.rows.edits[0]!.remainingAmount = '0';
     const threshold = await readRc1Ground(f.db, 'cache-pure-main');
-    expect(threshold.field.intersectsTree(surface)).toBe(false);
+    expect(threshold.field).toBe(first.field);
+    expect(threshold.field.intersectsTree(surface)).toBe(true);
     expect(threshold.navigation.sample(tree.x, tree.y).blocked).toBe(true);
     f.rows.edits[0]!.removedIndices = [0];
     const removed = await readRc1Ground(f.db, 'cache-pure-main');

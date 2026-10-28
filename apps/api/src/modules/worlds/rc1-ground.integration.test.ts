@@ -196,7 +196,7 @@ describe('RC1 verified source cache on isolated worlds', () => {
     }
   });
 
-  it('keeps ordinary stock changes out of the geometry cache but invalidates the physical woodland threshold', async () => {
+  it('keeps stock changes out of the geometry cache: trunks and stumps stand until the case is cleared', async () => {
     const rollback = Error('GROUND_THRESHOLD_ROLLBACK'),
       tree = artifact.forest!.trees[0]!,
       surface = { ...tree, halfWidth: 0, halfHeight: 0 };
@@ -234,9 +234,17 @@ describe('RC1 verified source cache on isolated worlds', () => {
         queries.length = 0;
         expect((await readRc1Ground(tx, worlds[0]!)).field).toBe(first.field);
         expect(queries.some((q) => q.includes('left join lateral') && q.includes('"world_rc1_resources"'))).toBe(false);
+        // No more 10 % threshold: a case without wood keeps its stumps (docs/SPEC-BOIS-ARBRE-UNITE.md).
         await tx
           .updateTable('woodlandDeposits')
-          .set({ remainingAmount: 100 })
+          .set({ remainingAmount: 0 })
+          .where('worldId', '=', worlds[0]!)
+          .where('featureId', '=', featureId)
+          .execute();
+        expect((await readRc1Ground(tx, worlds[0]!)).field).toBe(first.field);
+        await tx
+          .updateTable('woodlandDeposits')
+          .set({ cleared: true })
           .where('worldId', '=', worlds[0]!)
           .where('featureId', '=', featureId)
           .execute();

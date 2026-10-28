@@ -302,7 +302,7 @@ async function inputs(
         .leftJoin('woodlandDeposits as d', (j) =>
           j.onRef('d.worldId', '=', 'r.worldId').onRef('d.featureId', '=', 'r.featureId'),
         )
-        .select(['r.treeIndices', 'r.removedIndices', 'd.cleared', 'd.remainingAmount', 'd.initialAmount'])
+        .select(['r.treeIndices', 'r.removedIndices', 'd.cleared'])
         .where('r.worldId', '=', wid)
         .where(
           treeIds.length
@@ -392,13 +392,8 @@ function validateSpace(
   for (const { plan } of data.plans) validatePlan(plan, wanted, v);
   if (data.paths.some((path) => cells.some((c) => pathPassageIntersectsBox(path, c, 0.5, 0.5, v))))
     fail('ENGAGED_PASSAGE', 'Une équipe utilise encore cette emprise.');
-  const removed = new Set(
-    data.trees.flatMap((r) =>
-      r.cleared || (r.remainingAmount !== null && Number(r.remainingAmount) <= Number(r.initialAmount) * 0.1)
-        ? r.treeIndices
-        : r.removedIndices,
-    ),
-  );
+  // Trunks and stumps stand until the case is cleared (docs/SPEC-BOIS-ARBRE-UNITE.md).
+  const removed = new Set(data.trees.flatMap((r) => (r.cleared ? r.treeIndices : r.removedIndices)));
   const field = source
     ? editedRc1Field(
         {

@@ -13,13 +13,15 @@ import { materializeCohorts, workingTeam } from '../population/work.js';
 import { millisecondsUntilRested } from '../population/energy.js';
 import { consumeInitialWorkers, worksiteOrderBudget } from '../villages/exploitation-budget.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
-import { clearWoodland } from './woodland.js';
+import { nextWoodWork, readWoodlandTrees } from './woodland.js';
 import {
   readExtractions,
   readStoneDeposit,
   startStoneExtraction,
   stoneDepositDetails,
   stoneExtractionDuration,
+  STUMP_REMOVAL_MS,
+  STUMP_REMOVAL_WORKERS,
 } from './stone-extractions.js';
 import { wrappedDelta } from '../worlds/coordinates.js';
 import { poolAdmissionCap } from './extraction-pools.js';
@@ -461,16 +463,17 @@ export async function admitWorksites(
         a.ordinal - b.ordinal ||
         a.featureId.localeCompare(b.featureId),
     );
-    let next: { featureId: string; amount: number; path: TravelCell[]; transportMs: number } | undefined;
+    let next:
+      | { featureId: string; amount: number; treeIndex?: number; path: TravelCell[]; transportMs: number }
+      | undefined;
     let waitingStock = false,
       waitingAccess = false;
     let waitingTarget: { featureId: string } | null = null;
     for (const target of targets) {
       const deposit = await readStoneDeposit(tx, economy.worldId, target.featureId);
-      if (
-        deposit.resourceCode !== site.resourceCode ||
-        (site.resourceCode === 'wood' && deposit.cleared && !target.thresholdReachedAt)
-      ) {
+      // A case cleared meanwhile: this worksite's own clearing completed its
+      // target at the debit of the last stump, so another village did it.
+      if (deposit.resourceCode !== site.resourceCode || (site.resourceCode === 'wood' && deposit.cleared)) {
         await completeTarget(
           tx,
           { id: target.worksiteId },
@@ -481,25 +484,23 @@ export async function admitWorksites(
         );
         continue;
       }
-      const threshold = site.resourceCode === 'stone' ? 0 : deposit.initialAmount / 10;
-      if (
-        (target.thresholdReachedAt && site.mode === 'cut') ||
-        deposit.remainingAmount <= threshold ||
-        deposit.cleared
-      ) {
-        if (site.mode === 'clear' && !deposit.cleared) {
-          const details = await stoneDepositDetails(
-            tx,
-            { ...village, worldId: economy.worldId, villageId: economy.villageId },
-            economy,
-            target.featureId,
-          );
-          if (!details.eligibility.inRange || details.eligibility.protected) {
-            waitingAccess = true;
-            continue;
-          }
-          await clearWoodland(tx, economy.worldId, target.featureId, economy.through);
-        }
+      // Wood: one tree per lot, in the designated order; a clearing then
+      // removes each stump (docs/SPEC-BOIS-ARBRE-UNITE.md). Stone: the deposit.
+      const work =
+        site.resourceCode === 'wood'
+          ? await nextWoodWork(
+              tx,
+              economy.worldId,
+              target.featureId,
+              site.mode === 'clear' ? 'clear' : 'cut',
+              await readWoodlandTrees(tx, economy.worldId, target.featureId, target.treeIndices),
+            )
+          : deposit.remainingAmount <= 0
+            ? ({ kind: 'done' } as const)
+            : deposit.availableAmount < 1
+              ? ({ kind: 'wait' } as const)
+              : ({ kind: 'lot', amount: Math.min(100, deposit.availableAmount) } as const);
+      if (work.kind === 'done') {
         await completeTarget(
           tx,
           { id: target.worksiteId },
@@ -511,10 +512,23 @@ export async function admitWorksites(
         continue;
       }
       // A reservation is temporary, not a failed access. No route is needed until stock is free.
-      if (deposit.availableAmount < 1) {
+      if (work.kind === 'wait') {
         waitingStock = true;
         waitingTarget ??= { featureId: target.featureId };
         continue;
+      }
+      if (work.amount === 0) {
+        // The stump of a clearing: the access is checked here, not by a refusal.
+        const details = await stoneDepositDetails(
+          tx,
+          { ...village, worldId: economy.worldId, villageId: economy.villageId },
+          economy,
+          target.featureId,
+        );
+        if (!details.eligibility.inRange || details.eligibility.protected) {
+          waitingAccess = true;
+          continue;
+        }
       }
       let path: TravelCell[] | undefined;
       try {
@@ -553,7 +567,13 @@ export async function admitWorksites(
       // through seconds can turn 4052 into 4051.9999999999995 and abort the
       // village transaction when PostgreSQL stores transport_ms as an integer.
       const transportMs = travelDuration(path, village);
-      next = { featureId: target.featureId, amount: Math.min(100, deposit.availableAmount), path, transportMs };
+      next = {
+        featureId: target.featureId,
+        amount: work.amount,
+        ...('treeIndex' in work ? { treeIndex: work.treeIndex } : {}),
+        path,
+        transportMs,
+      };
       break;
     }
     if (!next) {
@@ -695,10 +715,11 @@ export async function admitWorksites(
       continue;
     }
     const cohorts = await materializeCohorts(tx, economy.worldId, economy.villageId, economy.through);
+    const stump = next.amount === 0;
     const workers = workingTeam(
       cohorts.filter((c) => c.avoidWorksiteId !== site.id),
-      budget.cap,
-      (count) => stoneExtractionDuration(count, next.amount) + 2 * transportMs,
+      stump ? Math.min(STUMP_REMOVAL_WORKERS, budget.cap) : budget.cap,
+      (count) => (stump ? STUMP_REMOVAL_MS : stoneExtractionDuration(count, next.amount)) + 2 * transportMs,
       budget.preferredCohortId,
     ).count;
     if (!workers) {
@@ -747,6 +768,7 @@ export async function admitWorksites(
       {
         id: site.id,
         amount: next.amount,
+        ...(next.treeIndex !== undefined ? { treeIndex: next.treeIndex } : {}),
         ...(budget.preferredCohortId ? { preferredCohortId: budget.preferredCohortId } : {}),
       },
     );

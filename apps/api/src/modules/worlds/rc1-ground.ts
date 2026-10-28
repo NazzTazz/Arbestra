@@ -88,7 +88,7 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
         (eb) =>
           eb
             .selectFrom('woodlandDeposits')
-            .select(['cleared', 'remainingAmount', 'initialAmount', 'cellX', 'cellY'])
+            .select(['cleared', 'initialAmount', 'cellX', 'cellY'])
             .whereRef('woodlandDeposits.worldId', '=', 'worldRc1Resources.worldId')
             .whereRef('woodlandDeposits.featureId', '=', 'worldRc1Resources.featureId')
             .limit(1)
@@ -110,7 +110,6 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
         'treeIndices',
         'removedIndices',
         'cleared',
-        'remainingAmount',
         'initialAmount',
         'woodlandDeposits.cellX',
         'woodlandDeposits.cellY',
@@ -120,16 +119,10 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
       .orderBy('worldRc1Resources.featureId')
       .execute();
     const canonicalIndices = (indices: number[]) => [...new Set(indices)].sort((a, b) => a - b);
-    const removed = canonicalIndices(
-      resourceEdits.flatMap((r) =>
-        r.cleared || (r.remainingAmount !== null && Number(r.remainingAmount) <= Number(r.initialAmount) * 0.1)
-          ? r.treeIndices
-          : r.removedIndices,
-      ),
-    );
-    // Full-grown trunks do not move with harvesting/regrowth. The collision
-    // field separately retains the existing depleted-tree threshold above.
-    const absent = canonicalIndices(resourceEdits.flatMap((r) => (r.cleared ? r.treeIndices : r.removedIndices)));
+    // Trunks and stumps stand until their case is cleared, whatever wood is
+    // left (docs/SPEC-BOIS-ARBRE-UNITE.md): collisions and navigation alike.
+    const absent = canonicalIndices(resourceEdits.flatMap((r) => (r.cleared ? r.treeIndices : r.removedIndices))),
+      removed = absent;
     const groves = resourceEdits.filter(
       (r) => !r.treeIndices.length && r.cellX !== null && r.cellY !== null && !r.cleared,
     );

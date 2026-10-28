@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { woodlandTrees, woodlandPassage } from './woodland-layout.js';
+import { woodlandTreeIndices } from './woodland-trees.js';
 import { buildTravelNetwork, refineTravelRoute, type TravelGround } from './travel-paths.js';
 import { emptyInfrastructure } from './infrastructure.js';
 import { spawnDelta } from './spawn-map.js';
@@ -36,6 +37,22 @@ describe('woodland pedestrian geometry', () => {
     expect(woodlandTrees(f)[0]!.scale).toBeCloseTo(full[0]!.scale * 0.28);
     f.deposit!.cleared = true;
     expect(woodlandTrees(f)).toEqual([]);
+  });
+  it('draws as many trees as the economy counts in a cell of a world without RC1 forest', () => {
+    for (let variantSeed = -6; variantSeed < 14; variantSeed++) {
+      const f = { ...wood(), variantSeed, rc1: undefined, deposit: null } as unknown as NaturalFeature;
+      expect(woodlandTrees(f)).toHaveLength(woodlandTreeIndices({ rc1: null, variantSeed }).length);
+      // Once it holds wood, 500 per tree: a case kept at two trees beside a building.
+      const kept = { ...wood(), variantSeed, rc1: undefined } as unknown as NaturalFeature;
+      kept.deposit!.initialAmount = 1000;
+      expect(woodlandTrees(kept)).toHaveLength(2);
+      expect(woodlandTreeIndices({ rc1: null, variantSeed, initialAmount: 1000 })).toEqual([0, 1]);
+    }
+    const starter = woodlandTreeIndices({
+      rc1: { sourceKey: 'starter:v:0', treeIndices: [], removedIndices: [] },
+      variantSeed: 3,
+    });
+    expect(woodlandTrees(wood())).toHaveLength(starter.length);
   });
   it('uses the dimensions and stock scale of the natural tree instances', () => {
     const f = wood();

@@ -415,7 +415,10 @@ export async function readTerrainProjection(
                           reservedAmount,
                           availableAmount: remainingAmount - reservedAmount,
                           ...(f.resourceCode === 'wood' ? { cutAmount: safeAmount(f.cutAmount!) } : {}),
-                          state: f.cleared || remainingAmount === 0 ? ('depleted' as const) : ('available' as const),
+                          // A wood case stays until its last stump is removed.
+                          state: (f.resourceCode === 'wood' ? f.cleared : remainingAmount === 0)
+                            ? ('depleted' as const)
+                            : ('available' as const),
                           revision: safeAmount(f.revision!),
                           updatedAt: f.updatedAt!.toISOString(),
                         },

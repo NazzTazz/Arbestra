@@ -8,15 +8,16 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS } from '../../database/seed.js';
-import { clearWoodland, materializeWoodland, materializeWoodlands } from './woodland.js';
+import { clearWoodland } from './woodland.js';
 import { completeStoneExtractionAt, readStoneDeposit, startStoneExtraction } from './stone-extractions.js';
+import { admitWorksites, createWorksite } from './worksites.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
-import { readVillageDepositDetails, ownedVillage } from '../villages/service.js';
-import { startVillageStoneExtraction, clearVillageWoodland } from '../villages/legacy-commands.fixture.js';
-import { getTerrainUpdates } from '../worlds/terrain.js';
-import { completeGardenHarvestAt } from '../population/garden-harvest.js';
-import { assignWorkers, eligibleWorkers, materializeCohorts } from '../population/work.js';
+import { readVillageDepositDetails, ownedVillage, reconcileVillageForRead } from '../villages/service.js';
+import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
 
+/** The tree as the wood harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md): 500 per
+ * tree, lots of 100 on one tree, felled at its first lot, a stump at its last;
+ * no regrowth, no threshold; stumps removed one by one before a case clears. */
 const url = testDatabaseUrl(),
   db = createDatabase(url),
   worldId = DEVELOPMENT_IDS.world,
@@ -27,53 +28,61 @@ beforeAll(async () => {
 });
 afterAll(() => db.destroy());
 const rollback = new Error('woodland fixture rollback');
+const cell = { cellX: 1024, cellY: 514 };
 
-async function fixture(run: (tx: Transaction<Database>, id: string, t: Date) => Promise<void>, amount = 300) {
+/** A case of `trees` trees (500 each) beside the dev village of the test world. */
+async function grove(tx: Transaction<Database>, t: Date, trees = 2) {
+  const id = randomUUID();
+  await tx
+    .insertInto('worldFeatures')
+    .values({ id, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 4 })
+    .execute();
+  await tx
+    .insertInto('woodlandDeposits')
+    .values({
+      worldId,
+      featureId: id,
+      ...cell,
+      initialAmount: 500 * trees,
+      remainingAmount: 500 * trees,
+      reservedAmount: 0,
+      revision: 1,
+      updatedAt: t,
+      regrowthUpdatedAt: t,
+    })
+    .execute();
+  await tx
+    .insertInto('worldCellOccupancies')
+    .values({ worldId, ...cell, featureId: id, buildingId: null, role: 'body' })
+    .execute();
+  return id;
+}
+const cohort = (tx: Transaction<Database>, village: string, t: Date) =>
+  tx
+    .insertInto('populationCohorts')
+    .values({
+      worldId,
+      villageId: village,
+      originVillageId: village,
+      memberCount: 10,
+      activity: 'idle',
+      energy: 10,
+      energyProgress: 0,
+      energyUpdatedAt: t,
+      restingSince: null,
+      foodUsedSinceRest: 0,
+      harvestId: null,
+      extractionId: null,
+    })
+    .execute();
+
+async function fixture(run: (tx: Transaction<Database>, id: string, t: Date) => Promise<void>, trees = 2) {
   try {
     await db.transaction().execute(async (tx) => {
       await tx.selectFrom('villages').select('id').where('id', '=', villageId).forUpdate().executeTakeFirstOrThrow();
       const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
-      const id = randomUUID();
-      await tx
-        .insertInto('worldFeatures')
-        .values({ id, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 1 })
-        .execute();
-      await tx
-        .insertInto('woodlandDeposits')
-        .values({
-          worldId,
-          featureId: id,
-          cellX: 1024,
-          cellY: 514,
-          initialAmount: 300,
-          remainingAmount: amount,
-          reservedAmount: 0,
-          revision: 1,
-          updatedAt: t,
-          regrowthUpdatedAt: t,
-        })
-        .execute();
-      await tx
-        .insertInto('worldCellOccupancies')
-        .values({ worldId, cellX: 1024, cellY: 514, featureId: id, buildingId: null, role: 'body' })
-        .execute();
-      await tx
-        .insertInto('populationCohorts')
-        .values({
-          worldId,
-          villageId,
-          originVillageId: villageId,
-          memberCount: 10,
-          activity: 'idle',
-          energy: 10,
-          energyProgress: 0,
-          energyUpdatedAt: t,
-          restingSince: null,
-          foodUsedSinceRest: 0,
-          harvestId: null,
-          extractionId: null,
-        })
-        .execute();
+      const id = await grove(tx, t, trees);
+      await cohort(tx, villageId, t);
       await run(tx, id, t);
       throw rollback;
     });
@@ -81,183 +90,296 @@ async function fixture(run: (tx: Transaction<Database>, id: string, t: Date) => 
     if (error !== rollback) throw error;
   }
 }
-const village = { worldId, villageId, widthCells: 2048, heightCells: 1024 };
-const stock = (tx: Transaction<Database>) =>
-  tx
-    .selectFrom('villageResources')
-    .select('amount')
-    .where('worldId', '=', worldId)
-    .where('villageId', '=', villageId)
-    .where('resourceCode', '=', 'wood')
+/** A second village of the same world, with its own team. */
+async function neighbour(tx: Transaction<Database>, t: Date) {
+  const account = randomUUID(),
+    id = randomUUID();
+  await tx
+    .insertInto('accounts')
+    .values({ id: account, email: `${account}@wood.test`, passwordHash: 'unused' })
+    .execute();
+  await tx.insertInto('worldMemberships').values({ worldId, accountId: account, playerName: 'Wood test' }).execute();
+  await tx
+    .insertInto('villages')
+    .values({
+      id,
+      worldId,
+      ownerAccountId: account,
+      name: 'Wood test',
+      anchorCellX: 1025,
+      anchorCellY: 512,
+      economyActivatedAt: t,
+    })
+    .execute();
+  await tx.insertInto('villageResources').values({ worldId, villageId: id, resourceCode: 'wood', amount: 0 }).execute();
+  const hall = await tx
+    .insertInto('buildings')
+    .values({
+      worldId,
+      villageId: id,
+      buildingType: 'town-hall',
+      level: 1,
+      targetLevel: null,
+      status: 'completed',
+      constructionStartedAt: null,
+      constructionCompletesAt: null,
+      completedAt: t,
+    })
+    .returning('id')
     .executeTakeFirstOrThrow();
-
-it('leaves settled full woodlands untouched but reconciles depleted stock and missing occupancy', async () => {
-  await fixture(async (tx, id, t) => {
-    const before = await tx
-      .selectFrom('woodlandDeposits')
-      .selectAll()
-      .where('featureId', '=', id)
-      .executeTakeFirstOrThrow();
-    await materializeWoodlands(tx, worldId, [id], new Date(t.getTime() + 3600000));
-    expect(
-      await tx.selectFrom('woodlandDeposits').selectAll().where('featureId', '=', id).executeTakeFirstOrThrow(),
-    ).toEqual(before);
-    await tx.deleteFrom('worldCellOccupancies').where('worldId', '=', worldId).where('featureId', '=', id).execute();
-    await materializeWoodlands(tx, worldId, [id], new Date(t.getTime() + 3600000));
-    expect(
+  await tx
+    .insertInto('worldCellOccupancies')
+    .values({ worldId, cellX: 1025, cellY: 512, buildingId: hall.id, featureId: null, role: 'anchor' })
+    .execute();
+  await cohort(tx, id, t);
+  return { account, id };
+}
+const village = { worldId, villageId, widthCells: 2048, heightCells: 1024 };
+const stock = async (tx: Transaction<Database>, village: string = villageId) =>
+  BigInt(
+    (
       await tx
-        .selectFrom('worldCellOccupancies')
-        .select('featureId')
+        .selectFrom('villageResources')
+        .select('amount')
         .where('worldId', '=', worldId)
-        .where('featureId', '=', id)
-        .execute(),
-    ).toHaveLength(1);
+        .where('villageId', '=', village)
+        .where('resourceCode', '=', 'wood')
+        .executeTakeFirstOrThrow()
+    ).amount,
+  );
+const tree = (tx: Transaction<Database>, id: string, treeIndex: number) =>
+  tx
+    .selectFrom('woodlandTrees')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', id)
+    .where('treeIndex', '=', treeIndex)
+    .executeTakeFirst();
+const lot = (tx: Transaction<Database>, id: string) =>
+  tx.selectFrom('depositExtractions').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+const occupied = async (tx: Transaction<Database>, id: string) =>
+  (
+    await tx
+      .selectFrom('worldCellOccupancies')
+      .select('featureId')
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', id)
+      .execute()
+  ).length;
+
+it('cuts a tree in five lots of 100: felled at the first, a stump at the fifth, each debited at its deadline', async () => {
+  await fixture(async (tx, id, t) => {
+    const before = await stock(tx);
+    let at = t;
+    for (let n = 1; n <= 5; n++) {
+      const work = await lot(
+        tx,
+        await startStoneExtraction(tx, village, { worldId, villageId, through: at }, id, randomUUID(), 1),
+      );
+      expect(work).toMatchObject({ treeIndex: 0, reservedAmount: '100' });
+      // The first lot fells the tree; its trunk holds the wood left.
+      expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 600 - 100 * n, reservedAmount: 100, felledAt: t });
+      // A read before the deadline debits nothing.
+      await completeStoneExtractionAt(tx, worldId, villageId, work.id, new Date(work.completesAt.getTime() - 1));
+      expect((await tree(tx, id, 0))!.remainingAmount).toBe(600 - 100 * n);
+      at = work.completesAt;
+      await completeStoneExtractionAt(tx, worldId, villageId, work.id, at);
+      expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 500 - 100 * n, reservedAmount: 0 });
+      expect(await lot(tx, work.id)).toMatchObject({ status: 'completed', woodDebitedAt: at });
+      expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({
+        cutAmount: 100 * n,
+        remainingAmount: 1000 - 100 * n,
+        reservedAmount: 0,
+        state: 'available',
+        blocksCell: true,
+      });
+    }
+    // Five lots, one stump, its wood delivered once.
+    expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 0, stumpRemovedAt: null });
+    expect(await stock(tx)).toBe(before + 500n);
+    // The sixth lot fells the next tree.
+    const sixth = await startStoneExtraction(tx, village, { worldId, villageId, through: at }, id, randomUUID(), 1);
+    expect((await lot(tx, sixth)).treeIndex).toBe(1);
+    expect(await tree(tx, id, 1)).toMatchObject({ remainingAmount: 500, reservedAmount: 100 });
+  });
+}, 60_000);
+
+it('shares a tree between two villages and lets only the owner debit its lot, at its deadline', async () => {
+  await fixture(async (tx, id, t) => {
+    const other = await neighbour(tx, t);
+    // A trunk of 150 left: one lot of 100 for the village, the remaining 50 for its neighbour.
+    await tx
+      .insertInto('woodlandTrees')
+      .values({ worldId, featureId: id, treeIndex: 0, remainingAmount: 150, felledAt: t })
+      .execute();
     await tx
       .updateTable('woodlandDeposits')
-      .set({ remainingAmount: 0, regrowthUpdatedAt: t })
+      .set({ remainingAmount: 650, cutAmount: 350 })
       .where('worldId', '=', worldId)
       .where('featureId', '=', id)
       .execute();
-    await materializeWoodlands(tx, worldId, [id], new Date(t.getTime() + 3600000));
-    const grown = await tx
-      .selectFrom('woodlandDeposits')
-      .select('remainingAmount')
-      .where('featureId', '=', id)
-      .executeTakeFirstOrThrow();
-    expect(Number(grown.remainingAmount)).toBeCloseTo(300 / 336, 8);
+    const mine = await lot(
+      tx,
+      await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1),
+    );
+    const theirs = await lot(
+      tx,
+      await startStoneExtraction(
+        tx,
+        { ...village, villageId: other.id },
+        { worldId, villageId: other.id, through: t },
+        id,
+        randomUUID(),
+        1,
+      ),
+    );
+    expect(mine).toMatchObject({ treeIndex: 0, reservedAmount: '100' });
+    expect(theirs).toMatchObject({ treeIndex: 0, reservedAmount: '50' });
+    expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 150, reservedAmount: 150 });
+    // Long after both deadlines, the neighbour's wake debits its own lot only.
+    const later = new Date(Math.max(mine.completesAt.getTime(), theirs.completesAt.getTime()) + 3_600_000);
+    const theirStock = await stock(tx, other.id);
+    await beginVillageEconomy(tx, worldId, other.id, undefined, [], [], false, [other.id], later);
+    expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 100, reservedAmount: 100 });
+    expect(await stock(tx, other.id)).toBe(theirStock + 50n);
+    expect((await lot(tx, mine.id)).woodDebitedAt).toBeNull();
+    // Readers already see the lot due as cut, without writing it.
+    await sql`select set_config('arbestra.economy_through', ${later.toISOString()}, true)`.execute(tx);
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ remainingAmount: 500, cutAmount: 500 });
+    // The owner debits it at its own deadline.
+    await completeStoneExtractionAt(tx, worldId, villageId, mine.id, mine.completesAt);
+    expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 0, reservedAmount: 0 });
+    expect(await lot(tx, mine.id)).toMatchObject({ woodDebitedAt: mine.completesAt });
     expect(
       await tx
-        .selectFrom('worldCellOccupancies')
-        .select('featureId')
-        .where('worldId', '=', worldId)
+        .selectFrom('woodlandDeposits')
+        .select(['remainingAmount', 'reservedAmount', 'cutAmount'])
         .where('featureId', '=', id)
-        .execute(),
-    ).toHaveLength(0);
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ remainingAmount: '500', reservedAmount: '0', cutAmount: '500' });
   });
-});
+}, 60_000);
 
-it('regrows over fourteen days, retains fractions across reads, caps stock and reblocks an unused cell', async () => {
+it('clears a case of two trees: ten lots of wood, two stumps removed one by one, then cleared and free', async () => {
   await fixture(async (tx, id, t) => {
-    await materializeWoodland(tx, worldId, id, t);
-    expect(
-      await tx.selectFrom('worldCellOccupancies').select('featureId').where('featureId', '=', id).execute(),
-    ).toHaveLength(0);
-    for (let i = 1; i <= 4; i++) await materializeWoodland(tx, worldId, id, new Date(t.getTime() + i * 3_600_000));
-    const row = await tx
-      .selectFrom('woodlandDeposits')
-      .selectAll()
-      .where('featureId', '=', id)
-      .executeTakeFirstOrThrow();
-    expect(Number(row.remainingAmount)).toBeCloseTo((300 * 4) / 336, 8);
-    await materializeWoodland(tx, worldId, id, new Date(t.getTime() + 40 * 3_600_000));
-    expect(
-      await tx.selectFrom('worldCellOccupancies').select('featureId').where('featureId', '=', id).execute(),
-    ).toHaveLength(1);
-    await materializeWoodland(tx, worldId, id, new Date(t.getTime() + 20 * 86400000));
-    expect((await readStoneDeposit(tx, worldId, id)).remainingAmount).toBe(300);
-  }, 0);
-});
-
-it('reservation is not depletion and a village cannot start a second mission on the same woodland', async () => {
-  await fixture(async (tx, id, t) => {
-    const command = randomUUID(),
-      economy = { worldId, villageId, through: t };
-    const work = await startStoneExtraction(tx, village, economy, id, command, 1);
-    expect(await startStoneExtraction(tx, village, economy, id, command, 1)).toBe(work);
-    expect((await readStoneDeposit(tx, worldId, id)).availableAmount).toBe(200);
-    await expect(clearWoodland(tx, worldId, id, t)).rejects.toMatchObject({ code: 'WOODLAND_NOT_CLEARABLE' });
-    await expect(startStoneExtraction(tx, village, economy, id, randomUUID(), 1)).rejects.toMatchObject({
-      code: 'WOODLAND_MISSION_IN_PROGRESS',
+    const anchor = { cellX: 1024, cellY: 512 },
+      path = [anchor, { cellX: 1024, cellY: 513 }, cell],
+      transportMs = travelDuration(path, village);
+    const siteId = await createWorksite(
+      tx,
+      { worldId, villageId, through: t },
+      {
+        commandId: randomUUID(),
+        mode: 'clear',
+        workerCap: 10,
+        featureIds: [id],
+      },
+    );
+    const lots: Array<Awaited<ReturnType<typeof lot>>> = [];
+    let at = t;
+    for (let step = 0; step < 80 && lots.length < 12; step++) {
+      await admitWorksites(tx, { worldId, villageId, through: at }, village, async () => path);
+      const running = await tx
+        .selectFrom('depositExtractions')
+        .selectAll()
+        .where('worksiteId', '=', siteId)
+        .where('status', '=', 'in-progress')
+        .executeTakeFirst();
+      if (!running) {
+        at = new Date(at.getTime() + 3_600_000); // Workers rest, then the site resumes.
+        continue;
+      }
+      // Until its last stump is removed, the case is occupied and blocks its cell.
+      expect(await occupied(tx, id)).toBe(1);
+      expect((await readStoneDeposit(tx, worldId, id)).blocksCell).toBe(true);
+      lots.push(running);
+      at = running.completesAt;
+      await completeStoneExtractionAt(tx, worldId, villageId, running.id, at);
+    }
+    expect(lots.map((l) => [l.treeIndex, Number(l.reservedAmount)])).toEqual([
+      ...Array.from({ length: 5 }, () => [0, 100]),
+      ...Array.from({ length: 5 }, () => [1, 100]),
+      [0, 0],
+      [1, 0],
+    ]);
+    // A stump: one inhabitant, the time of a lot of 100 for one inhabitant.
+    for (const stump of lots.slice(10)) {
+      expect(stump.workerCount).toBe(1);
+      expect(stump.completesAt.getTime() - stump.startedAt.getTime()).toBe(600_000 + 2 * transportMs);
+    }
+    expect((await tree(tx, id, 0))!.stumpRemovedAt).toEqual(lots[10]!.completesAt);
+    expect((await tree(tx, id, 1))!.stumpRemovedAt).toEqual(lots[11]!.completesAt);
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({
+      cleared: true,
+      state: 'depleted',
+      blocksCell: false,
+      remainingAmount: 0,
+      cutAmount: 1000,
     });
-  });
-});
-
-it('keeps fractional stock above the reclaim threshold blocked in details and chunks', async () => {
-  await fixture(async (tx, id, t) => {
-    const horizon = new Date(t.getTime() + 120000);
-    await materializeWoodland(tx, worldId, id, horizon);
-    const deposit = await readStoneDeposit(tx, worldId, id);
-    expect(deposit).toMatchObject({ remainingAmount: 30, blocksCell: true, canClear: false });
-    await expect(clearWoodland(tx, worldId, id, horizon)).rejects.toMatchObject({ code: 'WOODLAND_NOT_CLEARABLE' });
+    expect(await occupied(tx, id)).toBe(0);
     expect(
-      await tx.selectFrom('worldCellOccupancies').select('featureId').where('featureId', '=', id).execute(),
-    ).toHaveLength(1);
-    const source = {
-      transaction: () => ({
-        setIsolationLevel: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }),
-      }),
-    } as unknown as typeof db;
-    const chunks = await getTerrainUpdates(source, DEVELOPMENT_IDS.account, 'aube', '32,16');
-    expect(chunks.chunks[0]!.occupiedCells).toContainEqual({ cellX: 1024, cellY: 514 });
-    expect(chunks.chunks[0]!.features.find((f) => f.id === id)?.deposit?.blocksCell).toBe(true);
-  }, 30);
-});
-
-it('clearing during a last-lot mission preserves its delivery and stops regrowth without an extra reward', async () => {
-  await fixture(async (tx, id, t) => {
-    const before = BigInt((await stock(tx)).amount);
-    const work = await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1);
-    await clearWoodland(tx, worldId, id, t);
-    expect(BigInt((await stock(tx)).amount)).toBe(before);
-    const due = new Date(t.getTime() + 600000);
-    await completeStoneExtractionAt(tx, worldId, villageId, work, due);
-    await completeStoneExtractionAt(tx, worldId, villageId, work, due);
-    expect(BigInt((await stock(tx)).amount)).toBe(before + 30n);
-    await materializeWoodland(tx, worldId, id, new Date(due.getTime() + 30 * 86400000));
-    const after = await readStoneDeposit(tx, worldId, id);
-    expect(after).toMatchObject({ remainingAmount: 0, reservedAmount: 0, cleared: true });
+      (await tx.selectFrom('worldFeatures').select('state').where('id', '=', id).executeTakeFirstOrThrow()).state,
+    ).toBe('depleted');
     expect(
-      await tx.selectFrom('populationCohorts').select('id').where('extractionId', '=', work).execute(),
-    ).toHaveLength(0);
-  }, 30);
-});
-
-it('applies physical cuts in chronological order even before their villages claim the credit', async () => {
-  await fixture(async (tx, id, t) => {
-    const work = await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1);
-    const before = BigInt((await stock(tx)).amount);
-    const due = new Date(t.getTime() + 600000),
-      later = new Date(due.getTime() + 24 * 3600000);
-    await materializeWoodland(tx, worldId, id, later);
-    expect((await readStoneDeposit(tx, worldId, id)).remainingAmount).toBe(221);
-    expect(BigInt((await stock(tx)).amount)).toBe(before);
-    await completeStoneExtractionAt(tx, worldId, villageId, work, due);
-    expect(BigInt((await stock(tx)).amount)).toBe(before + 100n);
-    expect((await readStoneDeposit(tx, worldId, id)).remainingAmount).toBe(221);
+      await tx
+        .selectFrom('extractionWorksiteTargets')
+        .select(['status', 'reason'])
+        .where('worksiteId', '=', siteId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'completed', reason: 'goal-reached' });
   });
-});
+}, 120_000);
 
-it('a construction on a liberated case stops regrowth without overwriting the building', async () => {
+it('refuses to finish a clearing while a tree or a stump stands', async () => {
   await fixture(async (tx, id, t) => {
-    await materializeWoodland(tx, worldId, id, t);
+    await expect(clearWoodland(tx, worldId, id, t)).rejects.toMatchObject({ code: 'WOODLAND_NOT_CLEARABLE' });
     await tx
-      .insertInto('worldCellOccupancies')
-      .values({
-        worldId,
-        cellX: 1024,
-        cellY: 514,
-        buildingId: DEVELOPMENT_IDS.townHall,
-        featureId: null,
-        role: 'extension',
-      })
+      .insertInto('woodlandTrees')
+      .values([
+        { worldId, featureId: id, treeIndex: 0, remainingAmount: 0, felledAt: t, stumpRemovedAt: t },
+        { worldId, featureId: id, treeIndex: 1, remainingAmount: 0, felledAt: t },
+      ])
       .execute();
-    await materializeWoodland(tx, worldId, id, new Date(t.getTime() + 336 * 3600000));
+    await expect(clearWoodland(tx, worldId, id, t)).rejects.toMatchObject({ code: 'WOODLAND_NOT_CLEARABLE' });
+    expect(await occupied(tx, id)).toBe(1);
+    await tx.updateTable('woodlandTrees').set({ stumpRemovedAt: t }).where('featureId', '=', id).execute();
+    await clearWoodland(tx, worldId, id, t);
     expect((await readStoneDeposit(tx, worldId, id)).cleared).toBe(true);
-    expect(
-      (
-        await tx
-          .selectFrom('worldCellOccupancies')
-          .select('buildingId')
-          .where('worldId', '=', worldId)
-          .where('cellX', '=', 1024)
-          .where('cellY', '=', 514)
-          .executeTakeFirstOrThrow()
-      ).buildingId,
-    ).toBe(DEVELOPMENT_IDS.townHall);
-  }, 0);
+    expect(await occupied(tx, id)).toBe(0);
+  });
 });
 
-it('serves woodland details and starts the existing API service with a real path and resource identity', async () => {
+it('ignores an old notification: a lot already debited or a deadline that is not its own', async () => {
+  await fixture(async (tx, id, t) => {
+    const work = await lot(
+      tx,
+      await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1),
+    );
+    await completeStoneExtractionAt(tx, worldId, villageId, work.id, work.completesAt);
+    const after = {
+      stock: await stock(tx),
+      tree: await tree(tx, id, 0),
+      deposit: await tx
+        .selectFrom('woodlandDeposits')
+        .selectAll()
+        .where('featureId', '=', id)
+        .executeTakeFirstOrThrow(),
+    };
+    await completeStoneExtractionAt(tx, worldId, villageId, work.id, work.completesAt);
+    await completeStoneExtractionAt(tx, worldId, villageId, work.id, new Date(work.completesAt.getTime() + 1));
+    expect({
+      stock: await stock(tx),
+      tree: await tree(tx, id, 0),
+      deposit: await tx
+        .selectFrom('woodlandDeposits')
+        .selectAll()
+        .where('featureId', '=', id)
+        .executeTakeFirstOrThrow(),
+    }).toEqual(after);
+  });
+});
+
+it('serves woodland details and starts the existing API service on a tree, with a real path', async () => {
   await fixture(async (tx, id, t) => {
     const source = {
       transaction: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }),
@@ -270,7 +392,12 @@ it('serves woodland details and starts the existing API service with a real path
       { worldId, villageId, through: t },
       id,
     );
-    expect(details.deposit).toMatchObject({ resourceCode: 'wood', initialAmount: 300, remainingAmount: 300 });
+    expect(details.deposit).toMatchObject({
+      resourceCode: 'wood',
+      initialAmount: 1000,
+      remainingAmount: 1000,
+      regrowthPerHour: 0,
+    });
     expect(details.eligibility.workerOptions[0]?.canStart).toBe(true);
     const result = await startVillageStoneExtraction(
       source,
@@ -283,167 +410,78 @@ it('serves woodland details and starts the existing API service with a real path
     );
     expect(result.extraction.resourceCode).toBe('wood');
     expect(result.extraction.path.length).toBeGreaterThan(1);
-    expect(result.extraction.transportMs).toBe(
-      travelDuration(result.extraction.path, { widthCells: 2048, heightCells: 1024 }),
-    );
     expect(Date.parse(result.extraction.completesAt) - Date.parse(result.extraction.startedAt)).toBe(
       600000 + result.extraction.transportMs * 2,
     );
-    expect(result.deposit.availableAmount).toBe(200);
+    expect(result.deposit.availableAmount).toBe(900);
+    expect((await tree(tx, id, 0))!.reservedAmount).toBe(100);
   });
 });
 
-it('rolls back observed stock, reservation, workers and accomplishment mutations together', async () => {
-  const before = await db
-    .selectFrom('villageResources')
-    .selectAll()
-    .where('villageId', '=', villageId)
-    .orderBy('resourceCode')
-    .execute();
-  const cohorts = await db
-    .selectFrom('populationCohorts')
-    .selectAll()
-    .where('villageId', '=', villageId)
-    .orderBy('id')
-    .execute();
-  let workId = '';
-  await fixture(async (tx, id, t) => {
-    const amount = BigInt((await stock(tx)).amount);
-    workId = await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1);
-    await clearWoodland(tx, worldId, id, t);
-    await completeStoneExtractionAt(tx, worldId, villageId, workId, new Date(t.getTime() + 600000));
-    expect(BigInt((await stock(tx)).amount)).toBe(amount + 30n);
-    expect((await readStoneDeposit(tx, worldId, id)).cleared).toBe(true);
-    expect(
+/** Committed fixture for tests whose transactions must commit or roll back on their own. */
+async function committedGrove() {
+  return db.transaction().execute(async (tx) => {
+    const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
+    return { id: await grove(tx, t), t };
+  });
+}
+async function dropGrove(id: string) {
+  await db.deleteFrom('depositExtractions').where('featureId', '=', id).execute();
+  await db.deleteFrom('worldCellOccupancies').where('featureId', '=', id).execute();
+  await db.deleteFrom('woodlandDeposits').where('featureId', '=', id).execute();
+  await db.deleteFrom('worldFeatures').where('id', '=', id).execute();
+}
+
+it('writes nothing on wood and publishes nothing on a read without any deadline', async () => {
+  await resetE2eState(url);
+  const { id, t } = await committedGrove();
+  try {
+    // A case partly cut beside the village: the former read rewrote it each time.
+    await db.transaction().execute(async (tx) => {
       await tx
-        .selectFrom('villageAccomplishments')
-        .select('code')
-        .where('villageId', '=', villageId)
-        .where('code', '=', 'first-woodcut')
-        .execute(),
-    ).toHaveLength(1);
-    // fixture injects the identified rollback sentinel after these observations.
-  }, 30);
-  expect(
-    await db
-      .selectFrom('villageResources')
-      .selectAll()
-      .where('villageId', '=', villageId)
-      .orderBy('resourceCode')
-      .execute(),
-  ).toEqual(before);
-  expect(
-    await db.selectFrom('populationCohorts').selectAll().where('villageId', '=', villageId).orderBy('id').execute(),
-  ).toEqual(cohorts);
-  expect(await db.selectFrom('depositExtractions').select('id').where('id', '=', workId).execute()).toHaveLength(0);
-  expect(
-    await db
-      .selectFrom('villageAccomplishments')
-      .select('code')
-      .where('villageId', '=', villageId)
-      .where('code', '=', 'first-woodcut')
-      .execute(),
-  ).toHaveLength(0);
-});
-
-it('checks the authenticated village and world for clearing and prevents regrowth after the public command', async () => {
-  await fixture(async (tx, id, t) => {
-    const source = {
-      transaction: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }),
-    } as unknown as typeof db;
-    await expect(clearVillageWoodland(source, randomUUID(), 'aube', villageId, id)).rejects.toMatchObject({
-      code: 'VILLAGE_NOT_FOUND',
+        .insertInto('woodlandTrees')
+        .values({ worldId, featureId: id, treeIndex: 0, remainingAmount: 200, felledAt: t })
+        .execute();
+      await tx
+        .updateTable('woodlandDeposits')
+        .set({ remainingAmount: 700, cutAmount: 300 })
+        .where('featureId', '=', id)
+        .execute();
     });
-    await expect(
-      clearVillageWoodland(source, DEVELOPMENT_IDS.account, 'unknown-world', villageId, id),
-    ).rejects.toMatchObject({ code: 'VILLAGE_NOT_FOUND' });
-    const before = BigInt((await stock(tx)).amount);
-    const result = await clearVillageWoodland(source, DEVELOPMENT_IDS.account, 'aube', villageId, id);
-    expect(result.region.features.find((f) => f.id === id)?.deposit?.cleared).toBe(true);
-    expect(BigInt((await stock(tx)).amount)).toBe(before);
-    await materializeWoodland(tx, worldId, id, new Date(t.getTime() + 30 * 86400000));
-    expect((await readStoneDeposit(tx, worldId, id)).remainingAmount).toBe(0);
-  }, 20);
-});
+    const fingerprint = async () =>
+      (
+        await sql<Record<string, string>>`select
+          (select md5(string_agg(xmin::text||ctid::text,',' order by feature_id)) from woodland_deposits where world_id=${worldId}) as deposits,
+          (select md5(coalesce(string_agg(xmin::text||ctid::text,',' order by feature_id,tree_index),'')) from woodland_trees where world_id=${worldId}) as trees,
+          (select md5(string_agg(xmin::text||ctid::text,',' order by id)) from world_features where world_id=${worldId}) as features,
+          (select md5(string_agg(xmin::text||ctid::text,',' order by cell_x,cell_y)) from world_cell_occupancies where world_id=${worldId}) as occupancies,
+          (select coalesce(sum(revision),0)::text from game_sync_streams where world_id=${worldId} and stream_kind='spatial') as spatial`.execute(
+          db,
+        )
+      ).rows[0]!;
+    // The first wake after the reset activates the village economy once (village
+    // coverage, not wood); every later read is the case under test.
+    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', villageId);
+    const before = await fingerprint();
+    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', villageId);
+    await reconcileVillageForRead(db, DEVELOPMENT_IDS.account, 'aube', villageId);
+    expect(await fingerprint()).toEqual(before);
+  } finally {
+    await dropGrove(id);
+  }
+}, 60_000);
 
-it('records the first positive garden delivery once without an additional carrot reward', async () => {
-  await fixture(async (tx, _id, t) => {
-    const garden = await tx
-      .insertInto('buildings')
-      .values({
-        worldId,
-        villageId,
-        buildingType: 'garden',
-        level: 1,
-        targetLevel: null,
-        status: 'completed',
-        constructionStartedAt: null,
-        constructionCompletesAt: null,
-        completedAt: t,
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    const due = new Date(t.getTime() + 60000);
-    const work = await tx
-      .insertInto('gardenHarvests')
-      .values({
-        worldId,
-        villageId,
-        buildingId: garden.id,
-        commandId: randomUUID(),
-        plotCellX: null,
-        plotCellY: null,
-        status: 'in-progress',
-        startedAt: t,
-        completesAt: due,
-        completedAt: null,
-        workerCount: 1,
-        reservedCarrots: 7,
-        transportMs: 0,
-        pathCells: [],
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    const candidates = eligibleWorkers(await materializeCohorts(tx, worldId, villageId, t), 60000);
-    await assignWorkers(tx, candidates, 1, { harvestId: work.id, extractionId: null });
-    const carrot = () =>
-      tx
-        .selectFrom('villageResources')
-        .select('amount')
-        .where('villageId', '=', villageId)
-        .where('resourceCode', '=', 'carrot')
-        .executeTakeFirstOrThrow();
-    const amount = BigInt((await carrot()).amount);
-    await completeGardenHarvestAt(tx, worldId, villageId, work.id, due);
-    await completeGardenHarvestAt(tx, worldId, villageId, work.id, due);
-    expect(BigInt((await carrot()).amount)).toBe(amount + 7n);
-    const entry = await tx
-      .selectFrom('villageAccomplishments')
-      .select('completedAt')
-      .where('worldId', '=', worldId)
-      .where('villageId', '=', villageId)
-      .where('code', '=', 'first-harvest')
-      .execute();
-    expect(entry).toHaveLength(1);
-    expect(entry[0]!.completedAt).toEqual(due);
+it('serializes two villages on the case of a shared tree and keeps both reservations on it', async () => {
+  await resetE2eState(url);
+  const { id: featureId } = await committedGrove();
+  let other = { account: '', id: '' };
+  await db.transaction().execute(async (tx) => {
+    other = await neighbour(tx, new Date());
   });
-});
-
-it('serializes two villages on the woodland lock and preserves both reservations', async () => {
-  const featureId = randomUUID(),
-    otherAccount = randomUUID(),
-    otherVillage = randomUUID();
-  const t = new Date();
   let release!: () => void, ready!: () => void, waiting!: (pid: number) => void;
-  const held = new Promise<void>((resolve) => {
-    ready = resolve;
-  });
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const waiterPid = new Promise<number>((resolve) => {
-    waiting = resolve;
-  });
+  const held = new Promise<void>((resolve) => (ready = resolve));
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const waiterPid = new Promise<number>((resolve) => (waiting = resolve));
   let first: Promise<string> | undefined, second: Promise<string> | undefined;
   let holderPid = 0;
   const within = <T>(promise: Promise<T>) => {
@@ -456,86 +494,6 @@ it('serializes two villages on the woodland lock and preserves both reservations
     ]).finally(() => clearTimeout(timer));
   };
   try {
-    await db.transaction().execute(async (tx) => {
-      await tx
-        .insertInto('accounts')
-        .values({ id: otherAccount, email: `${otherAccount}@wood.test`, passwordHash: 'unused' })
-        .execute();
-      await tx
-        .insertInto('worldMemberships')
-        .values({ worldId, accountId: otherAccount, playerName: 'Wood test' })
-        .execute();
-      await tx
-        .insertInto('villages')
-        .values({
-          id: otherVillage,
-          worldId,
-          ownerAccountId: otherAccount,
-          name: 'Wood test',
-          anchorCellX: 1025,
-          anchorCellY: 512,
-        })
-        .execute();
-      const hall = await tx
-        .insertInto('buildings')
-        .values({
-          worldId,
-          villageId: otherVillage,
-          buildingType: 'town-hall',
-          level: 1,
-          targetLevel: null,
-          status: 'completed',
-          constructionStartedAt: null,
-          constructionCompletesAt: null,
-          completedAt: t,
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow();
-      await tx
-        .insertInto('worldCellOccupancies')
-        .values({ worldId, cellX: 1025, cellY: 512, buildingId: hall.id, featureId: null, role: 'anchor' })
-        .execute();
-      await tx
-        .insertInto('populationCohorts')
-        .values({
-          worldId,
-          villageId: otherVillage,
-          originVillageId: otherVillage,
-          memberCount: 10,
-          activity: 'idle',
-          energy: 10,
-          energyProgress: 0,
-          energyUpdatedAt: t,
-          restingSince: null,
-          foodUsedSinceRest: 0,
-          harvestId: null,
-          extractionId: null,
-        })
-        .execute();
-      await tx
-        .insertInto('worldFeatures')
-        .values({ id: featureId, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 1 })
-        .execute();
-      await tx
-        .insertInto('woodlandDeposits')
-        .values({
-          worldId,
-          featureId,
-          cellX: 1024,
-          cellY: 514,
-          initialAmount: 300,
-          remainingAmount: 300,
-          reservedAmount: 0,
-          revision: 1,
-          updatedAt: t,
-          regrowthUpdatedAt: t,
-        })
-        .execute();
-      await tx
-        .insertInto('worldCellOccupancies')
-        .values({ worldId, cellX: 1024, cellY: 514, featureId, buildingId: null, role: 'body' })
-        .execute();
-    });
     first = db.transaction().execute(async (tx) => {
       holderPid = (await tx.selectNoFrom(sql<number>`pg_backend_pid()`.as('pid')).executeTakeFirstOrThrow()).pid;
       const economy = await beginVillageEconomy(tx, worldId, villageId, featureId);
@@ -547,8 +505,8 @@ it('serializes two villages on the woodland lock and preserves both reservations
     await within(held);
     second = db.transaction().execute(async (tx) => {
       waiting((await tx.selectNoFrom(sql<number>`pg_backend_pid()`.as('pid')).executeTakeFirstOrThrow()).pid);
-      const economy = await beginVillageEconomy(tx, worldId, otherVillage, featureId);
-      return startStoneExtraction(tx, { ...village, villageId: otherVillage }, economy, featureId, randomUUID(), 1);
+      const economy = await beginVillageEconomy(tx, worldId, other.id, featureId);
+      return startStoneExtraction(tx, { ...village, villageId: other.id }, economy, featureId, randomUUID(), 1);
     });
     const pid = await within(waiterPid),
       deadline = Date.now() + 5000;
@@ -565,48 +523,90 @@ it('serializes two villages on the woodland lock and preserves both reservations
     expect(blocked).toBe(true);
     release();
     await within(Promise.all([first, second]));
-    const deposit = await db
-      .selectFrom('woodlandDeposits')
-      .select(['remainingAmount', 'reservedAmount'])
-      .where('featureId', '=', featureId)
-      .executeTakeFirstOrThrow();
-    expect(Number(deposit.remainingAmount)).toBe(300);
-    expect(Number(deposit.reservedAmount)).toBe(200);
     expect(
-      await db.selectFrom('depositExtractions').select('id').where('featureId', '=', featureId).execute(),
-    ).toHaveLength(2);
+      await db
+        .selectFrom('woodlandTrees')
+        .select(['treeIndex', 'remainingAmount', 'reservedAmount'])
+        .where('featureId', '=', featureId)
+        .execute(),
+    ).toEqual([{ treeIndex: 0, remainingAmount: 500, reservedAmount: 200 }]);
+    expect(
+      await db
+        .selectFrom('depositExtractions')
+        .select(['villageId', 'treeIndex', 'reservedAmount'])
+        .where('featureId', '=', featureId)
+        .orderBy('villageId')
+        .execute(),
+    ).toEqual([villageId, other.id].sort().map((v) => ({ villageId: v, treeIndex: 0, reservedAmount: '100' })));
+    expect(
+      await db
+        .selectFrom('woodlandDeposits')
+        .select(['remainingAmount', 'reservedAmount'])
+        .where('featureId', '=', featureId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ remainingAmount: '1000', reservedAmount: '200' });
   } finally {
     release?.();
     await Promise.allSettled([first, second].filter((p): p is Promise<string> => Boolean(p)));
     await resetE2eState(url);
-    await db.deleteFrom('worldCellOccupancies').where('featureId', '=', featureId).execute();
-    await db.deleteFrom('woodlandDeposits').where('featureId', '=', featureId).execute();
-    await db.deleteFrom('worldFeatures').where('id', '=', featureId).execute();
-    await db.deleteFrom('accounts').where('id', '=', otherAccount).execute();
+    await dropGrove(featureId);
+    if (other.account) await db.deleteFrom('accounts').where('id', '=', other.account).execute();
   }
-});
+}, 60_000);
 
-it('counts the wood ever cut from a grove: returned lots only, regrowth not subtracted', async () => {
-  await fixture(async (tx, id, t) => {
-    expect((await readStoneDeposit(tx, worldId, id)).cutAmount).toBe(0);
-    await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1);
-    // The lot is reserved, not cut, until its return.
-    expect((await readStoneDeposit(tx, worldId, id)).cutAmount).toBe(0);
-    const later = new Date(t.getTime() + 24 * 3600000);
-    await sql`select set_config('arbestra.economy_through', ${later.toISOString()}, true)`.execute(tx);
-    const after = await readStoneDeposit(tx, worldId, id);
-    expect(after.cutAmount).toBe(100);
-    // A day of regrowth gives back wood without reducing what was cut.
-    expect(after.remainingAmount).toBeGreaterThan(200);
-    // Debiting the lot stores it on the grove, counted once.
-    await materializeWoodland(tx, worldId, id, later);
-    const stored = await tx
-      .selectFrom('woodlandDeposits')
-      .select('cutAmount')
+it('rolls back a felled tree, its debit, the delivery and the workers after an identified error', async () => {
+  await resetE2eState(url);
+  const { id } = await committedGrove();
+  const snapshot = async () => ({
+    deposit: await db.selectFrom('woodlandDeposits').selectAll().where('featureId', '=', id).executeTakeFirstOrThrow(),
+    trees: await db.selectFrom('woodlandTrees').selectAll().where('featureId', '=', id).execute(),
+    feature: await db.selectFrom('worldFeatures').selectAll().where('id', '=', id).executeTakeFirstOrThrow(),
+    occupancies: await db.selectFrom('worldCellOccupancies').selectAll().where('featureId', '=', id).execute(),
+    lots: await db.selectFrom('depositExtractions').selectAll().where('featureId', '=', id).execute(),
+    resources: await db
+      .selectFrom('villageResources')
+      .selectAll()
+      .where('villageId', '=', villageId)
+      .orderBy('resourceCode')
+      .execute(),
+    cohorts: await db
+      .selectFrom('populationCohorts')
+      .selectAll()
+      .where('villageId', '=', villageId)
+      .orderBy('id')
+      .execute(),
+    tasks: await db
+      .selectFrom('scheduledTasks')
+      .select(['taskType', 'subjectId'])
       .where('worldId', '=', worldId)
-      .where('featureId', '=', id)
-      .executeTakeFirstOrThrow();
-    expect(Number(stored.cutAmount)).toBe(100);
-    expect((await readStoneDeposit(tx, worldId, id)).cutAmount).toBe(100);
+      .where('taskType', '=', 'deposit.extraction.complete')
+      .orderBy('subjectId')
+      .execute(),
   });
-});
+  const injected = new Error('EXPECTED_WOODLAND_ROLLBACK');
+  try {
+    const before = await snapshot();
+    await expect(
+      db.transaction().execute(async (tx) => {
+        const economy = await beginVillageEconomy(tx, worldId, villageId, id);
+        const work = await lot(tx, await startStoneExtraction(tx, village, economy, id, randomUUID(), 1));
+        await completeStoneExtractionAt(tx, worldId, villageId, work.id, work.completesAt);
+        await startStoneExtraction(tx, village, { ...economy, through: work.completesAt }, id, randomUUID(), 1);
+        // The writes took place before the error.
+        expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 400, reservedAmount: 100 });
+        expect(await stock(tx)).toBe(BigInt(before.resources.find((r) => r.resourceCode === 'wood')!.amount) + 100n);
+        expect(
+          await tx
+            .selectFrom('woodlandDeposits')
+            .select(['remainingAmount', 'reservedAmount', 'cutAmount'])
+            .where('featureId', '=', id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ remainingAmount: '900', reservedAmount: '100', cutAmount: '100' });
+        throw injected;
+      }),
+    ).rejects.toBe(injected);
+    expect(await snapshot()).toEqual(before);
+  } finally {
+    await dropGrove(id);
+  }
+}, 60_000);

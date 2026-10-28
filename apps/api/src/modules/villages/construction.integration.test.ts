@@ -11,6 +11,7 @@ import { buildApp } from '../../app.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { constructionConfirmationIsValid, emptyInfrastructure } from '@arbestra/contracts';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-map.js';
+import { clearWoodland } from '../deposits/woodland.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -68,6 +69,8 @@ const post = (body: object, id = villageId) =>
   });
 async function cleanup() {
   await db.deleteFrom('populationCohorts').where('worldId', '=', worldId).execute();
+  // A wood case refers to its feature without cascade; its trees follow it.
+  await db.deleteFrom('woodlandDeposits').where('worldId', '=', worldId).execute();
   await db.deleteFrom('worlds').where('id', '=', worldId).execute();
 }
 beforeAll(async () => {
@@ -607,3 +610,53 @@ it('validates only the selected RC1 vertices, rejects slopes, then creates with 
     JSON.stringify({ scenario: 'isolated RC1 vertex test, warm source, two new houses', samples }, null, 2),
   );
 }, 120000);
+
+it('refuses to build on a wood case while a stump stands, even after a read, and builds once it is cleared', async () => {
+  const featureId = randomUUID(),
+    t = new Date();
+  await db.transaction().execute(async (tx) => {
+    await tx
+      .insertInto('worldFeatures')
+      .values({ id: featureId, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 4 })
+      .execute();
+    // Two trees cut to nothing: two stumps, no wood left.
+    await tx
+      .insertInto('woodlandDeposits')
+      .values({
+        worldId,
+        featureId,
+        cellX: 67,
+        cellY: 64,
+        initialAmount: 1000,
+        remainingAmount: 0,
+        reservedAmount: 0,
+        cutAmount: 1000,
+        revision: 1,
+        updatedAt: t,
+        regrowthUpdatedAt: t,
+      })
+      .execute();
+    await tx
+      .insertInto('woodlandTrees')
+      .values([0, 1].map((treeIndex) => ({ worldId, featureId, treeIndex, remainingAmount: 0, felledAt: t })))
+      .execute();
+    await tx
+      .insertInto('worldCellOccupancies')
+      .values({ worldId, featureId, cellX: 67, cellY: 64, buildingId: null, role: 'body' })
+      .execute();
+  });
+  // The former read freed a case under 10 % of its wood; a stump now keeps it occupied.
+  expect(
+    (await app.inject({ url: `/api/worlds/${slug}/village`, cookies: { arbestra_session: token } })).statusCode,
+  ).toBe(200);
+  expect((await post(payload(67, 64))).json().code, errors.at(-1)?.stack).toBe('CELL_OCCUPIED');
+  expect(await wood()).toBe(2000);
+  // Both stumps removed: the case clears and frees its cell.
+  await db.transaction().execute(async (tx) => {
+    await tx.selectFrom('villages').select('id').where('id', '=', villageId).forUpdate().execute();
+    await tx.updateTable('woodlandTrees').set({ stumpRemovedAt: t }).where('featureId', '=', featureId).execute();
+    await clearWoodland(tx, worldId, featureId, t);
+  });
+  const built = await post(payload(67, 64));
+  expect(built.statusCode, errors.at(-1)?.stack).toBe(201);
+});

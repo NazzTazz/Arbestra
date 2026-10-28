@@ -191,10 +191,10 @@ export async function readSpatialChanges(
                     reservedAmount: safeAmount(row.reservedAmount!),
                     availableAmount: safeAmount(row.remainingAmount) - safeAmount(row.reservedAmount!),
                     ...(row.resourceCode === 'wood' ? { cutAmount: safeAmount(row.cutAmount!) } : {}),
-                    state:
-                      row.cleared || safeAmount(row.remainingAmount) === 0
-                        ? ('depleted' as const)
-                        : ('available' as const),
+                    // A wood case stays until its last stump is removed.
+                    state: (row.resourceCode === 'wood' ? row.cleared : safeAmount(row.remainingAmount) === 0)
+                      ? ('depleted' as const)
+                      : ('available' as const),
                     revision: safeAmount(row.revision!),
                     updatedAt: row.updatedAt!.toISOString(),
                   },

@@ -107,8 +107,8 @@ async function seed(tx: Transaction<Database>, count = 30) {
         featureId: id,
         cellX: 1015 - i,
         cellY: 520,
-        initialAmount: 300,
-        remainingAmount: 300,
+        initialAmount: 500,
+        remainingAmount: 500,
         reservedAmount: 0,
         revision: 1,
         updatedAt: through,
@@ -116,7 +116,7 @@ async function seed(tx: Transaction<Database>, count = 30) {
       })
       .onConflict((c) =>
         c.columns(['worldId', 'featureId']).doUpdateSet({
-          remainingAmount: 300,
+          remainingAmount: 500,
           reservedAmount: 0,
           revision: 1,
           updatedAt: through,

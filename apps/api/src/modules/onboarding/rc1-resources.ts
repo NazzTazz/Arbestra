@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import type { Rc1ResourceState } from './rc1-field.js';
-import type { SpawnResourceSupplement, GeneratedLandscape } from '@arbestra/contracts';
+import { WOOD_PER_TREE, type SpawnResourceSupplement, type GeneratedLandscape } from '@arbestra/contracts';
 export async function readRc1Resources(db: Kysely<Database>, worldId: string): Promise<Rc1ResourceState[]> {
   const metadata = await db.selectFrom('worldRc1Resources').selectAll().where('worldId', '=', worldId).execute();
   if (!metadata.length) return [];
@@ -168,11 +168,41 @@ export async function removeSpawnTrees(
       .where('featureId', '=', group.featureId!)
       .forUpdate()
       .executeTakeFirstOrThrow();
-    if (Number(row.reservedAmount) > 0)
+    // A stump being removed reserves no wood but is a lot all the same.
+    const busy = await tx
+      .selectFrom('depositExtractions')
+      .select('id')
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', group.featureId!)
+      .where('status', '=', 'in-progress')
+      .where('woodDebitedAt', 'is', null)
+      .executeTakeFirst();
+    if (Number(row.reservedAmount) > 0 || busy)
       throw new HttpError(409, 'SPAWN_BLOCKED', 'Ces arbres sont réservés pour une récolte.');
     const all = [...new Set([...group.removedIndices, ...group.treeIndices.filter((i) => set.has(i))])],
-      newly = all.length - group.removedIndices.length;
-    const capacity = (group.treeIndices.length - all.length) * 500;
+      gone = new Set(all);
+    const capacity = (group.treeIndices.length - all.length) * WOOD_PER_TREE;
+    // Wood left on the surviving trees: full when untouched, their trunk once felled.
+    const felled = new Map(
+      (
+        await tx
+          .selectFrom('woodlandTrees')
+          .select(['treeIndex', 'remainingAmount'])
+          .where('worldId', '=', worldId)
+          .where('featureId', '=', group.featureId!)
+          .execute()
+      ).map((t) => [t.treeIndex, t.remainingAmount]),
+    );
+    const remaining = group.treeIndices
+      .filter((i) => !gone.has(i))
+      .reduce((sum, i) => sum + (felled.get(i) ?? WOOD_PER_TREE), 0);
+    if (all.some((i) => felled.has(i)))
+      await tx
+        .deleteFrom('woodlandTrees')
+        .where('worldId', '=', worldId)
+        .where('featureId', '=', group.featureId!)
+        .where('treeIndex', 'in', all)
+        .execute();
     // The aggregate's access cell must not remain beneath the new building: the
     // ordinary woodland reconciliation would otherwise clear every surviving tree.
     const surviving = capacity
@@ -201,7 +231,7 @@ export async function removeSpawnTrees(
       .set({
         ...(surviving ?? {}),
         initialAmount: Math.max(1, capacity),
-        remainingAmount: Math.min(capacity, Math.max(0, Number(row.remainingAmount) - newly * 500)),
+        remainingAmount: Math.min(capacity, remaining),
         cleared: capacity === 0,
         regrowthUpdatedAt: through,
         updatedAt: through,
@@ -210,11 +240,21 @@ export async function removeSpawnTrees(
       .where('worldId', '=', worldId)
       .where('featureId', '=', group.featureId!)
       .execute();
+    // Without any tree left, the case is gone at once: no later read settles it.
     await tx
       .deleteFrom('worldCellOccupancies')
       .where('worldId', '=', worldId)
       .where('featureId', '=', group.featureId!)
-      .where((eb) => eb.or(cells.map((c) => eb.and([eb('cellX', '=', c.cellX), eb('cellY', '=', c.cellY)]))))
+      .$if(capacity > 0, (q) =>
+        q.where((eb) => eb.or(cells.map((c) => eb.and([eb('cellX', '=', c.cellX), eb('cellY', '=', c.cellY)])))),
+      )
       .execute();
+    if (!capacity)
+      await tx
+        .updateTable('worldFeatures')
+        .set({ state: 'depleted', updatedAt: sql`${through}` })
+        .where('worldId', '=', worldId)
+        .where('id', '=', group.featureId!)
+        .execute();
   }
 }

@@ -7,7 +7,6 @@ import type { Database } from '../../database/schema.js';
 import { materializeBuildingBuffer, materializeVillageResource } from './economy.js';
 import { completeGardenHarvestAt } from '../population/garden-harvest.js';
 import { completeStoneExtractionAt } from '../deposits/stone-extractions.js';
-import { materializeWoodlands } from '../deposits/woodland.js';
 import { completeScienceAt } from '../science/service.js';
 import { completeProcessingAt } from './processing.js';
 import { deliverMarketAt } from './market.js';
@@ -228,38 +227,24 @@ export async function beginVillageEconomy(
         .orderBy('featureId')
         .forUpdate()
         .execute();
-    const villages = await transaction
-      .selectFrom('villages')
-      .innerJoin('worlds', 'worlds.id', 'villages.worldId')
-      .select(['anchorCellX', 'anchorCellY', 'widthCells', 'heightCells'])
-      .where('villages.id', 'in', lockedPeers)
-      .where('villages.worldId', '=', worldId)
-      .execute();
-    const woods = await transaction
-      .selectFrom('woodlandDeposits')
-      .select('featureId')
-      .where('worldId', '=', worldId)
-      .where((eb) =>
-        eb.or([
-          ...villages.map(
-            (
-              village,
-            ) => sql<boolean>`least(abs(cell_x-${village.anchorCellX}),${village.widthCells}-abs(cell_x-${village.anchorCellX})) <= 32
-        and least(abs(cell_y-${village.anchorCellY}),${village.heightCells}-abs(cell_y-${village.anchorCellY})) <= 32`,
-          ),
-          ...(depositIds.length ? [eb('featureId', 'in', depositIds)] : []),
-          ...woodCells.map((c) => eb.and([eb('cellX', '=', c.cellX), eb('cellY', '=', c.cellY)])),
-        ]),
-      )
-      .orderBy('featureId')
-      .forUpdate()
-      .execute();
-    await materializeWoodlands(
-      transaction,
-      worldId,
-      woods.map((wood) => wood.featureId),
-      through,
-    );
+    // Wood cases by UUID: only those with a lot due, the targets this command or
+    // a worksite may admit, and cells a construction may claim. A read writes
+    // nothing on wood; each village debits its own lots at their deadlines and
+    // takes trees only under a case it holds (docs/SPEC-BOIS-ARBRE-UNITE.md).
+    if (depositIds.length || woodCells.length)
+      await transaction
+        .selectFrom('woodlandDeposits')
+        .select('featureId')
+        .where('worldId', '=', worldId)
+        .where((eb) =>
+          eb.or([
+            ...(depositIds.length ? [eb('featureId', 'in', depositIds)] : []),
+            ...woodCells.map((c) => eb.and([eb('cellX', '=', c.cellX), eb('cellY', '=', c.cellY)])),
+          ]),
+        )
+        .orderBy('featureId')
+        .forUpdate()
+        .execute();
     const catchup = await reconcileVillageEconomy(transaction, economy, reconciliationBudget);
     if (!catchup.complete) return { ...economy, catchup };
     const version = await transaction

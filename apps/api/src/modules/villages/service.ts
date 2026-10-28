@@ -83,7 +83,7 @@ import { admitScience, scienceSnapshot, scienceCommand } from '../science/servic
 import type { ScienceCommand } from '@arbestra/contracts';
 import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/deposit-access.js';
 import { knownGeography } from '../science/knowledge.js';
-import { claimWoodlandCell } from '../deposits/woodland.js';
+import { claimWoodlandCell, nextWoodWork, readWoodlandTrees } from '../deposits/woodland.js';
 import {
   stoneDepositDetails,
   readDepositAccess,
@@ -582,7 +582,12 @@ export async function refineVillagePath(
         deposit: {
           blocksCell: f.blocksCell,
           cleared: f.cleared,
-          state: f.featureTypeCode !== 'leveling-site' && Number(f.remainingAmount) === 0 ? 'depleted' : 'available',
+          // A wood case stays until its last stump is removed.
+          state:
+            f.featureTypeCode !== 'leveling-site' &&
+            (f.resourceCode === 'wood' ? f.cleared : Number(f.remainingAmount) === 0)
+              ? 'depleted'
+              : 'available',
         },
       })),
     },
@@ -2684,10 +2689,8 @@ export async function prepareExploitation(
     preview.excluded.push(...selection.excluded.map((i) => ({ key: i.featureId, reason: i.reason })));
     for (const id of preview[family]) {
       const deposit = await depositFor(id);
-      preview.estimates[family] += Math.max(
-        0,
-        Math.floor(deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)),
-      );
+      // No threshold any more: every tree is cut to nothing (docs/SPEC-BOIS-ARBRE-UNITE.md).
+      preview.estimates[family] += Math.max(0, deposit.remainingAmount);
     }
   }
   const gardenCap = preview.gardens.length ? 1 : 0;
@@ -2698,11 +2701,17 @@ export async function prepareExploitation(
   for (const family of ['wood', 'stone'] as const)
     for (const id of preview[family]) {
       const deposit = await depositFor(id);
-      const amount = Math.min(
-        100,
-        deposit.availableAmount,
-        Math.max(0, deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)),
-      );
+      // A wood lot takes one tree: its size is that tree's free wood.
+      const work =
+        family === 'wood' && deposit.availableAmount >= 1
+          ? await nextWoodWork(tx, village.worldId, id, 'cut', await readWoodlandTrees(tx, village.worldId, id))
+          : null;
+      const amount =
+        family === 'wood'
+          ? work?.kind === 'lot'
+            ? work.amount
+            : 0
+          : Math.min(100, deposit.availableAmount, deposit.remainingAmount);
       if (amount < 1) continue;
       const path = await pathFor(id);
       if (path) {
@@ -2979,7 +2988,8 @@ export async function prepareWorksiteSelection(
       excluded.push({ featureId, reason: 'resource-mismatch' });
       continue;
     }
-    if (details.deposit.cleared || (request.mode === 'extract' && details.deposit.remainingAmount === 0)) {
+    // A clearing still removes the stumps of a case without wood.
+    if (details.deposit.cleared || (request.mode !== 'clear' && details.deposit.remainingAmount === 0)) {
       excluded.push({ featureId, reason: 'depleted' });
       continue;
     }
@@ -3003,17 +3013,16 @@ export async function prepareWorksiteSelection(
       excluded.push({ featureId, reason: 'already-assigned' });
       continue;
     }
-    if (!(request.mode === 'clear' && details.deposit.canClear)) {
-      let path: TravelCell[] | undefined;
-      try {
-        path = await pathFor(featureId);
-      } catch (error) {
-        if (!(error instanceof HttpError && error.code === 'DESTINATION_UNREACHABLE')) throw error;
-      }
-      if (!path) {
-        excluded.push({ featureId, reason: 'unreachable' });
-        continue;
-      }
+    // Every clearing is work on site now: stumps are removed one by one.
+    let path: TravelCell[] | undefined;
+    try {
+      path = await pathFor(featureId);
+    } catch (error) {
+      if (!(error instanceof HttpError && error.code === 'DESTINATION_UNREACHABLE')) throw error;
+    }
+    if (!path) {
+      excluded.push({ featureId, reason: 'unreachable' });
+      continue;
     }
     included.push({ featureId, cellX: details.deposit.cellX, cellY: details.deposit.cellY });
   }

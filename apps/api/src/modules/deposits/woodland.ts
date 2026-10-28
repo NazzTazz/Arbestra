@@ -1,327 +1,253 @@
+import {
+  nextStump,
+  nextWoodLot,
+  treeWood,
+  WOOD_PER_TREE,
+  woodlandTreeIndices,
+  type TreeRecord,
+} from '@arbestra/contracts';
 import { sql, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 
-/** Caller has already locked these woodland rows in UUID order. Full, correctly
- * occupied deposits without physical returns have nothing to reconcile. */
-export async function materializeWoodlands(tx: Transaction<Database>, worldId: string, ids: string[], through: Date) {
-  if (!ids.length) return;
-  const full = await tx
-    .selectFrom('woodlandDeposits')
-    .select(['featureId', 'cellX', 'cellY'])
-    .where('worldId', '=', worldId)
-    .where('featureId', 'in', ids)
-    .where('cleared', '=', false)
-    .whereRef('remainingAmount', '=', 'initialAmount')
-    .where('reservedAmount', '=', '0')
-    .execute();
-  // Read each world-scoped relation once. Correlated EXISTS became quadratic on
-  // RC1's natural aggregates; these sets express the same settled predicate.
-  const occupancies = await tx
-    .selectFrom('worldCellOccupancies')
-    .select(['featureId', 'cellX', 'cellY'])
-    .where('worldId', '=', worldId)
-    .where('featureId', 'in', ids)
-    .where('buildingId', 'is', null)
-    .execute();
-  const available = await tx
-    .selectFrom('worldFeatures')
-    .select('id')
-    .where('worldId', '=', worldId)
-    .where('id', 'in', ids)
-    .where('state', '=', 'available')
-    .execute();
-  const due = await tx
-    .selectFrom('depositExtractions')
-    .select('featureId')
-    .where('worldId', '=', worldId)
-    .where('featureId', 'in', ids)
-    .where('resourceCode', '=', 'wood')
-    .where('woodDebitedAt', 'is', null)
-    .where('completesAt', '<=', through)
-    .execute();
-  const occupied = new Set(occupancies.map((o) => o.featureId + ':' + o.cellX + ':' + o.cellY)),
-    active = new Set(available.map((f) => f.id)),
-    pending = new Set(due.map((e) => e.featureId));
-  const skip = new Set(
-    full
-      .filter(
-        (w) =>
-          occupied.has(w.featureId + ':' + w.cellX + ':' + w.cellY) &&
-          active.has(w.featureId) &&
-          !pending.has(w.featureId),
-      )
-      .map((w) => w.featureId),
-  );
-  const withoutReturns = ids.filter((id) => !skip.has(id) && !pending.has(id));
-  if (withoutReturns.length) await materializeWoodlandsWithoutReturns(tx, worldId, withoutReturns, through);
-  // Physical returns retain their historical deadline order, including the
-  // threshold remembered before later regrowth and other villages' credits.
-  for (const id of ids) if (!skip.has(id) && pending.has(id)) await materializeWoodland(tx, worldId, id, through);
+/** The tree as the wood harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md). A case
+ * (woodland_deposits) holds the sum of its trees: remaining, reserved and cut
+ * wood are kept on it in the same statement as the tree they change, under the
+ * case lock, so readers and the journal keep working per case. Nothing here
+ * regrows or writes on a read: only the village owning a lot debits it, at its
+ * deadline, and the last stump removed clears the case. */
+
+export interface WoodlandTrees {
+  /** Every tree of the case, in the default designation order. */
+  all: number[];
+  /** Trees a target aims at: its own designation, or every tree. */
+  designated: number[];
+  records: Map<number, TreeRecord>;
 }
 
-/** Rows are already locked; only stock/cell projections with no due physical cut. */
-async function materializeWoodlandsWithoutReturns(
-  tx: Transaction<Database>,
-  worldId: string,
-  ids: string[],
-  through: Date,
-) {
-  type Result = {
-    featureId: string;
-    cellX: number;
-    cellY: number;
-    remainingAmount: string;
-    initialAmount: string;
-    cleared: boolean;
-    occupied: boolean;
-  };
-  const result = await sql<Result>`
-    with current as materialized (
-      select w as deposit, o.building_id is not null as building_occupied,
-        o.world_id is not null as occupied
-      from woodland_deposits w left join world_cell_occupancies o
-        on o.world_id=w.world_id and o.cell_x=w.cell_x and o.cell_y=w.cell_y
-      where w.world_id=${worldId} and w.feature_id in (${sql.join(ids)})
-    ), projected as materialized (
-      select deposit,occupied,(deposit).cleared or building_occupied as cleared,
-        case when building_occupied then (deposit).reserved_amount::numeric
-          else woodland_stock_at(deposit,${through}) end as stock
-      from current
-    )
-    update woodland_deposits w set remaining_amount=p.stock,cleared=p.cleared,
-      regrowth_updated_at=greatest(w.regrowth_updated_at,${through}),
-      revision=w.revision+case when floor((p.deposit).remaining_amount)<>floor(p.stock)
-        or (p.deposit).cleared<>p.cleared then 1 else 0 end,
-      updated_at=case when floor((p.deposit).remaining_amount)<>floor(p.stock)
-        or (p.deposit).cleared<>p.cleared then ${through} else w.updated_at end
-    from projected p where w.world_id=${worldId} and w.feature_id=(p.deposit).feature_id
-    returning w.feature_id,w.cell_x,w.cell_y,w.remaining_amount,w.initial_amount,w.cleared,p.occupied
-  `.execute(tx);
-  const after = result.rows,
-    blocked = (wood: Result) => !wood.cleared && Number(wood.remainingAmount) > Number(wood.initialAmount) / 10;
-  const liberated = after.filter((w) => !blocked(w)).map((w) => w.featureId);
-  if (liberated.length)
-    await tx
-      .deleteFrom('worldCellOccupancies')
-      .where('worldId', '=', worldId)
-      .where('featureId', 'in', liberated)
-      .execute();
-  const reclaimed = after
-    .filter((w) => blocked(w) && !w.occupied)
-    .map((w) => ({
-      worldId,
-      featureId: w.featureId,
-      cellX: w.cellX,
-      cellY: w.cellY,
-      buildingId: null,
-      role: 'body' as const,
-    }));
-  if (reclaimed.length)
-    await tx
-      .insertInto('worldCellOccupancies')
-      .values(reclaimed)
-      .onConflict((oc) => oc.columns(['worldId', 'cellX', 'cellY']).doNothing())
-      .execute();
-  if (after.length)
-    await sql`
-    update world_features f set state=case when p.cleared then 'depleted' else 'available' end,
-      updated_at=${through}
-    from jsonb_to_recordset(${JSON.stringify(after.map((w) => ({ feature_id: w.featureId, cleared: w.cleared })))}::jsonb)
-      as p(feature_id uuid,cleared boolean)
-    where f.world_id=${worldId} and f.id=p.feature_id
-  `.execute(tx);
-}
-
-/** All callers acquire stone rows first, then woodland UUIDs, before transitions. */
-export async function materializeWoodland(
+/** Read-only. Writers hold the case lock before calling it. */
+export async function readWoodlandTrees(
   tx: Transaction<Database>,
   worldId: string,
   featureId: string,
-  through: Date,
-) {
-  const before = await tx
-    .selectFrom('woodlandDeposits')
-    .selectAll()
-    .where('worldId', '=', worldId)
-    .where('featureId', '=', featureId)
-    .forUpdate()
-    .executeTakeFirst();
-  if (!before) return;
-  const occupied = await tx
-    .selectFrom('worldCellOccupancies')
-    .select(['buildingId', 'featureId'])
-    .where('worldId', '=', worldId)
-    .where('cellX', '=', before.cellX)
-    .where('cellY', '=', before.cellY)
-    .executeTakeFirst();
-  // Fold physical returns at their own deadlines. A crossing must survive regrowth
-  // between the return and a late worker/read, including a foreign village's read.
-  const due = await tx
+  designation?: readonly number[] | null,
+): Promise<WoodlandTrees> {
+  const row = await sql<{
+    variantSeed: number;
+    initialAmount: string | null;
+    sourceKey: string | null;
+    treeIndices: number[] | null;
+    removedIndices: number[] | null;
+    trees: Array<{ treeIndex: number; remainingAmount: number; reservedAmount: number; stumpRemoved: boolean }>;
+  }>`select f.variant_seed,(select d.initial_amount from woodland_deposits d
+        where d.world_id=f.world_id and d.feature_id=f.id) as initial_amount,r.source_key,r.tree_indices,r.removed_indices,
+      coalesce((select jsonb_agg(jsonb_build_object('treeIndex',t.tree_index,'remainingAmount',t.remaining_amount,
+        'reservedAmount',t.reserved_amount,'stumpRemoved',t.stump_removed_at is not null) order by t.tree_index)
+        from woodland_trees t where t.world_id=f.world_id and t.feature_id=f.id),'[]') as trees
+    from world_features f left join world_rc1_resources r on r.world_id=f.world_id and r.feature_id=f.id
+    where f.world_id=${worldId} and f.id=${featureId}`.execute(tx);
+  const found = row.rows[0];
+  if (!found) throw new HttpError(404, 'WOODLAND_NOT_FOUND', 'Bosquet introuvable.');
+  const all = woodlandTreeIndices({
+    rc1:
+      found.sourceKey === null
+        ? null
+        : {
+            sourceKey: found.sourceKey,
+            treeIndices: found.treeIndices ?? [],
+            removedIndices: found.removedIndices ?? [],
+          },
+    variantSeed: found.variantSeed,
+    initialAmount: found.initialAmount === null ? null : Number(found.initialAmount),
+  });
+  const members = new Set(all);
+  return {
+    all,
+    designated: designation ? designation.filter((i) => members.has(i)) : all,
+    records: new Map(found.trees.map((t) => [t.treeIndex, t])),
+  };
+}
+
+/** Trees whose stump a lot is removing right now, any village. */
+async function stumpsInProgress(tx: Transaction<Database>, worldId: string, featureId: string) {
+  const rows = await tx
     .selectFrom('depositExtractions')
-    .select(['id', 'completesAt', 'worksiteId'])
+    .select('treeIndex')
     .where('worldId', '=', worldId)
     .where('featureId', '=', featureId)
     .where('resourceCode', '=', 'wood')
-    .where('woodDebitedAt', 'is', null)
-    .where('completesAt', '<=', through)
-    .orderBy('completesAt')
-    .orderBy('id')
+    .where('status', '=', 'in-progress')
+    .where('treeIndex', 'is not', null)
+    .where('reservedAmount', '=', '0')
     .execute();
-  const deadlines = [...new Set(due.map((row) => row.completesAt.getTime()))];
-  for (const deadline of deadlines) {
-    const at = new Date(deadline);
-    await sql`
-      update woodland_deposits w set remaining_amount=woodland_stock_at(w,${at}),
-        reserved_amount=w.reserved_amount-coalesce((select sum(e.reserved_amount) from deposit_extractions e
-          where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
-            and e.wood_debited_at is null and e.completes_at<=${at}),0),
-        cut_amount=w.cut_amount+coalesce((select sum(e.reserved_amount) from deposit_extractions e
-          where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
-            and e.wood_debited_at is null and e.completes_at<=${at}),0),
-        regrowth_updated_at=greatest(w.regrowth_updated_at,${at})
-      where w.world_id=${worldId} and w.feature_id=${featureId}
-    `.execute(tx);
-    await tx
-      .updateTable('depositExtractions')
-      .set({ woodDebitedAt: at })
-      .where('worldId', '=', worldId)
-      .where('featureId', '=', featureId)
-      .where('resourceCode', '=', 'wood')
-      .where('woodDebitedAt', 'is', null)
-      .where('completesAt', '<=', at)
-      .execute();
-    const atStock = await tx
-      .selectFrom('woodlandDeposits')
-      .select(['remainingAmount', 'initialAmount', 'reservedAmount', 'cleared'])
-      .where('worldId', '=', worldId)
-      .where('featureId', '=', featureId)
-      .executeTakeFirstOrThrow();
-    if (!atStock.cleared && Number(atStock.remainingAmount) <= Number(atStock.initialAmount) / 10) {
-      const sites = await tx
-        .selectFrom('extractionWorksiteTargets')
-        .innerJoin('extractionWorksites', 'extractionWorksites.id', 'extractionWorksiteTargets.worksiteId')
-        .select([
-          'extractionWorksiteTargets.worksiteId',
-          'extractionWorksiteTargets.admittedAt',
-          'extractionWorksites.status',
-          'extractionWorksites.mode',
-        ])
-        .where('extractionWorksiteTargets.worldId', '=', worldId)
-        .where('extractionWorksiteTargets.featureId', '=', featureId)
-        .where('extractionWorksiteTargets.status', '=', 'pending')
-        .where('extractionWorksiteTargets.thresholdReachedAt', 'is', null)
-        .execute();
-      const committedIds = new Set(
-        due
-          .filter((row) => row.completesAt.getTime() === deadline)
-          .map((row) => row.worksiteId)
-          .filter((id): id is string => id !== null),
-      );
-      for (const site of sites) {
-        if (
-          !site.admittedAt ||
-          site.admittedAt > at ||
-          (site.status !== 'running' && !committedIds.has(site.worksiteId))
-        )
-          continue;
-        await tx
-          .updateTable('extractionWorksiteTargets')
-          .set({ thresholdReachedAt: at })
-          .where('worksiteId', '=', site.worksiteId)
-          .where('featureId', '=', featureId)
-          .execute();
-        if (site.mode === 'clear' && (site.status === 'running' || committedIds.has(site.worksiteId))) {
-          await tx
-            .updateTable('woodlandDeposits')
-            .set({ cleared: true, remainingAmount: sql`reserved_amount` })
-            .where('worldId', '=', worldId)
-            .where('featureId', '=', featureId)
-            .execute();
-        }
-      }
-    }
-  }
-  await sql`
-    update woodland_deposits w set remaining_amount=woodland_stock_at(w,${through}),
-      reserved_amount=w.reserved_amount-coalesce((select sum(e.reserved_amount) from deposit_extractions e
-        where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
-          and e.wood_debited_at is null and e.completes_at<=${through}),0),
-      cut_amount=w.cut_amount+coalesce((select sum(e.reserved_amount) from deposit_extractions e
-        where e.world_id=w.world_id and e.feature_id=w.feature_id and e.resource_code='wood'
-          and e.wood_debited_at is null and e.completes_at<=${through}),0),
-      regrowth_updated_at=greatest(w.regrowth_updated_at,${through})
-    where w.world_id=${worldId} and w.feature_id=${featureId}
-  `.execute(tx);
-  if (occupied?.buildingId)
-    await tx
-      .updateTable('woodlandDeposits')
-      .set({ cleared: true, remainingAmount: sql`reserved_amount` })
-      .where('worldId', '=', worldId)
-      .where('featureId', '=', featureId)
-      .execute();
-  const after = await tx
-    .selectFrom('woodlandDeposits')
-    .selectAll()
-    .where('worldId', '=', worldId)
-    .where('featureId', '=', featureId)
-    .executeTakeFirstOrThrow();
-  const blocked = !after.cleared && Number(after.remainingAmount) > Number(after.initialAmount) / 10;
-  if (!blocked)
-    await tx
-      .deleteFrom('worldCellOccupancies')
-      .where('worldId', '=', worldId)
-      .where('featureId', '=', featureId)
-      .execute();
-  else if (!occupied)
-    await tx
-      .insertInto('worldCellOccupancies')
-      .values({ worldId, featureId, cellX: after.cellX, cellY: after.cellY, buildingId: null, role: 'body' })
-      .onConflict((oc) => oc.columns(['worldId', 'cellX', 'cellY']).doNothing())
-      .execute();
-  if (
-    Math.floor(Number(before.remainingAmount)) !== Math.floor(Number(after.remainingAmount)) ||
-    before.cleared !== after.cleared ||
-    before.reservedAmount !== after.reservedAmount
-  ) {
-    await tx
-      .updateTable('woodlandDeposits')
-      .set({ revision: sql`revision+1`, updatedAt: through })
-      .where('worldId', '=', worldId)
-      .where('featureId', '=', featureId)
-      .execute();
-  }
-  await tx
-    .updateTable('worldFeatures')
-    .set({ state: after.cleared ? 'depleted' : 'available', updatedAt: sql`${through}` })
-    .where('worldId', '=', worldId)
-    .where('id', '=', featureId)
-    .execute();
+  return new Set(rows.map((r) => r.treeIndex!));
 }
 
-/** Caller already holds village and woodland locks. Does not touch foreign villages. */
-export async function clearWoodland(tx: Transaction<Database>, worldId: string, featureId: string, through: Date) {
-  await materializeWoodland(tx, worldId, featureId, through);
-  const wood = await tx
-    .selectFrom('woodlandDeposits')
-    .selectAll()
-    .where('worldId', '=', worldId)
-    .where('featureId', '=', featureId)
-    .executeTakeFirst();
-  if (!wood) throw new HttpError(404, 'WOODLAND_NOT_FOUND', 'Bosquet introuvable.');
-  if (wood.cleared) return;
-  if (Number(wood.remainingAmount) > Number(wood.initialAmount) / 10)
-    throw new HttpError(409, 'WOODLAND_NOT_CLEARABLE', 'Coupez au moins 90 % du bosquet avant de défricher.');
-  await tx
+export type WoodWork =
+  /** A lot of wood (1 to 100) on one tree, or the removal of one stump (0). */
+  | { kind: 'lot'; treeIndex: number; amount: number }
+  /** Wood left on the designated trees is reserved by other lots. */
+  | { kind: 'wait' }
+  /** Nothing left to do on the designated trees for this mode. */
+  | { kind: 'done' };
+
+/** Next work on a case: wood first, then (clearing only) its stumps one by one. */
+export async function nextWoodWork(
+  tx: Transaction<Database>,
+  worldId: string,
+  featureId: string,
+  mode: 'cut' | 'clear',
+  trees: WoodlandTrees,
+): Promise<WoodWork> {
+  const lot = nextWoodLot(trees.designated, trees.records);
+  if (lot) return { kind: 'lot', ...lot };
+  if (trees.designated.some((i) => treeWood(trees.records.get(i)).remaining > 0)) return { kind: 'wait' };
+  if (mode === 'cut') return { kind: 'done' };
+  const stump = nextStump(trees.designated, trees.records, await stumpsInProgress(tx, worldId, featureId));
+  if (stump !== null) return { kind: 'lot', treeIndex: stump, amount: 0 };
+  return trees.designated.some((i) => treeWood(trees.records.get(i)).state !== 'removed')
+    ? { kind: 'wait' }
+    : { kind: 'done' };
+}
+
+/** Reserves a lot on its tree and on the case. The caller holds the case lock;
+ * the tree row is taken after it. The first lot fells a standing tree. */
+export async function reserveWoodLot(
+  tx: Transaction<Database>,
+  worldId: string,
+  featureId: string,
+  lot: { treeIndex: number; amount: number },
+  through: Date,
+) {
+  if (lot.amount === 0) {
+    // A stump removal reserves no wood: its in-progress lot marks the stump busy.
+    const stump = await tx
+      .selectFrom('woodlandTrees')
+      .select('treeIndex')
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', featureId)
+      .where('treeIndex', '=', lot.treeIndex)
+      .where('remainingAmount', '=', 0)
+      .where('reservedAmount', '=', 0)
+      .where('stumpRemovedAt', 'is', null)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!stump) throw new Error('Woodland stump reservation invariant failed');
+    return;
+  }
+  const tree =
+    await sql`insert into woodland_trees(world_id,feature_id,tree_index,remaining_amount,reserved_amount,felled_at,updated_at)
+    values(${worldId},${featureId},${lot.treeIndex},${WOOD_PER_TREE},${lot.amount},${through},${through})
+    on conflict(world_id,feature_id,tree_index) do update set reserved_amount=woodland_trees.reserved_amount+excluded.reserved_amount,
+      revision=woodland_trees.revision+1,updated_at=excluded.updated_at
+    where woodland_trees.stump_removed_at is null
+      and woodland_trees.remaining_amount-woodland_trees.reserved_amount>=excluded.reserved_amount`.execute(tx);
+  if (Number(tree.numAffectedRows) !== 1) throw new Error('Woodland tree reservation invariant failed');
+  const reserved = await tx
     .updateTable('woodlandDeposits')
-    .set({ cleared: true, remainingAmount: sql`reserved_amount`, revision: sql`revision+1`, updatedAt: through })
+    .set({
+      reservedAmount: sql`reserved_amount + ${lot.amount}::bigint`,
+      revision: sql`revision + 1`,
+      updatedAt: sql`statement_timestamp()`,
+    })
     .where('worldId', '=', worldId)
     .where('featureId', '=', featureId)
+    .where('cleared', '=', false)
+    .where(sql<boolean>`remaining_amount - reserved_amount >= ${lot.amount}::bigint`)
+    .executeTakeFirst();
+  if (Number(reserved.numUpdatedRows) !== 1) throw new Error('Woodland reservation invariant failed');
+}
+
+/** The owner debits its own lot at its deadline: the tree loses the wood (or its
+ * stump), the case its sum, the cut counter gains the lot. A lot already folded
+ * by the former shared materialization only credits its village. Clears the
+ * case when its last stump is gone. The caller holds the village and case locks. */
+export async function debitWoodLot(
+  tx: Transaction<Database>,
+  extraction: {
+    worldId: string;
+    featureId: string;
+    id: string;
+    treeIndex: number | null;
+    reservedAmount: string | number;
+    woodDebitedAt: Date | null;
+  },
+  through: Date,
+) {
+  if (extraction.woodDebitedAt) return;
+  const { worldId, featureId } = extraction,
+    amount = Number(extraction.reservedAmount);
+  if (extraction.treeIndex !== null) {
+    const tree = await tx
+      .updateTable('woodlandTrees')
+      .set(
+        amount > 0
+          ? {
+              remainingAmount: sql`remaining_amount - ${amount}`,
+              reservedAmount: sql`reserved_amount - ${amount}`,
+              revision: sql`revision + 1`,
+              updatedAt: through,
+            }
+          : { stumpRemovedAt: through, revision: sql`revision + 1`, updatedAt: through },
+      )
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', featureId)
+      .where('treeIndex', '=', extraction.treeIndex)
+      .where('stumpRemovedAt', 'is', null)
+      .where((eb) =>
+        amount > 0
+          ? eb.and([eb('reservedAmount', '>=', amount), eb('remainingAmount', '>=', amount)])
+          : eb.and([eb('remainingAmount', '=', 0), eb('reservedAmount', '=', 0)]),
+      )
+      .executeTakeFirst();
+    if (Number(tree.numUpdatedRows) !== 1) throw new Error('Woodland tree debit invariant failed');
+  }
+  const debited = await tx
+    .updateTable('woodlandDeposits')
+    .set({
+      remainingAmount: sql`remaining_amount - ${amount}::bigint`,
+      reservedAmount: sql`reserved_amount - ${amount}::bigint`,
+      cutAmount: sql`cut_amount + ${amount}::bigint`,
+      revision: sql`revision + 1`,
+      updatedAt: through,
+    })
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', featureId)
+    .where('reservedAmount', '>=', String(amount))
+    .where('remainingAmount', '>=', String(amount))
+    .executeTakeFirst();
+  if (Number(debited.numUpdatedRows) !== 1) throw new Error('Woodland debit invariant failed');
+  await tx
+    .updateTable('depositExtractions')
+    .set({ woodDebitedAt: through })
+    .where('worldId', '=', worldId)
+    .where('id', '=', extraction.id)
     .execute();
+  if (amount === 0 || extraction.treeIndex === null) await clearWhenBare(tx, worldId, featureId, through);
+}
+
+/** A case becomes buildable once no tree and no stump is left on it: it is
+ * cleared, its trunks leave the navigation and its occupancy goes. */
+async function clearWhenBare(tx: Transaction<Database>, worldId: string, featureId: string, through: Date) {
+  const trees = await readWoodlandTrees(tx, worldId, featureId);
+  if (trees.all.every((i) => treeWood(trees.records.get(i)).state === 'removed'))
+    await clearCase(tx, worldId, featureId, through);
+}
+
+async function clearCase(tx: Transaction<Database>, worldId: string, featureId: string, through: Date) {
+  const cleared = await tx
+    .updateTable('woodlandDeposits')
+    .set({ cleared: true, revision: sql`revision+1`, updatedAt: through })
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', featureId)
+    .where('cleared', '=', false)
+    .executeTakeFirst();
+  if (!Number(cleared.numUpdatedRows)) return;
   await tx
     .deleteFrom('worldCellOccupancies')
     .where('worldId', '=', worldId)
     .where('featureId', '=', featureId)
+    .where('buildingId', 'is', null)
     .execute();
   await tx
     .updateTable('worldFeatures')
@@ -331,7 +257,30 @@ export async function clearWoodland(tx: Transaction<Database>, worldId: string, 
     .execute();
 }
 
-/** A validated construction claims a liberated woodland cell permanently. */
+/** Finishes the clearing of a case already bare of trees and stumps. The caller
+ * holds the village and case locks; removing a stump is a lot, not this call. */
+export async function clearWoodland(tx: Transaction<Database>, worldId: string, featureId: string, through: Date) {
+  const wood = await tx
+    .selectFrom('woodlandDeposits')
+    .select('cleared')
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', featureId)
+    .executeTakeFirst();
+  if (!wood) throw new HttpError(404, 'WOODLAND_NOT_FOUND', 'Bosquet introuvable.');
+  if (wood.cleared) return;
+  const trees = await readWoodlandTrees(tx, worldId, featureId);
+  if (!trees.all.every((i) => treeWood(trees.records.get(i)).state === 'removed'))
+    throw new HttpError(
+      409,
+      'WOODLAND_NOT_CLEARABLE',
+      'Abattez chaque arbre et retirez chaque souche avant de défricher.',
+    );
+  await clearCase(tx, worldId, featureId, through);
+}
+
+/** A validated construction claims a liberated woodland cell permanently. Since
+ * a case stays occupied until cleared, this only settles cells freed before the
+ * tree as harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md). */
 export async function claimWoodlandCell(tx: Transaction<Database>, worldId: string, cellX: number, cellY: number) {
   await tx
     .updateTable('woodlandDeposits')

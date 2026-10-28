@@ -112,10 +112,7 @@ export async function acceptHarvestIntent(
           cellX: target.cellX,
           cellY: target.cellY,
           resource: family,
-          amount: Math.max(
-            0,
-            Math.floor(deposit.remainingAmount - (family === 'wood' ? deposit.initialAmount / 10 : 0)),
-          ),
+          amount: Math.max(0, deposit.remainingAmount),
         });
       }
     }

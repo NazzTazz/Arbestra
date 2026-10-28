@@ -66,6 +66,20 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await transaction.deleteFrom('playerScience').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('gardenHarvests').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('depositExtractions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      // Felled trees stand again, and their cases hold all their wood.
+      await transaction.deleteFrom('woodlandTrees').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction
+        .updateTable('woodlandDeposits')
+        .set({
+          remainingAmount: sql.ref('initialAmount'),
+          reservedAmount: 0,
+          cutAmount: 0,
+          revision: sql`revision + 1`,
+          updatedAt: sql`transaction_timestamp()`,
+        })
+        .where('worldId', '=', DEVELOPMENT_IDS.world)
+        .where(sql<boolean>`remaining_amount <> initial_amount or reserved_amount <> 0 or cut_amount <> 0`)
+        .execute();
       await transaction.deleteFrom('extractionWorksites').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('extractionPools').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('exploitationOrders').where('worldId', '=', DEVELOPMENT_IDS.world).execute();

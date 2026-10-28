@@ -14,7 +14,6 @@ import { buildApp } from '../../app.js';
 import { loadConfig } from '../../config.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from '../villages/reconcile-economy.js';
-import { materializeWoodlands } from '../deposits/woodland.js';
 import {
   ownedVillage,
   stoneTravelPath,
@@ -797,62 +796,6 @@ describe('effective RC1 installation on isolated worlds', () => {
         .execute(db);
     }
   }, 120000);
-  it('retains settled woodland stock and reconciles a missing physical occupancy within its world', async () => {
-    const f = await fixture(),
-      id = randomUUID(),
-      at = new Date();
-    await db
-      .insertInto('worldFeatures')
-      .values({ id, worldId: f.id, featureTypeCode: 'woodland', state: 'available', variantSeed: 1 })
-      .execute();
-    await db
-      .insertInto('woodlandDeposits')
-      .values({
-        worldId: f.id,
-        featureId: id,
-        cellX: 100,
-        cellY: 20,
-        initialAmount: 1500,
-        remainingAmount: 1500,
-        reservedAmount: 0,
-        revision: 1,
-        updatedAt: at,
-        regrowthUpdatedAt: at,
-      })
-      .execute();
-    await db
-      .insertInto('worldCellOccupancies')
-      .values({ worldId: f.id, featureId: id, buildingId: null, cellX: 100, cellY: 20, role: 'body' })
-      .execute();
-    await db.transaction().execute(async (tx) => {
-      const before = await tx
-        .selectFrom('woodlandDeposits')
-        .selectAll()
-        .where('worldId', '=', f.id)
-        .where('featureId', '=', id)
-        .forUpdate()
-        .executeTakeFirstOrThrow();
-      await materializeWoodlands(tx, f.id, [id], at);
-      expect(
-        await tx
-          .selectFrom('woodlandDeposits')
-          .selectAll()
-          .where('worldId', '=', f.id)
-          .where('featureId', '=', id)
-          .executeTakeFirstOrThrow(),
-      ).toEqual(before);
-      await tx.deleteFrom('worldCellOccupancies').where('worldId', '=', f.id).where('featureId', '=', id).execute();
-      await materializeWoodlands(tx, f.id, [id], at);
-      expect(
-        await tx
-          .selectFrom('worldCellOccupancies')
-          .select('featureId')
-          .where('worldId', '=', f.id)
-          .where('featureId', '=', id)
-          .execute(),
-      ).toEqual([{ featureId: id }]);
-    });
-  }, 30000);
   it('serializes two accounts targeting the same site and rechecks the committed neighbor', async () => {
     const f = await fixture(),
       other = randomUUID();

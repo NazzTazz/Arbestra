@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { sql, type Transaction } from 'kysely';
+import { generatedTreeCount, WOOD_PER_TREE } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import { normalizeCell, toroidalChebyshev, worldCellKey } from './coordinates.js';
@@ -329,8 +330,9 @@ export async function generateWorld(transaction: Transaction<Database>, worldId:
             featureId: feature.id,
             cellX: feature.cellX,
             cellY: feature.cellY,
-            initialAmount: 300,
-            remainingAmount: 300,
+            // Each of its 2 to 5 trees is a harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md).
+            initialAmount: WOOD_PER_TREE * generatedTreeCount(feature.variantSeed),
+            remainingAmount: WOOD_PER_TREE * generatedTreeCount(feature.variantSeed),
             reservedAmount: 0,
             revision: 1,
             regrowthPeriodMs: 1_209_600_000,

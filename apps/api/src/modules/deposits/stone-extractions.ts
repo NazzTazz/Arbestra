@@ -16,7 +16,7 @@ import {
 import { beginRest, canWorkFor } from '../population/energy.js';
 import { normalizeCell, toroidalChebyshev } from '../worlds/coordinates.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
-import { materializeWoodland } from './woodland.js';
+import { debitWoodLot, nextWoodWork, readWoodlandTrees, reserveWoodLot } from './woodland.js';
 import { hasRecognizedDepositAccess } from '../science/deposit-access.js';
 
 export const COMPLETE_STONE_EXTRACTION_TASK = 'deposit.extraction.complete';
@@ -34,6 +34,11 @@ export interface ExtractionVillage {
 export function stoneExtractionDuration(workerCount: number, amount = STONE_EXTRACTION_LOT): number {
   return Math.ceil((STONE_EXTRACTION_BASE_MS * amount) / (STONE_EXTRACTION_LOT * workerCount));
 }
+
+/** Removing a stump yields no wood and lasts what a lot of 100 lasts for one
+ * inhabitant, whoever is sent (docs/SPEC-BOIS-ARBRE-UNITE.md §7). */
+export const STUMP_REMOVAL_WORKERS = 1;
+export const STUMP_REMOVAL_MS = stoneExtractionDuration(STUMP_REMOVAL_WORKERS, STONE_EXTRACTION_LOT);
 
 async function readRangeFootprints(tx: Transaction<Database>, village: ExtractionVillage) {
   return tx
@@ -137,12 +142,12 @@ export async function readStoneDeposit(
     remainingAmount,
     reservedAmount,
     availableAmount: remainingAmount - reservedAmount,
-    state: row.cleared || remainingAmount === 0 ? 'depleted' : 'available',
+    // A wood case stays until its last stump is removed, even without wood.
+    state: (wood ? row.cleared : remainingAmount === 0) ? 'depleted' : 'available',
     ...(wood
       ? {
           cleared: wood.cleared,
-          canClear: !wood.cleared && !row.blocksCell,
-          regrowthPerHour: (Number(wood.initialAmount) * 3_600_000) / Number(wood.regrowthPeriodMs),
+          regrowthPerHour: 0,
           cutAmount: safeAmount(row.cutAmount),
         }
       : {}),
@@ -256,12 +261,12 @@ export async function readDepositAccess(
   return { deposit, eligibility: await access(tx, village, deposit, context) };
 }
 
-function refusal(deposit: StoneDeposit, eligibility: Awaited<ReturnType<typeof access>>): string | null {
-  if (deposit.state === 'depleted') return 'DEPOSIT_DEPLETED';
+function refusal(deposit: StoneDeposit, eligibility: Awaited<ReturnType<typeof access>>, stump = false): string | null {
+  if (deposit.state === 'depleted' || (!stump && deposit.remainingAmount === 0)) return 'DEPOSIT_DEPLETED';
   if (!eligibility.inRange) return 'DEPOSIT_OUT_OF_RANGE';
   if (eligibility.protected) return 'DEPOSIT_PROTECTED';
   if (!eligibility.onBoundary) return 'DEPOSIT_INTERIOR';
-  return deposit.availableAmount === 0 ? 'DEPOSIT_FULLY_COMMITTED' : null;
+  return !stump && deposit.availableAmount === 0 ? 'DEPOSIT_FULLY_COMMITTED' : null;
 }
 
 /** Eligibility projection only; departures revalidate under village/target locks. */
@@ -318,7 +323,7 @@ export async function startStoneExtraction(
   workerCount: number,
   path: TravelCell[] = [],
   transportMs = 0,
-  worksite?: { id: string; amount: number; preferredCohortId?: string },
+  worksite?: { id: string; amount: number; treeIndex?: number; preferredCohortId?: string },
 ): Promise<string> {
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > STONE_EXTRACTION_MAX_WORKERS)
     throw new HttpError(400, 'EXTRACTION_WORKER_COUNT_INVALID', 'Effectif d’extraction invalide.');
@@ -351,13 +356,38 @@ export async function startStoneExtraction(
       'WOODLAND_MISSION_IN_PROGRESS',
       'Une coupe est déjà en cours sur ce bosquet pour votre village.',
     );
-  const reason = refusal(deposit, await access(tx, village, deposit));
+  // A wood lot takes one tree: the worksite's choice, or the first tree with
+  // wood in the default designation (docs/SPEC-BOIS-ARBRE-UNITE.md).
+  let tree: { treeIndex: number; amount: number } | null = null;
+  if (deposit.resourceCode === 'wood') {
+    if (worksite?.treeIndex !== undefined) tree = { treeIndex: worksite.treeIndex, amount: worksite.amount };
+    else {
+      const work = await nextWoodWork(
+        tx,
+        village.worldId,
+        featureId,
+        'cut',
+        await readWoodlandTrees(tx, village.worldId, featureId),
+      );
+      if (work.kind === 'lot') tree = { treeIndex: work.treeIndex, amount: work.amount };
+    }
+  }
+  const stump = tree?.amount === 0;
+  const reason = refusal(deposit, await access(tx, village, deposit), stump);
   if (reason) throw new HttpError(409, reason, 'Ce gisement ne peut pas être exploité actuellement.');
-  const available = deposit.availableAmount;
-  const amount = worksite?.amount ?? Math.min(STONE_EXTRACTION_LOT, available);
-  if (amount < 1 || amount > STONE_EXTRACTION_LOT || amount > available)
+  if (deposit.resourceCode === 'wood' && !tree)
     throw new HttpError(409, 'DEPOSIT_FULLY_COMMITTED', 'Lot indisponible.');
-  const durationMs = stoneExtractionDuration(workerCount, worksite ? amount : STONE_EXTRACTION_LOT) + transportMs * 2;
+  if (stump && workerCount !== STUMP_REMOVAL_WORKERS)
+    throw new HttpError(400, 'EXTRACTION_WORKER_COUNT_INVALID', 'Effectif d’extraction invalide.');
+  const available = deposit.availableAmount;
+  const amount = tree?.amount ?? worksite?.amount ?? Math.min(STONE_EXTRACTION_LOT, available);
+  if (!stump && (amount < 1 || amount > STONE_EXTRACTION_LOT || amount > available))
+    throw new HttpError(409, 'DEPOSIT_FULLY_COMMITTED', 'Lot indisponible.');
+  const durationMs =
+    (stump
+      ? STUMP_REMOVAL_MS
+      : stoneExtractionDuration(workerCount, worksite || tree ? amount : STONE_EXTRACTION_LOT)) +
+    transportMs * 2;
   const cohorts = await materializeCohorts(tx, village.worldId, village.villageId, economy.through);
   const candidates = eligibleWorkers(cohorts, durationMs).filter(
     (c) =>
@@ -381,6 +411,7 @@ export async function startStoneExtraction(
       completedAt: null,
       workerCount,
       reservedAmount: amount,
+      treeIndex: tree?.treeIndex ?? null,
       transportMs,
       pathCells: sql`${JSON.stringify(path)}::jsonb`,
     })
@@ -388,18 +419,21 @@ export async function startStoneExtraction(
     .executeTakeFirstOrThrow();
   await assignWorkers(tx, candidates, workerCount, { harvestId: null, extractionId: extraction.id });
   if (worksite) await clearWorksiteRotation(tx, village.worldId, village.villageId, worksite.id);
-  const reserved = await tx
-    .updateTable(deposit.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits')
-    .set({
-      reservedAmount: sql`reserved_amount + ${amount}::bigint`,
-      revision: sql`revision + 1`,
-      updatedAt: sql`statement_timestamp()`,
-    })
-    .where('worldId', '=', village.worldId)
-    .where('featureId', '=', featureId)
-    .where(sql<boolean>`remaining_amount - reserved_amount >= ${amount}::bigint`)
-    .executeTakeFirst();
-  if (Number(reserved.numUpdatedRows) !== 1) throw new Error('Stone deposit reservation invariant failed');
+  if (tree) await reserveWoodLot(tx, village.worldId, featureId, tree, economy.through);
+  else {
+    const reserved = await tx
+      .updateTable('stoneDeposits')
+      .set({
+        reservedAmount: sql`reserved_amount + ${amount}::bigint`,
+        revision: sql`revision + 1`,
+        updatedAt: sql`statement_timestamp()`,
+      })
+      .where('worldId', '=', village.worldId)
+      .where('featureId', '=', featureId)
+      .where(sql<boolean>`remaining_amount - reserved_amount >= ${amount}::bigint`)
+      .executeTakeFirst();
+    if (Number(reserved.numUpdatedRows) !== 1) throw new Error('Stone deposit reservation invariant failed');
+  }
   const dueAt = new Date(economy.through.getTime() + durationMs);
   await tx
     .insertInto('scheduledTasks')
@@ -434,7 +468,8 @@ export async function completeStoneExtractionAt(
     .executeTakeFirst();
   if (!extraction || extraction.status !== 'in-progress' || extraction.completesAt.getTime() !== through.getTime())
     return;
-  if (extraction.resourceCode === 'wood') await materializeWoodland(tx, worldId, extraction.featureId, through);
+  // Only the owner debits its lot, at its deadline (docs/SPEC-BOIS-ARBRE-UNITE.md).
+  if (extraction.resourceCode === 'wood') await debitWoodLot(tx, extraction, through);
   const deposit = await tx
     .selectFrom(extraction.resourceCode === 'wood' ? 'woodlandDeposits' : 'stoneDeposits')
     .selectAll()
@@ -482,19 +517,31 @@ export async function completeStoneExtractionAt(
   if (extraction.worksiteId) {
     const site = await tx
       .selectFrom('extractionWorksites')
-      .select(['status', 'workerCap'])
+      .select(['status', 'workerCap', 'mode'])
       .where('id', '=', extraction.worksiteId)
       .executeTakeFirstOrThrow();
     const target = await tx
       .selectFrom('extractionWorksiteTargets')
-      .select(['status', 'thresholdReachedAt'])
+      .select(['status', 'treeIndices'])
       .where('worksiteId', '=', extraction.worksiteId)
       .where('featureId', '=', extraction.featureId)
       .executeTakeFirstOrThrow();
     const afterDeposit = await readStoneDeposit(tx, worldId, extraction.featureId);
-    const threshold = extraction.resourceCode === 'wood' ? afterDeposit.initialAmount / 10 : 0;
+    // Wood: its designated trees cut to nothing (cutting), or the case cleared.
     const finished =
-      target.thresholdReachedAt !== null || afterDeposit.remainingAmount <= threshold || afterDeposit.cleared;
+      extraction.resourceCode === 'wood'
+        ? afterDeposit.cleared ||
+          (site.mode === 'cut' &&
+            (
+              await nextWoodWork(
+                tx,
+                worldId,
+                extraction.featureId,
+                'cut',
+                await readWoodlandTrees(tx, worldId, extraction.featureId, target.treeIndices),
+              )
+            ).kind === 'done')
+        : afterDeposit.remainingAmount <= 0;
     if (target.status === 'pending' && finished) {
       await tx
         .updateTable('extractionWorksiteTargets')

@@ -10,7 +10,6 @@ import { migrateToLatest } from '../../database/migrate.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { completeStoneExtractionAt } from './stone-extractions.js';
-import { materializeWoodland } from './woodland.js';
 import { admitWorksites, changeWorksite, createWorksite } from './worksites.js';
 import { ownedVillage, prepareWorksiteSelection } from '../villages/service.js';
 import { startVillageWorksite } from '../villages/legacy-commands.fixture.js';
@@ -61,8 +60,9 @@ async function fixture(run: (tx: Transaction<Database>, featureId: string, t: Da
           featureId,
           cellX: 1023,
           cellY: 514,
-          initialAmount: 300,
-          remainingAmount: 300,
+          // One tree of 500 (docs/SPEC-BOIS-ARBRE-UNITE.md).
+          initialAmount: 500,
+          remainingAmount: 500,
           reservedAmount: 0,
           revision: 1,
           updatedAt: t,
@@ -112,6 +112,21 @@ const current = (tx: Transaction<Database>, worksiteId: string) =>
     .where('status', '=', 'in-progress')
     .executeTakeFirst();
 
+/** The case's single tree cut down to `remaining`, its trunk on the ground. */
+async function cutTo(tx: Transaction<Database>, featureId: string, remaining: number, t: Date) {
+  await tx
+    .insertInto('woodlandTrees')
+    .values({ worldId, featureId, treeIndex: 0, remainingAmount: remaining, felledAt: t })
+    .onConflict((c) => c.columns(['worldId', 'featureId', 'treeIndex']).doUpdateSet({ remainingAmount: remaining }))
+    .execute();
+  await tx
+    .updateTable('woodlandDeposits')
+    .set({ remainingAmount: remaining, cutAmount: 500 - remaining })
+    .where('worldId', '=', worldId)
+    .where('featureId', '=', featureId)
+    .execute();
+}
+
 async function addTarget(tx: Transaction<Database>, t: Date, cellX: number, cellY: number) {
   const id = randomUUID();
   await tx
@@ -125,8 +140,8 @@ async function addTarget(tx: Transaction<Database>, t: Date, cellX: number, cell
       featureId: id,
       cellX,
       cellY,
-      initialAmount: 300,
-      remainingAmount: 100,
+      initialAmount: 500,
+      remainingAmount: 500,
       reservedAmount: 0,
       revision: 1,
       updatedAt: t,
@@ -137,6 +152,7 @@ async function addTarget(tx: Transaction<Database>, t: Date, cellX: number, cell
     .insertInto('worldCellOccupancies')
     .values({ worldId, featureId: id, cellX, cellY, buildingId: null, role: 'body' })
     .execute();
+  await cutTo(tx, id, 100, t);
   return id;
 }
 
@@ -178,7 +194,7 @@ it('advances from the last harvested target and stops searching after the first 
   await fixture(async (tx, first, t) => {
     const nearPrevious = await addTarget(tx, t, 1022, 515),
       nearHall = await addTarget(tx, t, 1027, 512);
-    await tx.updateTable('woodlandDeposits').set({ remainingAmount: 100 }).where('featureId', '=', first).execute();
+    await cutTo(tx, first, 100, t);
     const economy = { worldId, villageId, through: t };
     const id = await createWorksite(tx, economy, {
       commandId: randomUUID(),
@@ -294,7 +310,12 @@ it('ranks the first target across the toric seam', async () => {
 
 it('waits for reserved stock without routing or removing the target', async () => {
   await fixture(async (tx, first, t) => {
-    await tx.updateTable('woodlandDeposits').set({ reservedAmount: 300 }).where('featureId', '=', first).execute();
+    // Another lot holds the whole tree.
+    await tx
+      .insertInto('woodlandTrees')
+      .values({ worldId, featureId: first, treeIndex: 0, remainingAmount: 500, reservedAmount: 500, felledAt: t })
+      .execute();
+    await tx.updateTable('woodlandDeposits').set({ reservedAmount: 500 }).where('featureId', '=', first).execute();
     const economy = { worldId, villageId, through: t };
     const id = await createWorksite(tx, economy, {
       commandId: randomUUID(),
@@ -453,7 +474,7 @@ it('admits and resumes a worksite with an exact 4052 ms sub-cell journey', async
   });
 });
 
-it('keeps sending proportional lots and delivers until the renewable cutting threshold', async () => {
+it('keeps sending lots until the tree is cut to nothing, without clearing its stump', async () => {
   await fixture(async (tx, featureId, t) => {
     const economy = { worldId, villageId, through: t };
     const worksiteId = await createWorksite(tx, economy, {
@@ -463,7 +484,7 @@ it('keeps sending proportional lots and delivers until the renewable cutting thr
       featureIds: [featureId],
     });
     await admitWorksites(tx, economy, village, path);
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const lot = await current(tx, worksiteId);
       expect(lot).toBeDefined();
       await completeStoneExtractionAt(tx, worldId, villageId, lot!.id, lot!.completesAt);
@@ -476,14 +497,14 @@ it('keeps sending proportional lots and delivers until the renewable cutting thr
       .where('id', '=', worksiteId)
       .executeTakeFirstOrThrow();
     expect(site.status).toBe('completed');
-    expect(Number(site.deliveredAmount)).toBe(300);
+    expect(Number(site.deliveredAmount)).toBe(500);
     const wood = await tx
       .selectFrom('woodlandDeposits')
       .selectAll()
       .where('featureId', '=', featureId)
       .executeTakeFirstOrThrow();
     expect(wood.cleared).toBe(false);
-    expect(Number(wood.remainingAmount)).toBeLessThanOrEqual(30);
+    expect(Number(wood.remainingAmount)).toBe(0);
   });
 });
 
@@ -513,9 +534,9 @@ it('honors a pause before relaunch while delivering its committed lot', async ()
   });
 });
 
-it('finishes the clearing committed by the final returning lot, even after stop', async () => {
+it('delivers the lot of a stopped clearing but removes no stump after it', async () => {
   await fixture(async (tx, featureId, t) => {
-    await tx.updateTable('woodlandDeposits').set({ remainingAmount: 120 }).where('featureId', '=', featureId).execute();
+    await cutTo(tx, featureId, 100, t);
     const economy = { worldId, villageId, through: t };
     const id = await createWorksite(tx, economy, {
       commandId: randomUUID(),
@@ -528,53 +549,21 @@ it('finishes the clearing committed by the final returning lot, even after stop'
     await changeWorksite(tx, economy, id, { commandId: randomUUID(), action: 'stop' });
     await completeStoneExtractionAt(tx, worldId, villageId, lot!.id, lot!.completesAt);
     await admitWorksites(tx, { ...economy, through: lot!.completesAt }, village, path);
+    expect(await current(tx, id)).toBeUndefined();
     const wood = await tx
       .selectFrom('woodlandDeposits')
-      .select('cleared')
+      .select(['cleared', 'remainingAmount'])
       .where('featureId', '=', featureId)
       .executeTakeFirstOrThrow();
-    expect(wood.cleared).toBe(true);
+    // The stump stands: the case stays occupied until a clearing removes it.
+    expect(wood).toEqual({ cleared: false, remainingAmount: '0' });
+    expect(
+      await tx.selectFrom('worldCellOccupancies').select('featureId').where('featureId', '=', featureId).execute(),
+    ).toHaveLength(1);
     expect(
       (await tx.selectFrom('extractionWorksites').select('status').where('id', '=', id).executeTakeFirstOrThrow())
         .status,
     ).toBe('stopped');
-  });
-});
-
-it('remembers a cutting threshold crossed at return even after regrowth before a late worker', async () => {
-  await fixture(async (tx, featureId, t) => {
-    await tx.updateTable('woodlandDeposits').set({ remainingAmount: 120 }).where('featureId', '=', featureId).execute();
-    const economy = { worldId, villageId, through: t };
-    const id = await createWorksite(tx, economy, {
-      commandId: randomUUID(),
-      mode: 'cut',
-      workerCap: 2,
-      featureIds: [featureId],
-    });
-    await admitWorksites(tx, economy, village, path);
-    const lot = (await current(tx, id))!;
-    const late = new Date(lot.completesAt.getTime() + 15 * 86400_000);
-    await materializeWoodland(tx, worldId, featureId, late);
-    const stock = await tx
-      .selectFrom('woodlandDeposits')
-      .select('remainingAmount')
-      .where('featureId', '=', featureId)
-      .executeTakeFirstOrThrow();
-    expect(Number(stock.remainingAmount)).toBeGreaterThan(30);
-    const target = await tx
-      .selectFrom('extractionWorksiteTargets')
-      .select('thresholdReachedAt')
-      .where('worksiteId', '=', id)
-      .where('featureId', '=', featureId)
-      .executeTakeFirstOrThrow();
-    expect(target.thresholdReachedAt).toEqual(lot.completesAt);
-    await completeStoneExtractionAt(tx, worldId, villageId, lot.id, lot.completesAt);
-    await admitWorksites(tx, { ...economy, through: late }, village, path);
-    expect(
-      (await tx.selectFrom('extractionWorksites').select('status').where('id', '=', id).executeTakeFirstOrThrow())
-        .status,
-    ).toBe('completed');
-    expect(await current(tx, id)).toBeUndefined();
   });
 });
 
@@ -811,8 +800,8 @@ it('concentrates a woodland crew on the nearest bosquet before starting the next
         featureId: farId,
         cellX: 1026,
         cellY: 514,
-        initialAmount: 300,
-        remainingAmount: 300,
+        initialAmount: 500,
+        remainingAmount: 500,
         reservedAmount: 0,
         revision: 1,
         updatedAt: t,
@@ -833,7 +822,8 @@ it('concentrates a woodland crew on the nearest bosquet before starting the next
     const route = async (featureId: string) =>
       featureId === nearId ? path() : [...(await path()), { cellX: 1025, cellY: 514 }, { cellX: 1026, cellY: 514 }];
     await admitWorksites(tx, economy, village, route);
-    for (let i = 0; i < 3; i++) {
+    // The nearest tree goes down in five lots before the crew moves on.
+    for (let i = 0; i < 5; i++) {
       const lot = (await current(tx, id))!;
       expect(lot.featureId).toBe(nearId);
       await completeStoneExtractionAt(tx, worldId, villageId, lot.id, lot.completesAt);
@@ -861,8 +851,8 @@ describe('HTTP worksite contract', () => {
         featureId,
         cellX: 1023,
         cellY: 514,
-        initialAmount: 300,
-        remainingAmount: 300,
+        initialAmount: 500,
+        remainingAmount: 500,
         reservedAmount: 0,
         revision: 1,
         updatedAt: t,

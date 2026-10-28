@@ -1,5 +1,6 @@
 import type { NaturalFeature } from './villages.js';
 import { createSpawnSurfaceIndex, spawnDelta } from './spawn-map.js';
+import { proceduralTreeCount, STARTER_TREE_COUNT } from './woodland-trees.js';
 /** Positions and trunk scales of the existing woodland thin instances, in cells. */
 export interface WoodlandTree {
   x: number;
@@ -29,8 +30,15 @@ export function woodlandTrees(feature: WoodlandLayoutInput): WoodlandTree[] {
       elevation: t.elevation,
     }));
   }
+  // The same trees as the economy (woodlandTreeIndices): three for a starter
+  // supplement, 2 to 5 in a world without RC1 forest (500 of wood per tree).
   const seed = Math.abs(feature.variantSeed),
-    count = feature.rc1 ? 3 : 2 + (seed % 3);
+    count = feature.rc1
+      ? STARTER_TREE_COUNT
+      : proceduralTreeCount({
+          variantSeed: feature.variantSeed,
+          initialAmount: feature.deposit?.initialAmount ?? null,
+        });
   const stock = feature.deposit ? 0.2 + (0.8 * feature.deposit.remainingAmount) / feature.deposit.initialAmount : 1;
   return Array.from({ length: count }, (_, i) => {
     const angle = ((i + hash(seed, 401)) / count) * Math.PI * 2,
