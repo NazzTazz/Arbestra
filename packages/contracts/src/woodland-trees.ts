@@ -44,6 +44,35 @@ export function generatedTreeCount(variantSeed: number): number {
   return 2 + (Math.abs(Math.trunc(variantSeed)) % 4);
 }
 
+/** Trees of such a cell once it holds wood: 500 per tree. The conversion of an
+ * existing world keeps the former count beside buildings, roads and terraces
+ * (no tree added there), so the stored wood, not the seed, gives the count. */
+export function proceduralTreeCount(feature: { variantSeed: number; initialAmount?: number | null }): number {
+  return feature.initialAmount && feature.initialAmount > 0
+    ? Math.max(1, Math.round(feature.initialAmount / WOOD_PER_TREE))
+    : generatedTreeCount(feature.variantSeed);
+}
+
+/** Trees of a starter supplement (RC1 doc: two groves of three trees), drawn
+ * by the historical layout around the cell. */
+export const STARTER_TREE_COUNT = 3;
+
+/** Every tree of a wood cell, in the default designation order: the RC1 trees
+ * of the cell without those removed at installation; the three historical trees
+ * of a starter supplement; 0 to N−1 in a world without RC1 forest (N from its
+ * stored wood, else from its seed). Another RC1
+ * cell without any tree has none. */
+export function woodlandTreeIndices(input: {
+  rc1: { sourceKey: string; treeIndices: readonly number[]; removedIndices: readonly number[] } | null;
+  variantSeed: number;
+  initialAmount?: number | null;
+}): number[] {
+  if (!input.rc1) return Array.from({ length: proceduralTreeCount(input) }, (_, i) => i);
+  if (input.rc1.sourceKey.startsWith('starter:') && !input.rc1.treeIndices.length)
+    return Array.from({ length: STARTER_TREE_COUNT }, (_, i) => i);
+  return cellTreeIndices(input.rc1.treeIndices, input.rc1.removedIndices);
+}
+
 /** Next lot on the designated trees, in their order: the first with wood
  * available takes up to one lot; null when nothing is left to reserve. */
 export function nextWoodLot(
@@ -54,6 +83,24 @@ export function nextWoodLot(
     const { available } = treeWood(records.get(treeIndex));
     if (available >= 1) return { treeIndex, amount: Math.min(WOOD_LOT, available) };
   }
+  return null;
+}
+
+/** Next stump to remove when clearing, in the designated order: a tree cut to
+ * nothing, without reservation, its stump still there and not already being
+ * removed (`busy`). Null when no stump is free. */
+export function nextStump(
+  designated: readonly number[],
+  records: ReadonlyMap<number, TreeRecord>,
+  busy: ReadonlySet<number>,
+): number | null {
+  for (const treeIndex of designated)
+    if (
+      treeWood(records.get(treeIndex)).state === 'stump' &&
+      !records.get(treeIndex)!.reservedAmount &&
+      !busy.has(treeIndex)
+    )
+      return treeIndex;
   return null;
 }
 

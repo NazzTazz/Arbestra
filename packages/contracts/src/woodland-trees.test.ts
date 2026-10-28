@@ -3,8 +3,11 @@ import {
   cellTreeIndices,
   convertCutGrove,
   generatedTreeCount,
+  nextStump,
   nextWoodLot,
+  proceduralTreeCount,
   treeWood,
+  woodlandTreeIndices,
   WOOD_LOT,
   WOOD_PER_TREE,
   type TreeRecord,
@@ -39,6 +42,36 @@ it('takes lots from the designated trees in their order, one tree per lot', () =
 
 it('keeps the RC1 order of a cell without the trees removed at installation', () => {
   expect(cellTreeIndices([40, 12, 33, 8], [33])).toEqual([40, 12, 8]);
+});
+
+it('designates every tree of a cell by default: RC1 trees, three starter trees, generated trees', () => {
+  const rc1 = (sourceKey: string, treeIndices: number[], removedIndices: number[] = []) => ({
+    rc1: { sourceKey, treeIndices, removedIndices },
+    variantSeed: 3,
+  });
+  expect(woodlandTreeIndices(rc1('forest:12', [40, 12, 33], [12]))).toEqual([40, 33]);
+  expect(woodlandTreeIndices(rc1('starter:village:4', []))).toEqual([0, 1, 2]);
+  // An RC1 cell left without any tree has nothing to harvest.
+  expect(woodlandTreeIndices(rc1('forest:12', [40], [40]))).toEqual([]);
+  expect(woodlandTreeIndices(rc1('forest:13', []))).toEqual([]);
+  expect(woodlandTreeIndices({ rc1: null, variantSeed: 7 })).toEqual([0, 1, 2, 3, 4]);
+  expect(woodlandTreeIndices({ rc1: null, variantSeed: 4 })).toEqual([0, 1]);
+  // Its stored wood counts once converted: 500 per tree.
+  expect(woodlandTreeIndices({ rc1: null, variantSeed: 7, initialAmount: 1500 })).toEqual([0, 1, 2]);
+  expect(proceduralTreeCount({ variantSeed: 7, initialAmount: null })).toBe(generatedTreeCount(7));
+});
+
+it('removes stumps one by one in the designated order, never one already being removed', () => {
+  const records = new Map([
+    [4, record(4, 0)],
+    [6, record(6, 0, 0, true)],
+    [8, record(8, 0)],
+    [9, record(9, 200)],
+  ]);
+  expect(nextStump([6, 4, 8, 9], records, new Set())).toBe(4);
+  expect(nextStump([6, 4, 8, 9], records, new Set([4]))).toBe(8);
+  // A standing tree or a trunk with wood is not a stump.
+  expect(nextStump([9, 1], records, new Set())).toBeNull();
 });
 
 it('gives 2 to 5 trees to a generated wood cell, stable per cell', () => {
