@@ -36,6 +36,13 @@
 - Pour une tranche visuelle, prévoir une vérification navigateur du parcours. Les anciennes notes disant « à Tristan » ne dispensent pas de validation. Respecter toutefois toute répartition explicite encore applicable dans la session ; rapporter les vérifications manuelles restantes sans les prétendre faites.
 - Ne pas annoncer un test vert tant que son processus n'a pas terminé avec succès. Rapporter séparément lecture du code, inférence, reproduction et validation.
 
+## Performance
+
+- Une livraison qui modifie du code exécuté à chaque image ou à chaque pas (scène, villageois, terrain, trajets) s'accompagne d'une **mesure navigateur sur le dev local**, sur le parcours réel : temps jusqu'au village prêt (à froid et à chaud), images longues de plus de 200 ms pendant le chargement et pendant 60 s de jeu, coût par image des villageois. Les chiffres **avant/après** vont dans le commit et le handoff.
+- **Budgets** : village prêt en moins de 15 s, caches chauds ; aucune image de plus de 100 ms une fois le village prêt ; mise à jour des villageois sous 2 ms par image (p95). Un dépassement bloque la livraison, sauf accord explicite de Tristan.
+- **Chemins chauds** : un crochet appelé à chaque image ou à chaque échantillon de trajet est en O(1) ou indexé. Il ne reconstruit jamais un chunk, un bosquet ou une liste complète. Un calcul qui échoue n'est pas retenté à l'identique sans changement de contexte.
+- **Test automatisé** : chaque chemin chaud a un test déterministe, exécuté par la CI, qui borne le nombre d'appels à ses crochets (par exemple au plus N tests de place par image sur un chantier en forêt dense).
+
 ## Commandes et données
 
 - Dev : `corepack pnpm dev`. Lire `package.json` pour les scripts à jour.
@@ -50,6 +57,8 @@
 ## Clôture
 
 - Faire les corrections de finition et les vérifications requises avant d'annoncer la livraison. Si une preuve manque, statut **à valider**, pas **terminé**.
+- Le travail en cours se montre sur le dev local (`corepack pnpm dev`, http://localhost:5174). Statut **à valider** tant que Tristan n'a pas fait la recette en local. L'alpha ne reçoit que des tranches finies et validées, sauf correctif d'incident en production.
+- Avant une recette, le serveur de dev est stable (pas de redémarrages en boucle) et un chargement à froid est annoncé comme tel.
 - Mettre à jour le handoff courant et uniquement les docs de référence affectées. Ne pas recopier un ancien compte de tests comme résultat actuel.
 - Formater le code avant de committer : `corepack pnpm format` (Prettier, code seulement ; vérification `corepack pnpm format:check`). Un reformatage de masse va dans un commit dédié, ajouté à `.git-blame-ignore-revs`.
 - Commit/push lorsqu'autorisés pour la tâche, sans confirmation supplémentaire. Examiner les fichiers inclus, `git diff --cached --check`, puis vérifier branche et résultat du push. Aucun force-push par défaut.
