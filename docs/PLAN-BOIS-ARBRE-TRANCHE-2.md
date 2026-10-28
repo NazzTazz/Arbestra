@@ -2,7 +2,7 @@
 
 Date : 28 octobre 2026. Base : `92223e9`. Spec : [SPEC-BOIS-ARBRE-UNITE.md](SPEC-BOIS-ARBRE-UNITE.md).
 
-Statut : **plan, à valider par Tristan avant implémentation.** Le plan a été établi par lecture du code (sous-agent) ; les volumes ont été vérifiés en base de dev. Les numéros de ligne datent de `92223e9`.
+Statut : **plan validé par Tristan le 28 octobre au soir, avec ses réponses (spec §7) : arbre de 500 (5 lots), défrichage arbre par arbre, file d'attente consommée par le panneau Chantier, « Annuler » qui retire de la file.** Les points ci-dessous qui supposaient 300 ou une annulation de lots en route sont remplacés par ces décisions. Le plan a été établi par lecture du code (sous-agent) ; les volumes ont été vérifiés en base de dev. Les numéros de ligne datent de `92223e9`.
 
 ## Constats qui orientent le plan
 
@@ -52,7 +52,7 @@ Tout écrivain d'un arbre tient d'abord sa case. Deux villages qui visent le mê
 | 2b | **Bascule** en un seul commit : vue redéfinie, conversion appelée, débit par le propriétaire, défrichage sur souches seulement, raccourci « tout récolter et défricher », plus de repousse, de seuil ni de rayon de 32 cases, sol RC1 et version RC1 sans seuil, construction, installation à 300 par arbre. Désignation par défaut : tous les arbres de la case dans l'ordre, pour que le client actuel continue de fonctionner. Tests : trois lots par arbre, défrichage, raccourci, bootstrap sans écriture, concurrence sur un même arbre, rollback, conversion. | L'arbre devient l'unité, sans repousse |
 | 2c | Désignation par arbre dans les commandes (`woodTrees`, `treeIndices`), ordre de désignation conservé. | Le serveur accepte les arbres choisis |
 | 2d | Exposition par arbre aux lecteurs (chunks, flux spatial, snapshot), pour le client. | Aucun, prépare la tranche 3 |
-| 2e | **Annulation d'un geste** : commande idempotente sur l'intention. Les lots dont le travail n'a pas commencé sont retirés, les réservations libérées, les habitants font demi-tour. Tests : avant le départ, pendant le trajet, refus une fois le travail commencé, rejeu. | Bouton « Annuler » possible |
+| 2e | **File d'attente et annulation** : les gestes mettent en file des arbres et souches (récolte ou défrichage) ; le panneau Chantier la consomme ; « Annuler » retire de la file les éléments du geste pas encore pris en charge (commande idempotente). Retrait de souche arbre par arbre (troncs retirés de la navigation). | Bouton « Annuler » possible |
 | 3 | Client : grammaire gestuelle (toucher, glisser, appui long pour changer de mode, surlignage rouge du défrichage, « Annuler » pendant 15 s), rendu par arbre. | Nouvelle interaction |
 
 ## Risques

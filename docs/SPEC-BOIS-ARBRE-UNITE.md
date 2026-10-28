@@ -2,7 +2,7 @@
 
 Date : 28 octobre 2026. Base : `wip/v2-commandes-bornees`, `5203f2c`.
 
-Statut : **décisions de Tristan du 28 octobre intégrées, implémentation autorisée.** Analyse et mesures : [ETUDE-BOIS-MODELE-SERVEUR-2026-10-28.md](ETUDE-BOIS-MODELE-SERVEUR-2026-10-28.md).
+Statut : **décisions de Tristan du 28 octobre intégrées (deuxième série le soir : arbre de 500, défrichage arbre par arbre, file d'attente), implémentation autorisée.** Deux points ouverts au §7. Analyse et mesures : [ETUDE-BOIS-MODELE-SERVEUR-2026-10-28.md](ETUDE-BOIS-MODELE-SERVEUR-2026-10-28.md).
 
 Cette spec remplace, côté serveur et sélection, l'ordre de coupe fixe, la part `B = I / N`, la repousse et le seuil de 10 % de [SPEC-BOSQUETS-SOUCHES-REPOUSSE.md](SPEC-BOSQUETS-SOUCHES-REPOUSSE.md). Restent valables de cette spec-là :
 - l'abattage du vrai arbre ;
@@ -18,14 +18,17 @@ Les jeunes arbres et la repousse sont reportés à la tranche **croissance spont
 | Sujet | Décision (Tristan, 28 octobre) |
 |---|---|
 | Unité de récolte | **L'arbre.** Le joueur désigne les arbres qu'il coupe ; c'est l'arbre désigné qui tombe. |
-| Bois d'un arbre | **300 unités.** |
-| Lot | **100 unités.** Un arbre fait donc **3 lots**. |
+| Bois d'un arbre | **500 unités**, comme le fixe la doc RC1 (« un arbre représente 500 bois bruts », [SPEC-CARTE-SPAWN-RC1.md](SPEC-CARTE-SPAWN-RC1.md)). |
+| Lot | **100 unités.** Un arbre fait donc **5 lots**. |
 | Abattage | Quand on commence à débiter un arbre, **il tombe**. Le **tronc au sol** représente ensuite le stock de bois restant. Tronc épuisé : il ne reste qu'une **souche**. |
-| Repousse | **Aucune.** Un arbre coupé ne repousse pas. La croissance spontanée de nouveaux arbres viendra plus tard, avec un placement qui ne gêne pas les joueurs. |
+| Repousse | **Aucune.** Un arbre coupé ne repousse pas. La croissance spontanée viendra plus tard, avec un placement qui ne gêne pas les joueurs. |
 | Seuil de 10 % | **Supprimé.** |
-| Défrichage | Permis quand la case **ne contient plus que des souches**. Il rend la case constructible. |
-| Raccourci | **« Tout récolter et défricher »** reste disponible. Il sert notamment aux joueurs installés en forêt, qui doivent dégager la place pour construire. |
-| Navigation | **Seuls les troncs bloquent.** Un arbre coupé reste un obstacle jusqu'au défrichage de la case. |
+| Défrichage | **Arbre par arbre, souche par souche.** Un arbre désigné pour le défrichage est entièrement récolté, puis sa souche est retirée ; une souche désignée est retirée. Une case devient constructible quand il n'y reste plus ni arbre ni souche. |
+| File d'attente | Les gestes **mettent en file** des arbres et des souches, pour la récolte ou le défrichage. Le **panneau Chantier** consomme cette file avec ses habitants : c'est lui qui décide de l'effectif. |
+| Annuler | Pendant 15 s après un geste, « Annuler » **retire de la file** les arbres et souches de ce geste qui n'ont pas encore été pris en charge. |
+| Navigation | **Seuls les troncs bloquent.** Un arbre coupé reste un obstacle (sa souche) jusqu'à ce que la souche soit retirée. |
+| Mondes sans arbres RC1 | Comme le prévoit la doc RC1 (RC1 désigne la génération du monde, de son terrain et de ses forêts) : **2 à 5 arbres** par case. |
+| Compléments de départ | De **vrais arbres** (deux bosquets de trois arbres, doc RC1), qu'on **continue de donner** aux joueurs isolés des forêts. |
 | Cases de bois sans arbre | **On supprime leur bois.** |
 
 ## 2. Modèle
@@ -106,3 +109,19 @@ Un arbre est un arbre RC1 d'une case de bois : (monde, gisement, indice d'arbre)
 3. **Client : sélection et rendu par arbre.** Le clic et le balayage désignent des arbres. Le bosquet montre l'arbre debout, le tronc couché selon son bois restant, ou la souche. Le chantier abat l'arbre désigné. Plus de jeunes arbres.
 4. Allonger le délai du cache de présentation, puis mesurer.
 5. Plus tard : **croissance spontanée** de nouveaux arbres.
+
+## 7. Décisions du 28 octobre au soir, et points ouverts
+
+- **Grammaire gestuelle (mode Exploitation seulement)** :
+  - toucher = cet élément ; glisser = tous les éléments survolés ;
+  - **appui long = bascule globale** coupe ↔ défrichage, avec un indicateur visuel à concevoir (curseur, ou couleur de fond du HUD) ;
+  - arbres en file pour la coupe : leur bois s'affiche, comme aujourd'hui ;
+  - arbres et souches en file pour le défrichage : léger surlignage rouge jusqu'à la fin ;
+  - « Annuler » en haut à droite, 15 s, retire de la file les éléments du geste.
+- **Conversion** :
+  - **dev** : on peut supprimer et recréer les données de bois sans précaution ;
+  - **alpha** : il faut du bois pour tout le monde, et **ne jamais ajouter d'arbre trop près des bâtiments des joueurs**. Le compteur de bois coupé est recalculé en arbres de 500. Une case à moitié coupée garde la moitié de ses arbres debout.
+- **Ordre des lots** : la case la plus proche d'abord, puis l'ordre de désignation.
+- **Ouvert 1. Retirer une souche** : combien de travail ? Proposition : la durée d'un lot de 100 pour un habitant, sans bois rapporté.
+- **Ouvert 2. « Trop près des bâtiments »** : quelle distance minimale pour un arbre ajouté (complément de départ, mondes sans arbres RC1) ? Proposition : 2 cases de toute emprise de bâtiment, route ou terrasse.
+- **Exception assumée** à la règle « pas d'entité persistante par arbre décoratif » (AGENTS.md, doc RC1) : l'arbre devient une unité de jeu. Une ligne par arbre n'existe qu'à partir de sa première coupe.
