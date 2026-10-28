@@ -80,7 +80,7 @@ Bois disponible d'un emplacement = `tronc restant + (maturité ≥ 0,5 ? 300 × 
 
 ## 5. Tranches
 
-1. **Empreinte du réseau sans le seuil des bosquets.** Indépendante, en cours. En RC1, l'état, le blocage et le défrichage *partiel* des bosquets sortent de l'empreinte ; le défrichage complet y reste.
+1. **Empreinte du réseau sans le seuil des bosquets.** **Fait** (côté présentation) : sur un sol RC1, l'empreinte ignore l'état des bosquets ; le défrichage compte via les troncs retirés. Test unitaire rouge avant, vert après. Le chemin des commandes, avec ses cibles de bois, garde l'état, qui sert à choisir ses cibles. En RC1, l'état, le blocage et le défrichage *partiel* des bosquets sortent de l'empreinte ; le défrichage complet y reste.
 2. **Serveur : l'arbre comme unité.** Table `woodland_trees`, lots par emplacement, seuil calculé à la commande, lecture sans écriture, conversion. Tests :
    - lots sur un arbre adulte (3 lots) et sur un jeune arbre à 50 % ;
    - réservation concurrente du même arbre par deux villages (barrières, attente PostgreSQL observée) ;

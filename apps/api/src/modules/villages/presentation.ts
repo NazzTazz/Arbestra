@@ -119,12 +119,25 @@ async function readScopeRevisions(db: Kysely<Database>, worldId: string, scopes:
     .map((scope) => `${scope.kind}:${scope.key}=${counters.get(`${scope.kind}:${scope.key}`) ?? '-'}`)
     .join('\n');
 }
-function networkFingerprint(input: NetworkJob['state'], ground: Ground) {
+/** On RC1 ground only trunks block travel (Tristan, 28 October): a grove's
+ * stock threshold changes building and clearing, never a route, so it must
+ * not recompute the network. Clearing still counts, through the removed
+ * trunks of `navigationEdits`. */
+export function networkFingerprint(input: NetworkJob['state'], ground: Ground) {
+  const state = ground
+    ? {
+        ...input,
+        region: {
+          ...input.region,
+          features: input.region.features.map((f) => (f.type === 'woodland' ? { ...f, deposit: null } : f)),
+        },
+      }
+    : input;
   return createHash('sha256')
     .update(
       JSON.stringify({
         version: TRAVEL_NETWORK_VERSION,
-        state: input,
+        state,
         ground: ground ? { seed: ground.data.seed, edits: ground.navigationEdits } : null,
       }),
     )
