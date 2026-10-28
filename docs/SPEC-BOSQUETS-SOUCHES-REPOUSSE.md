@@ -55,6 +55,14 @@ Retour de Tristan (« ça agace tout le monde ») :
 
 **Disposition d'équipe** (proposée par la session de mise en scène, 28 octobre ; `#woodPlan`) : tout le chantier se règle sur l'arbre réel. Repère au pied B : A vers la clairière (bout de route), L le long de la lisière. L'arbre tombe selon ±L du côté libre (échantillons tous les 0,4 m sur la longueur du fût), sinon vers la clairière. Bûcheron seul en B + 0,6 A, face au tronc. Binôme 0 en travers de sa chute (B ± 0,49 ⊥ chute) : il abat l'arbre, puis le débite là où il est couché, du bout vers le pied, en avançant d'un pas à chaque tronçon (sa scie suit, plus de tronc de chevalet pour lui) ; si le poste côté bosquet n'est pas libre, l'arbre tombe vers la clairière. Chevalets des autres binômes après le bout du tronc, billots des fendeurs côté clairière à mi-tronc. Tout poste non libre garde sa place d'origine, pour ce rôle seulement. Reste à faire : prise plus basse pendant l'abattage (0,30), scieurs qui se redressent et regardent tomber l'arbre, souche du kit au pied dès la chute, pas lissé entre deux coupes.
 
+**Choix du chantier** (décidé par Tristan, 28 octobre ; remplace la disposition ci-dessus comme cas par défaut). Priorité : fluidité et lisibilité avant fidélité des animations. Trois cas, testés dans l'ordre :
+
+1. **Clairière de travail** : s'il existe un carré de 2 × 2 tuiles libres à moins de 5 cases de l'arbre à abattre, ces 4 tuiles deviennent le chantier. Un seul bûcheron va abattre l'arbre. Ensuite, 4 bûcherons tirent le tronc jusqu'au carré, où l'équipe le débite sur une disposition fixe. Premier rendu de la traction sans Blender : les tireurs reculent, le tronc glisse derrière eux. Une passe Blender pourra venir ensuite.
+2. **Équipe complète autour du bosquet** : sans carré libre à proximité, la disposition autour de l'arbre réel ci-dessus, si la place suffit pour toute l'équipe.
+3. **Équipe réduite** : sinon, une équipe réduite (2 ou 4 bûcherons) travaille sur place. Le chantier porte un indicateur `small`, pour expliquer plus tard au joueur pourquoi ce chantier montre moins de bûcherons.
+
+Ouvert : l'équipe réduite est-elle seulement visuelle (le lot garde son effectif et sa production, et les autres bûcherons restent invisibles ou attendent en lisière) ou réduit-elle l'effectif réel du lot côté serveur ?
+
 ## 7. Kit d'arbres
 
 Kit modulaire livré le 27 octobre (`origin/etude/kit-arbres`, `blender-elements/arbres/kit-arbres-b.json`, style B validé par Tristan) : sapins a/b/c et feuillu (un pour quatre sapins), chacun en fût et feuillage séparés, pousses (plant 0,36 m, arbuste 0,96 m), souches a/b, bûche, branche. Format du kit des villageois, un matériau à couleurs de sommet. Il remplace l'arbre procédural de `#buildWoodland`, les formes provisoires et l'arbre accessoire. Arbre couché sans feuillage : remonté de 0,19 × échelle.
