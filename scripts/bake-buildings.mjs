@@ -16,6 +16,7 @@ const recipes = [
   ['dwelling-logs', 2],
   ['dwelling-beams', 2],
   ['town-hall', 2],
+  ['stonemason', 1],
 ];
 for (const code of selected)
   if (!recipes.some(([recipe]) => recipe === code)) throw new Error(`Unknown building recipe: ${code}`);
@@ -84,7 +85,7 @@ try {
   );
   for (const file of await readdir(directory))
     if (
-      /^(university|dwelling(?:-logs|-beams)?|town-hall)-[1-3]-(?:(?:finished|works)-(?:lod[12]-)?)?[a-f0-9]{16}\.(?:(?:babylon|abmesh)\.gz|png)$/.test(
+      /^(university|dwelling(?:-logs|-beams)?|town-hall|stonemason)-[1-3]-(?:(?:finished|works)-(?:lod[12]-)?)?[a-f0-9]{16}\.(?:(?:babylon|abmesh)\.gz|png)$/.test(
         file,
       ) &&
       !used.has(file)

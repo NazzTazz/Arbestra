@@ -272,5 +272,30 @@
   "town-hall-2-works-lod2": {
     "url": "/buildings/town-hall-2-works-lod2-89a58f5079c78df0.abmesh.gz",
     "bytes": 279852
+  },
+  "stonemason-1-finished": {
+    "url": "/buildings/stonemason-1-finished-09d396a1eac72d4f.abmesh.gz",
+    "bytes": 698406,
+    "thumbnail": "/buildings/stonemason-1-ae37d8efc7b82f48.png"
+  },
+  "stonemason-1-finished-lod1": {
+    "url": "/buildings/stonemason-1-finished-lod1-a4204109e510b80c.abmesh.gz",
+    "bytes": 337343
+  },
+  "stonemason-1-finished-lod2": {
+    "url": "/buildings/stonemason-1-finished-lod2-f5ad0ab6728f7ad6.abmesh.gz",
+    "bytes": 310727
+  },
+  "stonemason-1-works": {
+    "url": "/buildings/stonemason-1-works-3c0e9a5ffa6785c7.abmesh.gz",
+    "bytes": 283826
+  },
+  "stonemason-1-works-lod1": {
+    "url": "/buildings/stonemason-1-works-lod1-24b4adb8df519a1e.abmesh.gz",
+    "bytes": 153305
+  },
+  "stonemason-1-works-lod2": {
+    "url": "/buildings/stonemason-1-works-lod2-12b8ea6dcdf3a4c4.abmesh.gz",
+    "bytes": 152066
   }
 }

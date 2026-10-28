@@ -9,6 +9,7 @@ import { buildingPlan, HOUSE_RECIPE, LOG_HOUSE_RECIPE, BEAM_HOUSE_RECIPE, HALL_R
 import { encodeBuildingAsset } from './building-asset-format';
 import { batchDistantBuilding } from './building-lod-geometry';
 import { buildTownHallMarket } from './town-hall-market-factory';
+import { buildStonemason } from './stonemason-factory';
 
 /** Offline compiler entry point. Never imported by the player application. */
 export function bakeBuilding(code: string, level: number, phase: 'finished' | 'works', lod: 0 | 1 | 2 = 0) {
@@ -23,6 +24,8 @@ export function bakeBuilding(code: string, level: number, phase: 'finished' | 'w
       buildUniversity(root, kit, level, phase, Math.max(0, level - 1), { mathematics: false, astronomy: false });
     // Every market hall level shares one model; the scene adds its live parts.
     else if (code === 'town-hall' && level >= 2) buildTownHallMarket(root, kit, phase, null, false, 'shell');
+    // Its fire is added by the scene (`buildStonemasonFire`).
+    else if (code === 'stonemason') buildStonemason(root, kit, phase, false);
     else {
       const base =
         code === 'town-hall'

@@ -3621,12 +3621,14 @@ export class BabylonVillageScene {
       body.position.copyFrom(this.#universityCentre(site));
       body.rotation.y = ((site.building.quarterTurns ?? 0) * Math.PI) / 2;
       this.#timberThatch ??= new TimberThatch(this.#scene);
-      buildCachedProceduralBuildingLod(
-        body,
-        'stonemason-finished',
-        (root) => buildStonemason(root, this.#timberThatch!, 'finished', false),
-        this.#timberThatch,
-      );
+      if (buildingAssets['stonemason-1-finished']) this.#loadBuildingAsset(body, 'stonemason-1-finished');
+      else
+        buildCachedProceduralBuildingLod(
+          body,
+          'stonemason-finished',
+          (root) => buildStonemason(root, this.#timberThatch!, 'finished', false),
+          this.#timberThatch,
+        );
       buildStonemasonFire(body, this.#timberThatch);
       this.#createContactShadow(body, 4.5, 4.5, body.position.y);
       return this.#registerStructure(body);
