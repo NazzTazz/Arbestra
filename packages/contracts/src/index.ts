@@ -47,6 +47,7 @@ export * from './hud-workforce.js';
 export * from './deposit-range.js';
 
 export * from './woodland-layout.js';
+export * from './woodland-trees.js';
 
 export * from './route-planner.js';
 export * from './hierarchical-route.js';

@@ -330,6 +330,8 @@ export interface DepositExtractionsTable {
     Array<{ cellX: number; cellY: number }> | null | undefined,
     Array<{ cellX: number; cellY: number }> | null
   >;
+  /** Tree of the cell this wood lot aims at (064); null for stone and history. */
+  treeIndex: ColumnType<number | null, number | null | undefined, number | null>;
 }
 
 export interface ExtractionWorksitesTable {
@@ -373,6 +375,8 @@ export interface ExtractionWorksiteTargetsTable {
   thresholdReachedAt: Timestamp | null;
   completedAt: Timestamp | null;
   reason: string | null;
+  /** Designated trees of a wood target (064); null = every tree, RC1 order. */
+  treeIndices: ColumnType<number[] | null, number[] | null | undefined, number[] | null>;
 }
 
 export interface ExtractionWorksiteCommandsTable {
@@ -753,6 +757,18 @@ export interface Database {
     cleared: ColumnType<boolean, boolean | undefined, boolean>;
     /** Wood ever cut: raised by each debit of a returned lot (062). */
     cutAmount: ColumnType<string, number | string | undefined, number | string>;
+  };
+  /** A tree from its first lot on (064); absent = standing, full. */
+  woodlandTrees: {
+    worldId: string;
+    featureId: string;
+    treeIndex: number;
+    remainingAmount: number;
+    reservedAmount: ColumnType<number, number | undefined, number>;
+    felledAt: Timestamp;
+    stumpRemovedAt: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+    revision: ColumnType<string, number | string | undefined, number | string>;
+    updatedAt: ColumnType<Date, Date | string | undefined, Date | string>;
   };
   resourceDeposits: StoneDepositsTable & {
     resourceCode: 'stone' | 'wood';

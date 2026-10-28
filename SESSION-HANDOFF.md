@@ -52,7 +52,7 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 - Test instable **préexistant** : `presentation.integration.test.ts` « reuses one capture… », `expect(b).toBe(a)` (1 échec sur 3 sur le code d'origine, 1 sur 2 avec le cache).
 
 **Prochaines étapes proposées (chacune avec mesure avant/après et test)**
-0. Spécification du bois (demande de Tristan) : étude [ETUDE-BOIS-MODELE-SERVEUR-2026-10-28.md](docs/ETUDE-BOIS-MODELE-SERVEUR-2026-10-28.md), questions au §4 en attente de Tristan ; puis lecture sans réécriture ; cache persistant étendu au chemin des commandes et du worker.
+0. **Bois par arbre** : spec [SPEC-BOIS-ARBRE-UNITE.md](docs/SPEC-BOIS-ARBRE-UNITE.md) (décisions de Tristan, §7), plan [PLAN-BOIS-ARBRE-TRANCHE-2.md](docs/PLAN-BOIS-ARBRE-TRANCHE-2.md). Fait : empreinte du réseau sans le seuil des bosquets (`5203f2c`), étape 2a (schéma 064 et règles pures). Suivant : 2b, la bascule (l'arbre devient l'unité, plus de repousse ni de seuil, lecture sans écriture, conversion ; en dev on peut tout recréer, en alpha accord de Tristan et aucun arbre ajouté près des bâtiments). Migration 064 appliquée en test et sur la base de dev.
 1. Décomposer `updatePoints` ; infrastructure (`InfrastructureRenderer.update`, `#projectLayers`) ; scierie à cuire (matériaux de scène à vérifier) ; lenteur serveur après inactivité.
 2. Emplacements libres (1 025 meshes pour un affichage en mode construction seulement) : création paresseuse ou en instances.
 3. Villageois : figurines créées sur plusieurs images, coût d'une recherche A* plafonné ; puis le cas 1 de la spec (clairière de travail), qui rend ces recherches inutiles autour des bosquets.
