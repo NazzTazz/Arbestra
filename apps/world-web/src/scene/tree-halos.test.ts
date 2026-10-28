@@ -6,6 +6,8 @@ import { vertexSurface, woodlandTrees } from '@arbestra/contracts';
 import { groveSlots } from './grove-trees';
 import type { NaturalFeature, VillageState } from '@arbestra/contracts';
 import { groveHalo, groveHaloTrees, TreeHalos, TREE_HALO_LIFT, treeHaloRadius } from './tree-halos';
+import { HALO_FLASH, HALO_FLASH_MS, RESOURCE_HALO_COLOURS, RESOURCE_HALO_OPACITY } from './resource-halos';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { TerrainStore } from './terrain-store';
 import { CELL_UNITS, WorldSpace } from './world-space';
 
@@ -136,43 +138,47 @@ it('places one tinted instance at the foot of every tree, projected like the woo
       const right = Vector3.TransformNormal(Vector3.Right(), matrix);
       expect(right.length()).toBeCloseTo(treeHaloRadius(tree) / 0.7, 5);
       const [r, g, b, a] = f.halos.colourAt(i);
-      expect([r, g, b].map((v) => Math.round(v * 255))).toEqual([0xac, 0x80, 0x56]);
-      expect(a).toBeCloseTo(0.65, 5);
+      const tint = Color3.FromHexString(RESOURCE_HALO_COLOURS.wood);
+      expect([r, g, b].map((v) => Math.round(v * 255))).toEqual(
+        [tint.r, tint.g, tint.b].map((v) => Math.round(v * 255)),
+      );
+      expect(a).toBeCloseTo(RESOURCE_HALO_OPACITY, 5);
     }
   } finally {
     f.dispose();
   }
 });
 
-it('flashes a selected grove white, fades it out, and frees its instances afterwards', () => {
+it('lights a validated grove up, puts it out, and frees its instances afterwards', () => {
   const f = fixture();
   try {
-    const halo = groveHalo(grove(), 32)!;
+    const halo = groveHalo(grove(), 32)!,
+      tint = Color3.FromHexString(RESOURCE_HALO_COLOURS.wood);
     f.halos.setAvailable([halo]);
     f.at(0);
     f.at(300);
-    expect(f.halos.colourAt(0)[3]).toBeCloseTo(0.65, 5);
+    expect(f.halos.colourAt(0)[3]).toBeCloseTo(RESOURCE_HALO_OPACITY, 5);
     f.halos.setPending([halo]);
-    f.at(300);
+    f.at(300); // validated
     expect(f.halos.pendingCount).toBe(1);
-    expect(f.halos.colourAt(0)[3]).toBeCloseTo(0.65, 5);
-    f.at(550);
+    expect(f.halos.colourAt(0)[3]).toBeCloseTo(RESOURCE_HALO_OPACITY, 5);
+    f.at(300 + HALO_FLASH.riseMs / 2);
     const [r, g, b] = f.halos.colourAt(1);
-    expect(r).toBeCloseTo(0xac / 255 + (1 - 0xac / 255) * 0.5, 5);
-    expect(g).toBeCloseTo(0x80 / 255 + (1 - 0x80 / 255) * 0.5, 5);
-    expect(b).toBeCloseTo(0x56 / 255 + (1 - 0x56 / 255) * 0.5, 5);
-    f.at(800);
-    expect(f.halos.colourAt(2).slice(0, 3)).toEqual([1, 1, 1]);
-    expect(f.halos.colourAt(2)[3]).toBeCloseTo(0.65, 5);
-    f.at(1300);
-    expect(f.halos.colourAt(0)[3]).toBeCloseTo(0.325, 5);
-    f.at(1800);
+    expect(r).toBeCloseTo(tint.r + (1 - tint.r) * 0.5, 5);
+    expect(g).toBeCloseTo(tint.g + (1 - tint.g) * 0.5, 5);
+    expect(b).toBeCloseTo(tint.b + (1 - tint.b) * 0.5, 5);
+    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs / 2);
+    // Fully lit: white, fully opaque.
+    expect(f.halos.colourAt(2)).toEqual([1, 1, 1, 1]);
+    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs / 2);
+    expect(f.halos.colourAt(0)[3]).toBeCloseTo(0.5, 5);
+    f.at(300 + HALO_FLASH_MS);
     // Still pending, flash over: nothing shown, like the cell halos.
     expect(f.halos.pendingCount).toBe(0);
     expect(f.halos.mesh.isEnabled()).toBe(false);
     f.halos.setPending([]);
     f.halos.setAvailable([]);
-    f.at(1900);
+    f.at(300 + HALO_FLASH_MS + 100);
     expect(f.halos.instanceCount).toBe(0);
     expect(f.halos.mesh.isEnabled()).toBe(false);
   } finally {

@@ -6,7 +6,16 @@ import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { vertexSurface } from '@arbestra/contracts';
 import type { VillageState } from '@arbestra/contracts';
-import { ResourceHalos, RESOURCE_HALO_LIFT } from './resource-halos';
+import { Constants } from '@babylonjs/core/Engines/constants';
+import {
+  HALO_FLASH,
+  HALO_FLASH_MS,
+  haloFlash,
+  ResourceHalos,
+  RESOURCE_HALO_COLOURS,
+  RESOURCE_HALO_LIFT,
+  RESOURCE_HALO_OPACITY,
+} from './resource-halos';
 import { TerrainStore } from './terrain-store';
 import { WorldSpace } from './world-space';
 
@@ -84,19 +93,21 @@ it('retains selections during a swipe and completes the animation even when the 
   const f = fixture();
   try {
     f.halos.setPending([f.cell]);
-    f.tick();
+    f.tick(); // validated at 40 ms
     const mesh = f.scene.getMeshByName('resource-halo-31:31')!;
-    expect(mesh.visibility).toBe(0.65);
+    expect(mesh.visibility).toBe(RESOURCE_HALO_OPACITY);
     f.halos.setPending([f.cell, { cellX: 30, cellY: 31 }]);
     f.settle();
     expect(f.scene.getMeshByName(mesh.name)).toBe(mesh);
     expect(f.halos.pendingCount).toBe(2);
     f.halos.setPending([]);
     f.tick();
-    expect(mesh.visibility).toBe(0.65);
-    f.at(1040);
-    expect(mesh.visibility).toBeCloseTo(0.325);
-    f.at(1540);
+    // Lit up while held, whatever the receipt does.
+    expect(mesh.visibility).toBe(1);
+    const halfFaded = 40 + HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs / 2;
+    f.at(halfFaded);
+    expect(mesh.visibility).toBeCloseTo(0.5);
+    f.at(40 + HALO_FLASH_MS);
     expect(mesh.isDisposed()).toBe(true);
     expect(f.halos.pendingCount).toBe(0);
   } finally {
@@ -161,7 +172,7 @@ it('keeps garden halos above the raised, flat crop surface rather than burying t
   }
 });
 
-it('uses brown, grey and orange for available wood, stone and carrots', () => {
+it('uses light gold, near white and bright orange for available wood, stone and carrots', () => {
   const f = fixture();
   try {
     f.halos.setAvailable([
@@ -172,20 +183,20 @@ it('uses brown, grey and orange for available wood, stone and carrots', () => {
     f.tick();
     f.settle();
     for (const [key, hex] of [
-      ['31:31', '#AC8056'],
-      ['30:31', '#AEB3B8'],
-      ['32:31', '#ED9645'],
+      ['31:31', RESOURCE_HALO_COLOURS.wood],
+      ['30:31', RESOURCE_HALO_COLOURS.stone],
+      ['32:31', RESOURCE_HALO_COLOURS.carrot],
     ]) {
       const mesh = f.scene.getMeshByName(`resource-halo-${key}`)!;
-      expect((mesh.material as StandardMaterial).emissiveColor.toHexString()).toBe(hex);
-      expect(mesh.visibility).toBe(0.65);
+      expect((mesh.material as StandardMaterial).emissiveColor.toHexString()).toBe(hex.toUpperCase());
+      expect(mesh.visibility).toBe(RESOURCE_HALO_OPACITY);
     }
   } finally {
     f.dispose();
   }
 });
 
-it('turns the same halo white in 500 ms, then fades in 1000 ms without replaying on updates', () => {
+it('lights a validated halo up, holds it, then puts it out, without replaying on updates', () => {
   const f = fixture();
   try {
     const cell = { ...f.cell, resource: 'stone' as const };
@@ -196,26 +207,29 @@ it('turns the same halo white in 500 ms, then fades in 1000 ms without replaying
       sharedCount = f.scene.materials.length;
     const initial = (mesh.material as StandardMaterial).emissiveColor.clone();
     f.halos.setPending([{ ...f.cell, resource: undefined }]);
-    f.at(300);
-    expect(mesh.visibility).toBe(0.65);
-    f.at(550);
+    f.at(300); // validated
+    expect(mesh.visibility).toBe(RESOURCE_HALO_OPACITY);
+    // Added light, not a veil: the validated halo glows.
+    expect((mesh.material as StandardMaterial).alphaMode).toBe(Constants.ALPHA_ADD);
+    f.at(300 + HALO_FLASH.riseMs / 2);
     expect(
       (mesh.material as StandardMaterial).emissiveColor.equalsWithEpsilon(Color3.Lerp(initial, Color3.White(), 0.5)),
     ).toBe(true);
+    expect(mesh.visibility).toBeCloseTo(haloFlash(HALO_FLASH.riseMs / 2).opacity);
     f.halos.setAvailable([cell]);
     f.halos.setPending([cell]);
-    f.at(800);
+    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs / 2);
     expect(f.scene.getMeshByName(mesh.name)).toBe(mesh);
     expect((mesh.material as StandardMaterial).emissiveColor.toHexString()).toBe('#FFFFFF');
-    expect(mesh.visibility).toBe(0.65);
-    f.at(1300);
-    expect(mesh.visibility).toBeCloseTo(0.325);
-    f.at(1800);
+    expect(mesh.visibility).toBe(1);
+    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs / 2);
+    expect(mesh.visibility).toBeCloseTo(0.5);
+    f.at(300 + HALO_FLASH_MS);
     expect(mesh.visibility).toBe(0);
     expect(mesh.isEnabled()).toBe(false);
     expect(f.scene.materials).toHaveLength(sharedCount);
     f.halos.setPending([cell]);
-    f.at(2500);
+    f.at(300 + HALO_FLASH_MS + 700);
     expect(mesh.visibility).toBe(0);
   } finally {
     f.dispose();

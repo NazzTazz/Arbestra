@@ -1,3 +1,4 @@
+import { Constants } from '@babylonjs/core/Engines/constants';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
@@ -25,9 +26,20 @@ type Halo = {
 export const RESOURCE_HALO_LIFT = 0.045;
 const RADIUS = 1.22,
   SEGMENTS = 4;
-const COLOURS = { wood: '#ac8056', stone: '#aeb3b8', carrot: '#ed9645' };
+// Light enough to read on grass, rock and soil alike (Tristan: « le cercle est un peu illisible »).
+const COLOURS = { wood: '#e8b77e', stone: '#e8edf1', carrot: '#ffad5c' };
 export const RESOURCE_HALO_COLOURS: Readonly<typeof COLOURS> = COLOURS;
-export const RESOURCE_HALO_OPACITY = 0.65;
+export const RESOURCE_HALO_OPACITY = 0.85;
+/** A validated item lights up: quick rise to a bright white, held, then out. */
+export const HALO_FLASH = { riseMs: 150, holdMs: 900, fadeMs: 900 } as const;
+const FLASH_END = HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs;
+/** Flash state at `age` ms after validation: whiteness, and opacity relative to full. */
+export function haloFlash(age: number): { white: number; opacity: number } {
+  const rise = Math.min(1, Math.max(0, age / HALO_FLASH.riseMs)),
+    fade = Math.min(1, Math.max(0, (age - HALO_FLASH.riseMs - HALO_FLASH.holdMs) / HALO_FLASH.fadeMs));
+  return { white: rise, opacity: (RESOURCE_HALO_OPACITY + (1 - RESOURCE_HALO_OPACITY) * rise) * (1 - fade) };
+}
+export const HALO_FLASH_MS = FLASH_END;
 const OPACITY = RESOURCE_HALO_OPACITY;
 const resource = (cell: ResourceHaloCell): Resource => cell.resource ?? (cell.garden ? 'carrot' : 'wood');
 
@@ -64,16 +76,19 @@ function footprint(cell: ResourceHaloCell, ground: Pick<TerrainStore, 'ground'>)
   return data;
 }
 
-/** A white ring at 70 % of the quad, alpha only: the material tints it. */
+/** A white ring at 70 % of the quad over a faint disc, alpha only: the material tints it. */
 export function haloTexture(
   scene: Scene,
-  { name = 'resource-halo-soft', size = 256, core = 0.015, soft = 0.035 } = {},
+  { name = 'resource-halo-soft', size = 256, core = 0.035, soft = 0.09, fill = 0.14 } = {},
 ): RawTexture {
   const pixels = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
       const r = Math.hypot(((x + 0.5) / size) * 2 - 1, ((y + 0.5) / size) * 2 - 1);
-      const alpha = 0.9 * Math.exp(-Math.pow((r - 0.7) / core, 2)) + 0.08 * Math.exp(-Math.pow((r - 0.7) / soft, 2));
+      // The disc reads as a zone; it fades out just inside the ring.
+      const disc = fill * Math.min(1, Math.max(0, (0.7 - r) / 0.12));
+      const alpha =
+        0.95 * Math.exp(-Math.pow((r - 0.7) / core, 2)) + 0.22 * Math.exp(-Math.pow((r - 0.7) / soft, 2)) + disc;
       const i = (y * size + x) * 4;
       pixels[i] = pixels[i + 1] = pixels[i + 2] = 255;
       pixels[i + 3] = Math.round(Math.min(1, alpha) * 255);
@@ -191,6 +206,8 @@ export class ResourceHalos {
       const base = this.#materials[resource(entry.cell)];
       if (entry.select && enabled) {
         entry.selectionMaterial ??= this.#material(`selection-${key}`, COLOURS[resource(entry.cell)]);
+        // Added light, not a veil: the validated halo glows on the ground.
+        entry.selectionMaterial.alphaMode = Constants.ALPHA_ADD;
         entry.selectedAt = now;
         entry.select = false;
         entry.alpha = 1;
@@ -198,15 +215,15 @@ export class ResourceHalos {
       let opacity = OPACITY;
       if (entry.selectedAt !== null) {
         const age = Math.max(0, now - entry.selectedAt),
-          white = Math.min(1, age / 500);
+          flash = haloFlash(age);
         const tint = entry.selectionMaterial!.emissiveColor;
         tint.set(
-          base.emissiveColor.r + (1 - base.emissiveColor.r) * white,
-          base.emissiveColor.g + (1 - base.emissiveColor.g) * white,
-          base.emissiveColor.b + (1 - base.emissiveColor.b) * white,
+          base.emissiveColor.r + (1 - base.emissiveColor.r) * flash.white,
+          base.emissiveColor.g + (1 - base.emissiveColor.g) * flash.white,
+          base.emissiveColor.b + (1 - base.emissiveColor.b) * flash.white,
         );
-        opacity *= 1 - Math.max(0, Math.min(1, (age - 500) / 1000));
-        if (age >= 1500) {
+        opacity = flash.opacity;
+        if (age >= FLASH_END) {
           entry.selectionMaterial!.dispose();
           entry.selectionMaterial = null;
           entry.selectedAt = null;

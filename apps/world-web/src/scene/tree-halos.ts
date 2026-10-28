@@ -9,7 +9,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import type { NaturalFeature, WoodlandTree } from '@arbestra/contracts';
 import { groveSlots } from './grove-trees';
 import type { Cell } from './construction-selection';
-import { haloTexture, RESOURCE_HALO_COLOURS, RESOURCE_HALO_OPACITY } from './resource-halos';
+import { haloFlash, HALO_FLASH_MS, haloTexture, RESOURCE_HALO_COLOURS, RESOURCE_HALO_OPACITY } from './resource-halos';
 import type { TerrainStore } from './terrain-store';
 import { CELL_UNITS, type WorldSpace } from './world-space';
 
@@ -113,7 +113,7 @@ export class TreeHalos {
   rebuildMs = 0;
   rebuilds = 0;
   constructor(private readonly scene: Scene) {
-    this.#texture = haloTexture(scene, { name: 'tree-halo-soft', size: 128, core: 0.04, soft: 0.09 });
+    this.#texture = haloTexture(scene, { name: 'tree-halo-soft', size: 128, core: 0.06, soft: 0.14, fill: 0.16 });
     const material = new StandardMaterial('tree-halo', scene);
     material.diffuseTexture = this.#texture;
     material.useAlphaFromDiffuseTexture = true;
@@ -280,7 +280,7 @@ export class TreeHalos {
         entry.select = false;
         entry.alpha = 1;
       }
-      if (entry.selectedAt !== null && now - entry.selectedAt >= 1500) {
+      if (entry.selectedAt !== null && now - entry.selectedAt >= HALO_FLASH_MS) {
         entry.selectedAt = null;
         entry.alpha = 0;
       }
@@ -301,9 +301,9 @@ export class TreeHalos {
       let opacity = OPACITY,
         white = 0;
       if (entry.selectedAt !== null) {
-        const age = Math.max(0, now - entry.selectedAt);
-        white = Math.min(1, age / 500);
-        opacity *= 1 - Math.max(0, Math.min(1, (age - 500) / 1000));
+        const flash = haloFlash(Math.max(0, now - entry.selectedAt));
+        white = flash.white;
+        opacity = flash.opacity;
       }
       const a = entry.alpha * zoom * opacity;
       const colour: Entry['colour'] = [
