@@ -1,19 +1,40 @@
-# Reprise — état au 26 octobre 2026
+# Reprise — état au 28 octobre 2026
 
 Index court. L'historique détaillé (preuves, mesures, sessions précédentes) est archivé dans [docs/HANDOFF-ARCHIVE-2026-10-23.md](docs/HANDOFF-ARCHIVE-2026-10-23.md).
 
-## Diagnostic local — abattage, 28 octobre 2026
+## Reprise — 28 octobre 2026, fin de session (performances)
 
-- Base `199f6b5`, branche `wip/v2-commandes-bornees`, tranche 4 de [SPEC-BOSQUETS-SOUCHES-REPOUSSE.md](docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md). **Correctif local implémenté, chute en coupe fraîche encore à valider au navigateur.** Aucun déploiement ni changement de base.
-- Régression reproduite avant correction, avec 1 et 4 ouvriers : un lot découvert à W0 + 1 s reconstruit les figurants sur les anciens postes, puis `#woodPlan` déplace leurs destinations vers l'arbre réel. L'abatteur peut donc ne jamais être reconnu au poste (`fellerAt=null`). `#create` prépare désormais les postes/accessoires avant les figurants. Les deux régressions vérifient proximité du vrai arbre, reconnaissance au poste et secousse visible avant chute.
-- Preuves du jour : `vitest run apps/world-web/src/scene/village-workers.test.ts apps/world-web/src/scene/worksite-site.test.ts --pool=threads --reporter=dot` : **59 tests, sortie 0** ; typecheck world-web et ESLint des deux fichiers : sorties 0. Deux essais avec le pool par défaut ont passé les assertions mais terminé en erreur RPC `onTaskUpdate` ; ils ne comptent pas comme validations. Prettier ciblé inchangé ; `pnpm format` interrompu car il parcourait aussi les worktrees non suivis de `.claude/` (tous les fichiers parcourus étaient inchangés).
-- Relevé réel au navigateur, Bressuire sur `localhost:5174`, après connexion par Tristan : lot `cbc3e862…`, première mesure `t=33,1`, `fellerAt=33,1`, `fallAt=7,2` ⇒ découvert après la chute planifiée. Les lots suivants mesurés dès le trajet ont `fallAt=-10` ⇒ sélection d'un tronc déjà couché, pas chute déclenchée par l'horaire d'attente. Cela ne prouve pas encore le comportement d'une coupe fraîche sur arbre debout.
-- Essai frais lancé/cadré par Tristan, vue de jour : non observable dans cette page, dont les deux états React restaient datés de `2026-10-28T09:53:33.316Z` à `10:06:23Z` (`woodPlan=[]`, aucune figurine). Une lecture isolée du bootstrap répondait 200 à `10:06:42Z`. L'événement de retour focus n'a pas rafraîchi l'état ; recharger a récupéré des compteurs plus récents, puis le navigateur est resté en chargement et une lecture CDP a expiré (`Runtime.evaluate`). Cause de ce blocage non établie, aucun correctif V2 extrapolé. Recette fraîche requise une fois cette scène rétablie.
-- Modifications locales : `village-workers.ts`, sa régression et ces notes ; `.claude/` était non suivi à la reprise. Pas de push ni déploiement pour ce diagnostic local.
+**Priorité de Tristan : fluidité et expérience de jeu avant fidélité des animations** (« l'exactitude des animations est un bonus »). Les budgets de performance sont désormais dans [AGENTS.md](AGENTS.md#performance) : village prêt en moins de 15 s à chaud, aucune image de plus de 100 ms une fois prêt, villageois sous 2 ms par image (p95), mesure navigateur avant/après sur le dev local, test CI qui borne les appels des chemins chauds. **Aujourd'hui, ces budgets sont dépassés** (mesures ci-dessous).
+
+**État Git** : branche `wip/v2-commandes-bornees`, tout est poussé, l'arbre de travail est propre (sondes retirées). Alpha resté à `alpha-2026.10.28.2` : les 14 commits `8fb0a94..d521fdb` ne sont **pas déployés** et attendent la recette locale de Tristan (abattage du vrai arbre, trajets, performances).
+
+**Fait cette session (dev local uniquement)**
+- `f4ab7e8` : le test de place du chantier (`stageFree`) reconstruisait le chunk (`store.chunk()` recopie tout à chaque appel) et régénérait les bosquets voisins à chaque appel. Mesuré : 16 930 appels à 4,5 ms en une rafale, soit une image de 77 s. Les troncs sont maintenant indexés par chunk et par case, rafraîchis au plus une fois par seconde.
+- `cb6b1b0` : autour d'un arbre abattu (`g.wood.plan`), A* une seule fois jusqu'à ce qu'un trajet soit trouvé, ensuite les seuls détours bon marché ; après 4 échecs (poste occupé compris), ligne droite à travers les corps (`TrafficActor.ghost`). Les autres chantiers gardent leur comportement. `reproject` compare des modèles de disposition (copie intacte, translatée par `shift()`), au lieu de reconstruire toute l'équipe à chaque publication de sol. Test « bounds the room tests per frame in a dense grove » : pire image 443 → 127 tests de place, 7 028 → 2 024 sur 30 s, 5/10 → 10/10 bûcherons au travail ; il échoue sur l'ancien code. 101 tests des villageois verts.
+- `19135bd` (trouvé par Astra) : un lot découvert après W0 plaçait ses figurants avant de déplacer les postes vers l'arbre réel.
+- `62cc3db` : l'API de dev ne surveille plus que `apps/api/src` et `packages/contracts/dist`. `node --watch` redémarrait en boucle sur `node_modules` (123 redémarrages), ce qui coupait la session de Tristan et perdait ses ordres. Il reste de rares faux événements Windows sur des fichiers de `src` non modifiés (3 dans l'après-midi).
+- Spec des bosquets : choix du chantier décidé par Tristan (clairière de 2 × 2 tuiles à moins de 5 cases et tronc tiré jusque-là ; sinon équipe complète autour du bosquet ; sinon équipe réduite, seulement visuelle, les autres bûcherons faisant la navette vers l'hôtel de ville). **Pas encore implémenté.**
+- Base de dev : 73 bosquets de `rc1-dev` remis à 100 % (sauvegarde `backup_woodland_deposits_20261028`), 6 vieux chantiers de bois arrêtés.
+
+**Mesures du 28 octobre, fin d'après-midi** (Bressuire, 66 bâtiments, machine saturée par la session Claude Code et deux onglets : durées absolues gonflées, proportions fiables)
+- Village prêt en 45 à 55 s à chaud.
+- Génération des bâtiments (boucle de `BabylonVillageScene.update`, après `#updateBuildableGrid`) : 7,7 à 22,6 s au premier passage, puis **5,3 à 10,8 s de régénération quand le kit de jardin arrive** (`fetchGardenKit().then(... this.update(...this.#lastUpdate))`, la signature visuelle change avec `gardenKit`).
+- Décodage du kit de jardin (`garden-kit.ts`, `Response.arrayBuffer.then`) sur le thread principal : 5 à 6 s.
+- `workers.sync` à la création de deux chantiers de bois de 10 bûcherons : 0,5 à 1,8 s (dans `#create` : route et disposition 474 ms à cause des tests `free` ; figurines environ 50 ms chacune).
+- Trajets après `cb6b1b0` : en 100 s, 4 recherches et 14 420 tests de place (contre environ 251 000 avant, sur une fenêtre plus longue). Une recherche A* réussie coûte encore environ 600 ms en une image. Villageois : 4,3 ms par image en moyenne, pic à 116 ms.
+- Préparation avant la scène (0 à 11 s) : pas encore analysée.
+
+**Prochaines étapes proposées à Tristan, dans l'ordre (chacune avec mesure avant/après et test)**
+1. À l'arrivée du kit de jardin, ne reconstruire que les jardins.
+2. Décoder le kit de jardin hors du thread principal, ou le mettre en cache.
+3. Génération des bâtiments : trouver le type coûteux, puis le mettre en cache ou étaler la génération sur plusieurs images.
+4. Villageois : figurines créées sur plusieurs images, coût d'une recherche A* plafonné ; puis le cas 1 de la spec (clairière de travail), qui rend ces recherches inutiles autour des bosquets.
+
+**Méthode de mesure qui a marché** : onglet sur `http://localhost:5174`, un `PerformanceObserver` de type `long-animation-frame` (attribution par script), et des sondes temporaires (`FrameTimings` forcé dans la boucle de rendu, marques de temps dans `update`, compteurs dans `#create` et `worksiteConnector`), à ne jamais committer. `canvas.dataset` expose `initialLoad`, `woodPlan`, `workerTraffic` et `terrainStreaming`.
 
 ## État
 
-- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. **Alpha déployé à `alpha-2026.10.27.12`** (dont tas de bûches, double porte de la halle-marché, halos au pied des arbres, bois coupé, arbres qui ne sautent plus) ; migration 062 (`cut_amount`) (figurines, bosquets sans chemin, arrivées compactes, scie de long, retour en convoi, bornes du pool de lecture, présentation réutilisée ; correctif de sortie de halle annulé) ; staging resté à `staging-2026.10.25.4`.
+- Branche de travail `wip/v2-commandes-bornees`, fusionnée en avance rapide dans `main`. **Alpha déployé à `alpha-2026.10.28.2`** (dont tas de bûches, double porte de la halle-marché, halos au pied des arbres, bois coupé, arbres qui ne sautent plus) ; migration 062 (`cut_amount`) (figurines, bosquets sans chemin, arrivées compactes, scie de long, retour en convoi, bornes du pool de lecture, présentation réutilisée ; correctif de sortie de halle annulé) ; staging resté à `staging-2026.10.25.4`.
 - **Jusqu'au 23 octobre ~17 h, la V2 n'a jamais tourné en prod** : son contrôle d'activation lisait `kysely_migration`, interdite au rôle applicatif (`deploy.py`) → 500 sur toutes les routes V2 et repli silencieux du client sur V1. Corrigé (`1383eb4`, contrôle par le catalogue, régression qui reproduit les droits de prod). Les recettes staging antérieures portaient donc sur la V1.
 - Autorisations durables de Tristan : commits, push, fusion dans `main`, déploiements staging/alpha et enchaînement des tranches, sans aval de routine. Restent à lui demander : gameplay, base de développement locale, actions destructives sur données joueurs.
 - Migrations 051–061 appliquées en test, staging, alpha et, le 27 octobre à la demande de Tristan, sur la base de développement locale (sauvegarde préalable `~/arbestra-dev-avant-migrations-20261027-1004.dump`).
