@@ -233,6 +233,17 @@ export class BabylonVillageScene {
   #treeKitMaterial: StandardMaterial | null = null;
   /** Grove trees felled by a worksite, by lot: masked in their grove. */
   readonly #felledTrees = new Map<string, { featureId: string; index: number; timer: number }>();
+  // Grove trunks per chunk and cell for the felling test, which asks thousands
+  // of times a frame: rebuilding the chunk and its groves on each call froze the
+  // page for over a minute. Refreshed at most once a second; felling is checked live.
+  readonly #stageTrunks = new Map<
+    string,
+    {
+      at: number;
+      version: number;
+      cells: Map<string, { featureId: string; index: number; x: number; z: number; radius: number }[]>;
+    }
+  >();
   readonly #constructionMaterial: StandardMaterial;
   readonly #scaffoldMaterial: StandardMaterial;
   readonly #selectionMaterial: StandardMaterial;
@@ -2838,30 +2849,59 @@ export class BabylonVillageScene {
     }
     spatial.updateEquipment(this.#infrastructureEquipment, this.#space);
     if (spatial.equipmentBlocked(point, radius)) return false;
-    const size = this.#store.world.chunkSize,
-      cx = Math.round(centre.cellX),
+    const cx = Math.round(centre.cellX),
       cy = Math.round(centre.cellY);
     for (let dy = -1; dy <= 1; dy++)
-      for (let dx = -1; dx <= 1; dx++)
-        for (const feature of this.featuresAt({
+      for (let dx = -1; dx <= 1; dx++) {
+        const cell = {
           cellX: (cx + dx + this.#space.width) % this.#space.width,
           cellY: (cy + dy + this.#space.height) % this.#space.height,
-        })) {
-          if (feature.type !== 'woodland') continue;
-          const ground = this.#store.ground(feature.cellX, feature.cellY);
-          if (!ground) continue;
-          const anchor = {
+        };
+        for (const trunk of this.#trunksAt(cell))
+          if (
+            Math.hypot(point.x - trunk.x, point.z - trunk.z) < trunk.radius + radius &&
+            !this.#treeFelled(trunk.featureId, trunk.index)
+          )
+            return false;
+      }
+    return true;
+  }
+  #trunksAt(cell: Cell) {
+    const store = this.#store!,
+      space = this.#space!,
+      key = store.key(cell.cellX, cell.cellY),
+      now = performance.now();
+    let cached = this.#stageTrunks.get(key);
+    if (!cached || cached.version !== space.version || now - cached.at > 1000) {
+      const size = store.world.chunkSize;
+      cached = { at: now, version: space.version, cells: new Map() };
+      for (const feature of store.chunk(key)?.features ?? []) {
+        if (feature.type !== 'woodland') continue;
+        const ground = store.ground(feature.cellX, feature.cellY);
+        if (!ground) continue;
+        const anchor = {
             cellX: Math.floor(feature.cellX / size) * size,
             cellY: Math.floor(feature.cellY / size) * size,
-          };
-          for (const slot of groveSlots(feature)) {
-            if (this.#treeFelled(feature.id, slot.index) || (!slot.standing && !slot.stump && !slot.young)) continue;
-            const at = this.#slotPlacement(feature, slot, anchor, ground.height),
-              trunk = 0.19 * slot.tree.scale + 0.15;
-            if (Math.hypot(point.x - at.x, point.z - at.z) < trunk + radius) return false;
-          }
-        }
-    return true;
+          },
+          trunks = groveSlots(feature)
+            .filter((slot) => slot.standing || slot.stump || slot.young)
+            .map((slot) => {
+              const at = this.#slotPlacement(feature, slot, anchor, ground.height);
+              return {
+                featureId: feature.id,
+                index: slot.index,
+                x: at.x,
+                z: at.z,
+                radius: 0.19 * slot.tree.scale + 0.15,
+              };
+            });
+        const list = cached.cells.get(cellKey(feature));
+        if (list) list.push(...trunks);
+        else cached.cells.set(cellKey(feature), trunks);
+      }
+      this.#stageTrunks.set(key, cached);
+    }
+    return cached.cells.get(cellKey(cell)) ?? [];
   }
   #releaseTree(lotId: string) {
     const felled = this.#felledTrees.get(lotId);
