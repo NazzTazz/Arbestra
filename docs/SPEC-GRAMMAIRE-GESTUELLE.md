@@ -67,8 +67,24 @@ Planche de test : https://claude.ai/artifact/VZQuVL9ZqbkziWom59JryD (dix proposi
   - Au repos : un anneau fin et **trois points en orbite**.
   - À la validation : les points plongent au centre et éclatent.
 - **Le mode se lit par la forme du marqueur** : une onde, c'est une récolte ; des satellites, c'est un défrichage. Le rouge du défrichage et l'indicateur du HUD restent en complément.
-- **« Colonne de lumière »** (proposition 10) : réservée à un autre usage. Elle signalera **l'échéance d'un échange de marché**, autour de l'hôtel de ville (à spécifier avec le marché).
+- **« Colonne de lumière »** (proposition 10) : réservée au marché, voir ci-dessous.
 - La proposition 1 (anneau épais, `dde67cc`) est remplacée par « Onde » et « Satellites » dans le client (`halo-marker.ts`, greffon de matériau animé par une horloge ; **à valider** en jeu). Le mode `clear` de l'outil bois donne aux halos la forme « Satellites ».
+
+### Colonne de lumière du marché
+
+- **Décision (Tristan, 28 octobre)** : quand une transaction de marché se termine et crédite le village, une colonne de lumière monte au-dessus de **l'hôtel de ville**, avec le « +N » des compteurs. Marché entre joueurs comme marché de l'Oracle. Effet ponctuel, donc embelli d'une vraie lumière.
+- **Déclencheur** (`ui/market-deliveries.ts`, même paire d'états que le « +N », dans `applySnapshot`) :
+  - livraison Oracle différée : un échange de `market.exchanges` reçoit son `completedAt` ;
+  - reprise d'une annonce par l'Oracle : une annonce ouverte et reprenable quitte la liste, son `oracleAt` passé ; une acceptation par un joueur observée en retard se reconnaît au nouveau convoi entrant ;
+  - échange entre joueurs, vendeur : le convoi entrant arrive (`arrivesAt` franchi) ;
+  - échange entre joueurs, acheteur : notre convoi revient avec la marchandise (`returnsAt` franchi) ;
+  - achat direct à l'Oracle (débit et livraison immédiats) : il ne laisse aucune trace dans l'état ; la colonne part au succès de la commande, quand l'état crédité est déjà appliqué.
+  - Rien au départ d'un convoi, au premier état, au changement de village ni au rechargement d'un état identique.
+  - Limite : les deux franchissements entre joueurs suivent l'heure serveur de l'état. Si un état plus récent arrive avant celui qui crédite (retard du worker), la colonne peut précéder le « +N » de ce retard.
+- **Effet** (`scene/market-beacon.ts`, une seule table `MARKET_BEACON` pour les réglages) : colonne or et cœur blanc en mélange additif, bord adouci, 18 étincelles verticales et 30 particules en spirale ascendante (instances minces). Environ 1,9 s : montée 0,24 s, tenue 0,88 s, extinction 0,8 s. Plusieurs livraisons prolongent la même colonne (0,45 s par livraison supplémentaire, quatre au plus).
+- **Lumière** : un point lumineux chaud préparé à l'avance dans le cluster des braseros (`clusteredEffectLight`), intensité nulle au repos. Aucune lumière ajoutée, basculée ni recompilée au déclenchement. Elle n'éclaire que lorsque le cluster est allumé, c'est-à-dire la nuit du village. Sans prise en charge du cluster, la colonne reste, sans vraie lumière.
+- **Aperçu** : bouton « Tester la colonne de marché » du panneau DEV (section Effets). Banc hors build : `http://localhost:5174/bench/marche.html` (vraie halle-marché, quadrillage de l'atelier, curseur jour/nuit, réglages de la lumière ; clic sur la halle pour déclencher).
+- Statut : **à valider** en jeu.
 
 ## 5. Ouvert
 
