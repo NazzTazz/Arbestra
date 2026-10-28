@@ -125,3 +125,19 @@ Un arbre est un arbre RC1 d'une case de bois : (monde, gisement, indice d'arbre)
 - **Ouvert 1. Retirer une souche** : combien de travail ? Proposition : la durée d'un lot de 100 pour un habitant, sans bois rapporté.
 - **Ouvert 2. « Trop près des bâtiments »** : quelle distance minimale pour un arbre ajouté (complément de départ, mondes sans arbres RC1) ? Proposition : 2 cases de toute emprise de bâtiment, route ou terrasse.
 - **Exception assumée** à la règle « pas d'entité persistante par arbre décoratif » (AGENTS.md, doc RC1) : l'arbre devient une unité de jeu. Une ligne par arbre n'existe qu'à partir de sa première coupe.
+
+## 8. Décisions sur l'implémentation de 2b (Tristan, 28 octobre au soir)
+
+Recommandations validées :
+1. **Retrait d'une souche** : un seul habitant, 600 s plus les trajets, quelle que soit l'équipe.
+2. **Arrêt d'un défrichage** : le lot engagé est livré, puis aucune souche n'est retirée.
+3. **Mondes procéduraux** : une case située à 3 cases ou moins (Chebyshev) d'un bâtiment, d'une route ou d'une terrasse garde son ancien nombre d'arbres (2 à 4) quand la conversion en ajouterait.
+4. **Alpha** : vérifier avant la conversion qu'il n'a pas de monde procédural. Sinon, la marge n'y joue pas.
+5. **Case RC1 sans arbre** : vidée, libérée et marquée `depleted`, sans suppression de ligne.
+
+Choix d'implémentation retenus (`8b806f2`, `c10807b`) :
+- La case garde la somme de ses arbres, écrite dans la même instruction que l'arbre.
+- Le défrichage final est automatique, et les troncs quittent la navigation au défrichage complet de la case.
+- Admission et départ d'un lot ont une seule borne : le bois libre de la case.
+- Un départ refusé met le chantier en attente sans faire échouer la lecture, la commande ni le worker.
+- La migration 066 reconvertit les cases dont les arbres ne correspondent pas au stock.
