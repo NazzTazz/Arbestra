@@ -51,7 +51,7 @@ Retour de Tristan (« ça agace tout le monde ») :
 1. Mode Exploitation : cercles au pied des arbres, balayage sur les arbres. Client seul, le plus attendu.
 2. Serveur : `cutAmount` stocké (migration 062), contrat ; compteurs dans la fiche du bosquet. **Fait.**
 3. Rendu du bosquet : souches, arbres d'origine, tronc couché, jeunes arbres (§2).
-4. Abattage du vrai arbre pendant un lot (§3), qui remplace l'arbre accessoire de la tranche 3 des chantiers.
+4. Abattage du vrai arbre pendant un lot (§3), qui remplace l'arbre accessoire de la tranche 3 des chantiers. **Fait le 28 octobre**, ordre fixe du bosquet (choix de Tristan : plusieurs villages coupent le même bosquet) : le tronc couché d'abord, sinon l'arbre d'origine suivant ; la scène le masque dans le bosquet (instances à l'échelle 0) pendant le lot puis une minute, le chantier le dessine avec la même pièce du kit, à la même place, échelle et rotation. Un lot coupe `reservedAmount / part` d'un tronc : ce qui en reste est le tronc couché que le bosquet montre ensuite. Le bûcheron seul se place devant le tronc quand la place est libre ; une équipe voit l'arbre tomber à l'instant prévu, à côté de ses postes (limite connue). Tremblement de ±0,05 rad à chaque coup.
 
 ## 7. Kit d'arbres
 

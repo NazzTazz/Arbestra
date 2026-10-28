@@ -1368,20 +1368,37 @@ it('brings a compact team home when the next lot starts exactly at its completio
     f.dispose();
   }
 });
-const woodTeam = (id: string, count: number) => {
+const woodTeam = (id: string, count: number, reserved = 100) => {
   const state = snapshot(id, epoch, count);
-  state.village.extractions[0]!.resourceCode = 'wood';
+  const lot = state.village.extractions[0]!;
+  lot.resourceCode = 'wood';
+  (lot as { reservedAmount: number }).reservedAmount = reserved;
   return state;
+};
+/** The grove tree the scene hands to a lot: one cell from the grove target, standing or lying. */
+const groveTree = (lying = 0) => {
+  const felled: string[] = [],
+    released: string[] = [];
+  const hooks: Partial<WorkerHooks> = {
+    fellTree: (_feature, _near, lot) => {
+      felled.push(lot);
+      return { x: 0.6, z: 7.2, variant: 'sapin-a', scale: 1, heightScale: 1, yaw: 0.3, lying, share: 100 };
+    },
+    releaseTree: (lot) => released.push(lot),
+  };
+  return { hooks, felled, released };
 };
 const tilt = (f: ReturnType<typeof fixture>, id: string) =>
   f.scene.getTransformNodeByName(`wood-tree-tilt-${id}`)?.rotation.x ?? NaN;
+const trunk = (f: ReturnType<typeof fixture>, id: string) => f.scene.getMeshByName(`wood-tree-trunk-${id}`);
 const logs = (f: ReturnType<typeof fixture>, id: string) =>
   f.scene.meshes.filter((m) => m.name.startsWith(`wood-pile-${id}-`) && m.isEnabled()).length;
 
 it.each([1, 4])(
-  'wood site: fells the tree live, empties the trunk and fills the pile by W1 (%i woodcutters)',
+  'wood site: fells the grove tree live, empties the trunk and fills the pile by W1 (%i woodcutters)',
   (count) => {
-    const f = fixture();
+    const grove = groveTree(),
+      f = fixture(() => true, grove.hooks);
     try {
       // Window: 8 s to 72 s, so the planned fall is 7.68 s after W0.
       f.view.sync(woodTeam(`felling-${count}`, count), epoch);
@@ -1392,23 +1409,66 @@ it.each([1, 4])(
       for (let t = 0; t <= 73_000; t += 33) {
         f.view.animate(epoch + t, true);
         const angle = tilt(f, `felling-${count}`);
-        if (t > 9_000 && t < 15_000 && Math.abs(angle) < 0.03) standing++;
+        if (t > 9_000 && t < 15_000 && Math.abs(angle) < 0.06) standing++;
         if (angle > 0.2 && angle < 1.3) falling = true;
         if (t > 40_000 && t < 70_000 && angle > 1.4) lying++;
         if (t === 71_973) pileAtEnd = logs(f, `felling-${count}`);
       }
+      expect(grove.felled).toEqual([`felling-${count}`]);
       expect(standing, 'the tree waits for its feller at the post').toBeGreaterThan(0);
       expect(falling, 'the fall is played, not skipped').toBe(true);
       expect(lying).toBeGreaterThan(0);
       expect(pileAtEnd).toBeGreaterThanOrEqual(8);
+      // Its whole share cut, nothing of it stays drawn once the work ends.
+      expect(trunk(f, `felling-${count}`)?.isEnabled(true) ?? false).toBe(false);
     } finally {
       f.dispose();
     }
   },
 );
 
-it('wood site: shows the tree already down after a reload past its fall, and the pile gone once loaded', () => {
-  const f = fixture();
+it('wood site: a lone woodcutter strikes the grove tree itself and makes it shake', () => {
+  const grove = groveTree(),
+    f = fixture(() => true, grove.hooks);
+  try {
+    f.view.sync(woodTeam('lone-axe', 1), epoch);
+    let shook = false;
+    // The axe reaches its post after W0 (8 s); the tree falls at 15.7 s.
+    for (let t = 0; t <= 15_000; t += 33) {
+      f.view.animate(epoch + t, true);
+      const angle = tilt(f, 'lone-axe');
+      if (Math.abs(angle) > 0.02 && Math.abs(angle) < 0.06) shook = true;
+    }
+    const axe = f.view.figures[0]!;
+    // In front of the trunk (0.6, 7.2), not at the template post.
+    expect(Math.hypot(axe.root.position.x - 0.6, axe.root.position.z - 7.2)).toBeLessThan(0.75);
+    expect(shook, 'each strike shakes the standing tree').toBe(true);
+  } finally {
+    f.dispose();
+  }
+});
+
+it('wood site: cuts up a trunk already lying without a fall and only by the lot share', () => {
+  const grove = groveTree(0.8),
+    f = fixture(() => true, grove.hooks);
+  try {
+    // 40 of a 100 share: the lying 0.8 ends at 0.4, left lying in the grove.
+    f.view.sync(woodTeam('lying', 4, 40), epoch);
+    let tilted = Infinity;
+    for (let t = 0; t <= 72_100; t += 33) {
+      f.view.animate(epoch + t, true);
+      if (trunk(f, 'lying')?.isEnabled(true)) tilted = Math.min(tilted, tilt(f, 'lying'));
+    }
+    expect(tilted).toBeCloseTo(Math.PI / 2);
+    expect(trunk(f, 'lying')!.scaling.y).toBeCloseTo(0.4, 1);
+  } finally {
+    f.dispose();
+  }
+});
+
+it('wood site: shows the tree already down after a reload past its fall, and releases it after the lot', () => {
+  const grove = groveTree(),
+    f = fixture(() => true, grove.hooks);
   try {
     f.view.sync(woodTeam('reloaded', 4), epoch + 40_000);
     f.view.animate(epoch + 40_000, true);
@@ -1416,6 +1476,8 @@ it('wood site: shows the tree already down after a reload past its fall, and the
     expect(logs(f, 'reloaded')).toBeGreaterThan(0);
     for (let t = 40_033; t <= 73_000; t += 33) f.view.animate(epoch + t, true);
     expect(logs(f, 'reloaded')).toBe(0);
+    for (let t = 73_033; t <= 130_000; t += 100) f.view.animate(epoch + t, true);
+    expect(grove.released).toEqual(['reloaded']);
   } finally {
     f.dispose();
   }

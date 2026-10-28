@@ -25,7 +25,7 @@ import { buildProceduralBuildingLod, buildCachedProceduralBuildingLod } from './
 import { buildSawmill } from './sawmill-factory';
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { buildPresentation } from './building-presentation';
-import { VillageWorkers } from './village-workers';
+import { VillageWorkers, type FelledTree } from './village-workers';
 import { WORKER_COLOURS } from './worker-figure';
 import { TimberThatch } from './timber-thatch';
 import { barracksPreviewPlacement, buildBarracks } from './barracks-factory';
@@ -108,7 +108,7 @@ import { RegionalOverview, TorusOverview } from './terrain-overview-view';
 import { RENDER_UNIT_CELLS } from './terrain-unit';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { bakeScenery, cloneWoodland, type SceneryPart } from './scenery-batch';
-import { groveSlots, treePieceData, youngOffset, type TreePiece } from './grove-trees';
+import { groveSlots, treePieceData, youngOffset, type GroveSlot, type TreePiece } from './grove-trees';
 import { VillageRoads } from './village-roads';
 import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
@@ -231,6 +231,8 @@ export class BabylonVillageScene {
   readonly #trunkMaterial: StandardMaterial;
   readonly #woodlandMaterial: MultiMaterial;
   #treeKitMaterial: StandardMaterial | null = null;
+  /** Grove trees felled by a worksite, by lot: masked in their grove. */
+  readonly #felledTrees = new Map<string, { featureId: string; index: number; timer: number }>();
   readonly #constructionMaterial: StandardMaterial;
   readonly #scaffoldMaterial: StandardMaterial;
   readonly #selectionMaterial: StandardMaterial;
@@ -1105,7 +1107,6 @@ export class BabylonVillageScene {
         white: this.#material('worker-white', '#ffffff'),
         timber: this.#trunkMaterial,
         stone: this.#stoneMaterial,
-        foliage: this.#leafMaterial,
       },
       {
         path: (path, lane) => this.#workerPath(path, lane),
@@ -1113,6 +1114,8 @@ export class BabylonVillageScene {
         localPath: (path) => this.#pathPoints(path),
         leisurePath: (buildingId, path, lane) => this.#leisurePath(buildingId, path, lane),
         leisureVersion: () => this.#groundKey(),
+        fellTree: (featureId, _near, lotId) => this.#fellTree(featureId, lotId),
+        releaseTree: (lotId) => this.#releaseTree(lotId),
         key: (point) => {
           const cell = this.#space!.inverse(point.x, point.z);
           return `${cell.cellX.toFixed(3)}:${cell.cellY.toFixed(3)}`;
@@ -2625,12 +2628,16 @@ export class BabylonVillageScene {
    */
   #buildWoodland(features: NaturalFeature[]): Mesh[] {
     if (!features.length) return [];
-    const pieces = new Map<TreePiece, { transforms: number[]; ids: string[] }>();
+    const pieces = new Map<TreePiece, { transforms: number[]; ids: string[]; slots: number[]; felled: boolean[] }>();
+    let slotIndex = -1,
+      felledPiece = false;
     const put = (piece: TreePiece, transform: Matrix, featureId: string) => {
       let entry = pieces.get(piece);
-      if (!entry) pieces.set(piece, (entry = { transforms: [], ids: [] }));
+      if (!entry) pieces.set(piece, (entry = { transforms: [], ids: [], slots: [], felled: [] }));
       entry.transforms.push(...transform.toArray());
       entry.ids.push(featureId);
+      entry.slots.push(slotIndex);
+      entry.felled.push(felledPiece);
     };
     const size = this.#store!.world.chunkSize;
     for (const feature of features) {
@@ -2640,18 +2647,21 @@ export class BabylonVillageScene {
       const anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size };
       for (const slot of groveSlots(feature)) {
         const { tree } = slot,
-          at = this.#space!.projectFrom({ cellX: tree.x, cellY: tree.y }, anchor),
-          y = tree.elevation === undefined ? ground.height : tree.elevation * TILE_SIZE,
-          // RC1 trees carry no rotation: turn each one from its slot.
-          yaw = tree.rotation || ((feature.variantSeed * 31 + slot.index * 97) % 360) * (Math.PI / 180),
+          { x, z, y, yaw } = this.#slotPlacement(feature, slot, anchor, ground.height),
+          at = { x, z },
           turn = Quaternion.RotationAxis(Vector3.Up(), yaw);
+        slotIndex = slot.index;
+        // A tree felled by a lot is drawn by the worksite; the grove keeps its place.
+        felledPiece = this.#treeFelled(feature.id, slot.index);
         const place = (scale: number, heightScale: number, x = at.x, z = at.z) =>
           Matrix.Compose(new Vector3(scale, heightScale, scale), turn, new Vector3(x, y, z));
         if (slot.standing) {
           put(`${slot.variant}-fut`, place(tree.scale, tree.heightScale), feature.id);
           put(`${slot.variant}-feuillage`, place(tree.scale, tree.heightScale), feature.id);
         }
+        felledPiece = false;
         if (slot.stump) put(slot.stump, place(tree.scale, tree.heightScale), feature.id);
+        felledPiece = this.#treeFelled(feature.id, slot.index);
         if (slot.lying > 0) {
           // The trunk without its foliage, on its side and resting on the ground.
           const lay = turn.multiply(Quaternion.RotationAxis(Vector3.Right(), Math.PI / 2));
@@ -2665,6 +2675,7 @@ export class BabylonVillageScene {
             feature.id,
           );
         }
+        felledPiece = false;
         if (slot.young) {
           const offset = youngOffset(feature.variantSeed, slot.index),
             beside = this.#space!.projectFrom({ cellX: tree.x + offset.x, cellY: tree.y + offset.y }, anchor),
@@ -2703,11 +2714,19 @@ export class BabylonVillageScene {
         source.setEnabled(false);
         this.#sceneryGeometry.set(key, source);
       }
-      const mesh = cloneWoodland(source, `woodland-${features[0]!.id}-${piece}`, new Float32Array(entry.transforms));
+      const matrices = new Float32Array(entry.transforms),
+        drawn = matrices.slice();
+      for (const [i, felled] of entry.felled.entries()) if (felled) drawn.fill(0, i * 16, i * 16 + 15);
+      const mesh = cloneWoodland(source, `woodland-${features[0]!.id}-${piece}`, drawn);
       mesh.metadata = {
         woodlandId: features[0]!.id,
         featureId: features[0]!.id,
         instanceFeatureIds: entry.ids,
+        instanceSlots: entry.slots,
+        instanceFellable: entry.felled.map(
+          (_, i) => !piece.startsWith('souche') && !piece.startsWith('pousse') && entry.slots[i]! >= 0,
+        ),
+        matrices,
         cellX: features[0]!.cellX,
         cellY: features[0]!.cellY,
       };
@@ -2717,6 +2736,84 @@ export class BabylonVillageScene {
       meshes.push(mesh);
     }
     return meshes;
+  }
+
+  /** Where and how a grove slot is drawn: shared by the grove and the tree a worksite fells. */
+  #slotPlacement(
+    feature: NaturalFeature,
+    slot: GroveSlot,
+    anchor: { cellX: number; cellY: number },
+    groundHeight: number,
+  ) {
+    const { tree } = slot,
+      at = this.#space!.projectFrom({ cellX: tree.x, cellY: tree.y }, anchor);
+    return {
+      x: at.x,
+      z: at.z,
+      y: tree.elevation === undefined ? groundHeight : tree.elevation * TILE_SIZE,
+      // RC1 trees carry no rotation: turn each one from its slot.
+      yaw: tree.rotation || ((feature.variantSeed * 31 + slot.index * 97) % 360) * (Math.PI / 180),
+    };
+  }
+  #treeFelled(featureId: string, index: number) {
+    for (const f of this.#felledTrees.values()) if (f.featureId === featureId && f.index === index) return true;
+    return false;
+  }
+  /** Draw or mask the fellable instances of a grove after a lot starts or ends. */
+  #applyFelledTrees(featureId: string) {
+    for (const mesh of this.#scene.meshes) {
+      const meta = mesh.metadata as {
+        woodlandId?: string;
+        instanceSlots?: number[];
+        instanceFellable?: boolean[];
+        matrices?: Float32Array;
+      } | null;
+      if (meta?.woodlandId !== featureId || !meta.instanceSlots || !meta.matrices) continue;
+      const drawn = meta.matrices.slice();
+      for (const [i, index] of meta.instanceSlots.entries())
+        if (meta.instanceFellable?.[i] && this.#treeFelled(featureId, index)) drawn.fill(0, i * 16, i * 16 + 15);
+      (mesh as Mesh).thinInstanceSetBuffer('matrix', drawn, 16, true);
+    }
+  }
+  /**
+   * The tree a wood lot fells, in the grove's own order shared by every village
+   * (docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md §3): the trunk already lying, else
+   * the next original standing. Masked in the grove until a minute after the
+   * lot, when the server's cut has redrawn the slot.
+   */
+  #fellTree(featureId: string, lotId: string): FelledTree | null {
+    const feature = this.#store?.naturalFeatures().find((f) => f.id === featureId);
+    if (!feature || !this.#space || !this.#store) return null;
+    const ground = this.#store.ground(feature.cellX, feature.cellY);
+    if (!ground) return null;
+    const slots = groveSlots(feature),
+      slot = slots.find((s) => s.lying > 0) ?? slots.find((s) => s.standing);
+    if (!slot) return null;
+    const size = this.#store.world.chunkSize,
+      anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size },
+      place = this.#slotPlacement(feature, slot, anchor, ground.height);
+    this.#felledTrees.set(lotId, { featureId, index: slot.index, timer: 0 });
+    this.#applyFelledTrees(featureId);
+    const deposit = feature.deposit,
+      share = deposit ? deposit.initialAmount / slots.length : 0;
+    return {
+      x: place.x,
+      z: place.z,
+      variant: slot.variant,
+      scale: slot.tree.scale,
+      heightScale: slot.tree.heightScale,
+      yaw: place.yaw,
+      lying: slot.lying,
+      share,
+    };
+  }
+  #releaseTree(lotId: string) {
+    const felled = this.#felledTrees.get(lotId);
+    if (!felled || felled.timer) return;
+    felled.timer = window.setTimeout(() => {
+      this.#felledTrees.delete(lotId);
+      this.#applyFelledTrees(felled.featureId);
+    }, 60_000);
   }
 
   #buildFeature(feature: NaturalFeature): Mesh[] {
