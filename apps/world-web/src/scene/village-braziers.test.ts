@@ -419,13 +419,20 @@ it('hands clustered fires to the cluster without registering each one in the sce
   });
   Object.defineProperty(engine, 'version', { value: 2 });
   const ground = MeshBuilder.CreateGround('receiver', { width: 20, height: 20 }, scene);
-  const braziers = new VillageBraziers(scene);
+  const braziers = new VillageBraziers(scene),
+    hall = new VillageBraziers(scene);
   const added = vi.spyOn(scene, 'addLight');
+  // Toggling a light walks every mesh of the scene, as registering it does.
+  const toggled = vi.spyOn(PointLight.prototype, 'setEnabled');
   try {
     braziers.updatePoints(Array.from({ length: 5 }, (_, i) => ({ id: `fire-${i}`, x: i, y: 0, z: 0, seed: 0.4 })));
+    // A building's own fires (the market hall's niches) join the same cluster.
+    hall.updatePoints([{ x: 9, y: 0, z: 0, seed: 0.2 }]);
     const cluster = scene.lights.find((light) => light instanceof ClusteredLightContainer) as ClusteredLightContainer;
-    // Only the first fire, which discovers cluster support, goes through the scene.
-    expect(added.mock.calls.filter(([light]) => light instanceof PointLight)).toHaveLength(1);
+    expect(added.mock.calls.filter(([light]) => light instanceof PointLight)).toHaveLength(0);
+    expect(toggled).not.toHaveBeenCalled();
+    expect(cluster.lights).toHaveLength(6);
+    hall.dispose();
     expect(cluster.lights).toHaveLength(5);
     expect(scene.lights.filter((light) => light instanceof PointLight)).toHaveLength(0);
     braziers.animate(1000, true, 1);
@@ -434,6 +441,7 @@ it('hands clustered fires to the cluster without registering each one in the sce
     expect(cluster.lights).toHaveLength(0);
   } finally {
     added.mockRestore();
+    toggled.mockRestore();
     braziers.dispose();
     scene.dispose();
     engine.dispose();

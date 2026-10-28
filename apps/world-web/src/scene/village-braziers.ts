@@ -315,19 +315,14 @@ export class VillageBraziers {
       flame.addColorGradient(0.35, new Color4(1, 0.38, 0.045, 0.5));
       flame.addColorGradient(1, new Color4(0.6, 0.08, 0.01, 0));
       flame.blendMode = ParticleSystem.BLENDMODE_ADD;
-      // The cluster takes its lights out of the scene at once. Registering them
-      // first walks every mesh three times per light (≈250 fires × 10 000 meshes).
-      const light = new PointLight(
-        `brazier-light-${index}`,
-        new Vector3(p.x, p.y + 0.16, p.z),
-        this.scene,
-        Boolean(this.#cluster),
-      );
+      // Born outside the scene: registering a light, or toggling it, walks every
+      // mesh (≈250 fires × 10 000 meshes). The cluster ignores a light's enabled
+      // state, so only the bounded fallback joins the scene and starts disabled.
+      const light = new PointLight(`brazier-light-${index}`, new Vector3(p.x, p.y + 0.16, p.z), this.scene, true);
       light.diffuse = new Color3(1, 0.51, 0.16);
       light.specular = Color3.Black();
       light.range = 5;
       light.intensity = 0;
-      light.setEnabled(false);
       if (!this.#clusterChecked) {
         this.#clusterChecked = true;
         if (ClusteredLightContainer.IsLightSupported(light)) {
@@ -348,7 +343,11 @@ export class VillageBraziers {
         if (import.meta.env.DEV && canvas) canvas.dataset.brazierLighting = this.#cluster ? 'clustered' : 'bounded';
       }
       if (this.#cluster) this.#cluster.light.addLight(light);
-      else light.includedOnlyMeshes = meshes;
+      else {
+        this.scene.addLight(light);
+        light.setEnabled(false);
+        light.includedOnlyMeshes = meshes;
+      }
       this.#items.push({
         key,
         point: { ...p },
