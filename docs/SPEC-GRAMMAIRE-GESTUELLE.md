@@ -56,7 +56,20 @@ Le balayage existe déjà pour les jardins et les bosquets (Tristan : inutile de
 - **2d** : chaque arbre est exposé (debout, abattu, souche, en file).
 - **2e** : file d'attente du bois consommée par le panneau Chantier, et commande d'annulation d'un geste.
 
-## 4. Ouvert
+## 4. Marqueurs (décidés par Tristan le 28 octobre, après essai de la planche « Cercles de récolte »)
 
-- **Marqueur-cercle de récolte** : Tristan veut le modifier encore. Aujourd'hui, c'est un halo au pied de chaque arbre debout (`tree-halos.ts`, spec des bosquets §5). Attente de sa description.
-- **Indicateur du mode** : la proposition du §3 est à essayer en jeu.
+Planche de test : https://claude.ai/artifact/VZQuVL9ZqbkziWom59JryD (dix propositions, avec la grammaire).
+
+- **Récolte** (arbres, pierre, jardins) : **« Onde »** (proposition 5).
+  - Au repos : un anneau doux.
+  - À la validation : il s'éclaircit et **deux ondes partent vers l'extérieur**, puis s'effacent.
+- **Défrichage** : **« Satellites »** (proposition 8).
+  - Au repos : un anneau fin et **trois points en orbite**.
+  - À la validation : les points plongent au centre et éclatent.
+- **Le mode se lit par la forme du marqueur** : une onde, c'est une récolte ; des satellites, c'est un défrichage. Le rouge du défrichage et l'indicateur du HUD restent en complément.
+- **« Colonne de lumière »** (proposition 10) : réservée à un autre usage. Elle signalera **l'échéance d'un échange de marché**, autour de l'hôtel de ville (à spécifier avec le marché).
+- La proposition 1 (anneau épais, `dde67cc`) est provisoire, en attendant « Onde ».
+
+## 5. Ouvert
+
+- **Indicateur du mode** : la proposition du §3 est à essayer en jeu, en plus des marqueurs.
