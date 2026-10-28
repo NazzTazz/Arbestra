@@ -108,6 +108,7 @@ export function DevDrawer({
   onReset,
   onFactory,
   renderLab,
+  onMarketBeacon,
 }: {
   noclip: boolean;
   onNoclip: (value: boolean) => void;
@@ -124,6 +125,7 @@ export function DevDrawer({
   onRoute: (id: string | null) => void;
   onCosmology: (value: boolean) => void;
   renderLab: () => RenderLab | null;
+  onMarketBeacon: () => void;
 }) {
   const statistics = useSyncExternalStore(subscribeStatistics, statisticsEnabled, () => false);
   if (!devToolsEnabled()) return null;
@@ -202,6 +204,16 @@ export function DevDrawer({
             <span>
               Repères : {state.region.features.length} · routes : {state.travelRoutes.length}
             </span>
+          </section>
+          <section>
+            <strong>Effets</strong>
+            <button type="button" onClick={onMarketBeacon}>
+              Tester la colonne de marché
+            </button>
+            <small>
+              Colonne au-dessus de l’hôtel de ville, sans transaction. Sa lumière n’éclaire que la nuit (voir le
+              laboratoire cosmologique pour l’heure).
+            </small>
           </section>
           <RenderLabControls lab={renderLab} />
           <div id="dev-cosmology-slot" />

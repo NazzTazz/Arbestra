@@ -72,6 +72,7 @@ import { Hud } from './ui/Hud';
 import { usePresentationClock } from './ui/use-presentation-clock';
 import { projectedWood } from './ui/resource-counter';
 import { useResourceFeedback } from './ui/use-resource-feedback';
+import { completedMarketTransactions, marketCommandDelivers } from './ui/market-deliveries';
 import { WorldModeNavigation, type ActiveWorldMode } from './ui/world-mode';
 import { WorldModeBar } from './ui/WorldModeBar';
 import { ExploitationPalette, type ExploitationIntentState, type ExploitationSettings } from './ui/ExploitationPanel';
@@ -397,6 +398,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           }
         }
         showResourceChanges(previous, snapshot.state);
+        // Same pair as the "+N": the column rises with the credited amounts.
+        const deliveries = completedMarketTransactions(previous, snapshot.state);
+        if (deliveries) terrainRef.current?.marketBeacon(deliveries);
         const presentation = currentInfrastructurePresentation(snapshot.state, infrastructurePresentationRef.current);
         if (presentation !== infrastructurePresentationRef.current) {
           infrastructurePresentationRef.current = presentation;
@@ -2254,6 +2258,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             setSelectedRouteId(null);
           }}
           renderLab={() => terrainRef.current?.renderLab() ?? null}
+          onMarketBeacon={() => terrainRef.current?.marketBeacon()}
         />
         <WorkforceHud
           key={`${state.world.id}:${state.village.id}`}
@@ -2395,13 +2400,17 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 revision={state.serverTime}
                 pending={pendingAction}
                 error={error}
-                onCommand={(command) =>
-                  runAction(async () => {
+                onCommand={async (command) => {
+                  const done = await runAction(async () => {
                     const v2 = villageV2Ref.current;
                     if (!v2.ready || !v2.trade) return commandPlayerMarket(worldSlug, state.village.id, command);
                     await v2.trade(command);
-                  })
-                }
+                  });
+                  // A direct Oracle purchase leaves no trace in the state; its credit
+                  // (and the "+N") was applied before the command resolved.
+                  if (done && marketCommandDelivers(command)) terrainRef.current?.marketBeacon();
+                  return done;
+                }}
                 onUpgrade={() => {
                   const quote = upgradePreview(state, selectedSiteId);
                   if (!quote || quote.error) {
