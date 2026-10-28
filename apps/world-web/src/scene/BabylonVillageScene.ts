@@ -115,6 +115,7 @@ import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './const
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
 import { siteSignature } from './site-signature';
+import { easeIncidence, skyLight } from './sky-light';
 import { fetchGardenKit, gardenHarvestState, GardenKitRenderer, type GardenPlotView } from './garden-kit';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
@@ -296,6 +297,9 @@ export class BabylonVillageScene {
   #presentationLight = 1;
   #baseSolar = 0;
   #baseAmbient = 0.34;
+  /** Sun incidence the lighting follows, eased in time; null until the first update. */
+  #skyIncidence: number | null = null;
+  #skyAt = 0;
   #arrivalNextAt = 0;
   #clock: SolarClock | null = null;
   #eyesSince: number | null = null;
@@ -4134,8 +4138,6 @@ export class BabylonVillageScene {
       -light.localDirection[1],
       -light.localDirection[2],
     );
-    this.#baseSolar = light.direct > 0 ? 0.85 : 0;
-    this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
     const weather = weatherAt(
       target.cellX / this.#space.width,
       target.cellY / this.#space.height,
@@ -4143,10 +4145,29 @@ export class BabylonVillageScene {
       this.#weather?.seed ?? 0,
     );
     this.#rainIntensity = weather.rain;
-    this.#baseAmbient = 0.34 + light.direct * 0.24 * (1 - weather.cloud * 0.4);
     if (import.meta.env.DEV) this.#canvas.dataset.weather = JSON.stringify(weather);
-    this.#scene.clearColor = Color4.FromHexString(light.direct > 0.01 ? '#8ea0a0ff' : '#263744ff');
-    this.#scene.fogColor.copyFromFloats(this.#scene.clearColor.r, this.#scene.clearColor.g, this.#scene.clearColor.b);
+    // A hidden sun counts as set; the solar preview answers its slider at once.
+    const incidence = light.occluded ? -0.3 : light.incidence;
+    this.#skyIncidence =
+      this.#skyIncidence === null || preview !== null
+        ? incidence
+        : easeIncidence(this.#skyIncidence, incidence, now - this.#skyAt);
+    this.#skyAt = now;
+    const sky = skyLight(this.#skyIncidence, weather.cloud);
+    if (import.meta.env.DEV)
+      this.#canvas.dataset.sky = JSON.stringify({
+        incidence: +light.incidence.toFixed(3),
+        occluded: light.occluded,
+        followed: +this.#skyIncidence.toFixed(3),
+      });
+    this.#baseSolar = sky.sun;
+    this.#solarLight.intensity = this.#baseSolar * this.#presentationLight;
+    this.#solarLight.diffuse.copyFromFloats(...sky.sunColor);
+    this.#baseAmbient = sky.ambient;
+    this.#ambientLight.diffuse.copyFromFloats(...sky.ambientColor);
+    this.#ambientLight.groundColor.copyFromFloats(...sky.groundColor);
+    this.#scene.clearColor = new Color4(...sky.sky, 1);
+    this.#scene.fogColor.copyFromFloats(...sky.sky);
     const phases = cyclePhases(phase);
     this.#cosmologyMetrics = {
       phase,
