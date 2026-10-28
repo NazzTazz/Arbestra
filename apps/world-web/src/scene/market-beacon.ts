@@ -21,7 +21,8 @@ type Rgb = readonly [number, number, number];
 export const MARKET_BEACON = {
   /** Envelope: a quick rise, a hold, then a soft fade (≈ 1.9 s for one delivery). */
   riseMs: 240,
-  holdMs: 880,
+  // Tuned by Tristan on bench/marche.html (28 October).
+  holdMs: 1060,
   fallMs: 800,
   /** Grouped deliveries hold the same column longer instead of stacking columns. */
   extraHoldMs: 450,
@@ -75,9 +76,9 @@ export const MARKET_BEACON = {
   /** A real light, drawn by the village fire cluster: visible at night only. */
   light: {
     colour: [1, 0.6, 0.26] as Rgb,
-    intensity: 3.2,
-    range: 10,
-    height: 5,
+    intensity: 1.5,
+    range: 13.5,
+    height: 1.4,
   },
 } as const;
 

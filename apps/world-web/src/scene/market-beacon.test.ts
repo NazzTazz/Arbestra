@@ -63,7 +63,8 @@ describe('market beacon timing', () => {
   it('rises quickly, holds, then fades out in about two seconds', () => {
     const timing = extendBeacon(null, 0, 1);
     expect(end()).toBeGreaterThanOrEqual(1800);
-    expect(end()).toBeLessThanOrEqual(2000);
+    // About two seconds; Tristan lengthened the hold on the bench (2.1 s).
+    expect(end()).toBeLessThanOrEqual(2200);
     expect(beaconLevel(timing, 0)).toBe(0);
     expect(beaconLevel(timing, MARKET_BEACON.riseMs)).toBe(1);
     expect(beaconLevel(timing, MARKET_BEACON.riseMs + MARKET_BEACON.holdMs - 1)).toBe(1);
