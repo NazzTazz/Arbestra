@@ -201,6 +201,8 @@ export interface TrafficActor {
   lateral?: number;
   /** On a short connector around its worksite: shares the road's passages with its team, never a flow. */
   local?: boolean;
+  /** Sent straight on after failed searches: walks through bodies, fluidity first. */
+  ghost?: boolean;
 }
 interface Passage {
   id: string;
@@ -429,7 +431,7 @@ export class WorkerTraffic {
         for (const proposal of proposals) {
           const a = proposal.actor,
             p = proposal.point;
-          if (!proposal.visible) continue;
+          if (!proposal.visible || a.ghost) continue;
           if (!canOccupy(p) || !canOccupy(a.position)) {
             denied = true;
             break;
@@ -438,6 +440,7 @@ export class WorkerTraffic {
             if (
               n.actor !== a &&
               !batch.includes(n.actor!) &&
+              !n.actor?.ghost &&
               sweptWorkerDistance(
                 a.visible ? a.position : p,
                 n.actor?.position ?? n.position,

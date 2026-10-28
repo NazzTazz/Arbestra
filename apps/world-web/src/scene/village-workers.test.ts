@@ -5,7 +5,13 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { TravelCell, VillageState } from '@arbestra/contracts';
 import { expect, it, vi } from 'vitest';
 import { VillageWorkers, type PathPoint, type WorkerHooks } from './village-workers';
-import { gardenHarvestPoint, sampleWorkerPath, type DoorLane, type TrafficActor } from './worker-motion';
+import {
+  gardenHarvestPoint,
+  sampleWorkerPath,
+  type DoorLane,
+  type TrafficActor,
+  type WorkerPoint,
+} from './worker-motion';
 import { gardenStride } from './worker-gestures';
 import { buildingPlan, doorConnector, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE } from './building-plan';
 
@@ -1521,6 +1527,44 @@ it('wood site: places pair 0 at the real tree in a dense forest, from the fellin
       working = Math.max(working, f.view.metrics.layouts[0]!.phases.filter((phase) => phase === 'work').length);
     }
     expect(working).toBe(4);
+  } finally {
+    f.dispose();
+  }
+});
+
+// Dev village, 28 October: in a dense grove the connectors to the posts kept
+// failing their A* search and retried it every 1.5 s, and every ground update
+// rebuilt the whole team; one frame ran 16,930 room tests (77 s). Fluidity
+// first (AGENTS.md, performance budgets): the work stays bounded per frame and
+// the team reaches its posts, in a straight line if no aisle exists.
+it('wood site: bounds the room tests per frame in a dense grove and still gets the team to work', () => {
+  const trunks: WorkerPoint[] = [];
+  for (let i = -4; i <= 4; i++)
+    for (let j = -4; j <= 4; j++) if (i || j) trunks.push({ x: 0.6 + i * 1.1, z: 7.2 + j * 1.1 });
+  let calls = 0;
+  const grove = groveTree(),
+    f = fixture((p, r) => (calls++, trunks.every((t) => Math.hypot(p.x - t.x, p.z - t.z) >= 0.3 + r)), {
+      ...grove.hooks,
+      stageFree: (p, r) => (calls++, trunks.every((t) => Math.hypot(p.x - t.x, p.z - t.z) >= 0.3 + r)),
+    });
+  try {
+    f.view.sync(woodTeam('dense-budget', 10), epoch);
+    let peak = 0,
+      total = 0,
+      working = 0;
+    for (let t = 0; t <= 30_000; t += 33) {
+      calls = 0;
+      // The scene reprojects on every published ground change while streaming.
+      if (t % 495 === 0) f.view.reproject();
+      f.view.animate(epoch + t, true);
+      peak = Math.max(peak, calls);
+      total += calls;
+      working = Math.max(working, f.view.metrics.layouts[0]!.phases.filter((phase) => phase === 'work').length);
+    }
+    // Measured 28 October: 443 and 7,028 before, 127 and 2,024 after.
+    expect(peak, 'room tests in the worst frame').toBeLessThanOrEqual(300);
+    expect(total, 'room tests over 30 s').toBeLessThanOrEqual(4_000);
+    expect(working, 'woodcutters at work').toBe(10);
   } finally {
     f.dispose();
   }

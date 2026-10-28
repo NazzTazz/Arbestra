@@ -174,6 +174,10 @@ interface Person extends VillageWorkerFigure {
   /** Points of the exit connector at the head of an inbound path; 0 when none. */
   exit: number;
   connectorRetry: number;
+  /** Connector searches failed in a row with the post free: four send the worker straight on. */
+  connectorFails: number;
+  /** An A* connector search failed since the last way found: retry the cheap bends only. */
+  searched: boolean;
   retireAt: number | null;
   harvestProgress: number | null;
   cohortId: string | null;
@@ -289,6 +293,8 @@ export class VillageWorkers {
   #hiddenRepresentative: string | null = null;
   readonly #installationDistances = new WeakMap<WorksiteLayout, number>();
   readonly #reservedLayouts = new WeakMap<WorksiteLayout, Map<number, WorkerPoint[]>>();
+  /** Each layout's template, before a felling plan moves its posts. */
+  readonly #templates = new WeakMap<WorksiteLayout, WorksiteLayout>();
   constructor(
     readonly scene: Scene,
     readonly materials: Materials,
@@ -628,7 +634,12 @@ export class VillageWorkers {
     }
     return p;
   }
-  #layout(m: Mission, route: WorkerPoint[], stop = 0) {
+  #layout(m: Mission, route: WorkerPoint[], stop = 0): WorksiteLayout {
+    const layout = this.#template(m, route, stop);
+    this.#templates.set(layout, structuredClone(layout));
+    return layout;
+  }
+  #template(m: Mission, route: WorkerPoint[], stop: number) {
     if (m.resource === 'idle' || m.resource === 'survey' || m.resource === 'trade') {
       const end = route[route.length - 1]!;
       return {
@@ -813,6 +824,8 @@ export class VillageWorkers {
       worked: false,
       exit: 0,
       connectorRetry: 0,
+      connectorFails: 0,
+      searched: false,
       retireAt: null,
       harvestProgress: null,
       cohortId: this.#cohort(m, index)?.id ?? null,
@@ -1319,8 +1332,15 @@ export class VillageWorkers {
       }
       const routeChanged = JSON.stringify(g.route) !== JSON.stringify(route);
       g.route = route;
-      const oldLayout = g.layout;
-      g.layout = this.#layout(g.mission, route, g.stop);
+      // A felling plan moves the template's posts: compare templates, or every
+      // ground update rebuilt the whole team and its connectors.
+      const oldLayout = g.layout,
+        fresh = this.#layout(g.mission, route, g.stop),
+        template = this.#templates.get(oldLayout),
+        same =
+          template !== undefined &&
+          JSON.stringify([template.variant, template.stations]) === JSON.stringify([fresh.variant, fresh.stations]);
+      g.layout = same ? oldLayout : fresh;
       if (routeChanged)
         for (const p of g.people) {
           if (p.phase === 'outbound') this.#reroute(p, route);
@@ -1329,7 +1349,7 @@ export class VillageWorkers {
       // Props retain their local template; translate only on coordinate rebasing.
       g.root.position.x -= shift.x;
       g.root.position.z -= shift.z;
-      if (JSON.stringify(oldLayout.stations) !== JSON.stringify(g.layout.stations)) {
+      if (!same) {
         for (const mesh of g.root.getChildMeshes()) mesh.dispose(false, false);
         // A rebuilt layout keeps when the feller arrived: the tree never stands up again.
         const fellerAt = g.wood?.fellerAt ?? null,
@@ -1345,13 +1365,7 @@ export class VillageWorkers {
         for (const p of g.people)
           if (p.phase === 'work') {
             const destination = this.#post(p, g, this.#lastNow ?? g.createdAt);
-            const connector = worksiteConnector(
-              p.actor.position,
-              destination,
-              this.hooks.project(g.mission.target),
-              (q, r) => this.#connectorFree(p, g, q, r),
-              this.#connectorPosts(p, g),
-            );
+            const connector = this.#connector(p, g, p.actor.position, destination);
             if (connector) {
               p.phase = 'rotate';
               p.actor.path = connector;
@@ -1372,10 +1386,13 @@ export class VillageWorkers {
   shift(x: number, z: number) {
     for (const g of this.#groups.values()) {
       // Connector endpoints can alias route points or stations; translate once.
+      const template = this.#templates.get(g.layout);
       const points = new Set<WorkerPoint>([
         ...g.route,
         ...g.layout.stations,
         g.layout.approach,
+        ...(template ? [...template.stations, template.approach] : []),
+        ...(template?.stations.flatMap((s) => (s.workAt ? [s.workAt] : [])) ?? []),
         ...(g.mission.leisure?.flatMap((l) => l.path) ?? []),
         ...g.people.flatMap((p) => p.actor.path),
         ...g.layout.stations.flatMap((s) => (s.workAt ? [s.workAt] : [])),
@@ -1416,6 +1433,36 @@ export class VillageWorkers {
       layout.set(p.index, posts);
     }
     return posts;
+  }
+  /**
+   * The way between a worker and a post. Around a felled grove tree, trunks
+   * close most aisles and failed A* searches retried every second froze the
+   * page (AGENTS.md, performance budgets): A* once until a way is found, the
+   * cheap bends on retries, and after four failures a straight line through
+   * bodies rather than a team idling on the road.
+   */
+  #connector(p: Person, g: Group, from: WorkerPoint, to: WorkerPoint, margin = 0): WorkerPoint[] | null {
+    const target = this.hooks.project(g.mission.target),
+      free = (q: WorkerPoint, r: number) => this.#connectorFree(p, g, q, r, margin);
+    // Elsewhere teammates free the aisles soon: search fully on every retry.
+    if (!g.wood?.plan) return worksiteConnector(from, to, target, free, this.#connectorPosts(p, g));
+    // A post held for good (two posts of the plan too close) also counts.
+    let path = worksiteConnector(from, to, target, free);
+    if (!path && !p.searched && free(to, 0.2)) {
+      p.searched = true;
+      path = worksiteConnector(from, to, target, free, this.#connectorPosts(p, g));
+    }
+    if (path) {
+      p.connectorFails = 0;
+      p.searched = false;
+      p.actor.ghost = false;
+      return path;
+    }
+    if (++p.connectorFails < 4) return null;
+    p.connectorFails = 0;
+    p.searched = false;
+    p.actor.ghost = true;
+    return [{ ...from }, to];
   }
   /**
    * Exits take a small body margin: sampled every 0.2 m, a connector can graze
@@ -1593,13 +1640,7 @@ export class VillageWorkers {
       if (length >= a.distance) break;
     }
     // Without a way back to the station, retrace the connector walked so far.
-    const connector = worksiteConnector(
-      a.position,
-      station,
-      this.hooks.project(g.mission.target),
-      (q, r) => this.#connectorFree(p, g, q, r, EXIT_MARGIN),
-      this.#connectorPosts(p, g),
-    );
+    const connector = this.#connector(p, g, a.position, station, EXIT_MARGIN);
     p.phase = 'rotate';
     p.phaseAt = now;
     p.exit = 0;
@@ -1722,18 +1763,11 @@ export class VillageWorkers {
         if (!p.actor.done && this.#remaining(p) > this.#roadJoin(destination, this.#backRoute(g)).along + 0.05) return;
       }
       if (now >= p.connectorRetry) {
-        const from = { ...p.actor.position },
-          target = this.hooks.project(m.target);
+        const from = { ...p.actor.position };
         const connector =
           m.resource === 'garden' || m.resource === 'survey'
             ? [from, destination]
-            : worksiteConnector(
-                from,
-                destination,
-                target,
-                (q, r) => this.#connectorFree(p, g, q, r),
-                this.#connectorPosts(p, g),
-              );
+            : this.#connector(p, g, from, destination);
         if (connector) {
           p.phase = 'install';
           p.phaseAt = now;
@@ -1756,6 +1790,7 @@ export class VillageWorkers {
       }
       if (p.phase === 'outbound') return; // Keep walking to the road end and retry from there.
     } else if ((p.phase === 'install' || p.phase === 'rotate') && p.actor.done) {
+      p.actor.ghost = false;
       p.phase = 'work';
       p.phaseAt = now;
       p.worked ||= now < returnAt;
@@ -1776,13 +1811,7 @@ export class VillageWorkers {
     ) {
       p.connectorRetry = now + 1500;
       const goal = leaving ? p.actor.path[p.exit - 1]! : p.actor.path.at(-1)!,
-        connector = worksiteConnector(
-          p.actor.position,
-          goal,
-          this.hooks.project(m.target),
-          (q, r) => this.#connectorFree(p, g, q, r, leaving ? EXIT_MARGIN : 0),
-          this.#connectorPosts(p, g),
-        );
+        connector = this.#connector(p, g, p.actor.position, goal, leaving ? EXIT_MARGIN : 0);
       if (connector) {
         p.actor.path = leaving ? [...connector, ...p.actor.path.slice(p.exit)] : connector;
         if (leaving) p.exit = connector.length;
@@ -1809,13 +1838,7 @@ export class VillageWorkers {
         Math.hypot(destination.x - p.actor.position.x, destination.z - p.actor.position.z) > 0.05 &&
         now >= p.connectorRetry
       ) {
-        const connector = worksiteConnector(
-          p.actor.position,
-          destination,
-          this.hooks.project(m.target),
-          (q, r) => this.#connectorFree(p, g, q, r),
-          this.#connectorPosts(p, g),
-        );
+        const connector = this.#connector(p, g, p.actor.position, destination);
         if (!connector) {
           p.connectorRetry = now + 1000;
           p.working = false;
@@ -1852,13 +1875,7 @@ export class VillageWorkers {
       if (now >= p.connectorRetry) {
         const route: WorkerPoint[] = [from];
         for (const stop of [lane, back, forward, lane, station]) {
-          const connector = worksiteConnector(
-            route[route.length - 1]!,
-            stop,
-            target,
-            (q, r) => this.#connectorFree(p, g, q, r),
-            this.#connectorPosts(p, g),
-          );
+          const connector = this.#connector(p, g, route[route.length - 1]!, stop);
           if (!connector) {
             route.length = 0;
             break;
@@ -1921,13 +1938,7 @@ export class VillageWorkers {
       const connector =
         m.resource === 'garden' || m.resource === 'survey'
           ? [{ ...p.actor.position }, join.point]
-          : worksiteConnector(
-              p.actor.position,
-              join.point,
-              this.hooks.project(m.target),
-              (q, r) => this.#connectorFree(p, g, q, r, EXIT_MARGIN),
-              this.#connectorPosts(p, g),
-            );
+          : this.#connector(p, g, p.actor.position, join.point, EXIT_MARGIN);
       if (!connector) {
         // A road join is taken for a moment by each passing teammate: try
         // again before the convoy's next gap has gone by.
@@ -1965,6 +1976,7 @@ export class VillageWorkers {
     ) {
       // On the road: walk at the convoy's pace and let the next teammate leave.
       p.exit = 0;
+      p.actor.ghost = false;
       p.actor.local = false;
       p.actor.speed = this.#returnSpeed(g, this.#backRoute(g));
     }
