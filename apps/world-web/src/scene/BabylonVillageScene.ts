@@ -3637,23 +3637,33 @@ export class BabylonVillageScene {
     return this.#createDwelling(site);
   }
 
+  /** The factory bakes the market's shell; only its clock hands, braziers and storefront glass are built here. */
+  #createTownHallMarket(body: Mesh, phase: 'finished' | 'works', oppositeEntrance: boolean): void {
+    this.#timberThatch ??= new TimberThatch(this.#scene);
+    const key = `town-hall-2-${phase}`;
+    if (!buildingAssets[key]) {
+      buildProceduralBuildingLod(
+        body,
+        (root, lod) => buildTownHallMarket(root, this.#timberThatch!, phase, lod === 0 ? body : null, oppositeEntrance),
+        this.#timberThatch,
+      );
+      return;
+    }
+    // The same half-turn the factory gives its own root for an entrance on +X.
+    if (oppositeEntrance) body.rotation.y += Math.PI;
+    this.#loadBuildingAsset(body, key);
+    const live = new BabylonMesh(`${body.name}-live`, this.#scene);
+    live.parent = body;
+    buildTownHallMarket(live, this.#timberThatch, phase, body, false, 'live');
+  }
+
   #createTownHall(site: VillageCell): Mesh {
     const body = new BabylonMesh(`town-hall-${site.id}`, this.#scene);
     body.position.set(site.x, 0.78, site.z);
     this.#timberThatch ??= new TimberThatch(this.#scene);
     if ((site.building?.targetLevel ?? site.building?.level ?? 1) >= 2) {
       body.position.y = 0;
-      buildProceduralBuildingLod(
-        body,
-        (root, lod) =>
-          buildTownHallMarket(
-            root,
-            this.#timberThatch!,
-            site.building?.status === 'under-construction' ? 'works' : 'finished',
-            lod === 0 ? body : null,
-          ),
-        this.#timberThatch,
-      );
+      this.#createTownHallMarket(body, site.building?.status === 'under-construction' ? 'works' : 'finished', false);
       this.#createContactShadow(body, 2.32, 4.56);
       return this.#registerStructure(body);
     }
@@ -3731,19 +3741,7 @@ export class BabylonVillageScene {
     body.position.set(site.x + plan.origin.x, plan.origin.y, site.z + plan.origin.z);
     body.rotation.y = plan.rotation;
     if (site.building?.type === 'town-hall' && (site.building.targetLevel ?? site.building.level) >= 2) {
-      this.#timberThatch ??= new TimberThatch(this.#scene);
-      buildProceduralBuildingLod(
-        body,
-        (root, lod) =>
-          buildTownHallMarket(
-            root,
-            this.#timberThatch!,
-            plan.phase,
-            lod === 0 ? body : null,
-            plan.recipe.entrance.face === '+x',
-          ),
-        this.#timberThatch,
-      );
+      this.#createTownHallMarket(body, plan.phase, plan.recipe.entrance.face === '+x');
       this.#createContactShadow(body, plan.width + 0.08, plan.depth + 0.08, plan.base);
       return this.#registerStructure(body);
     }

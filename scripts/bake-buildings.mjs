@@ -15,7 +15,7 @@ const recipes = [
   ['dwelling', 2],
   ['dwelling-logs', 2],
   ['dwelling-beams', 2],
-  ['town-hall', 1],
+  ['town-hall', 2],
 ];
 for (const code of selected)
   if (!recipes.some(([recipe]) => recipe === code)) throw new Error(`Unknown building recipe: ${code}`);
@@ -56,7 +56,9 @@ try {
           await writeFile(new URL(file, directory), bytes);
           manifest[key] = { url: `/buildings/${file}`, bytes: bytes.length };
           console.log(key, bytes.length);
-          if (phase === 'finished' && !variant) {
+          // The market hall's headless thumbnail comes out blank (28 October);
+          // the game keeps rendering that one itself.
+          if (phase === 'finished' && !variant && !(code === 'town-hall' && level >= 2)) {
             const png = await page.evaluate(
               async ({ code, level }) => {
                 const { renderBuildingThumbnail } = await import('/src/scene/building-thumbnail-renderer.ts');

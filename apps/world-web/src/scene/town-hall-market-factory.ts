@@ -10,6 +10,12 @@ import { buildTownHallClock } from './town-hall-clock';
 import { prepareRoundedCorner, finishRoundedCorner } from './town-hall-rounded-corner';
 import { buildTownHallStorefront } from './town-hall-storefront';
 
+/**
+ * The static shell is baked by the factory (`town-hall-2-*`); the live parts
+ * (clock hands, braziers, reflective storefront) are always built in the scene.
+ */
+export type MarketParts = 'all' | 'shell' | 'live';
+
 /** Workshop proposal: a long covered wooden balcony beside a small-stone room. */
 export function buildTownHallMarket(
   root: Mesh,
@@ -17,7 +23,10 @@ export function buildTownHallMarket(
   phase: 'finished' | 'works',
   fireOwner: Mesh | null = root,
   oppositeEntrance = false,
+  parts: MarketParts = 'all',
 ) {
+  const shell = parts !== 'live',
+    live = parts !== 'shell';
   // Canonical market entrance is -X. RC1 starter halls use +X; turn the
   // whole rectangular model before world-space effects (including braziers).
   if (oppositeEntrance) root.rotation.y += Math.PI;
@@ -58,9 +67,9 @@ export function buildTownHallMarket(
     const base = new Mesh('hall-market-ground-floor', kit.scene);
     base.parent = root;
     base.position.y = lower.base;
-    kit.build(base, lower);
-    finishRoundedCorner(base, kit, lower, lowerCorner, false, false, true);
-    {
+    if (shell) {
+      kit.build(base, lower);
+      finishRoundedCorner(base, kit, lower, lowerCorner, false, false, true);
       // Double door: a stone pier splits the wide opening into the entry and
       // exit lanes (entering on the right, seen from outside).
       const door = lower.openings.find((o) => o.face === '-x' && o.left < 0 && o.right > 0)!,
@@ -72,8 +81,8 @@ export function buildTownHallMarket(
       pier.material = kit.stone;
       pier.receiveShadows = true;
     }
-    if (phase === 'finished') buildTownHallStorefront(base, kit, lower, lowerCorner, storefront);
-    for (const niche of niches) {
+    if (phase === 'finished' && live) buildTownHallStorefront(base, kit, lower, lowerCorner, storefront);
+    for (const niche of shell ? niches : []) {
       const z = (niche.left + niche.right) / 2,
         width = niche.right - niche.left,
         height = niche.top - niche.bottom;
@@ -92,7 +101,7 @@ export function buildTownHallMarket(
         mesh.receiveShadows = true;
       }
     }
-    glazeWindows(base, lower);
+    if (shell) glazeWindows(base, lower);
     const upperBays: NonNullable<BuildingRecipe['windowOpenings']> = [];
     for (const face of ['-x', '+x'] as const)
       for (const centre of face === '+x' ? [-18, -10, 0, 10, 20] : [-20, -10, 0, 10, 20])
@@ -117,24 +126,28 @@ export function buildTownHallMarket(
     const room = new Mesh('hall-market-upper-room', kit.scene);
     room.parent = root;
     room.position.set((lower.width - upper.width) / 2, lower.base + lower.height + 0.08, 0);
-    kit.build(room, upper);
-    finishRoundedCorner(room, kit, upper, corner);
-    glazeWindows(room, upper);
-    buildTownHallClock(room, kit, phase, upper.height + 0.08, upper.width);
+    if (shell) {
+      kit.build(room, upper);
+      finishRoundedCorner(room, kit, upper, corner);
+      glazeWindows(room, upper);
+    }
+    buildTownHallClock(room, kit, phase, upper.height + 0.08, upper.width, parts);
     const eave = upper.height;
-    const roof = new Mesh('hall-market-shared-roof', kit.scene);
-    roof.parent = root;
-    roof.position.y = room.position.y;
-    buildMarketRoof(roof, kit, eave, phase === 'finished');
-    {
-      const parts: Mesh[] = [],
+    if (shell) {
+      const roof = new Mesh('hall-market-shared-roof', kit.scene);
+      roof.parent = root;
+      roof.position.y = room.position.y;
+      buildMarketRoof(roof, kit, eave, phase === 'finished');
+    }
+    if (shell) {
+      const pieces: Mesh[] = [],
         y = room.position.y,
         half = lower.width / 2 - 0.07,
         front = -lower.depth / 2 + 0.07;
       const box = (name: string, x: number, z: number, width: number, height: number, depth: number, dy: number) => {
         const mesh = MeshBuilder.CreateBox(name, { width, height, depth }, kit.scene);
         mesh.position.set(x, y + dy, z);
-        parts.push(mesh);
+        pieces.push(mesh);
       };
       const inner = room.position.x - upper.width / 2,
         balconyWidth = inner + half,
@@ -160,14 +173,14 @@ export function buildTownHallMarket(
           (-front * 2) / boards - 0.003,
           0.0175,
         );
-      const rails = Mesh.MergeMeshes(parts, true, true);
+      const rails = Mesh.MergeMeshes(pieces, true, true);
       if (rails) {
         rails.parent = root;
         rails.material = kit.wood;
         rails.receiveShadows = true;
       }
     }
-    if (phase === 'finished' && fireOwner) {
+    if (phase === 'finished' && fireOwner && live) {
       const braziers = new VillageBraziers(kit.scene);
       const points = niches.map((niche, index) => {
         const p = Vector3.TransformCoordinates(

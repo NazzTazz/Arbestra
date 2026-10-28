@@ -7,6 +7,7 @@ import { mathematicsCrownPlan } from './mathematics-factory';
 import { facePoint } from './building-plan';
 import { buildResourceDisplay } from './town-hall-resource-display';
 import { keepWorldMatrixDynamic } from './static-transforms';
+import type { MarketParts } from './town-hall-market-factory';
 
 /** The Mathematics glazed pavilion, fitted to the hall, with a local-time clock. */
 export function buildTownHallClock(
@@ -15,9 +16,12 @@ export function buildTownHallClock(
   phase: 'finished' | 'works',
   floor: number,
   width: number,
+  parts: MarketParts = 'all',
 ) {
   const plan = mathematicsCrownPlan(phase),
     scale = (width - 0.04) / plan.depth;
+  if (parts !== 'shell') buildClockHands(parent, kit, phase, floor, width, plan, scale);
+  if (parts === 'live') return;
   const crown = new Mesh('hall-market-clock-pavilion', kit.scene);
   crown.parent = parent;
   crown.position.y = floor;
@@ -58,9 +62,8 @@ export function buildTownHallClock(
   buildResourceDisplay(crown, kit, plan.base);
   const clock = new Mesh('hall-market-wooden-clock', kit.scene);
   clock.parent = parent;
-  const eave = (plan.base + plan.height) * scale,
-    rise = (plan.width / 2) * Math.tan((plan.recipe.roof.slope * Math.PI) / 180) * scale;
-  clock.position.set(-width / 2 - 0.06, floor + eave + rise / 2, 0);
+  const at = clockPosition(plan, scale, floor, width);
+  clock.position.set(at.x, at.y, 0);
   const face = MeshBuilder.CreateCylinder(
     'market-clock-face',
     { diameter: 0.4, height: 0.035, tessellation: 32 },
@@ -69,9 +72,8 @@ export function buildTownHallClock(
   face.rotation.z = Math.PI / 2;
   face.material = kit.wood;
   face.parent = clock;
-  const dark = new StandardMaterial('market-clock-dark-wood', kit.scene);
-  dark.diffuseColor = Color3.FromHexString('#2b2118');
-  dark.specularColor = Color3.Black();
+  const dark = clockDarkWood(kit);
+  clock.onDisposeObservable.addOnce(() => dark.dispose());
   for (let i = 0; i < (kit.lod === 2 ? 0 : 12); i++) {
     const angle = (i * Math.PI) / 6;
     const tick = MeshBuilder.CreateBox(
@@ -84,6 +86,37 @@ export function buildTownHallClock(
     tick.material = dark;
     tick.parent = clock;
   }
+}
+
+function clockDarkWood(kit: TimberThatch) {
+  const dark = new StandardMaterial('market-clock-dark-wood', kit.scene);
+  dark.diffuseColor = Color3.FromHexString('#2b2118');
+  dark.specularColor = Color3.Black();
+  return dark;
+}
+
+function clockPosition(plan: ReturnType<typeof mathematicsCrownPlan>, scale: number, floor: number, width: number) {
+  const eave = (plan.base + plan.height) * scale,
+    rise = (plan.width / 2) * Math.tan((plan.recipe.roof.slope * Math.PI) / 180) * scale;
+  return { x: -width / 2 - 0.06, y: floor + eave + rise / 2 };
+}
+
+/** The hands turn with local time, so they are never baked. */
+function buildClockHands(
+  parent: Mesh,
+  kit: TimberThatch,
+  phase: 'finished' | 'works',
+  floor: number,
+  width: number,
+  plan: ReturnType<typeof mathematicsCrownPlan>,
+  scale: number,
+) {
+  if (phase === 'works') return;
+  const clock = new Mesh('hall-market-wooden-clock-hands', kit.scene);
+  clock.parent = parent;
+  const at = clockPosition(plan, scale, floor, width);
+  clock.position.set(at.x, at.y, 0);
+  const dark = clockDarkWood(kit);
   const hands = [0.1, 0.14].map((length) => {
     const pivot = new Mesh('market-clock-hand-pivot', kit.scene);
     pivot.parent = clock;

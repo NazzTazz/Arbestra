@@ -33,9 +33,13 @@ test('l’hôtel de ville niveau 2 affiche la maquette validée dans le village'
         const pane = scene.getMeshByName('market-storefront-straight')!,
           bounds = pane.getBoundingInfo().boundingBox;
         const reflection = (pane.material as StandardMaterial).reflectionTexture!;
+        // The baked shell's instances carry their building's name as a prefix.
+        const baked = (name: string) => scene.meshes.find((m) => m.name.endsWith('-' + name));
+        const hall = pane.parent!.parent!.parent!.parent!;
         return {
-          pavilion: !!scene.getMeshByName('hall-market-clock-pavilion'),
-          display: !!scene.getMeshByName('market-resource-display'),
+          pavilion: !!baked('hall-market-clock-pavilion'),
+          display: !!baked('market-resource-display'),
+          asset: (hall.metadata as { assetState?: string } | null)?.assetState,
           curve: !!scene.getMeshByName('market-storefront-curved'),
           thickness: bounds.maximum.x - bounds.minimum.x,
           reflection: reflection.isCube,
@@ -50,6 +54,7 @@ test('l’hôtel de ville niveau 2 affiche la maquette validée dans le village'
       pavilion: true,
       display: true,
       curve: true,
+      asset: 'ready',
       reflection: true,
       renderTarget: false,
       probes: 0,

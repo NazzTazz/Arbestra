@@ -7,6 +7,79 @@ import { buildingPlan, recipeFor, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE, type Buil
 import { buildTownHallMarket } from './town-hall-market-factory';
 import { TimberThatch } from './timber-thatch';
 
+// NullEngine cannot create the storefront's raw cube texture; a box stands in for it.
+vi.mock('./town-hall-storefront', async () => {
+  const { MeshBuilder } = await import('@babylonjs/core/Meshes/meshBuilder');
+  return {
+    buildTownHallStorefront: (parent: Mesh) => {
+      MeshBuilder.CreateBox('market-storefront', {}, parent.getScene()).parent = parent;
+    },
+  };
+});
+
+function stubCanvas() {
+  vi.stubGlobal(
+    'OffscreenCanvas',
+    class {
+      constructor(
+        public width: number,
+        public height: number,
+      ) {}
+      getContext() {
+        return {
+          fillRect() {},
+          beginPath() {},
+          moveTo() {},
+          lineTo() {},
+          stroke() {},
+          bezierCurveTo() {},
+          ellipse() {},
+          clearRect() {},
+          drawImage() {},
+          canvas: this,
+        };
+      }
+    },
+  );
+}
+
+it('splits the market into a baked shell and live parts that never build masonry', () => {
+  stubCanvas();
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    kit = new TimberThatch(scene);
+  kit.lod = 2;
+  const build = vi.spyOn(kit, 'build');
+  const geometry = (root: Mesh) =>
+    root
+      .getChildMeshes()
+      .filter((mesh) => mesh.getTotalVertices() > 0)
+      .map((mesh) => `${mesh.name}:${mesh.getTotalVertices()}`)
+      .sort();
+  try {
+    for (const phase of ['finished', 'works'] as const) {
+      const all = new Mesh('all', scene),
+        shell = new Mesh('shell', scene),
+        live = new Mesh('live', scene);
+      buildTownHallMarket(all, kit, phase, null);
+      const observers = scene.onBeforeRenderObservable.observers.length;
+      buildTownHallMarket(shell, kit, phase, null, false, 'shell');
+      // A baked shell carries nothing that has to move or react to light.
+      expect(scene.onBeforeRenderObservable.observers.length, phase).toBe(observers);
+      build.mockClear();
+      buildTownHallMarket(live, kit, phase, null, false, 'live');
+      expect(build, phase).not.toHaveBeenCalled();
+      expect(geometry(live).length, phase).toBeLessThanOrEqual(phase === 'finished' ? 4 : 0);
+      expect([...geometry(shell), ...geometry(live)].sort(), phase).toEqual(geometry(all));
+      for (const root of [all, shell, live]) root.dispose(false, false);
+    }
+  } finally {
+    scene.dispose();
+    engine.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('keeps the market physical entrance on the planned access face through all four village rotations', () => {
   vi.stubGlobal(
     'OffscreenCanvas',

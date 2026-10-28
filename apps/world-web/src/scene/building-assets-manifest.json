@@ -248,5 +248,29 @@
   "town-hall-1-works-lod2": {
     "url": "/buildings/town-hall-1-works-lod2-3dab8e7d4c44ffe3.abmesh.gz",
     "bytes": 145341
+  },
+  "town-hall-2-finished": {
+    "url": "/buildings/town-hall-2-finished-90c437bff097bcb4.abmesh.gz",
+    "bytes": 3313785
+  },
+  "town-hall-2-finished-lod1": {
+    "url": "/buildings/town-hall-2-finished-lod1-fc02dd56c8c7b1d3.abmesh.gz",
+    "bytes": 599954
+  },
+  "town-hall-2-finished-lod2": {
+    "url": "/buildings/town-hall-2-finished-lod2-9f878c8c9ab7ced3.abmesh.gz",
+    "bytes": 533709
+  },
+  "town-hall-2-works": {
+    "url": "/buildings/town-hall-2-works-db0ecaf79b4905ad.abmesh.gz",
+    "bytes": 1900783
+  },
+  "town-hall-2-works-lod1": {
+    "url": "/buildings/town-hall-2-works-lod1-2d28c1d6e3a47706.abmesh.gz",
+    "bytes": 325205
+  },
+  "town-hall-2-works-lod2": {
+    "url": "/buildings/town-hall-2-works-lod2-89a58f5079c78df0.abmesh.gz",
+    "bytes": 279852
   }
 }
