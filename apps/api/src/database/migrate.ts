@@ -13,6 +13,7 @@ import * as gameSyncBatchDependenciesMigration from './migrations/059_game_sync_
 import * as bulkInsertTriggersMigration from './migrations/060_bulk_insert_triggers.js';
 import * as bulkSciencePlacesMigration from './migrations/061_bulk_science_places.js';
 import * as woodlandCutAmountMigration from './migrations/062_woodland_cut_amount.js';
+import * as villageTravelNetworksMigration from './migrations/063_village_travel_networks.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -134,6 +135,7 @@ const migrationProvider: MigrationProvider = {
       '060_bulk_insert_triggers': bulkInsertTriggersMigration,
       '061_bulk_science_places': bulkSciencePlacesMigration,
       '062_woodland_cut_amount': woodlandCutAmountMigration,
+      '063_village_travel_networks': villageTravelNetworksMigration,
     };
   },
 };

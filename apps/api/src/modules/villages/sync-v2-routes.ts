@@ -18,6 +18,8 @@ import { captureSyncV2, type SyncV2SharedInclude } from './sync-v2-capture.js';
 import { serveSyncV2Stream } from './sync-v2-stream.js';
 import { VillagePresentationReader } from './presentation.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
+import { devTime } from '../operations/dev-timing.js';
+import { databaseTravelNetworkStore } from '../navigation/network-store.js';
 
 const params = Type.Object({
   worldSlug: Type.String({ minLength: 1, maxLength: 64 }),
@@ -64,7 +66,11 @@ export async function registerSyncV2Routes(
   // A pure read-only projection, refreshed by the client on invalidation. The
   // reader keeps one capture per village while the journal streams covering
   // its inputs stand still; the ETag then spares the transfer as well.
-  const presentations = new VillagePresentationReader(db, navigation);
+  const presentations = new VillagePresentationReader(db, navigation, {
+    store: databaseTravelNetworkStore(db, () =>
+      app.log.warn({ code: 'TRAVEL_NETWORK_STORE_FAILED' }, 'Travel network cache unavailable'),
+    ),
+  });
   app.get(
     `${prefix}/presentation`,
     {
@@ -112,13 +118,15 @@ export async function registerSyncV2Routes(
     const query = request.query as { generation: number; include?: string };
     const include = [...new Set(query.include?.split(',') as SyncV2SharedInclude[] | undefined)];
     return bounded(
-      captureSyncV2(
-        db,
-        account.id,
-        worldSlug,
-        economy.villageId,
-        { protocol: 2, generation: query.generation, scopes: [], cursors: [] },
-        { include },
+      devTime('snapshot', () =>
+        captureSyncV2(
+          db,
+          account.id,
+          worldSlug,
+          economy.villageId,
+          { protocol: 2, generation: query.generation, scopes: [], cursors: [] },
+          { include },
+        ),
       ),
     );
   };

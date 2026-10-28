@@ -3,6 +3,7 @@ import { sql, type Kysely } from 'kysely';
 import type { ResolvedVillagePresentation, TravelRoute, VillageState } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { networkJob, type NetworkJob, type TravelNetworkExecutor } from '../navigation/network-job.js';
+import { TRAVEL_NETWORK_VERSION, type TravelNetworkStore } from '../navigation/network-store.js';
 import type { readRc1Ground } from '../worlds/rc1-ground.js';
 import { devTime } from '../operations/dev-timing.js';
 import { ownedVillage, state, withVillageProjection, type OwnedVillage } from './service.js';
@@ -70,6 +71,8 @@ export interface PresentationReaderOptions {
   freshMs: number;
   capacity: number;
   now: () => number;
+  /** Networks surviving a restart; without it, each process recomputes them. */
+  store?: TravelNetworkStore;
 }
 
 /** Chunks of one axis crossed by a window, on the torus. A window sampled
@@ -120,6 +123,7 @@ function networkFingerprint(input: NetworkJob['state'], ground: Ground) {
   return createHash('sha256')
     .update(
       JSON.stringify({
+        version: TRAVEL_NETWORK_VERSION,
         state: input,
         ground: ground ? { seed: ground.data.seed, edits: ground.navigationEdits } : null,
       }),
@@ -197,11 +201,7 @@ export class VillagePresentationReader {
     const network =
       previous?.fingerprint === fingerprint
         ? previous
-        : {
-            fingerprint,
-            // SQL is finished before any lane wait: no connection is held in the queue.
-            routes: await this.compute.network((known) => Promise.resolve(networkJob(input, ground, known))),
-          };
+        : { fingerprint, routes: await this.routes(village, fingerprint, input, ground) };
     projected.travelRoutes.unshift(...network.routes); // Committed woodland paths were captured with the snapshot.
     const entry: Entry = {
       worldId: village.worldId,
@@ -215,5 +215,16 @@ export class VillagePresentationReader {
     while (this.entries.size >= this.options.capacity) this.entries.delete(this.entries.keys().next().value!);
     this.entries.set(village.villageId, entry);
     return entry;
+  }
+  /** A restarted process finds the stored network of an unchanged input
+   * instead of recomputing it (15 s for Bressuire on a cold dev API). */
+  private async routes(village: OwnedVillage, fingerprint: string, input: NetworkJob['state'], ground: Ground) {
+    const store = this.options.store;
+    const stored = await store?.load(village.worldId, village.villageId, fingerprint);
+    if (stored) return stored;
+    // SQL is finished before any lane wait: no connection is held in the queue.
+    const routes = await this.compute.network((known) => Promise.resolve(networkJob(input, ground, known)));
+    await store?.save(village.worldId, village.villageId, fingerprint, routes);
+    return routes;
   }
 }

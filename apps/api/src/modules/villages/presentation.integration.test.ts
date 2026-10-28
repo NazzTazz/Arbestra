@@ -10,6 +10,7 @@ import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { buildApp } from '../../app.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
+import { databaseTravelNetworkStore } from '../navigation/network-store.js';
 import { constructBuilding, readVillageProjection } from './service.js';
 import { VillagePresentationReader, villagePresentation } from './presentation.js';
 
@@ -233,4 +234,59 @@ it('reuses one capture while its journal streams stand still and recomputes the 
   });
   expect(await read()).toBe(a);
   expect(networks).toBe(2);
+}, 120000);
+
+// A deployment restarts the API: every village used to recompute its whole
+// network on first read (15 s for Bressuire on a cold dev API).
+it('reuses a stored network after a restart and stores a new one for a structural change', async () => {
+  const routed = {
+    id: 'stored-route',
+    kind: 'building',
+    destination: { cellX: 1, cellY: 2 },
+    cells: [{ cellX: 1, cellY: 2 }],
+  };
+  let networks = 0;
+  const executor: TravelNetworkExecutor = {
+    network: async (load) => {
+      networks++;
+      await load({ sources: new Set() });
+      return [{ ...routed, id: `${routed.id}-${networks}` }] as never;
+    },
+  };
+  const store = databaseTravelNetworkStore(db, (error) => {
+    throw error;
+  });
+  await db.deleteFrom('villageTravelNetworks').execute();
+  const process = () => new VillagePresentationReader(db, executor, { freshMs: 60_000, store });
+  const first = await process().read(ids.account, 'aube', ids.village);
+  expect(networks).toBe(1);
+  expect(first.travelRoutes.some((route) => route.id === 'stored-route-1')).toBe(true);
+  const row = await db
+    .selectFrom('villageTravelNetworks')
+    .selectAll()
+    .where('villageId', '=', ids.village)
+    .executeTakeFirstOrThrow();
+  expect(row.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  // A new process with an unchanged village: the stored network, no routing.
+  const restarted = await process().read(ids.account, 'aube', ids.village);
+  expect(networks).toBe(1);
+  expect(restarted.travelRoutes.some((route) => route.id === 'stored-route-1')).toBe(true);
+  // Another input never reuses it: a stale row is a miss, then replaced.
+  await db
+    .updateTable('villageTravelNetworks')
+    .set({ fingerprint: 'f'.repeat(64) })
+    .where('villageId', '=', ids.village)
+    .execute();
+  const recomputed = await process().read(ids.account, 'aube', ids.village);
+  expect(networks).toBe(2);
+  expect(recomputed.travelRoutes.some((route) => route.id === 'stored-route-2')).toBe(true);
+  expect(
+    (
+      await db
+        .selectFrom('villageTravelNetworks')
+        .select('fingerprint')
+        .where('villageId', '=', ids.village)
+        .executeTakeFirstOrThrow()
+    ).fingerprint,
+  ).toBe(row.fingerprint);
 }, 120000);

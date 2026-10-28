@@ -142,6 +142,8 @@ export function instrumentDevDriver(driver: Driver): Driver {
 
 const routes = new Set([
   '/api/worlds/:worldSlug/village',
+  // First load: the client does not know its village id yet.
+  '/api/worlds/:worldSlug/village/bootstrap',
   '/api/worlds/:worldSlug/starter',
   '/api/worlds/:worldSlug/starter/terrain',
   '/api/worlds/:worldSlug/terrain',

@@ -588,6 +588,13 @@ export interface Database {
   };
   worldTerrainVertices: { worldId: string; vertexX: number; vertexY: number; height: number };
   worldSpawnTerraces: { worldId: string; villageId: string; cellX: number; cellY: number; height: number };
+  villageTravelNetworks: {
+    worldId: string;
+    villageId: string;
+    fingerprint: string;
+    routes: Buffer;
+    computedAt: ColumnType<Date, Date | undefined, Date>;
+  };
   worldRc1Resources: {
     worldId: string;
     featureId: string;
