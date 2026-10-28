@@ -5,8 +5,9 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { vertexSurface, woodlandTrees } from '@arbestra/contracts';
 import { groveSlots } from './grove-trees';
 import type { NaturalFeature, VillageState } from '@arbestra/contracts';
-import { groveHalo, groveHaloTrees, TreeHalos, TREE_HALO_LIFT, treeHaloRadius } from './tree-halos';
-import { HALO_FLASH, HALO_FLASH_MS, RESOURCE_HALO_COLOURS, RESOURCE_HALO_OPACITY } from './resource-halos';
+import { groveHalo, groveHaloTrees, TreeHalos, TREE_HALO_LIFT, treeHaloRadius, type TreeHaloGrove } from './tree-halos';
+import { HALO_MARKER, haloHalfSize } from './halo-marker';
+import { RESOURCE_HALO_COLOURS } from './resource-halos';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { TerrainStore } from './terrain-store';
 import { CELL_UNITS, WorldSpace } from './world-space';
@@ -42,6 +43,10 @@ const grove = (over: Partial<NaturalFeature> = {}): NaturalFeature => ({
   deposit: deposit(),
   ...over,
 });
+const WOOD = Color3.FromHexString(RESOURCE_HALO_COLOURS.wood),
+  CLEAR = Color3.FromHexString(HALO_MARKER.clearColour);
+const rgb = (c: Color3) => [c.r, c.g, c.b].map((v) => Math.round(v * 255));
+const tintOf = (colour: number[]) => colour.slice(0, 3).map((v) => Math.round(v * 255));
 
 it('offers a halo per drawn tree, none for a cleared grove, an empty stock or another resource', () => {
   const feature = grove();
@@ -114,7 +119,25 @@ function fixture() {
   return { scene, halos, space, store, state, tick, at, settle, dispose };
 }
 
-it('places one tinted instance at the foot of every tree, projected like the woodland mesh', () => {
+/** A grove of `trees` trees at cell (x, 31): the fixture's terrain is known everywhere. */
+function syntheticGrove(id: string, x: number, trees = 3): TreeHaloGrove {
+  return {
+    featureId: id,
+    cellX: x,
+    cellY: 31,
+    anchor: { cellX: 0, cellY: 0 },
+    revision: 1,
+    trees: Array.from({ length: trees }, (_, i) => ({
+      x: x + 0.2 + i * 0.25,
+      y: 31.4,
+      scale: 1,
+      heightScale: 1,
+      rotation: 0,
+    })),
+  };
+}
+
+it('places one resting « Onde » marker at the foot of every tree, sized to fit the outer wave', () => {
   const f = fixture();
   try {
     const feature = grove();
@@ -136,51 +159,144 @@ it('places one tinted instance at the foot of every tree, projected like the woo
       const up = Vector3.TransformNormal(Vector3.Up(), matrix);
       expect(up.y).toBeGreaterThan(0.9);
       const right = Vector3.TransformNormal(Vector3.Right(), matrix);
-      expect(right.length()).toBeCloseTo(treeHaloRadius(tree) / 0.7, 5);
-      const [r, g, b, a] = f.halos.colourAt(i);
-      const tint = Color3.FromHexString(RESOURCE_HALO_COLOURS.wood);
-      expect([r, g, b].map((v) => Math.round(v * 255))).toEqual(
-        [tint.r, tint.g, tint.b].map((v) => Math.round(v * 255)),
-      );
-      expect(a).toBeCloseTo(RESOURCE_HALO_OPACITY, 5);
+      expect(right.length()).toBeCloseTo(haloHalfSize(treeHaloRadius(tree)), 5);
+      // The reference ring is the tree's halo radius; the quad leaves room around it.
+      expect(right.length() * HALO_MARKER.ring).toBeCloseTo(treeHaloRadius(tree), 5);
+      const colour = f.halos.colourAt(i);
+      expect(tintOf(colour)).toEqual(rgb(WOOD));
+      expect(colour[3]).toBe(1);
+      expect(f.halos.stateAt(i)).toEqual({ validatedAt: null, mode: 'cut' });
     }
   } finally {
     f.dispose();
   }
 });
 
-it('lights a validated grove up, puts it out, and frees its instances afterwards', () => {
+it('validates a grove once, lets the shader play the waves, ends with no halo and frees its instances', () => {
   const f = fixture();
   try {
-    const halo = groveHalo(grove(), 32)!,
-      tint = Color3.FromHexString(RESOURCE_HALO_COLOURS.wood);
+    const halo = groveHalo(grove(), 32)!;
     f.halos.setAvailable([halo]);
     f.at(0);
     f.at(300);
-    expect(f.halos.colourAt(0)[3]).toBeCloseTo(RESOURCE_HALO_OPACITY, 5);
+    expect(f.halos.colourAt(0)[3]).toBeCloseTo(1, 5);
     f.halos.setPending([halo]);
     f.at(300); // validated
     expect(f.halos.pendingCount).toBe(1);
-    expect(f.halos.colourAt(0)[3]).toBeCloseTo(RESOURCE_HALO_OPACITY, 5);
-    f.at(300 + HALO_FLASH.riseMs / 2);
-    const [r, g, b] = f.halos.colourAt(1);
-    expect(r).toBeCloseTo(tint.r + (1 - tint.r) * 0.5, 5);
-    expect(g).toBeCloseTo(tint.g + (1 - tint.g) * 0.5, 5);
-    expect(b).toBeCloseTo(tint.b + (1 - tint.b) * 0.5, 5);
-    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs / 2);
-    // Fully lit: white, fully opaque.
-    expect(f.halos.colourAt(2)).toEqual([1, 1, 1, 1]);
-    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs / 2);
-    expect(f.halos.colourAt(0)[3]).toBeCloseTo(0.5, 5);
-    f.at(300 + HALO_FLASH_MS);
+    for (let i = 0; i < 3; i++) {
+      expect(f.halos.stateAt(i)).toEqual({ validatedAt: Math.fround(0.3), mode: 'cut' });
+      expect(f.halos.colourAt(i)[3]).toBe(1);
+    }
+    expect(f.halos.instanceWrites).toBe(3);
+    // Mid-way: the waves run from the clock uniform alone, nothing is rewritten.
+    f.at(300 + HALO_MARKER.flashMs / 2);
+    expect(f.halos.clock - f.halos.stateAt(0).validatedAt!).toBeCloseTo(HALO_MARKER.flashMs / 2000, 6);
+    expect(f.halos.instanceWrites).toBe(0);
+    expect(f.halos.uploads).toBe(0);
+    // The same grove offered again or kept pending does not replay its validation.
+    f.halos.setAvailable([halo]);
+    f.halos.setPending([halo]);
+    f.at(300 + HALO_MARKER.flashMs * 0.75);
+    expect(f.halos.stateAt(1).validatedAt).toBe(Math.fround(0.3));
+    f.at(300 + HALO_MARKER.flashMs);
     // Still pending, flash over: nothing shown, like the cell halos.
     expect(f.halos.pendingCount).toBe(0);
     expect(f.halos.mesh.isEnabled()).toBe(false);
+    expect(f.halos.colourAt(0)[3]).toBe(0);
+    f.halos.setPending([halo]);
+    f.at(300 + HALO_MARKER.flashMs + 700);
+    expect(f.halos.mesh.isEnabled()).toBe(false);
+    expect(f.halos.stateAt(0).validatedAt).toBeNull();
     f.halos.setPending([]);
     f.halos.setAvailable([]);
-    f.at(300 + HALO_FLASH_MS + 100);
+    f.at(300 + HALO_MARKER.flashMs + 800);
     expect(f.halos.instanceCount).toBe(0);
     expect(f.halos.mesh.isEnabled()).toBe(false);
+  } finally {
+    f.dispose();
+  }
+});
+
+it('shows « Satellites » in red while clearing, and a validation keeps the shape it was made with', () => {
+  const f = fixture();
+  try {
+    const first = syntheticGrove('first', 20),
+      second = syntheticGrove('second', 24);
+    f.halos.setAvailable([first, second]);
+    f.settle();
+    f.halos.setMode('clear');
+    expect(f.halos.mode).toBe('clear');
+    f.tick();
+    for (let i = 0; i < 6; i++) {
+      expect(f.halos.stateAt(i)).toEqual({ validatedAt: null, mode: 'clear' });
+      expect(tintOf(f.halos.colourAt(i))).toEqual(rgb(CLEAR));
+    }
+    f.halos.setPending([first]);
+    f.tick();
+    const validatedAt = f.halos.stateAt(0).validatedAt!;
+    expect(validatedAt).toBeCloseTo(f.halos.clock, 6);
+    // Back to cutting during the dive: the validated grove keeps diving, the other one turns into a ring.
+    f.halos.setMode('cut');
+    f.tick();
+    for (let i = 0; i < 3; i++) {
+      expect(f.halos.stateAt(i)).toEqual({ validatedAt, mode: 'clear' });
+      expect(tintOf(f.halos.colourAt(i))).toEqual(rgb(CLEAR));
+    }
+    for (let i = 3; i < 6; i++) {
+      expect(f.halos.stateAt(i)).toEqual({ validatedAt: null, mode: 'cut' });
+      expect(tintOf(f.halos.colourAt(i))).toEqual(rgb(WOOD));
+    }
+    expect(f.halos.instanceWrites).toBe(3);
+  } finally {
+    f.dispose();
+  }
+});
+
+it('bounds the work per frame: no rewrite at rest, even orbiting, and only the validated trees otherwise', () => {
+  const f = fixture();
+  try {
+    // Forty groves of three trees, in clearing mode: 120 orbiting markers.
+    const groves = Array.from({ length: 40 }, (_, i) => syntheticGrove(`g${i}`, 2 + i));
+    f.halos.setMode('clear');
+    f.halos.setAvailable(groves);
+    f.settle();
+    expect(f.halos.instanceCount).toBe(120);
+    const rebuilds = f.halos.rebuilds,
+      before = f.halos.clock;
+    for (let frame = 0; frame < 100; frame++) {
+      f.tick();
+      expect(f.halos.instanceWrites).toBe(0);
+      expect(f.halos.uploads).toBe(0);
+    }
+    // The orbit advances through the clock uniform only.
+    expect(f.halos.clock - before).toBeCloseTo(4, 6);
+    expect(f.halos.plugin.uniforms().clock[0]).toBe(f.halos.clock);
+    expect(f.halos.rebuilds).toBe(rebuilds);
+    // Validating two groves rewrites their six instances, in two partial uploads per attribute.
+    f.halos.setPending([groves[3]!, groves[17]!]);
+    f.tick();
+    expect(f.halos.instanceWrites).toBe(6);
+    expect(f.halos.uploads).toBe(4);
+    expect(f.halos.rebuilds).toBe(rebuilds);
+    // While the dive and the burst play: nothing.
+    const frames = Math.ceil(HALO_MARKER.flashMs / 40) - 2;
+    for (let frame = 0; frame < frames; frame++) {
+      f.tick();
+      expect(f.halos.instanceWrites).toBe(0);
+    }
+    // The end puts out those six instances only.
+    f.tick();
+    f.tick();
+    expect(f.halos.rebuilds).toBe(rebuilds);
+    for (let frame = 0; frame < 10; frame++) f.tick();
+    expect(f.halos.instanceWrites).toBe(0);
+    expect(f.halos.pendingCount).toBe(0);
+    // A mode switch rewrites every instance once (the hidden queued ones too), then nothing.
+    f.halos.setMode('cut');
+    f.tick();
+    expect(f.halos.instanceWrites).toBe(120);
+    f.tick();
+    expect(f.halos.instanceWrites).toBe(0);
   } finally {
     f.dispose();
   }
@@ -218,6 +334,8 @@ it('rebuilds on a toric rebase, a terrain revision or a new stock, and hides out
     f.tick();
     expect(f.halos.rebuilds).toBe(rebuilds + 3);
     expect(f.halos.instanceCount).toBe(2);
+    expect(f.halos.stateAt(1)).toEqual({ validatedAt: null, mode: 'cut' });
+    expect(f.halos.colourAt(1)[3]).toBe(1);
     f.tick(false);
     expect(f.halos.mesh.isEnabled()).toBe(true);
     for (let i = 0; i < 10; i++) f.tick(false);
@@ -245,5 +363,27 @@ it('waits for the deposit cell terrain instead of placing rings at an invented h
     expect(f.halos.mesh.isEnabled()).toBe(false);
   } finally {
     f.dispose();
+  }
+});
+
+it('carries the zoom fade as a uniform and frees its material', () => {
+  const f = fixture();
+  try {
+    f.halos.setAvailable([groveHalo(grove(), 32)!]);
+    f.settle();
+    const writes: number[] = [];
+    for (const [i, zoom] of [1, 0.8, 0.5, 0.2].entries()) {
+      f.halos.update(1000 + i * 40, f.space, f.store, true, zoom);
+      writes.push(f.halos.instanceWrites);
+      expect(f.halos.plugin.uniforms().clock[1]).toBe(zoom);
+    }
+    expect(writes).toEqual([0, 0, 0, 0]);
+    expect(f.scene.getMaterialByName('tree-halo')).not.toBeNull();
+    f.halos.dispose();
+    expect(f.scene.getMaterialByName('tree-halo')).toBeNull();
+    expect(f.scene.getMeshByName('tree-halos')).toBeNull();
+  } finally {
+    f.store.dispose();
+    f.scene.dispose();
   }
 });

@@ -2,19 +2,17 @@ import { expect, it } from 'vitest';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { vertexSurface } from '@arbestra/contracts';
 import type { VillageState } from '@arbestra/contracts';
 import { Constants } from '@babylonjs/core/Engines/constants';
+import { HALO_MARKER, type HaloMarkerPlugin } from './halo-marker';
 import {
-  HALO_FLASH,
-  HALO_FLASH_MS,
-  haloFlash,
   ResourceHalos,
   RESOURCE_HALO_COLOURS,
+  RESOURCE_HALO_HALF_SIZE,
   RESOURCE_HALO_LIFT,
-  RESOURCE_HALO_OPACITY,
+  RESOURCE_HALO_RING,
 } from './resource-halos';
 import { TerrainStore } from './terrain-store';
 import { WorldSpace } from './world-space';
@@ -65,6 +63,8 @@ function fixture() {
   };
   return { scene, halos, cell, space, store, state, surface, tick, at, settle, dispose };
 }
+const marker = (mesh: { material: unknown }) =>
+  (mesh.material as StandardMaterial).pluginManager!.getPlugin<HaloMarkerPlugin>('HaloMarker')!.uniforms();
 
 it('anchors every selected footprint vertex above the elevated terrain, following its two triangles', () => {
   const f = fixture();
@@ -82,6 +82,10 @@ it('anchors every selected footprint vertex above the elevated terrain, followin
       expect(positions[i + 1]).toBeCloseTo(expected + RESOURCE_HALO_LIFT, 5);
       expect(positions[i + 1]).toBeGreaterThan(10);
     }
+    // The footprint spans the marker quad: the reference ring at 84/128 of it, room for the waves.
+    expect(Math.max(...positions.filter((_, i) => i % 3 === 0))).toBeCloseTo(RESOURCE_HALO_HALF_SIZE, 6);
+    expect(RESOURCE_HALO_HALF_SIZE * HALO_MARKER.ring).toBeCloseTo(RESOURCE_HALO_RING, 6);
+    expect(marker(mesh).scale).toBeCloseTo(1 / RESOURCE_HALO_HALF_SIZE, 6);
     expect(mesh.isPickable).toBe(false);
     expect(mesh.renderingGroupId).toBe(0);
   } finally {
@@ -95,19 +99,19 @@ it('retains selections during a swipe and completes the animation even when the 
     f.halos.setPending([f.cell]);
     f.tick(); // validated at 40 ms
     const mesh = f.scene.getMeshByName('resource-halo-31:31')!;
-    expect(mesh.visibility).toBe(RESOURCE_HALO_OPACITY);
+    expect(mesh.visibility).toBe(1);
     f.halos.setPending([f.cell, { cellX: 30, cellY: 31 }]);
     f.settle();
     expect(f.scene.getMeshByName(mesh.name)).toBe(mesh);
     expect(f.halos.pendingCount).toBe(2);
     f.halos.setPending([]);
     f.tick();
-    // Lit up while held, whatever the receipt does.
+    // Still playing, whatever the receipt does.
     expect(mesh.visibility).toBe(1);
-    const halfFaded = 40 + HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs / 2;
-    f.at(halfFaded);
-    expect(mesh.visibility).toBeCloseTo(0.5);
-    f.at(40 + HALO_FLASH_MS);
+    expect(marker(mesh).state).toEqual([0, 1, 0]);
+    f.at(40 + HALO_MARKER.flashMs - 1);
+    expect(mesh.visibility).toBe(1);
+    f.at(40 + HALO_MARKER.flashMs);
     expect(mesh.isDisposed()).toBe(true);
     expect(f.halos.pendingCount).toBe(0);
   } finally {
@@ -129,6 +133,7 @@ it('follows terrain revisions and a toric rebase, and hides smoothly outside exp
     });
     f.space.rebase({ cellX: 63, cellY: 63 }, 32);
     f.tick();
+    expect(f.halos.footprintBuilds).toBe(1);
     expect(mesh.getVerticesData(VertexBuffer.PositionKind)![1]).toBeCloseTo(before + 5, 5);
     expect(mesh.position.x).toBe(-2.5);
     expect(mesh.position.z).toBe(-2.5);
@@ -172,7 +177,7 @@ it('keeps garden halos above the raised, flat crop surface rather than burying t
   }
 });
 
-it('uses light gold, near white and bright orange for available wood, stone and carrots', () => {
+it('rests as a gold, near white or orange « Onde » ring for wood, stone and carrots', () => {
   const f = fixture();
   try {
     f.halos.setAvailable([
@@ -186,17 +191,21 @@ it('uses light gold, near white and bright orange for available wood, stone and 
       ['31:31', RESOURCE_HALO_COLOURS.wood],
       ['30:31', RESOURCE_HALO_COLOURS.stone],
       ['32:31', RESOURCE_HALO_COLOURS.carrot],
-    ]) {
+    ] as const) {
       const mesh = f.scene.getMeshByName(`resource-halo-${key}`)!;
-      expect((mesh.material as StandardMaterial).emissiveColor.toHexString()).toBe(hex.toUpperCase());
-      expect(mesh.visibility).toBe(RESOURCE_HALO_OPACITY);
+      const material = mesh.material as StandardMaterial;
+      expect(material.emissiveColor.toHexString()).toBe(hex.toUpperCase());
+      // Resting markers blend normally; the alpha mode lets a validation add light.
+      expect(material.alphaMode).toBe(Constants.ALPHA_PREMULTIPLIED);
+      expect(marker(mesh).state).toEqual([0, 0, 0]);
+      expect(mesh.visibility).toBe(1);
     }
   } finally {
     f.dispose();
   }
 });
 
-it('lights a validated halo up, holds it, then puts it out, without replaying on updates', () => {
+it('plays a validation from the clock alone, without replaying on updates, then frees its material', () => {
   const f = fixture();
   try {
     const cell = { ...f.cell, resource: 'stone' as const };
@@ -204,33 +213,66 @@ it('lights a validated halo up, holds it, then puts it out, without replaying on
     f.at(0);
     f.at(300);
     const mesh = f.scene.getMeshByName('resource-halo-31:31')!,
+      shared = mesh.material,
       sharedCount = f.scene.materials.length;
-    const initial = (mesh.material as StandardMaterial).emissiveColor.clone();
     f.halos.setPending([{ ...f.cell, resource: undefined }]);
     f.at(300); // validated
-    expect(mesh.visibility).toBe(RESOURCE_HALO_OPACITY);
-    // Added light, not a veil: the validated halo glows.
-    expect((mesh.material as StandardMaterial).alphaMode).toBe(Constants.ALPHA_ADD);
-    f.at(300 + HALO_FLASH.riseMs / 2);
-    expect(
-      (mesh.material as StandardMaterial).emissiveColor.equalsWithEpsilon(Color3.Lerp(initial, Color3.White(), 0.5)),
-    ).toBe(true);
-    expect(mesh.visibility).toBeCloseTo(haloFlash(HALO_FLASH.riseMs / 2).opacity);
+    expect(mesh.material).not.toBe(shared);
+    expect(f.scene.materials).toHaveLength(sharedCount + 1);
+    expect((mesh.material as StandardMaterial).emissiveColor.toHexString()).toBe(
+      RESOURCE_HALO_COLOURS.stone.toUpperCase(),
+    );
+    expect(marker(mesh).state).toEqual([0.3, 1, 0]);
+    // Mid-way: the waves come from the clock uniform; no footprint is rebuilt.
+    f.at(300 + HALO_MARKER.flashMs / 2);
+    expect(f.halos.footprintBuilds).toBe(0);
+    expect(marker(mesh).clock[0] - marker(mesh).state[0]).toBeCloseTo(HALO_MARKER.flashMs / 2000, 6);
     f.halos.setAvailable([cell]);
     f.halos.setPending([cell]);
-    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs / 2);
+    f.at(300 + HALO_MARKER.flashMs * 0.75);
     expect(f.scene.getMeshByName(mesh.name)).toBe(mesh);
-    expect((mesh.material as StandardMaterial).emissiveColor.toHexString()).toBe('#FFFFFF');
+    expect(marker(mesh).state).toEqual([0.3, 1, 0]);
     expect(mesh.visibility).toBe(1);
-    f.at(300 + HALO_FLASH.riseMs + HALO_FLASH.holdMs + HALO_FLASH.fadeMs / 2);
-    expect(mesh.visibility).toBeCloseTo(0.5);
-    f.at(300 + HALO_FLASH_MS);
+    f.at(300 + HALO_MARKER.flashMs);
     expect(mesh.visibility).toBe(0);
     expect(mesh.isEnabled()).toBe(false);
+    expect(mesh.material).toBe(shared);
     expect(f.scene.materials).toHaveLength(sharedCount);
     f.halos.setPending([cell]);
-    f.at(300 + HALO_FLASH_MS + 700);
+    f.at(300 + HALO_MARKER.flashMs + 700);
     expect(mesh.visibility).toBe(0);
+  } finally {
+    f.dispose();
+  }
+});
+
+it('turns a wood cell into red « Satellites » while clearing; stone and gardens keep « Onde »', () => {
+  const f = fixture();
+  try {
+    const wood = { ...f.cell, resource: 'wood' as const },
+      stone = { cellX: 30, cellY: 31, resource: 'stone' as const };
+    f.halos.setAvailable([wood, stone]);
+    f.settle();
+    f.halos.setMode('clear');
+    f.tick();
+    const woodMesh = f.scene.getMeshByName('resource-halo-31:31')!,
+      stoneMesh = f.scene.getMeshByName('resource-halo-30:31')!;
+    expect(marker(woodMesh).state).toEqual([0, 0, 1]);
+    expect((woodMesh.material as StandardMaterial).emissiveColor.toHexString()).toBe(
+      HALO_MARKER.clearColour.toUpperCase(),
+    );
+    expect(marker(stoneMesh).state).toEqual([0, 0, 0]);
+    f.halos.setPending([wood, stone]);
+    f.tick();
+    const validatedAt = marker(woodMesh).state[0];
+    // Back to cutting during the dive: the validated wood cell keeps its satellites.
+    f.halos.setMode('cut');
+    f.tick();
+    expect(marker(woodMesh).state).toEqual([validatedAt, 1, 1]);
+    expect((woodMesh.material as StandardMaterial).emissiveColor.toHexString()).toBe(
+      HALO_MARKER.clearColour.toUpperCase(),
+    );
+    expect(marker(stoneMesh).state).toEqual([validatedAt, 1, 0]);
   } finally {
     f.dispose();
   }

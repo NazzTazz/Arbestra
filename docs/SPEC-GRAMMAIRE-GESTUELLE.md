@@ -68,7 +68,7 @@ Planche de test : https://claude.ai/artifact/VZQuVL9ZqbkziWom59JryD (dix proposi
   - À la validation : les points plongent au centre et éclatent.
 - **Le mode se lit par la forme du marqueur** : une onde, c'est une récolte ; des satellites, c'est un défrichage. Le rouge du défrichage et l'indicateur du HUD restent en complément.
 - **« Colonne de lumière »** (proposition 10) : réservée à un autre usage. Elle signalera **l'échéance d'un échange de marché**, autour de l'hôtel de ville (à spécifier avec le marché).
-- La proposition 1 (anneau épais, `dde67cc`) est provisoire, en attendant « Onde ».
+- La proposition 1 (anneau épais, `dde67cc`) est remplacée par « Onde » et « Satellites » dans le client (`halo-marker.ts`, greffon de matériau animé par une horloge ; **à valider** en jeu). Le mode `clear` de l'outil bois donne aux halos la forme « Satellites ».
 
 ## 5. Ouvert
 

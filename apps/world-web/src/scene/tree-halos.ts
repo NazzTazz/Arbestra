@@ -1,7 +1,7 @@
+import { Constants } from '@babylonjs/core/Engines/constants';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import type { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
@@ -9,7 +9,8 @@ import type { Scene } from '@babylonjs/core/scene';
 import type { NaturalFeature, WoodlandTree } from '@arbestra/contracts';
 import { groveSlots } from './grove-trees';
 import type { Cell } from './construction-selection';
-import { haloFlash, HALO_FLASH_MS, haloTexture, RESOURCE_HALO_COLOURS, RESOURCE_HALO_OPACITY } from './resource-halos';
+import { HALO_MARKER, haloHalfSize, HaloMarkerPlugin, type HarvestMode } from './halo-marker';
+import { RESOURCE_HALO_COLOURS } from './resource-halos';
 import type { TerrainStore } from './terrain-store';
 import { CELL_UNITS, type WorldSpace } from './world-space';
 
@@ -57,15 +58,19 @@ export function groveHalo(feature: GroveFeature, chunkSize: number): TreeHaloGro
 export const treeHaloRadius = (tree: Pick<WoodlandTree, 'scale'>): number =>
   0.62 * Math.max(0.5, Math.min(1.5, tree.scale));
 export const TREE_HALO_LIFT = 0.08;
-const RING = 0.7; // Where haloTexture draws its ring, as a fraction of the quad's half-size.
-const OPACITY = RESOURCE_HALO_OPACITY;
+/** Partial GPU uploads per frame beyond which one full upload is cheaper. */
+const MAX_PARTIAL_UPLOADS = 8;
 
+/** What the grove's instances were last written with (the tint follows the mode). */
+type Written = { alpha: number; selectedAt: number | null; mode: HarvestMode };
 type Entry = {
   grove: TreeHaloGrove;
   available: boolean;
   pending: boolean;
   select: boolean;
   selectedAt: number | null;
+  /** Mode the grove was validated in: its marker keeps that shape until the end of the flash. */
+  mode: HarvestMode;
   alpha: number;
   /** Ground revision of the deposit cell the matrices were built with. */
   groundRevision: number;
@@ -76,8 +81,9 @@ type Entry = {
   matrices: Float32Array | null;
   /** Instances actually placed (trees over known terrain). */
   count: number;
-  /** Colour written for the instances last frame. */
-  colour: [number, number, number, number];
+  /** First instance of the grove in the shared buffers. */
+  offset: number;
+  written: Written | null;
 };
 
 function quad(): VertexData {
@@ -90,40 +96,56 @@ function quad(): VertexData {
 }
 
 /**
- * One thin-instanced quad per standing tree of the groves on offer, tinted and
- * faded per instance: available / selected flash / fade-out, like the cell halos.
+ * One thin-instanced quad per standing tree of the groves on offer. The
+ * marker (« Onde » to cut, « Satellites » to clear) is drawn by a material
+ * plugin from a clock uniform and per-instance state: a frame rewrites no
+ * matrix, and instance attributes only for groves whose state changed
+ * (fade in/out, validation, end of a flash, mode switch).
  */
 export class TreeHalos {
   readonly #entries = new Map<string, Entry>();
   readonly #mesh: Mesh;
   readonly #material: StandardMaterial;
-  readonly #texture: RawTexture;
-  readonly #tint = Color3.FromHexString(RESOURCE_HALO_COLOURS.wood);
+  readonly #plugin: HaloMarkerPlugin;
+  readonly #tints: Record<HarvestMode, Color3> = {
+    cut: Color3.FromHexString(RESOURCE_HALO_COLOURS.wood),
+    clear: Color3.FromHexString(HALO_MARKER.clearColour),
+  };
   #available: TreeHaloGrove[] = [];
   #pending: TreeHaloGrove[] = [];
+  #mode: HarvestMode = 'cut';
   #matrices = new Float32Array(0);
-  #colours = new Float32Array(0);
+  #tint = new Float32Array(0);
+  #state = new Float32Array(0);
   #order: Entry[] = [];
   #layoutDirty = true;
   #spaceVersion = -1;
   #lastTime: number | null = null;
+  #epoch: number | null = null;
+  #clock = 0;
+  #zoom = 0;
   #instanceCount = 0;
   #pendingShown = 0;
   /** Milliseconds spent rebuilding instance matrices, for diagnostics. */
   rebuildMs = 0;
   rebuilds = 0;
-  constructor(private readonly scene: Scene) {
-    this.#texture = haloTexture(scene, { name: 'tree-halo-soft', size: 128, core: 0.06, soft: 0.14, fill: 0.16 });
+  /** Instances whose attributes the last update rewrote (0 at rest), and GPU uploads it issued. */
+  instanceWrites = 0;
+  uploads = 0;
+  constructor(scene: Scene) {
     const material = new StandardMaterial('tree-halo', scene);
-    material.diffuseTexture = this.#texture;
-    material.useAlphaFromDiffuseTexture = true;
-    // White everywhere: the per-instance colour carries the tint and the fade.
-    material.diffuseColor = Color3.White();
+    material.diffuseColor = Color3.Black();
     material.emissiveColor = Color3.White();
     material.disableLighting = true;
     material.backFaceCulling = false;
     material.disableDepthWrite = true;
     material.transparencyMode = StandardMaterial.MATERIAL_ALPHABLEND;
+    material.alphaMode = Constants.ALPHA_PREMULTIPLIED;
+    this.#plugin = new HaloMarkerPlugin(
+      material,
+      { clock: () => this.#clock, opacity: () => this.#zoom, scale: 1 },
+      true,
+    );
     this.#material = material;
     const mesh = new Mesh('tree-halos', scene);
     quad().applyToMesh(mesh);
@@ -135,8 +157,18 @@ export class TreeHalos {
   get mesh(): Mesh {
     return this.#mesh;
   }
+  get plugin(): HaloMarkerPlugin {
+    return this.#plugin;
+  }
   get instanceCount(): number {
     return this.#instanceCount;
+  }
+  get mode(): HarvestMode {
+    return this.#mode;
+  }
+  /** Wood tool mode: resting halos take its shape; a running validation keeps its own. */
+  setMode(mode: HarvestMode): void {
+    this.#mode = mode;
   }
   setAvailable(groves: TreeHaloGrove[]): void {
     this.#available = groves;
@@ -157,13 +189,15 @@ export class TreeHalos {
           pending: false,
           select: false,
           selectedAt: null,
+          mode: this.#mode,
           alpha: 0,
           groundRevision: -1,
           spaceVersion: -1,
           revision: -1,
           matrices: null,
           count: 0,
-          colour: [0, 0, 0, 0],
+          offset: 0,
+          written: null,
         });
         this.#layoutDirty = true;
       }
@@ -200,7 +234,7 @@ export class TreeHalos {
     for (const tree of grove.trees) {
       const foot = tree.elevation === undefined ? cellGround.height : tree.elevation * CELL_UNITS;
       const radius = treeHaloRadius(tree),
-        half = radius / RING,
+        half = haloHalfSize(radius),
         d = radius / CELL_UNITS;
       const west = ground.ground(tree.x - d, tree.y)?.height,
         east = ground.ground(tree.x + d, tree.y)?.height,
@@ -237,21 +271,20 @@ export class TreeHalos {
         entry.revision = grove.revision;
       }
       entry.count = entry.matrices.length / 16;
+      entry.offset = placed;
+      entry.written = null;
       placed += entry.count;
     }
     const matrices = new Float32Array(placed * 16);
-    let offset = 0;
-    for (const entry of this.#order) {
-      matrices.set(entry.matrices!, offset);
-      offset += entry.matrices!.length;
-    }
+    for (const entry of this.#order) matrices.set(entry.matrices!, entry.offset * 16);
     this.#matrices = matrices;
-    this.#colours = new Float32Array(placed * 4);
+    this.#tint = new Float32Array(placed * 4);
+    this.#state = new Float32Array(placed * 4);
     this.#instanceCount = placed;
-    for (const entry of this.#order) entry.colour = [0, 0, 0, 0];
     if (placed) {
       this.#mesh.thinInstanceSetBuffer('matrix', this.#matrices, 16, true);
-      this.#mesh.thinInstanceSetBuffer('color', this.#colours, 4, false);
+      this.#mesh.thinInstanceSetBuffer('haloTint', this.#tint, 4, false);
+      this.#mesh.thinInstanceSetBuffer('haloState', this.#state, 4, false);
     } else this.#mesh.thinInstanceSetBuffer('matrix', null, 16);
     this.#spaceVersion = space.version;
     this.#layoutDirty = false;
@@ -267,7 +300,9 @@ export class TreeHalos {
   ): void {
     const elapsed = this.#lastTime === null ? 0 : Math.max(0, now - this.#lastTime);
     this.#lastTime = now;
-    const zoom = Math.max(0, Math.min(1, zoomOpacity));
+    this.#epoch ??= now;
+    this.#clock = (now - this.#epoch) / 1000;
+    this.#zoom = Math.max(0, Math.min(1, zoomOpacity));
     for (const [key, entry] of this.#entries) {
       const target =
         enabled && ((entry.available && !entry.pending) || entry.select || entry.selectedAt !== null) ? 1 : 0;
@@ -277,10 +312,11 @@ export class TreeHalos {
           : Math.max(target, entry.alpha - elapsed / 320);
       if (entry.select && enabled) {
         entry.selectedAt = now;
+        entry.mode = this.#mode;
         entry.select = false;
         entry.alpha = 1;
       }
-      if (entry.selectedAt !== null && now - entry.selectedAt >= HALO_FLASH_MS) {
+      if (entry.selectedAt !== null && now - entry.selectedAt >= HALO_MARKER.flashMs) {
         entry.selectedAt = null;
         entry.alpha = 0;
       }
@@ -293,51 +329,66 @@ export class TreeHalos {
         this.#layoutDirty = true;
     }
     if (this.#layoutDirty || this.#spaceVersion !== space.version) this.#rebuild(space, ground);
-    let changed = false,
-      shown = false,
-      offset = 0;
+    let shown = false;
+    const ranges: Entry[] = [];
+    this.instanceWrites = 0;
     this.#pendingShown = 0;
     for (const entry of this.#order) {
-      let opacity = OPACITY,
-        white = 0;
-      if (entry.selectedAt !== null) {
-        const flash = haloFlash(Math.max(0, now - entry.selectedAt));
-        white = flash.white;
-        opacity = flash.opacity;
-      }
-      const a = entry.alpha * zoom * opacity;
-      const colour: Entry['colour'] = [
-        this.#tint.r + (1 - this.#tint.r) * white,
-        this.#tint.g + (1 - this.#tint.g) * white,
-        this.#tint.b + (1 - this.#tint.b) * white,
-        a,
-      ];
-      if (a > 0 && entry.count) {
+      if (entry.alpha * this.#zoom > 0 && entry.count) {
         shown = true;
         if (entry.pending) this.#pendingShown++;
       }
-      if (colour.some((v, i) => v !== entry.colour[i])) {
-        entry.colour = colour;
-        changed = true;
-        for (let i = 0; i < entry.count; i++) this.#colours.set(colour, (offset + i) * 4);
+      if (!entry.count) continue;
+      const validated = entry.selectedAt !== null,
+        mode = validated ? entry.mode : this.#mode,
+        tint = this.#tints[mode];
+      const last = entry.written;
+      if (last && last.alpha === entry.alpha && last.selectedAt === entry.selectedAt && last.mode === mode) continue;
+      entry.written = { alpha: entry.alpha, selectedAt: entry.selectedAt, mode };
+      const at = validated ? (entry.selectedAt! - this.#epoch!) / 1000 : 0;
+      for (let i = entry.offset; i < entry.offset + entry.count; i++) {
+        this.#tint[i * 4] = tint.r;
+        this.#tint[i * 4 + 1] = tint.g;
+        this.#tint[i * 4 + 2] = tint.b;
+        this.#tint[i * 4 + 3] = entry.alpha;
+        this.#state[i * 4] = at;
+        this.#state[i * 4 + 1] = validated ? 1 : 0;
+        this.#state[i * 4 + 2] = mode === 'clear' ? 1 : 0;
       }
-      offset += entry.count;
+      this.instanceWrites += entry.count;
+      ranges.push(entry);
     }
-    if (changed && this.#instanceCount) this.#mesh.thinInstanceBufferUpdated('color');
+    if (ranges.length > MAX_PARTIAL_UPLOADS) {
+      this.#mesh.thinInstanceBufferUpdated('haloTint');
+      this.#mesh.thinInstanceBufferUpdated('haloState');
+      this.uploads = 2;
+    } else {
+      for (const entry of ranges) {
+        this.#mesh.thinInstancePartialBufferUpdate('haloTint', entry.count, entry.offset);
+        this.#mesh.thinInstancePartialBufferUpdate('haloState', entry.count, entry.offset);
+      }
+      this.uploads = ranges.length * 2;
+    }
     this.#mesh.setEnabled(shown && this.#instanceCount > 0);
   }
   /** Groves whose selection flash is still on screen. */
   get pendingCount(): number {
     return this.#pendingShown;
   }
-  /** Per-instance colour, for tests and diagnostics. */
+  /** Per-instance tint and opacity, for tests and diagnostics. */
   colourAt(index: number): [number, number, number, number] {
-    return [
-      this.#colours[index * 4]!,
-      this.#colours[index * 4 + 1]!,
-      this.#colours[index * 4 + 2]!,
-      this.#colours[index * 4 + 3]!,
-    ];
+    return [this.#tint[index * 4]!, this.#tint[index * 4 + 1]!, this.#tint[index * 4 + 2]!, this.#tint[index * 4 + 3]!];
+  }
+  /** Per-instance marker state: validation time (scene clock, s) or null, and shape. */
+  stateAt(index: number): { validatedAt: number | null; mode: HarvestMode } {
+    return {
+      validatedAt: this.#state[index * 4 + 1] ? this.#state[index * 4]! : null,
+      mode: this.#state[index * 4 + 2] ? 'clear' : 'cut',
+    };
+  }
+  /** Scene clock the shader animates with, seconds. */
+  get clock(): number {
+    return this.#clock;
   }
   /** Per-instance world matrix, for tests and diagnostics. */
   matrixAt(index: number): Matrix {
@@ -358,6 +409,5 @@ export class TreeHalos {
     this.clear();
     this.#mesh.dispose(false, false);
     this.#material.dispose();
-    this.#texture.dispose();
   }
 }
