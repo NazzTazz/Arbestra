@@ -89,8 +89,8 @@ Un arbre est un arbre RC1 d'une case de bois : (monde, gisement, indice d'arbre)
   - Les lots en cours gardent leur réservation sur cet arbre, puis le suivant.
   - La repousse déjà acquise est **abandonnée** (plus de repousse).
 - **Cases défrichées** : inchangées.
-- **Cases sans arbre RC1** (40 en dev) : bois supprimé (gisement retiré, case libérée). Si un lot y est en cours, il se termine d'abord (**à vérifier en base avant conversion**).
-- **Équilibrage** : une case de N arbres passe de 300 à `300 × N` unités, soit **environ 8 fois plus de bois** au total (médiane de 8 arbres par case), et sans repousse.
+- **Cases sans arbre RC1** (4 en dev : toutes des compléments de départ `starter:`, 1 500 unités pour 3 arbres historiques) : bois supprimé (gisement retiré, case libérée). Si un lot y est en cours, il se termine d'abord (**à vérifier en base avant conversion**).
+- **Équilibrage** (corrigé après vérification en base le 28 octobre) : en RC1, les bosquets valent déjà **500 par arbre** (`rc1-field.ts:44`, 1 984 bosquets sur 1 988 en dev). Passer à 300 par arbre **réduit le bois de 40 %**, sans repousse. Le « × 8 » de la version précédente venait du monde procédural `aube` (300 par case), utilisé par les tests.
 - La conversion touche des données de joueurs sur l'alpha : **elle ne s'y applique qu'avec l'accord explicite de Tristan**, au moment du déploiement.
 
 ## 5. Tranches

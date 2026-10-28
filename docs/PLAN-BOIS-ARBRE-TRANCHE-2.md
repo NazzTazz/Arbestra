@@ -1,0 +1,71 @@
+# Bois par arbre : plan d'implémentation de la tranche serveur
+
+Date : 28 octobre 2026. Base : `92223e9`. Spec : [SPEC-BOIS-ARBRE-UNITE.md](SPEC-BOIS-ARBRE-UNITE.md).
+
+Statut : **plan, à valider par Tristan avant implémentation.** Le plan a été établi par lecture du code (sous-agent) ; les volumes ont été vérifiés en base de dev. Les numéros de ligne datent de `92223e9`.
+
+## Constats qui orientent le plan
+
+- **Quantités en base.** Les bosquets RC1 valent 500 par arbre (`onboarding/rc1-field.ts:44`, nettoyage d'installation `rc1-resources.ts:175,203`). Les compléments de départ valent 1 500 pour 3 arbres historiques (`spawn-resources.ts:191`). Les mondes procéduraux valent 300 par case (`worlds/generation.ts:325`).
+- **Monde de test.** Le monde procédural `aube`, celui de toutes les fixtures, n'a aucun arbre RC1.
+- **Débit des lots.** N'importe quel village qui réveille le bosquet débite aujourd'hui les lots dus de tous les villages (`woodland.ts:160-193`). Cible : seul le village propriétaire débite, à l'échéance du lot.
+- **Occupation des cases.** Un bosquet RC1 occupe toutes les cases de ses arbres (`rc1-resources.ts:119-146`). Après un passage sous 10 %, seule la case du gisement est réoccupée (`woodland.ts:270-281`).
+- **Aucune annulation.** Aucune commande ne permet de revenir sur un geste d'exploitation (`harvest-intents.ts` : `acceptHarvestIntent` seulement). Le `stop` des anciens chantiers ne s'applique pas au geste.
+
+## Schéma cible (additif)
+
+- **`woodland_trees`** :
+  - clé (monde, gisement, indice d'arbre) ;
+  - colonnes `remaining_amount` (0..300), `reserved_amount` (≤ `remaining_amount`), `felled_at`, `revision` ;
+  - clé étrangère vers `woodland_deposits`, en cascade.
+  - Une ligne n'existe qu'à partir du premier lot sur l'arbre ; sans ligne, l'arbre est debout avec 300 unités.
+  - Indice : en RC1, l'indice de `forest.trees`, déjà utilisé par `tree_indices` et `removed_indices`.
+- **`deposit_extractions.tree_index`** et **`extraction_worksite_targets.tree_indices`** : nullables. Une valeur nulle désigne tous les arbres de la case, dans l'ordre RC1.
+- **Vue `resource_deposits`** : redéfinie sans repousse ni seuil.
+  - Le bois d'une case est la somme de ses arbres, moins les lots dus et pas encore débités.
+  - `blocks_cell` vaut `not cleared`.
+  - Nouvelle colonne `clearable` : vraie s'il ne reste que des souches et aucun lot en cours.
+- **Écritures**, toutes sous le verrou de la case :
+  - réservation par upsert sur l'arbre ;
+  - débit par le propriétaire du lot, à son échéance ;
+  - défrichage.
+- **Lecture** : elle n'écrit plus rien sur le bois.
+- Déclencheurs du journal sur `woodland_trees` : publication du chunk spatial de la case et `village_sync_change`.
+
+## Ordre des verrous
+
+1. Village.
+2. Verrou consultatif de navigation.
+3. Borne `through`, lue après acquisition des verrous.
+4. Pierres par UUID.
+5. **Bois par UUID**, restreint aux lots dus et aux cibles : le rayon de 32 cases disparaît.
+6. Transitions dues.
+7. Arbres, uniquement sur des cases déjà tenues, par indice croissant.
+
+Tout écrivain d'un arbre tient d'abord sa case. Deux villages qui visent le même arbre se sérialisent donc sur la case, jamais sur l'arbre seul, et aucun cycle n'est possible. Écart assumé avec la lettre de la spec : une lecture garde le verrou de case des cibles en attente, parce qu'elle peut admettre un lot ; ce verrou ne produit aucune écriture.
+
+## Sous-tranches
+
+| # | Contenu | Effet en jeu |
+|---|---|---|
+| 2a | Schéma additif, logique pure (ordre des arbres, bois par arbre, calcul de conversion), fonction de conversion créée mais pas appelée. Tests unitaires, de contraintes et de publication. | Aucun |
+| 2b | **Bascule** en un seul commit : vue redéfinie, conversion appelée, débit par le propriétaire, défrichage sur souches seulement, raccourci « tout récolter et défricher », plus de repousse, de seuil ni de rayon de 32 cases, sol RC1 et version RC1 sans seuil, construction, installation à 300 par arbre. Désignation par défaut : tous les arbres de la case dans l'ordre, pour que le client actuel continue de fonctionner. Tests : trois lots par arbre, défrichage, raccourci, bootstrap sans écriture, concurrence sur un même arbre, rollback, conversion. | L'arbre devient l'unité, sans repousse |
+| 2c | Désignation par arbre dans les commandes (`woodTrees`, `treeIndices`), ordre de désignation conservé. | Le serveur accepte les arbres choisis |
+| 2d | Exposition par arbre aux lecteurs (chunks, flux spatial, snapshot), pour le client. | Aucun, prépare la tranche 3 |
+| 2e | **Annulation d'un geste** : commande idempotente sur l'intention. Les lots dont le travail n'a pas commencé sont retirés, les réservations libérées, les habitants font demi-tour. Tests : avant le départ, pendant le trajet, refus une fois le travail commencé, rejeu. | Bouton « Annuler » possible |
+| 3 | Client : grammaire gestuelle (toucher, glisser, appui long pour changer de mode, surlignage rouge du défrichage, « Annuler » pendant 15 s), rendu par arbre. | Nouvelle interaction |
+
+## Risques
+
+- **Conversion.** Changer `initial_amount` sur ~29 000 lignes déclenche, ligne par ligne, la navigation et le journal. À mesurer sur une copie de la base de dev ; procéder monde par monde.
+- **Mondes procéduraux.** Un bois coupé y reste bloquant jusqu'au défrichage, et l'empreinte du réseau y inclut le gisement : un recalcul du réseau par lot dans ces mondes.
+- **Occupation multicase.** Les cases d'arbres déjà libérées sous l'ancien seuil restent constructibles sans défrichage.
+- **Alpha.** La conversion touche les données des joueurs : accord explicite de Tristan au déploiement.
+
+## Questions pour Tristan
+
+- **Q1. Mondes procéduraux** (monde de test `aube`), sans arbre RC1 : combien d'arbres par case ? Recommandation : la disposition historique que le client dessine déjà (2 à 4 arbres selon la graine).
+- **Q2. Compléments de départ** (`starter:`, 1 500 pour 3 arbres historiques) : ce sont les cases sans arbre. Faut-il, en plus de supprimer les existants, cesser d'en créer à l'installation des villages pauvres en bois, ou leur donner 3 vrais arbres ?
+- **Q3. Compteur de bois coupé à la conversion** : le recalculer en arbres de 300 (souches × 300 + entame du tronc) ? Recommandation : oui, pour rester cohérent avec le rendu.
+- **Q4. Bosquets entamés** : la part déjà coupée se mesure en fraction de la case (une case à moitié coupée garde la moitié de ses arbres debout) ? Recommandation : oui.
+- **Q5. Ordre des lots** : entre plusieurs cases, la plus proche d'abord (comme aujourd'hui) ; dans une case, l'ordre de désignation. D'accord ?
