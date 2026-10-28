@@ -18,6 +18,7 @@ import type { NaturalFeature, StoneDeposit, VillageState } from '@arbestra/contr
 import { BabylonVillageScene, type TerrainStatus, type TerrainViewMode } from './BabylonVillageScene';
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import type { AreaPreview, Cell } from './construction-selection';
+import type { HarvestMode } from './halo-marker';
 import type { ActiveWorldMode } from '../ui/world-mode';
 
 interface VillageSceneProps {
@@ -36,6 +37,8 @@ interface VillageSceneProps {
   serverOffsetMs: number;
   terrainRef: Ref<TerrainHandle>;
   pendingHarvestCells: Cell[];
+  /** Wood tool mode: halos show « Onde » to cut, « Satellites » to clear. */
+  harvestWoodMode?: HarvestMode;
   highlightedSiteIds: string[];
   constructionMode?: boolean;
   showTravelPaths?: boolean;
@@ -111,6 +114,7 @@ export function VillageScene({
   serverOffsetMs,
   terrainRef,
   pendingHarvestCells,
+  harvestWoodMode = 'cut',
   highlightedSiteIds,
   constructionMode = false,
   showTravelPaths = false,
@@ -275,6 +279,9 @@ export function VillageScene({
   useEffect(() => {
     sceneRef.current?.updateHarvestPending(pendingHarvestCells);
   }, [state, pendingHarvestCells]);
+  useEffect(() => {
+    sceneRef.current?.setHarvestWoodMode(harvestWoodMode);
+  }, [harvestWoodMode, state.world.id, BabylonVillageScene]);
 
   useEffect(() => {
     sceneRef.current?.updateAreaSelection(selectingArea, preview, previewInvalid);

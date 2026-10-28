@@ -119,6 +119,7 @@ import { easeIncidence, skyLight } from './sky-light';
 import { fetchGardenKit, gardenHarvestState, GardenKitRenderer, type GardenPlotView } from './garden-kit';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
+import type { HarvestMode } from './halo-marker';
 import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
 import { groveHalo, TreeHalos, type TreeHaloGrove } from './tree-halos';
 import { groveRayPredicate, pickedGrove, resourceOverlay } from './resource-overlay';
@@ -2507,6 +2508,12 @@ export class BabylonVillageScene {
         position: this.#constructionGhost!.position.asArray(),
         models: this.#constructionGhost!.getChildMeshes().filter((m) => m.getTotalVertices() > 4).length,
       });
+  }
+
+  /** Wood tool mode: halos read « Onde » to cut and « Satellites » to clear. */
+  public setHarvestWoodMode(mode: HarvestMode): void {
+    this.#treeHalos.setMode(mode);
+    this.#resourceHalos.setMode(mode);
   }
 
   public updateHarvestPending(cells: Cell[]): void {

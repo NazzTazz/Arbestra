@@ -1984,6 +1984,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             serverOffsetMs={serverOffsetMs}
             terrainRef={terrainRef}
             pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : NO_PENDING_HARVESTS}
+            harvestWoodMode={worldMode === 'exploitation' ? exploitationSettings.woodMode : 'cut'}
             highlightedSiteIds={highlightedSiteIds}
             constructionMode={
               !paletteCollapsed &&
