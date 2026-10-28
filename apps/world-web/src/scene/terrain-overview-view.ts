@@ -29,6 +29,10 @@ const R = 2.4,
   TUBE = 1;
 const REGION_CELLS = 640,
   REGION_STEP = 8;
+/** Under the detailed terrain, the regional sheet stays this far below its lowest sample. */
+export const REGIONAL_GROUND_MARGIN = 0.15;
+/** Ground streams in chunk by chunk: refit the sheet at most this often. */
+export const REGIONAL_GROUND_REFIT_MS = 1000;
 const SURFACE_RADIUS = 0.48;
 
 function sample(data: TerrainOverview, x: number, y: number): number {
@@ -100,6 +104,13 @@ export class RegionalOverview {
   #subdivisions = 0;
   #lightAt = 0;
   #lastLightPhase = NaN;
+  /** Canonical cell of each vertex, and its height from the regional means. */
+  #vertexCells: Float64Array | null = null;
+  #baseHeights: Float32Array | null = null;
+  #groundRevision = NaN;
+  #groundAt = -Infinity;
+  /** Detailed-ground samples read by the last refit, for diagnostics and tests. */
+  groundSamples = 0;
   constructor(
     private readonly scene: Scene,
     weather: () => WeatherMap | null = () => null,
@@ -141,12 +152,14 @@ export class RegionalOverview {
       colors: number[] = [],
       indices: number[] = [];
     const point = space.project({ cellX: cx, cellY: cy });
+    const vertexCells: number[] = [];
     for (let j = 0; j <= subdivisions; j++)
       for (let i = 0; i <= subdivisions; i++) {
         const x = cx - extent / 2 + i * step;
         const y = cy - extent / 2 + j * step;
         const index = sample(data, x, y),
           isWater = data.waterCoverage[index]! > 127;
+        vertexCells.push(x, y);
         positions.push(
           point.x + (x - cx) * CELL_UNITS,
           isWater ? -0.86 : data.meanElevations[index]! * 0.025 - 0.28,
@@ -172,6 +185,9 @@ export class RegionalOverview {
     for (let index = 1; index < normals.length; index += 3) normals[index] = 1;
     vertex.normals = normals;
     vertex.applyToMesh(mesh, true);
+    this.#vertexCells = new Float64Array(vertexCells);
+    this.#baseHeights = new Float32Array(positions.filter((_, i) => i % 3 === 1));
+    this.#groundRevision = NaN; // a new sheet is fitted at once, not throttled
     this.#baseColors = new Float32Array(colors);
     this.#litColors = new Float32Array(colors);
     mesh.material = this.#material;
@@ -209,6 +225,78 @@ export class RegionalOverview {
       }
     this.#masses?.dispose();
     this.#masses = volumeMesh(this.scene, 'regional-forest-rock-masses', masses, this.#massMaterial);
+  }
+  get mesh(): MeshType | null {
+    return this.#mesh;
+  }
+  /**
+   * The sheet is a backdrop for terrain not streamed yet. Its vertices follow
+   * regional means, so in a hollow they rose above the detailed ground and
+   * shimmered through it (an « oil slick », Tristan, 28 October). Where detailed
+   * ground exists, each vertex sinks below the lowest sample of the blocks around
+   * it, so every triangle stays under the real surface. Throttled, never per frame.
+   */
+  fitGround(ground: (x: number, y: number) => number | null, revision: number, now: number): void {
+    const mesh = this.#mesh,
+      cells = this.#vertexCells,
+      base = this.#baseHeights,
+      data = this.#data;
+    if (!mesh || !cells || !base || !data || revision === this.#groundRevision) return;
+    if (!Number.isNaN(this.#groundRevision) && now - this.#groundAt < REGIONAL_GROUND_REFIT_MS) return;
+    this.#groundRevision = revision;
+    this.#groundAt = now;
+    const n = this.#subdivisions,
+      step = this.#extent / n,
+      w = data.world.widthCells,
+      h = data.world.heightCells;
+    let samples = 0;
+    const at = (x: number, y: number) => {
+      samples++;
+      return ground(normalize(Math.round(x), w), normalize(Math.round(y), h));
+    };
+    // Lowest detailed sample of each block, NaN where none is streamed.
+    const blocks = new Float64Array(n * n).fill(NaN);
+    for (let j = 0; j < n; j++)
+      for (let i = 0; i < n; i++) {
+        const x0 = cells[(j * (n + 1) + i) * 2]!,
+          y0 = cells[(j * (n + 1) + i) * 2 + 1]!;
+        // Most of the region has no detailed ground: five probes rule a block out.
+        const probes = [
+          [x0, y0],
+          [x0 + step, y0],
+          [x0, y0 + step],
+          [x0 + step, y0 + step],
+          [x0 + step / 2, y0 + step / 2],
+        ] as const;
+        if (probes.every(([x, y]) => at(x, y) === null)) continue;
+        let low = Infinity;
+        for (let dy = 0; dy <= step; dy++)
+          for (let dx = 0; dx <= step; dx++) {
+            const height = at(x0 + dx, y0 + dy);
+            if (height !== null && height < low) low = height;
+          }
+        if (low !== Infinity) blocks[j * n + i] = low;
+      }
+    const positions = mesh.getVerticesData('position');
+    if (!positions) return;
+    for (let j = 0; j <= n; j++)
+      for (let i = 0; i <= n; i++) {
+        let low = Infinity;
+        for (const [bi, bj] of [
+          [i - 1, j - 1],
+          [i, j - 1],
+          [i - 1, j],
+          [i, j],
+        ] as const)
+          if (bi >= 0 && bj >= 0 && bi < n && bj < n) {
+            const value = blocks[bj * n + bi]!;
+            if (!Number.isNaN(value) && value < low) low = value;
+          }
+        const v = j * (n + 1) + i;
+        positions[v * 3 + 1] = Math.min(base[v]!, low - REGIONAL_GROUND_MARGIN);
+      }
+    mesh.updateVerticesData('position', positions);
+    this.groundSamples = samples;
   }
   shift(x: number, z: number): void {
     for (const mesh of [this.#mesh, this.#masses])

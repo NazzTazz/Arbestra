@@ -1361,11 +1361,18 @@ export class BabylonVillageScene {
         if (this.#mode !== 'world') {
           this.#streamTerrain(now, frame);
           frame?.mark('streamingStats');
-          if (this.#space)
+          if (this.#space) {
             this.#regionalOverview.update(
               this.#space,
               this.#space.inverse(this.#camera.target.x, this.#camera.target.z),
             );
+            if (this.#store)
+              this.#regionalOverview.fitGround(
+                (x, y) => this.#store?.ground(x, y)?.height ?? null,
+                this.#store.groundRevision,
+                now,
+              );
+          }
         }
         if (!this.#initialLoad.ready) {
           this.#advanceBuildings();
