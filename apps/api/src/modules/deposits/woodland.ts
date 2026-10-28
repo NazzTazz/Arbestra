@@ -91,16 +91,24 @@ export type WoodWork =
   /** Nothing left to do on the designated trees for this mode. */
   | { kind: 'done' };
 
-/** Next work on a case: wood first, then (clearing only) its stumps one by one. */
+/** Next work on a case: wood first, then (clearing only) its stumps one by one.
+ * With `caseAvailable` (the case's free wood, as departures check it), a lot
+ * never takes more than the case holds: admission and departure share one
+ * bound, so a lot admitted is a lot that can leave. */
 export async function nextWoodWork(
   tx: Transaction<Database>,
   worldId: string,
   featureId: string,
   mode: 'cut' | 'clear',
   trees: WoodlandTrees,
+  caseAvailable?: number,
 ): Promise<WoodWork> {
   const lot = nextWoodLot(trees.designated, trees.records);
-  if (lot) return { kind: 'lot', ...lot };
+  if (lot) {
+    if (caseAvailable === undefined) return { kind: 'lot', ...lot };
+    const amount = Math.min(lot.amount, Math.floor(caseAvailable));
+    return amount >= 1 ? { kind: 'lot', treeIndex: lot.treeIndex, amount } : { kind: 'wait' };
+  }
   if (trees.designated.some((i) => treeWood(trees.records.get(i)).remaining > 0)) return { kind: 'wait' };
   if (mode === 'cut') return { kind: 'done' };
   const stump = nextStump(trees.designated, trees.records, await stumpsInProgress(tx, worldId, featureId));

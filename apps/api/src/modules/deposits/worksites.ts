@@ -494,6 +494,7 @@ export async function admitWorksites(
               target.featureId,
               site.mode === 'clear' ? 'clear' : 'cut',
               await readWoodlandTrees(tx, economy.worldId, target.featureId, target.treeIndices),
+              deposit.availableAmount,
             )
           : deposit.remainingAmount <= 0
             ? ({ kind: 'done' } as const)
@@ -751,27 +752,56 @@ export async function admitWorksites(
         await scheduleWake(tx, site, wakeAt);
       continue;
     }
-    await startStoneExtraction(
-      tx,
-      {
-        worldId: economy.worldId,
-        villageId: economy.villageId,
-        widthCells: village.widthCells,
-        heightCells: village.heightCells,
-      },
-      economy,
-      next.featureId,
-      randomUUID(),
-      workers,
-      next.path,
-      transportMs,
-      {
-        id: site.id,
-        amount: next.amount,
-        ...(next.treeIndex !== undefined ? { treeIndex: next.treeIndex } : {}),
-        ...(budget.preferredCohortId ? { preferredCohortId: budget.preferredCohortId } : {}),
-      },
-    );
+    // A departure refused now (stock, access, workers) must not fail the read,
+    // command or worker that admits it: the site waits and wakes up later.
+    await sql`savepoint worksite_departure`.execute(tx);
+    let refused: HttpError | undefined;
+    try {
+      await startStoneExtraction(
+        tx,
+        {
+          worldId: economy.worldId,
+          villageId: economy.villageId,
+          widthCells: village.widthCells,
+          heightCells: village.heightCells,
+        },
+        economy,
+        next.featureId,
+        randomUUID(),
+        workers,
+        next.path,
+        transportMs,
+        {
+          id: site.id,
+          amount: next.amount,
+          ...(next.treeIndex !== undefined ? { treeIndex: next.treeIndex } : {}),
+          ...(budget.preferredCohortId ? { preferredCohortId: budget.preferredCohortId } : {}),
+        },
+      );
+    } catch (error) {
+      if (!(error instanceof HttpError && error.statusCode === 409)) throw error;
+      refused = error;
+      await sql`rollback to savepoint worksite_departure`.execute(tx);
+    }
+    await sql`release savepoint worksite_departure`.execute(tx);
+    if (refused) {
+      await tx
+        .updateTable('extractionWorksites')
+        .set({
+          waitReason: ['DEPOSIT_OUT_OF_RANGE', 'DEPOSIT_PROTECTED', 'DEPOSIT_INTERIOR'].includes(refused.code)
+            ? 'access'
+            : refused.code === 'WORKERS_UNAVAILABLE'
+              ? 'workers-resting'
+              : 'stock-reserved',
+          updatedAt: economy.through,
+        })
+        .where('worldId', '=', economy.worldId)
+        .where('id', '=', site.id)
+        .execute();
+      if (!site.nextWakeAt || site.nextWakeAt <= economy.through)
+        await scheduleWake(tx, site, new Date(economy.through.getTime() + WAIT_MS));
+      continue;
+    }
     if (site.exploitationOrderId) await consumeInitialWorkers(tx, site.exploitationOrderId, workers);
     await tx
       .updateTable('extractionWorksites')

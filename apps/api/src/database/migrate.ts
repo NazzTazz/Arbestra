@@ -16,6 +16,7 @@ import * as woodlandCutAmountMigration from './migrations/062_woodland_cut_amoun
 import * as villageTravelNetworksMigration from './migrations/063_village_travel_networks.js';
 import * as woodlandTreesMigration from './migrations/064_woodland_trees.js';
 import * as woodlandTreeHarvestMigration from './migrations/065_woodland_tree_harvest.js';
+import * as woodlandTreeConversionRepairMigration from './migrations/066_woodland_tree_conversion_repair.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -140,6 +141,7 @@ const migrationProvider: MigrationProvider = {
       '063_village_travel_networks': villageTravelNetworksMigration,
       '064_woodland_trees': woodlandTreesMigration,
       '065_woodland_tree_harvest': woodlandTreeHarvestMigration,
+      '066_woodland_tree_conversion_repair': woodlandTreeConversionRepairMigration,
     };
   },
 };

@@ -48,7 +48,7 @@ async function former(
   values: {
     variantSeed: number;
     initial: number;
-    remaining: number;
+    remaining: number | string;
     cut: number;
     reserved?: number;
     occupied?: boolean;
@@ -253,6 +253,58 @@ it('converts cut, starter, treeless and procedural cases into trees of 500, once
         reservedAmount: '0',
       });
       expect(await occupancy(tx, busyTreeless)).toBe(0);
+      throw new Rollback();
+    });
+  } catch (error) {
+    if (!(error instanceof Rollback)) throw error;
+  }
+}, 120_000);
+
+it('converts again a case whose trees were written on the former stock, from its own stock', async () => {
+  try {
+    await db.transaction().execute(async (tx) => {
+      const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
+      // Development database, 28 October: the new code ran before migration 065
+      // and felled a tree of a case 90 % cut under the former model.
+      const id = await former(
+        tx,
+        await freeCell(tx, 1500, 300, 4, new Set()),
+        { variantSeed: 3, initial: 1000, remaining: '116.2859705687830687883723810000', cut: 900, reserved: 100 },
+        { sourceKey: 'forest:fixture-c', treeIndices: [5, 6], removedIndices: [] },
+      );
+      await tx
+        .insertInto('woodlandTrees')
+        .values({ worldId, featureId: id, treeIndex: 5, remainingAmount: 500, reservedAmount: 100, felledAt: t })
+        .execute();
+      const lot = await lotUnderWay(tx, id, 100, t);
+      await tx.updateTable('depositExtractions').set({ treeIndex: 5 }).where('id', '=', lot.id).execute();
+
+      expect(await convert(tx)).toBeGreaterThanOrEqual(1);
+      // 900 of 1000 cut: the first tree a stump, the second a trunk of 100 that keeps the lot.
+      expect(await caseOf(tx, id)).toEqual({
+        initialAmount: '1000',
+        remainingAmount: '100',
+        reservedAmount: '100',
+        cutAmount: '900',
+        cleared: false,
+      });
+      expect(await treesOf(tx, id)).toEqual([
+        { treeIndex: 5, remainingAmount: 0, reservedAmount: 0 },
+        { treeIndex: 6, remainingAmount: 100, reservedAmount: 100 },
+      ]);
+      expect(
+        (
+          await tx
+            .selectFrom('depositExtractions')
+            .select('treeIndex')
+            .where('id', '=', lot.id)
+            .executeTakeFirstOrThrow()
+        ).treeIndex,
+      ).toBe(6);
+      // Consistent now: a second run leaves it alone.
+      const once = [await caseOf(tx, id), await treesOf(tx, id)];
+      expect(await convert(tx)).toBe(0);
+      expect([await caseOf(tx, id), await treesOf(tx, id)]).toEqual(once);
       throw new Rollback();
     });
   } catch (error) {

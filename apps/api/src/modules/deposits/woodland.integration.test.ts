@@ -14,6 +14,7 @@ import { admitWorksites, createWorksite } from './worksites.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
 import { readVillageDepositDetails, ownedVillage, reconcileVillageForRead } from '../villages/service.js';
 import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
+import { admitVillageWorksites } from '../villages/worksite-admission.js';
 
 /** The tree as the wood harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md): 500 per
  * tree, lots of 100 on one tree, felled at its first lot, a stump at its last;
@@ -346,6 +347,88 @@ it('refuses to finish a clearing while a tree or a stump stands', async () => {
     await clearWoodland(tx, worldId, id, t);
     expect((await readStoneDeposit(tx, worldId, id)).cleared).toBe(true);
     expect(await occupied(tx, id)).toBe(0);
+  });
+});
+
+it('never fails a wake when a wood lot cannot leave: the next lot takes at most what the case holds', async () => {
+  await fixture(async (tx, id, t) => {
+    const economy = { worldId, villageId, through: t },
+      path = [{ cellX: 1024, cellY: 512 }, { cellX: 1024, cellY: 513 }, cell];
+    const siteId = await createWorksite(tx, economy, {
+      commandId: randomUUID(),
+      mode: 'cut',
+      workerCap: 10,
+      featureIds: [id],
+    });
+    await admitWorksites(tx, economy, village, async () => path);
+    const first = await tx
+      .selectFrom('depositExtractions')
+      .selectAll()
+      .where('worksiteId', '=', siteId)
+      .executeTakeFirstOrThrow();
+    // Development database, 28 October: the case still held the stock of the
+    // former model (116 of 1000, 900 cut) while the new code felled its tree.
+    await tx
+      .updateTable('woodlandDeposits')
+      .set({ remainingAmount: '116.2859705687830687883723810000', cutAmount: 900 })
+      .where('featureId', '=', id)
+      .execute();
+    // The wake of a read, a command or the worker after the lot's deadline:
+    // the same economy and admission, here at a chosen instant.
+    const later = new Date(first.completesAt.getTime() + 1);
+    await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], false, [villageId], later);
+    await admitVillageWorksites(tx, { worldId, villageId, through: later });
+    const wood = await tx
+      .selectFrom('woodlandDeposits')
+      .select(['remainingAmount', 'reservedAmount'])
+      .where('featureId', '=', id)
+      .executeTakeFirstOrThrow();
+    // Debited by its owner; the next lot stays within the case.
+    expect(Number(wood.remainingAmount)).toBeCloseTo(16.29, 2);
+    expect(Number(wood.reservedAmount)).toBeLessThanOrEqual(Number(wood.remainingAmount));
+    const next = await tx
+      .selectFrom('depositExtractions')
+      .select('reservedAmount')
+      .where('worksiteId', '=', siteId)
+      .where('status', '=', 'in-progress')
+      .executeTakeFirst();
+    expect(Number(next?.reservedAmount ?? 0)).toBeLessThanOrEqual(16);
+  });
+}, 60_000);
+
+it('lets a site wait when its departure is refused, instead of failing the wake that admits it', async () => {
+  await fixture(async (tx, id, t) => {
+    const economy = { worldId, villageId, through: t },
+      far = { cellX: 1400, cellY: 700 };
+    const siteId = await createWorksite(tx, economy, {
+      commandId: randomUUID(),
+      mode: 'cut',
+      workerCap: 10,
+      featureIds: [id],
+    });
+    // The case is now out of the village's range: the departure refuses it.
+    await tx.updateTable('worldCellOccupancies').set(far).where('featureId', '=', id).execute();
+    await tx.updateTable('woodlandDeposits').set(far).where('featureId', '=', id).execute();
+    await admitWorksites(tx, economy, village, async () => [{ cellX: 1024, cellY: 512 }, far]);
+    expect(await tx.selectFrom('depositExtractions').select('id').where('worksiteId', '=', siteId).execute()).toEqual(
+      [],
+    );
+    expect(
+      await tx
+        .selectFrom('extractionWorksites')
+        .select(['status', 'waitReason'])
+        .where('id', '=', siteId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'running', waitReason: 'access' });
+    expect(
+      await tx
+        .selectFrom('scheduledTasks')
+        .select('taskType')
+        .where('taskType', '=', 'deposit.worksite.wake')
+        .where(sql<boolean>`payload->>'worksiteId'=${siteId}`)
+        .execute(),
+    ).toHaveLength(1);
+    expect(await tree(tx, id, 0)).toBeUndefined();
   });
 });
 

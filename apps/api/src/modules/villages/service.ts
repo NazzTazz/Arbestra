@@ -2704,7 +2704,14 @@ export async function prepareExploitation(
       // A wood lot takes one tree: its size is that tree's free wood.
       const work =
         family === 'wood' && deposit.availableAmount >= 1
-          ? await nextWoodWork(tx, village.worldId, id, 'cut', await readWoodlandTrees(tx, village.worldId, id))
+          ? await nextWoodWork(
+              tx,
+              village.worldId,
+              id,
+              'cut',
+              await readWoodlandTrees(tx, village.worldId, id),
+              deposit.availableAmount,
+            )
           : null;
       const amount =
         family === 'wood'

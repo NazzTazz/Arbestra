@@ -368,6 +368,7 @@ export async function startStoneExtraction(
         featureId,
         'cut',
         await readWoodlandTrees(tx, village.worldId, featureId),
+        deposit.availableAmount,
       );
       if (work.kind === 'lot') tree = { treeIndex: work.treeIndex, amount: work.amount };
     }
