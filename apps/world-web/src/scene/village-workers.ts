@@ -1119,6 +1119,15 @@ export class VillageWorkers {
       this.#woodPlans.set(g.mission.id, { kind: 'nul', fall: null });
       return null;
     }
+    // A site the ordinary test found no room for put everyone on the road with
+    // no pair (Tristan's dev village, 28 October: idle villagers on a path).
+    // Around a real tree the felling test decides: pair the sawyers and lay
+    // the site out as an open one.
+    if (g.layout.variant === 'blocked') {
+      let sawyer = 0;
+      for (const s of stations) if (s.role === 'saw') s.pair = Math.floor(sawyer++ / 2);
+      g.layout.variant = 'front';
+    }
     const base = { x: tree.x - root.x, z: tree.z - root.z },
       add = (p: WorkerPoint, d: WorkerPoint, k: number) => ({ x: p.x + d.x * k, z: p.z + d.z * k }),
       free = (p: WorkerPoint, r = 0.2) =>

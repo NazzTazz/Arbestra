@@ -1499,6 +1499,26 @@ it('wood site: places pair 0 at the real tree in a dense forest, from the fellin
   }
 });
 
+// Dev village, 28 October: with no room at all for the ordinary test the site
+// was laid out on the road with no pair; the team idled there.
+it('wood site: lays out a site the ordinary test found no room for around the real tree', () => {
+  const grove = groveTree(),
+    f = fixture(() => false, { ...grove.hooks, stageFree: () => true });
+  try {
+    f.view.sync(woodTeam('no-room', 4), epoch);
+    f.view.animate(epoch, true);
+    expect(f.view.metrics.woodPlans).toEqual([{ id: 'no-room', kind: 'binome', fall: expect.any(Number) }]);
+    let working = 0;
+    for (let t = 33; t <= 30_000; t += 33) {
+      f.view.animate(epoch + t, true);
+      working = Math.max(working, f.view.metrics.layouts[0]!.phases.filter((phase) => phase === 'work').length);
+    }
+    expect(working).toBe(4);
+  } finally {
+    f.dispose();
+  }
+});
+
 it('wood site: cuts up a trunk already lying without a fall and only by the lot share', () => {
   const grove = groveTree(0.8),
     f = fixture(() => true, grove.hooks);
