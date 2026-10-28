@@ -89,6 +89,12 @@ export interface WorkerHooks {
    */
   fellTree?: (featureId: string, near: WorkerPoint, lotId: string) => FelledTree | null;
   releaseTree?: (lotId: string) => void;
+  /**
+   * Room for the felling layout: real trunks (the felled tree excepted),
+   * buildings, water and equipment; paths allowed, no exclusion around the
+   * grove. Falls back to `free` when absent.
+   */
+  stageFree?: (point: WorkerPoint, radius: number) => boolean;
 }
 /** A real grove tree, in scene units: kit variant, scales and its own turn. */
 export interface FelledTree extends WorkerPoint {
@@ -207,6 +213,12 @@ interface WoodProps {
   fellerAt: number | null;
   plan: WoodPlan | null;
 }
+/** What a wood site's layout found, for the debug overlay. */
+interface WoodPlanState {
+  kind: 'nul' | 'arbre-seul' | 'binome' | 'binome-sans-place';
+  /** Fall heading in degrees, null without a tree. */
+  fall: number | null;
+}
 /** Where the wood site works around the felled grove tree, in group-local units. */
 interface WoodPlan {
   tree: FelledTree;
@@ -245,6 +257,7 @@ const SAW_BLADE = { y: 0.4, height: 0.055 };
 export class VillageWorkers {
   readonly #groups = new Map<string, Group>();
   readonly #latest = new Map<string, Mission>();
+  readonly #woodPlans = new Map<string, WoodPlanState>();
   readonly #traffic = new WorkerTraffic();
   #lastNow: number | null = null;
   #accumulator = 0;
@@ -288,6 +301,10 @@ export class VillageWorkers {
       pending: this.#pending.size,
       updateMs: this.#costs.length ? this.#costs.reduce((a, b) => a + b, 0) / this.#costs.length : 0,
       maxUpdateMs: Math.max(0, ...this.#costs),
+      woodPlans: [...this.#groups.values()].flatMap((g) => {
+        const plan = this.#woodPlans.get(g.mission.id);
+        return plan ? [{ id: g.mission.id, ...plan }] : [];
+      }),
       layouts: [...this.#groups.values()].map((g) => ({
         id: g.mission.id,
         resource: g.mission.resource,
@@ -1094,14 +1111,24 @@ export class VillageWorkers {
     const at = station.workAt ?? station,
       root = g.root.position;
     const tree = previous ?? this.hooks.fellTree?.(featureId, { x: at.x + root.x, z: at.z + root.z }, g.mission.id);
-    if (!tree) return null;
+    if (!tree) {
+      this.#woodPlans.set(g.mission.id, { kind: 'nul', fall: null });
+      return null;
+    }
     const base = { x: tree.x - root.x, z: tree.z - root.z },
       add = (p: WorkerPoint, d: WorkerPoint, k: number) => ({ x: p.x + d.x * k, z: p.z + d.z * k }),
-      free = (p: WorkerPoint, r = 0.2) => this.hooks.free({ x: p.x + root.x, z: p.z + root.z }, r, featureId);
+      free = (p: WorkerPoint, r = 0.2) =>
+        this.hooks.stageFree
+          ? this.hooks.stageFree({ x: p.x + root.x, z: p.z + root.z }, r)
+          : this.hooks.free({ x: p.x + root.x, z: p.z + root.z }, r, featureId, true);
     const towards = (from: WorkerPoint, to: WorkerPoint) => {
       const length = Math.hypot(to.x - from.x, to.z - from.z) || 1;
       return { x: (to.x - from.x) / length, z: (to.z - from.z) / length };
     };
+    const turn = (d: WorkerPoint, angle: number) => ({
+      x: d.x * Math.cos(angle) - d.z * Math.sin(angle),
+      z: d.x * Math.sin(angle) + d.z * Math.cos(angle),
+    });
     // A: from the foot towards the clearing; L: along the forest edge.
     const clearing = towards(
         base,
@@ -1109,11 +1136,23 @@ export class VillageWorkers {
       ),
       edge = { x: clearing.z, z: -clearing.x },
       length = trunkTop(tree.variant) * tree.heightScale;
-    const lies = (d: WorkerPoint) => {
-      for (let k = 0.4; k <= length + 1e-6; k += 0.4) if (!free(add(base, d, k), 0.25)) return false;
-      return true;
+    // The clearest of 16 directions over the trunk's length; on a tie, along
+    // the forest edge (readable from the usual camera), then into the clearing.
+    const room = (d: WorkerPoint) => {
+      let n = 0;
+      for (let k = 0.4; k <= length + 1e-6; k += 0.4, n++) if (!free(add(base, d, k), 0.25)) break;
+      return n;
     };
-    let fall = lies(edge) ? edge : lies({ x: -edge.x, z: -edge.z }) ? { x: -edge.x, z: -edge.z } : clearing;
+    let fall = clearing,
+      best = -1;
+    for (let i = 0; i < 16; i++) {
+      const d = turn(clearing, (i * Math.PI) / 8),
+        score = room(d) * 10 + Math.abs(d.x * edge.x + d.z * edge.z) * 2 + (d.x * clearing.x + d.z * clearing.z);
+      if (score > best + 1e-9) {
+        best = score;
+        fall = d;
+      }
+    }
     // Installation walks to the station itself; work checks its workAt: move both.
     const face = (s: WorkStation, post: WorkerPoint, toward: WorkerPoint) => {
       s.x = post.x;
@@ -1121,22 +1160,34 @@ export class VillageWorkers {
       s.workAt = post;
       s.facing = Math.atan2(toward.x - post.x, toward.z - post.z);
     };
-    if (axe >= 0 && tree.lying === 0 && free(add(base, clearing, 0.6)))
-      face(stations[axe]!, add(base, clearing, 0.6), base);
-    // Saw pair 0 stands across its saw line, perpendicular to the fall.
-    const pair0 = stations.flatMap((s, i) => (s.role === 'saw' && s.pair === 0 ? [i] : []));
-    if (pair0.length === 2 && fall !== clearing && !free(add(base, clearing, -0.49))) fall = clearing;
-    const across = fall === clearing ? edge : clearing;
-    let sawsTree = false;
-    if (pair0.length === 2) {
-      const start = tree.lying > 0 ? add(base, fall, length * tree.lying * (5 / 6)) : base,
-        a = add(start, across, 0.49),
-        b = add(start, across, -0.49);
-      if (free(a) && free(b)) {
-        face(stations[pair0[0]!]!, a, start);
-        face(stations[pair0[1]!]!, b, start);
-        sawsTree = true;
+    let kind: WoodPlanState['kind'] = 'arbre-seul';
+    if (axe >= 0 && tree.lying === 0)
+      for (let i = 0; i < 16; i++) {
+        const post = add(base, turn(clearing, (i * Math.PI) / 8), 0.6);
+        if (free(post)) {
+          face(stations[axe]!, post, base);
+          break;
+        }
       }
+    // Saw pair 0 across its fall at the foot: the saw line turns by 15° steps
+    // until both posts are free. It never goes back to a sawhorse trunk.
+    const pair0 = stations.flatMap((s, i) => (s.role === 'saw' && s.pair === 0 ? [i] : []));
+    let across = { x: fall.z, z: -fall.x };
+    if (pair0.length === 2) {
+      const start = tree.lying > 0 ? add(base, fall, length * tree.lying * (5 / 6)) : base;
+      let placed = false;
+      for (let i = 0; i < 12 && !placed; i++) {
+        const line = turn(across, (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (Math.PI / 12)),
+          a = add(start, line, 0.49),
+          b = add(start, line, -0.49);
+        if (free(a) && free(b)) {
+          face(stations[pair0[0]!]!, a, start);
+          face(stations[pair0[1]!]!, b, start);
+          across = line;
+          placed = true;
+        }
+      }
+      kind = placed ? 'binome' : 'binome-sans-place';
     }
     // The other pairs' sawhorses after the trunk's end, perpendicular to the fall.
     for (const pair of [...new Set(stations.filter((s) => s.role === 'saw' && s.pair > 0).map((s) => s.pair))]) {
@@ -1158,7 +1209,8 @@ export class VillageWorkers {
           post = add(block, clearing, 0.32);
         if (free(post) && free(block, 0.15)) face(s, post, block);
       }
-    return { tree, base, fall, across, length, pair0: sawsTree ? pair0 : [] };
+    this.#woodPlans.set(g.mission.id, { kind, fall: Math.round((Math.atan2(fall.x, fall.z) * 180) / Math.PI) });
+    return { tree, base, fall, across, length, pair0 };
   }
   /**
    * Draws the planned grove tree from the same kit pieces, at the same place,

@@ -1115,6 +1115,7 @@ export class BabylonVillageScene {
         leisurePath: (buildingId, path, lane) => this.#leisurePath(buildingId, path, lane),
         leisureVersion: () => this.#groundKey(),
         fellTree: (featureId, _near, lotId) => this.#fellTree(featureId, lotId),
+        stageFree: (point, radius) => this.#stageFree(point, radius, workerSpatial),
         releaseTree: (lotId) => this.#releaseTree(lotId),
         key: (point) => {
           const cell = this.#space!.inverse(point.x, point.z);
@@ -1578,6 +1579,7 @@ export class BabylonVillageScene {
           );
           this.#canvas.dataset.workerServerNow = String(workerServerNow);
           this.#canvas.dataset.workerFigures = String(this.#workers.figures.length);
+          this.#canvas.dataset.woodPlan = JSON.stringify(this.#workers.metrics.woodPlans);
           this.#canvas.dataset.workerVertices = String(
             this.#workers.figures.reduce(
               (sum, figure) =>
@@ -2806,6 +2808,58 @@ export class BabylonVillageScene {
       lying: slot.lying,
       share,
     };
+  }
+  /**
+   * Room for the felling layout (docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md §3):
+   * the real trunks of nearby groves, felled trees excepted, buildings, water,
+   * barriers and equipment. Paths are allowed and the worked grove has no
+   * exclusion around its centre: standing among its trees is the point.
+   */
+  #stageFree(point: { x: number; z: number }, radius: number, spatial: WorkerObstacles): boolean {
+    if (!this.#space || !this.#store || !this.#state) return false;
+    spatial.update(this.#state);
+    const centre = this.#space.inverse(point.x, point.z);
+    for (const [dx, dz] of [
+      [0, 0],
+      [-radius, -radius],
+      [radius, radius],
+      [-radius, radius],
+      [radius, -radius],
+    ]) {
+      const cell = this.#space.inverse(point.x + dx!, point.z + dz!),
+        x = Math.round(cell.cellX) % this.#space.width,
+        y = Math.round(cell.cellY) % this.#space.height;
+      const ground = this.#store.ground(x, y);
+      if (!ground || ground.code !== 1) return false;
+      if (infrastructureBarrierAt(this.#infrastructureBarriers, cell, this.#state.world)) return false;
+      if (spatial.occupied(x, y)) return false;
+    }
+    spatial.updateEquipment(this.#infrastructureEquipment, this.#space);
+    if (spatial.equipmentBlocked(point, radius)) return false;
+    const size = this.#store.world.chunkSize,
+      cx = Math.round(centre.cellX),
+      cy = Math.round(centre.cellY);
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++)
+        for (const feature of this.featuresAt({
+          cellX: (cx + dx + this.#space.width) % this.#space.width,
+          cellY: (cy + dy + this.#space.height) % this.#space.height,
+        })) {
+          if (feature.type !== 'woodland') continue;
+          const ground = this.#store.ground(feature.cellX, feature.cellY);
+          if (!ground) continue;
+          const anchor = {
+            cellX: Math.floor(feature.cellX / size) * size,
+            cellY: Math.floor(feature.cellY / size) * size,
+          };
+          for (const slot of groveSlots(feature)) {
+            if (this.#treeFelled(feature.id, slot.index) || (!slot.standing && !slot.stump && !slot.young)) continue;
+            const at = this.#slotPlacement(feature, slot, anchor, ground.height),
+              trunk = 0.19 * slot.tree.scale + 0.15;
+            if (Math.hypot(point.x - at.x, point.z - at.z) < trunk + radius) return false;
+          }
+        }
+    return true;
   }
   #releaseTree(lotId: string) {
     const felled = this.#felledTrees.get(lotId);

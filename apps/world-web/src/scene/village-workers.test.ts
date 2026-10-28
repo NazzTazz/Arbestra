@@ -1476,6 +1476,22 @@ it('wood site: saw pair 0 fells the grove tree at its foot, then cuts the lying 
   }
 });
 
+// Alpha, 28 October: in a dense forest the ordinary posts test refused every
+// place around the real tree, so pair 0 kept sawing its sawhorse trunk.
+it('wood site: places pair 0 at the real tree in a dense forest, from the felling layout test', () => {
+  const grove = groveTree(),
+    // The ordinary test refuses the grove's surroundings, as its exclusion did.
+    f = fixture((p) => Math.hypot(p.x - 0.6, p.z - 7.2) > 1.2, { ...grove.hooks, stageFree: () => true });
+  try {
+    f.view.sync(woodTeam('dense', 4), epoch);
+    f.view.animate(epoch, true);
+    expect(f.view.metrics.woodPlans).toEqual([{ id: 'dense', kind: 'binome', fall: expect.any(Number) }]);
+    expect(f.scene.getMeshByName('work-trunk-dense-0')).toBeNull();
+  } finally {
+    f.dispose();
+  }
+});
+
 it('wood site: cuts up a trunk already lying without a fall and only by the lot share', () => {
   const grove = groveTree(0.8),
     f = fixture(() => true, grove.hooks);

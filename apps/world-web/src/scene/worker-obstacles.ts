@@ -60,6 +60,10 @@ export class WorkerObstacles {
     const key = `${x}:${y}`;
     return this.#occupied.has(key) || (this.#blocking.get(key)?.some((id) => id !== ownFeatureId) ?? false);
   }
+  /** A building or its footprint, whatever the features. */
+  occupied(x: number, y: number): boolean {
+    return this.#occupied.has(`${x}:${y}`);
+  }
   feature(id: string | null): NaturalFeature | undefined {
     return id === null ? undefined : this.#byId.get(id);
   }
