@@ -51,6 +51,25 @@ interface BrazierCluster {
   active: Set<VillageBraziers>;
 }
 const sceneClusters = new WeakMap<Scene, BrazierCluster>();
+
+/**
+ * Drawn by the cluster alone. Babylon's light constructor resyncs every mesh twice
+ * (empty include and exclude lists), which also makes each mesh a direct receiver
+ * of the light: ≈250 fires × 10 000 meshes, and fires lit twice at night.
+ */
+class ClusteredPointLight extends PointLight {}
+(ClusteredPointLight.prototype as unknown as { _resyncMeshes(): void })._resyncMeshes = () => {};
+
+function brazierLight(clustered: boolean, name: string, position: Vector3, scene: Scene): PointLight {
+  const light = clustered
+    ? new ClusteredPointLight(name, position, scene, true)
+    : new PointLight(name, position, scene, true);
+  light.diffuse = new Color3(1, 0.51, 0.16);
+  light.specular = Color3.Black();
+  light.range = 5;
+  light.intensity = 0;
+  return light;
+}
 const sceneNights = new WeakMap<Scene, boolean>();
 /** The village scene publishes its night for building fires. */
 export function setSceneNight(scene: Scene, night: boolean): void {
@@ -167,7 +186,7 @@ export class VillageBraziers {
   #items: Array<{
     key: string;
     point: BrazierPoint;
-    meshes: Mesh[];
+    meshes: AbstractMesh[];
     flame: ParticleSystem;
     burning: boolean;
     light: PointLight;
@@ -276,16 +295,16 @@ export class VillageBraziers {
         previous.delete(key);
         continue;
       }
-      // Every brazier has the same masonry: share one geometry instead of
-      // rebuilding and merging eight blocks per streamed brazier.
-      const masonry = this.#masonryTemplate().clone('brazier-masonry', null, true)!;
-      masonry.setEnabled(true);
+      // Every brazier has the same masonry: a native instance of one template.
+      // Cloning copied each mesh's properties by reflection (~1 ms per brazier).
+      const template = this.#masonryTemplate(),
+        masonry = template.createInstance('brazier-masonry');
       masonry.position.set(p.x, p.y, p.z);
       masonry.isPickable = Boolean(p.id);
       masonry.metadata = p.id ? { equipmentId: p.id } : null;
       if (parent) masonry.setParent(parent);
       else freezeStaticHierarchy(masonry);
-      const meshes: Mesh[] = [masonry];
+      const meshes: AbstractMesh[] = [masonry];
       const flame = new ParticleSystem(`brazier-fire-${index}`, 24, this.scene);
       flame.particleTexture = this.#fire;
       flame.emitter = new Vector3(p.x, p.y + 0.1, p.z);
@@ -318,11 +337,10 @@ export class VillageBraziers {
       // Born outside the scene: registering a light, or toggling it, walks every
       // mesh (≈250 fires × 10 000 meshes). The cluster ignores a light's enabled
       // state, so only the bounded fallback joins the scene and starts disabled.
-      const light = new PointLight(`brazier-light-${index}`, new Vector3(p.x, p.y + 0.16, p.z), this.scene, true);
-      light.diffuse = new Color3(1, 0.51, 0.16);
-      light.specular = Color3.Black();
-      light.range = 5;
-      light.intensity = 0;
+      const name = `brazier-light-${index}`,
+        at = new Vector3(p.x, p.y + 0.16, p.z);
+      // Until a fire learns that the cluster is unsupported, lights are built for it.
+      let light = brazierLight(!this.#clusterChecked || this.#cluster !== null, name, at, this.scene);
       if (!this.#clusterChecked) {
         this.#clusterChecked = true;
         if (ClusteredLightContainer.IsLightSupported(light)) {
@@ -344,9 +362,14 @@ export class VillageBraziers {
       }
       if (this.#cluster) this.#cluster.light.addLight(light);
       else {
+        if (light instanceof ClusteredPointLight) {
+          light.dispose();
+          light = brazierLight(false, name, at, this.scene);
+        }
         this.scene.addLight(light);
         light.setEnabled(false);
-        light.includedOnlyMeshes = meshes;
+        // Babylon lights an instance through its source.
+        light.includedOnlyMeshes = [...meshes, template];
       }
       this.#items.push({
         key,
@@ -393,6 +416,7 @@ export class VillageBraziers {
       this.#nextBind = 0;
       return;
     }
+    if (this.#masonry && this.#masonry.visibility !== alpha) this.#masonry.visibility = alpha;
     if (!this.#cluster && lighting && now >= this.#nextBind) {
       this.#nextBind = now + 1000;
       const eye = this.scene.activeCamera?.globalPosition ?? Vector3.Zero();
@@ -410,10 +434,7 @@ export class VillageBraziers {
       const t = now * item.tempo,
         phase = item.phase;
       const flicker = 1 + 0.12 * Math.sin(t * 0.011 + phase) + 0.07 * Math.sin(t * 0.027 + phase * 2.3);
-      for (const mesh of item.meshes) {
-        mesh.visibility = alpha;
-        mesh.setEnabled(alpha > 0);
-      }
+      for (const mesh of item.meshes) mesh.setEnabled(alpha > 0);
       item.flame.emitRate = (29 + 9 * Math.sin(t * 0.0047 + phase)) * alpha;
       if (night && !item.burning) {
         item.flame.start();
@@ -461,7 +482,8 @@ export class VillageBraziers {
     this.#masonry = Mesh.MergeMeshes(meshes, true, false)!;
     this.#masonry.name = 'brazier-masonry-template';
     this.#masonry.isPickable = false;
-    this.#masonry.setEnabled(false);
+    // Instances share their source's visibility; the template itself is never drawn.
+    this.#masonry.isVisible = false;
     return this.#masonry;
   }
   #clear(): void {

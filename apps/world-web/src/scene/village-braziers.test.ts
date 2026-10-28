@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
@@ -224,7 +225,10 @@ it.each(['equipment', 'decoration'])(
           .boundingBox.centerWorld.subtract(new Vector3(4, 2, 6))
           .length(),
       ).toBeLessThan(0.2);
-      expect(scene.getMeshByName('brazier-masonry-template')!.isEnabled()).toBe(false);
+      // Instances of one never-drawn template, not reflective clones.
+      expect(second).toBeInstanceOf(InstancedMesh);
+      expect((second as InstancedMesh).sourceMesh).toBe(scene.getMeshByName('brazier-masonry-template'));
+      expect(scene.getMeshByName('brazier-masonry-template')!.isVisible).toBe(false);
       braziers.updatePoints([]);
       expect(masonry.isDisposed()).toBe(true);
       expect(scene.particleSystems).toHaveLength(0);
@@ -431,6 +435,8 @@ it('hands clustered fires to the cluster without registering each one in the sce
     const cluster = scene.lights.find((light) => light instanceof ClusteredLightContainer) as ClusteredLightContainer;
     expect(added.mock.calls.filter(([light]) => light instanceof PointLight)).toHaveLength(0);
     expect(toggled).not.toHaveBeenCalled();
+    // The cluster draws them: no mesh receives a fire as a direct light source.
+    expect(ground.lightSources.filter((light) => light instanceof PointLight)).toHaveLength(0);
     expect(cluster.lights).toHaveLength(6);
     hall.dispose();
     expect(cluster.lights).toHaveLength(5);
