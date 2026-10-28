@@ -114,6 +114,7 @@ import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
+import { siteSignature } from './site-signature';
 import { fetchGardenKit, gardenHarvestState, GardenKitRenderer, type GardenPlotView } from './garden-kit';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
 import { RenderDiagnostics } from '../dev/render-diagnostics';
@@ -1884,31 +1885,13 @@ export class BabylonVillageScene {
       for (const site of state.cells) {
         if (site.footprint && !site.building && site.footprint.buildingType !== 'garden') continue;
         const key = site.building?.id ?? site.id;
-        const footprint = site.building
-          ? state.cells.filter((c) => c.footprint?.buildingId === site.building!.id).map((c) => [c.cellX, c.cellY])
-          : [];
-        const signature = JSON.stringify([
-          state.world.id,
-          site.building?.type === 'university' ? [site.cellX, site.cellY] : [site.x, site.z],
-          site.building?.type,
-          site.building?.status,
-          site.building?.level,
-          site.building?.targetLevel,
-          site.building?.visualLayout,
-          site.building?.quarterTurns,
-          footprint,
-          plans.get(key)?.murets,
-          site.footprint?.state,
-          this.#gardenStages.get(site.id),
-          this.#fullGardenSites.has(site.id),
-          site.building?.type === 'garden' || site.footprint?.buildingType === 'garden'
-            ? this.#gardenKit !== null
-            : null,
-          site.building?.type === 'university'
-            ? [state.science?.levels.mathematics, state.science?.levels.astronomy]
-            : null,
-          !site.building && !site.footprint ? [site.canBuild, this.#highlightedSiteIds.has(site.id)] : null,
-        ]);
+        const signature = siteSignature(state, site, {
+          murets: plans.get(key)?.murets,
+          gardenStage: this.#gardenStages.get(site.id),
+          fullGarden: this.#fullGardenSites.has(site.id),
+          gardenKit: this.#gardenKit !== null,
+          highlighted: this.#highlightedSiteIds.has(site.id),
+        });
         retained.add(key);
         let cached = this.#buildingCache.get(key);
         if (cached?.signature !== signature) {

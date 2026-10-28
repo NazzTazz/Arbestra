@@ -24,11 +24,17 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 - Trajets après `cb6b1b0` : en 100 s, 4 recherches et 14 420 tests de place (contre environ 251 000 avant, sur une fenêtre plus longue). Une recherche A* réussie coûte encore environ 600 ms en une image. Villageois : 4,3 ms par image en moyenne, pic à 116 ms.
 - Préparation avant la scène (0 à 11 s) : pas encore analysée.
 
-**Prochaines étapes proposées à Tristan, dans l'ordre (chacune avec mesure avant/après et test)**
-1. À l'arrivée du kit de jardin, ne reconstruire que les jardins.
-2. Décoder le kit de jardin hors du thread principal, ou le mettre en cache.
-3. Génération des bâtiments : trouver le type coûteux, puis le mettre en cache ou étaler la génération sur plusieurs images.
-4. Villageois : figurines créées sur plusieurs images, coût d'une recherche A* plafonné ; puis le cas 1 de la spec (clairière de travail), qui rend ces recherches inutiles autour des bosquets.
+**Suite du 28 octobre, soir (étape 1 faite, dev local, à valider)**
+- Cause réelle de la « régénération à l'arrivée du kit » : la signature de cache de chaque bâtiment contenait sa position **locale** (`site.x/z`). Entre le premier passage et l'arrivée du kit, l'origine locale est reprojetée (`WorldSpace.rebase`, qui déplace déjà les meshes) : les 1 127 signatures changeaient, tout était régénéré, hôtel de ville compris. Correctif : `scene/site-signature.ts`, position par cellule canonique (comme le campus). Test `site-signature.test.ts` rouge sur l'ancienne règle, vert après.
+- Mesure navigateur (Bressuire, 66 bâtiments, même machine chargée) : passage à l'arrivée du kit **3,1 à 13,5 s → 81 ms** (38 jardins seuls régénérés). Bâtiments et jardins restent alignés sur les routes après le rebase (capture).
+- L'étape 2 proposée (décoder le kit hors du thread principal) est **sans objet** : le décodage mesure 2 ms (24 Ko). L'attribution LoAF à `Response.arrayBuffer.then` désignait la régénération lancée depuis ce `then`.
+- Premier passage de génération : 5,8 à 8,6 s, dont **l'hôtel de ville en halle-marché seul 4,1 à 4,8 s** (`buildTownHallMarket`, géométrie à la brique, construite trois fois pour les LOD par `buildProceduralBuildingLod`, sans cache ni asset cuit) ; 1 025 emplacements libres ~1,1 s ; scierie 0,3 s ; tailleur de pierre jusqu'à 2 s au premier passage (mesure isolée, à confirmer).
+- Incident dev : le serveur API enfant de `node --watch` était mort (500 partout, rien sur le port 3000, superviseur toujours là, `touch` sans effet). Relancé à part par l'agent ; le `pnpm dev` de Tristan reste à redémarrer proprement.
+
+**Prochaines étapes proposées (chacune avec mesure avant/après et test)**
+1. Halle-marché : la cuire comme `town-hall-1` (`scripts/bake-buildings.mjs`, braseros et horloge restant procéduraux), ou à défaut une génération par LOD à la demande (LOD lointain d'abord).
+2. Emplacements libres (1 025 meshes pour un affichage en mode construction seulement) : création paresseuse ou en instances.
+3. Villageois : figurines créées sur plusieurs images, coût d'une recherche A* plafonné ; puis le cas 1 de la spec (clairière de travail), qui rend ces recherches inutiles autour des bosquets.
 
 **Méthode de mesure qui a marché** : onglet sur `http://localhost:5174`, un `PerformanceObserver` de type `long-animation-frame` (attribution par script), et des sondes temporaires (`FrameTimings` forcé dans la boucle de rendu, marques de temps dans `update`, compteurs dans `#create` et `worksiteConnector`), à ne jamais committer. `canvas.dataset` expose `initialLoad`, `woodPlan`, `workerTraffic` et `terrainStreaming`.
 
