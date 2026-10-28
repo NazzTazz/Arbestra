@@ -33,10 +33,7 @@ const REGION_CELLS = 640,
 export const REGIONAL_GROUND_MARGIN = 0.15;
 /** Ground streams in chunk by chunk: refit the sheet at most this often. */
 export const REGIONAL_GROUND_REFIT_MS = 1000;
-/** Terrain code of water: its sheet vertices are the lake bed seen through the water. */
-const WATER_CODE = 2;
-/** Height of the sheet's water, and the lowest it may ever sink: below it, the
- * sheet stopped backing translucent water and lakes turned white (Tristan). */
+/** Height of the sheet's water where no detailed terrain is streamed. */
 export const REGIONAL_WATER_HEIGHT = -0.86;
 const SURFACE_RADIUS = 0.48;
 
@@ -239,9 +236,8 @@ export class RegionalOverview {
    * regional means, so in a hollow they rose above the detailed ground and
    * shimmered through it (an « oil slick », Tristan, 28 October). Where detailed
    * ground exists, each vertex sinks below the lowest sample of the blocks around
-   * it, so every triangle stays under the real surface. Water samples are left
-   * out: under translucent water the sheet is the visible bed, and sinking it
-   * there turned lakes white. Throttled, never per frame.
+   * it, so every triangle stays under the real surface, river beds included:
+   * the real bed is what shows through the water. Throttled, never per frame.
    */
   fitGround(
     ground: (x: number, y: number) => { code: number; height: number } | null,
@@ -263,8 +259,7 @@ export class RegionalOverview {
     let samples = 0;
     const at = (x: number, y: number) => {
       samples++;
-      const sample = ground(normalize(Math.round(x), w), normalize(Math.round(y), h));
-      return sample && sample.code !== WATER_CODE ? sample.height : null;
+      return ground(normalize(Math.round(x), w), normalize(Math.round(y), h))?.height ?? null;
     };
     // Lowest detailed sample of each block, NaN where none is streamed.
     const blocks = new Float64Array(n * n).fill(NaN);
@@ -305,7 +300,7 @@ export class RegionalOverview {
             if (!Number.isNaN(value) && value < low) low = value;
           }
         const v = j * (n + 1) + i;
-        positions[v * 3 + 1] = Math.max(REGIONAL_WATER_HEIGHT, Math.min(base[v]!, low - REGIONAL_GROUND_MARGIN));
+        positions[v * 3 + 1] = Math.min(base[v]!, low - REGIONAL_GROUND_MARGIN);
       }
     mesh.updateVerticesData('position', positions);
     this.groundSamples = samples;

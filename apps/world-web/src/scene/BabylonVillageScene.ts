@@ -2620,7 +2620,9 @@ export class BabylonVillageScene {
       },
       this.#scene,
     );
-    earth.position.y = -1.55;
+    // A backdrop for unstreamed terrain, far under any river bed: at -1.55 it
+    // hid deep RC1 beds and showed pale through the water (Tristan, 29 October).
+    earth.position.y = -30;
     const background = new StandardMaterial('loading-backdrop', this.#scene);
     background.diffuseColor = Color3.FromHexString('#8ea0a0');
     background.disableLighting = true;

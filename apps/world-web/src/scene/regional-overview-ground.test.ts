@@ -83,28 +83,17 @@ it('refits only when the ground changes, at most once per interval, and probes u
   }
 });
 
-it('leaves the sheet under a lake where it is: it is the bed seen through the water', () => {
+it('sinks the sheet under a river bed too, so the real bed shows through the water', () => {
   const f = fixture();
   try {
-    const before = f.heights();
-    // The whole streamed area is water, its RC1 bed far below.
+    // Streamed water, its RC1 bed deep below the regional water height.
     f.overview.fitGround(
       (x, y) => (x >= 480 && x <= 544 && y >= 480 && y <= 544 ? { code: 2, height: -6 } : null),
       1,
       0,
     );
-    expect(f.heights()).toEqual(before);
-  } finally {
-    f.dispose();
-  }
-});
-
-it('never sinks the sheet below its former water level, so lakes keep their bed', () => {
-  const f = fixture();
-  try {
-    // A shore cell classed as land but holding a deep RC1 bed.
-    f.overview.fitGround((x, y) => (x >= 480 && x <= 544 && y >= 480 && y <= 544 ? land(-3) : null), 1, 0);
-    expect(Math.min(...f.heights().map((v) => v.y))).toBeCloseTo(REGIONAL_WATER_HEIGHT, 5);
+    expect(Math.min(...f.heights().map((v) => v.y))).toBeCloseTo(-6 - REGIONAL_GROUND_MARGIN, 5);
+    expect(-6 - REGIONAL_GROUND_MARGIN).toBeLessThan(REGIONAL_WATER_HEIGHT);
   } finally {
     f.dispose();
   }
