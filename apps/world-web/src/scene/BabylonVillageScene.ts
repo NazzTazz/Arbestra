@@ -1491,6 +1491,9 @@ export class BabylonVillageScene {
         this.#canvas.dataset.cloudCover = String(this.#transition.alpha);
         if (import.meta.env.DEV && this.#mode === 'world')
           this.#canvas.dataset.worldCamera = JSON.stringify(this.#torusOverview?.navigationMetrics());
+        // Felling layout of each wood site, readable in dev from the console.
+        if (import.meta.env.DEV || import.meta.env.MODE === 'e2e' || devToolsEnabled())
+          this.#canvas.dataset.woodPlan = JSON.stringify(this.#workers.woodPlans);
         if (import.meta.env.MODE === 'e2e') {
           const viewport = this.#camera.viewport.toGlobal(
             this.#engine.getRenderWidth(),
@@ -1579,7 +1582,6 @@ export class BabylonVillageScene {
           );
           this.#canvas.dataset.workerServerNow = String(workerServerNow);
           this.#canvas.dataset.workerFigures = String(this.#workers.figures.length);
-          this.#canvas.dataset.woodPlan = JSON.stringify(this.#workers.metrics.woodPlans);
           this.#canvas.dataset.workerVertices = String(
             this.#workers.figures.reduce(
               (sum, figure) =>

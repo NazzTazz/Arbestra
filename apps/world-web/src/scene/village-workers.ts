@@ -293,6 +293,13 @@ export class VillageWorkers {
   get figures(): VillageWorkerFigure[] {
     return [...this.#groups.values()].flatMap((g) => g.people);
   }
+  /** What each wood site's felling layout found, for the debug overlay. */
+  get woodPlans() {
+    return [...this.#groups.values()].flatMap((g) => {
+      const plan = this.#woodPlans.get(g.mission.id);
+      return plan ? [{ id: g.mission.id, ...plan }] : [];
+    });
+  }
   get metrics() {
     return {
       figures: this.figures.length,
@@ -301,10 +308,7 @@ export class VillageWorkers {
       pending: this.#pending.size,
       updateMs: this.#costs.length ? this.#costs.reduce((a, b) => a + b, 0) / this.#costs.length : 0,
       maxUpdateMs: Math.max(0, ...this.#costs),
-      woodPlans: [...this.#groups.values()].flatMap((g) => {
-        const plan = this.#woodPlans.get(g.mission.id);
-        return plan ? [{ id: g.mission.id, ...plan }] : [];
-      }),
+      woodPlans: this.woodPlans,
       layouts: [...this.#groups.values()].map((g) => ({
         id: g.mission.id,
         resource: g.mission.resource,
