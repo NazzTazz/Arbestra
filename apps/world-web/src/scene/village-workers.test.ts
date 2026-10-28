@@ -1448,6 +1448,34 @@ it('wood site: a lone woodcutter strikes the grove tree itself and makes it shak
   }
 });
 
+it('wood site: saw pair 0 fells the grove tree at its foot, then cuts the lying trunk towards its foot', () => {
+  const grove = groveTree(),
+    f = fixture(() => true, grove.hooks);
+  try {
+    // Four woodcutters: saw pair 0 and two choppers.
+    f.view.sync(woodTeam('team', 4), epoch);
+    const sawyers = () => f.view.figures.slice(0, 2).map((p) => p.root.position.clone());
+    let atFoot = false;
+    const along: number[] = [];
+    for (let t = 0; t <= 71_000; t += 33) {
+      f.view.animate(epoch + t, true);
+      const [a, b] = sawyers();
+      const mid = { x: (a!.x + b!.x) / 2, z: (a!.z + b!.z) / 2 };
+      const foot = Math.hypot(mid.x - 0.6, mid.z - 7.2);
+      if (t > 10_000 && t < 15_000 && foot < 0.1 && Math.abs(Math.hypot(a!.x - b!.x, a!.z - b!.z) - 0.98) < 0.05)
+        atFoot = true;
+      if (t > 20_000 && t % 5_000 < 33) along.push(foot);
+    }
+    expect(atFoot, 'both sawyers across the foot of the real tree before it falls').toBe(true);
+    // Cutting from the end towards the foot: never moving away, and closer at the end.
+    for (let i = 1; i < along.length; i++) expect(along[i]!).toBeLessThanOrEqual(along[i - 1]! + 1e-6);
+    expect(along.at(-1)!).toBeLessThan(along[0]!);
+    expect(f.scene.getMeshByName('work-trunk-team-0'), 'no sawhorse trunk for pair 0').toBeNull();
+  } finally {
+    f.dispose();
+  }
+});
+
 it('wood site: cuts up a trunk already lying without a fall and only by the lot share', () => {
   const grove = groveTree(0.8),
     f = fixture(() => true, grove.hooks);

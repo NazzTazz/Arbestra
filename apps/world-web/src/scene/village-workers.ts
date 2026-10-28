@@ -22,9 +22,9 @@ import {
   type WorkerPoint,
   type WorkerRole,
 } from './worker-motion';
-import { worksiteLayout, worksiteConnector, type WorksiteLayout } from './worksite-layout';
+import { worksiteLayout, worksiteConnector, type WorksiteLayout, type WorkStation } from './worksite-layout';
 import { PILE_LOGS, WOOD_SECTIONS, pileSlot, woodFallAt, woodPlannedFall, woodSite } from './worksite-site';
-import { treePieceData, type TreeVariant } from './grove-trees';
+import { treePieceData, trunkTop, type TreeVariant } from './grove-trees';
 import { idleTour, idleTourPhase, type IdleLeg, type IdleVisit } from './idle-tour';
 import {
   buildWorkerFigure,
@@ -205,8 +205,19 @@ interface WoodProps {
   /** Index of the person whose arrival lets the tree fall, and when it got there (s from W0). */
   feller: number;
   fellerAt: number | null;
-  /** The pair's sawhorse trunk: the felled tree lies under the blade in its place. */
-  sawhorse: Mesh | null;
+  plan: WoodPlan | null;
+}
+/** Where the wood site works around the felled grove tree, in group-local units. */
+interface WoodPlan {
+  tree: FelledTree;
+  base: WorkerPoint;
+  /** Unit direction of the fall, and of saw pair 0's line across it. */
+  fall: WorkerPoint;
+  across: WorkerPoint;
+  /** Length of the trunk under its foliage. */
+  length: number;
+  /** Saw pair 0, when it fells and cuts up the tree itself. */
+  pair0: number[];
 }
 /** Trunk radius of a kit tree at scale 1: a tree lying without its foliage rests on it. */
 const KIT_TRUNK_RADIUS = 0.19;
@@ -974,6 +985,8 @@ export class VillageWorkers {
   #props(g: Group, felled: FelledTree | null = null) {
     const m = g.mission;
     if (m.resource === 'garden' || m.resource === 'idle' || m.resource === 'survey' || m.resource === 'trade') return;
+    // Posts move around the real tree before the saws and blocks are placed.
+    const plan = m.resource === 'wood' ? this.#woodPlan(g, felled) : null;
     const sawPairs = new Map<number, WorkerPoint[]>();
     for (const s of g.layout.stations)
       if (s.role === 'saw' && (g.layout.variant !== 'compact' || s.pair === 0)) {
@@ -1019,6 +1032,8 @@ export class VillageWorkers {
           saw,
         );
       g.saws.push(saw);
+      // Pair 0 saws the felled tree itself: no sawhorse trunk.
+      if (plan?.pair0.length && pair === 0) continue;
       const trunk = MeshBuilder.CreateCylinder(
         `work-trunk-${m.id}-${pair}`,
         { height: 0.9, diameter: 0.19, tessellation: 6 },
@@ -1056,50 +1071,114 @@ export class VillageWorkers {
         block.metadata = { station: i };
         g.blocks.push(block);
       }
-    if (m.resource === 'wood') g.wood = this.#woodProps(g, felled);
+    if (m.resource === 'wood') g.wood = this.#woodProps(g, plan);
     g.root.setEnabled(false);
   }
   /**
-   * The felled tree is a real tree of the grove (docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md §3),
-   * drawn from the same kit piece at the same place, scale and turn, and hidden
-   * in the grove meanwhile. It falls sideways from its feller, readable from the
-   * usual camera. The pile waits beside the road end.
+   * The whole wood site works around the real grove tree (layout from the
+   * scene's designer, 28 October): a lone axe in front of it; saw pair 0 fells
+   * it across its saw line, then cuts the trunk where it lies, a step closer
+   * at each section; the other pairs' sawhorses after the trunk's end and the
+   * chopping blocks on the clearing side. The tree falls along the forest edge
+   * on its free side, else into the clearing. Any post that is not free keeps
+   * its template place, for that role only. Presentation only.
    */
-  #woodProps(g: Group, previous: FelledTree | null = null): WoodProps | null {
+  #woodPlan(g: Group, previous: FelledTree | null): WoodPlan | null {
+    const stations = g.layout.stations,
+      featureId = g.mission.featureId,
+      axe = stations.findIndex((s) => s.role === 'axe'),
+      first = stations.findIndex((s) => s.role === 'saw' && s.pair === 0),
+      feller = axe >= 0 ? axe : first >= 0 ? first : 0,
+      station = stations[feller];
+    if (!station || !featureId) return null;
+    const at = station.workAt ?? station,
+      root = g.root.position;
+    const tree = previous ?? this.hooks.fellTree?.(featureId, { x: at.x + root.x, z: at.z + root.z }, g.mission.id);
+    if (!tree) return null;
+    const base = { x: tree.x - root.x, z: tree.z - root.z },
+      add = (p: WorkerPoint, d: WorkerPoint, k: number) => ({ x: p.x + d.x * k, z: p.z + d.z * k }),
+      free = (p: WorkerPoint, r = 0.2) => this.hooks.free({ x: p.x + root.x, z: p.z + root.z }, r, featureId);
+    const towards = (from: WorkerPoint, to: WorkerPoint) => {
+      const length = Math.hypot(to.x - from.x, to.z - from.z) || 1;
+      return { x: (to.x - from.x) / length, z: (to.z - from.z) / length };
+    };
+    // A: from the foot towards the clearing; L: along the forest edge.
+    const clearing = towards(
+        base,
+        Math.hypot(g.layout.approach.x - base.x, g.layout.approach.z - base.z) > 0.1 ? g.layout.approach : at,
+      ),
+      edge = { x: clearing.z, z: -clearing.x },
+      length = trunkTop(tree.variant) * tree.heightScale;
+    const lies = (d: WorkerPoint) => {
+      for (let k = 0.4; k <= length + 1e-6; k += 0.4) if (!free(add(base, d, k), 0.25)) return false;
+      return true;
+    };
+    let fall = lies(edge) ? edge : lies({ x: -edge.x, z: -edge.z }) ? { x: -edge.x, z: -edge.z } : clearing;
+    // Installation walks to the station itself; work checks its workAt: move both.
+    const face = (s: WorkStation, post: WorkerPoint, toward: WorkerPoint) => {
+      s.x = post.x;
+      s.z = post.z;
+      s.workAt = post;
+      s.facing = Math.atan2(toward.x - post.x, toward.z - post.z);
+    };
+    if (axe >= 0 && tree.lying === 0 && free(add(base, clearing, 0.6)))
+      face(stations[axe]!, add(base, clearing, 0.6), base);
+    // Saw pair 0 stands across its saw line, perpendicular to the fall.
+    const pair0 = stations.flatMap((s, i) => (s.role === 'saw' && s.pair === 0 ? [i] : []));
+    if (pair0.length === 2 && fall !== clearing && !free(add(base, clearing, -0.49))) fall = clearing;
+    const across = fall === clearing ? edge : clearing;
+    let sawsTree = false;
+    if (pair0.length === 2) {
+      const start = tree.lying > 0 ? add(base, fall, length * tree.lying * (5 / 6)) : base,
+        a = add(start, across, 0.49),
+        b = add(start, across, -0.49);
+      if (free(a) && free(b)) {
+        face(stations[pair0[0]!]!, a, start);
+        face(stations[pair0[1]!]!, b, start);
+        sawsTree = true;
+      }
+    }
+    // The other pairs' sawhorses after the trunk's end, perpendicular to the fall.
+    for (const pair of [...new Set(stations.filter((s) => s.role === 'saw' && s.pair > 0).map((s) => s.pair))]) {
+      const indices = stations.flatMap((s, i) => (s.role === 'saw' && s.pair === pair ? [i] : []));
+      if (indices.length !== 2) continue;
+      const centre = add(add(base, fall, length + 0.6 + 0.9 * (pair - 1)), clearing, 0.35),
+        a = add(centre, fall, -0.49),
+        b = add(centre, fall, 0.49);
+      if (free(a) && free(b)) {
+        face(stations[indices[0]!]!, a, centre);
+        face(stations[indices[1]!]!, b, centre);
+      }
+    }
+    // Chopping blocks on the clearing side, halfway along the trunk.
+    let k = 0;
+    for (const s of stations)
+      if (s.role === 'wood-chop') {
+        const block = add(add(base, fall, length / 2), clearing, 1.1 + 0.6 * k++),
+          post = add(block, clearing, 0.32);
+        if (free(post) && free(block, 0.15)) face(s, post, block);
+      }
+    return { tree, base, fall, across, length, pair0: sawsTree ? pair0 : [] };
+  }
+  /**
+   * Draws the planned grove tree from the same kit pieces, at the same place,
+   * scale and turn, hidden in the grove meanwhile. The pile waits beside the
+   * road end.
+   */
+  #woodProps(g: Group, plan: WoodPlan | null): WoodProps | null {
     const stations = g.layout.stations,
       axe = stations.findIndex((s) => s.role === 'axe'),
-      saw = stations.findIndex((s) => s.role === 'saw' && s.pair === 0);
-    const feller = axe >= 0 ? axe : saw >= 0 ? saw : 0,
-      station = stations[feller];
-    if (!station) return null;
-    const at = station.workAt ?? station,
-      target = this.hooks.project(g.mission.target);
-    const featureId = g.mission.featureId;
-    const near = { x: at.x + g.root.position.x, z: at.z + g.root.position.z };
-    const tree = previous ?? (featureId ? (this.hooks.fellTree?.(featureId, near, g.mission.id) ?? null) : null);
+      first = stations.findIndex((s) => s.role === 'saw' && s.pair === 0);
+    const feller = axe >= 0 ? axe : first >= 0 ? first : 0;
+    if (!stations[feller]) return null;
+    const target = this.hooks.project(g.mission.target);
     let heading: TransformNode | null = null,
       tilt: TransformNode | null = null,
       trunk: Mesh | null = null,
-      crown: Mesh | null = null,
-      base: WorkerPoint = at;
-    if (tree) {
-      base = { x: tree.x - g.root.position.x, z: tree.z - g.root.position.z };
-      // A lone woodcutter strikes the grove tree itself: its post moves in front
-      // of the trunk when that place is free, facing it.
-      if (axe >= 0 && tree.lying === 0) {
-        const away = { x: at.x - base.x, z: at.z - base.z },
-          length = Math.hypot(away.x, away.z) || 1,
-          post = { x: base.x + (away.x / length) * 0.6, z: base.z + (away.z / length) * 0.6 };
-        if (
-          this.hooks.free({ x: post.x + g.root.position.x, z: post.z + g.root.position.z }, 0.2, g.mission.featureId)
-        ) {
-          station.workAt = post;
-          station.facing = Math.atan2(base.x - post.x, base.z - post.z);
-        }
-      }
-      const toTree = { x: base.x - at.x, z: base.z - at.z },
-        length = Math.hypot(toTree.x, toTree.z) || 1,
-        fall = { x: toTree.z / length, z: -toTree.x / length };
+      crown: Mesh | null = null;
+    const base = plan?.base ?? stations[feller]!.workAt ?? stations[feller]!;
+    if (plan) {
+      const { tree, fall } = plan;
       heading = new TransformNode(`wood-tree-${g.mission.id}`, this.scene);
       heading.parent = g.root;
       heading.position.set(base.x, 0, base.z);
@@ -1148,7 +1227,7 @@ export class VillageWorkers {
       log.metadata = { level: slot.level };
       logs.push(log);
     }
-    return { heading, tilt, trunk, crown, tree, logs, base, pile, feller, fellerAt: null, sawhorse: null };
+    return { heading, tilt, trunk, crown, tree: plan?.tree ?? null, plan, logs, base, pile, feller, fellerAt: null };
   }
 
   reproject() {
@@ -1992,6 +2071,7 @@ export class VillageWorkers {
         length = to + (from - to) * (site.sections / WOOD_SECTIONS);
       w.heading.setEnabled(base !== null && length > 0.001);
       w.trunk.scaling.y = Math.max(0.001, length);
+      if (w.plan?.pair0.length === 2 && landed) this.#followCut(g, w.plan, to, from, site.sections);
       w.crown.setEnabled(!landed && site.sections === WOOD_SECTIONS);
     }
     // The pile leaves with the carriers once loading starts.
@@ -2001,6 +2081,42 @@ export class VillageWorkers {
       log.setEnabled(pile !== null && !loaded && i < site.logs);
       const level = (log.metadata as { level: number }).level;
       log.position.y = (pile ?? 0) + PILE_LOG.diameter / 2 + level * PILE_LOG.diameter * 0.9;
+    }
+  }
+  /**
+   * Saw pair 0 cuts the lying trunk from its end towards its foot: at each
+   * section it steps to the next cut, and its saw follows.
+   */
+  #followCut(g: Group, plan: WoodPlan, to: number, from: number, sections: number) {
+    const cut = plan.length * (to + ((from - to) * Math.max(0, sections - 1)) / WOOD_SECTIONS),
+      centre = { x: plan.base.x + plan.fall.x * cut, z: plan.base.z + plan.fall.z * cut };
+    for (const [side, index] of plan.pair0.entries()) {
+      const station = g.layout.stations[index]!,
+        sign = side === 0 ? 1 : -1,
+        post = { x: centre.x + plan.across.x * 0.49 * sign, z: centre.z + plan.across.z * 0.49 * sign },
+        previous = station.workAt ?? station;
+      if (Math.hypot(post.x - previous.x, post.z - previous.z) < 0.01) continue;
+      const person = g.people[index],
+        settled = person ? this.#workingAtPost(person, g) : false;
+      station.x = post.x;
+      station.z = post.z;
+      station.workAt = post;
+      station.facing = Math.atan2(centre.x - post.x, centre.z - post.z);
+      // One step to the next cut, keeping its work.
+      if (person && settled) {
+        person.actor.position = { ...post };
+        person.last = { ...post };
+        person.previous = { ...post };
+      }
+    }
+    const saw = g.saws.find((m) => (m.metadata as { pair: number }).pair === 0);
+    if (saw) {
+      const meta = saw.metadata as { x: number; z: number; ux: number; uz: number };
+      meta.x = centre.x;
+      meta.z = centre.z;
+      meta.ux = plan.across.x;
+      meta.uz = plan.across.z;
+      saw.rotation.y = -Math.atan2(plan.across.z, plan.across.x);
     }
   }
   #workingAtPost(p: Person, g: Group) {
