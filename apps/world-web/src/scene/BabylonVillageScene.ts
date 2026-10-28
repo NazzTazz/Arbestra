@@ -1368,7 +1368,7 @@ export class BabylonVillageScene {
             );
             if (this.#store)
               this.#regionalOverview.fitGround(
-                (x, y) => this.#store?.ground(x, y)?.height ?? null,
+                (x, y) => this.#store?.ground(x, y) ?? null,
                 this.#store.groundRevision,
                 now,
               );
