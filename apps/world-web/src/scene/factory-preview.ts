@@ -25,6 +25,7 @@ import { buildStonemason } from './stonemason-factory';
 import { CAMPUS_SUBDIVISIONS, MATHEMATICS_CROWN_WIDTH } from './mathematics-factory';
 import { buildUniversity } from './university-factory';
 import { CELL_UNITS } from './world-space';
+import { buildFootprintGrid } from './footprint-grid';
 import { addressedWorld, worldPage } from '../api/world-address';
 import { buildInfrastructurePresentation, type InfrastructureRecipe } from './infrastructure-factory';
 import { RESOURCE_RECIPES, buildResourcePresentation, isResourceRecipe } from './resource-factory';
@@ -203,59 +204,8 @@ async function openWorkshop() {
     footprint = new Mesh('workshop-footprint', scene);
     footprint.rotation.y = (turn * Math.PI) / 2;
     const width = columns * CELL_UNITS,
-      depth = rows * CELL_UNITS,
-      lines: Vector3[][] = [];
-    for (let x = 0; x <= columns; x++)
-      lines.push([
-        new Vector3(-width / 2 + x * CELL_UNITS, 0.014, -depth / 2),
-        new Vector3(-width / 2 + x * CELL_UNITS, 0.014, depth / 2),
-      ]);
-    for (let z = 0; z <= rows; z++)
-      lines.push([
-        new Vector3(-width / 2, 0.014, -depth / 2 + z * CELL_UNITS),
-        new Vector3(width / 2, 0.014, -depth / 2 + z * CELL_UNITS),
-      ]);
-    const grid = MeshBuilder.CreateLineSystem('workshop-footprint-grid', { lines }, scene);
-    grid.color = Color3.FromHexString('#ffffff');
-    grid.alpha = 0.95;
-    grid.parent = footprint;
-    grid.isPickable = false;
-    grid.renderingGroupId = 1;
-    if (subdivisions > 1) {
-      const minorLines: Vector3[][] = [],
-        halfLines: Vector3[][] = [],
-        step = CELL_UNITS / subdivisions;
-      for (let x = 1; x < columns * subdivisions; x++)
-        if (x % subdivisions) {
-          const group = x % subdivisions === subdivisions / 2 ? halfLines : minorLines;
-          group.push([
-            new Vector3(-width / 2 + x * step, 0.014, -depth / 2),
-            new Vector3(-width / 2 + x * step, 0.014, depth / 2),
-          ]);
-        }
-      for (let z = 1; z < rows * subdivisions; z++)
-        if (z % subdivisions) {
-          const group = z % subdivisions === subdivisions / 2 ? halfLines : minorLines;
-          group.push([
-            new Vector3(-width / 2, 0.014, -depth / 2 + z * step),
-            new Vector3(width / 2, 0.014, -depth / 2 + z * step),
-          ]);
-        }
-      const minorGrid = MeshBuilder.CreateLineSystem('workshop-subcell-grid', { lines: minorLines }, scene);
-      minorGrid.color = Color3.FromHexString('#214e91');
-      minorGrid.alpha = 0.38;
-      minorGrid.parent = footprint;
-      minorGrid.isPickable = false;
-      minorGrid.renderingGroupId = 1;
-      if (halfLines.length) {
-        const halfGrid = MeshBuilder.CreateLineSystem('workshop-halfcell-grid', { lines: halfLines }, scene);
-        halfGrid.color = Color3.FromHexString('#4685cf');
-        halfGrid.alpha = 0.72;
-        halfGrid.parent = footprint;
-        halfGrid.isPickable = false;
-        halfGrid.renderingGroupId = 1;
-      }
-    }
+      depth = rows * CELL_UNITS;
+    buildFootprintGrid(scene, footprint, columns, rows, subdivisions);
     const fill = MeshBuilder.CreateGround('workshop-footprint-fill', { width, height: depth }, scene);
     fill.position.y = 0.01;
     fill.material = footprintMaterial;
