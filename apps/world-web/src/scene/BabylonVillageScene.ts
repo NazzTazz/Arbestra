@@ -3909,9 +3909,9 @@ export class BabylonVillageScene {
 
   #registerStructure(root: Mesh): Mesh {
     root.receiveShadows = true;
-    for (const child of root.getChildMeshes()) {
-      child.receiveShadows = true;
-    }
+    // Instances take shadows from their source; setting it on them only warns.
+    for (const child of root.getChildMeshes())
+      if (child.getClassName() !== 'InstancedMesh') child.receiveShadows = true;
     return root;
   }
 
