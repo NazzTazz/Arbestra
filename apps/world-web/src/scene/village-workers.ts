@@ -218,6 +218,10 @@ interface WoodPlanState {
   kind: 'nul' | 'arbre-seul' | 'binome' | 'binome-sans-place';
   /** Fall heading in degrees, null without a tree. */
   fall: number | null;
+  /** Seconds from W0: when the feller reached its post, when the tree falls, and now. */
+  fellerAt?: number | null;
+  fallAt?: number;
+  t?: number;
 }
 /** Where the wood site works around the felled grove tree, in group-local units. */
 interface WoodPlan {
@@ -1245,7 +1249,9 @@ export class VillageWorkers {
     if (plan) {
       const { tree, fall } = plan;
       heading = new TransformNode(`wood-tree-${g.mission.id}`, this.scene);
-      heading.parent = g.root;
+      // Not under the site root, which shows only once someone works: the grove
+      // hides this tree from the lot's start, so it is drawn from then on.
+      heading.parent = null;
       heading.position.set(base.x, 0, base.z);
       const fallAngle = Math.atan2(fall.x, fall.z);
       heading.rotation.y = fallAngle;
@@ -2113,13 +2119,23 @@ export class VillageWorkers {
       // A trunk already lying is cut up from the start, with no fall.
       fallAt = w.tree && w.tree.lying > 0 ? -10 : seenFrom >= planned ? planned : woodFallAt(duration, w.fellerAt);
     const site = woodSite(duration, t, fallAt, seenFrom);
+    const debug = this.#woodPlans.get(g.mission.id);
+    if (debug) {
+      debug.fellerAt = w.fellerAt === null ? null : Math.round(w.fellerAt * 10) / 10;
+      debug.fallAt = Math.round(fallAt * 10) / 10;
+      debug.t = Math.round(t * 10) / 10;
+    }
     const groundAt = (q: WorkerPoint) => this.hooks.ground({ x: q.x + g.root.position.x, z: q.z + g.root.position.z });
     if (w.heading && w.tilt && w.trunk && w.crown && w.tree) {
       const base = groundAt(w.base);
       w.heading.setEnabled(base !== null && site.sections > 0);
       // Once down, the trunk rests on its side, without its foliage (kit README).
       const landed = site.tilt >= Math.PI / 2 - 1e-6;
-      w.heading.position.y = (base ?? 0) + (landed ? KIT_TRUNK_RADIUS * w.tree.scale : 0);
+      w.heading.position.set(
+        w.base.x + g.root.position.x,
+        (base ?? 0) + (landed ? KIT_TRUNK_RADIUS * w.tree.scale : 0),
+        w.base.z + g.root.position.z,
+      );
       // A strike shakes the standing tree, damped in 0.4 s.
       let shake = 0;
       if (site.tilt === 0 && feller && this.#workingAtPost(feller, g)) {
@@ -2450,6 +2466,7 @@ export class VillageWorkers {
   }
   #disposeGroup(g: Group) {
     if (g.wood?.tree) this.hooks.releaseTree?.(g.mission.id);
+    g.wood?.heading?.dispose(false, false);
     for (const p of g.people) p.dispose();
     g.root.dispose(false, false);
   }

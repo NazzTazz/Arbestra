@@ -1485,7 +1485,7 @@ it('wood site: places pair 0 at the real tree in a dense forest, from the fellin
   try {
     f.view.sync(woodTeam('dense', 4), epoch);
     f.view.animate(epoch, true);
-    expect(f.view.metrics.woodPlans).toEqual([{ id: 'dense', kind: 'binome', fall: expect.any(Number) }]);
+    expect(f.view.metrics.woodPlans).toEqual([expect.objectContaining({ id: 'dense', kind: 'binome' })]);
     expect(f.scene.getMeshByName('work-trunk-dense-0')).toBeNull();
     // The whole team reaches its posts, not only those the ordinary test lets through.
     let working = 0;
@@ -1507,13 +1507,29 @@ it('wood site: lays out a site the ordinary test found no room for around the re
   try {
     f.view.sync(woodTeam('no-room', 4), epoch);
     f.view.animate(epoch, true);
-    expect(f.view.metrics.woodPlans).toEqual([{ id: 'no-room', kind: 'binome', fall: expect.any(Number) }]);
+    expect(f.view.metrics.woodPlans).toEqual([expect.objectContaining({ id: 'no-room', kind: 'binome' })]);
     let working = 0;
     for (let t = 33; t <= 30_000; t += 33) {
       f.view.animate(epoch + t, true);
       working = Math.max(working, f.view.metrics.layouts[0]!.phases.filter((phase) => phase === 'work').length);
     }
     expect(working).toBe(4);
+  } finally {
+    f.dispose();
+  }
+});
+
+// Dev village, 28 October: the grove hid the tree from the lot's start while
+// the site drew it only once someone worked, so it vanished during the walk.
+it('wood site: draws the felled grove tree standing while the woodcutters walk there', () => {
+  const grove = groveTree(),
+    f = fixture(() => true, grove.hooks);
+  try {
+    f.view.sync(woodTeam('walking', 4), epoch);
+    f.view.animate(epoch + 2_000, true);
+    expect(f.view.metrics.layouts[0]!.phases.every((phase) => phase === 'outbound')).toBe(true);
+    expect(trunk(f, 'walking')?.isEnabled(true)).toBe(true);
+    expect(tilt(f, 'walking')).toBe(0);
   } finally {
     f.dispose();
   }
