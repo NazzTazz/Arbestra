@@ -36,8 +36,15 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 - Preuves : test `town-hall-market-factory.test.ts` (coque + vivant = modèle complet, aucune animation dans la coque, aucun `kit.build` côté vivant) ; e2e `town-hall-market-visual` adapté aux noms préfixés des instances et vérifiant `assetState: 'ready'`, vert en local ; recette visuelle dans le navigateur (devanture arrondie, balcon, pavillon de l'horloge, présentoir).
 - Reste : la vignette headless de la halle sort **blanche** (la factory la saute, le jeu la rend lui-même comme avant) ; la première tentative de cuisson complète est restée bloquée 10 min sans sortie, sans doute sur ce rendu ; braseros de nuit non revus.
 
+**Ce qui borne « prêt » (28 octobre, soir, dev local, machine à ~50 % de CPU au repos : temps absolus très variables, 15 à 37 s pour le même parcours)**
+- Serveur : à chaud, bootstrap 0,4–2,3 s et présentation 0,07–3,6 s. **Après une longue inactivité** (47 min), 9,6 s puis 9,1 s, en série : à creuser (Server-Timing via `localStorage['arbestra:timing']='1'`).
+- Client, chronologie type : préparation de la scène (une image de 1,5 à 4,2 s), terrain 2,7–4,5 s, routes 0,7–5,9 s (`#updateTravelPaths` : infrastructure 0,35–1,5 s, braseros et routes automatiques ~0,5 s chacun), première image 2,4–4,7 s (compilation des matériaux).
+- Profil JS (le dev envoie maintenant `Document-Policy: js-profiling`, comme la production : `new Profiler` marche en local) : braseros `updatePoints` 1,1–1,3 s (dont 0,65 s pour les deux braseros de la halle), routes 1,3–1,5 s, emplacements libres 0,5–0,8 s, instanciation des modèles cuits 0,5–0,7 s, scierie 0,45–0,5 s, tailleur de pierre 0,92 s → 0 (cuit).
+- Fait : tailleur de pierre cuit par la factory (`stonemason-1-*`, feu toujours ajouté par la scène) ; lumières de braseros créées hors scène et jamais basculées en mode cluster (le cluster ignore l'état activé ; chaque ajout ou bascule parcourait les ~10 000 meshes). Test rouge avant, vert après. **Gain des braseros non visible au profil** (`updatePoints` toujours ~1,1 s) : reste à décomposer (clone de la maçonnerie, constructeur de `PointLight`). Braseros de nuit à revoir.
+- Déployé sur staging pour la recette (staging sert à cela ; alpha a des joueurs).
+
 **Prochaines étapes proposées (chacune avec mesure avant/après et test)**
-1. Ce qui borne « prêt » à ~32 s : profil du chargement (terrain, trajets, image finale).
+1. Décomposer `updatePoints` ; infrastructure (`InfrastructureRenderer.update`, `#projectLayers`) ; scierie à cuire (matériaux de scène à vérifier) ; lenteur serveur après inactivité.
 2. Emplacements libres (1 025 meshes pour un affichage en mode construction seulement) : création paresseuse ou en instances.
 3. Villageois : figurines créées sur plusieurs images, coût d'une recherche A* plafonné ; puis le cas 1 de la spec (clairière de travail), qui rend ces recherches inutiles autour des bosquets.
 
