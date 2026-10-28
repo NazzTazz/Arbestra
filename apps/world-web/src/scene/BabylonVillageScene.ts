@@ -122,6 +122,7 @@ import { RenderDiagnostics } from '../dev/render-diagnostics';
 import type { HarvestMode } from './halo-marker';
 import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
 import { groveHalo, TreeHalos, type TreeHaloGrove } from './tree-halos';
+import { MarketBeacon } from './market-beacon';
 import { groveRayPredicate, pickedGrove, resourceOverlay } from './resource-overlay';
 import { WorkerObstacles } from './worker-obstacles';
 
@@ -191,6 +192,9 @@ export class BabylonVillageScene {
   readonly #previewMeshes: Mesh[] = [];
   readonly #resourceHalos: ResourceHalos;
   readonly #treeHalos: TreeHalos;
+  readonly #marketBeacon: MarketBeacon;
+  /** Foot of the town hall the current beacon stands on (canonical cell, ground height). */
+  #marketBeaconAnchor: { cellX: number; cellY: number; height: number } | null = null;
   readonly #levelingAreaMaterial: StandardMaterial;
   readonly #invalidAreaMaterial: StandardMaterial;
   readonly #resizeObserver: ResizeObserver;
@@ -1261,6 +1265,8 @@ export class BabylonVillageScene {
     for (const material of this.#scene.materials) material.freeze();
     this.#resourceHalos = new ResourceHalos(this.#scene);
     this.#treeHalos = new TreeHalos(this.#scene);
+    // Prepared now, materials compiled, light in the fire cluster: a delivery creates nothing.
+    this.#marketBeacon = new MarketBeacon(this.#scene);
 
     this.#selectionMarker = MeshBuilder.CreateBox(
       'selection-marker',
@@ -1418,6 +1424,10 @@ export class BabylonVillageScene {
         this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
         setSceneNight(this.#scene, this.#villageNight);
         this.#villageBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
+        if (this.#marketBeacon.active && this.#space && this.#marketBeaconAnchor) {
+          const foot = this.#space.project(this.#marketBeaconAnchor);
+          this.#marketBeacon.update(now, foot.x, this.#marketBeaconAnchor.height, foot.z, this.#mode !== 'world');
+        }
         if (this.#gardenKit && this.#state) {
           // A harvest removes plants over time: refresh its plots four times a second.
           const inputs = [
@@ -4497,6 +4507,15 @@ export class BabylonVillageScene {
     this.#camera.radius = this.#mode === 'village' ? VILLAGE_LANDING.radius : Math.max(90, this.#camera.radius);
     this.#setMode('village');
   }
+  /** A market transaction credited the village: the light column above the town hall (also the DEV preview). */
+  public marketBeacon(deliveries = 1): void {
+    const state = this.#state,
+      hall = state?.cells.find((c) => c.building?.type === 'town-hall');
+    if (!state || !hall) return;
+    const foot = townHallFocus(state);
+    this.#marketBeaconAnchor = { cellX: foot.cellX, cellY: foot.cellY, height: this.#siteGround(hall) };
+    this.#marketBeacon.trigger(performance.now(), deliveries);
+  }
   public rotateWorld(horizontal: number, vertical: number): void {
     if (this.#flyover) return;
     if (this.#mode === 'world' && this.#torusOverview) {
@@ -4930,6 +4949,7 @@ export class BabylonVillageScene {
     this.#workers.dispose();
     this.#resourceHalos.dispose();
     this.#treeHalos.dispose();
+    this.#marketBeacon.dispose();
     this.#scene.dispose();
     this.#engine.dispose();
     this.#canvas.width = 0;

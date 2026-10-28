@@ -47,10 +47,35 @@ export interface BrazierPoint {
 // Owners still control their own intensities and must not switch off other fires.
 interface BrazierCluster {
   light: ClusteredLightContainer;
-  owners: Set<VillageBraziers>;
+  /** Fire groups and occasional effects (the market beacon): the last one leaving disposes it. */
+  owners: Set<object>;
+  /** Fire groups lit tonight: the cluster is enabled while one is. */
   active: Set<VillageBraziers>;
 }
 const sceneClusters = new WeakMap<Scene, BrazierCluster>();
+const FIRE_RANGE = 5;
+
+/** The scene's shared fire cluster, created disabled on first use; null when the engine cannot cluster `probe`. */
+function joinCluster(scene: Scene, owner: object, probe: PointLight): BrazierCluster | null {
+  if (!ClusteredLightContainer.IsLightSupported(probe)) return null;
+  let cluster = sceneClusters.get(scene);
+  if (!cluster) {
+    const container = new ClusteredLightContainer('village-brazier-cluster', [], scene);
+    container.maxRange = FIRE_RANGE;
+    container.setEnabled(false);
+    cluster = { light: container, owners: new Set(), active: new Set() };
+    sceneClusters.set(scene, cluster);
+  }
+  cluster.owners.add(owner);
+  return cluster;
+}
+function leaveCluster(scene: Scene, owner: object, cluster: BrazierCluster): void {
+  cluster.owners.delete(owner);
+  if (cluster.owners.size === 0) {
+    cluster.light.dispose(false, true);
+    sceneClusters.delete(scene);
+  }
+}
 
 /**
  * Drawn by the cluster alone. Babylon's light constructor resyncs every mesh twice
@@ -66,9 +91,40 @@ function brazierLight(clustered: boolean, name: string, position: Vector3, scene
     : new PointLight(name, position, scene, true);
   light.diffuse = new Color3(1, 0.51, 0.16);
   light.specular = Color3.Black();
-  light.range = 5;
+  light.range = FIRE_RANGE;
   light.intensity = 0;
   return light;
+}
+
+/**
+ * A point light drawn by the shared fire cluster, prepared once by an
+ * occasional effect (the market beacon). It never joins the scene nor toggles:
+ * only its intensity moves, and it shows while the cluster is lit, at village
+ * night. Null when the engine cannot cluster lights: no fallback light, since
+ * registering or toggling one walks every mesh and recompiles their materials.
+ */
+export function clusteredEffectLight(scene: Scene, owner: object, name: string, range: number): PointLight | null {
+  const light = new ClusteredPointLight(name, Vector3.Zero(), scene, true);
+  light.specular = Color3.Black();
+  light.range = range;
+  light.intensity = 0;
+  const cluster = joinCluster(scene, owner, light);
+  if (!cluster) {
+    light.dispose();
+    return null;
+  }
+  // The container clamps every range; the fires keep their own.
+  if (cluster.light.maxRange < range) cluster.light.maxRange = range;
+  cluster.light.addLight(light);
+  return light;
+}
+export function releaseClusteredEffectLight(scene: Scene, owner: object, light: PointLight): void {
+  const cluster = sceneClusters.get(scene);
+  if (cluster) {
+    cluster.light.removeLight(light);
+    leaveCluster(scene, owner, cluster);
+  }
+  light.dispose();
 }
 const sceneNights = new WeakMap<Scene, boolean>();
 /** The village scene publishes its night for building fires. */
@@ -343,20 +399,9 @@ export class VillageBraziers {
       let light = brazierLight(!this.#clusterChecked || this.#cluster !== null, name, at, this.scene);
       if (!this.#clusterChecked) {
         this.#clusterChecked = true;
-        if (ClusteredLightContainer.IsLightSupported(light)) {
-          let cluster = sceneClusters.get(this.scene);
-          if (!cluster) {
-            const container = new ClusteredLightContainer('village-brazier-cluster', [], this.scene);
-            container.maxRange = 5;
-            container.setEnabled(false);
-            cluster = { light: container, owners: new Set(), active: new Set() };
-            sceneClusters.set(this.scene, cluster);
-          }
-          this.#cluster = cluster;
-          cluster.owners.add(this);
-          // Existing frozen materials must compile the new light type once.
-          for (const material of this.scene.materials) if (material.isFrozen) material.unfreeze();
-        }
+        this.#cluster = joinCluster(this.scene, this, light);
+        // Existing frozen materials must compile the new light type once.
+        if (this.#cluster) for (const material of this.scene.materials) if (material.isFrozen) material.unfreeze();
         const canvas = this.scene.getEngine().getRenderingCanvas();
         if (import.meta.env.DEV && canvas) canvas.dataset.brazierLighting = this.#cluster ? 'clustered' : 'bounded';
       }
@@ -501,11 +546,10 @@ export class VillageBraziers {
     this.#meshIndex = null;
     if (this.#cluster) {
       this.#cluster.active.delete(this);
-      this.#cluster.owners.delete(this);
-      if (this.#cluster.owners.size === 0) {
-        this.#cluster.light.dispose(false, true);
-        sceneClusters.delete(this.scene);
-      } else this.#cluster.light.setEnabled(this.#cluster.active.size > 0);
+      leaveCluster(this.scene, this, this.#cluster);
+      const lit = this.#cluster.active.size > 0;
+      // Even an unchanged toggle walks every mesh: the beacon may remain the only owner.
+      if (this.#cluster.owners.size > 0 && this.#cluster.light.isEnabled() !== lit) this.#cluster.light.setEnabled(lit);
       this.#cluster = null;
     }
     this.#masonry?.dispose(false, false);

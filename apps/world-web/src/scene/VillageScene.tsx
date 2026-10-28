@@ -90,6 +90,8 @@ export interface TerrainHandle {
   cancelGesture: () => void;
   resetCosmology: () => void;
   renderLab: () => import('./render-lab').RenderLab | null;
+  /** Light column above the town hall for market deliveries that just credited the village. */
+  marketBeacon: (deliveries?: number) => void;
   projectPopulation: (id: string) => ScreenAnchor | null;
   featuresAt: (cell: Cell) => NaturalFeature[];
   acceptDeposit: (deposit: StoneDeposit) => void;
@@ -253,6 +255,7 @@ export function VillageScene({
       },
       featuresAt: (cell) => sceneRef.current?.featuresAt(cell) ?? [],
       renderLab: () => sceneRef.current?.renderLab() ?? null,
+      marketBeacon: (deliveries) => sceneRef.current?.marketBeacon(deliveries),
       acceptDeposit: (deposit) => sceneRef.current?.acceptDeposit(deposit),
       projectPopulation: (id) => sceneRef.current?.projectPopulation(id) ?? null,
       showVillage: () => sceneRef.current?.showVillage(),
