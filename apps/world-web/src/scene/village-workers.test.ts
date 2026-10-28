@@ -1448,6 +1448,33 @@ it('wood site: a lone woodcutter strikes the grove tree itself and makes it shak
   }
 });
 
+it.each([1, 4])(
+  'wood site: restores a lot discovered just after W0 at the real tree before felling it (%i woodcutters)',
+  (count) => {
+    const grove = groveTree(),
+      f = fixture(() => true, grove.hooks),
+      id = `late-discovery-${count}`;
+    try {
+      // W0 is 8 s. Discover the ongoing lot one second later, before the
+      // planned fall at 15.68 s: the reconstructed workers must use the real
+      // tree's posts, not the original worksite template's positions.
+      f.view.sync(woodTeam(id, count), epoch + 9_000);
+      let shook = false;
+      for (let t = 9_000; t <= 15_000; t += 33) {
+        f.view.animate(epoch + t, true);
+        const angle = tilt(f, id);
+        if (Math.abs(angle) > 0.02 && Math.abs(angle) < 0.06) shook = true;
+      }
+      const feller = f.view.figures[0]!;
+      expect(Math.hypot(feller.root.position.x - 0.6, feller.root.position.z - 7.2)).toBeLessThan(0.75);
+      expect(f.view.woodPlans[0]!.fellerAt, 'the reconstructed feller is recognized at its post').not.toBeNull();
+      expect(shook, 'visible work shakes the tree before its planned fall').toBe(true);
+    } finally {
+      f.dispose();
+    }
+  },
+);
+
 it('wood site: saw pair 0 fells the grove tree at its foot, then cuts the lying trunk towards its foot', () => {
   const grove = groveTree(),
     f = fixture(() => true, grove.hooks);

@@ -678,8 +678,10 @@ export class VillageWorkers {
       createdAt: now,
       stop,
     };
-    for (let i = 0; i < mission.count; i++) group.people.push(this.#person(group, i, now));
+    // The real tree moves the work posts. Reconstruct arrivals only once those
+    // posts are final, including when this lot is first seen after W0.
     this.#props(group);
+    for (let i = 0; i < mission.count; i++) group.people.push(this.#person(group, i, now));
     return group;
   }
   #box(
