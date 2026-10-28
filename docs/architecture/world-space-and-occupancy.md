@@ -100,7 +100,11 @@ Extraction, terrassement, rendements des gisements, territoire politique, quête
 
 La position persiste dans `stone_deposits` après suppression de l’occupation. Le snapshot conserve la feature depleted comme trace, qui ne bloque pas `canBuild`. La cellule libérée reste soumise au terrain et aux autres règles de construction. Les commandes recherchent le UUID dans le monde, jamais dans la fenêtre 64×64. Les rochers sont invalidés individuellement par ID/révision, indépendamment du terrain.
 
-## Bosquet libéré et défriché (017)
+## Case de bois occupée jusqu'au défrichage (065)
+
+Depuis l'arbre comme unité de récolte ([spec](../SPEC-BOIS-ARBRE-UNITE.md)), une case de bois reste occupée, donc non constructible, tant qu'il y reste un arbre ou une souche ; seul le retrait de la dernière souche la libère et retire ses troncs de la navigation. Plus de seuil de 10 % ni de repousse ; la conversion 065 réoccupe la case des bosquets libérés sous l'ancien seuil quand elle est encore libre. La section suivante décrit l'ancien modèle.
+
+## Bosquet libéré et défriché (017) — historique
 
 La position persiste dans `woodland_deposits`, même sans occupation. À stock physique ≤10 % du stock initial, l'occupation feature est supprimée ; au-dessus, la repousse réoccupe une case inutilisée. Les chunks en lecture seule projettent cette occupation sans déclencher l'économie des villages. Le booléen autoritatif `blocksCell` conserve la précision du seuil malgré les fractions de repousse.
 
