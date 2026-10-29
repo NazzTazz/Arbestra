@@ -154,6 +154,9 @@ function percentile(values: number[]): number {
 function sameInputs(previous: readonly unknown[], next: readonly unknown[]): boolean {
   return previous.length === next.length && previous.every((value, index) => value === next[index]);
 }
+/** Surface tint of water, under its ripples; multiplied by the material alpha. */
+export const WATER_SURFACE_VEIL = 'rgba(78, 140, 196, 0.5)';
+
 export class BabylonVillageScene {
   readonly #engine: Engine;
   readonly #scene: Scene;
@@ -2573,6 +2576,10 @@ export class BabylonVillageScene {
     texture.wrapV = Texture.WRAP_ADDRESSMODE;
     const context = texture.getContext();
     context.clearRect(0, 0, 128, 128);
+    // A light blue veil under the ripples marks the water from the very bank,
+    // before the bed darkens with depth (Tristan, 29 October).
+    context.fillStyle = WATER_SURFACE_VEIL;
+    context.fillRect(0, 0, 128, 128);
     context.lineWidth = 2.5;
     context.strokeStyle = 'rgba(211, 239, 235, 0.55)';
     for (const [index, y] of [16, 48, 80, 112].entries()) {
