@@ -586,6 +586,12 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     }
     return true;
   }
+  // Leaving Exploitation puts the wood tool back to cutting (Tristan, 29 October):
+  // coming back, a player never clears without having asked for it again.
+  useEffect(() => {
+    if (worldMode !== 'exploitation')
+      setExploitationSettings((current) => (current.woodMode === 'cut' ? current : { ...current, woodMode: 'cut' }));
+  }, [worldMode]);
   const chooseExploitation = (choice: ExploitationChoice) => {
     cancelWorldGesture();
     closePanels();

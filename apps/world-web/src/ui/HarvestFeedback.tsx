@@ -18,7 +18,11 @@ export function HarvestFeedbackLayer({
           item = items.find((i) => i.id === el.dataset.id);
         if (!item) continue;
         const age = Date.now() - item.at,
-          anchor = age < 3000 ? scene.current?.projectCell(item) : null;
+          anchor =
+            age < 3000
+              ? ((item.tree && scene.current?.projectTree(item.tree.featureId, item.tree.treeIndex)) ??
+                scene.current?.projectCell(item))
+              : null;
         el.style.display = anchor ? 'block' : 'none';
         if (anchor) {
           el.style.left = `${anchor.x}px`;

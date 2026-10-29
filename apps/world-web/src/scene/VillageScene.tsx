@@ -110,6 +110,8 @@ export interface TerrainHandle {
   acceptDeposit: (deposit: StoneDeposit) => void;
   showVillage: () => void;
   projectCell: (cell: Cell) => ScreenAnchor | null;
+  /** The screen point above one rendered tree of a grove, or null. */
+  projectTree: (featureId: string, treeIndex: number) => ScreenAnchor | null;
   setWorldMode: (mode: ActiveWorldMode) => void;
 }
 
@@ -276,6 +278,7 @@ export function VillageScene({
       projectPopulation: (id) => sceneRef.current?.projectPopulation(id) ?? null,
       showVillage: () => sceneRef.current?.showVillage(),
       projectCell: (cell) => sceneRef.current?.projectCell(cell) ?? null,
+      projectTree: (featureId, treeIndex) => sceneRef.current?.projectTree(featureId, treeIndex) ?? null,
       focusCell: (cell) => sceneRef.current?.focusCell(cell),
       viewCenter: () => sceneRef.current?.viewCenter() ?? null,
       naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],

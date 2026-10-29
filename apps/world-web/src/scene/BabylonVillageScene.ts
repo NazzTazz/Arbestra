@@ -2532,6 +2532,16 @@ export class BabylonVillageScene {
     return this.#projectPoint(new Vector3(p.x, (ground?.height ?? 0) + 0.5, p.z));
   }
 
+  /** Above one rendered tree's foot (a harvest feedback per tree): an index lookup. */
+  public projectTree(featureId: string, treeIndex: number): ScreenAnchor | null {
+    if (!this.#space || this.#mode !== 'village') return null;
+    const tree = this.#groves.get(featureId)?.trees.find((t) => t.treeIndex === treeIndex);
+    if (!tree) return null;
+    const p = this.#space.project({ cellX: tree.x, cellY: tree.y }),
+      ground = this.#store?.ground(Math.round(tree.x), Math.round(tree.y));
+    return this.#projectPoint(new Vector3(p.x, (ground?.height ?? 0) + 0.5, p.z));
+  }
+
   public projectPopulation(id: string): ScreenAnchor | null {
     const position = this.#workers.populationPosition(id);
     return position && this.#mode === 'village' ? this.#projectPoint(position) : null;

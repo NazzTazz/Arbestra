@@ -15,7 +15,30 @@ export type HarvestFeedback = Cell & {
   text: string;
   resource: 'carrot' | 'wood' | 'stone' | 'error';
   at: number;
+  /** A wood feedback rises from its own tree, not from the grove's cell. */
+  tree?: { featureId: string; treeIndex: number };
 };
+
+/**
+ * The wood a receipt accepted, tree by tree (Tristan, 29 October: one « +500 »
+ * per tree, not one per grove): each designated tree takes what it still holds,
+ * in the order designated, until the accepted amount is spent; the amounts add
+ * up to the receipt's. A tree the scene does not know shares what is left.
+ */
+export function woodFeedbackAmounts(
+  amount: number,
+  treeIndices: readonly number[],
+  remainingOf: (treeIndex: number) => number | null,
+): Array<{ treeIndex: number; amount: number }> {
+  let left = amount;
+  return treeIndices.map((treeIndex, i) => {
+    const rest = treeIndices.length - i,
+      share = Math.min(left, remainingOf(treeIndex) ?? Math.ceil(left / rest)),
+      given = i === treeIndices.length - 1 ? left : share;
+    left -= given;
+    return { treeIndex, amount: given };
+  });
+}
 /** The last gesture, which « Annuler » targets for 15 s (docs/SPEC-GRAMMAIRE-GESTUELLE.md §1). */
 export interface LastGesture {
   commandId: string;
@@ -78,8 +101,8 @@ export function useHarvestTool({
     last = useRef<LastGesture | null>(null),
     accepted = useRef<Array<{ until: number; trees: DesignatedTree[] }>>([]),
     holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const current = useRef({ state, enabled, filter, woodMode, onAccepted });
-  current.current = { state, enabled, filter, woodMode, onAccepted };
+  const current = useRef({ state, scene, enabled, filter, woodMode, onAccepted });
+  current.current = { state, scene, enabled, filter, woodMode, onAccepted };
   const storageKey = state ? `arbestra:harvest-intents:${state.world.id}:${state.village.id}` : null;
   const context = useRef(storageKey);
   context.current = storageKey;
@@ -99,12 +122,22 @@ export function useHarvestTool({
   }
   function flash(receipt: HarvestReceipt, item: Draft) {
     const at = Date.now();
-    const entries: HarvestFeedback[] = receipt.accepted.map((a) => ({
-      ...a,
-      id: randomUUID(),
-      text: `+${a.amount}`,
-      at,
-    }));
+    const entries: HarvestFeedback[] = receipt.accepted.flatMap((a): HarvestFeedback[] => {
+      if (a.resource !== 'wood' || !a.treeIndices?.length)
+        return [{ ...a, id: randomUUID(), text: `+${a.amount}`, at }];
+      const rows = current.current.scene.current?.groveTrees(a.key) ?? [];
+      return woodFeedbackAmounts(
+        a.amount,
+        a.treeIndices,
+        (treeIndex) => rows.find((r) => r.treeIndex === treeIndex)?.remaining ?? null,
+      ).map(({ treeIndex, amount }) => ({
+        ...a,
+        id: randomUUID(),
+        text: `+${amount}`,
+        at,
+        tree: { featureId: a.key, treeIndex },
+      }));
+    });
     // The trees accepted stay marked until the village's queue holds them.
     const kept = receipt.accepted.flatMap((a): DesignatedTree[] =>
       a.resource !== 'wood'

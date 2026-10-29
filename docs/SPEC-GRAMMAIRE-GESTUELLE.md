@@ -43,7 +43,7 @@ Le balayage existe déjà pour les jardins et les bosquets (Tristan : inutile de
 
 ### Interface (`App.tsx`, `ExploitationPanel.tsx`)
 
-- **Mode global** `cut | clear`, gardé pour la session. La palette ne demande plus ni mode ni groupe d'habitants avant le geste.
+- **Mode global** `cut | clear`, gardé tant qu'on reste en Exploitation ; il revient à la coupe quand on la quitte (Tristan, 29 octobre). La palette ne demande plus ni mode ni groupe d'habitants avant le geste.
 - **Indicateur du mode** (proposition, à valider à l'essai) :
   - **en coupe** : HUD normal, curseur hache ;
   - **en défrichage** : liseré et fond du HUD teintés de rouge, curseur arracheur de souche ;
@@ -106,7 +106,7 @@ Planche de test : https://claude.ai/artifact/VZQuVL9ZqbkziWom59JryD (dix proposi
 - **Envoi** : `woodTrees` (ordre de désignation) et `woodMode: 'clear'` en défrichage, par la file `harvest-intents`. Reçus : `+N` sur la case acceptée (comme avant) ; refus traduits, dont `tree-not-found` (« Arbre introuvable »), `depleted` (« Épuisé »), `already-assigned` (« Déjà prévu »), `cancelled` (« Annulé »).
 - **Serveur** : la géométrie RC1 d'un bosquet nomme désormais l'indice RC1 de chaque arbre (`rc1.trees[].index`, contrat additif). Sans lui, le client ne pouvait pas désigner un arbre d'un monde RC1 ; un arbre sans indice (ancien serveur) vaut sa case entière.
 
-**Indicateur** : badge en haut au centre (« Coupe » ou « Défrichage », « appui long pour … »), cadre rouge autour de la vue en défrichage, bulle « Mode coupe » ou « Mode défrichage » près du pointeur à chaque bascule, vibration de 30 ms. Le mode est gardé pour la session (il ne revient plus à la coupe en quittant l'Exploitation ; un rechargement repart en coupe). « Préparer un défrichage » de la fiche choisit aussi le mode.
+**Indicateur** : badge en haut au centre (« Coupe » ou « Défrichage », « appui long pour … »), cadre rouge autour de la vue en défrichage, bulle « Mode coupe » ou « Mode défrichage » près du pointeur à chaque bascule, vibration de 30 ms. Le mode revient à la coupe quand on quitte l'Exploitation (décision de Tristan, 29 octobre) et au rechargement. « Préparer un défrichage » de la fiche choisit aussi le mode.
 
 **Marqueurs** (`tree-halos.ts`, `resource-overlay.ts`) : un halo par arbre (une entrée chacun), « Onde » en coupe, « Satellites » en défrichage ; validation lumineuse de 1,8 s sur le seul arbre désigné. Ne sont plus offerts : en coupe, les arbres en file ; en défrichage, ceux en file pour le défrichage (un arbre en file pour la coupe peut être pris plus loin). Au repos, une image ne parcourt plus les halos (O(1)). Les arbres acceptés restent marqués 6 s, le temps que la file du village les montre.
 
