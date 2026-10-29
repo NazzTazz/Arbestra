@@ -327,7 +327,7 @@ export async function readTerrainProjection(
                     Math.abs(rc1.data.forest!.trees[i]!.y - t.cellY) <= 0.5,
                 ),
             )
-            .map((i) => rc1.data.forest!.trees[i]!),
+            .map((i) => ({ ...rc1.data.forest!.trees[i]!, index: i })),
           rocks: g.sourceKey.startsWith('stone:')
             ? (rc1.data.stoneSites?.find((s) => String(s.id) === g.sourceKey.slice(6))?.rocks ?? [])
             : [],

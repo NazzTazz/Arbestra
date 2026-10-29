@@ -16,6 +16,9 @@ export const Rc1FeatureGeometrySchema = Type.Object({
       elevation: Type.Number(),
       size: Type.Number(),
       crown: Type.Number(),
+      /** The tree's RC1 index (`forest.trees`): the `treeIndex` a command designates and
+       * `deposit.trees` names (docs/SPEC-BOIS-ARBRE-UNITE.md). Absent from an older server. */
+      index: Type.Optional(Type.Integer({ minimum: 0 })),
     }),
   ),
   rocks: Type.Array(

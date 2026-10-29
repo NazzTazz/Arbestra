@@ -264,7 +264,10 @@ export async function rc1FeatureGeometry(
         return [
           r.featureId,
           {
-            trees: r.treeIndices.filter((i) => !removed.has(i)).map((i) => grounded(data.forest!.trees[i]!)),
+            // Each tree names its RC1 index: the `treeIndex` a gesture designates.
+            trees: r.treeIndices
+              .filter((i) => !removed.has(i))
+              .map((i) => ({ ...grounded(data.forest!.trees[i]!), index: i })),
             rocks: (r.sourceKey.startsWith('stone:')
               ? (data.stoneSites?.find((s) => String(s.id) === r.sourceKey.slice(6))?.rocks ?? [])
               : []
