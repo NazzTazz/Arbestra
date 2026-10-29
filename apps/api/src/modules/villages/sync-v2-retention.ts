@@ -1,24 +1,40 @@
-import { sql, type Kysely } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 
 export interface SyncRetention {
   maxAgeMs: number;
   maxEntries: number;
   rowBudget: number;
   streamBudget: number;
+  batchBudget: number;
 }
 export const SYNC_RETENTION: SyncRetention = {
   maxAgeMs: 7 * 24 * 3600000,
   maxEntries: 10000,
   rowBudget: 2000,
   streamBudget: 200,
+  batchBudget: 2000,
 };
+
+/** Retention transactions of all processes exclude each other (deployment
+ * overlap, second instance). Without it, two of them pruning two streams of
+ * one stored vector each still see the other's row in READ COMMITTED and both
+ * keep the vector, which nothing references any more. Writers and readers
+ * never take this lock; a pass that finds it held stops instead of waiting. */
+async function retentionExclusive<DB>(tx: Transaction<DB>): Promise<boolean> {
+  return (
+    await sql<{
+      locked: boolean;
+    }>`select pg_try_advisory_xact_lock(hashtextextended('sync-journal-retention',0)) as locked`.execute(tx)
+  ).rows[0]!.locked;
+}
 
 /** One bounded retention pass over the V2 journal: per stream, delete an
  * expired prefix (older than maxAgeMs, or beyond the last maxEntries) and
  * raise retained_from to its last revision in the same transaction. Epochs
  * and revisions never change: a cursor below the floor resumes by snapshot.
- * Takes no business lock and never waits for a publisher (SKIP LOCKED); a
- * stream advances by at most rowBudget rows per pass. */
+ * Takes no business lock and never waits for a publisher (SKIP LOCKED) or for
+ * another retention process (it stops); a stream advances by at most
+ * rowBudget rows per pass. */
 export async function pruneSyncJournal<DB>(
   db: Kysely<DB>,
   options: SyncRetention = SYNC_RETENTION,
@@ -38,6 +54,7 @@ export async function pruneSyncJournal<DB>(
     rows = 0;
   for (const candidate of candidates) {
     const deleted = await db.transaction().execute(async (tx) => {
+      if (!(await retentionExclusive(tx))) return null;
       const stream = (
         await sql<{ epoch: string; revision: string; retainedFrom: string }>`
         select epoch::text,revision::text,retained_from::text as "retainedFrom" from game_sync_streams
@@ -77,12 +94,50 @@ export async function pruneSyncJournal<DB>(
           where c.world_id=b.world_id and c.dependencies_batch_id=b.batch_id)`.execute(tx);
       return removed.length;
     });
+    if (deleted === null) break;
     if (deleted > 0) {
       streams++;
       rows += deleted;
     }
   }
   return { streams, rows };
+}
+
+export interface SyncBatchKey {
+  worldId: string;
+  batchId: string;
+}
+
+/** Bounded sweep of stored vectors older than the retention that no journal
+ * row references: leftovers of passes that overlapped before the retention
+ * lock. Walks the primary key after `after`, at most batchBudget entries per
+ * call; `next` is null once the end is reached, so the following call starts
+ * over. A vector and its rows are published together and no publication
+ * references an older vector: an unreferenced one never becomes referenced
+ * again, and the foreign key refuses to delete a referenced one. */
+export async function sweepSyncBatches<DB>(
+  db: Kysely<DB>,
+  after: SyncBatchKey | null,
+  options: SyncRetention = SYNC_RETENTION,
+): Promise<{ examined: number; removed: number; next: SyncBatchKey | null }> {
+  const cutoff = new Date(Date.now() - options.maxAgeMs);
+  return db.transaction().execute(async (tx) => {
+    if (!(await retentionExclusive(tx))) return { examined: 0, removed: 0, next: after };
+    const lower = after ? sql`(world_id,batch_id)>(${after.worldId}::uuid,${after.batchId}::uuid)` : sql`true`;
+    const examined = (
+      await sql<SyncBatchKey>`select world_id::text as "worldId",batch_id::text as "batchId" from game_sync_batches
+      where ${lower} order by world_id,batch_id limit ${options.batchBudget}`.execute(tx)
+    ).rows;
+    const last = examined.at(-1);
+    if (!last) return { examined: 0, removed: 0, next: null };
+    const removed = (
+      await sql`delete from game_sync_batches b
+      where ${lower} and (world_id,batch_id)<=(${last.worldId}::uuid,${last.batchId}::uuid) and b.recorded_at<${cutoff}
+        and not exists(select 1 from game_sync_changes c where c.world_id=b.world_id and c.dependencies_batch_id=b.batch_id)
+      returning 1`.execute(tx)
+    ).rows.length;
+    return { examined: examined.length, removed, next: examined.length < options.batchBudget ? null : last };
+  });
 }
 
 /** Periodic retention, one pass at a time; stop() waits for the current one. */
@@ -93,11 +148,16 @@ export function startSyncJournalRetention<DB>(
   options: SyncRetention = SYNC_RETENTION,
 ): () => Promise<void> {
   let stopped = false,
-    current: Promise<unknown> | null = null;
+    current: Promise<unknown> | null = null,
+    swept: SyncBatchKey | null = null;
   const run = () => {
     if (stopped || current) return;
     current = pruneSyncJournal(db, options)
       .catch(onError)
+      .then(() => sweepSyncBatches(db, swept, options))
+      .then((sweep) => {
+        swept = sweep.next;
+      }, onError)
       .finally(() => {
         current = null;
       });
