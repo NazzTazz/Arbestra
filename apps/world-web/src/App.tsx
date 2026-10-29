@@ -36,6 +36,7 @@ import { SyncV2HttpError } from './api/sync-v2-transport';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import { setFactoryEnabled } from './api/client';
 import { InfrastructureTools } from './ui/InfrastructureTools';
+import { DemolitionTool } from './ui/DemolitionTool';
 import type { RepresentativeInfo } from './scene/village-workers';
 import type { InhabitantCameraMode } from './scene/inhabitant-camera';
 import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
@@ -2591,6 +2592,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 clearPreview();
                 clearConstructionError();
                 if (tool === 'terraform') chooseMode(worldMode === 'terraform' ? 'construction' : 'terraform');
+                else if (worldMode === 'terraform') chooseMode('construction');
                 setConstructionDomain('tools');
                 setConstruction({ action: 'build', type: null });
               }}
@@ -2600,6 +2602,13 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 cancelWorldGesture();
                 setWorkshop('buildings');
               }}
+              demolition={(active) => (
+                <DemolitionTool
+                  state={sceneState ?? state}
+                  scene={terrainRef}
+                  active={active && worldMode === 'construction' && !showDev && !workshop && !arrivalActive}
+                />
+              )}
               infrastructure={
                 <InfrastructureTools
                   state={sceneState ?? state}

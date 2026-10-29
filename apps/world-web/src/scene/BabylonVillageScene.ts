@@ -168,6 +168,7 @@ import type { DoorLane } from './worker-motion';
 const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
+import { DemolitionMarks } from './demolition-marks';
 export type TerrainStatus = 'loading' | 'retry' | null;
 export type TerrainViewMode = 'village' | 'region' | 'world';
 
@@ -454,6 +455,76 @@ export class BabylonVillageScene {
             }
           : null,
       );
+  }
+  #demolitionMarks: DemolitionMarks | null = null;
+  #demolitionIndex: {
+    state: VillageState;
+    cells: Map<string, Array<{ cellX: number; cellY: number }>>;
+    types: Map<string, string>;
+    equipment: Map<string, { x: number; y: number }>;
+  } | null = null;
+  /** Marks one designated target in red. Called once per newly swept target, never per frame. */
+  public demolitionMark(kind: 'building' | 'road' | 'equipment', id: string) {
+    const state = this.#state,
+      space = this.#space;
+    if (!state || !space) return;
+    if (this.#demolitionIndex?.state !== state) {
+      const cells = new Map<string, Array<{ cellX: number; cellY: number }>>(),
+        types = new Map<string, string>();
+      for (const cell of state.cells) {
+        const building = cell.footprint?.buildingId ?? cell.building?.id;
+        if (!building) continue;
+        types.set(building, cell.footprint?.buildingType ?? cell.building?.type ?? '');
+        const list = cells.get(building) ?? [];
+        list.push(cell);
+        cells.set(building, list);
+      }
+      this.#demolitionIndex = {
+        state,
+        cells,
+        types,
+        equipment: new Map((state.infrastructure?.equipment ?? []).map((e) => [e.id, e])),
+      };
+    }
+    const marks = (this.#demolitionMarks ??= new DemolitionMarks(this.#scene));
+    const ground = (cellX: number, cellY: number) => this.#store?.ground(cellX, cellY)?.height ?? 0;
+    const tile = (key: string, cell: { cellX: number; cellY: number }, height: number) => {
+      const p = space.project(cell);
+      marks.add(key, {
+        x: p.x,
+        y: ground(cell.cellX, cell.cellY) + height / 2,
+        z: p.z,
+        width: TILE_SIZE * 0.96,
+        height,
+        depth: TILE_SIZE * 0.96,
+      });
+    };
+    if (kind === 'road') {
+      const [cellX, cellY] = id.split(':').map(Number) as [number, number];
+      tile(`road:${id}`, { cellX, cellY }, 0.12);
+    } else if (kind === 'equipment') {
+      const e = this.#demolitionIndex.equipment.get(id);
+      if (!e) return;
+      const p = space.project({ cellX: e.x / 8, cellY: e.y / 8 }),
+        cell = { cellX: Math.floor(e.x / 8 + 0.5) % space.width, cellY: Math.floor(e.y / 8 + 0.5) % space.height };
+      marks.add(`equipment:${id}`, {
+        x: p.x,
+        y: ground(cell.cellX, cell.cellY) + 0.6,
+        z: p.z,
+        width: 0.9,
+        height: 1.2,
+        depth: 0.9,
+      });
+    } else {
+      // Footprint volumes: instanced recipes share one mesh, whose bounds cover every copy.
+      const type = this.#demolitionIndex.types.get(id),
+        height = type === 'garden' ? 0.3 : type === 'dwelling' ? 3.4 : 4.5;
+      for (const cell of this.#demolitionIndex.cells.get(id) ?? [])
+        tile(`building:${id}:${cell.cellX}:${cell.cellY}`, cell, height);
+    }
+  }
+  public demolitionClear() {
+    this.#demolitionMarks?.clear();
   }
   public terrainVertexHeight(x: number, y: number) {
     return this.#store?.vertexHeight(x, y) ?? null;
@@ -4288,6 +4359,7 @@ export class BabylonVillageScene {
     this.#camera.position.x -= shift.x;
     this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
+    this.#demolitionMarks?.shift(shift.x, shift.z);
     this.#inhabitantCamera.shift(shift.x, shift.z);
     this.#resourceOverlayAt = 0;
     for (const mesh of [
@@ -5195,6 +5267,7 @@ export class BabylonVillageScene {
 
   public dispose(): void {
     this.#terraformRenderer?.dispose();
+    this.#demolitionMarks?.dispose();
     cancelAnimationFrame(this.#infrastructureHoverFrame);
     this.#infrastructureHoverFrame = 0;
     this.#infrastructureHoverEvent = null;

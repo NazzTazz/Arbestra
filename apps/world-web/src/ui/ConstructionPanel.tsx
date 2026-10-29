@@ -15,7 +15,7 @@ const DOMAINS = [
 ] as const;
 const TOOLS = [
   { id: 'terraform', label: 'Terraformation', icon: 'tool:terraform', detail: 'Niveler le sol', available: true },
-  { id: 'demolish', label: 'Détruire', icon: 'tool:demolish', detail: 'À venir', available: false },
+  { id: 'demolish', label: 'Détruire', icon: 'tool:demolish', detail: 'Sans remboursement', available: true },
 ] as const;
 export interface ConstructionChoice {
   action: 'build' | 'upgrade' | 'extend';
@@ -71,6 +71,7 @@ export function ConstructionPanel({
   domain,
   tool = null,
   onTool = () => {},
+  demolition = () => null,
   infrastructure,
   factoryEnabled,
   onWorkshop,
@@ -97,6 +98,8 @@ export function ConstructionPanel({
   domain: ConstructionDomain;
   tool?: ConstructionTool | null;
   onTool?: (tool: ConstructionTool) => void;
+  /** Destroy tool, owned here: it needs no world mode of its own. */
+  demolition?: (active: boolean) => ReactNode;
   infrastructure: ReactNode;
   factoryEnabled: boolean;
   onWorkshop: () => void;
@@ -104,6 +107,8 @@ export function ConstructionPanel({
   onClearError: () => void;
 }) {
   const [category, setCategory] = useState('Habitat');
+  const [demolishing, setDemolishing] = useState(false);
+  const activeTool = tool ?? (domain === 'tools' && demolishing ? 'demolish' : null);
   const definition = definitions.find((item) => item.code === construction.type);
   const groups = ['Habitat', 'Production', 'Savoir', 'Administration'].filter((group) =>
     definitions.some((item) => categoryOf(item.code) === group),
@@ -171,6 +176,7 @@ export function ConstructionPanel({
               aria-pressed={domain === item.id}
               onClick={() => {
                 if (item.id !== domain) onDomainChange(item.id);
+                setDemolishing(false);
                 if (collapsed) onToggle();
               }}
             >
@@ -221,6 +227,7 @@ export function ConstructionPanel({
           )}
         </aside>
       )}
+      {domain === 'tools' && demolition(activeTool === 'demolish' && !collapsed)}
       {domain === 'tools' ? (
         !collapsed && (
           <section className="construction-showroom" aria-label="Outils">
@@ -231,8 +238,11 @@ export function ConstructionPanel({
                 key={item.id}
                 aria-label={item.label}
                 disabled={locked || !item.available}
-                aria-pressed={tool === item.id}
-                onClick={() => onTool(item.id)}
+                aria-pressed={activeTool === item.id}
+                onClick={() => {
+                  setDemolishing(item.id === 'demolish' && activeTool !== 'demolish');
+                  onTool(item.id);
+                }}
               >
                 <strong>{item.label}</strong>
                 <BuildingThumbnail code={item.icon} />

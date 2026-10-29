@@ -2087,6 +2087,14 @@ button {
   min-height: 0;
   background: none;
 }
+.demolition-feedback {
+  display: grid;
+  gap: 6px;
+  font-size: 0.83rem;
+}
+.demolition-feedback small {
+  color: #c2d3eb;
+}
 .construction-current {
   display: grid;
   gap: 6px;
