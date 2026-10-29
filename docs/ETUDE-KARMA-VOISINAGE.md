@@ -219,6 +219,8 @@ Lecture seule ; lignes d'`origin/main` `5970fec`.
 - Formulation : « validation de fast-impact par Tristan non établie dans ce cadrage », pas « jamais validé ».
 - Le raccord est assez précis pour être proposé à Tristan ; il ne demande ni nouveau moteur ni portage.
 
+**Validé (Tristan, 29 octobre)** : **fast-impact** (`sha256-splitmix-occupancy/1`) est le protocole de référence de la résolution, mis au point avec Darthmoule (docteur en modélisation CFD et 0-dimension). Reste seulement à confirmer, lors du raccord, que l'artefact embarqué l'exécute bien (provenance renvoyée par l'exécutable).
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
