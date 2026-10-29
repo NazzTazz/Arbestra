@@ -211,6 +211,14 @@ Lecture seule ; lignes d'`origin/main` `5970fec`.
 - Campagnes à part (image `waar-campaign:bd79dff-m`).
 - Proposition : le worker d'Arbestra, sur le même VPS, appelle cet artefact précis (extrait de l'image, empreinte vérifiée au démarrage) ; soufflerie et jeu calculent avec le même fichier sur la même machine. La recette de fast-impact par Tristan reste ouverte.
 
+**Astra sur ce relevé** :
+
+- L'horodatage est compatible avec les sources de `5970fec` mais ne prouve pas les features compilées. Pour confirmer fast-impact : observer une requête réelle de la soufflerie et la provenance renvoyée par l'exécutable.
+- Si le CLI est lié dynamiquement, son empreinte ne couvre pas les bibliothèques chargées ; l'exécuter hors du conteneur Debian peut changer son environnement. Vérification bornée : même artefact, dépendances identifiées, mêmes requêtes et graines sur un petit corpus, empreintes de rejeu identiques.
+- Arbestra embarque une **copie versionnée** de l'artefact avec son déploiement, sans dépendre du conteneur de démonstration ni de sa disponibilité.
+- Formulation : « validation de fast-impact par Tristan non établie dans ce cadrage », pas « jamais validé ».
+- Le raccord est assez précis pour être proposé à Tristan ; il ne demande ni nouveau moteur ni portage.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
