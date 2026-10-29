@@ -152,6 +152,22 @@ Rien du combat ni du karma n'est livré.
   - question de Jean-Michel à Tristan : le pacte permet-il seulement de construire chez l'autre, ou aussi de partager une zone de revendication (quartier commun) ?
 - Claude-Opus étudie le moteur en lecture seule avant de proposer un raccord.
 
+## 4 octies. Lecture du moteur waar-micro-combat (Claude-Opus, 29 octobre)
+
+Lecture seule ; lignes d'`origin/main` `5970fec`.
+
+- **Ce qui existe** : résolution en Rust (`engines/waar-cohort/rust/src/v2.rs`), PHP pour valider, orchestrer et produire les rapports. Contrats `waar-combat-request/2` et `waar-combat-result/2`, rejouables (ruleset et armées embarqués, `replayHash`). Transport : CLI JSONL ou FFI. Aléa adressé par SHA-256 depuis une graine 31 bits. Conséquences (blessés, capture, compression) en politique versionnée séparée de la physique.
+- **Générique** : cohortes, modificateurs avec provenance, politiques de conséquences, batch, rejeu. **Spécifique Waar** : les 4 types (soldat, lancier, archer, chevalier) figés dans Rust, schémas et PHP ; météo et budgets monotypes.
+- **Soufflerie** : duels dans les deux sens, matrice des 16 monotypes, ellipses d'objectifs, recherche de candidats, optimiseur évolutif, campagnes paramétriques reprenables. **Sandbox Bagaar** : ère Waar virtuelle de 24 comptes et joueurs simulés ; les **slots Lua** sont des politiques de joueurs, pas des règles de combat (Linux seulement).
+- **Exécuté** : PHPUnit racine 247 tests verts ; suite moteur 37 échecs dus uniquement à la DLL FFI non construite.
+- **Points d'attention** :
+  - le protocole par défaut `sha256-splitmix-occupancy/1` (fast-impact) est activé depuis le 27 septembre alors que trois documents le disent non sélectionné, et il n'a pas d'implémentation PHP (parité non couverte) ;
+  - checkout principal sur une branche divergente ; CLI compilé antérieur au dernier commit Rust ;
+  - dette R1 (`replayHash` dépend des taux de compression) ; aucun candidat d'équilibrage approuvé ; `waar-sf` utilise encore le combat legacy.
+- **Raccord proposé (Claude-Opus, à arbitrer)** : binaire Rust en **processus enfant persistant du worker**, via le JSONL existant. Même binaire que la soufflerie, parité exacte. Combat en tâche à échéance : graine dérivée de l'identifiant du combat, requête, résultat, ruleset et empreinte du binaire archivés, conséquences appliquées une seule fois. Coût : binaire Linux construit en CI. Alternative : crate en WASM dans Node (parité à prouver). Portage TypeScript déconseillé (deux implémentations, `ln`/`exp`/`cos` non garantis au bit près).
+- **Adaptations** : types d'unités (projection sur les 4 types Waar ou généralisation à N types) ; Oracle « aider à gagner » = modificateurs du défenseur, « limiter les pertes » = politique de conséquences asymétrique à créer (`compressionPercent` et `capturePercent` sont communs aux deux camps) ; pas de bâtiments ni de siège dans le moteur ; blessés et guérison côté population.
+- **Questions** : Tristan — combat instantané ou à échéance, rôle de l'Oracle, 4 types ou N types, dépendance Rust acceptée, blessés persistants, sandbox macro Arbestra. Astra — statut de fast-impact, binaire de référence, dette R1, WASM. Jean-Michel — correspondance des rôles, défenseur d'une interception, modificateurs des tours, contenu du rapport public d'un combat de convoi.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
