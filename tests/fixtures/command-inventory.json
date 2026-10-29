@@ -561,6 +561,13 @@
   },
   {
     "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/harvest-intents/:commandId/cancel",
+    "actions": [],
+    "lot": "E",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/infrastructure",
     "actions": [],
     "lot": "D",
