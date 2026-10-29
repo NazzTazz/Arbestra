@@ -203,6 +203,14 @@ Lecture seule ; lignes d'`origin/main` `5970fec`.
 - Oracle : il peut agir sur les conditions du combat, et cette intervention n'exclut pas une limitation des conséquences. Distinguer un vent qui gêne tous les archers (perturbation, pas forcément favorable au défenseur) d'un vent contraire au seul agresseur (protection asymétrique). Effets à mesurer dans la soufflerie, avec et sans intervention, plutôt qu'un pourcentage arbitraire.
 - Fait technique (Claude-Opus) : les requêtes du moteur portent déjà des modificateurs par camp avec provenance ; les deux variantes de vent s'expriment sans modifier le moteur, et la provenance « Oracle » apparaît dans le rapport.
 
+**Build de référence sur le VPS (vérifié par Claude-Opus, lecture seule, 29 octobre)** :
+
+- Soufflerie en ligne : conteneur `waar-engine-demo-engine-1`, image `waar-engine-demo:5970fec…`, en service depuis 4 semaines.
+- Binaire : `/app/engines/waar-cohort/rust/target/release/waar-cohort-cli`, 1 307 424 octets, horodaté 27 septembre 00:13, sha256 `e3705c8f77b56b08c803fb5a671bf5fd2d4f763a76cbb44146c26aefb2bd64a8`, x86_64, Debian 12 (glibc 2.36).
+- Le dernier commit Rust est `c0f476f` (27 septembre 00:03 UTC, active fast-impact) ; aucun changement Rust jusqu'à `5970fec`. Le binaire correspond donc aux sources Rust de `5970fec`, fast-impact compris.
+- Campagnes à part (image `waar-campaign:bd79dff-m`).
+- Proposition : le worker d'Arbestra, sur le même VPS, appelle cet artefact précis (extrait de l'image, empreinte vérifiée au démarrage) ; soufflerie et jeu calculent avec le même fichier sur la même machine. La recette de fast-impact par Tristan reste ouverte.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
