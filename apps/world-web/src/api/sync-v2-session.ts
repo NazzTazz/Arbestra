@@ -1,4 +1,10 @@
-import { applySyncV2Batch, readServerEvents, type SyncV2State, type SyncV2Batch } from '@arbestra/contracts';
+import {
+  applySyncV2Batch,
+  applySyncV2SnapshotPages,
+  readServerEvents,
+  type SyncV2State,
+  type SyncV2Batch,
+} from '@arbestra/contracts';
 
 export class SyncV2HttpError extends Error {
   constructor(
@@ -81,6 +87,20 @@ export class SyncV2Session {
       this.publish(this.state, (input as SyncV2Batch).observedAt, input as SyncV2Batch);
     }
     return result.kind;
+  }
+  /** A paged snapshot and its catch-up delta, published as one state; the
+   * pages alone never are. `restart`: read it again from its first page.
+   * Publishers receive a bare `scope-snapshot` marker (no group): a
+   * snapshot was installed, which rereads the presentation. */
+  applyPaged(pages: readonly unknown[], delta: unknown): 'applied' | 'restart' | 'ignored' {
+    if (this.closed) return 'ignored';
+    const result = applySyncV2SnapshotPages(this.state, pages, delta);
+    if (result.kind === 'resync') throw new SyncV2ResyncRequired();
+    if (result.kind === 'restart') return 'restart';
+    this.state = result.state;
+    const batch = delta as SyncV2Batch;
+    this.publish(this.state, batch.observedAt, { ...batch, coverage: 'scope-snapshot', groups: [] });
+    return 'applied';
   }
   close(): void {
     this.closed = true;

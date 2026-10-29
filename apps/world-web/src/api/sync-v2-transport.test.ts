@@ -1,6 +1,15 @@
 import { expect, it, vi } from 'vitest';
-import { SYNC_V2_PRIVATE_COMPONENTS, SYNC_V2_KNOWLEDGE_COMPONENTS, type SyncV2Batch } from '@arbestra/contracts';
+import {
+  SYNC_V2_PRIVATE_COMPONENTS,
+  SYNC_V2_KNOWLEDGE_COMPONENTS,
+  visibleSyncV2Scope,
+  type SyncV2Batch,
+  type SyncV2ReadRequest,
+  type SyncV2SnapshotPage,
+  type SyncV2State,
+} from '@arbestra/contracts';
 import { SyncV2Transport } from './sync-v2-transport';
+import { SyncV2SessionExpired } from './sync-v2-session';
 const worldId = '11111111-1111-4111-8111-111111111111',
   villageId = '22222222-2222-4222-8222-222222222222';
 const epoch = '33333333-3333-4333-8333-333333333333',
@@ -659,5 +668,231 @@ it('spaces stream reopenings by Retry-After when the stream itself is refused as
   } finally {
     transport.close();
     vi.useRealTimers();
+  }
+});
+
+const epochB = '99999999-9999-4999-8999-999999999999';
+const plot = (x: number) => ({
+  id: `${x},0`,
+  buildingId: epoch,
+  cellX: x,
+  cellY: 0,
+  amount: x,
+  capacity: 600,
+  productionPerHour: 60,
+  productionUpdatedAt: '2026-10-22T00:00:00.000Z',
+});
+const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => plot(from + index));
+/** One page of a paged private snapshot; the first one also lists the
+ * whole registry and the complete knowledge scope. */
+function snapshotPage(
+  generation: number,
+  options: { epoch?: string; revision?: string; first?: boolean; plots: ReturnType<typeof range>; next: string | null },
+): SyncV2SnapshotPage {
+  const village = {
+    stream: { kind: 'village' as const, key: villageId, epoch: options.epoch ?? epoch },
+    fromRevision: '0',
+    toRevision: options.revision ?? '4',
+    changes: options.first
+      ? SYNC_V2_PRIVATE_COMPONENTS.map((component) => ({
+          component,
+          upsert: component === 'gardenPlots' ? options.plots : [],
+          remove: [],
+        }))
+      : [{ component: 'gardenPlots' as const, upsert: options.plots, remove: [] }],
+  } as SyncV2SnapshotPage['groups'][number];
+  return {
+    protocol: 2,
+    worldId,
+    villageId,
+    generation,
+    observedAt: '2026-10-22T00:00:00Z',
+    coverage: 'scope-snapshot-page',
+    next: options.next,
+    groups: options.first ? [village, bootstrap(generation).groups[1]!] : [village],
+  };
+}
+function catchUp(generation: number, from: string, to: string, epochValue = epoch): SyncV2Batch {
+  return {
+    protocol: 2,
+    worldId,
+    villageId,
+    generation,
+    observedAt: '2026-10-22T00:00:05Z',
+    coverage: 'delta',
+    groups: [
+      {
+        stream: { kind: 'village', key: villageId, epoch: epochValue },
+        fromRevision: from,
+        toRevision: to,
+        changes:
+          from === to
+            ? []
+            : [
+                {
+                  component: 'identity',
+                  upsert: [{ id: villageId, name: 'Après les pages', anchorCellX: 1, anchorCellY: 2 }],
+                  remove: [],
+                },
+                { component: 'gardenPlots', upsert: [], remove: ['0,0'] },
+              ],
+      },
+      { stream: { kind: 'knowledge', key: owner, epoch }, fromRevision: '1', toRevision: '1', changes: [] },
+    ],
+  };
+}
+type Read = { url: string; body: SyncV2ReadRequest | null; pages: boolean };
+/** Serves the bootstrap, sync reads and an idle stream from `answer`. */
+function pagingTransport(answer: (read: Read, generation: number) => Promise<Response> | Response) {
+  const reads: Read[] = [],
+    published: Array<{ state: SyncV2State; batch: SyncV2Batch }> = [];
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream'))
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const headers = new Headers(init?.headers);
+    const read = {
+      url: String(url),
+      body: init?.body ? (JSON.parse(String(init.body)) as SyncV2ReadRequest) : null,
+      pages: headers.get('x-arbestra-sync-pages') === '1',
+    };
+    reads.push(read);
+    return answer(read, Number(headers.get('x-arbestra-generation')));
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: (state, _observedAt, batch) => published.push({ state, batch }),
+    expired: () => undefined,
+  });
+  return { transport, reads, published };
+}
+const plotsOf = (state: SyncV2State) =>
+  [...visibleSyncV2Scope(state.scopes.get(`village:${villageId}`)!).keys()]
+    .filter((key) => key.startsWith('gardenPlots:'))
+    .map((key) => key.slice('gardenPlots:'.length))
+    .sort((a, b) => Number(a.split(',')[0]) - Number(b.split(',')[0]));
+
+it('publishes a paged snapshot once, after its last page and catch-up delta, retrying a failed page', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let failures = 0,
+    caughtUp = false;
+  const { transport, reads, published } = pagingTransport(async (read, generation) => {
+    if (read.url.includes('/bootstrap'))
+      return json(snapshotPage(generation, { first: true, plots: range(0, 2), next: 'cursor-1' }));
+    const after = read.body?.page?.after;
+    if (after === 'cursor-1') return json(snapshotPage(generation, { plots: range(3, 5), next: 'cursor-2' }));
+    if (after === 'cursor-2') {
+      // The third page fails once, then succeeds with the same cursor.
+      if (failures++ === 0) return json({ code: 'SYNC_BUSY', message: 'Occupé' }, 503);
+      return json(snapshotPage(generation, { revision: '5', plots: range(6, 8), next: null }));
+    }
+    // The catch-up delta, held until the test has checked nothing was published.
+    caughtUp = true;
+    await gate;
+    return json(catchUp(generation, '4', '6'));
+  });
+  try {
+    const starting = transport.start();
+    await vi.waitFor(() => expect(caughtUp).toBe(true), { timeout: 3000 });
+    // Every page is read, and nothing is published yet.
+    expect(published).toHaveLength(0);
+    expect(transport.snapshot?.scopes.size ?? 0).toBe(0);
+    release();
+    await starting;
+    expect(published).toHaveLength(1);
+    const [{ state, batch }] = published as [(typeof published)[number]];
+    // All pages, then the delta: a plot of page 1 removed, the name changed.
+    expect(plotsOf(state)).toEqual(range(1, 8).map((row) => row.id));
+    expect(visibleSyncV2Scope(state.scopes.get(`village:${villageId}`)!).get(`identity:${villageId}`)).toMatchObject({
+      name: 'Après les pages',
+    });
+    expect(state.scopes.get(`village:${villageId}`)?.revision).toBe('6');
+    expect(batch.coverage).toBe('scope-snapshot');
+    expect(reads.map((read) => read.body?.page?.after ?? (read.body ? 'delta' : 'bootstrap'))).toEqual([
+      'bootstrap',
+      'cursor-1',
+      'cursor-2',
+      'cursor-2',
+      'delta',
+    ]);
+    expect(reads.every((read) => read.pages)).toBe(true);
+    // Later pages read the private scope only; the delta starts at page 1's cursors.
+    expect(reads[1]!.body).toMatchObject({ scopes: [{ kind: 'village', key: villageId }], cursors: [] });
+    expect(reads[4]!.body?.cursors).toEqual([
+      { kind: 'village', key: villageId, epoch, revision: '4' },
+      { kind: 'knowledge', key: owner, epoch, revision: '1' },
+    ]);
+  } finally {
+    transport.close();
+  }
+});
+
+it('starts over from the first page when the epoch changes mid-way, publishing only the coherent state', async () => {
+  let restarts = 0,
+    expired = false;
+  const { transport, reads, published } = pagingTransport((read, generation) => {
+    if (read.url.includes('/bootstrap'))
+      return json(snapshotPage(generation, { first: true, plots: range(0, 2), next: 'old-1' }));
+    const after = read.body?.page?.after;
+    // The second page was read after the epoch was replaced.
+    if (after === 'old-1') return json(snapshotPage(generation, { epoch: epochB, plots: range(3, 5), next: null }));
+    if (after === 'new-1') {
+      // The server notices it too, once: start over again.
+      if (!expired) {
+        expired = true;
+        return json({ code: 'SYNC_SNAPSHOT_PAGE_EXPIRED', message: 'À relire' }, 409);
+      }
+      return json(snapshotPage(generation, { epoch: epochB, revision: '9', plots: range(13, 15), next: null }));
+    }
+    if (read.body?.cursors.length === 0) {
+      restarts++;
+      return json(
+        snapshotPage(generation, { epoch: epochB, revision: '9', first: true, plots: range(10, 12), next: 'new-1' }),
+      );
+    }
+    const village = read.body?.cursors.find((cursor) => cursor.kind === 'village');
+    return json(catchUp(generation, village!.revision, village!.revision, village!.epoch));
+  });
+  try {
+    await transport.start();
+    expect(restarts).toBe(2);
+    expect(published).toHaveLength(1);
+    const [{ state }] = published as [(typeof published)[number]];
+    expect(state.scopes.get(`village:${villageId}`)).toMatchObject({ epoch: epochB, revision: '9' });
+    // No plot of the first epoch survives in the published state.
+    expect(plotsOf(state)).toEqual(range(10, 15).map((row) => row.id));
+    expect(reads.filter((read) => read.body?.page?.after === 'new-1')).toHaveLength(2);
+  } finally {
+    transport.close();
+  }
+});
+
+it('publishes nothing when the session expires in the middle of a paged snapshot', async () => {
+  const { transport, published } = pagingTransport((read, generation) => {
+    if (read.url.includes('/bootstrap'))
+      return json(snapshotPage(generation, { first: true, plots: range(0, 2), next: 'cursor-1' }));
+    return json({ code: 'UNAUTHENTICATED', message: 'Session expirée' }, 401);
+  });
+  try {
+    await expect(transport.start()).rejects.toBeInstanceOf(SyncV2SessionExpired);
+    expect(published).toHaveLength(0);
+    expect(transport.snapshot).toBeUndefined();
+  } finally {
+    transport.close();
+  }
+});
+
+it('keeps a village within one page on a single complete snapshot, asking for pages without reading any', async () => {
+  const { transport, reads, published } = pagingTransport((_read, generation) => json(bootstrap(generation)));
+  try {
+    await transport.start();
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({ pages: true, body: null });
+    expect(reads[0]!.url).toMatch(/\/bootstrap\?generation=\d+$/);
+    expect(published).toHaveLength(1);
+    expect(published[0]!.batch.coverage).toBe('scope-snapshot');
+  } finally {
+    transport.close();
   }
 });

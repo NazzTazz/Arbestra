@@ -2,6 +2,10 @@ import {
   processingCommandIsValid,
   processingConfirmationV2IsValid,
   syncV2BatchIsValid,
+  syncV2SnapshotPageIsValid,
+  SYNC_V2_PAGES_HEADER,
+  SYNC_V2_SNAPSHOT_MAX_PAGES,
+  type SyncV2SnapshotPage,
   commandReceiptReadResponseIsValid,
   villagePresentationIsValid,
   constructionConfirmationV2IsValid,
@@ -69,6 +73,16 @@ async function parse(response: Response): Promise<unknown> {
   return data;
 }
 const includeQuery = (options: Options) => (options.include?.length ? `&include=${options.include.join(',')}` : '');
+/** Snapshot reads accept a paged answer (docs/DESIGN-PAGINATION-SNAPSHOT-V2.md);
+ * a server without pages ignores the header. */
+const pagesHeader = { [SYNC_V2_PAGES_HEADER]: '1' };
+/** A failed page is retried with its cursor; pages already read stay valid. */
+const PAGE_ATTEMPTS = 3;
+const PAGE_RETRY_MS = 500;
+/** Inconsistent pages start over from the first page, a bounded number of times. */
+const SNAPSHOT_RESTARTS = 3;
+const startsSnapshot = (input: unknown): input is SyncV2Batch | SyncV2SnapshotPage =>
+  (syncV2BatchIsValid(input) && input.coverage === 'scope-snapshot') || syncV2SnapshotPageIsValid(input);
 
 /** One mounted village owns this transport. Only intentions are persisted:
  * every reload reacquires complete projection values with their cursors. */
@@ -83,14 +97,23 @@ export class SyncV2Transport {
         `/api/worlds/${encodeURIComponent(worldSlug)}/village/bootstrap?generation=${generation}${includeQuery(options)}`,
         {
           credentials: 'same-origin',
-          headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': String(generation), ...timingHeader() },
+          headers: {
+            'x-arbestra-protocol': '2',
+            'x-arbestra-generation': String(generation),
+            ...pagesHeader,
+            ...timingHeader(),
+          },
         },
       ),
     );
-    if (!syncV2BatchIsValid(input) || input.coverage !== 'scope-snapshot' || input.generation !== generation)
-      throw new SyncV2ResyncRequired();
+    if (!startsSnapshot(input) || input.generation !== generation) throw new SyncV2ResyncRequired();
     const transport = new SyncV2Transport(worldSlug, input.worldId, input.villageId, options, generation);
-    transport.open(input);
+    try {
+      await transport.open(input);
+    } catch (error) {
+      transport.close();
+      throw error;
+    }
     return transport;
   }
   generation: number;
@@ -172,7 +195,7 @@ export class SyncV2Transport {
       throw error;
     }
     this.clearScopeTooLarge();
-    this.finishStart(input);
+    await this.finishStart(input);
   }
   private startRead(alreadyWoken: boolean): Promise<unknown> {
     return this.json(
@@ -180,6 +203,7 @@ export class SyncV2Transport {
       alreadyWoken
         ? {
             method: 'POST',
+            headers: pagesHeader,
             body: JSON.stringify({
               protocol: 2,
               generation: this.generation,
@@ -187,25 +211,24 @@ export class SyncV2Transport {
               cursors: [],
             }),
           }
-        : {},
+        : { headers: pagesHeader },
     );
   }
-  private finishStart(input: unknown) {
+  private async finishStart(input: unknown) {
     if (this.closed) return;
     if (
-      !syncV2BatchIsValid(input) ||
-      input.coverage !== 'scope-snapshot' ||
+      !startsSnapshot(input) ||
       input.worldId !== this.worldId ||
       input.villageId !== this.villageId ||
       input.generation !== this.generation
     )
       throw new SyncV2ResyncRequired();
-    this.open(input);
+    await this.open(input);
   }
-  private open(input: SyncV2Batch) {
+  private async open(input: SyncV2Batch | SyncV2SnapshotPage) {
     // Same per-tab convention as pending constructions: world and village.
     this.pendingKey = `arbestra:pending-processing:${this.worldSlug}:${this.villageId}`;
-    this.session = new SyncV2Session(
+    const session = new SyncV2Session(
       {
         worldId: this.worldId,
         villageId: this.villageId,
@@ -216,8 +239,94 @@ export class SyncV2Transport {
       (state, observedAt, batch) => this.options.publish(state, observedAt, batch),
       this.request,
     );
-    this.session.apply(input);
-    void this.listen();
+    this.session = session;
+    try {
+      await this.install(input, session);
+    } catch (error) {
+      // Nothing was published: no half-open session stays behind.
+      if (this.session === session) {
+        session.close();
+        this.session = null;
+      }
+      throw error;
+    }
+    if (!this.closed && this.session === session) void this.listen();
+  }
+  /** Applies a snapshot read's answer to `session`. A paged snapshot is read
+   * to its last page, caught up by one delta from its first page's cursors,
+   * and only then published (docs/DESIGN-PAGINATION-SNAPSHOT-V2.md). */
+  private async install(input: unknown, session: SyncV2Session): Promise<void> {
+    for (let restarts = 0; ; restarts++) {
+      if (!syncV2SnapshotPageIsValid(input)) {
+        if (!this.closed && this.session === session) session.apply(input);
+        return;
+      }
+      if (restarts > SNAPSHOT_RESTARTS) throw new Error('SYNC_V2_SNAPSHOT_UNSTABLE');
+      const first = input,
+        scopes = first.groups.map(({ stream }) => ({ kind: stream.kind, key: stream.key }));
+      const pages: SyncV2SnapshotPage[] = [first];
+      let complete = true;
+      for (let next = first.next; next; next = pages.at(-1)!.next) {
+        if (pages.length >= SYNC_V2_SNAPSHOT_MAX_PAGES) throw new Error('SYNC_V2_SNAPSHOT_TOO_MANY_PAGES');
+        const page = await this.snapshotPage(next);
+        if (this.closed || this.session !== session) return;
+        if (!page) {
+          complete = false;
+          break;
+        }
+        pages.push(page);
+      }
+      if (complete) {
+        const delta = await this.json('/sync/read', {
+          method: 'POST',
+          headers: pagesHeader,
+          body: JSON.stringify({
+            protocol: 2,
+            generation: this.generation,
+            scopes,
+            cursors: first.groups.map(({ stream, toRevision }) => ({ ...stream, revision: toRevision })),
+          }),
+        });
+        if (this.closed || this.session !== session) return;
+        // Too much changed meanwhile: the server answered with a snapshot.
+        if (startsSnapshot(delta)) {
+          input = delta;
+          continue;
+        }
+        if (session.applyPaged(pages, delta) !== 'restart') return;
+      }
+      input = await this.json('/sync/read', {
+        method: 'POST',
+        headers: pagesHeader,
+        body: JSON.stringify({ protocol: 2, generation: this.generation, scopes, cursors: [] }),
+      });
+      if (this.closed || this.session !== session) return;
+    }
+  }
+  /** A later page of a paged snapshot. A failure is retried with the same
+   * cursor; null means the snapshot must start over from its first page. */
+  private async snapshotPage(after: string): Promise<SyncV2SnapshotPage | null> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const page = await this.json('/sync/read', {
+          method: 'POST',
+          headers: pagesHeader,
+          body: JSON.stringify({
+            protocol: 2,
+            generation: this.generation,
+            scopes: [{ kind: 'village', key: this.villageId }],
+            cursors: [],
+            page: { after },
+          }),
+        });
+        return syncV2SnapshotPageIsValid(page) ? page : null;
+      } catch (error) {
+        if (error instanceof SyncV2HttpError && error.code === 'SYNC_SNAPSHOT_PAGE_EXPIRED') return null;
+        const transient = !(error instanceof SyncV2HttpError) || error.status >= 500;
+        if (this.closed || error instanceof SyncV2SessionExpired || !transient || attempt >= PAGE_ATTEMPTS) throw error;
+        await new Promise((resolve) => setTimeout(resolve, PAGE_RETRY_MS * attempt));
+      }
+    }
   }
   private async listen(): Promise<void> {
     if (this.closed || !this.session) return;
@@ -282,6 +391,7 @@ export class SyncV2Transport {
       try {
         input = await this.json('/sync/read', {
           method: 'POST',
+          headers: pagesHeader,
           body: JSON.stringify({
             protocol: 2,
             generation: this.generation,
@@ -294,7 +404,7 @@ export class SyncV2Transport {
         throw error;
       }
       this.clearScopeTooLarge();
-      if (!this.closed && this.session === session) session.apply(input);
+      if (!this.closed && this.session === session) await this.install(input, session);
     })().finally(() => {
       this.refreshFlight = null;
     });
