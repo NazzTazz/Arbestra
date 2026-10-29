@@ -8,7 +8,8 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 2. **Alpha** : mesurer la conversion du bois (migrations 064 à 069) sur une copie de la base alpha, vérifier l'absence de monde procédural, puis accord explicite de Tristan avant de convertir le bois des joueurs.
 3. **Tranche trajets** (validée par Tristan, à spécifier) : le coût ×30 des jardins (`GARDEN_CROSSING_COST`, `808e8b2`) pousse des trajets hors de l'itinéraire grossier vers la recherche fine complète : 2,3 à 6,2 s et 32 000 à 37 000 nœuds sur deux cases de Bressuire (216,213 et 229,220), au lieu de 0,13 à 0,19 s au coût ordinaire, sous le verrou du village. Pistes : accepter l'itinéraire grossier selon sa longueur plutôt que son détour, ou relancer au coût ordinaire au-delà d'un budget de nœuds ; garder « jardin = passage de dernier recours ». Mesure avant/après sur Bressuire, test borné du nombre de nœuds.
 4. **Performance du rendu** (antérieure au bois) : ~15 à 28 images/s, ~290 appels de dessin par image, temps dominé par Babylon (`_evaluateActiveMeshes`, `_renderForCamera`, matrices) ; villageois ~2,2 ms par image. Mesure A/B du 29 octobre : la tranche bois n'ajoute ni appel de dessin ni coût mesurable.
-5. **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts listés au §5 et dans les cycles.
+5. **Défrichage plus rapide** (Tristan, recette du 29 octobre) : le plafond de 8 chantiers contraint le défrichage arbre par arbre ; à accélérer plus tard (plafond, ou plusieurs souches par chantier).
+6. **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts listés au §5 et dans les cycles.
 
 ## Défricher une case de souches : « Sans chemin » corrigé (29 octobre, soir) — à valider
 
