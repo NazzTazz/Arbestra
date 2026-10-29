@@ -139,6 +139,19 @@ Rien du combat ni du karma n'est livré.
 - **Jean-Michel** : trois pactes envisageables (voisinage, non-agression, droit de passage) ; prudence sur la non-agression, qui contournerait le karma si elle était une immunité ; première étape minimale : événement territorial → notification → contact ; aucun pacte ne cède le territoire d'un tiers. Question à Tristan : contrats exécutés par le serveur ou engagements politiques rompables ?
 - **Claude-Opus** : les deux, selon ce que touche le pacte. Le serveur n'exécute un pacte que s'il modifie un droit qu'il applique déjà : le pacte de voisinage lève, entre les deux signataires seulement, l'interdiction ou la perte de karma de construire chez l'autre (permission bilatérale révocable, sans effet sur les tiers ni les revendications). La non-agression reste un engagement politique rompable, jamais une immunité ; sa rupture peut être un événement public. Le pacte de voisinage serait le premier pacte formel.
 
+## 4 septies. Pactes, et moteur de combat existant (29 octobre)
+
+- **Validé (Tristan)** : le combat d'Arbestra réutilisera le **moteur de combat de Waar** et sa soufflerie d'équilibrage (`../waar-micro-combat`, conçu pour 4 unités de Waar, `../waar-sf`) : banc de tests et d'équilibrage, sandbox macroscopique, joueurs simulés, slots Lua. Pas de second moteur. Astra (Sol en effort Pro) rejoint l'étude.
+- **Astra** : résolution agrégée par cohortes, actions simultanées depuis l'état de début de round, rapports rejouables, distinction entre résolution physique et politiques de conséquences (blessés, morts, prisonniers). Cœur natif Rust avec une interface JSONL (`resolve`, `batch`, `campaignBatch`). Spécialisé sur soldat, lancier, archer, chevalier : la correspondance avec les habitants d'Arbestra reste à définir.
+- **Séparation proposée (Astra, approuvée par Claude-Opus)** : Arbestra autorise et prépare l'engagement → le moteur résout → Arbestra applique les conséquences (tâche à échéance, sous verrou du village, idempotente). Le moteur ignore tours, pactes et karma. La soufflerie éprouve l'équilibrage, elle ne tourne pas pendant une attaque.
+- **Oracle** : choisir d'abord entre « aider le défenseur à gagner » (résolution) et « limiter les conséquences d'une défaite » (conséquences). Pas de multiplicateur arbitraire avant.
+- **Pactes (Jean-Michel puis Astra)** :
+  - la révocation retire une permission future, sans réécrire le passé : les constructions acceptées sous pacte actif restent ; la permission compte au moment où le serveur accepte la commande ;
+  - une permission de construire n'accorde implicitement aucun autre droit (renseignement, commerce, militaire, priorité territoriale) ; bénéficiaires nommés village par village ; aucun effet sur un tiers ;
+  - le premier pacte de voisinage autorise les constructions ordinaires, **pas les bâtiments revendicatifs** (une tour demanderait un consentement spécifique), pour qu'une tour posée sous pacte ne contraigne pas ensuite le village qui l'a permise. Claude-Opus retire son idée qu'une révocation coupe les revendications d'une tour ;
+  - question de Jean-Michel à Tristan : le pacte permet-il seulement de construire chez l'autre, ou aussi de partager une zone de revendication (quartier commun) ?
+- Claude-Opus étudie le moteur en lecture seule avant de proposer un raccord.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
