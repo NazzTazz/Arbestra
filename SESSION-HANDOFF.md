@@ -2,6 +2,17 @@
 
 Index court. L'historique détaillé (preuves, mesures, sessions précédentes) est archivé dans [docs/HANDOFF-ARCHIVE-2026-10-23.md](docs/HANDOFF-ARCHIVE-2026-10-23.md).
 
+## Bois par arbre, étape 2e (29 octobre) — à valider
+
+[Plan](docs/PLAN-BOIS-ARBRE-TRANCHE-2.md), ligne 2e (contrat détaillé) ; [grammaire gestuelle](docs/SPEC-GRAMMAIRE-GESTUELLE.md) §3 « Serveur requis ». Serveur et contrat seulement, client inchangé (nouveaux champs optionnels).
+- **File en coupe ou en défrichage** : `HarvestIntent.woodMode` (`cut` par défaut, `clear`). Chaque cible de la file garde ses arbres, ceux à défricher (`worksites[].targets[].clearTreeIndices`) et la part de chaque geste (`designations`). Le défrichage englobe la coupe. Le chantier commun consomme la file : bois d'abord, puis les souches à défricher.
+- **Annuler un geste** : `POST /api/worlds/:worldSlug/villages/:villageId/harvest-intents/:commandId/cancel`, idempotente par geste. Retire ses arbres et souches sauf ceux qu'un lot du village travaille ; ne touche pas aux autres gestes ; une cible vidée est supprimée. Reçu arbre par arbre (`removed`, `in-progress`, `queued`, `not-queued`). Geste pas encore traité : annulé d'avance. Seul le bois est annulé.
+- **Navigation arbre par arbre** : une souche retirée retire son tronc (déclencheur sur `woodland_trees`, sol RC1, contexte des trajets, compléments `starter:`), la case reste occupée jusqu'au défrichage.
+- **Migrations 068 et 069**, additives, **appliquées sur la base de test seulement**. À appliquer sur dev avant la recette.
+- Commits : `7264657` (file et annulation), `0178823` (navigation), `2016c85` (garde d'une cible dont un lot roule, test de la route). Non poussés.
+- **Preuves (base de test)** : nouveaux tests dans `woodland.integration` (file en défrichage consommée par le chantier commun, défrichage qui englobe la coupe, annulation avec lot en cours et rejeu sans écriture, geste fusionné, cible vidée supprimée sans habitant retenu, autre village refusé, annulation avant traitement, course annulation/worker dans les deux ordres avec attente PostgreSQL observée, route), `rc1-trunk-navigation` (souche retirée : tronc sorti, révision, empreinte, `navigation_changed`, versions de chunk ; abattage et coupe : rien ne bouge), `rc1-ground-cache`, `construction`, tests unitaires des règles de file. Rouges sur l'ancien code : les deux tests du défrichage en file (avec l'ancien `harvest-intents.ts`), le test du tronc RC1. Vertes, une par une ou par petits groupes : woodland, woodland-conversion, worksites, exploitation, hud-workforce, harvest-submissions, stone-proofs, natural-features, sync-v2-* (10 fichiers), presentation, presentation-fingerprint, rc1-ground, rc1-ground-cache, construction, construction-v2, rc1-trunk-navigation, rc1-navigation, route-cache, rc1-network-ground, observation-actions.
+- **Client (tranche 3, non fait)** : envoyer `woodMode`, lire `clearTreeIndices`, appeler l'annulation, traduire le refus `cancelled`, retirer de sa navigation locale les troncs dont `deposit.trees[].stumpRemoved` est vrai.
+
 ## Bois par arbre, étapes 2c et 2d (29 octobre) — à valider
 
 [Plan](docs/PLAN-BOIS-ARBRE-TRANCHE-2.md), lignes 2c et 2d (contrat détaillé). Serveur et contrat seulement ; le client ne change que la fiche du bosquet (ligne « Repousse » retirée).
@@ -9,7 +20,7 @@ Index court. L'historique détaillé (preuves, mesures, sessions précédentes) 
 - **2d, exposition** : `deposit.trees` (arbres touchés) dans les chunks, le flux spatial, le snapshot, la présentation et la fiche (plus de `regrowthPerHour`) ; file du village dans `worksites[].targets[].treeIndices` ; arbre du lot dans `extractions[].treeIndex`. Corrigé au passage : `Extraction.reservedAmount` refusait 0, donc tout lot V2 contenant un retrait de souche (2b) faisait resynchroniser le client.
 - **Migration 067** (appliquée sur la base de test seulement) : vue `resource_deposits` de nouveau aplatie. Depuis 065, toute jointure par identifiant évaluait la vue entière : 5 cases 159,5 → 4,8 ms ; lecture d'un chunk 142–197 → 42–45 ms ; instantané spatial 242–360 → 63–81 ms (base de test, machine chargée). **À appliquer sur dev** (vue seule, rapide).
 - **Présentation** : deux lectures simultanées pouvaient faire deux captures (test « reuses one capture… », instable avant, rouge 4 fois sur 4 après 067). Une lecture réutilise désormais une capture terminée entre-temps si les compteurs sont égaux ; vert 3 fois sur 3.
-- **Reste** : troncs retirés de la navigation à la case entière seulement, file en coupe seulement, annulation : étape 2e.
+- **Reste** (au 29 octobre midi) : troncs retirés de la navigation à la case entière seulement, file en coupe seulement, annulation. Fait depuis en 2e (section ci-dessus).
 
 ## Bois par arbre, étape 2b : la bascule serveur (28 octobre, nuit) — à valider
 

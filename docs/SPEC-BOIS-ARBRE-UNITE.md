@@ -68,8 +68,8 @@ Un arbre est un arbre RC1 d'une case de bois : (monde, gisement, indice d'arbre)
 
 ### Navigation
 
-- Les troncs de tous les arbres de la case restent des obstacles jusqu'au défrichage, qu'ils soient debout, abattus ou réduits à des souches.
-- L'empreinte du réseau de trajets ne dépend pas du bois restant. Elle ne change qu'au défrichage, ou au nettoyage d'installation. C'est déjà le cas côté présentation depuis `5203f2c`.
+- Le tronc d'un arbre reste un obstacle tant que l'arbre est debout, abattu ou réduit à une souche. Il quitte la navigation au retrait de sa souche (étape 2e), même si la case garde d'autres arbres ou souches et reste donc occupée, non constructible.
+- L'empreinte du réseau de trajets ne dépend pas du bois restant. Elle ne change qu'au retrait d'une souche, au défrichage, ou au nettoyage d'installation.
 
 ## 3. Stockage (serveur)
 
@@ -137,7 +137,7 @@ Recommandations validées :
 
 Choix d'implémentation retenus (`8b806f2`, `c10807b`) :
 - La case garde la somme de ses arbres, écrite dans la même instruction que l'arbre.
-- Le défrichage final est automatique, et les troncs quittent la navigation au défrichage complet de la case.
+- Le défrichage final est automatique. Les troncs quittaient la navigation au défrichage complet de la case ; depuis 2e, chaque tronc la quitte au retrait de sa souche.
 - Admission et départ d'un lot ont une seule borne : le bois libre de la case.
 - Un départ refusé met le chantier en attente sans faire échouer la lecture, la commande ni le worker.
 - La migration 066 reconvertit les cases dont les arbres ne correspondent pas au stock.

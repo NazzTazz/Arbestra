@@ -2,7 +2,7 @@
 
 Date : 28 octobre 2026. Base : `wip/v2-commandes-bornees`.
 
-Statut : **décisions de Tristan intégrées ; branchement en attente des étapes serveur 2c, 2d et 2e** ([PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md)). Essayée d'abord sur la coupe et le défrichage des arbres, puis à généraliser.
+Statut : **décisions de Tristan intégrées ; étapes serveur 2c, 2d et 2e livrées (à valider), branchement client à faire (tranche 3)** ([PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md)). Essayée d'abord sur la coupe et le défrichage des arbres, puis à généraliser.
 
 ## 1. Décisions (Tristan, 28 octobre)
 
@@ -54,7 +54,11 @@ Le balayage existe déjà pour les jardins et les bosquets (Tristan : inutile de
 
 - **2c** (fait le 29 octobre, à valider) : la commande accepte des arbres désignés (`woodTrees`, contrat dans [PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md)).
 - **2d** (fait le 29 octobre, à valider) : chaque arbre touché est exposé (`deposit.trees`) ; la file du village se lit dans `worksites[].targets[].treeIndices` et le mode du chantier.
-- **2e** : file d'attente du bois consommée par le panneau Chantier, et commande d'annulation d'un geste.
+- **2e** (fait le 29 octobre, à valider) : contrat détaillé dans [PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md), ligne 2e.
+  - **Mise en file** : l'intention de récolte porte `woodMode: 'cut' | 'clear'` (coupe par défaut) avec ses arbres (`woodTrees`). Le défrichage englobe la coupe : un arbre en file pour la coupe et redésigné en défrichage passe en défrichage ; l'inverse n'ajoute rien (`already-assigned`). Le reçu marque `woodMode: 'clear'` sur le bois accepté en défrichage.
+  - **Lire la file** : `worksites[].targets[]` du chantier commun du bois (`poolResource: 'wood'`) : `treeIndices` (arbres en file, `null` = toute la case) et `clearTreeIndices` (ceux à défricher ; absent : aucun). Le surlignage rouge suit `clearTreeIndices` tant que la cible est `pending` et l'arbre pas encore retiré (`deposit.trees[].stumpRemoved`).
+  - **Annuler** : `POST /api/worlds/:worldSlug/villages/:villageId/harvest-intents/:commandId/cancel`, sans corps, `commandId` = celui du geste. Idempotente : le premier reçu est enregistré et rejoué tel quel. Le reçu liste chaque arbre du geste : `removed`, `in-progress` (un lot du village y travaille, il reste en file), `queued` (gardé par un autre geste, avec son `mode`), `not-queued` (plus rien à retirer). Un geste pas encore traité est annulé d'avance (`beforeQueue: true`). Seul le bois du geste est annulé ; pas de fenêtre de 15 s côté serveur.
+  - **Navigation** : une souche retirée retire son tronc de la navigation, même si la case n'est pas encore défrichée.
 
 ## 4. Marqueurs (décidés par Tristan le 28 octobre, après essai de la planche « Cercles de récolte »)
 
