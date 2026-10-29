@@ -271,24 +271,22 @@ it('adds to a queued case what is not there yet: a clearing takes a cut tree fur
   expect(queueContribution({ treeIndices: null, clearTreeIndices: null }, 'cut', [1], [])).toEqual([]);
 });
 
-it('withdraws a gesture from a case: its trees not taken leave, the other shares stay', () => {
+it('withdraws a gesture from a case: all of its trees leave, the other shares stay', () => {
   const shares = [share(null, 'cut', [4]), share('a', 'cut', [2, 0]), share('b', 'clear', [0, 1])];
-  expect(withdrawGesture(shares, 'b', new Set([1]), [0, 1, 2, 4])).toEqual({
-    designations: [share(null, 'cut', [4]), share('a', 'cut', [2, 0]), share('b', 'clear', [1])],
+  // A tree under way leaves too: only its lot is delivered (Tristan, 29 October).
+  expect(withdrawGesture(shares, 'b')).toEqual({
+    designations: [share(null, 'cut', [4]), share('a', 'cut', [2, 0])],
     found: true,
   });
-  expect(withdrawGesture(shares, 'a', new Set(), [0, 1, 2, 4])).toEqual({
+  expect(withdrawGesture(shares, 'a')).toEqual({
     designations: [share(null, 'cut', [4]), share('b', 'clear', [0, 1])],
     found: true,
   });
-  // A share of the whole case keeps only its taken trees.
-  expect(withdrawGesture([share('c', 'cut', null)], 'c', new Set([3]), [1, 3])).toEqual({
-    designations: [share('c', 'cut', [3])],
-    found: true,
-  });
+  // A share of the whole case leaves whole.
+  expect(withdrawGesture([share('c', 'cut', null)], 'c')).toEqual({ designations: [], found: true });
   // Another gesture, or none recorded: nothing changes.
-  expect(withdrawGesture(shares, 'z', new Set(), [0]).found).toBe(false);
-  expect(withdrawGesture(shares, 'z', new Set(), [0]).designations).toEqual(shares);
+  expect(withdrawGesture(shares, 'z').found).toBe(false);
+  expect(withdrawGesture(shares, 'z').designations).toEqual(shares);
 });
 
 it('accepts a clearing intent and checks the receipt of a cancellation', () => {
@@ -305,7 +303,7 @@ it('accepts a clearing intent and checks the receipt of a cancellation', () => {
       commandId,
       trees: [
         { featureId, treeIndex: 0, outcome: 'removed' },
-        { featureId, treeIndex: 1, outcome: 'in-progress', mode: 'clear' },
+        { featureId, treeIndex: 1, outcome: 'in-progress' },
         { featureId, treeIndex: 2, outcome: 'queued', mode: 'cut' },
         { featureId, treeIndex: 3, outcome: 'not-queued' },
       ],

@@ -17,13 +17,15 @@ import { ownedVillage } from './service.js';
 
 /** « Annuler » a gesture of the wood queue (slice 2e of
  * docs/PLAN-BOIS-ARBRE-TRANCHE-2.md, docs/SPEC-GRAMMAIRE-GESTUELLE.md): its
- * trees and stumps not yet taken leave the queue; a tree a lot of the village
- * works on stays, with its mode. Only this gesture's share of each case is
- * withdrawn: another gesture's trees stay. A case left without any share leaves
- * the queue. The first receipt is stored: a replay answers it unchanged and
- * changes nothing. The 15 s of the button are the interface's; the server
- * cancels as long as something is left to withdraw. Only the wood of the
- * gesture is withdrawn. */
+ * trees and stumps leave the queue. A tree a lot of the village works on is not
+ * finished (Tristan, 29 October): only that lot is delivered, then the tree is
+ * left as it is (its trunk keeps the wood left; a stump stays), like stopping a
+ * clearing (docs/SPEC-BOIS-ARBRE-UNITE.md §8.2). Only this gesture's share of
+ * each case is withdrawn: another gesture's trees stay. A case left without any
+ * share leaves the queue once no lot of the village runs on it. The first
+ * receipt is stored: a replay answers it unchanged and changes nothing. The
+ * 15 s of the button are the interface's; the server cancels as long as
+ * something is left to withdraw. Only the wood of the gesture is withdrawn. */
 export async function cancelHarvestIntent(
   db: Kysely<Database>,
   accountId: string,
@@ -158,7 +160,7 @@ async function withdraw(
     let queue = target ? { treeIndices: target.treeIndices, clearTreeIndices: target.clearTreeIndices } : null,
       found = false;
     if (target?.designations) {
-      const left = withdrawGesture(target.designations, commandId, taken, trees.all);
+      const left = withdrawGesture(target.designations, commandId);
       found = left.found;
       // A lot of the village on the case keeps its target until it is delivered
       // (its completion reads the target); an empty one then completes.
@@ -190,11 +192,12 @@ async function withdraw(
     for (const treeIndex of share.treeIndices ?? trees.all) {
       const after: WoodMode = queue?.clearTreeIndices?.includes(treeIndex) ? 'clear' : 'cut';
       receipt.trees.push(
-        queued(treeIndex) && taken.has(treeIndex)
-          ? { featureId, treeIndex, outcome: 'in-progress', mode: after }
-          : queued(treeIndex) && hasWork(trees, treeIndex, after)
-            ? { featureId, treeIndex, outcome: 'queued', mode: after }
-            : found && !taken.has(treeIndex) && hasWork(trees, treeIndex, mode)
+        queued(treeIndex) && (taken.has(treeIndex) || hasWork(trees, treeIndex, after))
+          ? { featureId, treeIndex, outcome: 'queued', mode: after }
+          : // Withdrawn while a lot works on it: only that lot is delivered.
+            found && taken.has(treeIndex)
+            ? { featureId, treeIndex, outcome: 'in-progress' }
+            : found && hasWork(trees, treeIndex, mode)
               ? { featureId, treeIndex, outcome: 'removed' }
               : { featureId, treeIndex, outcome: 'not-queued' },
       );

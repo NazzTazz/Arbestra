@@ -25,7 +25,7 @@ Les jeunes arbres et la repousse sont reportés à la tranche **croissance spont
 | Seuil de 10 % | **Supprimé.** |
 | Défrichage | **Arbre par arbre, souche par souche.** Un arbre désigné pour le défrichage est entièrement récolté, puis sa souche est retirée ; une souche désignée est retirée. Une case devient constructible quand il n'y reste plus ni arbre ni souche. |
 | File d'attente | Les gestes **mettent en file** des arbres et des souches, pour la récolte ou le défrichage. Le **panneau Chantier** consomme cette file avec ses habitants : c'est lui qui décide de l'effectif. |
-| Annuler | Pendant 15 s après un geste, « Annuler » **retire de la file** les arbres et souches de ce geste qui n'ont pas encore été pris en charge. |
+| Annuler | Pendant 15 s après un geste, « Annuler » **retire de la file** les arbres et souches de ce geste. Un arbre entamé n'est pas fini : seul le lot en cours est livré, comme à l'arrêt d'un défrichage (§8.2) ; le tronc reste au sol avec son bois, la souche reste (Tristan, 29 octobre). |
 | Navigation | **Seuls les troncs bloquent.** Un arbre coupé reste un obstacle (sa souche) jusqu'à ce que la souche soit retirée. |
 | Mondes sans arbres RC1 | Comme le prévoit la doc RC1 (RC1 désigne la génération du monde, de son terrain et de ses forêts) : **2 à 5 arbres** par case. |
 | Compléments de départ | De **vrais arbres** (deux bosquets de trois arbres, doc RC1), qu'on **continue de donner** aux joueurs isolés des forêts. |

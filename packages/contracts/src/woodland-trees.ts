@@ -218,27 +218,18 @@ export function queueContribution(
   return (designated ?? candidates).filter((index) => !clearing.has(index));
 }
 
-/** Withdraws a gesture from a queued case (slice 2e): its trees leave its
- * shares, except those `kept` (a lot of the village works on them). Returns
- * the shares left and whether the gesture had any share on this case. */
+/** Withdraws a gesture from a queued case (slice 2e): all of its trees leave
+ * its shares, a tree under way included. Tristan's decision (29 October): a
+ * cancelled tree is not finished; only the lot already under way is delivered,
+ * like stopping a clearing (docs/SPEC-BOIS-ARBRE-UNITE.md §8.2). The other
+ * shares stay. Returns the shares left and whether the gesture had any share
+ * on this case. */
 export function withdrawGesture(
   designations: readonly QueueDesignation[],
   commandId: string,
-  kept: ReadonlySet<number>,
-  all: readonly number[],
 ): { designations: QueueDesignation[]; found: boolean } {
-  let found = false;
-  const left: QueueDesignation[] = [];
-  for (const share of designations) {
-    if (share.commandId !== commandId) {
-      left.push({ ...share });
-      continue;
-    }
-    found = true;
-    const trees = (share.treeIndices ?? all).filter((index) => kept.has(index));
-    if (trees.length) left.push({ ...share, treeIndices: trees });
-  }
-  return { designations: left, found };
+  const left = designations.filter((share) => share.commandId !== commandId).map((share) => ({ ...share }));
+  return { designations: left, found: left.length !== designations.length };
 }
 
 /** Next stump to remove when clearing, in the designated order: a tree cut to
