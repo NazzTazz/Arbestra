@@ -20,6 +20,7 @@ import * as woodlandTreeConversionRepairMigration from './migrations/066_woodlan
 import * as resourceDepositsFlatViewMigration from './migrations/067_resource_deposits_flat_view.js';
 import * as woodQueueGesturesMigration from './migrations/068_wood_queue_gestures.js';
 import * as woodlandStumpNavigationMigration from './migrations/069_woodland_stump_navigation.js';
+import * as woodlandTreesSyncV2Migration from './migrations/070_woodland_trees_sync_v2.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -148,6 +149,7 @@ const migrationProvider: MigrationProvider = {
       '067_resource_deposits_flat_view': resourceDepositsFlatViewMigration,
       '068_wood_queue_gestures': woodQueueGesturesMigration,
       '069_woodland_stump_navigation': woodlandStumpNavigationMigration,
+      '070_woodland_trees_sync_v2': woodlandTreesSyncV2Migration,
     };
   },
 };

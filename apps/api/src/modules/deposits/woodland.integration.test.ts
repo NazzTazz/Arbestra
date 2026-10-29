@@ -1164,6 +1164,67 @@ it('publishes the chunk of a case to the journal when a tree falls and when a st
   }
 }, 120_000);
 
+/** Retrospective guard: tree rows alone (no write on the case row) must reach the V2 journal,
+ * with the same reference the reader uses to rebuild `deposit.trees`. */
+it('publishes the chunk of a case when only its tree rows change', async () => {
+  await resetE2eState(url);
+  const { id } = await committedGrove();
+  const world = await db.selectFrom('worlds').selectAll().where('id', '=', worldId).executeTakeFirstOrThrow();
+  const size = world.chunkSize,
+    chunk = { chunkX: Math.floor(cell.cellX / size), chunkY: Math.floor(cell.cellY / size) },
+    scope = `${chunk.chunkX},${chunk.chunkY}`;
+  const journalled = async (tx: Transaction<Database>) =>
+    (
+      await sql<{ n: number }>`select count(*)::int as n from game_sync_pending where transaction_id=txid_current()
+        and world_id=${worldId} and stream_kind='spatial' and scope_key=${scope}
+        and component='spatialFeatures' and entity_key=${id}`.execute(tx)
+    ).rows[0]!.n;
+  const clear = (tx: Transaction<Database>) =>
+    sql`delete from game_sync_pending where transaction_id=txid_current()`.execute(tx);
+  const trees = async (tx: Transaction<Database>) => {
+    await sql`select game_sync_publish()`.execute(tx);
+    const [change] = await readSpatialChanges(
+      tx,
+      {
+        worldId,
+        worldSlug: 'aube',
+        accountId: DEVELOPMENT_IDS.account,
+        widthCells: world.widthCells,
+        heightCells: world.heightCells,
+        chunkSize: size,
+        generationVersion: world.generationVersion,
+        ...chunk,
+      },
+      [{ component: 'spatialFeatures', key: id }],
+    );
+    return change!.component === 'spatialFeatures' ? change!.upsert[0]!.locations[0]!.deposit!.trees : undefined;
+  };
+  try {
+    await expect(
+      db.transaction().execute(async (tx) => {
+        const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
+        expect(await journalled(tx)).toBe(0);
+        // A first lot: the tree row appears, the case row is untouched.
+        await sql`insert into woodland_trees(world_id,feature_id,tree_index,remaining_amount,reserved_amount,felled_at)
+          values(${worldId},${id},0,500,100,${t})`.execute(tx);
+        expect(await journalled(tx)).toBe(1);
+        await clear(tx);
+        // A debit, then the stump removal: tree rows only.
+        await sql`update woodland_trees set remaining_amount=0,reserved_amount=0 where feature_id=${id}`.execute(tx);
+        expect(await journalled(tx)).toBe(1);
+        await clear(tx);
+        await sql`update woodland_trees set stump_removed_at=${t} where feature_id=${id}`.execute(tx);
+        expect(await journalled(tx)).toBe(1);
+        expect(await trees(tx)).toMatchObject([{ treeIndex: 0, remainingAmount: 0, stumpRemoved: true }]);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  } finally {
+    await resetE2eState(url);
+    await dropGrove(id);
+  }
+}, 60_000);
+
 // Slice 2e (docs/PLAN-BOIS-ARBRE-TRANCHE-2.md): the wood queue in cut or clear
 // mode, consumed by the pool (the Chantier panel), and « Annuler » a gesture.
 const local = (tx: Transaction<Database>) =>
