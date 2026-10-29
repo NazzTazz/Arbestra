@@ -81,6 +81,37 @@ Rien du combat ni du karma n'est livré.
 - **Question fondamentale pour Tristan** : le karma protège-t-il un **territoire** (zone géographique du village, frontières, souveraineté) ou une **distance minimale de voisinage** autour des bâtiments, variable selon le karma ? Jean-Michel et Claude-Opus pensent que l'intention est la seconde, plus simple.
 - Version simplifiée (Claude-Opus) si c'est la distance de voisinage : interdit de construire à moins de D cases d'un bâtiment terminé d'un autre village, D = 8 (karma positif), 4 (nul), 0 (négatif) ; entre D et 8, confirmation et perte de karma.
 
+## 4 quater. Troisième cycle : territoire et tours de guet (29 octobre)
+
+**Proposé (Tristan)** : l'hôtel de ville crée un rayon de territoire revendiqué ; on l'étend par des **tours de guet**, qui surveillent aussi les mouvements commerciaux. Une construction ordinaire ne projette plus d'exclusion. La portée de construction de 8 cases reste une règle distincte.
+
+**Brief de Jean-Michel** (conception déjà discutée avec Tristan sur le militaire, à ne pas considérer comme décidée sauf mention) :
+
+- caserne ; gardes formés depuis la population existante, avec une compétence de garde ; affectables aux tours ou aux escortes ; former des soldats ne coûte pas de karma ;
+- tours de guet garnies de gardes ou d'espions, qui détectent les mouvements hostiles, neutres et commerciaux et les transmettent à la caserne (« Convoi commercial détecté à l'est du village »), avec une interception possible ;
+- escortes : unités militaires accompagnant physiquement les convois ; chevaux réutilisés entre transport et cavalerie ;
+- parcours d'interception envisagé : détection → renseignement → interception décidée par le joueur → vérification serveur et coût de karma → combat avec escortes → conséquences publiées ;
+- espionnage et contre-espionnage : pistes seulement ;
+- alertes sobres, sans répétition, avec expiration, et précises à la mesure de ce que le serveur sait ;
+- aucune formule de combat, composition d'armée ou règle de victoire n'est décidée.
+
+**Penchants de Jean-Michel** : la construction revendique, la garnison active la surveillance ; revendication persistante, protection conditionnelle au karma.
+
+**Analyse de Claude-Opus (proposée)** :
+
+1. Revendication = disque de Chebyshev torique autour de l'hôtel de ville (rayon selon son niveau) et de chaque tour.
+2. Continuité : une tour ne se pose que dans son propre territoire.
+3. **Plafond** de tours lié au niveau de l'hôtel de ville : c'est ce qui borne vraiment le land grab.
+4. **Premier arrivé** : une case appartient à la plus ancienne revendication qui la couvre ; territoire dérivé de la liste des revendications, sans cadastre.
+5. Tour vide : garde son territoire, ne détecte rien.
+6. Dans un territoire : karma positif → aucun étranger ne construit ; nul → confirmation et perte de karma ; négatif → libre. Les frontières ne varient pas avec le karma, seule leur étanchéité.
+7. Hors territoire : portée de 8 cases, avant-postes non protégés.
+8. Anti-encerclement : pendant la protection d'arrivée, aucune revendication étrangère ne peut couvrir le disque qu'aurait l'hôtel de ville du débutant au niveau maximal.
+9. Villages existants : disque de l'hôtel de ville, priorité à la date d'installation ; les constructions déjà chez autrui restent et s'améliorent sur leur emprise.
+10. Détection : les trajets des convois sont connus au départ ; on intersecte le trajet avec les disques de surveillance des tours garnies et on programme les alertes à échéance (tâches comme l'économie), sans balayage continu.
+
+**Décisions indispensables avant une spec** : rayons (hôtel de ville par niveau, tour, surveillance) ; plafond de tours ; protection selon le karma (point 6) ; parade anti-encerclement ; ce que révèle une détection. Le territoire peut être livré avant la surveillance.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
