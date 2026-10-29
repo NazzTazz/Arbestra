@@ -2,7 +2,7 @@
 
 Date : 28 octobre 2026. Base : `wip/v2-commandes-bornees`.
 
-Statut : **décisions de Tristan intégrées ; étapes serveur 2c, 2d et 2e livrées (à valider), branchement client à faire (tranche 3)** ([PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md)). Essayée d'abord sur la coupe et le défrichage des arbres, puis à généraliser.
+Statut : **décisions de Tristan intégrées ; serveur (2c, 2d, 2e) et client (tranche 3, 29 octobre) livrés, à valider** par la recette de Tristan en local ([PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md) ; ce qui est livré : §6). Essayée d'abord sur la coupe et le défrichage des arbres, puis à généraliser.
 
 ## 1. Décisions (Tristan, 28 octobre)
 
@@ -92,4 +92,30 @@ Planche de test : https://claude.ai/artifact/VZQuVL9ZqbkziWom59JryD (dix proposi
 
 ## 5. Ouvert
 
-- **Indicateur du mode** : la proposition du §3 est à essayer en jeu, en plus des marqueurs.
+- **Indicateur du mode** : livré tel que proposé au §3, sans curseur propre (badge, cadre rouge, bulle, vibration). À juger en jeu.
+- **Rouge du défrichage** : teinte d'instance `CLEAR_TINT` (`grove-instances.ts`), multipliée aux couleurs du kit ; lisible de jour, discrète de nuit. Intensité à régler par Tristan.
+- **« Annuler » sur la pierre et les jardins** : plus tard (validé par Tristan) ; seul le bois d'un geste s'annule.
+
+## 6. Livré (tranche 3, client, 29 octobre) — à valider
+
+**Geste** (`BabylonVillageScene.ts`, `wood-gesture.ts`), sans nouvel interpréteur :
+- L'appui de récolte ne désigne plus rien à l'enfoncement. Relâché sans bouger : un toucher ; sorti de la zone morte (8 px) : un glissé ; tenu 450 ms immobile : la bascule (sondée une fois par image, O(1)). La bascule ne s'applique qu'avec l'outil « Bois brut » ; ailleurs l'appui reste un toucher ou un glissé.
+- **Toucher** : l'arbre ou la souche sous le pointeur, lu dans l'instance mince touchée (`instanceSlots`, `instanceTrees` des meshes de bosquet). Une souche ou un tronc bas manqués par le rayon : l'arbre rendu dont le pied est le plus proche du point du sol, à 0,35 case au plus.
+- **Glisser** : l'arbre sous le pointeur, puis chaque arbre dont le pied est à 0,35 case au plus du segment parcouru depuis l'échantillon précédent, dans l'ordre rencontré, chacun une fois. Les candidats viennent d'un index des bosquets rendus par case (cases traversées et voisines). Jardins et pierre : les cases traversées, comme avant.
+- **Mode** : en coupe, un arbre debout ou abattu dont du bois est libre ; en défrichage, tout arbre ou souche encore là.
+- **Envoi** : `woodTrees` (ordre de désignation) et `woodMode: 'clear'` en défrichage, par la file `harvest-intents`. Reçus : `+N` sur la case acceptée (comme avant) ; refus traduits, dont `tree-not-found` (« Arbre introuvable »), `depleted` (« Épuisé »), `already-assigned` (« Déjà prévu »), `cancelled` (« Annulé »).
+- **Serveur** : la géométrie RC1 d'un bosquet nomme désormais l'indice RC1 de chaque arbre (`rc1.trees[].index`, contrat additif). Sans lui, le client ne pouvait pas désigner un arbre d'un monde RC1 ; un arbre sans indice (ancien serveur) vaut sa case entière.
+
+**Indicateur** : badge en haut au centre (« Coupe » ou « Défrichage », « appui long pour … »), cadre rouge autour de la vue en défrichage, bulle « Mode coupe » ou « Mode défrichage » près du pointeur à chaque bascule, vibration de 30 ms. Le mode est gardé pour la session (il ne revient plus à la coupe en quittant l'Exploitation ; un rechargement repart en coupe). « Préparer un défrichage » de la fiche choisit aussi le mode.
+
+**Marqueurs** (`tree-halos.ts`, `resource-overlay.ts`) : un halo par arbre (une entrée chacun), « Onde » en coupe, « Satellites » en défrichage ; validation lumineuse de 1,8 s sur le seul arbre désigné. Ne sont plus offerts : en coupe, les arbres en file ; en défrichage, ceux en file pour le défrichage (un arbre en file pour la coupe peut être pris plus loin). Au repos, une image ne parcourt plus les halos (O(1)). Les arbres acceptés restent marqués 6 s, le temps que la file du village les montre.
+
+**File → rendu** (`wood-queue.ts`) : cibles `pending` des chantiers de bois (chantier commun, ou chantier propre en marche), `treeIndices` (null = toute la case), `clearTreeIndices`, mode `clear` d'un chantier. Les arbres et souches en file pour le défrichage sont teintés de rouge jusqu'au retrait de la souche. Un changement de file ne redessine que les bosquets des cases dont la file a changé.
+
+**Rendu par arbre** (`grove-trees.ts`, `grove-instances.ts`) : debout ; abattu = tronc couché de longueur bois restant / 500 (au moins 0,12) à côté de sa souche ; souche ; rien une fois la souche retirée. Plus de jeunes arbres ni de repousse. Trois instances par arbre (tronc, feuillage, souche) ; un arbre qui change réécrit les siennes, avec des envois partiels au GPU ; la signature d'un bosquet ne porte plus que sa géométrie, donc ni un lot ni une réservation ne le reconstruisent. Une pièce sans instance visible (les souches d'un bosquet intact) n'est pas dessinée. Le chantier abat l'arbre que nomme son lot (`extractions[].treeIndex`) ; un retrait de souche n'abat rien.
+
+**Navigation locale** (`grove-trunks.ts`) : les troncs des villageois (test de place des chantiers de bois) viennent d'un index par chunk, relu seulement quand le chunk change (`TerrainStore.featureVersion`), et seuls les bosquets dont les souches retirées ont changé sont replacés. Une souche retirée sort son tronc, comme sur le serveur.
+
+**« Annuler »** (`WoodGestureHud.tsx`, `use-harvest-tool.ts`) : en haut à droite, 15 s de décompte, vise le dernier geste (un nouveau le remplace). Pas encore envoyé : retiré localement ; en cours d'envoi : annulé dès que le serveur l'a ; envoyé : `POST …/cancel`. Le résultat dit les arbres retirés, le lot en cours qui se termine, ceux déjà prévus par un autre geste, ceux déjà faits.
+
+**Fiche du bosquet** : les arbres et leur état (debout, abattu et bois restant, souche, souche retirée) et, pour chacun, s'il est en file pour la coupe ou le défrichage. Plus de repousse. **Panneau Chantier** (carte « Coupe de bois » et fiches des chantiers) : la file en arbres (« N arbres à couper · M à défricher · K bosquets entiers »).

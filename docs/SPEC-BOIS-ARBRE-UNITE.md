@@ -106,7 +106,7 @@ Un arbre est un arbre RC1 d'une case de bois : (monde, gisement, indice d'arbre)
    - défrichage refusé tant qu'il reste un tronc, permis avec seulement des souches ;
    - le raccourci enchaîne coupe et défrichage ;
    - la conversion conserve le bois coupé.
-3. **Client : sélection et rendu par arbre.** Le clic et le balayage désignent des arbres. Le bosquet montre l'arbre debout, le tronc couché selon son bois restant, ou la souche. Le chantier abat l'arbre désigné. Plus de jeunes arbres.
+3. **Client : sélection et rendu par arbre** (fait le 29 octobre, à valider : [SPEC-GRAMMAIRE-GESTUELLE.md](SPEC-GRAMMAIRE-GESTUELLE.md) §6). Le clic et le balayage désignent des arbres. Le bosquet montre l'arbre debout, le tronc couché selon son bois restant, ou la souche. Le chantier abat l'arbre désigné. Plus de jeunes arbres.
 4. Allonger le délai du cache de présentation, puis mesurer.
 5. Plus tard : **croissance spontanée** de nouveaux arbres.
 
