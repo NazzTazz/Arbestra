@@ -22,7 +22,14 @@ import {
   type SyncV2State,
   type SyncV2ReadRequest,
 } from '@arbestra/contracts';
-import { SyncV2Session, SyncV2ResyncRequired, SyncV2SessionExpired } from './sync-v2-session';
+import {
+  SyncV2HttpError,
+  SyncV2Session,
+  SyncV2ResyncRequired,
+  SyncV2SessionExpired,
+  syncV2HttpError,
+} from './sync-v2-session';
+export { SyncV2HttpError };
 
 let nextGeneration = 0;
 
@@ -35,18 +42,6 @@ const timingHeader = (): Record<string, string> => {
     return {};
   }
 };
-export class SyncV2HttpError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly retryAfterMs = 1000,
-    /** Whether the server actually sent a Retry-After header. */
-    readonly hasRetryAfter = false,
-  ) {
-    super(message);
-  }
-}
 type Options = {
   publish: (state: SyncV2State, observedAt: string, batch: SyncV2Batch) => void;
   expired: () => void;
@@ -70,18 +65,7 @@ const isScopeTooLarge = (error: unknown): error is SyncV2HttpError =>
 async function parse(response: Response): Promise<unknown> {
   const data: unknown = await response.json();
   if (response.status === 401) throw new SyncV2SessionExpired();
-  if (!response.ok) {
-    const error = data as { code?: string; message?: string };
-    const header = response.headers.get('retry-after');
-    const seconds = Number(header ?? '1');
-    throw new SyncV2HttpError(
-      response.status,
-      error.code ?? 'HTTP_ERROR',
-      error.message ?? 'Synchronisation indisponible.',
-      Number.isFinite(seconds) ? Math.max(0, Math.min(seconds, 60)) * 1000 : 1000,
-      header !== null && Number.isFinite(seconds),
-    );
-  }
+  if (!response.ok) throw syncV2HttpError(response, data);
   return data;
 }
 const includeQuery = (options: Options) => (options.include?.length ? `&include=${options.include.join(',')}` : '');
@@ -262,6 +246,8 @@ export class SyncV2Transport {
           failure = refreshError;
         }
       }
+      // A stream refused at its opening (too large village) is spaced and flagged too.
+      this.noteScopeTooLarge(failure);
       if (!this.closed) this.retry = setTimeout(() => void this.listen(), this.retryDelay(failure));
       return;
     }

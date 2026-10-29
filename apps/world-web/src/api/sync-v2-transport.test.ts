@@ -625,3 +625,39 @@ it('backs off with a growing bounded delay when Retry-After is missing on a too 
     vi.useRealTimers();
   }
 });
+
+it('spaces stream reopenings by Retry-After when the stream itself is refused as too large', async () => {
+  vi.useFakeTimers();
+  const opens: number[] = [],
+    notices: Array<number | null> = [];
+  const request: typeof fetch = async (url, init) => {
+    const generation = Number(new Headers(init?.headers).get('x-arbestra-generation') ?? 0);
+    if (String(url).endsWith('/sync/stream')) {
+      opens.push(Date.now());
+      return new Response(JSON.stringify({ code: 'SYNC_SCOPE_TOO_LARGE', message: 'Trop grand' }), {
+        status: 503,
+        headers: { 'content-type': 'application/json', 'retry-after': '60' },
+      });
+    }
+    return json(bootstrap(generation));
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: () => undefined,
+    expired: () => undefined,
+    onScopeTooLarge: (retryInMs: number | null) => notices.push(retryInMs),
+  } as ConstructorParameters<typeof SyncV2Transport>[3]);
+  try {
+    await transport.start();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // Opening the stream every 2 s would make about 150 attempts.
+    expect(opens.length).toBeLessThanOrEqual(6);
+    for (let index = 1; index < opens.length; index++)
+      expect(opens[index]! - opens[index - 1]!).toBeGreaterThanOrEqual(60_000);
+    expect(notices).toContain(60_000);
+  } finally {
+    transport.close();
+    vi.useRealTimers();
+  }
+});

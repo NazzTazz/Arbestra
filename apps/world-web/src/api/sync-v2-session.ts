@@ -1,5 +1,31 @@
 import { applySyncV2Batch, readServerEvents, type SyncV2State, type SyncV2Batch } from '@arbestra/contracts';
 
+export class SyncV2HttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly retryAfterMs = 1000,
+    /** Whether the server actually sent a Retry-After header. */
+    readonly hasRetryAfter = false,
+  ) {
+    super(message);
+  }
+}
+/** A refused synchronization request, typed from its JSON body and Retry-After. */
+export function syncV2HttpError(response: Response, data: unknown): SyncV2HttpError {
+  const error = (data ?? {}) as { code?: string; message?: string };
+  const header = response.headers.get('retry-after');
+  const seconds = Number(header ?? '1');
+  return new SyncV2HttpError(
+    response.status,
+    error.code ?? 'HTTP_ERROR',
+    error.message ?? 'Synchronisation indisponible.',
+    Number.isFinite(seconds) ? Math.max(0, Math.min(seconds, 60)) * 1000 : 1000,
+    header !== null && Number.isFinite(seconds),
+  );
+}
+
 export interface AppliedSyncCursor {
   kind: string;
   key: string;
@@ -88,7 +114,9 @@ export class SyncV2Session {
         return;
       }
       if (response.status === 401) throw new SyncV2SessionExpired();
-      if (!response.ok) throw new Error(`SYNC_V2_HTTP_${response.status}`);
+      // A refused opening (a too large village, 503 with Retry-After) is typed
+      // like any other read, so the transport spaces its retries.
+      if (!response.ok) throw syncV2HttpError(response, await response.json().catch(() => null));
       if (!response.headers.get('content-type')?.startsWith('text/event-stream') || !response.body)
         throw new Error('SYNC_V2_INVALID_STREAM');
       await readServerEvents(response.body, {

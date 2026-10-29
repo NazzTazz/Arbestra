@@ -191,6 +191,9 @@ export async function registerSyncV2Routes(
         }
         const close = () => reply.raw.destroy();
         streams.add(close);
+        // The first capture runs before the stream's headers: it may still answer
+        // a too large scope with Retry-After. Later ones only end the stream.
+        let opening = true;
         try {
           await serveSyncV2Stream(
             reply,
@@ -198,7 +201,9 @@ export async function registerSyncV2Routes(
             async (next) => {
               const current = await authenticate(db, token);
               await reconcileActivityDeadline(db, current.id, worldSlug, villageId);
-              return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next));
+              const answer = opening ? reply : undefined;
+              opening = false;
+              return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next), answer);
             },
             {
               onError: () => app.log.warn({ code: 'SYNC_V2_STREAM_INTERRUPTED' }, 'Synchronization stream interrupted'),

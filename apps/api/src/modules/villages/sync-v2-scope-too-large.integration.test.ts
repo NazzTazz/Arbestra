@@ -60,3 +60,18 @@ it('answers a too large private snapshot with a typed 503 and a Retry-After head
   expect(response.json()).toEqual({ code: 'SYNC_SCOPE_TOO_LARGE' });
   expect(response.headers['retry-after']).toBe(String(SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS));
 });
+
+it('answers the same 503 and Retry-After when a stream cannot open', async () => {
+  // The first capture of a stream runs before its headers: the client opening
+  // its stream on a too large village must not reconnect every 2 s either.
+  const response = await app.inject({
+    method: 'POST',
+    url: `/api/worlds/aube/villages/${ids.village}/sync/stream`,
+    headers: { 'x-arbestra-protocol': '2' },
+    cookies: { session: token },
+    payload: { protocol: 2, generation: 0, scopes: [], cursors: [] },
+  });
+  expect(response.statusCode).toBe(503);
+  expect(response.json()).toEqual({ code: 'SYNC_SCOPE_TOO_LARGE' });
+  expect(response.headers['retry-after']).toBe(String(SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS));
+});
