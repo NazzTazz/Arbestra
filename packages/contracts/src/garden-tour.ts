@@ -1,4 +1,4 @@
-import { travelDuration, type TravelCell, type TravelRoute } from './travel-paths.js';
+import { GARDEN_CROSSING_COST, travelDuration, type TravelCell, type TravelRoute } from './travel-paths.js';
 const key = (p: TravelCell) => `${p.cellX}:${p.cellY}`;
 
 /** Reuses the already-authorized cardinal road graph, without new world navigation. */
@@ -12,6 +12,22 @@ export function planGardenTour(
     !world && path.every((p) => Number.isInteger(p.cellX) && Number.isInteger(p.cellY))
       ? Math.max(0, path.length - 1) * 1000
       : travelDuration(path, world);
+  // The network names each plot route `${gardenId}:${x}:${y}`. A leg chooses its
+  // way as the network does: plots of other gardens than the leg's own ends cost
+  // GARDEN_CROSSING_COST per step. Durations stay physical.
+  const cellOf = (p: TravelCell) => {
+    const x = Math.floor(p.cellX + 0.5),
+      y = Math.floor(p.cellY + 0.5);
+    return world
+      ? `${((x % world.widthCells) + world.widthCells) % world.widthCells}:${((y % world.heightCells) + world.heightCells) % world.heightCells}`
+      : `${x}:${y}`;
+  };
+  const gardens = new Map<string, string>();
+  for (const route of routes) {
+    const suffix = ':' + key(route.destination);
+    if (route.kind === 'garden' && route.id.endsWith(suffix) && route.id.length > suffix.length)
+      gardens.set(cellOf(route.destination), route.id.slice(0, -suffix.length));
+  }
   const graph = new Map<string, Map<string, TravelCell>>();
   const link = (a: TravelCell, b: TravelCell) => {
     const neighbours = graph.get(key(a)) ?? new Map<string, TravelCell>();
@@ -42,6 +58,11 @@ export function planGardenTour(
         link(a!, b!);
       }
   const path = (from: TravelCell, to: TravelCell): TravelCell[] | null => {
+    const own = new Set([gardens.get(cellOf(from)), gardens.get(cellOf(to))]);
+    const weight = (a: TravelCell, b: TravelCell) => {
+      const owner = gardens.size ? gardens.get(cellOf(b)) : undefined;
+      return duration([a, b]) * (owner !== undefined && !own.has(owner) ? GARDEN_CROSSING_COST : 1);
+    };
     const queue = [{ cell: from, distance: 0 }],
       parents = new Map<string, TravelCell | null>([[key(from), null]]),
       distances = new Map([[key(from), 0]]);
@@ -56,7 +77,7 @@ export function planGardenTour(
         return result.reverse();
       }
       for (const next of graph.get(key(current))?.values() ?? []) {
-        const distance = entry.distance + duration([current, next]);
+        const distance = entry.distance + weight(current, next);
         if (distance < (distances.get(key(next)) ?? Infinity)) {
           distances.set(key(next), distance);
           parents.set(key(next), current);

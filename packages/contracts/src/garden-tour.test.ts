@@ -26,6 +26,22 @@ it('counts a canonical torus seam as one step and rejects a disconnected target'
   expect(planGardenTour(routes, c(7), [c(0)])?.durationMs).toBe(62000);
   expect(planGardenTour(routes, c(7), [c(2)])).toBeNull();
 });
+it('chooses legs as the network does: another garden is not a road, the plots of the leg ends are', () => {
+  // The union of routes offers a 4-step leg across plot (1,1) of garden g3
+  // and the network's own 6-step way around it.
+  const routes: TravelRoute[] = [
+    { id: 'g3:1:1', kind: 'garden', destination: c(1, 1), cells: [c(0), c(0, 1), c(1, 1)] },
+    { id: 'a:2:2', kind: 'garden', destination: c(2, 2), cells: [c(0), c(1), c(2), c(3), c(3, 1), c(3, 2), c(2, 2)] },
+    { id: 'shed', kind: 'building', destination: c(2, 1), cells: [c(1, 1), c(2, 1), c(2, 2)] },
+  ];
+  const around = planGardenTour(routes, c(0), [c(2, 2)])!;
+  expect(around.stops[0]!.path).not.toContainEqual(c(1, 1));
+  expect(around.stops[0]!.arrivesAfterMs).toBe(6000);
+  // Harvesting g3 first, the next leg may leave g3 through its own plot.
+  const both = planGardenTour(routes, c(0), [c(1, 1), c(2, 2)])!;
+  expect(both.stops[1]!.path).toEqual([c(1, 1), c(2, 1), c(2, 2)]);
+  expect(both.stops[1]!.arrivesAfterMs - both.stops[0]!.workEndsAfterMs).toBe(2000);
+});
 it('crosses adjacent selected plots directly, including a torus seam, without shortcutting other land', () => {
   const routes = [route([c(3), c(2), c(1), c(0)]), route([c(3), c(4), c(5), c(6), c(7)])];
   const plan = planGardenTour(routes, c(3), [c(0), c(7)], { widthCells: 8, heightCells: 4 })!;

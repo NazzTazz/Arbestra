@@ -61,9 +61,31 @@ export interface TravelRoute {
 
 const key = ({ cellX, cellY }: TravelCell): string => `${cellX}:${cellY}`;
 const edgeKey = (a: string, b: string): string => (a < b ? a + '|' + b : b + '|' + a);
-/** A completed garden is walkable ground; reservations remain obstacles. */
+/** A completed garden is walkable ground, but not a road (see GARDEN_CROSSING_COST); reservations remain obstacles. */
 export function blocksTravelFootprint(footprint: TravelNetworkState['cells'][number]['footprint']): boolean {
   return !!footprint && !(footprint.buildingType === 'garden' && footprint.state === 'active');
+}
+/**
+ * Cost factor of a step on an active garden plot that does not belong to the
+ * route's destination garden (Tristan, 29 October: crossing gardens is kept for
+ * harvesting enclosed plots, a garden is not an ordinary road). Never a hard
+ * block: a garden enclosed by other gardens stays reachable, at this price.
+ * 30 makes one crossed plot dearer than any detour the bounded searches accept:
+ * coarse network, one cell at >= 0.7 × 30 = 21 against at most 8 extra steps;
+ * refinement, >= 7 eighth-steps inside the plot at >= 21 each (147) against at
+ * most 128 extra eighth-steps. A route thus always goes around a garden when
+ * the searches can find an ordinary passage. 6 was not enough: on the dev
+ * village (Bressuire, 29 October), 68 of 105 routes still crossed a garden,
+ * the detour around being 7.5 cells. Costs only grow, so every existing lower
+ * bound (0.7 per step) remains admissible.
+ */
+export const GARDEN_CROSSING_COST = 30;
+/** Active garden plots, by cell, with the garden (building) they belong to. */
+function gardenOwners(state: Pick<TravelNetworkState, 'cells'>): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const c of state.cells)
+    if (c.footprint && !blocksTravelFootprint(c.footprint)) owners.set(key(c), c.footprint.buildingId);
+  return owners;
 }
 const wrap = (value: number, size: number): number => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number): number => {
@@ -369,6 +391,7 @@ export function buildTravelNetwork(
     ? { cellX: hall.cellX, cellY: hall.cellY }
     : { cellX: village.anchorCellX, cellY: village.anchorCellY };
   const blocked = new Set(state.cells.filter((cell) => blocksTravelFootprint(cell.footprint)).map(key));
+  const gardens = gardenOwners(state);
   for (const feature of region.features) {
     if (
       feature.type === 'woodland' &&
@@ -421,6 +444,8 @@ export function buildTravelNetwork(
     if (!inside(goal.destination) && goal.kind !== 'stone') continue;
     const maxSteps = distance(start, goal.destination) + 8;
     const goalKey = key(goal.destination);
+    // A plot, or a garden's own building route: its garden is ordinary ground.
+    const ownGarden = gardens.get(goalKey);
     const pending = new StepQueue();
     pending.push({ cell: start, cost: 0, score: distance(start, goal.destination) * 0.7, direction: -1, steps: 0 });
     const best = new Map<string, number>();
@@ -449,9 +474,10 @@ export function buildTravelNetwork(
         if ((!inside(cell) && cellKey !== goalKey) || (blocked.has(cellKey) && cellKey !== goalKey)) continue;
         if (!walk(current.cell, cell)) continue;
         const edge = edgeKey(currentCellKey, cellKey);
+        const owner = gardens.size ? gardens.get(cellKey) : undefined;
         const cost =
           current.cost +
-          (shared.has(edge) ? 0.7 : 1) +
+          (shared.has(edge) ? 0.7 : 1) * (owner !== undefined && owner !== ownGarden ? GARDEN_CROSSING_COST : 1) +
           (current.direction >= 0 && current.direction !== direction ? 0.05 : 0);
         const stateKey = `${cellKey}:${direction}`;
         if (cost >= (best.get(stateKey) ?? Infinity)) continue;
@@ -565,7 +591,15 @@ function prepareRefinement(
   }
   for (const e of state.infrastructure!.equipment)
     for (const dx of [-0.25, 0, 0.25]) for (const dy of [-0.25, 0, 0.25]) markFine(e.x / 8 + dx, e.y / 8 + dy);
-  return { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells };
+  // Garden of each active plot, by numeric cell index (one lookup per step).
+  const gardens = new Map<number, string>();
+  for (const c of state.cells)
+    if (c.footprint && !blocksTravelFootprint(c.footprint))
+      gardens.set(
+        wrap(c.cellY, world.heightCells) * world.widthCells + wrap(c.cellX, world.widthCells),
+        c.footprint.buildingId,
+      );
+  return { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells, gardens };
 }
 
 // Four geometry contexts, at most 64 routes / 16384 points per context. Keys
@@ -599,6 +633,8 @@ function refinementCache(state: TravelNetworkState, ground?: TravelGround): Refi
       .map((c) => [
         c.cellX,
         c.cellY,
+        // An unblocked footprint is an active garden plot: with its owner, it
+        // also fixes the garden crossing costs of the prepared context.
         c.footprint?.buildingId,
         blocksTravelFootprint(c.footprint),
         c.building && [
@@ -641,7 +677,12 @@ export function refineTravelRoute(
   prepared?: ReturnType<typeof prepareRefinement>,
   ground?: TravelGround,
   checkpoint?: () => void,
-  search?: { maxVisited?: number; onLimit?: () => void },
+  search?: {
+    maxVisited?: number;
+    onLimit?: () => void;
+    /** Garden of the true destination when `route` is only its first leg; null: none. */
+    garden?: string | null;
+  },
 ): TravelRoute | null {
   checkpoint?.();
   if (!state.infrastructure || !route.cells.length) return route;
@@ -674,7 +715,25 @@ export function refineTravelRoute(
     destination = local(route.destination) ? route.destination : route.cells[lastLocal];
   if (!destination) return route;
   const context = prepared ?? cache?.prepared ?? prepareRefinement(state, ground);
-  const { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells } = context;
+  const { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells, gardens } = context;
+  const gardenAt = (x: number, y: number) =>
+    gardens.get(
+      wrap(Math.floor(y + 0.5), world.heightCells) * world.widthCells + wrap(Math.floor(x + 0.5), world.widthCells),
+    );
+  // Plots of the destination garden are ordinary ground; every other active
+  // plot costs GARDEN_CROSSING_COST per step (Tristan, 29 October).
+  const ownGarden =
+    search?.garden !== undefined ? search.garden : (gardenAt(route.destination.cellX, route.destination.cellY) ?? null);
+  let crossesGardens = false;
+  for (const owner of gardens.values())
+    if (owner !== ownGarden) {
+      crossesGardens = true;
+      break;
+    }
+  const crossing = (x: number, y: number) => {
+    const owner = gardenAt(x, y);
+    return owner !== undefined && owner !== ownGarden ? GARDEN_CROSSING_COST : 1;
+  };
   // Shared obstacles and fine cells are immutable; only destination portals vary.
   const destinationFine = new Set<string>();
   const markFine = (x: number, y: number) =>
@@ -836,7 +895,7 @@ export function refineTravelRoute(
         context,
         ground,
         checkpoint,
-        { maxVisited: Math.min(2048, search?.maxVisited ?? 2048) },
+        { maxVisited: Math.min(2048, search?.maxVisited ?? 2048), garden: ownGarden },
       );
       if (connector) {
         const cells = [...connector.cells, ...tail.slice(1)];
@@ -873,6 +932,22 @@ export function refineTravelRoute(
         accesses,
         connector: (a) => accessClear(starts[Number(a.id)]!, hall.building!.id),
         walk: segmentClear,
+        // Lattice edges are cardinal, of one eighth or one cell: each eighth
+        // step pays its cell's garden factor, as in the fine search below.
+        ...(crossesGardens
+          ? {
+              minimumCost: 1,
+              cost: (a: TravelCell, b: TravelCell) => {
+                const dx = delta(b.cellX, a.cellX, world.widthCells),
+                  dy = delta(b.cellY, a.cellY, world.heightCells),
+                  length = Math.abs(dx) + Math.abs(dy),
+                  n = Math.max(1, Math.round(length * 8));
+                let factor = 0;
+                for (let i = 1; i <= n; i++) factor += crossing(a.cellX + (dx * i) / n, a.cellY + (dy * i) / n);
+                return (length * factor) / n;
+              },
+            }
+          : {}),
       },
       {
         worldId: world.id,
@@ -1028,7 +1103,8 @@ export function refineTravelRoute(
               const guided = guide.has(
                 `${wrap(Math.round(p.cellX), world.widthCells)}:${wrap(Math.round(p.cellY), world.heightCells)}`,
               );
-              cost += manual || guided ? 0.7 : 1;
+              // A factor >= 1 only: estimate() and the 0.7 minimum stay lower bounds.
+              cost += (manual || guided ? 0.7 : 1) * (crossesGardens ? crossing(p.cellX, p.cellY) : 1);
               steps++;
             }
             if (!valid) break;
