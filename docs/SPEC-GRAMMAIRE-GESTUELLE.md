@@ -52,8 +52,8 @@ Le balayage existe déjà pour les jardins et les bosquets (Tristan : inutile de
 
 ### Serveur requis
 
-- **2c** : la commande accepte des arbres désignés.
-- **2d** : chaque arbre est exposé (debout, abattu, souche, en file).
+- **2c** (fait le 29 octobre, à valider) : la commande accepte des arbres désignés (`woodTrees`, contrat dans [PLAN-BOIS-ARBRE-TRANCHE-2.md](PLAN-BOIS-ARBRE-TRANCHE-2.md)).
+- **2d** (fait le 29 octobre, à valider) : chaque arbre touché est exposé (`deposit.trees`) ; la file du village se lit dans `worksites[].targets[].treeIndices` et le mode du chantier.
 - **2e** : file d'attente du bois consommée par le panneau Chantier, et commande d'annulation d'un geste.
 
 ## 4. Marqueurs (décidés par Tristan le 28 octobre, après essai de la planche « Cercles de récolte »)

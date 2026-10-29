@@ -2,6 +2,15 @@
 
 Index court. L'historique détaillé (preuves, mesures, sessions précédentes) est archivé dans [docs/HANDOFF-ARCHIVE-2026-10-23.md](docs/HANDOFF-ARCHIVE-2026-10-23.md).
 
+## Bois par arbre, étapes 2c et 2d (29 octobre) — à valider
+
+[Plan](docs/PLAN-BOIS-ARBRE-TRANCHE-2.md), lignes 2c et 2d (contrat détaillé). Serveur et contrat seulement ; le client ne change que la fiche du bosquet (ligne « Repousse » retirée).
+- **2c, désignation par arbre** : `woodTrees: [{ featureId, treeIndices }]` sur l'intention de récolte, l'ordre d'exploitation et la demande de chantier ; chaque case désignée figure aussi dans `wood`. Ordre : case la plus proche, puis ordre de désignation. Refus par arbre `tree-not-found` ; souches seules en coupe : `depleted` ; la file fusionne les nouveaux arbres d'une case déjà en attente ; défrichage partiel des seuls arbres et souches désignés ; rejeu avec d'autres arbres : `COMMAND_ID_CONFLICT`. Corrigé au passage : la désignation se perdait quand un autre consommateur de la file prenait la cible.
+- **2d, exposition** : `deposit.trees` (arbres touchés) dans les chunks, le flux spatial, le snapshot, la présentation et la fiche (plus de `regrowthPerHour`) ; file du village dans `worksites[].targets[].treeIndices` ; arbre du lot dans `extractions[].treeIndex`. Corrigé au passage : `Extraction.reservedAmount` refusait 0, donc tout lot V2 contenant un retrait de souche (2b) faisait resynchroniser le client.
+- **Migration 067** (appliquée sur la base de test seulement) : vue `resource_deposits` de nouveau aplatie. Depuis 065, toute jointure par identifiant évaluait la vue entière : 5 cases 159,5 → 4,8 ms ; lecture d'un chunk 142–197 → 42–45 ms ; instantané spatial 242–360 → 63–81 ms (base de test, machine chargée). **À appliquer sur dev** (vue seule, rapide).
+- **Présentation** : deux lectures simultanées pouvaient faire deux captures (test « reuses one capture… », instable avant, rouge 4 fois sur 4 après 067). Une lecture réutilise désormais une capture terminée entre-temps si les compteurs sont égaux ; vert 3 fois sur 3.
+- **Reste** : troncs retirés de la navigation à la case entière seulement, file en coupe seulement, annulation : étape 2e.
+
 ## Bois par arbre, étape 2b : la bascule serveur (28 octobre, nuit) — à valider
 
 [Spec](docs/SPEC-BOIS-ARBRE-UNITE.md) §1 et §7, [plan](docs/PLAN-BOIS-ARBRE-TRANCHE-2.md). Code serveur et migration 065, **appliquée sur la base de test seulement** : ni dev, ni staging, ni alpha (Tristan l'appliquera).
