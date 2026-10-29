@@ -105,7 +105,7 @@ Spec : [commandes bornées et synchronisation ciblée](SPEC-COMMANDES-BORNEES-SY
 - **Flux** : `village` (privé), connaissance, manifeste, chunks spatiaux, `traffic` (convois publics).
 - **Lecture** : `sync-v2-capture.ts` (`captureSyncV2`) lit le journal (`sync-v2-journal.ts`) puis les entités par composant (`sync-v2-readers.ts`, `-shared-`, `-spatial-`, `-traffic-readers.ts`). Delta si possible, sinon snapshot.
 - **Routes** (`sync-v2-routes.ts`, préfixe `/api/worlds/:worldSlug/villages/:villageId`) : `bootstrap` (aussi `/api/worlds/:worldSlug/village/bootstrap` au premier chargement), `sync/read`, `sync/stream` (SSE), `presentation` (versionnée).
-- **Rétention** : `sync-v2-retention.ts` purge au-delà de 7 jours ou 10 000 entrées par flux.
+- **Rétention** : `sync-v2-retention.ts` purge au-delà de 7 jours ou 10 000 entrées par flux, une transaction de rétention à la fois pour tous les processus (verrou consultatif essayé, jamais attendu), puis balaie par tranches bornées les vecteurs `game_sync_batches` qu'aucune ligne ne référence plus.
 - **Client** : `packages/contracts/src/sync-v2.ts` (`applySyncV2Batch`, application pure et idempotente), `world-web/src/api/sync-v2-session.ts`, `sync-v2-transport.ts` (requêtes, flux, réouverture d'epoch, gestes), `processing-v2.ts` (hook `useVillageSyncV2`).
 
 Ajouter une table métier lisible en V2 : trigger de collecte dans une migration, composant et lecteur dans `sync-v2-readers.ts`, application côté contrat.
