@@ -50,6 +50,15 @@ Rien du combat ni du karma n'est livré.
 - **Notification** : le voisin est prévenu dans son journal.
 - **Persistance avant le combat** : karma et griefs sont enregistrés dès maintenant, pour que l'historique existe quand le combat arrivera.
 
+## 3 bis. Arbitrages de Tristan (29 octobre, réponse à Jean-Michel)
+
+**Validé** :
+
+- **Les convois ne sont jamais protégés**, quel que soit le karma du propriétaire. Attaquer un convoi est une agression et coûte du karma à l'agresseur. Un joueur à karma positif peut avoir des gardes et escorter ses échanges sans perdre sa protection.
+- **Échanges sécurisés** : l'Oracle, avec une marge de 30 % et des taux défavorables.
+- **Le cycle « attaque, 14 jours exposé »** est voulu : un pacifiste tenté par un convoi lucratif doit peser ses 15 jours de vulnérabilité, plus coûteux encore à côté d'un voisin agressif.
+- Le **land grab** soulevé par Jean-Michel est un vrai problème, à étudier.
+
 ## 4 bis. Propositions de Jean-Michel (29 octobre, non validées)
 
 - **Distinguer trois protections** : militaire (empêcher ou atténuer une attaque), territoriale (empêcher l'empiètement constructif), économique (échanges et convois). Le karma fixe le *niveau* de protection ; l'*assiette territoriale* dit quels bâtiments projettent un rayon. Option minimale : seuls des bâtiments structurants projettent la protection (parade au *land grab* : dix maisons espacées de 16 cases privatisent une région).
@@ -59,6 +68,18 @@ Rien du combat ni du karma n'est livré.
 - **Convois** : modèle A (le karma du propriétaire protège ses convois) ou modèle B (convois attaquables, l'agresseur paie en karma, le propriétaire garde sa protection territoriale). Jean-Michel préfère B, cohérent avec les escortes.
 - **Villages existants** : ne détruire, déplacer ni invalider aucune construction acceptée ; nouvelles règles pour les tentatives futures ; chevauchements historiques enregistrés comme acquis.
 - **Harcèlement par provocation** : construire près d'un pacifique pour provoquer une riposte qui le ferait sortir de sa protection. Le serveur doit connaître le contexte métier d'une action (riposte autorisée ou attaque initiée), pas seulement qui a cliqué.
+
+## 4 ter. Deuxième cycle (29 octobre)
+
+- **Claude-Opus** propose un *cœur* de village (bâtiments à moins de R du centre de l'hôtel de ville, R selon son niveau) seul à projeter l'exclusion, une bande de confirmation, une frontière médiane en cas de chevauchement, et le report du grief au combat.
+- **Jean-Michel** casse trois points, acceptés par Claude-Opus :
+  1. un bâtiment éligible au bord de R projette encore 8 cases : l'exclusion atteint R + 8, R ne borne rien ;
+  2. la frontière médiane change une interdiction absolue en priorité de propriété (une case à 5 de A et 7 de B serait constructible par A, bien que dans l'exclusion de B) ;
+  3. la bande de confirmation est un engagement dans l'hostilité plus qu'un frein : une fois à karma nul, chaque empiètement suivant ne fait que relancer la même horloge de 14 jours.
+- Il note aussi le risque multi-comptes (un débutant obtient d'emblée la protection maximale), argument pour une protection bornée et non extensible par des bâtiments ordinaires.
+- Points d'accord : non-rétroactivité ; grief reporté au combat ; séparation entre droit de construire (portée) et droit d'exclure.
+- **Question fondamentale pour Tristan** : le karma protège-t-il un **territoire** (zone géographique du village, frontières, souveraineté) ou une **distance minimale de voisinage** autour des bâtiments, variable selon le karma ? Jean-Michel et Claude-Opus pensent que l'intention est la seconde, plus simple.
+- Version simplifiée (Claude-Opus) si c'est la distance de voisinage : interdit de construire à moins de D cases d'un bâtiment terminé d'un autre village, D = 8 (karma positif), 4 (nul), 0 (négatif) ; entre D et 8, confirmation et perte de karma.
 
 ## 5. Ouvert
 
