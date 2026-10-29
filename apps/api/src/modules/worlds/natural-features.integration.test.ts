@@ -208,3 +208,46 @@ it('projects only deposits inside the requested areas and preserves canonical lo
   // excluding the off-window resource and the second world's deposit.
   expect(find(plan)?.['Actual Rows']).toBe(3);
 });
+it('looks a wood case up by key inside a join, without evaluating the whole deposits view', async () => {
+  // Migration 067: each branch of resource_deposits has a single FROM item, so
+  // PostgreSQL flattens it and a join reaches the case by its key. Under 065
+  // the wood branch stayed a subquery, evaluated in full for every lookup.
+  const id = randomUUID(),
+    worldId = worlds[1]!;
+  await db
+    .insertInto('worldFeatures')
+    .values({ id, worldId, featureTypeCode: 'woodland', state: 'available', variantSeed: 1 })
+    .execute();
+  await db
+    .insertInto('woodlandDeposits')
+    .values({
+      worldId,
+      featureId: id,
+      cellX: 40,
+      cellY: 40,
+      initialAmount: 1000,
+      remainingAmount: 1000,
+      reservedAmount: 0,
+      revision: 1,
+      updatedAt: new Date(),
+      regrowthUpdatedAt: new Date(),
+    })
+    .execute();
+  const explained = await sql<Record<string, unknown>>`explain (format json)
+    select d.feature_id,d.remaining_amount from (values (${id}::uuid)) v(id)
+    join resource_deposits d on d.world_id=${worldId}::uuid and d.feature_id=v.id`.execute(db);
+  const nodes: Array<Record<string, unknown>> = [];
+  const walk = (node: Record<string, unknown>) => {
+    nodes.push(node);
+    for (const child of (node.Plans as Array<Record<string, unknown>> | undefined) ?? []) walk(child);
+  };
+  walk((Object.values(explained.rows[0]!)[0] as Array<{ Plan: Record<string, unknown> }>)[0]!.Plan);
+  expect(nodes.filter((node) => node['Node Type'] === 'Subquery Scan')).toEqual([]);
+  expect(nodes.some((node) => node['Relation Name'] === 'woodland_deposits')).toBe(true);
+  expect(
+    (
+      await sql<{ remainingAmount: string }>`select d.remaining_amount from (values (${id}::uuid)) v(id)
+        join resource_deposits d on d.world_id=${worldId}::uuid and d.feature_id=v.id`.execute(db)
+    ).rows,
+  ).toEqual([{ remainingAmount: '1000' }]);
+});
