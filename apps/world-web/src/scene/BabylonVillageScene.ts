@@ -109,7 +109,7 @@ import { RegionalOverview, TorusOverview } from './terrain-overview-view';
 import { RENDER_UNIT_CELLS } from './terrain-unit';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { bakeScenery, cloneWoodland, type SceneryPart } from './scenery-batch';
-import { groveSlots, treePieceData, type GroveSlot, type TreePiece } from './grove-trees';
+import { groveHasStumps, groveSlots, isStumpPiece, treePieceData, type GroveSlot, type TreePiece } from './grove-trees';
 import { GroveInstances, type TreeLook } from './grove-instances';
 import { GroveTrunkIndex } from './grove-trunks';
 import { changedCases, queuedMode, woodQueue, type WoodQueue } from './wood-queue';
@@ -2903,8 +2903,11 @@ export class BabylonVillageScene {
       anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size };
     const instances = new GroveInstances(slots, (slot) => this.#slotPlacement(feature, slot, anchor, ground.height));
     instances.apply((slot) => this.#treeLook(feature.id, slot));
-    const meshes = new Map<TreePiece, Mesh>();
+    const meshes = new Map<TreePiece, Mesh>(),
+      stumps = groveHasStumps(feature);
     for (const [piece, data] of instances.pieces) {
+      // No stump mesh before the grove's first felled tree (its signature then rebuilds it).
+      if (!stumps && isStumpPiece(piece)) continue;
       const mesh = cloneWoodland(this.#treeKitSource(piece), `woodland-${feature.id}-${piece}`, data.matrices, false);
       // The clearing tint, per tree, multiplies the kit's vertex colours.
       mesh.thinInstanceSetBuffer('color', data.colours, 4, false);
@@ -2920,7 +2923,7 @@ export class BabylonVillageScene {
       mesh.isPickable = true;
       mesh.thinInstanceEnablePicking = true;
       mesh.addLODLevel(250, null);
-      // A piece no tree shows yet (stumps of an untouched grove) costs no draw call.
+      // A piece no tree shows yet costs no draw call.
       mesh.isVisible = data.shown > 0;
       meshes.set(piece, mesh);
     }

@@ -20,6 +20,7 @@ import kit from './tree-kit.json';
 export type TreePiece = keyof typeof kit.pieces;
 export type TreeVariant = keyof typeof kit.trunkTop;
 export type StumpPiece = 'souche-a' | 'souche-b';
+export const isStumpPiece = (piece: TreePiece): piece is StumpPiece => piece === 'souche-a' || piece === 'souche-b';
 
 export interface GroveSlot {
   /** Place of the tree in its grove's drawn order. */
@@ -110,7 +111,18 @@ export function woodlandSignature(feature: NaturalFeature): string {
     feature.deposit?.cleared ?? false,
     // Without RC1 forest, the stored wood gives the number of trees.
     feature.rc1 ? null : (feature.deposit?.initialAmount ?? null),
+    // Stump pieces are built at a grove's first felled tree only: one rebuild then.
+    groveHasStumps(feature),
   ]);
+}
+
+/**
+ * Whether a grove shows a stump (a felled tree, or a stump not removed yet).
+ * An untouched grove builds no stump mesh at all (loading cost); its first
+ * felled tree changes the grove's signature, and the grove is rebuilt once.
+ */
+export function groveHasStumps(feature: Pick<NaturalFeature, 'deposit'>): boolean {
+  return feature.deposit?.trees?.some((t) => Boolean(t.felledAt) && !t.stumpRemoved) ?? false;
 }
 
 const decoded = new Map<TreePiece, VertexData>();

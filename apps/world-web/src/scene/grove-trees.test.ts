@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NaturalFeature, WoodlandTreeState } from '@arbestra/contracts';
-import { groveSlots, treePieceData, treeVariant, woodlandSignature } from './grove-trees';
+import { groveHasStumps, groveSlots, treePieceData, treeVariant, woodlandSignature } from './grove-trees';
 
 const tree = (
   treeIndex: number,
@@ -88,8 +88,20 @@ describe('grove slots, tree by tree, from the server', () => {
         ...grove(trees, cleared),
         deposit: { ...grove(trees, cleared).deposit },
       }) as unknown as NaturalFeature;
-    expect(woodlandSignature(feature([tree(41, 300)]))).toBe(woodlandSignature(feature()));
+    // The first felled tree rebuilds the grove once, to add its stump meshes;
+    // later cuts, other felled trees and reservations never rebuild it.
+    expect(woodlandSignature(feature([tree(41, 300)]))).not.toBe(woodlandSignature(feature()));
+    expect(woodlandSignature(feature([tree(41, 300), tree(12, 100)]))).toBe(
+      woodlandSignature(feature([tree(41, 300)])),
+    );
+    expect(woodlandSignature(feature([tree(41, 100)]))).toBe(woodlandSignature(feature([tree(41, 300)])));
     expect(woodlandSignature(feature([], true))).not.toBe(woodlandSignature(feature()));
+  });
+
+  it('builds no stump before a grove has a felled tree', () => {
+    expect(groveHasStumps({ deposit: grove([]).deposit } as never)).toBe(false);
+    expect(groveHasStumps({ deposit: grove([tree(41, 300)]).deposit } as never)).toBe(true);
+    expect(groveHasStumps({ deposit: grove([{ ...tree(41, 0), stumpRemoved: true }]).deposit } as never)).toBe(false);
   });
 
   it('is the same for every reader and draws one broadleaf for four firs', () => {
