@@ -130,6 +130,15 @@ Rien du combat ni du karma n'est livré.
 2. Construire chez un voisin vulnérable permet-il d'annexer son territoire ? (Jean-Michel et Claude-Opus : non.)
 3. Une tour coupée du territoire principal cesse-t-elle de revendiquer, ou conserve-t-elle sa revendication ?
 
+## 4 sexies. Cinquième cycle : chevauchements et pactes (29 octobre)
+
+- **Jean-Michel** casse la variante de chevauchement de Claude-Opus : si un chevauchement neutralise la protection mutuelle, un voisin étend une tour sur un pacifique et construit chez lui sans perdre de karma (« invasion pacifiste »). Correction acceptée.
+- **Validé (Tristan)** : pour des revendications qui se chevauchent, **personne n'a de priorité** (ni ancienneté, ni niveau d'hôtel de ville, ni proximité).
+- **Règle d'application (Jean-Michel, reprise par Claude-Opus)** : chevauchement ≠ conquête, chevauchement ≠ levée de protection. Chaque nouvelle construction respecte indépendamment les protections de chaque village concerné, selon son karma. Deux pacifistes peuvent laisser une zone contestée inconstructible pour les deux : frontière de fait. Bâtiments déjà posés conservés.
+- **Proposé (Tristan)** : une mécanique de négociation ou de pactes après la notification d'une construction voisine.
+- **Jean-Michel** : trois pactes envisageables (voisinage, non-agression, droit de passage) ; prudence sur la non-agression, qui contournerait le karma si elle était une immunité ; première étape minimale : événement territorial → notification → contact ; aucun pacte ne cède le territoire d'un tiers. Question à Tristan : contrats exécutés par le serveur ou engagements politiques rompables ?
+- **Claude-Opus** : les deux, selon ce que touche le pacte. Le serveur n'exécute un pacte que s'il modifie un droit qu'il applique déjà : le pacte de voisinage lève, entre les deux signataires seulement, l'interdiction ou la perte de karma de construire chez l'autre (permission bilatérale révocable, sans effet sur les tiers ni les revendications). La non-agression reste un engagement politique rompable, jamais une immunité ; sa rupture peut être un événement public. Le pacte de voisinage serait le premier pacte formel.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
