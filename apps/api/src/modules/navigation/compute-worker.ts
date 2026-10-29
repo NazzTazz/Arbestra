@@ -3,7 +3,6 @@ import {
   canWalkSpawnSegment,
   createSpawnTerrainField,
   editedRc1Field,
-  woodlandTrees,
   woodlandPassage,
   infrastructurePlanSurface,
   planRoute,
@@ -22,7 +21,7 @@ import {
 import { artifactChecksum } from '../world-generator/artifact.js';
 import type { NavigationData } from './context.js';
 import type { NetworkJob } from './network-job.js';
-import { rc1NetworkGround } from './rc1-network-ground.js';
+import { rc1NetworkGround, standingGroveTrees } from './rc1-network-ground.js';
 const sources = new Map<string, { data: GeneratedLandscape; field: ReturnType<typeof createSpawnTerrainField> }>();
 const networkGrounds = new Map<string, TravelGround>();
 function sourceFor(
@@ -80,12 +79,12 @@ function build(data: NavigationData, stage: (name: string) => void): NavigationF
     for (const e of data.treeEdits)
       if (e.grove)
         trees.push(
-          ...woodlandTrees({
+          ...standingGroveTrees({
             cellX: e.cellX,
             cellY: e.cellY,
             variantSeed: e.variantSeed,
-            rc1: { trees: [], rocks: [] },
-            deposit: { remainingAmount: e.initialAmount, initialAmount: e.initialAmount, cleared: false },
+            initialAmount: e.initialAmount,
+            ...(e.removedTrees ? { removedTrees: e.removedTrees } : {}),
           }),
         );
     const field = editedRc1Field(source.data, source.field, data.terraces, [...absent], data.vertices),

@@ -19,7 +19,21 @@ export interface Rc1NetworkEdits {
   height: number;
   terraces: SpawnTerrace[];
   absent: number[];
-  groves: Array<{ cellX: number; cellY: number; variantSeed: number; initialAmount: number }>;
+  /** Starter supplements; `removedTrees`: their drawn trees whose stump is removed (slice 2e). */
+  groves: Array<{ cellX: number; cellY: number; variantSeed: number; initialAmount: number; removedTrees?: number[] }>;
+}
+
+/** The trunks of a starter supplement still standing: its three drawn trees
+ * (`woodlandTrees`, tree index = position) but those whose stump is removed. */
+export function standingGroveTrees(grove: Rc1NetworkEdits['groves'][number]): WoodlandTree[] {
+  const removed = new Set(grove.removedTrees ?? []);
+  return woodlandTrees({
+    cellX: grove.cellX,
+    cellY: grove.cellY,
+    variantSeed: grove.variantSeed,
+    rc1: { trees: [], rocks: [] },
+    deposit: { remainingAmount: grove.initialAmount, initialAmount: grove.initialAmount, cleared: false },
+  }).filter((_, index) => !removed.has(index));
 }
 
 export function rc1NetworkGround(
@@ -32,14 +46,7 @@ export function rc1NetworkGround(
   const trees: WoodlandTree[] = (data.forest?.trees ?? []).flatMap((t, i) =>
     absent.has(i) ? [] : [{ x: t.x, y: t.y, scale: t.crown * t.size, heightScale: t.size, rotation: 0 }],
   );
-  for (const grove of edits.groves)
-    trees.push(
-      ...woodlandTrees({
-        ...grove,
-        rc1: { trees: [], rocks: [] },
-        deposit: { remainingAmount: grove.initialAmount, initialAmount: grove.initialAmount, cleared: false },
-      }),
-    );
+  for (const grove of edits.groves) trees.push(...standingGroveTrees(grove));
   const trunks = woodlandPassage(trees, { widthCells: edits.width, heightCells: edits.height });
   const revision = createHash('sha256')
     .update(JSON.stringify([edits.vertices, edits.terraces, trees.map((t) => [t.x, t.y, t.scale])]))

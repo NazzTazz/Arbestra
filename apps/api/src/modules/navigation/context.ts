@@ -10,6 +10,7 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-compute-protocol.js';
 import { navigationVersions } from './route-cache.js';
+import { rc1AbsentTrees, removedStumpsSql } from '../deposits/woodland.js';
 export interface NavigationData {
   vertices?: import('@arbestra/contracts').TerrainVertex[];
   worldId: string;
@@ -27,6 +28,8 @@ export interface NavigationData {
     variantSeed: number;
     removed: number[];
     grove: boolean;
+    /** Drawn trees of a starter supplement whose stump is removed (slice 2e). */
+    removedTrees?: number[];
   }>;
   legacy?:
     | {
@@ -216,17 +219,23 @@ export async function loadNavigationContext(
             'woodlandDeposits.cellX',
             'woodlandDeposits.cellY',
             'variantSeed',
+            removedStumpsSql().as('stumps'),
           ])
           .where('worldRc1Resources.worldId', '=', worldId)
           .execute();
-        treeEdits = edits.map((r) => ({
-          cellX: r.cellX ?? 0,
-          cellY: r.cellY ?? 0,
-          initialAmount: Number(r.initialAmount ?? 0),
-          variantSeed: r.variantSeed ?? 3,
-          removed: r.cleared ? r.treeIndices : r.removedIndices,
-          grove: !r.treeIndices.length && !r.cleared,
-        }));
+        // A trunk leaves with its stump (slice 2e), before its case is cleared.
+        treeEdits = edits.map((r) => {
+          const grove = !r.treeIndices.length && !r.cleared;
+          return {
+            cellX: r.cellX ?? 0,
+            cellY: r.cellY ?? 0,
+            initialAmount: Number(r.initialAmount ?? 0),
+            variantSeed: r.variantSeed ?? 3,
+            removed: rc1AbsentTrees(r),
+            grove,
+            ...(grove && r.stumps?.length ? { removedTrees: r.stumps } : {}),
+          };
+        });
       } else
         legacy = {
           chunkSize: world.chunkSize,

@@ -14,6 +14,7 @@ import type { Database } from '../../database/schema.js';
 import { readRc1Source } from './rc1-source.js';
 import { editedRc1Field } from '../onboarding/rc1-field.js';
 import { rc1GroundVersion } from './rc1-ground-version.js';
+import { rc1AbsentTrees, removedStumpsSql } from '../deposits/woodland.js';
 type GroundGeometry = {
   data: GeneratedLandscape;
   field: ReturnType<typeof editedRc1Field>;
@@ -114,14 +115,15 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
         'woodlandDeposits.cellX',
         'woodlandDeposits.cellY',
         'variantSeed',
+        removedStumpsSql().as('stumps'),
       ])
       .where('worldRc1Resources.worldId', '=', worldId)
       .orderBy('worldRc1Resources.featureId')
       .execute();
     const canonicalIndices = (indices: number[]) => [...new Set(indices)].sort((a, b) => a - b);
-    // Trunks and stumps stand until their case is cleared, whatever wood is
-    // left (docs/SPEC-BOIS-ARBRE-UNITE.md): collisions and navigation alike.
-    const absent = canonicalIndices(resourceEdits.flatMap((r) => (r.cleared ? r.treeIndices : r.removedIndices))),
+    // A trunk stands, whatever wood is left, until its stump is removed or its
+    // case cleared (docs/SPEC-BOIS-ARBRE-UNITE.md): collisions and navigation alike.
+    const absent = canonicalIndices(resourceEdits.flatMap(rc1AbsentTrees)),
       removed = absent;
     const groves = resourceEdits.filter(
       (r) => !r.treeIndices.length && r.cellX !== null && r.cellY !== null && !r.cleared,
@@ -138,7 +140,13 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
       terraces,
       removed,
       absent,
-      groves.map((r) => [r.cellX, r.cellY, r.variantSeed ?? 3, Number(r.initialAmount) === 0 ? 0 : 1]),
+      groves.map((r) => [
+        r.cellX,
+        r.cellY,
+        r.variantSeed ?? 3,
+        Number(r.initialAmount) === 0 ? 0 : 1,
+        ...(r.stumps?.length ? [r.stumps] : []),
+      ]),
     ]);
     const prior = geometries.get(key);
     if (prior?.data === source.data) {
@@ -214,6 +222,8 @@ export async function readRc1Ground(db: Kysely<Database>, worldId: string) {
         cellY: r.cellY!,
         variantSeed: r.variantSeed ?? 3,
         initialAmount: Number(r.initialAmount),
+        // Absent while every stump stands: the network fingerprint is unchanged.
+        ...(r.stumps?.length ? { removedTrees: r.stumps } : {}),
       })),
     };
     const navigation = rc1NetworkGround(source.data, source.field, navigationEdits, field);

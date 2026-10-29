@@ -26,6 +26,7 @@ type Edit = {
   cellX: number | null;
   cellY: number | null;
   variantSeed: number | null;
+  stumps?: number[] | null;
 };
 function smallForest() {
   const data = structuredClone(artifact);
@@ -209,6 +210,52 @@ describe('RC1 ground geometry cache without database', () => {
     const rejection = Error('changed artifact rejected by source');
     source.mockRejectedValueOnce(rejection);
     await expect(readRc1Ground(f.db, 'cache-pure-other')).rejects.toBe(rejection);
+  });
+  it('removes the trunk of a removed stump only, before its case is cleared, and of a starter tree by position', async () => {
+    const f = fixture(),
+      [one, two] = f.data.forest!.trees;
+    f.rows.edits = [
+      {
+        treeIndices: [0, 1],
+        removedIndices: [],
+        cleared: false,
+        remainingAmount: '500',
+        initialAmount: '1000',
+        cellX: null,
+        cellY: null,
+        variantSeed: null,
+      },
+    ];
+    const standing = await readRc1Ground(f.db, 'cache-pure-stumps');
+    expect(standing.navigation.sample(one!.x, one!.y).blocked).toBe(true);
+    // Stump 0 removed; index 5 is no tree of this case and is ignored.
+    f.rows.edits[0]!.stumps = [0, 5];
+    const removed = await readRc1Ground(f.db, 'cache-pure-stumps');
+    expect(removed.navigationEdits.absent).toEqual([0]);
+    expect(removed.navigation.sample(one!.x, one!.y).blocked).toBe(false);
+    expect(removed.navigation.sample(two!.x, two!.y).blocked).toBe(true);
+    expect(removed.field.intersectsTree({ x: one!.x, y: one!.y, halfWidth: 0, halfHeight: 0 })).toBe(false);
+    expect(removed.navigation.revision).not.toBe(standing.navigation.revision);
+    // A starter supplement keeps its drawn trees but the removed ones.
+    f.rows.edits.push({
+      treeIndices: [],
+      removedIndices: [],
+      cleared: false,
+      remainingAmount: '1500',
+      initialAmount: '1500',
+      cellX: 140,
+      cellY: 20,
+      variantSeed: 2,
+      stumps: null,
+    });
+    const grove = await readRc1Ground(f.db, 'cache-pure-stumps');
+    expect(grove.navigationEdits.groves).toEqual([{ cellX: 140, cellY: 20, variantSeed: 2, initialAmount: 1500 }]);
+    f.rows.edits[1]!.stumps = [1];
+    const thinned = await readRc1Ground(f.db, 'cache-pure-stumps');
+    expect(thinned.navigationEdits.groves).toEqual([
+      { cellX: 140, cellY: 20, variantSeed: 2, initialAmount: 1500, removedTrees: [1] },
+    ]);
+    expect(thinned.navigation.revision).not.toBe(grove.navigation.revision);
   });
   it('bounds retained contexts and navigation samples while preserving their answers', async () => {
     const f = fixture(),

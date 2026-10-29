@@ -37,6 +37,30 @@ export function woodDesignations(
   return designations;
 }
 
+/** Removed stumps of the case of a `world_rc1_resources` row (`alias`: its name
+ * in the outer query, a constant of the caller), in tree order; null when none.
+ * Their trunks have left the navigation (slice 2e). */
+export function removedStumpsSql(alias = 'world_rc1_resources') {
+  return sql<number[] | null>`(select array_agg(stump.tree_index order by stump.tree_index)
+    from woodland_trees stump where stump.world_id=${sql.raw(`${alias}.world_id`)}
+      and stump.feature_id=${sql.raw(`${alias}.feature_id`)} and stump.stump_removed_at is not null)`;
+}
+
+/** RC1 forest trees of a case whose trunk is gone: removed at installation,
+ * stump removed (slice 2e), or every tree of a cleared case. A trunk stands,
+ * whatever wood is left, until then (docs/SPEC-BOIS-ARBRE-UNITE.md). The three
+ * drawn trees of a starter supplement are not RC1 trees: see `removedTrees`. */
+export function rc1AbsentTrees(row: {
+  treeIndices: number[];
+  removedIndices: number[];
+  cleared: boolean | null;
+  stumps?: number[] | null;
+}): number[] {
+  if (row.cleared) return row.treeIndices;
+  const own = new Set(row.treeIndices);
+  return [...row.removedIndices, ...(row.stumps ?? []).filter((index) => own.has(index))];
+}
+
 /** Per-tree state of a wood case for readers (slice 2d): the trees with a row
  * only (felled, reserved, stump, removed stump), the lots due and not yet
  * debited by their village shown as cut, exactly like `resource_deposits`. */

@@ -651,6 +651,15 @@ it('refuses to build on a wood case while a stump stands, even after a read, and
   ).toBe(200);
   expect((await post(payload(67, 64))).json().code, errors.at(-1)?.stack).toBe('CELL_OCCUPIED');
   expect(await wood()).toBe(2000);
+  // One stump removed (its trunk leaves the navigation): the other keeps the case occupied.
+  await db
+    .updateTable('woodlandTrees')
+    .set({ stumpRemovedAt: t })
+    .where('featureId', '=', featureId)
+    .where('treeIndex', '=', 0)
+    .execute();
+  expect((await post(payload(67, 64))).json().code, errors.at(-1)?.stack).toBe('CELL_OCCUPIED');
+  expect(await wood()).toBe(2000);
   // Both stumps removed: the case clears and frees its cell.
   await db.transaction().execute(async (tx) => {
     await tx.selectFrom('villages').select('id').where('id', '=', villageId).forUpdate().execute();

@@ -22,6 +22,7 @@ import {
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
+import { rc1AbsentTrees, removedStumpsSql } from '../deposits/woodland.js';
 import { villageSyncRevision } from './sync-revision.js';
 import type { OwnedVillage } from './service.js';
 import type { VillageEconomy } from './reconcile-economy.js';
@@ -302,7 +303,7 @@ async function inputs(
         .leftJoin('woodlandDeposits as d', (j) =>
           j.onRef('d.worldId', '=', 'r.worldId').onRef('d.featureId', '=', 'r.featureId'),
         )
-        .select(['r.treeIndices', 'r.removedIndices', 'd.cleared'])
+        .select(['r.treeIndices', 'r.removedIndices', 'd.cleared', removedStumpsSql('r').as('stumps')])
         .where('r.worldId', '=', wid)
         .where(
           treeIds.length
@@ -392,8 +393,9 @@ function validateSpace(
   for (const { plan } of data.plans) validatePlan(plan, wanted, v);
   if (data.paths.some((path) => cells.some((c) => pathPassageIntersectsBox(path, c, 0.5, 0.5, v))))
     fail('ENGAGED_PASSAGE', 'Une équipe utilise encore cette emprise.');
-  // Trunks and stumps stand until the case is cleared (docs/SPEC-BOIS-ARBRE-UNITE.md).
-  const removed = new Set(data.trees.flatMap((r) => (r.cleared ? r.treeIndices : r.removedIndices)));
+  // A trunk stands until its stump is removed or its case cleared; the case
+  // itself stays occupied until cleared (docs/SPEC-BOIS-ARBRE-UNITE.md).
+  const removed = new Set(data.trees.flatMap(rc1AbsentTrees));
   const field = source
     ? editedRc1Field(
         {
