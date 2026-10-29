@@ -112,6 +112,24 @@ Rien du combat ni du karma n'est livré.
 
 **Décisions indispensables avant une spec** : rayons (hôtel de ville par niveau, tour, surveillance) ; plafond de tours ; protection selon le karma (point 6) ; parade anti-encerclement ; ce que révèle une détection. Le territoire peut être livré avant la surveillance.
 
+## 4 quinquies. Quatrième cycle (29 octobre)
+
+**Jean-Michel** :
+
+- Plafond de tours lié au niveau de l'hôtel de ville : oui, hypothèse principale.
+- Invariant : une revendication n'existe que tant que sa tour existe. Une tour coupée du cœur cesse de revendiquer jusqu'au rétablissement de la continuité (proposé).
+- « Premier arrivé » déconseillé : il fige l'expansion d'un voisin qui investit plus tard, et pose la question des joueurs inactifs. Alternative : territoire dérivé des bâtiments existants, revendications pouvant se chevaucher sans propriété exclusive.
+- Pas d'annexion : une construction étrangère légale dans un territoire vulnérable ne revendique pas les cases déjà revendiquées. Intrusion et conquête restent distinctes.
+- Alertes : programmer à l'échéance est bon, mais elles doivent être invalidées ou recalculées quand le convoi change (retard, détour, attaque, annulation) ; recalcul ponctuel à la garnison ; distinguer détection et identification.
+
+**Claude-Opus** se range à ces points. Précision : le « premier arrivé » ne demandait pas de cadastre (date de fin de construction du bâtiment), mais l'objection de fond tient. Variante soutenue : une case revendiquée par deux villages n'est protégée pour aucun des deux contre l'autre, seulement contre les tiers ; le disque de l'hôtel de ville ne peut être chevauché par aucune tour étrangère. Joueurs inactifs : hors première tranche, à noter.
+
+**Arbitrages soumis à Tristan** :
+
+1. Revendications concurrentes : chevauchements possibles sans propriété exclusive, ou priorité à la plus ancienne ?
+2. Construire chez un voisin vulnérable permet-il d'annexer son territoire ? (Jean-Michel et Claude-Opus : non.)
+3. Une tour coupée du territoire principal cesse-t-elle de revendiquer, ou conserve-t-elle sa revendication ?
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
