@@ -13,8 +13,13 @@ export interface TreeLook {
   masked: boolean;
   tint: boolean;
 }
-/** Trees and stumps queued for clearing read slightly red (docs/SPEC-GRAMMAIRE-GESTUELLE.md §1). */
-export const CLEAR_TINT: readonly [number, number, number, number] = [1.3, 0.74, 0.68, 1];
+/**
+ * Trees and stumps queued for clearing read red (docs/SPEC-GRAMMAIRE-GESTUELLE.md §1).
+ * The factor multiplies the kit's vertex colours: the red channel must rise
+ * well above 1 for green foliage to turn red, by day and by night (Tristan,
+ * 29 October: 1.3 / 0.74 / 0.68 only browned the trees).
+ */
+export const CLEAR_TINT: readonly [number, number, number, number] = [2.6, 0.5, 0.45, 1];
 const PLAIN: readonly [number, number, number, number] = [1, 1, 1, 1];
 
 /** One piece of the tree kit for one grove: an instance per tree using it. */

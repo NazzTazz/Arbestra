@@ -82,22 +82,33 @@ const wrap = (d: number, size: number) => d - Math.round(d / size) * size;
  * `candidates` are the trees of the cells along the segment and their
  * neighbours (an index lookup): the work is O(those trees).
  */
+/**
+ * Reach of a swipe around a tree's foot, in cells: under half the closest
+ * spacing of a grove's trees (0.2), so a tap that slips a few pixels over a
+ * dense grove takes the tree it meant, not its neighbours (Tristan, 29 October:
+ * a starter grove gave three trees to one touch at 0.35). The instance under
+ * the pointer stays the main designation; the foot reach catches low stumps.
+ */
+export const WOOD_FOOT_REACH = 0.15;
+
 export function treesAlongSegment(
   from: { cellX: number; cellY: number },
   to: { cellX: number; cellY: number },
   candidates: Iterable<GestureTree>,
   world: { widthCells: number; heightCells: number },
-  reach = 0.35,
+  reach = WOOD_FOOT_REACH,
 ): GestureTree[] {
   const dx = wrap(to.cellX - from.cellX, world.widthCells),
     dy = wrap(to.cellY - from.cellY, world.heightCells),
     length2 = dx * dx + dy * dy;
-  const met: Array<{ tree: GestureTree; t: number }> = [];
+  const met: Array<{ tree: GestureTree; t: number; d: number }> = [];
   for (const tree of candidates) {
     const px = wrap(tree.x - from.cellX, world.widthCells),
       py = wrap(tree.y - from.cellY, world.heightCells);
     const t = length2 > 0 ? Math.max(0, Math.min(1, (px * dx + py * dy) / length2)) : 0;
-    if (Math.hypot(px - dx * t, py - dy * t) <= reach) met.push({ tree, t });
+    const d = Math.hypot(px - dx * t, py - dy * t);
+    if (d <= reach) met.push({ tree, t, d });
   }
-  return met.sort((a, b) => a.t - b.t).map((m) => m.tree);
+  // In the order met; at one point (a still pointer), the nearest foot first.
+  return met.sort((a, b) => a.t - b.t || a.d - b.d).map((m) => m.tree);
 }

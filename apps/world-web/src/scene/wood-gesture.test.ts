@@ -47,9 +47,9 @@ const world = { widthCells: 512, heightCells: 256 };
 
 it('selects the trees a swipe crosses, each in the order the swipe meets it', () => {
   const trees = [
-    tree('b', 0, 13.1, 10.2),
-    tree('a', 1, 10.6, 9.8),
-    tree('a', 0, 11.9, 10.1),
+    tree('b', 0, 13.1, 10.1),
+    tree('a', 1, 10.6, 9.9),
+    tree('a', 0, 11.9, 10.05),
     tree('c', 0, 12, 12), // Two cells off the line.
   ];
   expect(
@@ -76,4 +76,16 @@ it('follows the torus across its seam and keeps a still pointer to the tree unde
   expect(
     treesAlongSegment({ cellX: 0.3, cellY: 5 }, { cellX: 0.3, cellY: 5 }, seam, world).map((t) => t.featureId),
   ).toEqual(['west']);
+});
+
+it('takes only the meant tree when a touch slips a few pixels over a dense grove', () => {
+  // A starter grove: three trees 0.2 to 0.3 cell apart (closest spacing 0.2).
+  const grove = [tree('starter', 0, 10, 10), tree('starter', 1, 10.25, 10.1), tree('starter', 2, 9.9, 10.28)];
+  expect(
+    treesAlongSegment({ cellX: 10.02, cellY: 10.02 }, { cellX: 10.06, cellY: 10.03 }, grove, world).map((t) => t.slot),
+  ).toEqual([0]);
+  // A still pointer between two feet takes the nearest one only first.
+  expect(treesAlongSegment({ cellX: 10.17, cellY: 10.07 }, { cellX: 10.17, cellY: 10.07 }, grove, world)[0]?.slot).toBe(
+    1,
+  );
 });
