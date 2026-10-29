@@ -41,14 +41,18 @@ export async function assertSyncV2Available(db: Kysely<Database>): Promise<void>
   if (!ready) throw new HttpError(503, 'SYNC_V2_UNAVAILABLE', 'Synchronisation V2 indisponible.');
 }
 
+export const SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS = 60;
 /** A scope beyond the reader bounds (4 096 references) is a typed, explicit
  * refusal rather than an internal error; pagination is not implemented yet. */
-async function bounded<T>(read: Promise<T>): Promise<T> {
+async function bounded<T>(read: Promise<T>, reply?: FastifyReply): Promise<T> {
   try {
     return await read;
   } catch (error) {
-    if (error instanceof RangeError)
+    if (error instanceof RangeError) {
+      // Pagination does not exist yet: tell clients not to retry every 2 s.
+      reply?.header('Retry-After', String(SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS));
       throw new HttpError(503, 'SYNC_SCOPE_TOO_LARGE', 'Ce village dépasse la taille synchronisable.');
+    }
     throw error;
   }
 }
@@ -84,7 +88,7 @@ export async function registerSyncV2Routes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const presentation = await bounded(presentations.read(account.id, worldSlug, villageId));
+      const presentation = await bounded(presentations.read(account.id, worldSlug, villageId), reply);
       const etag = `"${presentation.version}"`;
       reply.header('Cache-Control', 'private, no-cache').header('ETag', etag);
       if (request.headers['if-none-match'] === etag) return reply.status(304).send();
@@ -128,6 +132,7 @@ export async function registerSyncV2Routes(
           { include },
         ),
       ),
+      reply,
     );
   };
   app.get(
@@ -182,7 +187,7 @@ export async function registerSyncV2Routes(
         reply.header('Cache-Control', 'no-store');
         if (operation === 'read') {
           reply.serializer(JSON.stringify);
-          return bounded(captureSyncV2(db, account.id, worldSlug, villageId, body));
+          return bounded(captureSyncV2(db, account.id, worldSlug, villageId, body), reply);
         }
         const close = () => reply.raw.destroy();
         streams.add(close);

@@ -432,6 +432,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     village: villageV2Mode,
     onState: applySnapshot,
     onExpired: expireSession,
+    onNotice: pushNotification,
   });
   villageV2Ref.current = {
     ready: villageV2Mode && villageV2.villageReady,

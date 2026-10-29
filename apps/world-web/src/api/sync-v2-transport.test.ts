@@ -554,3 +554,74 @@ it('rereads the other streams right after a gesture confirmation (science lives 
     transport.close();
   }
 });
+
+function tooLargeTransport(retryAfter: string | null) {
+  const readTimes: number[] = [],
+    notices: Array<number | null> = [];
+  let large = true;
+  const request: typeof fetch = async (url, init) => {
+    const generation = Number(new Headers(init?.headers).get('x-arbestra-generation') ?? 0);
+    if (String(url).endsWith('/sync/stream'))
+      return new Response('event: reset\ndata: {}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+    if (String(url).endsWith('/sync/read')) {
+      readTimes.push(Date.now());
+      if (large)
+        return new Response(JSON.stringify({ code: 'SYNC_SCOPE_TOO_LARGE', message: 'Trop grand' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json', ...(retryAfter ? { 'retry-after': retryAfter } : {}) },
+        });
+    }
+    return json(bootstrap(generation));
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: () => undefined,
+    expired: () => undefined,
+    onScopeTooLarge: (retryInMs: number | null) => notices.push(retryInMs),
+  } as ConstructorParameters<typeof SyncV2Transport>[3]);
+  return { transport, readTimes, notices, recover: () => (large = false) };
+}
+
+it('spaces snapshot rereads by Retry-After when the village is too large, flags it and recovers', async () => {
+  vi.useFakeTimers();
+  const { transport, readTimes, notices, recover } = tooLargeTransport('60');
+  try {
+    await transport.start();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // A 2 s loop would make about 150 reads; Retry-After 60 allows about 5.
+    expect(readTimes.length).toBeGreaterThanOrEqual(2);
+    expect(readTimes.length).toBeLessThanOrEqual(6);
+    for (let index = 1; index < readTimes.length; index++)
+      expect(readTimes[index]! - readTimes[index - 1]!).toBeGreaterThanOrEqual(60_000);
+    expect(notices.length).toBeGreaterThan(0);
+    expect(notices.every((value) => value === 60_000)).toBe(true);
+    recover();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(notices.at(-1)).toBeNull();
+    const settled = readTimes.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(readTimes.length).toBeLessThanOrEqual(settled + 5);
+  } finally {
+    transport.close();
+    vi.useRealTimers();
+  }
+});
+
+it('backs off with a growing bounded delay when Retry-After is missing on a too large village', async () => {
+  vi.useFakeTimers();
+  const { transport, readTimes, notices } = tooLargeTransport(null);
+  try {
+    await transport.start();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(readTimes.length).toBeLessThanOrEqual(10);
+    const gaps = readTimes.slice(1).map((time, index) => time - readTimes[index]!);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(15_000);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(60_000);
+    expect(gaps.at(-1)).toBe(60_000);
+    expect(notices.every((value) => value !== null && value >= 15_000 && value <= 60_000)).toBe(true);
+  } finally {
+    transport.close();
+    vi.useRealTimers();
+  }
+});

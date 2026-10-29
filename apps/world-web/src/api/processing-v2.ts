@@ -138,12 +138,30 @@ type Options = {
   village: boolean;
   onState: (update: TimedVillageState) => void;
   onExpired: () => void;
+  /** Sober, non-blocking message (e.g. village too large to synchronize). */
+  onNotice?: (message: string) => void;
 };
+
+/** Message for a village whose snapshot exceeds the server bound. */
+export function scopeTooLargeMessage(retryInMs: number): string {
+  const seconds = Math.max(1, Math.round(retryInMs / 1000));
+  const delay = seconds >= 60 ? `${Math.round(seconds / 60)} min` : `${seconds} s`;
+  return `Village trop grand pour être synchronisé ; nouvel essai dans ${delay}.`;
+}
 
 /** One V2 transport per mounted village. The workshop always uses it when
  * the server negotiates V2; the whole village only in village mode. A server
  * that does not negotiate V2 leaves both on their historical path. */
-export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, village, onState, onExpired }: Options) {
+export function useVillageSyncV2({
+  worldSlug,
+  worldId,
+  villageId,
+  enabled,
+  village,
+  onState,
+  onExpired,
+  onNotice,
+}: Options) {
   const [status, setStatus] = useState<ProcessingV2Status>('off');
   const [villageReady, setVillageReady] = useState(false);
   const [orders, setOrders] = useState<ProcessingOrder[]>([]);
@@ -151,6 +169,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
   const transport = useRef<SyncV2Transport | null>(null);
   const expired = useRef(onExpired);
   expired.current = onExpired;
+  const notice = useRef(onNotice);
+  notice.current = onNotice;
   const accept = useRef(onState);
   accept.current = onState;
   const placed = useRef<(placement: ConfirmedPlacement) => void>(() => undefined);
@@ -227,6 +247,9 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, villa
     };
     const handlers = {
       expired: () => expired.current(),
+      onScopeTooLarge: (retryInMs: number | null) => {
+        if (retryInMs !== null) notice.current?.(scopeTooLargeMessage(retryInMs));
+      },
       publish: (state: SyncV2State, observedAt: string, batch: SyncV2Batch) => {
         setOrders(processingOrdersV2(state));
         if (!village) return;

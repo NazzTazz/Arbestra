@@ -41,6 +41,8 @@ export class SyncV2HttpError extends Error {
     readonly code: string,
     message: string,
     readonly retryAfterMs = 1000,
+    /** Whether the server actually sent a Retry-After header. */
+    readonly hasRetryAfter = false,
   ) {
     super(message);
   }
@@ -53,19 +55,31 @@ type Options = {
   scopes?: SyncV2ReadRequest['scopes'];
   /** Shared scopes keyed by the server; the private stream is implicit. */
   include?: readonly ('knowledge' | 'manifest' | 'traffic')[];
+  /** The private snapshot exceeds the server bound: rereads are spaced and
+   * this receives the delay before the next attempt, then null once a read
+   * succeeds again. */
+  onScopeTooLarge?: (retryInMs: number | null) => void;
 };
+
+const SCOPE_TOO_LARGE = 'SYNC_SCOPE_TOO_LARGE';
+const SCOPE_TOO_LARGE_FIRST_MS = 15_000;
+const SCOPE_TOO_LARGE_MAX_MS = 60_000;
+const isScopeTooLarge = (error: unknown): error is SyncV2HttpError =>
+  error instanceof SyncV2HttpError && error.code === SCOPE_TOO_LARGE;
 
 async function parse(response: Response): Promise<unknown> {
   const data: unknown = await response.json();
   if (response.status === 401) throw new SyncV2SessionExpired();
   if (!response.ok) {
     const error = data as { code?: string; message?: string };
-    const seconds = Number(response.headers.get('retry-after') ?? '1');
+    const header = response.headers.get('retry-after');
+    const seconds = Number(header ?? '1');
     throw new SyncV2HttpError(
       response.status,
       error.code ?? 'HTTP_ERROR',
       error.message ?? 'Synchronisation indisponible.',
       Number.isFinite(seconds) ? Math.max(0, Math.min(seconds, 60)) * 1000 : 1000,
+      header !== null && Number.isFinite(seconds),
     );
   }
   return data;
@@ -102,6 +116,9 @@ export class SyncV2Transport {
   private retry: ReturnType<typeof setTimeout> | undefined;
   private refreshFlight: Promise<void> | null = null;
   private pendingKey: string | null = null;
+  private tooLargeFailures = 0;
+  private holdUntil = 0;
+  private tooLargeDelay = 2000;
   private readonly request: typeof fetch;
   private readonly storage: Storage | undefined;
   private readonly root: string;
@@ -138,11 +155,43 @@ export class SyncV2Transport {
     );
   }
   /** A new owner (the mounted village) takes over an already open session. */
-  rebind(handlers: Pick<Options, 'publish' | 'expired'>) {
+  rebind(handlers: Pick<Options, 'publish' | 'expired' | 'onScopeTooLarge'>) {
     this.options = { ...this.options, ...handlers };
   }
+  /** A refused snapshot because the village is too large: records the next
+   * delay (Retry-After, else a growing bounded backoff) and flags it. */
+  private noteScopeTooLarge(error: unknown) {
+    if (!isScopeTooLarge(error)) return;
+    this.tooLargeFailures++;
+    this.tooLargeDelay = error.hasRetryAfter
+      ? Math.max(1000, error.retryAfterMs)
+      : Math.min(SCOPE_TOO_LARGE_FIRST_MS * 2 ** (this.tooLargeFailures - 1), SCOPE_TOO_LARGE_MAX_MS);
+    this.holdUntil = Date.now() + this.tooLargeDelay;
+    this.options.onScopeTooLarge?.(this.tooLargeDelay);
+  }
+  private clearScopeTooLarge() {
+    if (!this.tooLargeFailures) return;
+    this.tooLargeFailures = 0;
+    this.holdUntil = 0;
+    this.options.onScopeTooLarge?.(null);
+  }
+  /** Delay before retrying after a failure: spaced when the village is too large. */
+  private retryDelay(error: unknown): number {
+    return isScopeTooLarge(error) ? this.tooLargeDelay : 2000;
+  }
   async start(alreadyWoken = false): Promise<void> {
-    const input = await this.json(
+    let input: unknown;
+    try {
+      input = await this.startRead(alreadyWoken);
+    } catch (error) {
+      this.noteScopeTooLarge(error);
+      throw error;
+    }
+    this.clearScopeTooLarge();
+    this.finishStart(input);
+  }
+  private startRead(alreadyWoken: boolean): Promise<unknown> {
+    return this.json(
       alreadyWoken ? '/sync/read' : `/bootstrap?generation=${this.generation}${includeQuery(this.options)}`,
       alreadyWoken
         ? {
@@ -156,6 +205,8 @@ export class SyncV2Transport {
           }
         : {},
     );
+  }
+  private finishStart(input: unknown) {
     if (this.closed) return;
     if (
       !syncV2BatchIsValid(input) ||
@@ -195,6 +246,7 @@ export class SyncV2Transport {
         this.options.expired();
         return;
       }
+      let failure: unknown = error;
       if (error instanceof SyncV2ResyncRequired) {
         try {
           await this.refresh(true);
@@ -207,8 +259,11 @@ export class SyncV2Transport {
           // Even a snapshot is refused: a stream epoch was replaced, which a
           // subscription generation never accepts. Reopen a new one.
           if (refreshError instanceof SyncV2ResyncRequired) return this.reopen();
+          failure = refreshError;
         }
       }
+      if (!this.closed) this.retry = setTimeout(() => void this.listen(), this.retryDelay(failure));
+      return;
     }
     if (!this.closed) this.retry = setTimeout(() => void this.listen(), 2000);
   }
@@ -228,7 +283,7 @@ export class SyncV2Transport {
         this.options.expired();
         return;
       }
-      this.retry = setTimeout(() => void this.reopen(), 2000);
+      this.retry = setTimeout(() => void this.reopen(), this.retryDelay(error));
     }
   }
   refresh(snapshot = false): Promise<void> {
@@ -237,15 +292,22 @@ export class SyncV2Transport {
       const session = this.session;
       if (this.closed || !session) return;
       const cursors = session.cursors;
-      const input = await this.json('/sync/read', {
-        method: 'POST',
-        body: JSON.stringify({
-          protocol: 2,
-          generation: this.generation,
-          scopes: cursors.map(({ kind, key }) => ({ kind, key })),
-          cursors: snapshot ? [] : cursors,
-        }),
-      });
+      let input: unknown;
+      try {
+        input = await this.json('/sync/read', {
+          method: 'POST',
+          body: JSON.stringify({
+            protocol: 2,
+            generation: this.generation,
+            scopes: cursors.map(({ kind, key }) => ({ kind, key })),
+            cursors: snapshot ? [] : cursors,
+          }),
+        });
+      } catch (error) {
+        this.noteScopeTooLarge(error);
+        throw error;
+      }
+      this.clearScopeTooLarge();
       if (!this.closed && this.session === session) session.apply(input);
     })().finally(() => {
       this.refreshFlight = null;
@@ -253,6 +315,8 @@ export class SyncV2Transport {
     return this.refreshFlight;
   }
   reconnect() {
+    // A too large village is not reread on every gesture: wait for the delay.
+    if (Date.now() < this.holdUntil) return;
     void this.refresh().catch((error) => {
       if (error instanceof SyncV2SessionExpired) {
         this.close();
