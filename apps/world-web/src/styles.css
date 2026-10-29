@@ -2064,22 +2064,27 @@ button {
 }
 .construction-families {
   display: grid;
-  grid-template-rows: repeat(3, minmax(44px, 1fr));
+  /* Three domains share the fixed palette height: no row may outgrow it. */
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 3px;
   border: 0;
   padding: 0;
   min-height: 0;
 }
 .construction-families button {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  padding: 0;
+  padding: 3px;
   border: 1px solid transparent;
   background: none;
   overflow: hidden;
 }
 .construction-families .building-thumbnail {
-  height: 40px;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
   background: none;
 }
 .construction-current {
