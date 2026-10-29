@@ -170,6 +170,17 @@ export class VillagePresentationReader {
         readScopeRevisions(this.db, village.worldId, cached.scopes),
       );
       if (revisions === cached.revisions) return cached.presentation;
+      // A concurrent read may have finished its capture while this one read the
+      // counters: equal counters (scopes included) make that capture current.
+      const latest = this.entries.get(key);
+      if (
+        latest &&
+        latest !== cached &&
+        latest.worldId === village.worldId &&
+        this.options.now() - latest.at < this.options.freshMs &&
+        latest.revisions === revisions
+      )
+        return latest.presentation;
     }
     let pending = this.inflight.get(key);
     if (!pending) {
