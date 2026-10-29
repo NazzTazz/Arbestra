@@ -6,6 +6,26 @@ import { atlasUv, grassVariant } from './terrain-palette';
 import type { Scene } from '@babylonjs/core/scene';
 import type { WorldSpace } from './world-space';
 import { TERRAIN_STREAMING } from './terrain-settings';
+const SHORE: readonly [number, number, number, number] = [0.8, 0.75, 0.6, 1],
+  DRY: readonly [number, number, number, number] = [1, 1, 1, 1],
+  /** Deepest bed tint: a dark blue that tells water from grass (Tristan, 29 October). */
+  DEEP: readonly [number, number, number] = [0.22, 0.34, 0.48];
+/** Depth, in cells, at which the bed reaches its deepest tint. */
+export const RC1_BED_FULL_DEPTH = 0.6;
+/** Vertex tint of the ground from the water depth above it (cells): sand on
+ * the shore, then darker and bluer with depth, so water reads at a glance. */
+export function bedColour(depth: number): readonly number[] {
+  if (depth <= -0.08) return DRY;
+  if (depth < 0.08) return SHORE;
+  const t = Math.min(1, (depth - 0.08) / (RC1_BED_FULL_DEPTH - 0.08));
+  return [
+    SHORE[0] + (DEEP[0] - SHORE[0]) * t,
+    SHORE[1] + (DEEP[1] - SHORE[1]) * t,
+    SHORE[2] + (DEEP[2] - SHORE[2]) * t,
+    1,
+  ];
+}
+
 export function rc1Height(
   chunk: Pick<TerrainChunk, 'originCellX' | 'originCellY' | 'rc1'>,
   x: number,
@@ -59,8 +79,7 @@ export function buildRc1TerrainUnit(
       pos.push(origin.x + v.x * 2.5, (water ? v.w + 0.006 : v.h) * 2.5, origin.z + v.y * 2.5);
       if (water) uvs.push((chunk.originCellX + v.x) / 5, (chunk.originCellY + v.y) / 5);
       else {
-        const shore = Math.abs(v.h - v.w) < 0.08;
-        colors.push(...(shore ? [0.8, 0.75, 0.6, 1] : [1, 1, 1, 1]));
+        colors.push(...bedColour(v.w - v.h));
         groundUvs.push(...atlasUv(tile, v.x - cellX + 0.5, v.y - cellY + 0.5));
       }
     }
