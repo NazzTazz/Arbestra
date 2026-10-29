@@ -379,11 +379,15 @@ export async function stoneTravelPath(
 ): Promise<TravelCell[] | undefined> {
   const deposit = await tx
     .selectFrom('resourceDeposits')
-    .select(['cellX', 'cellY', 'remainingAmount', 'resourceCode'])
+    .select(['cellX', 'cellY', 'remainingAmount', 'resourceCode', 'cleared'])
     .where('worldId', '=', village.worldId)
     .where('featureId', '=', featureId)
     .executeTakeFirst();
-  if (!deposit || Number(deposit.remainingAmount) <= 0) return undefined;
+  // A wood case is work until it is cleared: once its wood is cut, its stumps
+  // are still removed one by one (docs/SPEC-BOIS-ARBRE-UNITE.md). Whether a cut
+  // has wood left is decided by the selection and the admission, not here.
+  if (!deposit || (deposit.resourceCode === 'wood' ? deposit.cleared : Number(deposit.remainingAmount) <= 0))
+    return undefined;
   // Most local targets have no reported expedition. Check that fact once
   // before loading the player's science and historical route. Permissions are
   // still read on every call; a cached physical path grants no remote access.

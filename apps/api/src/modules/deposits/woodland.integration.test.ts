@@ -720,12 +720,20 @@ it('rolls back a felled tree, its debit, the delivery and the workers after an i
 // Slices 2c and 2d (docs/PLAN-BOIS-ARBRE-TRANCHE-2.md): designated trees in
 // commands, and the state of each tree exposed to the readers.
 const trail: TravelCell[] = [{ cellX: 1024, cellY: 512 }, { cellX: 1024, cellY: 513 }, cell];
-/** Runs a worksite lot by lot, each debited at its deadline, until it completes. */
-async function runSite(tx: Transaction<Database>, siteId: string, t: Date, max = 20) {
+/** Runs a worksite lot by lot, each debited at its deadline, until it completes;
+ * `real` admits it on the routes of production (stoneTravelPath). */
+async function runSite(
+  tx: Transaction<Database>,
+  siteId: string,
+  t: Date,
+  max = 20,
+  paths: 'trail' | 'real' = 'trail',
+) {
   const lots: Array<Awaited<ReturnType<typeof lot>>> = [];
   let at = t;
   for (let step = 0; step < 160 && lots.length < max; step++) {
-    await admitWorksites(tx, { worldId, villageId, through: at }, village, async () => trail);
+    if (paths === 'real') await admitVillageWorksites(tx, { worldId, villageId, through: at });
+    else await admitWorksites(tx, { worldId, villageId, through: at }, village, async () => trail);
     const running = await tx
       .selectFrom('depositExtractions')
       .selectAll()
@@ -1232,6 +1240,51 @@ it('queues trees for clearing through a gesture: the queue fells them, then remo
     expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ cleared: false, blocksCell: true });
     expect(await occupied(tx, id)).toBe(1);
   }, 3);
+}, 120_000);
+
+// Staging, 29 October: every clearing gesture on a case of stumps only was
+// refused « Sans chemin » (unreachable). The route search took a case without
+// wood left for finished, although its stumps are still work to do.
+it('queues a case of stumps only for clearing, on a real path, then removes each stump and frees the case', async () => {
+  await fixture(async (tx, id, t) => {
+    await cut(tx, id, t, 2, { 0: 0, 1: 0 });
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ remainingAmount: 0, cleared: false });
+    expect(await gesture(local(tx), id, randomUUID(), [1, 0], 'clear')).toMatchObject({
+      accepted: [{ key: id, resource: 'wood', amount: 0, treeIndices: [1, 0], woodMode: 'clear' }],
+      refused: [],
+    });
+    // The queue removes the stumps, in the designated order, on the routes of production.
+    const lots = await runSite(tx, await poolSite(tx), t, 20, 'real');
+    expect(lotsOf(lots)).toEqual([
+      [1, 0],
+      [0, 0],
+    ]);
+    expect(lots.every((l) => (l.pathCells?.length ?? 0) > 1)).toBe(true);
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ cleared: true, blocksCell: false });
+    expect(await occupied(tx, id)).toBe(0);
+  });
+}, 120_000);
+
+it('removes the stumps of a clearing once its last wood is cut, on a real path, instead of abandoning it', async () => {
+  await fixture(async (tx, id, t) => {
+    // One lot of wood left on tree 0; tree 1 is a stump.
+    await cut(tx, id, t, 2, { 0: 100, 1: 0 });
+    const siteId = await createWorksite(
+      tx,
+      { worldId, villageId, through: t },
+      { commandId: randomUUID(), mode: 'clear', workerCap: 10, featureIds: [id] },
+    );
+    const lots = await runSite(tx, siteId, t, 20, 'real');
+    // Once the case had no wood left, its stumps were abandoned as unreachable.
+    expect(await targetOf(tx, siteId)).toMatchObject({ status: 'completed', reason: 'goal-reached' });
+    expect(lotsOf(lots)).toEqual([
+      [0, 100],
+      [0, 0],
+      [1, 0],
+    ]);
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ cleared: true, blocksCell: false });
+    expect(await occupied(tx, id)).toBe(0);
+  });
 }, 120_000);
 
 it('lets a clearing include a cut: a cut tree designated again is cleared, the reverse adds nothing', async () => {
