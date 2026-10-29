@@ -4,7 +4,7 @@ import type { Database } from '../../database/schema.js';
 import { projectVillageResources, projectGardenPlots } from './economy.js';
 import { readProcessingOrders } from './processing.js';
 import { readCohortProjection, readPopulationProjection } from '../population/projection.js';
-import { housingCapacity } from '../population/housing.js';
+import { housingCapacity, HOUSING_BUILDING_TYPES } from '../population/housing.js';
 import type { VillageEconomy } from './reconcile-economy.js';
 import { readExtractionPools } from '../deposits/extraction-pools.js';
 import { readExtractions } from '../deposits/stone-extractions.js';
@@ -53,7 +53,6 @@ export async function readPrivateScopeSnapshot(
   const sources = [
     ['resources', 'village_resources', 'resource_code'],
     ['cohorts', 'population_cohorts', 'id'],
-    ['restHousing', 'buildings', 'id'],
     ['buildings', 'buildings', 'id'],
     ['accomplishments', 'village_accomplishments', 'code'],
     ['scienceContributions', 'science_contributions', 'building_id'],
@@ -73,7 +72,15 @@ export async function readPrivateScopeSnapshot(
     sql`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
     where world_id=${worldId} and village_id=${villageId} and (${open} or id in (select id from ${sql.id(table)}
       where world_id=${worldId} and village_id=${villageId} order by ${sql.id(order)} desc limit ${sql.lit(limit)}))`;
+  // Only buildings the restHousing reader turns into a row: housing types that
+  // are built or being upgraded. Others never carry a value, and one that
+  // becomes housing is touched by the buildings trigger (migration 053).
   queries.push(
+    running(
+      'restHousing',
+      'buildings',
+      sql`building_type in (${sql.join(HOUSING_BUILDING_TYPES)}) and (status='completed' or target_level is not null)`,
+    ),
     running('gardenHarvests', 'garden_harvests', sql`status='in-progress'`),
     running('extractions', 'deposit_extractions', sql`status='in-progress'`),
     running('buildingExpansions', 'building_expansions', sql`status='under-construction'`),

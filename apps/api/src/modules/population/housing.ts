@@ -1,5 +1,7 @@
 import type { Selectable, Transaction } from 'kysely';
 import type { Database, PopulationCohortsTable } from '../../database/schema.js';
+/** Building types that house residents: the only ones housingCapacity gives beds. */
+export const HOUSING_BUILDING_TYPES = ['dwelling', 'town-hall'] as const;
 export const housingCapacity = (buildingType: string, level: number) =>
   buildingType === 'town-hall' ? 30 : buildingType === 'dwelling' ? (level >= 2 ? 25 : 5) : 0;
 type Cohort = Selectable<PopulationCohortsTable>;
@@ -17,7 +19,7 @@ export async function allocateRestHousing(
     .where('worldId', '=', worldId)
     .where('villageId', '=', villageId)
     .where((eb) => eb.or([eb('status', '=', 'completed'), eb('targetLevel', 'is not', null)]))
-    .where('buildingType', 'in', ['dwelling', 'town-hall'])
+    .where('buildingType', 'in', [...HOUSING_BUILDING_TYPES])
     .orderBy('id')
     .execute();
   homes.sort(
