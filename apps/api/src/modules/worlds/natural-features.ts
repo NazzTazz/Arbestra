@@ -1,5 +1,6 @@
 import { sql, type Kysely } from 'kysely';
 import type { Database } from '../../database/schema.js';
+import { woodlandTreeStatesSql, type RawWoodlandTreeState } from '../deposits/woodland.js';
 
 export interface FeatureArea {
   minX: number;
@@ -8,13 +9,16 @@ export interface FeatureArea {
   maxY: number;
 }
 /** Restrict the economic view before projecting stock. A deposit's canonical
- * location wins over any surviving occupancy, including outside the window. */
+ * location wins over any surviving occupancy, including outside the window.
+ * `withTrees` adds the touched trees of each uncleared wood case (one indexed
+ * lookup per case), for the readers that expose them. */
 export function naturalFeaturesQuery(
   db: Kysely<Database>,
   worldId: string,
   areas: readonly FeatureArea[],
   excludeWoodlands = false,
   featureIds?: readonly string[],
+  withTrees = false,
 ) {
   if (!areas.length) throw Error('A natural-feature read needs an area');
   const inside = (x: string, y: string) =>
@@ -88,6 +92,15 @@ export function naturalFeaturesQuery(
         'resourceDeposits.blocksCell',
         'resourceDeposits.cutAmount',
       ])
+      .$if(withTrees, (q) =>
+        q.select(
+          sql<RawWoodlandTreeState[] | null>`case when ${sql.ref('resourceDeposits.resourceCode')}='wood'
+            and not ${sql.ref('resourceDeposits.cleared')} then ${woodlandTreeStatesSql(
+              sql.ref('resourceDeposits.worldId'),
+              sql.ref('resourceDeposits.featureId'),
+            )} end`.as('trees'),
+        ),
+      )
       .where('worldFeatures.worldId', '=', worldId)
       .$if(excludeWoodlands, (q) => q.where('worldFeatures.featureTypeCode', '!=', 'woodland'))
   );

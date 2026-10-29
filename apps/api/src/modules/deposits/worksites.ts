@@ -13,7 +13,7 @@ import { materializeCohorts, workingTeam } from '../population/work.js';
 import { millisecondsUntilRested } from '../population/energy.js';
 import { consumeInitialWorkers, worksiteOrderBudget } from '../villages/exploitation-budget.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
-import { nextWoodWork, readWoodlandTrees } from './woodland.js';
+import { nextWoodWork, readWoodlandTrees, woodDesignations } from './woodland.js';
 import {
   readExtractions,
   readStoneDeposit,
@@ -73,6 +73,7 @@ export async function readWorksites(
           'extractionWorksiteTargets.featureId',
           'extractionWorksiteTargets.status',
           'extractionWorksiteTargets.reason',
+          'extractionWorksiteTargets.treeIndices',
           'resourceDeposits.cellX',
           'resourceDeposits.cellY',
         ])
@@ -85,10 +86,12 @@ export async function readWorksites(
       extractions ?? readExtractions(tx, worldId, villageId, ids),
     ]);
   const grouped = new Map<string, ExtractionWorksite['targets']>(),
-    missions = new Map(active.map((r) => [r.worksiteId, r.extraction]));
-  for (const { worksiteId, ...target } of targets) {
+    missions = new Map(active.map((r) => [r.worksiteId, r.extraction])),
+    wood = new Set(rows.filter((row) => row.resourceCode === 'wood').map((row) => row.id));
+  for (const { worksiteId, treeIndices, ...target } of targets) {
     const group = grouped.get(worksiteId) ?? [];
-    group.push(target);
+    // Wood targets name their designated trees (null: every tree of the case).
+    group.push(wood.has(worksiteId) ? { ...target, treeIndices } : target);
     grouped.set(worksiteId, group);
   }
   return rows.map((row) => ({
@@ -107,11 +110,16 @@ export async function readWorksites(
   }));
 }
 
+/** A target to create: its case, and for wood its designated trees (null or
+ * absent: every tree of the case). A bare identifier takes the request's
+ * designation of that case. */
+export type WorksiteTargetInput = string | { featureId: string; treeIndices?: number[] | null };
+
 export async function createWorksite(
   tx: Transaction<Database>,
   economy: VillageEconomy,
   request: StartExtractionWorksiteRequest,
-  acceptedFeatureIds = request.featureIds,
+  acceptedFeatureIds: readonly WorksiteTargetInput[] = request.featureIds,
   exploitationOrderId?: string,
   poolResource?: 'wood' | 'stone',
   pausedPool = false,
@@ -167,24 +175,32 @@ export async function createWorksite(
     })
     .returning('id')
     .executeTakeFirstOrThrow();
-  if (acceptedFeatureIds.length)
+  if (acceptedFeatureIds.length) {
+    const designations = resourceCode === 'wood' ? woodDesignations(request.featureIds, request.woodTrees) : null;
     await tx
       .insertInto('extractionWorksiteTargets')
       .values(
-        acceptedFeatureIds.map((featureId, ordinal) => ({
-          worksiteId: created.id,
-          worldId: economy.worldId,
-          villageId: economy.villageId,
-          featureId: featureId.toLowerCase(),
-          ordinal,
-          status: 'pending' as const,
-          admittedAt: null,
-          thresholdReachedAt: null,
-          completedAt: null,
-          reason: null,
-        })),
+        acceptedFeatureIds.map((accepted, ordinal) => {
+          const featureId = (typeof accepted === 'string' ? accepted : accepted.featureId).toLowerCase();
+          const treeIndices =
+            typeof accepted === 'string' ? designations?.get(featureId) : (accepted.treeIndices ?? undefined);
+          return {
+            worksiteId: created.id,
+            worldId: economy.worldId,
+            villageId: economy.villageId,
+            featureId,
+            ordinal,
+            status: 'pending' as const,
+            admittedAt: null,
+            thresholdReachedAt: null,
+            completedAt: null,
+            reason: null,
+            treeIndices: resourceCode === 'wood' ? (treeIndices ?? null) : null,
+          };
+        }),
       )
       .execute();
+  }
   return created.id;
 }
 
@@ -680,6 +696,8 @@ export async function admitWorksites(
             thresholdReachedAt: owner.thresholdReachedAt,
             completedAt: null,
             reason: null,
+            // The designated trees follow their target to its new site.
+            treeIndices: owner.treeIndices,
           })
           .onConflict((c) =>
             c.columns(['worksiteId', 'featureId']).doUpdateSet({
@@ -688,6 +706,7 @@ export async function admitWorksites(
               thresholdReachedAt: owner.thresholdReachedAt,
               completedAt: null,
               reason: null,
+              treeIndices: owner.treeIndices,
             }),
           )
           .execute();

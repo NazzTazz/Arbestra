@@ -1,6 +1,7 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { type Kysely } from 'kysely';
+import { canonicalWoodTrees } from '@arbestra/contracts';
 import type { HarvestIntent, HarvestReceipt, ExploitationRequest } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -9,8 +10,36 @@ import { beginVillageEconomy } from './reconcile-economy.js';
 import { WAKE_EXTRACTION_WORKSITE_TASK } from '../deposits/worksites.js';
 import { appendPoolTargets } from '../deposits/extraction-pools.js';
 import { readStoneDeposit } from '../deposits/stone-extractions.js';
+import { designatedWood, woodDesignations } from '../deposits/woodland.js';
 import { materializeCohorts } from '../population/work.js';
 import { normalizeCell } from '../worlds/coordinates.js';
+
+/** The canonical form of an intent, compared on replay. Cases are sorted;
+ * designated trees keep the player's order (docs/SPEC-BOIS-ARBRE-UNITE.md),
+ * and an intent without designation keeps its historical form. */
+export function canonicalHarvestIntent(raw: HarvestIntent, village: { widthCells: number; heightCells: number }) {
+  const wood = [...new Set(raw.wood.map((id) => id.toLowerCase()))].sort();
+  woodDesignations(wood, raw.woodTrees);
+  const woodTrees = canonicalWoodTrees(raw.woodTrees);
+  const request: HarvestIntent = {
+    commandId: raw.commandId.toLowerCase(),
+    gardens: [
+      ...new Map(
+        raw.gardens.map((c) => {
+          const p = {
+            cellX: normalizeCell(c.cellX, village.widthCells),
+            cellY: normalizeCell(c.cellY, village.heightCells),
+          };
+          return [`${p.cellX}:${p.cellY}`, p];
+        }),
+      ).values(),
+    ].sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY),
+    wood,
+    ...(woodTrees ? { woodTrees } : {}),
+    stone: [...new Set(raw.stone.map((id) => id.toLowerCase()))].sort(),
+  };
+  return request;
+}
 
 /** A receipt confirms durable targets, not delivered stock or an immediate departure.
  * Existing admission/worker code chooses teams, routes and lots after commit.
@@ -24,22 +53,7 @@ export async function acceptHarvestIntent(
 ): Promise<HarvestReceipt> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-    const request: HarvestIntent = {
-      commandId: raw.commandId.toLowerCase(),
-      gardens: [
-        ...new Map(
-          raw.gardens.map((c) => {
-            const p = {
-              cellX: normalizeCell(c.cellX, village.widthCells),
-              cellY: normalizeCell(c.cellY, village.heightCells),
-            };
-            return [`${p.cellX}:${p.cellY}`, p];
-          }),
-        ).values(),
-      ].sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY),
-      wood: [...new Set(raw.wood.map((id) => id.toLowerCase()))].sort(),
-      stone: [...new Set(raw.stone.map((id) => id.toLowerCase()))].sort(),
-    };
+    const request = canonicalHarvestIntent(raw, village);
     const economy = await beginVillageEconomy(
       tx,
       village.worldId,
@@ -71,8 +85,10 @@ export async function acceptHarvestIntent(
         cohorts.reduce((n, c) => n + c.memberCount, 0),
       ),
     );
+    const { woodTrees: _designation, ...targets } = request;
+    void _designation;
     const command: ExploitationRequest = {
-      ...request,
+      ...targets,
       workerCap: cap,
       durationMs: null,
       cohortId: null,
@@ -96,15 +112,35 @@ export async function acceptHarvestIntent(
         });
       }
     }
+    const queued: Record<'wood' | 'stone', Array<{ featureId: string; treeIndices?: number[] | null }>> = {
+      wood: [],
+      stone: [],
+    };
     for (const family of ['wood', 'stone'] as const) {
-      const selection = await prepareWorksiteSelection(tx, village, economy, {
-        commandId: request.commandId,
-        mode: family === 'wood' ? 'cut' : 'extract',
-        workerCap: 10,
-        featureIds: request[family],
-      });
+      // Wood: designated trees join the queue, even on a case already queued.
+      const selection = await prepareWorksiteSelection(
+        tx,
+        village,
+        economy,
+        {
+          commandId: request.commandId,
+          mode: family === 'wood' ? 'cut' : 'extract',
+          workerCap: 10,
+          featureIds: request[family],
+          ...(family === 'wood' && request.woodTrees ? { woodTrees: request.woodTrees } : {}),
+        },
+        undefined,
+        family === 'wood',
+      );
+      queued[family] = selection.included;
       command[family] = selection.included.map((i) => i.featureId);
-      receipt.refused.push(...selection.excluded.map((i) => ({ key: i.featureId, reason: i.reason })));
+      receipt.refused.push(
+        ...selection.excluded.map((i) => ({
+          key: i.featureId,
+          reason: i.reason,
+          ...(i.treeIndex !== undefined ? { treeIndex: i.treeIndex } : {}),
+        })),
+      );
       for (const target of selection.included) {
         const deposit = await readStoneDeposit(tx, village.worldId, target.featureId);
         receipt.accepted.push({
@@ -112,7 +148,12 @@ export async function acceptHarvestIntent(
           cellX: target.cellX,
           cellY: target.cellY,
           resource: family,
-          amount: Math.max(0, deposit.remainingAmount),
+          ...(target.treeIndices
+            ? {
+                amount: await designatedWood(tx, village.worldId, target.featureId, target.treeIndices),
+                treeIndices: target.treeIndices,
+              }
+            : { amount: Math.max(0, deposit.remainingAmount) }),
         });
       }
     }
@@ -140,8 +181,8 @@ export async function acceptHarvestIntent(
         orderId = order.id;
       }
       for (const family of ['wood', 'stone'] as const)
-        if (command[family].length) {
-          await appendPoolTargets(tx, economy, family, command[family]);
+        if (queued[family].length) {
+          await appendPoolTargets(tx, economy, family, queued[family]);
         }
       if (gardenPlan)
         await tx

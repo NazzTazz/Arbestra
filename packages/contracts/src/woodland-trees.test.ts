@@ -1,7 +1,14 @@
+import { Value } from '@sinclair/typebox/value';
 import { expect, it } from 'vitest';
+import { HarvestIntentSchema } from './exploitation.js';
+import { ExtractionSchema, StoneDepositSchema } from './villages.js';
 import {
+  addedTrees,
+  canonicalWoodTrees,
   cellTreeIndices,
   convertCutGrove,
+  designatedTrees,
+  mergedTrees,
   generatedTreeCount,
   nextStump,
   nextWoodLot,
@@ -105,4 +112,118 @@ it('converts a half-cut cell into half its trees as stumps or trunk, in tree ord
     record(2, 0),
   ]);
   expect(convertCutGrove({ initialAmount: 1500, cutAmount: 600, trees: [] })).toEqual({ records: [], cutAmount: 0 });
+});
+
+it('canonicalizes a designation: one entry per case, trees deduplicated in their designated order', () => {
+  expect(canonicalWoodTrees(undefined)).toBeUndefined();
+  expect(canonicalWoodTrees([])).toBeUndefined();
+  const a = 'B0000000-0000-4000-8000-000000000002',
+    b = 'a0000000-0000-4000-8000-000000000001';
+  expect(
+    canonicalWoodTrees([
+      { featureId: a, treeIndices: [9, 3, 9] },
+      { featureId: b, treeIndices: [40, 12] },
+      { featureId: a.toLowerCase(), treeIndices: [3, 1] },
+    ]),
+  ).toEqual([
+    { featureId: b, treeIndices: [40, 12] },
+    // Never sorted: the order of the trees is the order of the lots.
+    { featureId: a.toLowerCase(), treeIndices: [9, 3, 1] },
+  ]);
+});
+
+it('checks a designation against its case: unknown trees refused, nothing-left trees left out', () => {
+  const records = new Map([
+    [12, record(12, 0)],
+    [33, record(33, 0, 0, true)],
+    [8, record(8, 200, 100)],
+  ]);
+  // Tree 7 is not in the case (or was removed at installation).
+  expect(designatedTrees([8, 7, 12, 40, 33], [40, 12, 33, 8], records, 'cut')).toEqual({
+    kept: [8, 40],
+    unknown: [7],
+  });
+  // Clearing keeps the stump to remove, never a stump already removed.
+  expect(designatedTrees([8, 7, 12, 40, 33], [40, 12, 33, 8], records, 'clear')).toEqual({
+    kept: [8, 12, 40],
+    unknown: [7],
+  });
+  expect(designatedTrees([12, 33], [40, 12, 33, 8], records, 'cut')).toEqual({ kept: [], unknown: [] });
+});
+
+it('adds to a queued case only the trees it does not hold, the whole case absorbing any designation', () => {
+  expect(addedTrees([3, 5], [5, 7, 3, 9])).toEqual([7, 9]);
+  expect(addedTrees([3, 5], [5])).toEqual([]);
+  expect(addedTrees(null, [5])).toEqual([]);
+  expect(addedTrees([3], null)).toBeNull();
+  expect(mergedTrees([3, 5], [5, 7, 3, 9])).toEqual([3, 5, 7, 9]);
+  expect(mergedTrees([3, 5], null)).toBeNull();
+  expect(mergedTrees(null, [4])).toBeNull();
+});
+
+it('accepts designated trees and per-tree states in the contracts, and old payloads without them', () => {
+  const featureId = 'a0000000-0000-4000-8000-000000000001',
+    commandId = 'c0000000-0000-4000-8000-000000000003';
+  expect(Value.Check(HarvestIntentSchema, { commandId, gardens: [], wood: [featureId], stone: [] })).toBe(true);
+  expect(
+    Value.Check(HarvestIntentSchema, {
+      commandId,
+      gardens: [],
+      wood: [featureId],
+      woodTrees: [{ featureId, treeIndices: [4, 1] }],
+      stone: [],
+    }),
+  ).toBe(true);
+  expect(
+    Value.Check(HarvestIntentSchema, {
+      commandId,
+      gardens: [],
+      wood: [featureId],
+      woodTrees: [{ featureId, treeIndices: [] }],
+      stone: [],
+    }),
+  ).toBe(false);
+  const deposit = {
+    featureId,
+    resourceCode: 'wood',
+    cleared: false,
+    blocksCell: true,
+    cutAmount: 500,
+    cellX: 3,
+    cellY: 4,
+    initialAmount: 1500,
+    remainingAmount: 1000,
+    reservedAmount: 100,
+    availableAmount: 900,
+    state: 'available',
+    revision: 3,
+    updatedAt: '2026-10-29T10:00:00.000Z',
+  };
+  expect(Value.Check(StoneDepositSchema, deposit)).toBe(true);
+  const trees = [
+    { treeIndex: 4, remainingAmount: 0, reservedAmount: 0, felledAt: '2026-10-29T09:00:00.000Z', stumpRemoved: false },
+    { treeIndex: 1, remainingAmount: 400, reservedAmount: 100, felledAt: deposit.updatedAt, stumpRemoved: false },
+  ];
+  expect(Value.Check(StoneDepositSchema, { ...deposit, trees })).toBe(true);
+  // The record of a tree state is the one the shared rules read.
+  expect(treeWood(trees[1]).state).toBe('felled');
+  // A stump removal is a lot without wood: its extraction carries 0.
+  expect(
+    Value.Check(ExtractionSchema, {
+      resourceCode: 'wood',
+      cellX: 3,
+      cellY: 4,
+      id: commandId,
+      featureId,
+      treeIndex: 4,
+      workerCount: 1,
+      reservedAmount: 0,
+      status: 'in-progress',
+      startedAt: deposit.updatedAt,
+      completesAt: deposit.updatedAt,
+      completedAt: null,
+      transportMs: 0,
+      path: [],
+    }),
+  ).toBe(true);
 });

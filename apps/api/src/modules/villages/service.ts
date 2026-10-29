@@ -30,6 +30,9 @@ import type {
   ExtractionWorksiteSelection,
 } from '@arbestra/contracts';
 import {
+  addedTrees,
+  canonicalWoodTrees,
+  designatedTrees,
   exploitationAdmissionCap,
   travelDuration,
   refineTravelRoute,
@@ -83,7 +86,14 @@ import { admitScience, scienceSnapshot, scienceCommand } from '../science/servic
 import type { ScienceCommand } from '@arbestra/contracts';
 import { recognizedDepositRoute, hasRecognizedDepositAccess } from '../science/deposit-access.js';
 import { knownGeography } from '../science/knowledge.js';
-import { claimWoodlandCell, nextWoodWork, readWoodlandTrees } from '../deposits/woodland.js';
+import {
+  claimWoodlandCell,
+  designatedWood,
+  nextWoodWork,
+  readWoodlandTrees,
+  woodDesignations,
+  woodlandTreesField,
+} from '../deposits/woodland.js';
 import {
   stoneDepositDetails,
   readDepositAccess,
@@ -662,6 +672,7 @@ async function featuresInSnapshot(
   village: OwnedVillage,
   ground: Snapshot,
   excludeWoodlands = false,
+  withTrees = false,
 ) {
   return devTime('features', async () => {
     const endX = ground.originCellX + ground.width;
@@ -685,6 +696,8 @@ async function featuresInSnapshot(
       village.worldId,
       xs.flatMap(([minX, maxX]) => ys.map(([minY, maxY]) => ({ minX: minX!, maxX: maxX!, minY: minY!, maxY: maxY! }))),
       excludeWoodlands,
+      undefined,
+      withTrees,
     ).execute();
   });
 }
@@ -1224,7 +1237,8 @@ export async function state(
     );
     const occupied = new Map(occupancyRows.map((row) => [worldCellKey(row.cellX, row.cellY), row]));
     const visible = new Set([...available, ...occupied.keys()]);
-    const features = await featuresInSnapshot(tx, village, ground);
+    // The snapshot shows each touched tree of its woodlands (slice 2d).
+    const features = await featuresInSnapshot(tx, village, ground, false, true);
     const featureCells = new Set(
       features
         .filter((feature) => (feature.resourceCode ? feature.blocksCell : feature.featureState !== 'depleted'))
@@ -1313,7 +1327,9 @@ export async function state(
                   remainingAmount: safeAmount(feature.remainingAmount!),
                   reservedAmount: safeAmount(feature.reservedAmount!),
                   availableAmount: safeAmount(feature.remainingAmount!) - safeAmount(feature.reservedAmount!),
-                  ...(feature.resourceCode === 'wood' ? { cutAmount: safeAmount(feature.cutAmount!) } : {}),
+                  ...(feature.resourceCode === 'wood'
+                    ? { cutAmount: safeAmount(feature.cutAmount!), ...woodlandTreesField(feature.trees) }
+                    : {}),
                   state:
                     feature.cleared || feature.featureState === 'depleted'
                       ? ('depleted' as const)
@@ -2559,15 +2575,22 @@ export async function readVillageDepositDetails(
 }
 
 function canonicalExploitation(request: ExploitationRequest, village: OwnedVillage): ExploitationRequest {
+  const { woodTrees: rawTrees, ...rest } = request;
+  const wood = request.wood.map((id) => id.toLowerCase());
+  // Checked against the selection; absent without designation, so that an
+  // order recorded before designations replays identically.
+  woodDesignations(wood, rawTrees);
+  const woodTrees = canonicalWoodTrees(rawTrees);
   return {
-    ...request,
+    ...rest,
     cohortId: request.cohortId?.toLowerCase() ?? null,
     initialAdmission: request.initialAdmission ?? 'allow-wait',
     gardens: request.gardens.map((c) => ({
       cellX: normalizeCell(c.cellX, village.widthCells),
       cellY: normalizeCell(c.cellY, village.heightCells),
     })),
-    wood: request.wood.map((id) => id.toLowerCase()),
+    wood,
+    ...(woodTrees ? { woodTrees } : {}),
     stone: request.stone.map((id) => id.toLowerCase()),
   };
 }
@@ -2667,6 +2690,8 @@ export async function prepareExploitation(
     if (!paths.has(id)) paths.set(id, await stoneTravelPath(tx, village, id));
     return paths.get(id);
   };
+  // Trees kept for each designated wood case, in their order.
+  const designated = new Map<string, number[]>();
   for (const family of ['wood', 'stone'] as const) {
     if (!request[family].length) continue;
     const selection = await prepareWorksiteSelection(
@@ -2678,6 +2703,7 @@ export async function prepareExploitation(
         mode: family === 'wood' ? request.woodMode : 'extract',
         workerCap: Math.min(10, request.workerCap),
         featureIds: request[family],
+        ...(family === 'wood' && request.woodTrees ? { woodTrees: request.woodTrees } : {}),
       },
       pathFor,
     );
@@ -2686,13 +2712,26 @@ export async function prepareExploitation(
       (a, b) => worksiteTargetDistance(a, origin, village) - worksiteTargetDistance(b, origin, village),
     );
     preview[family] = selection.included.map((i) => i.featureId);
-    preview.excluded.push(...selection.excluded.map((i) => ({ key: i.featureId, reason: i.reason })));
+    for (const item of selection.included) if (item.treeIndices) designated.set(item.featureId, item.treeIndices);
+    preview.excluded.push(
+      ...selection.excluded.map((i) => ({
+        key: i.featureId,
+        reason: i.reason,
+        ...(i.treeIndex !== undefined ? { treeIndex: i.treeIndex } : {}),
+      })),
+    );
     for (const id of preview[family]) {
       const deposit = await depositFor(id);
       // No threshold any more: every tree is cut to nothing (docs/SPEC-BOIS-ARBRE-UNITE.md).
-      preview.estimates[family] += Math.max(0, deposit.remainingAmount);
+      preview.estimates[family] += designated.has(id)
+        ? await designatedWood(tx, village.worldId, id, designated.get(id)!)
+        : Math.max(0, deposit.remainingAmount);
     }
   }
+  if (designated.size)
+    preview.woodTrees = preview.wood.flatMap((featureId) =>
+      designated.has(featureId) ? [{ featureId, treeIndices: designated.get(featureId)! }] : [],
+    );
   const gardenCap = preview.gardens.length ? 1 : 0;
   const woodCap = preview.wood.length ? Math.min(10, request.activityCaps?.wood ?? 10) : 0;
   const stoneCap = preview.stone.length ? Math.min(10, request.activityCaps?.stone ?? 10) : 0;
@@ -2709,7 +2748,7 @@ export async function prepareExploitation(
               village.worldId,
               id,
               'cut',
-              await readWoodlandTrees(tx, village.worldId, id),
+              await readWoodlandTrees(tx, village.worldId, id, designated.get(id)),
               deposit.availableAmount,
             )
           : null;
@@ -2919,6 +2958,8 @@ export async function startVillageExploitation(
       .executeTakeFirstOrThrow();
     for (const family of ['wood', 'stone'] as const)
       if (request[family].length) {
+        // Every case was accepted (no exclusion): the trees kept for each.
+        const kept = new Map(prepared.preview.woodTrees?.map((item) => [item.featureId, item.treeIndices]));
         await createWorksite(
           tx,
           economy,
@@ -2928,7 +2969,10 @@ export async function startVillageExploitation(
             workerCap: caps?.[family] ?? 10,
             featureIds: request[family],
           },
-          request[family],
+          request[family].map((featureId) => ({
+            featureId,
+            treeIndices: family === 'wood' ? (kept.get(featureId) ?? null) : null,
+          })),
           order.id,
         );
       }
@@ -2962,16 +3006,24 @@ export async function startVillageExploitation(
   });
 }
 
+/** Selects the targets of a worksite or of a queue. A wood case may designate
+ * some of its trees (docs/SPEC-BOIS-ARBRE-UNITE.md, slice 2c): a tree the case
+ * does not have is refused (`tree-not-found`), a tree with nothing left to do
+ * in the mode is left out, and a case left without any tree is `depleted`.
+ * With `mergeWoodQueue`, a case already in the village's wood queue is not
+ * `already-assigned` while the designation adds trees to it. */
 export async function prepareWorksiteSelection(
   tx: Transaction<Database>,
   village: OwnedVillage,
   economy: VillageEconomy,
   request: StartExtractionWorksiteRequest,
   pathFor = (id: string) => stoneTravelPath(tx, village, id),
+  mergeWoodQueue = false,
 ): Promise<ExtractionWorksiteSelection> {
   const included: ExtractionWorksiteSelection['included'] = [],
     excluded: ExtractionWorksiteSelection['excluded'] = [];
   if (!request.featureIds.length) return { included, excluded };
+  const designations = woodDesignations(request.featureIds, request.woodTrees);
   const accessContext = await readDepositAccessContext(tx, village);
   const seen = new Set<string>();
   for (const rawId of request.featureIds) {
@@ -3000,6 +3052,25 @@ export async function prepareWorksiteSelection(
       excluded.push({ featureId, reason: 'depleted' });
       continue;
     }
+    // Designated trees: in the player's order, never sorted.
+    let treeIndices: number[] | null = null;
+    const designation = details.deposit.resourceCode === 'wood' ? designations.get(featureId) : undefined;
+    if (designation) {
+      const trees = await readWoodlandTrees(tx, village.worldId, featureId);
+      const { kept, unknown } = designatedTrees(
+        designation,
+        trees.all,
+        trees.records,
+        request.mode === 'clear' ? 'clear' : 'cut',
+      );
+      excluded.push(...unknown.map((treeIndex) => ({ featureId, reason: 'tree-not-found', treeIndex })));
+      if (!kept.length) {
+        // Only stumps when cutting, only removed stumps when clearing.
+        if (unknown.length < designation.length) excluded.push({ featureId, reason: 'depleted' });
+        continue;
+      }
+      treeIndices = kept;
+    }
     const eligibility = details.eligibility;
     if (!eligibility.inRange || eligibility.protected || !eligibility.onBoundary) {
       excluded.push({
@@ -3009,15 +3080,33 @@ export async function prepareWorksiteSelection(
       continue;
     }
     const existing = await tx
-      .selectFrom('extractionWorksiteTargets')
-      .select('worksiteId')
-      .where('worldId', '=', economy.worldId)
-      .where('villageId', '=', economy.villageId)
-      .where('featureId', '=', featureId)
-      .where('status', '=', 'pending')
+      .selectFrom('extractionWorksiteTargets as t')
+      .innerJoin('extractionWorksites as s', (join) =>
+        join.onRef('s.worldId', '=', 't.worldId').onRef('s.id', '=', 't.worksiteId'),
+      )
+      .select(['t.treeIndices', 's.poolResource'])
+      .where('t.worldId', '=', economy.worldId)
+      .where('t.villageId', '=', economy.villageId)
+      .where('t.featureId', '=', featureId)
+      .where('t.status', '=', 'pending')
       .executeTakeFirst();
     if (existing) {
-      excluded.push({ featureId, reason: 'already-assigned' });
+      // A case already in the wood queue gains the trees it does not hold yet.
+      const added =
+        mergeWoodQueue && details.deposit.resourceCode === 'wood' && existing.poolResource === 'wood'
+          ? addedTrees(existing.treeIndices, treeIndices)
+          : [];
+      if (added !== null && !added.length) {
+        excluded.push({ featureId, reason: 'already-assigned' });
+        continue;
+      }
+      // Already queued, hence already routed: no new route search.
+      included.push({
+        featureId,
+        cellX: details.deposit.cellX,
+        cellY: details.deposit.cellY,
+        ...(added ? { treeIndices: added } : {}),
+      });
       continue;
     }
     // Every clearing is work on site now: stumps are removed one by one.
@@ -3031,7 +3120,12 @@ export async function prepareWorksiteSelection(
       excluded.push({ featureId, reason: 'unreachable' });
       continue;
     }
-    included.push({ featureId, cellX: details.deposit.cellX, cellY: details.deposit.cellY });
+    included.push({
+      featureId,
+      cellX: details.deposit.cellX,
+      cellY: details.deposit.cellY,
+      ...(treeIndices ? { treeIndices } : {}),
+    });
   }
   return { included, excluded };
 }

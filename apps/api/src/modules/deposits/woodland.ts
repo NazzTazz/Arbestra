@@ -1,12 +1,15 @@
 import {
+  canonicalWoodTrees,
   nextStump,
   nextWoodLot,
   treeWood,
   WOOD_PER_TREE,
   woodlandTreeIndices,
   type TreeRecord,
+  type WoodlandTreeState,
+  type WoodTreeDesignation,
 } from '@arbestra/contracts';
-import { sql, type Transaction } from 'kysely';
+import { sql, type Expression, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 
@@ -16,6 +19,69 @@ import { HttpError } from '../../errors.js';
  * case lock, so readers and the journal keep working per case. Nothing here
  * regrows or writes on a read: only the village owning a lot debits it, at its
  * deadline, and the last stump removed clears the case. */
+
+/** Trees a command designates, by case (slice 2c): each designated case must
+ * also be selected, its trees kept in the player's order. A selected case
+ * without designation means all of its trees. */
+export function woodDesignations(
+  wood: readonly string[],
+  woodTrees: readonly WoodTreeDesignation[] | undefined,
+): Map<string, number[]> {
+  const selected = new Set(wood.map((id) => id.toLowerCase())),
+    designations = new Map<string, number[]>();
+  for (const entry of canonicalWoodTrees(woodTrees) ?? []) {
+    if (!selected.has(entry.featureId))
+      throw new HttpError(400, 'WOOD_TREES_OUTSIDE_SELECTION', 'Des arbres désignés sont hors de la sélection.');
+    designations.set(entry.featureId, entry.treeIndices);
+  }
+  return designations;
+}
+
+/** Per-tree state of a wood case for readers (slice 2d): the trees with a row
+ * only (felled, reserved, stump, removed stump), the lots due and not yet
+ * debited by their village shown as cut, exactly like `resource_deposits`. */
+export function woodlandTreeStatesSql(worldId: Expression<unknown> | string, featureId: Expression<unknown> | string) {
+  return sql<RawWoodlandTreeState[] | null>`(select jsonb_agg(jsonb_build_object(
+      'treeIndex',t.tree_index,
+      'remainingAmount',t.remaining_amount-coalesce(due.amount,0),
+      'reservedAmount',t.reserved_amount-coalesce(due.amount,0),
+      'felledAt',t.felled_at,
+      'stumpRemoved',t.stump_removed_at is not null or coalesce(due.stump,false)) order by t.tree_index)
+    from woodland_trees t left join lateral (
+      select sum(e.reserved_amount)::integer as amount,bool_or(e.reserved_amount=0) as stump from deposit_extractions e
+      where e.world_id=t.world_id and e.feature_id=t.feature_id and e.tree_index=t.tree_index
+        and e.resource_code='wood' and e.wood_debited_at is null
+        and e.completes_at<=coalesce(nullif(current_setting('arbestra.economy_through',true),'')::timestamptz,statement_timestamp())
+    ) due on true
+    where t.world_id=${worldId} and t.feature_id=${featureId})`;
+}
+export interface RawWoodlandTreeState {
+  treeIndex: number;
+  remainingAmount: number;
+  reservedAmount: number;
+  felledAt: string;
+  stumpRemoved: boolean;
+}
+/** `{ trees }` for a deposit projection, nothing when every tree stands untouched. */
+export function woodlandTreesField(raw: readonly RawWoodlandTreeState[] | null | undefined): {
+  trees?: WoodlandTreeState[];
+} {
+  if (!raw?.length) return {};
+  return {
+    trees: raw.map((tree) => ({
+      treeIndex: tree.treeIndex,
+      remainingAmount: tree.remainingAmount,
+      reservedAmount: tree.reservedAmount,
+      felledAt: new Date(tree.felledAt).toISOString(),
+      stumpRemoved: tree.stumpRemoved,
+    })),
+  };
+}
+/** Per-tree state of one case, for its details sheet. */
+export async function readWoodlandTreeStates(tx: Transaction<Database>, worldId: string, featureId: string) {
+  const row = await tx.selectNoFrom(woodlandTreeStatesSql(worldId, featureId).as('trees')).executeTakeFirstOrThrow();
+  return woodlandTreesField(row.trees);
+}
 
 export interface WoodlandTrees {
   /** Every tree of the case, in the default designation order. */
@@ -66,6 +132,18 @@ export async function readWoodlandTrees(
     designated: designation ? designation.filter((i) => members.has(i)) : all,
     records: new Map(found.trees.map((t) => [t.treeIndex, t])),
   };
+}
+
+/** Wood left on the designated trees of a case (an estimate: lots of other
+ * villages due and not yet debited still count). */
+export async function designatedWood(
+  tx: Transaction<Database>,
+  worldId: string,
+  featureId: string,
+  designation: readonly number[],
+) {
+  const trees = await readWoodlandTrees(tx, worldId, featureId, designation);
+  return trees.designated.reduce((sum, index) => sum + treeWood(trees.records.get(index)).remaining, 0);
 }
 
 /** Trees whose stump a lot is removing right now, any village. */

@@ -86,6 +86,70 @@ export function nextWoodLot(
   return null;
 }
 
+/** Trees designated by a command in one wood case. */
+export interface WoodTreeDesignation {
+  featureId: string;
+  treeIndices: number[];
+}
+
+/** Canonical designation of a command: one entry per case (lower-case
+ * identifier, cases sorted), its trees deduplicated in their first designated
+ * order. Trees are never sorted: their order is the order of the lots. */
+export function canonicalWoodTrees(
+  entries: readonly WoodTreeDesignation[] | undefined,
+): WoodTreeDesignation[] | undefined {
+  if (!entries?.length) return undefined;
+  const cases = new Map<string, Set<number>>();
+  for (const entry of entries) {
+    const id = entry.featureId.toLowerCase(),
+      trees = cases.get(id) ?? new Set<number>();
+    for (const index of entry.treeIndices) trees.add(index);
+    cases.set(id, trees);
+  }
+  return [...cases]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([featureId, trees]) => ({ featureId, treeIndices: [...trees] }));
+}
+
+/** Checks a designation against its case, keeping its order: a tree the case
+ * does not have (or lost at installation) is unknown; a tree with nothing left
+ * to do in this mode is left out (a stump when cutting, a stump already
+ * removed when clearing). */
+export function designatedTrees(
+  designation: readonly number[],
+  all: readonly number[],
+  records: ReadonlyMap<number, TreeRecord>,
+  mode: 'cut' | 'clear',
+): { kept: number[]; unknown: number[] } {
+  const members = new Set(all),
+    kept: number[] = [],
+    unknown: number[] = [];
+  for (const index of designation) {
+    if (!members.has(index)) {
+      unknown.push(index);
+      continue;
+    }
+    const { state } = treeWood(records.get(index));
+    if (mode === 'cut' ? state === 'standing' || state === 'felled' : state !== 'removed') kept.push(index);
+  }
+  return { kept, unknown };
+}
+
+/** What a designation adds to a case already queued (null: every tree of the
+ * case): null when it adds the whole case, an empty list when it adds nothing. */
+export function addedTrees(queued: readonly number[] | null, added: readonly number[] | null): number[] | null {
+  if (queued === null) return [];
+  if (added === null) return null;
+  const known = new Set(queued);
+  return added.filter((index) => !known.has(index));
+}
+
+/** A queued designation extended by another, the queued trees first. */
+export function mergedTrees(queued: readonly number[] | null, added: readonly number[] | null): number[] | null {
+  if (queued === null || added === null) return null;
+  return [...queued, ...(addedTrees(queued, added) ?? [])];
+}
+
 /** Next stump to remove when clearing, in the designated order: a tree cut to
  * nothing, without reservation, its stump still there and not already being
  * removed (`busy`). Null when no stump is free. */

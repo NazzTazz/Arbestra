@@ -3,6 +3,7 @@ import { sql, type Transaction } from 'kysely';
 import {
   extractionPoolCaps,
   extractionPoolSettings,
+  mergedTrees,
   type ExtractionPool,
   type ExtractionPoolCommand,
 } from '@arbestra/contracts';
@@ -161,11 +162,14 @@ export async function wakeExtractionPool(tx: Transaction<Database>, ctx: Village
       .execute();
 }
 
+/** Queues targets in the resource's common queue. A wood case already queued
+ * gains the newly designated trees after its own, in their order; a case
+ * designated whole takes all of its trees (docs/SPEC-BOIS-ARBRE-UNITE.md). */
 export async function appendPoolTargets(
   tx: Transaction<Database>,
   ctx: VillageEconomy,
   resource: Resource,
-  ids: string[],
+  targets: ReadonlyArray<string | { featureId: string; treeIndices?: number[] | null }>,
 ) {
   const pool = await ensureExtractionPool(tx, ctx, resource);
   await syncPoolSites(tx, ctx, pool);
@@ -180,7 +184,7 @@ export async function appendPoolTargets(
     .execute();
   const pending = await tx
     .selectFrom('extractionWorksiteTargets')
-    .select('featureId')
+    .select(['worksiteId', 'featureId', 'treeIndices'])
     .where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId)
     .where(
@@ -190,7 +194,31 @@ export async function appendPoolTargets(
     )
     .where('status', '=', 'pending')
     .execute();
-  const fresh = ids.filter((id) => !pending.some((t) => t.featureId === id));
+  const wanted = targets.map((target) =>
+    typeof target === 'string'
+      ? { featureId: target, treeIndices: null }
+      : { featureId: target.featureId, treeIndices: resource === 'wood' ? (target.treeIndices ?? null) : null },
+  );
+  const fresh: typeof wanted = [];
+  for (const target of wanted) {
+    const queued = pending.find((t) => t.featureId === target.featureId);
+    if (!queued) {
+      fresh.push(target);
+      continue;
+    }
+    if (resource !== 'wood') continue;
+    // The merge keeps the queued trees first: the same length is the same list.
+    const merged = mergedTrees(queued.treeIndices, target.treeIndices);
+    if (merged === null ? queued.treeIndices === null : merged.length === queued.treeIndices?.length) continue;
+    await tx
+      .updateTable('extractionWorksiteTargets')
+      .set({ treeIndices: merged })
+      .where('worldId', '=', ctx.worldId)
+      .where('worksiteId', '=', queued.worksiteId)
+      .where('featureId', '=', queued.featureId)
+      .where('status', '=', 'pending')
+      .execute();
+  }
   if (pending.length + fresh.length > 64)
     throw new HttpError(409, 'WORKSITE_TARGET_LIMIT', '64 cibles en attente au maximum par ressource.');
   const owner = sites[0]!.id;
@@ -200,7 +228,7 @@ export async function appendPoolTargets(
     .where('worldId', '=', ctx.worldId)
     .where('worksiteId', '=', owner)
     .executeTakeFirstOrThrow();
-  for (const [i, featureId] of fresh.entries())
+  for (const [i, { featureId, treeIndices }] of fresh.entries())
     await tx
       .insertInto('extractionWorksiteTargets')
       .values({
@@ -214,6 +242,7 @@ export async function appendPoolTargets(
         thresholdReachedAt: null,
         completedAt: null,
         reason: null,
+        treeIndices,
       })
       .onConflict((c) =>
         c.columns(['worksiteId', 'featureId']).doUpdateSet({
@@ -223,6 +252,8 @@ export async function appendPoolTargets(
           thresholdReachedAt: null,
           completedAt: null,
           reason: null,
+          // A finished target queued again takes its new designation.
+          treeIndices,
         }),
       )
       .execute();

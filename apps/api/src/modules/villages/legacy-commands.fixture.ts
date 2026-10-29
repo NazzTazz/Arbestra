@@ -300,7 +300,8 @@ export async function startVillageWorksite(
       tx,
       economy,
       request,
-      selection?.included.map((item) => item.featureId),
+      // The trees kept from each designation, in their order.
+      selection?.included,
     );
     const villageState = await state(tx, accountId, worldSlug, economy);
     const worksite = villageState.village.worksites.find((site) => site.id === id);

@@ -7,6 +7,7 @@ import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { HttpError } from '../../errors.js';
 import { ownedVillage } from './service.js';
 import { acceptHarvestIntent } from './harvest-intents.js';
+import { woodDesignations } from '../deposits/woodland.js';
 export const HARVEST_SUBMISSION_TASK = 'harvest.intent';
 const MAX_ATTEMPTS = 8;
 const pending = (commandId: string): HarvestReceipt => ({ commandId, pending: true, accepted: [], refused: [] });
@@ -21,6 +22,8 @@ export async function receiveHarvestIntent(
     const village = await ownedVillage(tx, accountId, slug, villageId);
     if (!request.gardens.length && !request.wood.length && !request.stone.length)
       throw new HttpError(400, 'HARVEST_EMPTY', 'Aucune ressource désignée.');
+    // Designated trees belong to selected cases: refused now, not after the queue.
+    woodDesignations(request.wood, request.woodTrees);
     const inserted = await tx
       .insertInto('harvestSubmissions')
       .values({

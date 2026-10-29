@@ -334,11 +334,8 @@ export function DepositPanel({
       {!access && <p className="error">Ce gisement est hors de portée, protégé ou inaccessible.</p>}
       {wood ? (
         <>
-          <p>
-            {details.deposit.cleared
-              ? 'Bosquet défriché'
-              : `Repousse : ${details.deposit.regrowthPerHour?.toFixed(2) ?? '0,89'} bois/h`}
-          </p>
+          {/* No regrowth any more: a felled tree stays down (docs/SPEC-BOIS-ARBRE-UNITE.md). */}
+          {details.deposit.cleared && <p>Bosquet défriché</p>}
           <button
             type="button"
             disabled={pending || !access || details.deposit.cleared}

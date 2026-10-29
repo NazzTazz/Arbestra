@@ -3,7 +3,7 @@ import { Rc1FeatureGeometrySchema } from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { ExtractionPoolSchema } from './hud-workforce.js';
 import { ScienceStateSchema } from './science.js';
-import { ExploitationOrderSchema } from './exploitation.js';
+import { ExploitationOrderSchema, WoodTreesSchema } from './exploitation.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
 import { ProcessingRecipeSchema, ProcessingOrderSchema } from './processing.js';
 import { MarketStateSchema } from './market.js';
@@ -138,15 +138,33 @@ export const GardenSchema = Type.Object({
 });
 export type Garden = Static<typeof GardenSchema>;
 
+/** A tree of a wood case once touched (docs/SPEC-BOIS-ARBRE-UNITE.md): felled
+ * by its first lot, its trunk on the ground holds `remainingAmount`, at 0 a
+ * stump until `stumpRemoved`. Lots due and not yet debited count as cut, like
+ * the case. An untouched tree has no entry: it stands with 500. A superset of
+ * `TreeRecord`, so `treeWood()` gives its state. */
+export const WoodlandTreeStateSchema = Type.Object(
+  {
+    treeIndex: Type.Integer({ minimum: 0 }),
+    remainingAmount: Type.Integer({ minimum: 0, maximum: 500 }),
+    reservedAmount: Type.Integer({ minimum: 0, maximum: 500 }),
+    felledAt: Type.String({ format: 'date-time' }),
+    stumpRemoved: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type WoodlandTreeState = Static<typeof WoodlandTreeStateSchema>;
+
 export const StoneDepositSchema = Type.Object({
   featureId: Type.String({ format: 'uuid' }),
   resourceCode: Type.Union([Type.Literal('stone'), Type.Literal('wood')]),
   canClear: Type.Optional(Type.Boolean()),
   cleared: Type.Optional(Type.Boolean()),
   blocksCell: Type.Optional(Type.Boolean()),
-  regrowthPerHour: Type.Optional(Type.Number({ minimum: 0 })),
-  /** Wood ever cut from a grove, regrowth included; never decreases (clearing destroys, it does not cut). */
+  /** Wood ever cut from a grove; never decreases (removing a stump cuts nothing). */
   cutAmount: Type.Optional(Type.Integer({ minimum: 0 })),
+  /** Touched trees of an uncleared wood case, by tree index; absent when every tree stands untouched. */
+  trees: Type.Optional(Type.Array(WoodlandTreeStateSchema, { maxItems: 256 })),
   cellX: Type.Integer({ minimum: 0 }),
   cellY: Type.Integer({ minimum: 0 }),
   initialAmount: Type.Integer({ minimum: 1 }),
@@ -176,8 +194,10 @@ export const ExtractionSchema = Type.Object({
   cellY: Type.Integer({ minimum: 0 }),
   id: Type.String({ format: 'uuid' }),
   featureId: Type.String({ format: 'uuid' }),
+  /** Tree a wood lot works on (a stump removal carries no wood). */
+  treeIndex: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
   workerCount: Type.Integer({ minimum: 1 }),
-  reservedAmount: Type.Integer({ minimum: 1 }),
+  reservedAmount: Type.Integer({ minimum: 0 }),
   status: Type.Union([Type.Literal('in-progress'), Type.Literal('completed')]),
   startedAt: Type.String({ format: 'date-time' }),
   completesAt: Type.String({ format: 'date-time' }),
@@ -198,6 +218,10 @@ export const ExtractionWorksiteTargetSchema = Type.Object({
     Type.Literal('abandoned'),
   ]),
   reason: Type.Union([Type.String(), Type.Null()]),
+  /** Designated trees of a wood target, in their order; null for every tree of the case. A
+   * pending target's designated trees not yet done are in this village's queue, for its
+   * worksite's mode (`cut`, or `clear`: wood then stump). */
+  treeIndices: Type.Optional(Type.Union([Type.Array(Type.Integer({ minimum: 0 })), Type.Null()])),
 });
 export const ExtractionWorksiteSchema = Type.Object({
   poolResource: Type.Optional(Type.Union([Type.Literal('wood'), Type.Literal('stone'), Type.Null()])),
@@ -469,15 +493,29 @@ export const StartExtractionWorksiteRequestSchema = Type.Object(
     mode: Type.Union([Type.Literal('extract'), Type.Literal('cut'), Type.Literal('clear')]),
     workerCap: Type.Integer({ minimum: 1, maximum: 10 }),
     featureIds: Type.Array(Type.String({ format: 'uuid' }), { minItems: 1, maxItems: 64 }),
+    /** Designated trees of wood cases listed in `featureIds` (see `WoodTreesSchema`). */
+    woodTrees: Type.Optional(WoodTreesSchema),
   },
   { additionalProperties: false },
 );
 export type StartExtractionWorksiteRequest = Static<typeof StartExtractionWorksiteRequestSchema>;
 export const ExtractionWorksiteSelectionSchema = Type.Object({
   included: Type.Array(
-    Type.Object({ featureId: Type.String({ format: 'uuid' }), cellX: Type.Integer(), cellY: Type.Integer() }),
+    Type.Object({
+      featureId: Type.String({ format: 'uuid' }),
+      cellX: Type.Integer(),
+      cellY: Type.Integer(),
+      /** Trees kept from the designation, in their order; null or absent for every tree. */
+      treeIndices: Type.Optional(Type.Union([Type.Array(Type.Integer({ minimum: 0 })), Type.Null()])),
+    }),
   ),
-  excluded: Type.Array(Type.Object({ featureId: Type.String({ format: 'uuid' }), reason: Type.String() })),
+  excluded: Type.Array(
+    Type.Object({
+      featureId: Type.String({ format: 'uuid' }),
+      reason: Type.String(),
+      treeIndex: Type.Optional(Type.Integer({ minimum: 0 })),
+    }),
+  ),
 });
 export type ExtractionWorksiteSelection = Static<typeof ExtractionWorksiteSelectionSchema>;
 export const ChangeExtractionWorksiteRequestSchema = Type.Object(

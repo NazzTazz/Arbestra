@@ -16,7 +16,7 @@ import {
 import { beginRest, canWorkFor } from '../population/energy.js';
 import { normalizeCell, toroidalChebyshev } from '../worlds/coordinates.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
-import { debitWoodLot, nextWoodWork, readWoodlandTrees, reserveWoodLot } from './woodland.js';
+import { debitWoodLot, nextWoodWork, readWoodlandTreeStates, readWoodlandTrees, reserveWoodLot } from './woodland.js';
 import { hasRecognizedDepositAccess } from '../science/deposit-access.js';
 
 export const COMPLETE_STONE_EXTRACTION_TASK = 'deposit.extraction.complete';
@@ -144,13 +144,7 @@ export async function readStoneDeposit(
     availableAmount: remainingAmount - reservedAmount,
     // A wood case stays until its last stump is removed, even without wood.
     state: (wood ? row.cleared : remainingAmount === 0) ? 'depleted' : 'available',
-    ...(wood
-      ? {
-          cleared: wood.cleared,
-          regrowthPerHour: 0,
-          cutAmount: safeAmount(row.cutAmount),
-        }
-      : {}),
+    ...(wood ? { cleared: wood.cleared, cutAmount: safeAmount(row.cutAmount) } : {}),
     revision: safeAmount(row.revision),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -181,6 +175,7 @@ function extractionProjection(
     id: row.id,
     resourceCode: row.resourceCode,
     featureId: row.featureId,
+    ...(row.resourceCode === 'wood' ? { treeIndex: row.treeIndex } : {}),
     cellX: deposit.cellX,
     cellY: deposit.cellY,
     workerCount: row.workerCount,
@@ -308,7 +303,11 @@ export async function stoneDepositDetails(
   });
   return {
     serverTime: economy.through.toISOString(),
-    deposit,
+    // The grove's sheet shows each tree touched (no regrowth any more).
+    deposit:
+      deposit.resourceCode === 'wood' && !deposit.cleared
+        ? { ...deposit, ...(await readWoodlandTreeStates(tx, village.worldId, featureId)) }
+        : deposit,
     transportMs,
     eligibility: { ...eligibility, lotAmount: Math.min(STONE_EXTRACTION_LOT, deposit.availableAmount), workerOptions },
   };
@@ -528,20 +527,20 @@ export async function completeStoneExtractionAt(
       .where('featureId', '=', extraction.featureId)
       .executeTakeFirstOrThrow();
     const afterDeposit = await readStoneDeposit(tx, worldId, extraction.featureId);
-    // Wood: its designated trees cut to nothing (cutting), or the case cleared.
+    // Wood: its designated trees cut to nothing (cutting) or removed down to
+    // their stumps (clearing), or the case cleared.
     const finished =
       extraction.resourceCode === 'wood'
         ? afterDeposit.cleared ||
-          (site.mode === 'cut' &&
-            (
-              await nextWoodWork(
-                tx,
-                worldId,
-                extraction.featureId,
-                'cut',
-                await readWoodlandTrees(tx, worldId, extraction.featureId, target.treeIndices),
-              )
-            ).kind === 'done')
+          (
+            await nextWoodWork(
+              tx,
+              worldId,
+              extraction.featureId,
+              site.mode === 'clear' ? 'clear' : 'cut',
+              await readWoodlandTrees(tx, worldId, extraction.featureId, target.treeIndices),
+            )
+          ).kind === 'done'
         : afterDeposit.remainingAmount <= 0;
     if (target.status === 'pending' && finished) {
       await tx

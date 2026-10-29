@@ -10,6 +10,7 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { normalizeCell } from './coordinates.js';
 import { safeAmount } from '../deposits/stone-extractions.js';
+import { woodlandTreesField } from '../deposits/woodland.js';
 import { knownGeography } from '../science/knowledge.js';
 
 export function parseTerrainChunks(raw: string): Array<{ chunkX: number; chunkY: number }> {
@@ -264,6 +265,9 @@ export async function readTerrainProjection(
       minY: c.chunkY * size,
       maxY: (c.chunkY + 1) * size,
     })),
+    false,
+    undefined,
+    true,
   ).execute();
   if (preparation && rc1 && !features.length) {
     for (const g of rc1ResourceGroups(rc1.data, rc1.field)) {
@@ -298,6 +302,7 @@ export async function readTerrainProjection(
         cleared: null,
         blocksCell: null,
         cutAmount: null,
+        trees: null,
       });
     }
   }
@@ -414,7 +419,9 @@ export async function readTerrainProjection(
                           remainingAmount,
                           reservedAmount,
                           availableAmount: remainingAmount - reservedAmount,
-                          ...(f.resourceCode === 'wood' ? { cutAmount: safeAmount(f.cutAmount!) } : {}),
+                          ...(f.resourceCode === 'wood'
+                            ? { cutAmount: safeAmount(f.cutAmount!), ...woodlandTreesField(f.trees) }
+                            : {}),
                           // A wood case stays until its last stump is removed.
                           state: (f.resourceCode === 'wood' ? f.cleared : remainingAmount === 0)
                             ? ('depleted' as const)

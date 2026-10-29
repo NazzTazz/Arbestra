@@ -824,3 +824,51 @@ it('adopts only running automatic sites and bounds future crews without rewritin
     }),
   ).rejects.toBe(rollback);
 });
+
+it('keeps the designated trees of a queued case when another consumer of the queue takes it', async () => {
+  const abort = new Error('designated queue rollback');
+  await expect(
+    db.transaction().execute(async (tx) => {
+      const { ctx, targets } = await seed(tx);
+      // The second case holds three trees; only tree 2 is designated.
+      await tx
+        .updateTable('woodlandDeposits')
+        .set({ initialAmount: 1500, remainingAmount: 1500 })
+        .where('worldId', '=', worldId)
+        .where('featureId', '=', targets[1]!)
+        .execute();
+      await appendPoolTargets(
+        tx,
+        ctx,
+        'wood',
+        targets.map((featureId, i) => (i === 1 ? { featureId, treeIndices: [2] } : featureId)),
+      );
+      await changeExtractionPool(tx, ctx, { commandId: randomUUID(), resource: 'wood', action: 'people-up' });
+      await changeExtractionPool(tx, ctx, { commandId: randomUUID(), resource: 'wood', action: 'sites-up' });
+      const sites = await tx
+        .selectFrom('extractionWorksites')
+        .select('id')
+        .where('worldId', '=', worldId)
+        .where('villageId', '=', villageId)
+        .where('poolResource', '=', 'wood')
+        .orderBy('createdAt')
+        .orderBy('id')
+        .execute();
+      await admitWorksites(tx, ctx, dimensions, route);
+      // The second consumer takes the case over, with its designation.
+      expect((await active(tx)).find((job) => job.featureId === targets[1])).toMatchObject({
+        worksiteId: sites[1]!.id,
+        treeIndex: 2,
+      });
+      expect(
+        await tx
+          .selectFrom('extractionWorksiteTargets')
+          .select(['status', 'treeIndices'])
+          .where('worksiteId', '=', sites[1]!.id)
+          .where('featureId', '=', targets[1]!)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ status: 'pending', treeIndices: [2] });
+      throw abort;
+    }),
+  ).rejects.toBe(abort);
+});

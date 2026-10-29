@@ -8,6 +8,7 @@ import { readSelectedGround } from '../worlds/selected-ground.js';
 import { buildingExterior } from '../worlds/building-exterior.js';
 import { normalizeCell, wrappedDelta } from '../worlds/coordinates.js';
 import { safeAmount } from '../deposits/stone-extractions.js';
+import { woodlandTreesField } from '../deposits/woodland.js';
 import { readSelectedRc1FeatureGeometry } from '../worlds/rc1-ground.js';
 import type { SyncEntityReference } from './sync-v2-readers.js';
 
@@ -156,7 +157,7 @@ export async function readSpatialChanges(
       }));
       changes.push({ component, upsert, remove: ids.filter((id) => !upsert.some((row) => row.id === id)) });
     } else if (component === 'spatialFeatures') {
-      const rows = await naturalFeaturesQuery(tx, worldId, [area], false, ids).execute();
+      const rows = await naturalFeaturesQuery(tx, worldId, [area], false, ids, true).execute();
       const knowledge = await knownGeography(tx, worldId, accountId, width, height, [area]);
       const geometry =
         context.generationVersion === 3 && rows.length
@@ -190,7 +191,9 @@ export async function readSpatialChanges(
                     remainingAmount: safeAmount(row.remainingAmount),
                     reservedAmount: safeAmount(row.reservedAmount!),
                     availableAmount: safeAmount(row.remainingAmount) - safeAmount(row.reservedAmount!),
-                    ...(row.resourceCode === 'wood' ? { cutAmount: safeAmount(row.cutAmount!) } : {}),
+                    ...(row.resourceCode === 'wood'
+                      ? { cutAmount: safeAmount(row.cutAmount!), ...woodlandTreesField(row.trees) }
+                      : {}),
                     // A wood case stays until its last stump is removed.
                     state: (row.resourceCode === 'wood' ? row.cleared : safeAmount(row.remainingAmount) === 0)
                       ? ('depleted' as const)

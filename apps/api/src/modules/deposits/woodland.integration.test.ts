@@ -1,4 +1,5 @@
-import { travelDuration } from '@arbestra/contracts';
+import { SyncV2ChangeSchema, travelDuration, type TravelCell } from '@arbestra/contracts';
+import { Value } from '@sinclair/typebox/value';
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -12,9 +13,18 @@ import { clearWoodland } from './woodland.js';
 import { completeStoneExtractionAt, readStoneDeposit, startStoneExtraction } from './stone-extractions.js';
 import { admitWorksites, createWorksite } from './worksites.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
-import { readVillageDepositDetails, ownedVillage, reconcileVillageForRead } from '../villages/service.js';
+import {
+  readVillageDepositDetails,
+  ownedVillage,
+  prepareWorksiteSelection,
+  reconcileVillageForRead,
+  state,
+} from '../villages/service.js';
 import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
 import { admitVillageWorksites } from '../villages/worksite-admission.js';
+import { acceptHarvestIntent } from '../villages/harvest-intents.js';
+import { readSpatialChanges } from '../villages/sync-v2-spatial-readers.js';
+import { readTerrainProjection } from '../worlds/terrain.js';
 
 /** The tree as the wood harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md): 500 per
  * tree, lots of 100 on one tree, felled at its first lot, a stump at its last;
@@ -479,8 +489,10 @@ it('serves woodland details and starts the existing API service on a tree, with 
       resourceCode: 'wood',
       initialAmount: 1000,
       remainingAmount: 1000,
-      regrowthPerHour: 0,
     });
+    // No regrowth any more, and no tree touched yet.
+    expect(details.deposit).not.toHaveProperty('regrowthPerHour');
+    expect(details.deposit).not.toHaveProperty('trees');
     expect(details.eligibility.workerOptions[0]?.canStart).toBe(true);
     const result = await startVillageStoneExtraction(
       source,
@@ -693,3 +705,442 @@ it('rolls back a felled tree, its debit, the delivery and the workers after an i
     await dropGrove(id);
   }
 }, 60_000);
+
+// Slices 2c and 2d (docs/PLAN-BOIS-ARBRE-TRANCHE-2.md): designated trees in
+// commands, and the state of each tree exposed to the readers.
+const trail: TravelCell[] = [{ cellX: 1024, cellY: 512 }, { cellX: 1024, cellY: 513 }, cell];
+/** Runs a worksite lot by lot, each debited at its deadline, until it completes. */
+async function runSite(tx: Transaction<Database>, siteId: string, t: Date, max = 20) {
+  const lots: Array<Awaited<ReturnType<typeof lot>>> = [];
+  let at = t;
+  for (let step = 0; step < 160 && lots.length < max; step++) {
+    await admitWorksites(tx, { worldId, villageId, through: at }, village, async () => trail);
+    const running = await tx
+      .selectFrom('depositExtractions')
+      .selectAll()
+      .where('worksiteId', '=', siteId)
+      .where('status', '=', 'in-progress')
+      .executeTakeFirst();
+    if (!running) {
+      const site = await tx
+        .selectFrom('extractionWorksites')
+        .select('status')
+        .where('id', '=', siteId)
+        .executeTakeFirstOrThrow();
+      if (site.status === 'completed') break;
+      at = new Date(at.getTime() + 3_600_000); // Workers rest, then the site resumes.
+      continue;
+    }
+    lots.push(running);
+    at = running.completesAt;
+    await completeStoneExtractionAt(tx, worldId, villageId, running.id, at);
+  }
+  return lots;
+}
+const targetOf = (tx: Transaction<Database>, siteId: string) =>
+  tx
+    .selectFrom('extractionWorksiteTargets')
+    .select(['status', 'reason', 'treeIndices'])
+    .where('worksiteId', '=', siteId)
+    .executeTakeFirstOrThrow();
+/** Trees already cut on the fixture case: stumps (0) or trunks, the case kept as their sum. */
+async function cut(tx: Transaction<Database>, id: string, t: Date, trees: number, rows: Record<number, number>) {
+  await tx
+    .insertInto('woodlandTrees')
+    .values(
+      Object.entries(rows).map(([i, remainingAmount]) => ({
+        worldId,
+        featureId: id,
+        treeIndex: Number(i),
+        remainingAmount,
+        felledAt: t,
+      })),
+    )
+    .execute();
+  const left = Object.values(rows).reduce((sum, n) => sum + n, 0) + 500 * (trees - Object.keys(rows).length);
+  await tx
+    .updateTable('woodlandDeposits')
+    .set({ remainingAmount: left, cutAmount: 500 * trees - left })
+    .where('featureId', '=', id)
+    .execute();
+}
+const lotsOf = (lots: Array<{ treeIndex: number | null; reservedAmount: string }>) =>
+  lots.map((l) => [l.treeIndex, Number(l.reservedAmount)]);
+const five = (tree: number) => Array.from({ length: 5 }, () => [tree, 100]);
+
+it('fells only the designated trees, in the order designated, then completes the target', async () => {
+  await fixture(async (tx, id, t) => {
+    const siteId = await createWorksite(
+      tx,
+      { worldId, villageId, through: t },
+      {
+        commandId: randomUUID(),
+        mode: 'cut',
+        workerCap: 10,
+        featureIds: [id],
+        woodTrees: [{ featureId: id, treeIndices: [2, 0] }],
+      },
+    );
+    expect((await targetOf(tx, siteId)).treeIndices).toEqual([2, 0]);
+    const lots = await runSite(tx, siteId, t);
+    // Tree 2 first, as designated, then tree 0; trees 1 and 3 stand untouched.
+    expect(lotsOf(lots)).toEqual([...five(2), ...five(0)]);
+    expect(await tree(tx, id, 1)).toBeUndefined();
+    expect(await tree(tx, id, 3)).toBeUndefined();
+    expect(await targetOf(tx, siteId)).toEqual({ status: 'completed', reason: 'goal-reached', treeIndices: [2, 0] });
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ remainingAmount: 1000, cleared: false });
+  }, 4);
+}, 120_000);
+
+it('clears only the designated trees and stumps, and leaves the case occupied while a tree stands', async () => {
+  await fixture(async (tx, id, t) => {
+    // Tree 0 is already a stump; tree 1 stands, tree 2 stands and is not designated.
+    await cut(tx, id, t, 3, { 0: 0 });
+    const siteId = await createWorksite(
+      tx,
+      { worldId, villageId, through: t },
+      {
+        commandId: randomUUID(),
+        mode: 'clear',
+        workerCap: 10,
+        featureIds: [id],
+        woodTrees: [{ featureId: id, treeIndices: [0, 1] }],
+      },
+    );
+    const lots = await runSite(tx, siteId, t);
+    // The wood of tree 1, then the stumps one by one in the designated order.
+    expect(lotsOf(lots)).toEqual([...five(1), [0, 0], [1, 0]]);
+    expect((await tree(tx, id, 0))!.stumpRemovedAt).toEqual(lots[5]!.completesAt);
+    expect((await tree(tx, id, 1))!.stumpRemovedAt).toEqual(lots[6]!.completesAt);
+    expect(await tree(tx, id, 2)).toBeUndefined();
+    expect((await targetOf(tx, siteId)).status).toBe('completed');
+    // Not cleared: tree 2 still stands, so the case stays occupied and unbuildable.
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({
+      cleared: false,
+      state: 'available',
+      blocksCell: true,
+      remainingAmount: 500,
+      cutAmount: 1000,
+    });
+    expect(await occupied(tx, id)).toBe(1);
+  }, 3);
+}, 120_000);
+
+it('clears a whole case designated tree by tree, in that order, and frees it at its last stump', async () => {
+  await fixture(async (tx, id, t) => {
+    const siteId = await createWorksite(
+      tx,
+      { worldId, villageId, through: t },
+      {
+        commandId: randomUUID(),
+        mode: 'clear',
+        workerCap: 10,
+        featureIds: [id],
+        woodTrees: [{ featureId: id, treeIndices: [1, 0] }],
+      },
+    );
+    const lots = await runSite(tx, siteId, t);
+    expect(lotsOf(lots)).toEqual([...five(1), ...five(0), [1, 0], [0, 0]]);
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({
+      cleared: true,
+      state: 'depleted',
+      blocksCell: false,
+    });
+    expect(await occupied(tx, id)).toBe(0);
+    expect((await targetOf(tx, siteId)).status).toBe('completed');
+  });
+}, 120_000);
+
+it('refuses a tree the case does not have, and a cut designation of stumps only', async () => {
+  await fixture(async (tx, id, t) => {
+    await cut(tx, id, t, 3, { 0: 0, 1: 200 });
+    const owned = await ownedVillage(tx, DEVELOPMENT_IDS.account, 'aube', villageId);
+    const economy = { worldId, villageId, through: t };
+    const select = (mode: 'cut' | 'clear', treeIndices: number[]) =>
+      prepareWorksiteSelection(
+        tx,
+        owned,
+        economy,
+        {
+          commandId: randomUUID(),
+          mode,
+          workerCap: 10,
+          featureIds: [id],
+          woodTrees: [{ featureId: id, treeIndices }],
+        },
+        async () => trail,
+      );
+    const at = { featureId: id, cellX: cell.cellX, cellY: cell.cellY };
+    // Tree 7 is not in the case; the stump (0) is left out of a cut, silently.
+    expect(await select('cut', [1, 7, 0, 2])).toEqual({
+      included: [{ ...at, treeIndices: [1, 2] }],
+      excluded: [{ featureId: id, reason: 'tree-not-found', treeIndex: 7 }],
+    });
+    expect(await select('cut', [0])).toEqual({ included: [], excluded: [{ featureId: id, reason: 'depleted' }] });
+    expect(await select('cut', [9])).toEqual({
+      included: [],
+      excluded: [{ featureId: id, reason: 'tree-not-found', treeIndex: 9 }],
+    });
+    // A clearing keeps the stump: it is work to do.
+    expect(await select('clear', [0, 2])).toEqual({ included: [{ ...at, treeIndices: [0, 2] }], excluded: [] });
+    // A designation must name a selected case.
+    await expect(
+      prepareWorksiteSelection(
+        tx,
+        owned,
+        economy,
+        {
+          commandId: randomUUID(),
+          mode: 'cut',
+          workerCap: 10,
+          featureIds: [id],
+          woodTrees: [{ featureId: randomUUID(), treeIndices: [0] }],
+        },
+        async () => trail,
+      ),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'WOOD_TREES_OUTSIDE_SELECTION' });
+  }, 3);
+}, 60_000);
+
+it('queues designated trees, merges new ones into the queued case and refuses a replay with other trees', async () => {
+  await fixture(async (tx, id) => {
+    const source = {
+      transaction: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }),
+    } as unknown as typeof db;
+    const intent = (commandId: string, treeIndices?: number[]) =>
+      acceptHarvestIntent(source, DEVELOPMENT_IDS.account, 'aube', villageId, {
+        commandId,
+        gardens: [],
+        wood: [id],
+        ...(treeIndices ? { woodTrees: [{ featureId: id, treeIndices }] } : {}),
+        stone: [],
+      });
+    const queued = async () =>
+      (
+        await tx
+          .selectFrom('extractionWorksiteTargets as t')
+          .innerJoin('extractionWorksites as s', 's.id', 't.worksiteId')
+          .select('t.treeIndices')
+          .where('t.featureId', '=', id)
+          .where('t.status', '=', 'pending')
+          .where('s.poolResource', '=', 'wood')
+          .executeTakeFirstOrThrow()
+      ).treeIndices;
+    const first = randomUUID();
+    expect(await intent(first, [2])).toMatchObject({
+      accepted: [{ key: id, resource: 'wood', amount: 500, treeIndices: [2] }],
+      refused: [],
+    });
+    expect(await queued()).toEqual([2]);
+    // The same intent with other trees is another command.
+    await expect(intent(first, [1])).rejects.toMatchObject({ statusCode: 409, code: 'COMMAND_ID_CONFLICT' });
+    expect((await intent(first, [2])).accepted).toHaveLength(1);
+    // New trees join the queued case after its own; a foreign tree is refused alone.
+    expect(await intent(randomUUID(), [1, 2, 7])).toMatchObject({
+      accepted: [{ key: id, treeIndices: [1] }],
+      refused: [{ key: id, reason: 'tree-not-found', treeIndex: 7 }],
+    });
+    expect(await queued()).toEqual([2, 1]);
+    // Nothing new: already planned.
+    expect((await intent(randomUUID(), [2])).refused).toEqual([{ key: id, reason: 'already-assigned' }]);
+    // The whole case takes all of its trees; nothing can be added after.
+    expect((await intent(randomUUID())).accepted).toMatchObject([{ key: id, amount: 1500 }]);
+    expect(await queued()).toBeNull();
+    expect((await intent(randomUUID(), [0])).refused).toEqual([{ key: id, reason: 'already-assigned' }]);
+  }, 3);
+}, 120_000);
+
+it('exposes a felled tree and a stump to the chunk, spatial, snapshot and details readers', async () => {
+  await fixture(async (tx, id, t) => {
+    const world = await tx.selectFrom('worlds').selectAll().where('id', '=', worldId).executeTakeFirstOrThrow();
+    const size = world.chunkSize,
+      chunk = { chunkX: Math.floor(cell.cellX / size), chunkY: Math.floor(cell.cellY / size) };
+    const readers = async () => {
+      const terrain = await readTerrainProjection(
+        tx,
+        DEVELOPMENT_IDS.account,
+        'aube',
+        `${chunk.chunkX},${chunk.chunkY}`,
+        false,
+      );
+      const spatial = await readSpatialChanges(
+        tx,
+        {
+          worldId,
+          worldSlug: 'aube',
+          accountId: DEVELOPMENT_IDS.account,
+          widthCells: world.widthCells,
+          heightCells: world.heightCells,
+          chunkSize: size,
+          generationVersion: world.generationVersion,
+          ...chunk,
+        },
+        [{ component: 'spatialFeatures', key: id }],
+      );
+      for (const change of spatial)
+        expect([...Value.Errors(SyncV2ChangeSchema, change)].map((error) => error.message)).toEqual([]);
+      const located = spatial[0]!.component === 'spatialFeatures' ? spatial[0]!.upsert[0]!.locations[0]! : null;
+      return {
+        chunk: terrain.chunks[0]!.features.find((f) => f.id === id)!.deposit!,
+        spatial: located!.deposit!,
+      };
+    };
+    // A lot fells tree 0: its trunk holds 500, 100 of them reserved.
+    const work = await lot(
+      tx,
+      await startStoneExtraction(tx, village, { worldId, villageId, through: t }, id, randomUUID(), 1),
+    );
+    const felled = {
+      treeIndex: 0,
+      remainingAmount: 500,
+      reservedAmount: 100,
+      felledAt: t.toISOString(),
+      stumpRemoved: false,
+    };
+    const read = await readers();
+    expect(read.chunk.trees).toEqual([felled]);
+    expect(read.spatial.trees).toEqual([felled]);
+    // A lot due and not yet debited shows as cut, on the tree as on the case.
+    await sql`select set_config('arbestra.economy_through', ${work.completesAt.toISOString()}, true)`.execute(tx);
+    const due = await readers();
+    expect(due.chunk).toMatchObject({ remainingAmount: 900, reservedAmount: 0 });
+    expect(due.chunk.trees).toEqual([{ ...felled, remainingAmount: 400, reservedAmount: 0 }]);
+    await sql`select set_config('arbestra.economy_through', '', true)`.execute(tx);
+    // Tree 1 down to a stump, then its stump removed (the case still stands: tree 0).
+    await tx
+      .insertInto('woodlandTrees')
+      .values({ worldId, featureId: id, treeIndex: 1, remainingAmount: 0, felledAt: t })
+      .execute();
+    const stump = { treeIndex: 1, remainingAmount: 0, reservedAmount: 0, felledAt: t.toISOString() };
+    expect((await readers()).chunk.trees).toEqual([felled, { ...stump, stumpRemoved: false }]);
+    await tx
+      .updateTable('woodlandTrees')
+      .set({ stumpRemovedAt: t })
+      .where('featureId', '=', id)
+      .where('treeIndex', '=', 1)
+      .execute();
+    const removed = { ...stump, stumpRemoved: true };
+    expect((await readers()).spatial.trees).toEqual([felled, removed]);
+    // The village snapshot and the grove's sheet show the same trees.
+    const snapshot = await state(tx, DEVELOPMENT_IDS.account, 'aube', { worldId, villageId, through: t }, false, true);
+    expect(snapshot.region.features.find((f) => f.id === id)!.deposit!.trees).toEqual([felled, removed]);
+    const owned = await ownedVillage(tx, DEVELOPMENT_IDS.account, 'aube', villageId);
+    const details = await readVillageDepositDetails(
+      tx,
+      DEVELOPMENT_IDS.account,
+      owned,
+      { worldId, villageId, through: t },
+      id,
+    );
+    expect(details.deposit.trees).toEqual([felled, removed]);
+    // The village knows which tree its lot works on.
+    expect(snapshot.village.extractions.find((e) => e.id === work.id)).toMatchObject({ treeIndex: 0 });
+  });
+}, 120_000);
+
+it('shows the designated trees of a queued target to its village, with its mode', async () => {
+  await fixture(async (tx, id, t) => {
+    const siteId = await createWorksite(
+      tx,
+      { worldId, villageId, through: t },
+      {
+        commandId: randomUUID(),
+        mode: 'clear',
+        workerCap: 10,
+        featureIds: [id],
+        woodTrees: [{ featureId: id, treeIndices: [1] }],
+      },
+    );
+    const snapshot = await state(tx, DEVELOPMENT_IDS.account, 'aube', { worldId, villageId, through: t }, false, true);
+    expect(snapshot.village.worksites.find((site) => site.id === siteId)).toMatchObject({
+      mode: 'clear',
+      targets: [{ featureId: id, status: 'pending', treeIndices: [1] }],
+    });
+  });
+}, 60_000);
+
+it('publishes the chunk of a case to the journal when a tree falls and when a stump is removed', async () => {
+  await resetE2eState(url);
+  const { id } = await committedGrove();
+  const world = await db.selectFrom('worlds').selectAll().where('id', '=', worldId).executeTakeFirstOrThrow();
+  const size = world.chunkSize,
+    chunk = { chunkX: Math.floor(cell.cellX / size), chunkY: Math.floor(cell.cellY / size) },
+    scope = `${chunk.chunkX},${chunk.chunkY}`;
+  const pending = async (tx: Transaction<Database>) =>
+    (
+      await sql<{ n: number }>`select count(*)::int as n from game_sync_pending where transaction_id=txid_current()
+        and world_id=${worldId} and stream_kind='spatial' and scope_key=${scope}
+        and component='spatialFeatures' and entity_key=${id}`.execute(tx)
+    ).rows[0]!.n;
+  /** Publishes this transaction, then reads back its journal entry and the reader's trees. */
+  const published = async (tx: Transaction<Database>) => {
+    await sql`select game_sync_publish()`.execute(tx);
+    const entry = await sql<{ changes: Array<{ component: string; key: string }> }>`select changes
+      from game_sync_changes where world_id=${worldId} and stream_kind='spatial' and scope_key=${scope}
+      order by revision desc limit 1`.execute(tx);
+    expect(entry.rows[0]!.changes).toContainEqual({ component: 'spatialFeatures', key: id });
+    const [change] = await readSpatialChanges(
+      tx,
+      {
+        worldId,
+        worldSlug: 'aube',
+        accountId: DEVELOPMENT_IDS.account,
+        widthCells: world.widthCells,
+        heightCells: world.heightCells,
+        chunkSize: size,
+        generationVersion: world.generationVersion,
+        ...chunk,
+      },
+      [{ component: 'spatialFeatures', key: id }],
+    );
+    return change!.component === 'spatialFeatures' ? change!.upsert[0]!.locations[0]!.deposit!.trees : undefined;
+  };
+  try {
+    await expect(
+      db.transaction().execute(async (tx) => {
+        const economy = await beginVillageEconomy(tx, worldId, villageId, id);
+        expect(await pending(tx)).toBe(0);
+        await startStoneExtraction(tx, village, economy, id, randomUUID(), 1);
+        expect(await pending(tx)).toBe(1);
+        expect(await published(tx)).toMatchObject([{ treeIndex: 0, remainingAmount: 500, reservedAmount: 100 }]);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+    // Both trees already stumps (committed), then a clearing removes stump 0.
+    await db.transaction().execute(async (tx) => {
+      const t = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('t')).executeTakeFirstOrThrow()).t;
+      await cut(tx, id, t, 2, { 0: 0, 1: 0 });
+    });
+    await expect(
+      db.transaction().execute(async (tx) => {
+        const economy = await beginVillageEconomy(tx, worldId, villageId, id);
+        const siteId = await createWorksite(tx, economy, {
+          commandId: randomUUID(),
+          mode: 'clear',
+          workerCap: 10,
+          featureIds: [id],
+          woodTrees: [{ featureId: id, treeIndices: [0] }],
+        });
+        await admitWorksites(tx, economy, village, async () => trail);
+        const removal = await tx
+          .selectFrom('depositExtractions')
+          .selectAll()
+          .where('worksiteId', '=', siteId)
+          .executeTakeFirstOrThrow();
+        expect(lotsOf([removal])).toEqual([[0, 0]]);
+        // Starting a stump removal changes nothing a reader shows.
+        expect(await pending(tx)).toBe(0);
+        await completeStoneExtractionAt(tx, worldId, villageId, removal.id, removal.completesAt);
+        expect(await pending(tx)).toBe(1);
+        expect(await published(tx)).toMatchObject([
+          { treeIndex: 0, stumpRemoved: true },
+          { treeIndex: 1, stumpRemoved: false },
+        ]);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  } finally {
+    await resetE2eState(url);
+    await dropGrove(id);
+  }
+}, 120_000);
