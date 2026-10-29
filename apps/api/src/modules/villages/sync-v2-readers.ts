@@ -1,5 +1,11 @@
 import { sql, type RawBuilder, type Transaction } from 'kysely';
-import { SYNC_V2_PRIVATE_COMPONENTS, type SyncV2Change, type SyncV2Contribution } from '@arbestra/contracts';
+import {
+  SYNC_V2_COMPONENT_LIMITS,
+  SYNC_V2_PRIVATE_COMPONENTS,
+  SYNC_V2_SNAPSHOT_PAGE_REFERENCES,
+  type SyncV2Change,
+  type SyncV2Contribution,
+} from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { projectVillageResources, projectGardenPlots } from './economy.js';
 import { readProcessingOrders } from './processing.js';
@@ -44,11 +50,10 @@ export const privateReaderComponents = new Set<SyncV2Change['component']>([
 ]);
 
 /** Enumeration is reserved for an explicit scope snapshot. Ordinary deltas
- * receive their keys from the durable journal and never enter this path. */
-export async function readPrivateScopeSnapshot(
-  tx: Transaction<Database>,
-  context: VillageEconomy,
-): Promise<SyncV2Change[]> {
+ * receive their keys from the durable journal and never enter this path.
+ * Each query yields (component, key) rows; the six singleton references are
+ * listed apart (singletonReferences). */
+function privateReferenceQueries(context: VillageEconomy): RawBuilder<SyncEntityReference>[] {
   const { worldId, villageId } = context;
   const sources = [
     ['resources', 'village_resources', 'resource_code'],
@@ -58,7 +63,7 @@ export async function readPrivateScopeSnapshot(
     ['scienceContributions', 'science_contributions', 'building_id'],
   ] as const;
   const queries = sources.map(
-    ([component, table, column]) => sql`
+    ([component, table, column]) => sql<SyncEntityReference>`
     select ${sql.lit(component)}::text as component, ${sql.id(column)}::text as key from ${sql.id(table)}
     where world_id=${worldId} and village_id=${villageId}`,
   );
@@ -66,10 +71,10 @@ export async function readPrivateScopeSnapshot(
   // finished rows (thousands in an old village) would push a component past
   // its bound in the client schema, and the snapshot past its own.
   const running = (component: string, table: string, condition: RawBuilder<unknown>) =>
-    sql`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
+    sql<SyncEntityReference>`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
     where world_id=${worldId} and village_id=${villageId} and ${condition}`;
   const recent = (component: string, table: string, open: RawBuilder<unknown>, order: string, limit: number) =>
-    sql`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
+    sql<SyncEntityReference>`select ${sql.lit(component)}::text as component,id::text as key from ${sql.id(table)}
     where world_id=${worldId} and village_id=${villageId} and (${open} or id in (select id from ${sql.id(table)}
       where world_id=${worldId} and village_id=${villageId} order by ${sql.id(order)} desc limit ${sql.lit(limit)}))`;
   // Only buildings the restHousing reader turns into a row: housing types that
@@ -94,7 +99,8 @@ export async function readPrivateScopeSnapshot(
   // Orders still open or with workers out (the status readExploitationOrders
   // derives), plus the 32 recent ones the historical read showed: Catmark held
   // 1222 completed orders, past the component bound of the client schema.
-  queries.push(sql`select 'exploitationOrders'::text as component,o.id::text as key from exploitation_orders o
+  queries.push(sql<SyncEntityReference>`select 'exploitationOrders'::text as component,o.id::text as key
+    from exploitation_orders o
     where o.world_id=${worldId} and o.village_id=${villageId} and (o.garden_status='pending'
       or o.id in (select id from exploitation_orders where world_id=${worldId} and village_id=${villageId}
         order by confirmed_at desc limit 32)
@@ -105,29 +111,113 @@ export async function readPrivateScopeSnapshot(
       or exists (select 1 from deposit_extractions d join extraction_worksites w on w.id=d.worksite_id
         and w.world_id=d.world_id and w.village_id=d.village_id where d.world_id=o.world_id
         and d.village_id=o.village_id and w.exploitation_order_id=o.id and d.status='in-progress'))`);
-  queries.push(sql`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
+  queries.push(sql<SyncEntityReference>`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
     from garden_plots where world_id=${worldId} and village_id=${villageId}`);
-  queries.push(sql`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
+  queries.push(sql<SyncEntityReference>`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
     where world_id=${worldId} and (village_id=${villageId} or destination_village_id=${villageId})
     and returns_at > ${context.through}`);
-  const rows = (await sql<SyncEntityReference>`${sql.join(queries, sql` union all `)} limit 4097`.execute(tx)).rows;
-  const references: SyncEntityReference[] = [
-    ...rows,
-    { component: 'identity', key: villageId },
-    { component: 'populationSummary', key: '*' },
-    { component: 'infrastructure', key: '*' },
-    { component: 'installation', key: '*' },
-    { component: 'extractionPools', key: 'wood' },
-    { component: 'extractionPools', key: 'stone' },
-  ];
-  if (references.length > 4096) throw new RangeError('Private scope snapshot requires pagination');
-  const changes = await readRegisteredPrivateChanges(tx, context, references);
+  return queries;
+}
+const singletonReferences = (villageId: string): SyncEntityReference[] => [
+  { component: 'identity', key: villageId },
+  { component: 'populationSummary', key: '*' },
+  { component: 'infrastructure', key: '*' },
+  { component: 'installation', key: '*' },
+  { component: 'extractionPools', key: 'wood' },
+  { component: 'extractionPools', key: 'stone' },
+];
+/** Every registry component listed, the empty ones too. A snapshot replaces
+ * the entire base; keys of terminal entities need not survive as tombstones
+ * after that replacement. */
+function completeRegistry(changes: SyncV2Change[]): SyncV2Change[] {
   for (const component of SYNC_V2_PRIVATE_COMPONENTS) {
     if (!changes.some((change) => change.component === component)) changes.push({ component, upsert: [], remove: [] });
   }
-  // A snapshot replaces the entire base; keys of terminal entities need not
-  // survive as tombstones after that replacement.
   return changes.map((change) => ({ ...change, remove: [] }));
+}
+
+/** Single-batch snapshot, for clients without paged snapshots: refused
+ * beyond 4096 references, which only a paged snapshot can carry. */
+export async function readPrivateScopeSnapshot(
+  tx: Transaction<Database>,
+  context: VillageEconomy,
+): Promise<SyncV2Change[]> {
+  const queries = privateReferenceQueries(context);
+  const rows = (await sql<SyncEntityReference>`${sql.join(queries, sql` union all `)} limit 4097`.execute(tx)).rows;
+  const references: SyncEntityReference[] = [...rows, ...singletonReferences(context.villageId)];
+  if (references.length > 4096) throw new RangeError('Private scope snapshot requires pagination');
+  return completeRegistry(await readRegisteredPrivateChanges(tx, context, references));
+}
+
+/** Every reference a single snapshot would cover, unbounded and unordered:
+ * the reference the pages are compared with. */
+export async function readPrivateScopeReferences(
+  tx: Transaction<Database>,
+  context: VillageEconomy,
+): Promise<SyncEntityReference[]> {
+  const queries = privateReferenceQueries(context);
+  const rows = (await sql<SyncEntityReference>`${sql.join(queries, sql` union all `)}`.execute(tx)).rows;
+  return [...rows, ...singletonReferences(context.villageId)];
+}
+
+export interface SyncSnapshotPosition {
+  component: string;
+  key: string;
+}
+/** One page of the private snapshot (docs/DESIGN-PAGINATION-SNAPSHOT-V2.md):
+ * references in (component, key) byte order strictly after `after`, at most
+ * `limit` and, per component, the bound of its schema. Only this page's
+ * entities are read. `last` is where the next page starts, null once the
+ * enumeration is exhausted. The first page lists the whole registry. */
+export async function readPrivateScopeSnapshotPage(
+  tx: Transaction<Database>,
+  context: VillageEconomy,
+  after: SyncSnapshotPosition | null,
+  limit = SYNC_V2_SNAPSHOT_PAGE_REFERENCES,
+): Promise<{ changes: SyncV2Change[]; last: SyncSnapshotPosition | null }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > SYNC_V2_SNAPSHOT_PAGE_REFERENCES)
+    throw new RangeError('Invalid snapshot page size');
+  const queries = [
+    ...privateReferenceQueries(context),
+    ...singletonReferences(context.villageId).map(
+      (reference) => sql<SyncEntityReference>`select ${reference.component}::text as component,
+        ${reference.key}::text as key`,
+    ),
+  ];
+  // Byte order ("C"): stable whatever the database collation. Components
+  // before the cursor are constant columns: the planner drops their branches.
+  const position = after
+    ? sql`where component collate "C" > ${after.component}::text
+      or (component = ${after.component}::text and key collate "C" > ${after.key}::text)`
+    : sql``;
+  const rows = (
+    await sql<SyncEntityReference>`select component,key from (${sql.join(queries, sql` union all `)}) refs ${position}
+    order by component collate "C", key collate "C" limit ${limit + 1}`.execute(tx)
+  ).rows;
+  const page: SyncEntityReference[] = [];
+  let more = false,
+    component = '',
+    count = 0;
+  for (const row of rows) {
+    if (row.component !== component) {
+      component = row.component;
+      count = 0;
+    }
+    const bound = SYNC_V2_COMPONENT_LIMITS[row.component];
+    if (!bound) throw Error(`Unregistered private synchronization component: ${row.component}`);
+    if (page.length === limit || count === bound) {
+      more = true;
+      break;
+    }
+    page.push(row);
+    count++;
+  }
+  const changes = await readRegisteredPrivateChanges(tx, context, page);
+  const last = page.at(-1);
+  return {
+    changes: after ? changes.map((change) => ({ ...change, remove: [] })) : completeRegistry(changes),
+    last: more && last ? { component: last.component, key: last.key } : null,
+  };
 }
 
 /** Called inside the same read-only MVCC capture as the journal/counters.

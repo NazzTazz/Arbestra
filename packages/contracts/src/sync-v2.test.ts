@@ -1,5 +1,12 @@
 import { expect, it } from 'vitest';
-import { applySyncV2Batch, visibleSyncV2Scope, type SyncV2Batch, type SyncV2State } from './sync-v2.js';
+import {
+  applySyncV2Batch,
+  applySyncV2SnapshotPages,
+  visibleSyncV2Scope,
+  SYNC_V2_PRIVATE_COMPONENTS,
+  type SyncV2Batch,
+  type SyncV2State,
+} from './sync-v2.js';
 import { SYNC_V2_SPATIAL_COMPONENTS } from './sync-v2-spatial.js';
 
 const worldId = '11111111-1111-4111-8111-111111111111',
@@ -199,4 +206,103 @@ it('accepts a village with more than 1024 homes, up to the snapshot bound', () =
   };
   expect(applySyncV2Batch(empty(), homes(2000)).kind).toBe('applied');
   expect(applySyncV2Batch(empty(), homes(4097)).kind).toBe('resync');
+});
+
+const otherEpoch = '44444444-4444-4444-8444-444444444444';
+const code = (index: number) => ({ code: `a${index}`, completedAt: '2026-10-21T12:00:00.000Z' });
+/** Accomplishments `from`..`to` in one page; the first page lists the registry. */
+function page(from: number, to: number, next: string | null, options: { revision?: string; epoch?: string } = {}) {
+  const upsert = Array.from({ length: to - from + 1 }, (_, index) => code(from + index));
+  const first = from === 0;
+  return {
+    protocol: 2,
+    worldId,
+    villageId,
+    generation: 1,
+    observedAt: '2026-10-21T12:00:00.000Z',
+    coverage: 'scope-snapshot-page',
+    next,
+    groups: [
+      {
+        stream: { kind: 'village', key: villageId, epoch: options.epoch ?? epoch },
+        fromRevision: '0',
+        toRevision: options.revision ?? '5',
+        changes: first
+          ? SYNC_V2_PRIVATE_COMPONENTS.map((component) => ({
+              component,
+              upsert: component === 'accomplishments' ? upsert : [],
+              remove: [],
+            }))
+          : [{ component: 'accomplishments', upsert, remove: [] }],
+      },
+    ],
+  };
+}
+const catchUp = (from = '5', to = '7') => ({
+  ...batch('delta', from, to, 42),
+  groups: [
+    {
+      ...batch('delta', from, to, 42).groups[0]!,
+      changes: [
+        { component: 'resources' as const, upsert: [resource(42)], remove: [] },
+        { component: 'accomplishments' as const, upsert: [], remove: ['a1'] },
+      ],
+    },
+  ],
+});
+
+it('assembles snapshot pages at the first page revision, then brings them to one version by the delta', () => {
+  // 128 accomplishments is the bound of one change: 200 need two pages.
+  const pages = [page(0, 127, 'next'), page(128, 199, null, { revision: '6' })];
+  const result = applySyncV2SnapshotPages(empty(), pages, catchUp());
+  expect(result.kind).toBe('applied');
+  const scope = result.state.scopes.get(key)!;
+  expect(scope.revision).toBe('7');
+  const values = visibleSyncV2Scope(scope);
+  expect([...values.keys()].filter((entry) => entry.startsWith('accomplishments:'))).toHaveLength(199);
+  expect(values.has('accomplishments:a1')).toBe(false);
+  expect(values.get('resources:wood')).toMatchObject({ amount: 42 });
+  // An idle catch-up keeps the first page revision.
+  expect(applySyncV2SnapshotPages(empty(), pages, catchUp('5', '5')).state.scopes.get(key)?.revision).toBe('5');
+});
+
+it('restarts on pages that do not form one snapshot, and never alters the state', () => {
+  const state = empty();
+  const cases: Array<[string, unknown[], unknown]> = [
+    ['later page in another epoch', [page(0, 9, 'next'), page(10, 19, null, { epoch: otherEpoch })], catchUp()],
+    ['later page behind the anchor', [page(0, 9, 'next'), page(10, 19, null, { revision: '4' })], catchUp()],
+    ['entity on two pages', [page(0, 9, 'next'), page(9, 19, null)], catchUp()],
+    ['chain cut short', [page(0, 9, 'next')], catchUp()],
+    ['chain past its end', [page(0, 9, null), page(10, 19, null)], catchUp()],
+    ['first page without the registry', [page(10, 19, null)], catchUp()],
+    ['delta from another revision', [page(0, 9, null)], catchUp('4', '7')],
+    ['complete snapshot instead of a delta', [page(0, 9, null)], batch('scope-snapshot', '0', '7')],
+    ['delta of another generation', [page(0, 9, null)], { ...catchUp(), generation: 2 }],
+  ];
+  const tombstone = page(10, 19, null);
+  tombstone.groups[0]!.changes[0]!.remove = ['a3'] as never;
+  cases.push(['tombstone in a page', [page(0, 9, 'next'), tombstone], catchUp()]);
+  for (const [name, pages, delta] of cases) {
+    const result = applySyncV2SnapshotPages(state, pages, delta);
+    expect(result.kind, name).toBe('restart');
+    expect(result.state, name).toBe(state);
+  }
+});
+
+it('replaces the session state like a snapshot: same epoch only, newer confirmations kept', () => {
+  const known = applySyncV2Batch(empty(), batch('scope-snapshot', '0', '3'));
+  expect(known.kind).toBe('applied');
+  const confirmed = applySyncV2Batch(known.state, { ...batch('effects', '9', '9', 77) });
+  expect(confirmed.kind).toBe('applied');
+  const pages = [page(0, 9, null)];
+  const result = applySyncV2SnapshotPages(confirmed.state, pages, catchUp());
+  expect(result.kind).toBe('applied');
+  // The confirmation at 9 is newer than the paged state at 7: still overlaid.
+  expect(visibleSyncV2Scope(result.state.scopes.get(key)!).get('resources:wood')).toMatchObject({ amount: 77 });
+  // A replaced epoch needs a new subscription generation.
+  const replaced = applySyncV2SnapshotPages(known.state, [page(0, 9, null, { epoch: otherEpoch })], {
+    ...catchUp(),
+    groups: [{ ...catchUp().groups[0]!, stream: { kind: 'village', key: villageId, epoch: otherEpoch } }],
+  });
+  expect(replaced.kind).toBe('resync');
 });

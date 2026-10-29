@@ -1,28 +1,112 @@
-import { sql, type Kysely } from 'kysely';
-import type { SyncV2Batch, SyncV2ReadRequest } from '@arbestra/contracts';
+import { sql, type Kysely, type Transaction } from 'kysely';
+import {
+  SYNC_V2_PRIVATE_COMPONENTS,
+  type SyncV2Batch,
+  type SyncV2ReadRequest,
+  type SyncV2SnapshotPage,
+} from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { ownedVillage } from './service.js';
 import { readJournalSelection, readSubscribedJournal, type SyncCursor, type SyncScope } from './sync-v2-journal.js';
-import { readPrivateScopeSnapshot, readRegisteredPrivateChanges } from './sync-v2-readers.js';
+import {
+  readPrivateScopeSnapshot,
+  readPrivateScopeSnapshotPage,
+  readRegisteredPrivateChanges,
+  type SyncSnapshotPosition,
+} from './sync-v2-readers.js';
 import { readSpatialChanges, readSpatialScopeSnapshot } from './sync-v2-spatial-readers.js';
 import { readSharedChanges, readSharedScopeSnapshot } from './sync-v2-shared-readers.js';
 import { readTrafficChanges, readTrafficScopeSnapshot } from './sync-v2-traffic-readers.js';
 
 export type SyncV2SharedInclude = 'knowledge' | 'manifest' | 'traffic';
+interface CaptureOptions {
+  include?: readonly SyncV2SharedInclude[];
+  /** The stream only sends deltas: when a snapshot is required it gets a
+   * bare `scope-snapshot` marker (no group), never read, and resets. */
+  deltaOnly?: boolean;
+}
+
+/** Position of a paged private snapshot. Opaque to the client; it grants
+ * nothing: each page authenticates and checks the village again. */
+interface PageCursor extends SyncSnapshotPosition {
+  epoch: string;
+  /** Revision of the first page, from which the client catches up. */
+  anchor: string;
+}
+const encodePageCursor = (cursor: PageCursor) =>
+  Buffer.from(JSON.stringify({ v: 1, e: cursor.epoch, r: cursor.anchor, c: cursor.component, k: cursor.key })).toString(
+    'base64url',
+  );
+function decodePageCursor(token: string): PageCursor {
+  let value: { v?: unknown; e?: unknown; r?: unknown; c?: unknown; k?: unknown } | null = null;
+  try {
+    value = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
+  } catch {
+    // Reported below.
+  }
+  const { e, r, c, k } = value ?? {};
+  if (
+    value?.v !== 1 ||
+    typeof e !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(e) ||
+    typeof r !== 'string' ||
+    !/^(0|[1-9][0-9]{0,18})$/.test(r) ||
+    BigInt(r) > 9223372036854775807n ||
+    typeof c !== 'string' ||
+    !(SYNC_V2_PRIVATE_COMPONENTS as readonly string[]).includes(c) ||
+    typeof k !== 'string' ||
+    k.length < 1 ||
+    k.length > 128
+  )
+    throw new HttpError(400, 'INVALID_SYNC_PAGE', 'Page de synchronisation invalide.');
+  return { epoch: e, anchor: r, component: c, key: k };
+}
+async function captureClock(tx: Transaction<Database>): Promise<Date> {
+  const { through } = await tx
+    .selectNoFrom([
+      sql<Date>`statement_timestamp()`.as('through'),
+      sql<string>`set_config('arbestra.economy_through',statement_timestamp()::text,true)`.as('clock'),
+    ])
+    .executeTakeFirstOrThrow();
+  return through;
+}
 
 /** `include` resolves server-keyed shared scopes for a bootstrap, whose
- * client does not know the account or world key yet. */
+ * client does not know the account or world key yet. With `pages`, a private
+ * snapshot beyond one page is answered by its first page; `request.page`
+ * reads a later one. Without it, the snapshot is complete or refused. */
+export function captureSyncV2(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  request: SyncV2ReadRequest,
+  options?: CaptureOptions & { pages?: false },
+): Promise<SyncV2Batch>;
+export function captureSyncV2(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  request: SyncV2ReadRequest,
+  options: CaptureOptions & { pages: boolean },
+): Promise<SyncV2Batch | SyncV2SnapshotPage>;
 export async function captureSyncV2(
   db: Kysely<Database>,
   accountId: string,
   worldSlug: string,
   villageId: string,
   request: SyncV2ReadRequest,
-  options: { include?: readonly SyncV2SharedInclude[] } = {},
-): Promise<SyncV2Batch> {
+  options: CaptureOptions & { pages?: boolean } = {},
+): Promise<SyncV2Batch | SyncV2SnapshotPage> {
   if (!Number.isSafeInteger(request.generation) || request.generation < 0)
     throw new HttpError(400, 'INVALID_SYNC_GENERATION', 'Génération invalide.');
+  if (request.page) {
+    if (!options.pages || options.deltaOnly)
+      throw new HttpError(400, 'INVALID_SYNC_PAGE', 'Pages de synchronisation non négociées.');
+    return captureSnapshotPage(db, accountId, worldSlug, villageId, request, decodePageCursor(request.page.after));
+  }
   return db
     .transaction()
     .setIsolationLevel('repeatable read')
@@ -76,12 +160,7 @@ export async function captureSyncV2(
           throw new HttpError(400, 'INVALID_SYNC_CURSOR', 'Curseur hors abonnement.');
         bases.set(key, { epoch: cursor.epoch, revision: cursor.revision });
       }
-      const { through } = await tx
-        .selectNoFrom([
-          sql<Date>`statement_timestamp()`.as('through'),
-          sql<string>`set_config('arbestra.economy_through',statement_timestamp()::text,true)`.as('clock'),
-        ])
-        .executeTakeFirstOrThrow();
+      const through = await captureClock(tx);
       const captured = await readSubscribedJournal(
         tx,
         village.worldId,
@@ -89,16 +168,34 @@ export async function captureSyncV2(
       );
       if (captured.kind !== 'ready')
         throw new HttpError(503, 'SYNC_SCOPE_NOT_INITIALIZED', 'Synchronisation indisponible.');
+      const header = {
+        protocol: 2 as const,
+        worldId: village.worldId,
+        villageId,
+        generation: request.generation,
+        observedAt: through.toISOString(),
+      };
+      // A stream resets instead of reading a snapshot it would discard.
+      if (captured.coverage === 'scope-snapshot' && options.deltaOnly)
+        return { ...header, coverage: 'scope-snapshot' as const, groups: [] };
       const context = { worldId: village.worldId, villageId, accountId, through };
       const groups: SyncV2Batch['groups'] = [];
+      let next: string | null = null;
       for (const stream of captured.streams) {
         const snapshot = captured.coverage === 'scope-snapshot';
         let changes: SyncV2Batch['groups'][number]['changes'];
-        if (stream.scope.kind === 'village')
-          changes = snapshot
-            ? await readPrivateScopeSnapshot(tx, context)
-            : await readRegisteredPrivateChanges(tx, context, stream.references);
-        else if (stream.scope.kind === 'spatial') {
+        if (stream.scope.kind === 'village') {
+          if (snapshot && options.pages) {
+            // The first page: its revision is the anchor of the next ones.
+            const page = await readPrivateScopeSnapshotPage(tx, context, null);
+            changes = page.changes;
+            if (page.last)
+              next = encodePageCursor({ ...page.last, epoch: stream.cursor.epoch, anchor: stream.cursor.revision });
+          } else
+            changes = snapshot
+              ? await readPrivateScopeSnapshot(tx, context)
+              : await readRegisteredPrivateChanges(tx, context, stream.references);
+        } else if (stream.scope.kind === 'spatial') {
           const [chunkX, chunkY] = stream.scope.key.split(',').map(Number) as [number, number];
           const spatial = {
             ...context,
@@ -128,14 +225,66 @@ export async function captureSyncV2(
           changes,
         });
       }
+      return next
+        ? { ...header, coverage: 'scope-snapshot-page' as const, next, groups }
+        : { ...header, coverage: captured.coverage, groups };
+    });
+}
+
+/** A later page of a paged private snapshot, in its own capture. A replaced
+ * epoch, a revision below the anchor (restore) or an anchor below the
+ * retention floor would make the catch-up delta impossible: the client must
+ * start over, and this page is not read. */
+async function captureSnapshotPage(
+  db: Kysely<Database>,
+  accountId: string,
+  worldSlug: string,
+  villageId: string,
+  request: SyncV2ReadRequest,
+  cursor: PageCursor,
+): Promise<SyncV2SnapshotPage> {
+  return db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (tx) => {
+      await sql`set transaction read only`.execute(tx);
+      const village = await ownedVillage(tx, accountId, worldSlug, villageId);
+      if (
+        request.cursors.length ||
+        request.scopes.some((scope) => scope.kind !== 'village' || scope.key !== village.villageId)
+      )
+        throw new HttpError(400, 'INVALID_SYNC_PAGE', 'Page de synchronisation invalide.');
+      const through = await captureClock(tx);
+      const counter = (
+        await sql<{ epoch: string; revision: string; retainedFrom: string }>`select epoch::text,revision::text,
+          retained_from::text as "retainedFrom" from game_sync_streams
+        where world_id=${village.worldId} and stream_kind='village' and scope_key=${village.villageId}`.execute(tx)
+      ).rows[0];
+      if (!counter) throw new HttpError(503, 'SYNC_SCOPE_NOT_INITIALIZED', 'Synchronisation indisponible.');
+      if (
+        counter.epoch !== cursor.epoch ||
+        BigInt(counter.revision) < BigInt(cursor.anchor) ||
+        BigInt(cursor.anchor) < BigInt(counter.retainedFrom)
+      )
+        throw new HttpError(409, 'SYNC_SNAPSHOT_PAGE_EXPIRED', 'Instantané à relire depuis sa première page.');
+      const context = { worldId: village.worldId, villageId: village.villageId, accountId, through };
+      const page = await readPrivateScopeSnapshotPage(tx, context, cursor);
       return {
         protocol: 2,
         worldId: village.worldId,
-        villageId,
+        villageId: village.villageId,
         generation: request.generation,
         observedAt: through.toISOString(),
-        coverage: captured.coverage,
-        groups,
+        coverage: 'scope-snapshot-page',
+        next: page.last ? encodePageCursor({ ...cursor, ...page.last }) : null,
+        groups: [
+          {
+            stream: { kind: 'village', key: village.villageId, epoch: counter.epoch },
+            fromRevision: '0',
+            toRevision: counter.revision,
+            changes: page.changes,
+          },
+        ],
       };
     });
 }
@@ -159,12 +308,7 @@ export async function capturePrivateSync(
     .execute(async (tx) => {
       await sql`set transaction read only`.execute(tx);
       const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-      const { through } = await tx
-        .selectNoFrom([
-          sql<Date>`statement_timestamp()`.as('through'),
-          sql<string>`set_config('arbestra.economy_through',statement_timestamp()::text,true)`.as('clock'),
-        ])
-        .executeTakeFirstOrThrow();
+      const through = await captureClock(tx);
       const selection = await readJournalSelection(
         tx,
         village.worldId,

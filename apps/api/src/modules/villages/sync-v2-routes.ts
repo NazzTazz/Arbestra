@@ -3,8 +3,10 @@ import { sql, type Kysely } from 'kysely';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import {
+  SYNC_V2_PAGES_HEADER,
   SyncV2BatchSchema,
   SyncV2ReadRequestSchema,
+  SyncV2SnapshotPageSchema,
   VillagePresentationSchema,
   type SyncV2ReadRequest,
 } from '@arbestra/contracts';
@@ -27,6 +29,10 @@ const params = Type.Object({
 });
 const headers = Type.Object({ 'x-arbestra-protocol': Type.Literal('2') }, { additionalProperties: true });
 const prefix = '/api/worlds/:worldSlug/villages/:villageId';
+/** A snapshot read may answer with a page when the client says it can
+ * assemble them; the header is ignored by servers without pages. */
+const acceptsPages = (request: FastifyRequest) => request.headers[SYNC_V2_PAGES_HEADER] === '1';
+const readResponse = Type.Union([SyncV2BatchSchema, SyncV2SnapshotPageSchema]);
 
 /** Registration is not activation: until the complete writer/backfill rollout
  * is installed, these endpoints fail closed rather than expose partial streams.
@@ -42,14 +48,16 @@ export async function assertSyncV2Available(db: Kysely<Database>): Promise<void>
 }
 
 export const SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS = 60;
-/** A scope beyond the reader bounds (4 096 references) is a typed, explicit
- * refusal rather than an internal error; pagination is not implemented yet. */
+/** A scope beyond the reader bounds is a typed, explicit refusal rather than
+ * an internal error. A client that accepts paged private snapshots
+ * (SYNC_V2_PAGES_HEADER) no longer meets it for the private scope; others
+ * (older clients, traffic, spatial, knowledge) still can. */
 async function bounded<T>(read: Promise<T>, reply?: FastifyReply): Promise<T> {
   try {
     return await read;
   } catch (error) {
     if (error instanceof RangeError) {
-      // Pagination does not exist yet: tell clients not to retry every 2 s.
+      // Retrying the same read every 2 s cannot succeed: space it.
       reply?.header('Retry-After', String(SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS));
       throw new HttpError(503, 'SYNC_SCOPE_TOO_LARGE', 'Ce village dépasse la taille synchronisable.');
     }
@@ -129,7 +137,7 @@ export async function registerSyncV2Routes(
           worldSlug,
           economy.villageId,
           { protocol: 2, generation: query.generation, scopes: [], cursors: [] },
-          { include },
+          { include, pages: acceptsPages(request) },
         ),
       ),
       reply,
@@ -142,7 +150,7 @@ export async function registerSyncV2Routes(
         params,
         headers,
         querystring: Type.Omit(bootstrapQuery, ['villageId']),
-        response: { 200: SyncV2BatchSchema },
+        response: { 200: readResponse },
       },
     },
     (request, reply) => bootstrap(request, reply, (request.params as { villageId: string }).villageId),
@@ -156,7 +164,7 @@ export async function registerSyncV2Routes(
         params: Type.Object({ worldSlug: params.properties.worldSlug }),
         headers,
         querystring: bootstrapQuery,
-        response: { 200: SyncV2BatchSchema },
+        response: { 200: readResponse },
       },
     },
     (request, reply) => bootstrap(request, reply, (request.query as { villageId?: string }).villageId),
@@ -170,7 +178,7 @@ export async function registerSyncV2Routes(
           params,
           headers,
           body: SyncV2ReadRequestSchema,
-          ...(operation === 'read' ? { response: { 200: SyncV2BatchSchema } } : {}),
+          ...(operation === 'read' ? { response: { 200: readResponse } } : {}),
         },
         // Reject unknown fields before Fastify's AJV removes them.
         preValidation: async (request) => {
@@ -187,12 +195,19 @@ export async function registerSyncV2Routes(
         reply.header('Cache-Control', 'no-store');
         if (operation === 'read') {
           reply.serializer(JSON.stringify);
-          return bounded(captureSyncV2(db, account.id, worldSlug, villageId, body), reply);
+          return bounded(
+            captureSyncV2(db, account.id, worldSlug, villageId, body, { pages: acceptsPages(request) }),
+            reply,
+          );
         }
+        // Pages are read over sync/read; a stream only carries deltas.
+        if (body.page) throw new HttpError(400, 'INVALID_SYNC_PAGE', 'Page de synchronisation invalide.');
         const close = () => reply.raw.destroy();
         streams.add(close);
-        // The first capture runs before the stream's headers: it may still answer
-        // a too large scope with Retry-After. Later ones only end the stream.
+        // A cursor that needs a snapshot resets the stream without reading
+        // it: the client reads the (possibly paged) snapshot over sync/read.
+        // The first capture runs before the stream's headers: a too large
+        // shared scope may still answer with Retry-After.
         let opening = true;
         try {
           await serveSyncV2Stream(
@@ -203,7 +218,7 @@ export async function registerSyncV2Routes(
               await reconcileActivityDeadline(db, current.id, worldSlug, villageId);
               const answer = opening ? reply : undefined;
               opening = false;
-              return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next), answer);
+              return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next, { deltaOnly: true }), answer);
             },
             {
               onError: () => app.log.warn({ code: 'SYNC_V2_STREAM_INTERRUPTED' }, 'Synchronization stream interrupted'),

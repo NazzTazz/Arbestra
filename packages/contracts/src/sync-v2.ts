@@ -435,6 +435,21 @@ export const processingConfirmationV2IsValid = (value: unknown): value is Proces
 export const processingCommandIsValid = (value: unknown): value is ProcessingCommand =>
   Value.Check(ProcessingCommandSchema, value);
 export type SyncV2Change = Static<typeof SyncV2ChangeSchema>;
+/** Most entities a single change of each component may carry: the bound of
+ * its schema above, shared by the server's snapshot pages. */
+export const SYNC_V2_COMPONENT_LIMITS: Readonly<Record<string, number>> = Object.fromEntries(
+  (
+    SyncV2ChangeSchema.anyOf as unknown as Array<{
+      properties: { component: { const: string }; upsert: { maxItems: number } };
+    }>
+  ).map((branch) => [branch.properties.component.const, branch.properties.upsert.maxItems]),
+);
+/** Paged private snapshots (docs/DESIGN-PAGINATION-SNAPSHOT-V2.md). A client
+ * opts in with this header; without it a snapshot is complete or refused. */
+export const SYNC_V2_PAGES_HEADER = 'x-arbestra-sync-pages';
+export const SYNC_V2_SNAPSHOT_PAGE_REFERENCES = 4096;
+export const SYNC_V2_SNAPSHOT_MAX_PAGES = 64;
+const pageCursor = Type.String({ pattern: '^[A-Za-z0-9_-]{1,1024}$' });
 const scope = Type.Omit(SyncV2StreamSchema, ['epoch']);
 export const SyncV2ReadRequestSchema = Type.Object(
   {
@@ -444,10 +459,35 @@ export const SyncV2ReadRequestSchema = Type.Object(
     cursors: Type.Array(Type.Object({ ...SyncV2StreamSchema.properties, revision }, { additionalProperties: false }), {
       maxItems: 64,
     }),
+    /** Next page of a paged private snapshot, with the opaque cursor the
+     * previous page returned. Only the private scope is read. */
+    page: Type.Optional(Type.Object({ after: pageCursor }, { additionalProperties: false })),
   },
   { additionalProperties: false },
 );
 export type SyncV2ReadRequest = Static<typeof SyncV2ReadRequestSchema>;
+/** One page of a private snapshot too large for a single batch. The first
+ * page also carries every other requested scope, complete; each page is its
+ * own capture. Never applied alone: see applySyncV2SnapshotPages. */
+export const SyncV2SnapshotPageSchema = Type.Object(
+  {
+    protocol: Type.Literal(2),
+    worldId: id,
+    villageId: id,
+    generation: Type.Integer({ minimum: 0 }),
+    observedAt: time,
+    coverage: Type.Literal('scope-snapshot-page'),
+    next: Type.Union([pageCursor, Type.Null()]),
+    groups: Type.Array(
+      Type.Object({ ...group, fromRevision: revision, toRevision: revision }, { additionalProperties: false }),
+      { minItems: 1, maxItems: 64 },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type SyncV2SnapshotPage = Static<typeof SyncV2SnapshotPageSchema>;
+export const syncV2SnapshotPageIsValid = (value: unknown): value is SyncV2SnapshotPage =>
+  Value.Check(SyncV2SnapshotPageSchema, value);
 type Entity = SyncV2Change['upsert'][number];
 type Versioned = { revision: string; value: Entity | null };
 export interface SyncV2Scope {
@@ -475,6 +515,21 @@ const entityKey = (component: SyncV2Change['component'], entity: Entity) =>
           : (entity as { id: string }).id
   }`;
 const compare = (a: string, b: string) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
+const MAX_REVISION = 9223372036854775807n;
+const registryOf = (kind: SyncV2Batch['groups'][number]['stream']['kind']): readonly string[] =>
+  kind === 'village'
+    ? SYNC_V2_PRIVATE_COMPONENTS
+    : kind === 'spatial'
+      ? SYNC_V2_SPATIAL_COMPONENTS
+      : kind === 'knowledge'
+        ? SYNC_V2_KNOWLEDGE_COMPONENTS
+        : kind === 'manifest'
+          ? SYNC_V2_MANIFEST_COMPONENTS
+          : kind === 'offers'
+            ? SYNC_V2_OFFER_COMPONENTS
+            : kind === 'traffic'
+              ? SYNC_V2_TRAFFIC_COMPONENTS
+              : [];
 
 /** Validate every group before replacing anything. ACKs overlay keys; only a
  * complete delta/snapshot can advance a stream's canonical applied cursor. */
@@ -498,7 +553,7 @@ export function applySyncV2Batch(
     seen = new Set<string>();
   let changed = false;
   for (const group of input.groups) {
-    if (BigInt(group.fromRevision) > 9223372036854775807n || BigInt(group.toRevision) > 9223372036854775807n)
+    if (BigInt(group.fromRevision) > MAX_REVISION || BigInt(group.toRevision) > MAX_REVISION)
       return { kind: 'resync', state };
     // Covered/stale groups still have to be valid. Otherwise a malformed
     // companion could be silently skipped while another group is published.
@@ -512,20 +567,7 @@ export function applySyncV2Batch(
         validatedKeys.add(key);
       }
     }
-    const registry: readonly string[] =
-      group.stream.kind === 'village'
-        ? SYNC_V2_PRIVATE_COMPONENTS
-        : group.stream.kind === 'spatial'
-          ? SYNC_V2_SPATIAL_COMPONENTS
-          : group.stream.kind === 'knowledge'
-            ? SYNC_V2_KNOWLEDGE_COMPONENTS
-            : group.stream.kind === 'manifest'
-              ? SYNC_V2_MANIFEST_COMPONENTS
-              : group.stream.kind === 'offers'
-                ? SYNC_V2_OFFER_COMPONENTS
-                : group.stream.kind === 'traffic'
-                  ? SYNC_V2_TRAFFIC_COMPONENTS
-                  : [];
+    const registry = registryOf(group.stream.kind);
     if (
       !registry.length ||
       (group.stream.kind === 'village'
@@ -580,6 +622,113 @@ export function applySyncV2Batch(
     scopes.set(key, { epoch: group.stream.epoch, revision: cursor, base, effects });
   }
   if (!changed) return { kind: 'ignored', state };
+  return { kind: 'applied', state: { ...state, scopes } };
+}
+
+/** A paged snapshot, published as one state (docs/DESIGN-PAGINATION-SNAPSHOT-V2.md).
+ * Each page is its own capture: entities of a later page may be newer than
+ * the first page's revisions (the anchor). The pages are assembled at that
+ * anchor, then `delta` (anchor → now, one capture of every stream) brings
+ * every entity to a single version before anything replaces `state`.
+ * `restart`: the pages or the delta do not form one snapshot, read again
+ * from the first page. `resync`: a coherent snapshot this subscription
+ * generation cannot accept (replaced epoch, older revision). */
+export function applySyncV2SnapshotPages(
+  state: SyncV2State,
+  pages: readonly unknown[],
+  delta: unknown,
+): { kind: 'applied'; state: SyncV2State } | { kind: 'restart' | 'resync'; state: SyncV2State } {
+  const restart = { kind: 'restart' as const, state };
+  if (!pages.length || pages.length > SYNC_V2_SNAPSHOT_MAX_PAGES) return restart;
+  const village = `village:${state.villageId}`;
+  const assembled = new Map<string, { epoch: string; revision: string; base: Map<string, Entity> }>();
+  for (const [index, page] of pages.entries()) {
+    if (!Value.Check(SyncV2SnapshotPageSchema, page)) return restart;
+    if (page.worldId !== state.worldId || page.villageId !== state.villageId || page.generation !== state.generation)
+      return restart;
+    // Only the last page ends the chain.
+    if ((page.next === null) !== (index === pages.length - 1)) return restart;
+    const streams = new Set<string>();
+    for (const group of page.groups) {
+      const key = streamKey(group.stream);
+      const registry = registryOf(group.stream.kind);
+      if (
+        streams.has(key) ||
+        !registry.length ||
+        (group.stream.kind === 'village' ? key !== village : !state.subscribedScopes?.has(key)) ||
+        group.fromRevision !== '0' ||
+        BigInt(group.toRevision) > MAX_REVISION
+      )
+        return restart;
+      streams.add(key);
+      const components = new Set(group.changes.map((change) => change.component));
+      // A snapshot page carries values, never tombstones.
+      if (
+        components.size !== group.changes.length ||
+        group.changes.some((change) => !registry.includes(change.component) || change.remove.length)
+      )
+        return restart;
+      if (index === 0) {
+        // The first page lists the whole registry, like a complete snapshot.
+        if (components.size !== registry.length) return restart;
+        assembled.set(key, { epoch: group.stream.epoch, revision: group.toRevision, base: new Map() });
+      } else {
+        // Later pages continue the private stream only, in the anchor's epoch.
+        const anchor = assembled.get(key);
+        if (
+          key !== village ||
+          !anchor ||
+          anchor.epoch !== group.stream.epoch ||
+          compare(group.toRevision, anchor.revision) < 0
+        )
+          return restart;
+      }
+      const base = assembled.get(key)!.base;
+      for (const change of group.changes)
+        for (const entity of change.upsert) {
+          const entry = entityKey(change.component, entity);
+          if (base.has(entry)) return restart;
+          base.set(entry, entity);
+        }
+    }
+    if (index === 0 && !streams.has(village)) return restart;
+  }
+  // The catch-up delta starts at every anchor, in one capture.
+  if (
+    !Value.Check(SyncV2BatchSchema, delta) ||
+    delta.coverage !== 'delta' ||
+    delta.worldId !== state.worldId ||
+    delta.villageId !== state.villageId ||
+    delta.generation !== state.generation ||
+    delta.groups.length !== assembled.size
+  )
+    return restart;
+  for (const group of delta.groups) {
+    const anchor = assembled.get(streamKey(group.stream));
+    if (!anchor || anchor.epoch !== group.stream.epoch || group.fromRevision !== anchor.revision) return restart;
+  }
+  const provisional: SyncV2State = {
+    ...state,
+    scopes: new Map(
+      [...assembled].map(([key, scope]) => [
+        key,
+        { epoch: scope.epoch, revision: scope.revision, base: scope.base, effects: new Map() },
+      ]),
+    ),
+  };
+  const caught = applySyncV2Batch(provisional, delta);
+  if (caught.kind === 'resync') return restart;
+  // Replace like a scope snapshot: newer confirmations stay overlaid.
+  const scopes = new Map(state.scopes);
+  for (const [key, scope] of caught.state.scopes) {
+    const previous = state.scopes.get(key);
+    if (previous && (previous.epoch !== scope.epoch || compare(previous.revision, scope.revision) > 0))
+      return { kind: 'resync', state };
+    const effects = new Map<string, Versioned>();
+    for (const [entity, effect] of previous?.effects ?? [])
+      if (compare(effect.revision, scope.revision) > 0) effects.set(entity, effect);
+    scopes.set(key, { epoch: scope.epoch, revision: scope.revision, base: scope.base, effects });
+  }
   return { kind: 'applied', state: { ...state, scopes } };
 }
 
