@@ -222,6 +222,10 @@ export const ExtractionWorksiteTargetSchema = Type.Object({
    * pending target's designated trees not yet done are in this village's queue, for its
    * worksite's mode (`cut`, or `clear`: wood then stump). */
   treeIndices: Type.Optional(Type.Union([Type.Array(Type.Integer({ minimum: 0 })), Type.Null()])),
+  /** Trees of a wood target queued for clearing (slice 2e): their wood, then their stump.
+   * Absent: none, the others being queued for their wood only. A worksite in `clear` mode
+   * clears all its designated trees. */
+  clearTreeIndices: Type.Optional(Type.Array(Type.Integer({ minimum: 0 }))),
 });
 export const ExtractionWorksiteSchema = Type.Object({
   poolResource: Type.Optional(Type.Union([Type.Literal('wood'), Type.Literal('stone'), Type.Null()])),

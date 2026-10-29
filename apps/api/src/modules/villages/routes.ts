@@ -10,8 +10,14 @@ import { TerraformCommandSchema, TerraformChangedSchema, type TerraformCommand }
 import { observationCommitted } from '../admin/observation-actions.js';
 import { receiveExpedition, readExpeditionReceipts } from '../science/expeditions.js';
 import { ExpeditionReceiptSchema, type ExpeditionIntent } from '@arbestra/contracts';
-import { HarvestIntentSchema, HarvestReceiptSchema, type HarvestIntent } from '@arbestra/contracts';
+import {
+  HarvestCancelReceiptSchema,
+  HarvestIntentSchema,
+  HarvestReceiptSchema,
+  type HarvestIntent,
+} from '@arbestra/contracts';
 import { receiveHarvestIntent, readHarvestReceipts } from './harvest-submissions.js';
+import { cancelHarvestIntent } from './harvest-cancellations.js';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import {
@@ -439,6 +445,27 @@ export async function registerVillageRoutes(
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
       return receiveHarvestIntent(db, account.id, worldSlug, villageId, request.body as HarvestIntent);
+    },
+  );
+  // « Annuler » a gesture of the wood queue, idempotent by the gesture's commandId.
+  app.post(
+    '/api/worlds/:worldSlug/villages/:villageId/harvest-intents/:commandId/cancel',
+    {
+      schema: {
+        params: Type.Object({ ...VillageParametersSchema.properties, commandId: Type.String({ format: 'uuid' }) }),
+        response: { 200: HarvestCancelReceiptSchema },
+      },
+    },
+    async (request) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      const { worldSlug, villageId, commandId } = request.params as {
+        worldSlug: string;
+        villageId: string;
+        commandId: string;
+      };
+      const receipt = await cancelHarvestIntent(db, account.id, worldSlug, villageId, commandId);
+      observationCommitted(request);
+      return receipt;
     },
   );
   app.post(

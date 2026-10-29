@@ -8,6 +8,7 @@ it('covers command families without capturing previews, camera publications or r
     'buildings/:buildingId/upgrade',
     'buildings/:buildingId/discover-supplies',
     'harvest-intents',
+    'harvest-intents/:commandId/cancel',
     'worksites/:worksiteId',
     'extraction-pools',
     'population/gestures',

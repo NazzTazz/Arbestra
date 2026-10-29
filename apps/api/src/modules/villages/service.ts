@@ -30,9 +30,9 @@ import type {
   ExtractionWorksiteSelection,
 } from '@arbestra/contracts';
 import {
-  addedTrees,
   canonicalWoodTrees,
   designatedTrees,
+  queueContribution,
   exploitationAdmissionCap,
   travelDuration,
   refineTravelRoute,
@@ -3055,8 +3055,9 @@ export async function prepareWorksiteSelection(
     // Designated trees: in the player's order, never sorted.
     let treeIndices: number[] | null = null;
     const designation = details.deposit.resourceCode === 'wood' ? designations.get(featureId) : undefined;
+    let trees: Awaited<ReturnType<typeof readWoodlandTrees>> | undefined;
     if (designation) {
-      const trees = await readWoodlandTrees(tx, village.worldId, featureId);
+      trees = await readWoodlandTrees(tx, village.worldId, featureId);
       const { kept, unknown } = designatedTrees(
         designation,
         trees.all,
@@ -3084,17 +3085,28 @@ export async function prepareWorksiteSelection(
       .innerJoin('extractionWorksites as s', (join) =>
         join.onRef('s.worldId', '=', 't.worldId').onRef('s.id', '=', 't.worksiteId'),
       )
-      .select(['t.treeIndices', 's.poolResource'])
+      .select(['t.treeIndices', 't.clearTreeIndices', 's.poolResource'])
       .where('t.worldId', '=', economy.worldId)
       .where('t.villageId', '=', economy.villageId)
       .where('t.featureId', '=', featureId)
       .where('t.status', '=', 'pending')
       .executeTakeFirst();
     if (existing) {
-      // A case already in the wood queue gains the trees it does not hold yet.
+      // A case already in the wood queue gains the trees it does not hold yet;
+      // a clearing, those it does not clear yet (slice 2e).
+      const mode = request.mode === 'clear' ? 'clear' : 'cut';
+      const candidates =
+        mode === 'clear' && treeIndices === null
+          ? designatedTrees(
+              (trees ??= await readWoodlandTrees(tx, village.worldId, featureId)).all,
+              trees.all,
+              trees.records,
+              'clear',
+            ).kept
+          : [];
       const added =
         mergeWoodQueue && details.deposit.resourceCode === 'wood' && existing.poolResource === 'wood'
-          ? addedTrees(existing.treeIndices, treeIndices)
+          ? queueContribution(existing, mode, treeIndices, candidates)
           : [];
       if (added !== null && !added.length) {
         excluded.push({ featureId, reason: 'already-assigned' });

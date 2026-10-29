@@ -57,7 +57,7 @@ export function observationCommandKind(route: string): string | null {
   if (!route.startsWith('/api/worlds/:worldSlug/villages/:villageId/') || route.endsWith('/preview')) return null;
   const tail = route.split('/:villageId/')[1]!;
   if (
-    /^(buildings(?:\/:buildingId\/(?:upgrade|expansions|discover-supplies))?|harvest-intents|extraction-pools|market\/trades|processing|infrastructure|exploitation|science|leveling|terraform|population\/gestures|worksites\/:worksiteId)$/.test(
+    /^(buildings(?:\/:buildingId\/(?:upgrade|expansions|discover-supplies))?|harvest-intents(?:\/:commandId\/cancel)?|extraction-pools|market\/trades|processing|infrastructure|exploitation|science|leveling|terraform|population\/gestures|worksites\/:worksiteId)$/.test(
       tail,
     )
   )

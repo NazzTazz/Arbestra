@@ -1,22 +1,27 @@
 import { Value } from '@sinclair/typebox/value';
 import { expect, it } from 'vitest';
-import { HarvestIntentSchema } from './exploitation.js';
+import { HarvestCancelReceiptSchema, HarvestIntentSchema } from './exploitation.js';
 import { ExtractionSchema, StoneDepositSchema } from './villages.js';
 import {
   addedTrees,
   canonicalWoodTrees,
   cellTreeIndices,
   convertCutGrove,
+  designatedQueue,
   designatedTrees,
   mergedTrees,
   generatedTreeCount,
   nextStump,
   nextWoodLot,
   proceduralTreeCount,
+  queueContribution,
+  targetDesignations,
   treeWood,
+  withdrawGesture,
   woodlandTreeIndices,
   WOOD_LOT,
   WOOD_PER_TREE,
+  type QueueDesignation,
   type TreeRecord,
 } from './woodland-trees.js';
 
@@ -226,4 +231,88 @@ it('accepts designated trees and per-tree states in the contracts, and old paylo
       path: [],
     }),
   ).toBe(true);
+});
+
+// Slice 2e: the wood queue in cut or clear mode, a share per gesture.
+const share = (commandId: string | null, mode: 'cut' | 'clear', treeIndices: number[] | null): QueueDesignation => ({
+  commandId,
+  mode,
+  treeIndices,
+});
+
+it('derives a queued case from its shares: trees in order, clearing including cutting', () => {
+  expect(designatedQueue([share('a', 'cut', [2, 0]), share('b', 'clear', [1, 2])], [0, 1, 2, 3])).toEqual({
+    treeIndices: [2, 0, 1],
+    clearTreeIndices: [1, 2],
+  });
+  // A share of the whole case makes every tree queued; clearing it whole clears them all.
+  expect(designatedQueue([share('a', 'cut', [2]), share('b', 'clear', null)], [0, 1, 2])).toEqual({
+    treeIndices: null,
+    clearTreeIndices: [0, 1, 2],
+  });
+  // A target queued before shares were recorded is one share without gesture.
+  expect(targetDesignations({ designations: null, treeIndices: [3], clearTreeIndices: null })).toEqual([
+    share(null, 'cut', [3]),
+  ]);
+  expect(targetDesignations({ treeIndices: null, clearTreeIndices: [1] })).toEqual([
+    share(null, 'cut', null),
+    share(null, 'clear', [1]),
+  ]);
+});
+
+it('adds to a queued case what is not there yet: a clearing takes a cut tree further, a cut adds nothing to a clearing', () => {
+  const queue = { treeIndices: [2, 0], clearTreeIndices: [0] };
+  expect(queueContribution(queue, 'cut', [0, 2, 5], [])).toEqual([5]);
+  expect(queueContribution(queue, 'cut', [0], [])).toEqual([]);
+  expect(queueContribution(queue, 'clear', [0, 2], [])).toEqual([2]);
+  // Clearing the whole case: the trees not cleared yet, or the whole case when none is.
+  expect(queueContribution(queue, 'clear', null, [0, 1, 2])).toEqual([1, 2]);
+  expect(queueContribution({ treeIndices: [2], clearTreeIndices: null }, 'clear', null, [0, 1, 2])).toBeNull();
+  expect(queueContribution({ treeIndices: null, clearTreeIndices: null }, 'cut', [1], [])).toEqual([]);
+});
+
+it('withdraws a gesture from a case: its trees not taken leave, the other shares stay', () => {
+  const shares = [share(null, 'cut', [4]), share('a', 'cut', [2, 0]), share('b', 'clear', [0, 1])];
+  expect(withdrawGesture(shares, 'b', new Set([1]), [0, 1, 2, 4])).toEqual({
+    designations: [share(null, 'cut', [4]), share('a', 'cut', [2, 0]), share('b', 'clear', [1])],
+    found: true,
+  });
+  expect(withdrawGesture(shares, 'a', new Set(), [0, 1, 2, 4])).toEqual({
+    designations: [share(null, 'cut', [4]), share('b', 'clear', [0, 1])],
+    found: true,
+  });
+  // A share of the whole case keeps only its taken trees.
+  expect(withdrawGesture([share('c', 'cut', null)], 'c', new Set([3]), [1, 3])).toEqual({
+    designations: [share('c', 'cut', [3])],
+    found: true,
+  });
+  // Another gesture, or none recorded: nothing changes.
+  expect(withdrawGesture(shares, 'z', new Set(), [0]).found).toBe(false);
+  expect(withdrawGesture(shares, 'z', new Set(), [0]).designations).toEqual(shares);
+});
+
+it('accepts a clearing intent and checks the receipt of a cancellation', () => {
+  const commandId = '00000000-0000-4000-8000-000000000001',
+    featureId = '00000000-0000-4000-8000-000000000002';
+  expect(
+    Value.Check(HarvestIntentSchema, { commandId, gardens: [], wood: [featureId], woodMode: 'clear', stone: [] }),
+  ).toBe(true);
+  expect(
+    Value.Check(HarvestIntentSchema, { commandId, gardens: [], wood: [featureId], woodMode: 'burn', stone: [] }),
+  ).toBe(false);
+  expect(
+    Value.Check(HarvestCancelReceiptSchema, {
+      commandId,
+      trees: [
+        { featureId, treeIndex: 0, outcome: 'removed' },
+        { featureId, treeIndex: 1, outcome: 'in-progress', mode: 'clear' },
+        { featureId, treeIndex: 2, outcome: 'queued', mode: 'cut' },
+        { featureId, treeIndex: 3, outcome: 'not-queued' },
+      ],
+    }),
+  ).toBe(true);
+  expect(Value.Check(HarvestCancelReceiptSchema, { commandId, beforeQueue: true, trees: [] })).toBe(true);
+  expect(
+    Value.Check(HarvestCancelReceiptSchema, { commandId, trees: [{ featureId, treeIndex: 0, outcome: 'gone' }] }),
+  ).toBe(false);
 });

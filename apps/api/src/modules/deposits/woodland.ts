@@ -169,10 +169,11 @@ export type WoodWork =
   /** Nothing left to do on the designated trees for this mode. */
   | { kind: 'done' };
 
-/** Next work on a case: wood first, then (clearing only) its stumps one by one.
- * With `caseAvailable` (the case's free wood, as departures check it), a lot
- * never takes more than the case holds: admission and departure share one
- * bound, so a lot admitted is a lot that can leave. */
+/** Next work on a case: wood first, then the stumps to clear one by one: all
+ * designated trees in `clear` mode; in `cut` mode, those of `clearTrees` (a
+ * queued target mixing both, slice 2e). With `caseAvailable` (the case's free
+ * wood, as departures check it), a lot never takes more than the case holds:
+ * admission and departure share one bound, so a lot admitted is a lot that can leave. */
 export async function nextWoodWork(
   tx: Transaction<Database>,
   worldId: string,
@@ -180,6 +181,7 @@ export async function nextWoodWork(
   mode: 'cut' | 'clear',
   trees: WoodlandTrees,
   caseAvailable?: number,
+  clearTrees?: readonly number[] | null,
 ): Promise<WoodWork> {
   const lot = nextWoodLot(trees.designated, trees.records);
   if (lot) {
@@ -188,12 +190,16 @@ export async function nextWoodWork(
     return amount >= 1 ? { kind: 'lot', treeIndex: lot.treeIndex, amount } : { kind: 'wait' };
   }
   if (trees.designated.some((i) => treeWood(trees.records.get(i)).remaining > 0)) return { kind: 'wait' };
-  if (mode === 'cut') return { kind: 'done' };
-  const stump = nextStump(trees.designated, trees.records, await stumpsInProgress(tx, worldId, featureId));
+  const clearing =
+    mode === 'clear'
+      ? trees.designated
+      : clearTrees?.length
+        ? trees.designated.filter((i) => clearTrees.includes(i))
+        : [];
+  if (!clearing.length) return { kind: 'done' };
+  const stump = nextStump(clearing, trees.records, await stumpsInProgress(tx, worldId, featureId));
   if (stump !== null) return { kind: 'lot', treeIndex: stump, amount: 0 };
-  return trees.designated.some((i) => treeWood(trees.records.get(i)).state !== 'removed')
-    ? { kind: 'wait' }
-    : { kind: 'done' };
+  return clearing.some((i) => treeWood(trees.records.get(i)).state !== 'removed') ? { kind: 'wait' } : { kind: 'done' };
 }
 
 /** Reserves a lot on its tree and on the case. The caller holds the case lock;

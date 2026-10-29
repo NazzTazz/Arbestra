@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { sql, type Transaction } from 'kysely';
 import {
+  designatedQueue,
   extractionPoolCaps,
   extractionPoolSettings,
-  mergedTrees,
+  targetDesignations,
   type ExtractionPool,
   type ExtractionPoolCommand,
+  type QueueDesignation,
+  type WoodMode,
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import type { VillageEconomy } from '../villages/reconcile-economy.js';
 import { HttpError } from '../../errors.js';
 import { createWorksite, WAKE_EXTRACTION_WORKSITE_TASK } from './worksites.js';
+import { readWoodlandTrees } from './woodland.js';
 
 type Resource = 'wood' | 'stone';
 export async function ensureExtractionPool(tx: Transaction<Database>, ctx: VillageEconomy, resource: Resource) {
@@ -162,14 +167,28 @@ export async function wakeExtractionPool(tx: Transaction<Database>, ctx: Village
       .execute();
 }
 
-/** Queues targets in the resource's common queue. A wood case already queued
- * gains the newly designated trees after its own, in their order; a case
- * designated whole takes all of its trees (docs/SPEC-BOIS-ARBRE-UNITE.md). */
+/** The queue of a wood case from its shares; reads the case's trees only
+ * when a share clears it whole. */
+async function woodQueue(tx: Transaction<Database>, worldId: string, featureId: string, shares: QueueDesignation[]) {
+  const all = shares.some((share) => share.mode === 'clear' && share.treeIndices === null)
+    ? (await readWoodlandTrees(tx, worldId, featureId)).all
+    : [];
+  return designatedQueue(shares, all);
+}
+
+/** Queues targets in the resource's common queue. A wood target records the
+ * share of the gesture that queued it (slice 2e), so that cancelling a gesture
+ * withdraws its own trees only. A case already queued gains the newly
+ * designated trees after its own, in their order; a case designated whole
+ * takes all of its trees; a clearing takes further the trees queued for their
+ * wood (docs/SPEC-BOIS-ARBRE-UNITE.md). Without gesture, the share has no
+ * command: it is never withdrawn. */
 export async function appendPoolTargets(
   tx: Transaction<Database>,
   ctx: VillageEconomy,
   resource: Resource,
   targets: ReadonlyArray<string | { featureId: string; treeIndices?: number[] | null }>,
+  gesture: { commandId: string | null; mode: WoodMode } = { commandId: null, mode: 'cut' },
 ) {
   const pool = await ensureExtractionPool(tx, ctx, resource);
   await syncPoolSites(tx, ctx, pool);
@@ -184,7 +203,7 @@ export async function appendPoolTargets(
     .execute();
   const pending = await tx
     .selectFrom('extractionWorksiteTargets')
-    .select(['worksiteId', 'featureId', 'treeIndices'])
+    .select(['worksiteId', 'featureId', 'treeIndices', 'clearTreeIndices', 'designations'])
     .where('worldId', '=', ctx.worldId)
     .where('villageId', '=', ctx.villageId)
     .where(
@@ -199,20 +218,36 @@ export async function appendPoolTargets(
       ? { featureId: target, treeIndices: null }
       : { featureId: target.featureId, treeIndices: resource === 'wood' ? (target.treeIndices ?? null) : null },
   );
-  const fresh: typeof wanted = [];
+  const share = (treeIndices: number[] | null): QueueDesignation => ({
+    commandId: gesture.commandId,
+    mode: gesture.mode,
+    treeIndices,
+  });
+  const fresh: Array<
+    (typeof wanted)[number] & { clearTreeIndices: number[] | null; shares: QueueDesignation[] | null }
+  > = [];
   for (const target of wanted) {
     const queued = pending.find((t) => t.featureId === target.featureId);
     if (!queued) {
-      fresh.push(target);
+      const shares = resource === 'wood' ? [share(target.treeIndices)] : null;
+      const queue = shares ? await woodQueue(tx, ctx.worldId, target.featureId, shares) : null;
+      fresh.push({ ...target, clearTreeIndices: queue?.clearTreeIndices ?? null, shares });
       continue;
     }
     if (resource !== 'wood') continue;
-    // The merge keeps the queued trees first: the same length is the same list.
-    const merged = mergedTrees(queued.treeIndices, target.treeIndices);
-    if (merged === null ? queued.treeIndices === null : merged.length === queued.treeIndices?.length) continue;
+    // The queued trees stay first; a share that changes nothing is not kept.
+    const shares = [...targetDesignations(queued), share(target.treeIndices)];
+    const queue = await woodQueue(tx, ctx.worldId, target.featureId, shares);
+    if (
+      isDeepStrictEqual(queue, {
+        treeIndices: queued.treeIndices,
+        clearTreeIndices: queued.clearTreeIndices,
+      })
+    )
+      continue;
     await tx
       .updateTable('extractionWorksiteTargets')
-      .set({ treeIndices: merged })
+      .set({ ...queue, designations: JSON.stringify(shares) })
       .where('worldId', '=', ctx.worldId)
       .where('worksiteId', '=', queued.worksiteId)
       .where('featureId', '=', queued.featureId)
@@ -228,7 +263,8 @@ export async function appendPoolTargets(
     .where('worldId', '=', ctx.worldId)
     .where('worksiteId', '=', owner)
     .executeTakeFirstOrThrow();
-  for (const [i, { featureId, treeIndices }] of fresh.entries())
+  for (const [i, { featureId, treeIndices, clearTreeIndices, shares }] of fresh.entries()) {
+    const designations = shares ? JSON.stringify(shares) : null;
     await tx
       .insertInto('extractionWorksiteTargets')
       .values({
@@ -243,6 +279,8 @@ export async function appendPoolTargets(
         completedAt: null,
         reason: null,
         treeIndices,
+        clearTreeIndices,
+        designations,
       })
       .onConflict((c) =>
         c.columns(['worksiteId', 'featureId']).doUpdateSet({
@@ -254,9 +292,12 @@ export async function appendPoolTargets(
           reason: null,
           // A finished target queued again takes its new designation.
           treeIndices,
+          clearTreeIndices,
+          designations,
         }),
       )
       .execute();
+  }
   await wakeExtractionPool(tx, ctx, resource);
 }
 

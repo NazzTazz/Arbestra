@@ -150,6 +150,97 @@ export function mergedTrees(queued: readonly number[] | null, added: readonly nu
   return [...queued, ...(addedTrees(queued, added) ?? [])];
 }
 
+/** What a queued tree is for: its wood (`cut`), or its wood then its stump
+ * (`clear`). Clearing includes cutting (docs/SPEC-BOIS-ARBRE-UNITE.md). */
+export type WoodMode = 'cut' | 'clear';
+
+/** One gesture's share of a queued wood case (slice 2e): the trees its
+ * receipt accepted there, in its mode (null: every tree of the case). A null
+ * `commandId` is a share queued without a recorded gesture (before 2e, or by
+ * a caller without gesture): no cancellation withdraws it. */
+export interface QueueDesignation {
+  commandId: string | null;
+  mode: WoodMode;
+  treeIndices: number[] | null;
+}
+
+/** The shares of a queued target: its own record, or for a target queued
+ * before shares were recorded, its trees as shares without gesture. */
+export function targetDesignations(target: {
+  designations?: readonly QueueDesignation[] | null;
+  treeIndices: readonly number[] | null;
+  clearTreeIndices?: readonly number[] | null;
+}): QueueDesignation[] {
+  if (target.designations) return target.designations.map((d) => ({ ...d }));
+  const shares: QueueDesignation[] = [
+    { commandId: null, mode: 'cut', treeIndices: target.treeIndices ? [...target.treeIndices] : null },
+  ];
+  if (target.clearTreeIndices?.length)
+    shares.push({ commandId: null, mode: 'clear', treeIndices: [...target.clearTreeIndices] });
+  return shares;
+}
+
+/** The queue of a case from its shares, in their order: its trees (null:
+ * every tree of the case) and the trees to clear (null: none). A share that
+ * clears the whole case clears `all` of its trees. */
+export function designatedQueue(
+  designations: readonly QueueDesignation[],
+  all: readonly number[],
+): { treeIndices: number[] | null; clearTreeIndices: number[] | null } {
+  let trees: number[] | null = [];
+  const clearing: number[] = [],
+    known = new Set<number>();
+  for (const share of designations) {
+    trees = mergedTrees(trees, share.treeIndices);
+    if (share.mode === 'clear')
+      for (const index of share.treeIndices ?? all)
+        if (!known.has(index)) {
+          known.add(index);
+          clearing.push(index);
+        }
+  }
+  return { treeIndices: trees, clearTreeIndices: clearing.length ? clearing : null };
+}
+
+/** What a gesture adds to a queued case. Cutting: the trees not queued yet
+ * (`addedTrees`). Clearing: the trees not queued for clearing yet, a tree
+ * queued for its wood only being taken further; `candidates` are the trees a
+ * clearing of the whole case would take. Null: the whole case; empty: nothing. */
+export function queueContribution(
+  queue: { treeIndices: readonly number[] | null; clearTreeIndices: readonly number[] | null },
+  mode: WoodMode,
+  designated: readonly number[] | null,
+  candidates: readonly number[],
+): number[] | null {
+  if (mode === 'cut') return addedTrees(queue.treeIndices, designated);
+  const clearing = new Set(queue.clearTreeIndices ?? []);
+  if (designated === null && !clearing.size) return null;
+  return (designated ?? candidates).filter((index) => !clearing.has(index));
+}
+
+/** Withdraws a gesture from a queued case (slice 2e): its trees leave its
+ * shares, except those `kept` (a lot of the village works on them). Returns
+ * the shares left and whether the gesture had any share on this case. */
+export function withdrawGesture(
+  designations: readonly QueueDesignation[],
+  commandId: string,
+  kept: ReadonlySet<number>,
+  all: readonly number[],
+): { designations: QueueDesignation[]; found: boolean } {
+  let found = false;
+  const left: QueueDesignation[] = [];
+  for (const share of designations) {
+    if (share.commandId !== commandId) {
+      left.push({ ...share });
+      continue;
+    }
+    found = true;
+    const trees = (share.treeIndices ?? all).filter((index) => kept.has(index));
+    if (trees.length) left.push({ ...share, treeIndices: trees });
+  }
+  return { designations: left, found };
+}
+
 /** Next stump to remove when clearing, in the designated order: a tree cut to
  * nothing, without reservation, its stump still there and not already being
  * removed (`busy`). Null when no stump is free. */

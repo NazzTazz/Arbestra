@@ -522,13 +522,13 @@ export async function completeStoneExtractionAt(
       .executeTakeFirstOrThrow();
     const target = await tx
       .selectFrom('extractionWorksiteTargets')
-      .select(['status', 'treeIndices'])
+      .select(['status', 'treeIndices', 'clearTreeIndices'])
       .where('worksiteId', '=', extraction.worksiteId)
       .where('featureId', '=', extraction.featureId)
       .executeTakeFirstOrThrow();
     const afterDeposit = await readStoneDeposit(tx, worldId, extraction.featureId);
     // Wood: its designated trees cut to nothing (cutting) or removed down to
-    // their stumps (clearing), or the case cleared.
+    // their stumps (clearing, or the trees a queued target clears), or the case cleared.
     const finished =
       extraction.resourceCode === 'wood'
         ? afterDeposit.cleared ||
@@ -539,6 +539,8 @@ export async function completeStoneExtractionAt(
               extraction.featureId,
               site.mode === 'clear' ? 'clear' : 'cut',
               await readWoodlandTrees(tx, worldId, extraction.featureId, target.treeIndices),
+              undefined,
+              target.clearTreeIndices,
             )
           ).kind === 'done'
         : afterDeposit.remainingAmount <= 0;

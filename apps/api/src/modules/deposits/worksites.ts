@@ -74,6 +74,7 @@ export async function readWorksites(
           'extractionWorksiteTargets.status',
           'extractionWorksiteTargets.reason',
           'extractionWorksiteTargets.treeIndices',
+          'extractionWorksiteTargets.clearTreeIndices',
           'resourceDeposits.cellX',
           'resourceDeposits.cellY',
         ])
@@ -88,10 +89,13 @@ export async function readWorksites(
   const grouped = new Map<string, ExtractionWorksite['targets']>(),
     missions = new Map(active.map((r) => [r.worksiteId, r.extraction])),
     wood = new Set(rows.filter((row) => row.resourceCode === 'wood').map((row) => row.id));
-  for (const { worksiteId, treeIndices, ...target } of targets) {
+  for (const { worksiteId, treeIndices, clearTreeIndices, ...target } of targets) {
     const group = grouped.get(worksiteId) ?? [];
-    // Wood targets name their designated trees (null: every tree of the case).
-    group.push(wood.has(worksiteId) ? { ...target, treeIndices } : target);
+    // Wood targets name their designated trees (null: every tree of the case)
+    // and those queued for clearing (slice 2e).
+    group.push(
+      wood.has(worksiteId) ? { ...target, treeIndices, ...(clearTreeIndices ? { clearTreeIndices } : {}) } : target,
+    );
     grouped.set(worksiteId, group);
   }
   return rows.map((row) => ({
@@ -511,6 +515,7 @@ export async function admitWorksites(
               site.mode === 'clear' ? 'clear' : 'cut',
               await readWoodlandTrees(tx, economy.worldId, target.featureId, target.treeIndices),
               deposit.availableAmount,
+              target.clearTreeIndices,
             )
           : deposit.remainingAmount <= 0
             ? ({ kind: 'done' } as const)
@@ -696,8 +701,11 @@ export async function admitWorksites(
             thresholdReachedAt: owner.thresholdReachedAt,
             completedAt: null,
             reason: null,
-            // The designated trees follow their target to its new site.
+            // The designated trees, those to clear and the share of each
+            // gesture follow their target to its new site.
             treeIndices: owner.treeIndices,
+            clearTreeIndices: owner.clearTreeIndices,
+            designations: owner.designations ? JSON.stringify(owner.designations) : null,
           })
           .onConflict((c) =>
             c.columns(['worksiteId', 'featureId']).doUpdateSet({
@@ -707,6 +715,8 @@ export async function admitWorksites(
               completedAt: null,
               reason: null,
               treeIndices: owner.treeIndices,
+              clearTreeIndices: owner.clearTreeIndices,
+              designations: owner.designations ? JSON.stringify(owner.designations) : null,
             }),
           )
           .execute();

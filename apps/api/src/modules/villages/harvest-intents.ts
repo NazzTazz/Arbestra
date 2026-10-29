@@ -36,6 +36,8 @@ export function canonicalHarvestIntent(raw: HarvestIntent, village: { widthCells
     ].sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY),
     wood,
     ...(woodTrees ? { woodTrees } : {}),
+    // Cutting keeps the historical form of an intent.
+    ...(raw.woodMode === 'clear' ? { woodMode: 'clear' as const } : {}),
     stone: [...new Set(raw.stone.map((id) => id.toLowerCase()))].sort(),
   };
   return request;
@@ -77,6 +79,16 @@ export async function acceptHarvestIntent(
     if (!request.gardens.length && !request.wood.length && !request.stone.length)
       throw new HttpError(400, 'HARVEST_EMPTY', 'Aucune ressource désignée.');
     const receipt: HarvestReceipt = { commandId: request.commandId, accepted: [], refused: [] };
+    // A gesture cancelled before it was processed never queues its wood
+    // (slice 2e). Both sides decide under the village lock.
+    const cancelled = await tx
+      .selectFrom('harvestIntentCancellations')
+      .select('commandId')
+      .where('worldId', '=', village.worldId)
+      .where('villageId', '=', villageId)
+      .where('commandId', '=', request.commandId)
+      .executeTakeFirst();
+    const woodMode = request.woodMode ?? 'cut';
     const cohorts = await materializeCohorts(tx, village.worldId, villageId, economy.through);
     const cap = Math.max(
       1,
@@ -85,14 +97,15 @@ export async function acceptHarvestIntent(
         cohorts.reduce((n, c) => n + c.memberCount, 0),
       ),
     );
-    const { woodTrees: _designation, ...targets } = request;
+    const { woodTrees: _designation, woodMode: _mode, ...targets } = request;
     void _designation;
+    void _mode;
     const command: ExploitationRequest = {
       ...targets,
       workerCap: cap,
       durationMs: null,
       cohortId: null,
-      woodMode: 'cut',
+      woodMode,
       initialAdmission: 'allow-wait',
     };
     let gardenPlan: Awaited<ReturnType<typeof prepareExploitation>>['plan'] = null;
@@ -117,14 +130,20 @@ export async function acceptHarvestIntent(
       stone: [],
     };
     for (const family of ['wood', 'stone'] as const) {
-      // Wood: designated trees join the queue, even on a case already queued.
+      if (family === 'wood' && cancelled) {
+        receipt.refused.push(...request.wood.map((key) => ({ key, reason: 'cancelled' })));
+        command.wood = [];
+        continue;
+      }
+      // Wood: designated trees join the queue, even on a case already queued,
+      // for their wood or for clearing (slice 2e).
       const selection = await prepareWorksiteSelection(
         tx,
         village,
         economy,
         {
           commandId: request.commandId,
-          mode: family === 'wood' ? 'cut' : 'extract',
+          mode: family === 'wood' ? woodMode : 'extract',
           workerCap: 10,
           featureIds: request[family],
           ...(family === 'wood' && request.woodTrees ? { woodTrees: request.woodTrees } : {}),
@@ -154,6 +173,7 @@ export async function acceptHarvestIntent(
                 treeIndices: target.treeIndices,
               }
             : { amount: Math.max(0, deposit.remainingAmount) }),
+          ...(family === 'wood' && woodMode === 'clear' ? { woodMode } : {}),
         });
       }
     }
@@ -180,9 +200,16 @@ export async function acceptHarvestIntent(
           .executeTakeFirstOrThrow();
         orderId = order.id;
       }
+      // Each wood target records this gesture's share: a cancellation withdraws it.
       for (const family of ['wood', 'stone'] as const)
         if (queued[family].length) {
-          await appendPoolTargets(tx, economy, family, queued[family]);
+          await appendPoolTargets(
+            tx,
+            economy,
+            family,
+            queued[family],
+            family === 'wood' ? { commandId: request.commandId, mode: woodMode } : undefined,
+          );
         }
       if (gardenPlan)
         await tx

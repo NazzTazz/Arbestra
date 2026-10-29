@@ -1,4 +1,4 @@
-import { SyncV2ChangeSchema, travelDuration, type TravelCell } from '@arbestra/contracts';
+import { SyncV2ChangeSchema, travelDuration, type HarvestCancelReceipt, type TravelCell } from '@arbestra/contracts';
 import { Value } from '@sinclair/typebox/value';
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
@@ -23,6 +23,15 @@ import {
 import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
 import { admitVillageWorksites } from '../villages/worksite-admission.js';
 import { acceptHarvestIntent } from '../villages/harvest-intents.js';
+import { cancelHarvestIntent, cancelHarvestIntentIn } from '../villages/harvest-cancellations.js';
+import {
+  HARVEST_SUBMISSION_TASK,
+  processHarvestSubmission,
+  readHarvestReceipts,
+  receiveHarvestIntent,
+} from '../villages/harvest-submissions.js';
+import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
+import { readExtractionPools } from './extraction-pools.js';
 import { readSpatialChanges } from '../villages/sync-v2-spatial-readers.js';
 import { readTerrainProjection } from '../worlds/terrain.js';
 
@@ -1144,3 +1153,405 @@ it('publishes the chunk of a case to the journal when a tree falls and when a st
     await dropGrove(id);
   }
 }, 120_000);
+
+// Slice 2e (docs/PLAN-BOIS-ARBRE-TRANCHE-2.md): the wood queue in cut or clear
+// mode, consumed by the pool (the Chantier panel), and « Annuler » a gesture.
+const local = (tx: Transaction<Database>) =>
+  ({
+    transaction: () => ({ execute: <T>(run: (tx: Transaction<Database>) => Promise<T>) => run(tx) }),
+  }) as unknown as typeof db;
+/** A gesture on the trees of one case, in a mode. */
+const gesture = (
+  source: typeof db,
+  featureId: string,
+  commandId: string,
+  treeIndices: number[] | null,
+  woodMode?: 'cut' | 'clear',
+) =>
+  acceptHarvestIntent(source, DEVELOPMENT_IDS.account, 'aube', villageId, {
+    commandId,
+    gardens: [],
+    wood: [featureId],
+    ...(treeIndices ? { woodTrees: [{ featureId, treeIndices }] } : {}),
+    ...(woodMode ? { woodMode } : {}),
+    stone: [],
+  });
+/** The pending wood queue target of a case, for this village. */
+const queuedCase = (tx: Transaction<Database> | typeof db, featureId: string) =>
+  tx
+    .selectFrom('extractionWorksiteTargets as t')
+    .innerJoin('extractionWorksites as s', 's.id', 't.worksiteId')
+    .select(['t.treeIndices', 't.clearTreeIndices', 't.designations', 't.worksiteId'])
+    .where('t.worldId', '=', worldId)
+    .where('t.villageId', '=', villageId)
+    .where('t.featureId', '=', featureId)
+    .where('t.status', '=', 'pending')
+    .where('s.poolResource', '=', 'wood')
+    .executeTakeFirst();
+const poolSite = async (tx: Transaction<Database>) =>
+  (
+    await tx
+      .selectFrom('extractionWorksites')
+      .select('id')
+      .where('worldId', '=', worldId)
+      .where('villageId', '=', villageId)
+      .where('poolResource', '=', 'wood')
+      .orderBy('createdAt')
+      .orderBy('id')
+      .executeTakeFirstOrThrow()
+  ).id;
+const cancelIn = (tx: Transaction<Database>, commandId: string) =>
+  cancelHarvestIntentIn(tx, DEVELOPMENT_IDS.account, 'aube', villageId, commandId);
+
+it('queues trees for clearing through a gesture: the queue fells them, then removes their stumps only', async () => {
+  await fixture(async (tx, id, t) => {
+    const source = local(tx);
+    // Tree 2 to clear, then tree 0 for its wood only; tree 1 is not designated.
+    expect(await gesture(source, id, randomUUID(), [2], 'clear')).toMatchObject({
+      accepted: [{ key: id, resource: 'wood', amount: 500, treeIndices: [2], woodMode: 'clear' }],
+      refused: [],
+    });
+    expect((await gesture(source, id, randomUUID(), [0])).accepted[0]).not.toHaveProperty('woodMode');
+    expect(await queuedCase(tx, id)).toMatchObject({ treeIndices: [2, 0], clearTreeIndices: [2] });
+    // The village reads which trees are queued, and which for clearing.
+    const snapshot = await state(tx, DEVELOPMENT_IDS.account, 'aube', { worldId, villageId, through: t }, false, true);
+    expect(snapshot.village.worksites.find((site) => site.poolResource === 'wood')).toMatchObject({
+      mode: 'cut',
+      targets: [{ featureId: id, status: 'pending', treeIndices: [2, 0], clearTreeIndices: [2] }],
+    });
+    // The pool consumes the queue with its own team: wood first, in the designated order, then stump 2.
+    const lots = await runSite(tx, await poolSite(tx), t, 11);
+    expect(lotsOf(lots)).toEqual([...five(2), ...five(0), [2, 0]]);
+    expect(lots[10]!.workerCount).toBe(1);
+    expect((await tree(tx, id, 2))!.stumpRemovedAt).toEqual(lots[10]!.completesAt);
+    expect(await tree(tx, id, 0)).toMatchObject({ remainingAmount: 0, stumpRemovedAt: null });
+    expect(await tree(tx, id, 1)).toBeUndefined();
+    expect(await queuedCase(tx, id)).toBeUndefined();
+    expect(await readStoneDeposit(tx, worldId, id)).toMatchObject({ cleared: false, blocksCell: true });
+    expect(await occupied(tx, id)).toBe(1);
+  }, 3);
+}, 120_000);
+
+it('lets a clearing include a cut: a cut tree designated again is cleared, the reverse adds nothing', async () => {
+  await fixture(async (tx, id) => {
+    const source = local(tx),
+      clear2 = randomUUID();
+    await gesture(source, id, randomUUID(), [0, 1]);
+    expect(await queuedCase(tx, id)).toMatchObject({ treeIndices: [0, 1], clearTreeIndices: null });
+    // Tree 1 goes further (clearing), tree 2 joins for clearing.
+    expect((await gesture(source, id, clear2, [1, 2], 'clear')).accepted).toMatchObject([
+      { key: id, treeIndices: [1, 2], woodMode: 'clear' },
+    ]);
+    expect(await queuedCase(tx, id)).toMatchObject({ treeIndices: [0, 1, 2], clearTreeIndices: [1, 2] });
+    // Cutting a tree queued for clearing, or clearing it again: already planned.
+    expect((await gesture(source, id, randomUUID(), [2])).refused).toEqual([{ key: id, reason: 'already-assigned' }]);
+    expect((await gesture(source, id, randomUUID(), [1], 'clear')).refused).toEqual([
+      { key: id, reason: 'already-assigned' },
+    ]);
+    // Clearing the whole case takes only the trees not cleared yet.
+    expect((await gesture(source, id, randomUUID(), null, 'clear')).accepted).toMatchObject([
+      { key: id, treeIndices: [0], woodMode: 'clear' },
+    ]);
+    expect(await queuedCase(tx, id)).toMatchObject({ treeIndices: [0, 1, 2], clearTreeIndices: [1, 2, 0] });
+    // A replay of the clearing is the same command; with another mode it is another one.
+    expect((await gesture(source, id, clear2, [1, 2], 'clear')).accepted).toHaveLength(1);
+    await expect(gesture(source, id, clear2, [1, 2])).rejects.toMatchObject({ code: 'COMMAND_ID_CONFLICT' });
+  }, 3);
+}, 120_000);
+
+it('cancels a gesture: its trees not taken leave the queue, the tree of a lot under way stays; a replay changes nothing', async () => {
+  await fixture(async (tx, id, t) => {
+    const g = randomUUID();
+    await gesture(local(tx), id, g, [2, 0, 1]);
+    // The pool takes tree 2: its first lot is under way.
+    await admitWorksites(tx, { worldId, villageId, through: t }, village, async () => trail);
+    const running = await tx
+      .selectFrom('depositExtractions')
+      .selectAll()
+      .where('featureId', '=', id)
+      .where('status', '=', 'in-progress')
+      .execute();
+    expect(lotsOf(running)).toEqual([[2, 100]]);
+    const receipt = await cancelIn(tx, g);
+    expect(receipt).toEqual({
+      commandId: g,
+      trees: [
+        { featureId: id, treeIndex: 2, outcome: 'in-progress', mode: 'cut' },
+        { featureId: id, treeIndex: 0, outcome: 'removed' },
+        { featureId: id, treeIndex: 1, outcome: 'removed' },
+      ],
+    });
+    const queued = await queuedCase(tx, id);
+    expect(queued).toMatchObject({
+      treeIndices: [2],
+      clearTreeIndices: null,
+      designations: [{ commandId: g, mode: 'cut', treeIndices: [2] }],
+    });
+    // Replayed: the same receipt, and nothing written.
+    const rows = async () => ({
+      targets: await tx.selectFrom('extractionWorksiteTargets').selectAll().where('featureId', '=', id).execute(),
+      lots: await tx.selectFrom('depositExtractions').selectAll().where('featureId', '=', id).execute(),
+      cancellations: await tx.selectFrom('harvestIntentCancellations').selectAll().where('commandId', '=', g).execute(),
+    });
+    const before = await rows();
+    expect(before.cancellations).toHaveLength(1);
+    expect(await cancelIn(tx, g.toUpperCase())).toEqual(receipt);
+    expect(await rows()).toEqual(before);
+    // The lot under way is delivered, then tree 2 is finished; trees 0 and 1 stand.
+    await completeStoneExtractionAt(tx, worldId, villageId, running[0]!.id, running[0]!.completesAt);
+    const rest = await runSite(tx, queued!.worksiteId, running[0]!.completesAt, 4);
+    expect(lotsOf(rest)).toEqual(five(2).slice(1));
+    expect(await tree(tx, id, 2)).toMatchObject({ remainingAmount: 0 });
+    expect(await tree(tx, id, 0)).toBeUndefined();
+    expect(await tree(tx, id, 1)).toBeUndefined();
+    expect(await queuedCase(tx, id)).toBeUndefined();
+  }, 3);
+}, 120_000);
+
+it('withdraws only the trees of the gesture from a case another gesture queued first', async () => {
+  await fixture(async (tx, id, t) => {
+    const source = local(tx),
+      first = randomUUID(),
+      merged = randomUUID(),
+      last = randomUUID();
+    await gesture(source, id, first, [0]);
+    // Merged into the queued case: tree 0 taken further (clearing), tree 1 added.
+    await gesture(source, id, merged, [0, 1], 'clear');
+    await gesture(source, id, last, [2]);
+    expect(await queuedCase(tx, id)).toMatchObject({ treeIndices: [0, 1, 2], clearTreeIndices: [0, 1] });
+    // Tree 0 stays, back to its first gesture's cut; tree 1 leaves.
+    expect((await cancelIn(tx, merged)).trees).toEqual([
+      { featureId: id, treeIndex: 0, outcome: 'queued', mode: 'cut' },
+      { featureId: id, treeIndex: 1, outcome: 'removed' },
+    ]);
+    expect(await queuedCase(tx, id)).toMatchObject({
+      treeIndices: [0, 2],
+      clearTreeIndices: null,
+      designations: [
+        { commandId: first, mode: 'cut', treeIndices: [0] },
+        { commandId: last, mode: 'cut', treeIndices: [2] },
+      ],
+    });
+    expect((await cancelIn(tx, first)).trees).toEqual([{ featureId: id, treeIndex: 0, outcome: 'removed' }]);
+    expect(await queuedCase(tx, id)).toMatchObject({ treeIndices: [2] });
+    // The last gesture empties the case: it leaves the queue, no team is held or sent.
+    expect((await cancelIn(tx, last)).trees).toEqual([{ featureId: id, treeIndex: 2, outcome: 'removed' }]);
+    expect(await queuedCase(tx, id)).toBeUndefined();
+    expect(
+      await tx.selectFrom('extractionWorksiteTargets').select('status').where('featureId', '=', id).execute(),
+    ).toEqual([]);
+    await admitWorksites(tx, { worldId, villageId, through: t }, village, async () => trail);
+    expect(await tx.selectFrom('depositExtractions').select('id').where('featureId', '=', id).execute()).toEqual([]);
+    expect((await readExtractionPools(tx, worldId, villageId, ['wood']))[0]).toMatchObject({
+      mobilized: 0,
+      activeSites: 0,
+      pendingTargets: 0,
+    });
+    expect(
+      await tx
+        .selectFrom('populationCohorts')
+        .select('id')
+        .where('worldId', '=', worldId)
+        .where('villageId', '=', villageId)
+        .where('extractionId', 'is not', null)
+        .execute(),
+    ).toEqual([]);
+  }, 3);
+}, 120_000);
+
+it('refuses to cancel the gesture of another village, and leaves its queue untouched', async () => {
+  await fixture(async (tx, id, t) => {
+    const other = await neighbour(tx, t),
+      g = randomUUID();
+    await gesture(local(tx), id, g, [1]);
+    const before = await queuedCase(tx, id);
+    // The other player names the gesture from its own village: not found there.
+    await expect(cancelHarvestIntentIn(tx, other.account, 'aube', other.id, g)).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'HARVEST_INTENT_NOT_FOUND',
+    });
+    // Nor can it reach the village that owns the gesture.
+    await expect(cancelHarvestIntentIn(tx, other.account, 'aube', villageId, g)).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'VILLAGE_NOT_FOUND',
+    });
+    expect(await queuedCase(tx, id)).toEqual(before);
+    expect(
+      await tx.selectFrom('harvestIntentCancellations').select('commandId').where('commandId', '=', g).execute(),
+    ).toEqual([]);
+  }, 3);
+}, 60_000);
+
+it('cancels a gesture before the worker processes it: its wood is never queued', async () => {
+  await resetE2eState(url);
+  const { id } = await committedGrove();
+  const g = randomUUID();
+  try {
+    expect(
+      await receiveHarvestIntent(db, DEVELOPMENT_IDS.account, 'aube', villageId, {
+        commandId: g,
+        gardens: [],
+        wood: [id],
+        woodTrees: [{ featureId: id, treeIndices: [1, 0] }],
+        woodMode: 'clear',
+        stone: [],
+      }),
+    ).toMatchObject({ pending: true });
+    const receipt = await cancelHarvestIntent(db, DEVELOPMENT_IDS.account, 'aube', villageId, g);
+    expect(receipt).toEqual({
+      commandId: g,
+      beforeQueue: true,
+      trees: [
+        { featureId: id, treeIndex: 1, outcome: 'removed' },
+        { featureId: id, treeIndex: 0, outcome: 'removed' },
+      ],
+    });
+    // The worker comes afterwards: the intent is refused, nothing joins the queue.
+    await db.transaction().execute((tx) =>
+      processHarvestSubmission(tx, {
+        id: randomUUID(),
+        worldId,
+        taskType: HARVEST_SUBMISSION_TASK,
+        subjectId: randomUUID(),
+        payload: { villageId, commandId: g },
+        dueAt: new Date(),
+        availableAt: new Date(),
+        attempts: 0,
+        lastError: null,
+        completedAt: null,
+      } as unknown as ScheduledTask),
+    );
+    expect((await readHarvestReceipts(db, DEVELOPMENT_IDS.account, 'aube', villageId, [g]))[0]).toEqual({
+      commandId: g,
+      accepted: [],
+      refused: [{ key: id, reason: 'cancelled' }],
+    });
+    expect(await queuedCase(db, id)).toBeUndefined();
+    expect(await cancelHarvestIntent(db, DEVELOPMENT_IDS.account, 'aube', villageId, g)).toEqual(receipt);
+  } finally {
+    await resetE2eState(url);
+    await dropGrove(id);
+  }
+}, 60_000);
+
+/** A cancellation and the worker that takes the same tree: the first holds the
+ * village (barrier), the second waits for it in PostgreSQL, then both finish. */
+async function race(firstIs: 'worker' | 'cancel') {
+  await resetE2eState(url);
+  const { id } = await committedGrove();
+  const g = randomUUID();
+  await gesture(db, id, g, [1, 0]);
+  let release!: () => void, ready!: () => void, waiting!: (pid: number) => void;
+  const held = new Promise<void>((resolve) => (ready = resolve));
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const waiterPid = new Promise<number>((resolve) => (waiting = resolve));
+  const within = <T>(promise: Promise<T>) => {
+    let timer!: ReturnType<typeof setTimeout>;
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('cancellation concurrency timeout')), 10000);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  };
+  const pid = async (tx: Transaction<Database>) =>
+    (await tx.selectNoFrom(sql<number>`pg_backend_pid()`.as('pid')).executeTakeFirstOrThrow()).pid;
+  let holder = 0;
+  /** The worker's wake: the village, then its admission, held at its route search when first. */
+  const worker = (hold: boolean) =>
+    db.transaction().execute(async (tx) => {
+      if (hold) holder = await pid(tx);
+      else waiting(await pid(tx));
+      const economy = await beginVillageEconomy(tx, worldId, villageId);
+      await admitWorksites(tx, economy, village, async () => {
+        if (hold) {
+          ready();
+          await gate;
+        }
+        return trail;
+      });
+      return undefined;
+    });
+  const cancel = (hold: boolean) =>
+    db.transaction().execute(async (tx) => {
+      if (hold) holder = await pid(tx);
+      else waiting(await pid(tx));
+      const receipt = await cancelIn(tx, g);
+      if (hold) {
+        ready();
+        await gate;
+      }
+      return receipt;
+    });
+  let first: Promise<HarvestCancelReceipt | undefined> | undefined,
+    second: Promise<HarvestCancelReceipt | undefined> | undefined;
+  try {
+    first = firstIs === 'worker' ? worker(true) : cancel(true);
+    await within(held);
+    second = firstIs === 'worker' ? cancel(false) : worker(false);
+    const waiter = await within(waiterPid),
+      deadline = Date.now() + 5000;
+    let blocked = false;
+    while (Date.now() < deadline) {
+      blocked = (
+        await db
+          .selectNoFrom(sql<boolean>`${holder}=any(pg_blocking_pids(${waiter}))`.as('blocked'))
+          .executeTakeFirstOrThrow()
+      ).blocked;
+      if (blocked) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(blocked).toBe(true);
+    release();
+    const [a, b] = await within(Promise.all([first, second]));
+    return {
+      receipt: (firstIs === 'cancel' ? a : b)!,
+      lots: await db
+        .selectFrom('depositExtractions')
+        .select(['treeIndex', 'reservedAmount', 'status'])
+        .where('featureId', '=', id)
+        .execute(),
+      trees: await db
+        .selectFrom('woodlandTrees')
+        .select(['treeIndex', 'remainingAmount', 'reservedAmount'])
+        .where('featureId', '=', id)
+        .execute(),
+      deposit: await db
+        .selectFrom('woodlandDeposits')
+        .select(['remainingAmount', 'reservedAmount'])
+        .where('featureId', '=', id)
+        .executeTakeFirstOrThrow(),
+      queued: await queuedCase(db, id),
+      id,
+    };
+  } finally {
+    release?.();
+    await Promise.allSettled([first, second].filter((p) => p !== undefined));
+    await resetE2eState(url);
+    await dropGrove(id);
+  }
+}
+
+it('lets the worker win when it takes the tree first: the cancellation keeps that tree and withdraws the other', async () => {
+  const { receipt, lots, trees, deposit, queued, id } = await race('worker');
+  expect(lots).toEqual([{ treeIndex: 1, reservedAmount: '100', status: 'in-progress' }]);
+  expect(trees).toEqual([{ treeIndex: 1, remainingAmount: 500, reservedAmount: 100 }]);
+  expect(deposit).toEqual({ remainingAmount: '1000', reservedAmount: '100' });
+  expect(receipt.trees).toEqual([
+    { featureId: id, treeIndex: 1, outcome: 'in-progress', mode: 'cut' },
+    { featureId: id, treeIndex: 0, outcome: 'removed' },
+  ]);
+  expect(queued).toMatchObject({ treeIndices: [1] });
+}, 60_000);
+
+it('lets the cancellation win when it holds the village first: the worker then takes nothing', async () => {
+  const { receipt, lots, trees, deposit, queued, id } = await race('cancel');
+  expect(receipt.trees).toEqual([
+    { featureId: id, treeIndex: 1, outcome: 'removed' },
+    { featureId: id, treeIndex: 0, outcome: 'removed' },
+  ]);
+  expect(lots).toEqual([]);
+  expect(trees).toEqual([]);
+  expect(deposit).toEqual({ remainingAmount: '1000', reservedAmount: '0' });
+  expect(queued).toBeUndefined();
+}, 60_000);

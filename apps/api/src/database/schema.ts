@@ -377,6 +377,14 @@ export interface ExtractionWorksiteTargetsTable {
   reason: string | null;
   /** Designated trees of a wood target (064); null = every tree, RC1 order. */
   treeIndices: ColumnType<number[] | null, number[] | null | undefined, number[] | null>;
+  /** Trees of a wood target to clear (068); null = none. */
+  clearTreeIndices: ColumnType<number[] | null, number[] | null | undefined, number[] | null>;
+  /** Share of each gesture in a wood target (068); null before 068. */
+  designations: ColumnType<
+    import('@arbestra/contracts').QueueDesignation[] | null,
+    string | null | undefined,
+    string | null
+  >;
 }
 
 export interface ExtractionWorksiteCommandsTable {
@@ -568,6 +576,13 @@ export interface Database {
     receipt: JSONColumnType<import('@arbestra/contracts').HarvestReceipt>;
     orderId: string | null;
     createdAt: Timestamp;
+  };
+  harvestIntentCancellations: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    receipt: JSONColumnType<import('@arbestra/contracts').HarvestCancelReceipt>;
+    createdAt: Generated<Timestamp>;
   };
   villageStarterInstallations: {
     worldId: string;
