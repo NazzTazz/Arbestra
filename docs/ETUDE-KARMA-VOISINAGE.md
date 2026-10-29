@@ -168,6 +168,19 @@ Lecture seule ; lignes d'`origin/main` `5970fec`.
 - **Adaptations** : types d'unités (projection sur les 4 types Waar ou généralisation à N types) ; Oracle « aider à gagner » = modificateurs du défenseur, « limiter les pertes » = politique de conséquences asymétrique à créer (`compressionPercent` et `capturePercent` sont communs aux deux camps) ; pas de bâtiments ni de siège dans le moteur ; blessés et guérison côté population.
 - **Questions** : Tristan — combat instantané ou à échéance, rôle de l'Oracle, 4 types ou N types, dépendance Rust acceptée, blessés persistants, sandbox macro Arbestra. Astra — statut de fast-impact, binaire de référence, dette R1, WASM. Jean-Michel — correspondance des rôles, défenseur d'une interception, modificateurs des tours, contenu du rapport public d'un combat de convoi.
 
+## 4 nonies. Réponse d'Astra sur le moteur (29 octobre, acceptée par Claude-Opus)
+
+- **fast-impact** : sélection explicite dans la soufflerie (commit `c0f476f`, qui fait aussi demander l'ancien protocole au benchmark PHP/Rust). Parité PHP/Rust non démontrée ; recette finale par Tristan non établie. Le protocole des conséquences reste `sha256-binomial-tree/1`.
+- **Référence d'exécution** : pas le binaire local. Commit source (candidat `5970fec`) + `Cargo.lock` + features + compilateur et cible + empreinte de l'artefact, avec un corpus de combats rejoué sur l'artefact déployé, et l'artefact conservé. Une soufflerie Windows et un worker Linux partagent les sources, pas l'artefact ; Rust ne garantit pas `ln`/`exp`/`cos` identiques entre plateformes. Le résultat enregistré est celui appliqué ; le rejeu vérifie ; la comparaison entre runtimes est une preuve séparée.
+- **Raccord** : processus enfant persistant du worker via le CLI JSONL existant (il lit ses requêtes ligne à ligne et vide sa sortie à chaque réponse) ; adaptateur borné : corrélation, délai, plafond d'effectifs, erreurs explicites, reprise avec la même requête. WASM et TypeScript après seulement.
+- **Graine** : privée, tirée côté serveur, enregistrée une fois avec l'engagement, réutilisée à chaque reprise ; jamais dérivable de l'identifiant public (sinon un pillard pourrait anticiper l'issue).
+- **Types** : rôle ≠ classe. Garde, guetteur, escorte sont des affectations. Garder les 4 classes si elles servent le catalogue voulu par Tristan, sans reprendre les valeurs de Waar. Pas de non-combattant déguisé en soldat ; sort d'un convoi sans escorte à définir ; l'interception reste une agression.
+- **Oracle** : une atténuation asymétrique demanderait une politique de conséquences versionnée, utilisée aussi dans la soufflerie, avec le sort précis des pertes évitées.
+- **Interception** : le convoi et son escorte forment le camp défenseur, l'intercepteur l'attaquant ; l'efficacité défensive d'une escorte mobile se calibre à part.
+- **Tours** : renseignement seulement, aucun bonus de combat automatique ; une garnison ne participe que si une règle d'engagement l'y envoie.
+- **Rapports** filtrés par destinataire : exploitation (tout), participants (leurs effectifs, pertes, marchandises), observateurs (événement, lieu, identités effectivement identifiées, issue). La rupture d'un pacte est un événement diplomatique distinct.
+- **Premier cas de soufflerie proposé** : le pacifiste qui escorte ses pierres face au voisin tenté de sacrifier ses quatorze jours de protection.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
