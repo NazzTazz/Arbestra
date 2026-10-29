@@ -27,7 +27,7 @@ Avancent seuls : constructions, extensions, jardins, extractions, science, ateli
 
 A fait ; C1 fait côté serveur (503 `SYNC_SCOPE_TOO_LARGE`), sans `Retry-After` ni traitement client ; C2 largement fait (restent succès à 128, ancres du manifeste à 1 024) ; **C3 (pagination) non fait** ; **B (purges concurrentes) non fait**.
 
-À vérifier : `woodland_trees` (064-069) n'a pas de déclencheur V2 ; le retrait d'une souche ne signale que le journal V1 (`069:44-46`).
+Tranché le 29 octobre (`b4e9316`) : risque latent, pas un bug vivant. Toute écriture serveur sur `woodland_trees` met aussi à jour `woodland_deposits`, déjà publié. Un déclencheur V2 sur `woodland_trees` (migration 070) publie désormais la même référence, au cas où une ligne d'arbre changerait seule ; test d'intégration rouge avant, vert après.
 
 ## Références par village sur alpha (snapshot privé, limite 4 096)
 
@@ -44,7 +44,7 @@ Les bâtiments comptent deux fois (`buildings` et `restHousing`). Arkham illustr
 
 ## Ordre proposé
 
-1. Vérifier la publication V2 d'un retrait de souche (S).
+1. ~~Vérifier la publication V2 d'un retrait de souche (S).~~ Fait (`b4e9316`).
 2. Audit B et C1 côté client (S).
 3. Références : `restHousing` limité aux logements (S), puis pagination des snapshots (L, prioritaire vu Pinkystan à 46 %).
 4. Autonomie de l'énergie et du repos (M), puis lectures pures : bootstraps et flux sans réveil (S à M).
