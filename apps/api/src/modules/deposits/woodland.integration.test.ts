@@ -31,6 +31,8 @@ import {
   receiveHarvestIntent,
 } from '../villages/harvest-submissions.js';
 import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
+import { buildApp } from '../../app.js';
+import { hashSessionToken } from '../../security/sessions.js';
 import { readExtractionPools } from './extraction-pools.js';
 import { readSpatialChanges } from '../villages/sync-v2-spatial-readers.js';
 import { readTerrainProjection } from '../worlds/terrain.js';
@@ -1555,3 +1557,54 @@ it('lets the cancellation win when it holds the village first: the worker then t
   expect(deposit).toEqual({ remainingAmount: '1000', reservedAmount: '0' });
   expect(queued).toBeUndefined();
 }, 60_000);
+
+it('serves the cancellation on its route, with its receipt and the same receipt on a replay', async () => {
+  await resetE2eState(url);
+  const { id } = await committedGrove();
+  const g = randomUUID(),
+    token = randomUUID();
+  await db
+    .insertInto('sessions')
+    .values({
+      accountId: DEVELOPMENT_IDS.account,
+      tokenHash: hashSessionToken(token),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    })
+    .execute();
+  const app = await buildApp(
+    {
+      databaseUrl: url,
+      host: '127.0.0.1',
+      port: 0,
+      isProduction: false,
+      cookieName: 'arbestra_session',
+      sessionTtlDays: 30,
+      constructionDurationOverrideMs: null,
+      scheduledTaskPollIntervalMs: 250,
+      expeditionWorkerEnabled: false,
+    },
+    db,
+  );
+  try {
+    await app.ready();
+    await gesture(db, id, g, [1], 'clear');
+    const cancel = (commandId: string, village: string = villageId) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/worlds/aube/villages/${village}/harvest-intents/${commandId}/cancel`,
+        cookies: { arbestra_session: token },
+      });
+    const first = await cancel(g);
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ commandId: g, trees: [{ featureId: id, treeIndex: 1, outcome: 'removed' }] });
+    expect((await cancel(g)).json()).toEqual(first.json());
+    expect((await cancel(randomUUID())).json()).toMatchObject({ code: 'HARVEST_INTENT_NOT_FOUND' });
+    expect((await cancel(g, randomUUID())).statusCode).toBe(404);
+    expect((await cancel('not-a-gesture')).statusCode).toBe(400);
+  } finally {
+    await app.close();
+    await db.deleteFrom('sessions').where('tokenHash', '=', hashSessionToken(token)).execute();
+    await resetE2eState(url);
+    await dropGrove(id);
+  }
+}, 120_000);

@@ -160,7 +160,9 @@ async function withdraw(
     if (target?.designations) {
       const left = withdrawGesture(target.designations, commandId, taken, trees.all);
       found = left.found;
-      if (found && !left.designations.length) {
+      // A lot of the village on the case keeps its target until it is delivered
+      // (its completion reads the target); an empty one then completes.
+      if (found && !left.designations.length && !taken.size) {
         // Nothing left: the case leaves the queue, no empty target waits for people.
         await tx
           .deleteFrom('extractionWorksiteTargets')
