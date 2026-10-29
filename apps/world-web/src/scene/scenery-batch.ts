@@ -13,14 +13,15 @@ export interface SceneryPart {
   scaling: Vector3;
   rotation: Vector3;
 }
-export function cloneWoodland(source: Mesh, name: string, transforms: Float32Array): Mesh {
+/** A grove mesh from its kit piece; `staticBuffer` false keeps its instances writable one by one. */
+export function cloneWoodland(source: Mesh, name: string, transforms: Float32Array, staticBuffer = true): Mesh {
   const mesh = source.clone(name)!;
   // Babylon stores world0..world3 on Geometry, not on the mesh. Clones must
   // own their geometry before installing different thin-instance matrices.
   mesh.makeGeometryUnique();
   mesh.setEnabled(true);
   mesh.isPickable = false;
-  mesh.thinInstanceSetBuffer('matrix', transforms, 16, true);
+  mesh.thinInstanceSetBuffer('matrix', transforms, 16, staticBuffer);
   mesh.thinInstanceRefreshBoundingInfo();
   return mesh;
 }

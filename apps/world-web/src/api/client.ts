@@ -63,6 +63,25 @@ export async function sendHarvestIntent(
     ),
   );
 }
+/** « Annuler » a harvest gesture's wood (slice 2e): idempotent, the first receipt is replayed. */
+export async function cancelHarvestIntent(
+  slug: string,
+  villageId: string,
+  commandId: string,
+): Promise<import('@arbestra/contracts').HarvestCancelReceipt> {
+  return parseResponse(
+    await fetch(
+      '/api/worlds/' +
+        encodeURIComponent(slug) +
+        '/villages/' +
+        encodeURIComponent(villageId) +
+        '/harvest-intents/' +
+        encodeURIComponent(commandId) +
+        '/cancel',
+      { signal: AbortSignal.timeout(15000), method: 'POST', credentials: 'same-origin' },
+    ),
+  );
+}
 import { randomUUID } from '../random-uuid';
 import { villageRequestGeneration } from './village-sync';
 import { SYNC_V2_VILLAGE } from './sync-v2-initial';

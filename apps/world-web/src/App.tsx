@@ -82,6 +82,7 @@ import { type GameNotification } from './ui/NotificationStack';
 import { OracleJournal } from './ui/OracleJournal';
 import { useOracleHint } from './ui/useOracleHint';
 import { BuildingPanel, DepositPanel, WorksitePanel } from './ui/PlayerPanels';
+import { HarvestCancelButton, WoodModeBubble, WoodModeIndicator } from './ui/WoodGestureHud';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
@@ -138,6 +139,7 @@ type ConstructionIntentState = 'idle' | 'submitting' | 'error' | 'uncertain';
 const pendingExploitationKey = (villageId: string) => `arbestra:pending-exploitation:${worldSlug}:${villageId}`;
 const pendingConstructionKey = (villageId: string) => `arbestra:pending-construction:${worldSlug}:${villageId}`;
 const NO_PENDING_HARVESTS: Cell[] = [];
+const NO_PENDING_TREES: Array<{ featureId: string; treeIndex: number | null }> = [];
 
 function gardenReady(garden: Garden, serverNow: number): number {
   return garden.plots.reduce(
@@ -546,6 +548,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     state,
     scene: terrainRef,
     slug: worldSlug,
+    woodMode: exploitationSettings.woodMode,
     enabled:
       worldMode === 'exploitation' &&
       exploitationCategory === 'exploit' &&
@@ -556,6 +559,33 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       !uncertainRequest.current,
     onAccepted: () => markOracleProgress(),
   });
+  // The wood tool (docs/SPEC-GRAMMAIRE-GESTUELLE.md): its mode shows while it is in use.
+  const woodToolActive =
+    worldMode === 'exploitation' &&
+    exploitationCategory === 'exploit' &&
+    harvest.filter === 'wood' &&
+    !paletteCollapsed &&
+    terrainView === 'village' &&
+    !uncertainRequest.current;
+  const [woodModeBubble, setWoodModeBubble] = useState<{
+    mode: 'cut' | 'clear';
+    x: number;
+    y: number;
+    at: number;
+  } | null>(null);
+  /** A long press switches cutting and clearing, globally; it applies to the wood tool only. */
+  function toggleWoodMode(point: { x: number; y: number }): boolean {
+    if (!woodToolActive) return false;
+    const mode = exploitationSettings.woodMode === 'clear' ? 'cut' : 'clear';
+    setExploitationSettings((current) => ({ ...current, woodMode: mode }));
+    setWoodModeBubble({ mode, x: point.x, y: point.y, at: Date.now() });
+    try {
+      navigator.vibrate?.(30);
+    } catch {
+      /* Vibration is optional. */
+    }
+    return true;
+  }
   const chooseExploitation = (choice: ExploitationChoice) => {
     cancelWorldGesture();
     closePanels();
@@ -1460,7 +1490,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       toggleHud();
       return;
     }
-    if (mode !== 'exploitation') setExploitationSettings((current) => ({ ...current, woodMode: 'cut' }));
+    // The wood mode (cutting or clearing) is kept for the session (docs/SPEC-GRAMMAIRE-GESTUELLE.md §3).
     cancelDraft();
     closePanels();
     setShowScience(false);
@@ -1485,7 +1515,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     }
   }
   function changeView(view: TerrainViewMode) {
-    if (view !== 'village') setExploitationSettings((current) => ({ ...current, woodMode: 'cut' }));
     setTerrainView(view);
     cancelDraft();
     closePanels();
@@ -1988,7 +2017,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             serverOffsetMs={serverOffsetMs}
             terrainRef={terrainRef}
             pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : NO_PENDING_HARVESTS}
-            harvestWoodMode={worldMode === 'exploitation' ? exploitationSettings.woodMode : 'cut'}
+            pendingHarvestTrees={worldMode === 'exploitation' ? harvest.pendingTrees : NO_PENDING_TREES}
+            harvestWoodMode={woodToolActive ? exploitationSettings.woodMode : 'cut'}
+            onWoodModeToggle={toggleWoodMode}
             highlightedSiteIds={highlightedSiteIds}
             constructionMode={
               !paletteCollapsed &&
@@ -2037,10 +2068,10 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             onAreaGesture={
               starterActive ? (_first, last, commit) => starter!.onGesture(last, commit) : handleAreaGesture
             }
-            onGardenHarvest={(cell, fresh, previewOnly) =>
+            onGardenHarvest={(cell, fresh, previewOnly, tree) =>
               uncertainRequest.current
                 ? collectExploitation(cell, fresh, previewOnly)
-                : harvest.collect(cell, fresh, previewOnly)
+                : harvest.collect(cell, fresh, previewOnly, tree)
             }
             onWorldGestureCancelled={cancelWorldGesture}
             onSiteSelected={(id, anchor, inspect) => {
@@ -2101,6 +2132,16 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           onChoose={(mode) => chooseMode(mode, true)}
         />
         <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef} />
+        {woodToolActive && <WoodModeIndicator mode={exploitationSettings.woodMode} />}
+        <WoodModeBubble bubble={woodModeBubble} />
+        {worldMode === 'exploitation' && terrainView === 'village' && (
+          <HarvestCancelButton
+            gesture={harvest.lastGesture}
+            result={harvest.cancelResult}
+            onCancel={harvest.cancelLast}
+            onDismiss={harvest.dismissCancel}
+          />
+        )}
         {worldMode === 'exploitation' &&
           terrainView === 'village' &&
           !paletteCollapsed &&
@@ -2452,6 +2493,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         {menuAnchor && selectedFeatureId && worldMode === 'exploitation' ? (
           <WorldContextMenu anchor={menuAnchor}>
             <DepositPanel
+              trees={terrainRef.current?.groveTrees(selectedFeatureId) ?? null}
               details={depositDetails}
               unmapped={depositUnmapped}
               loading={depositLoading}

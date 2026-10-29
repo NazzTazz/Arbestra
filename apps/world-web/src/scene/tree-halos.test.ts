@@ -5,7 +5,15 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { vertexSurface, woodlandTrees } from '@arbestra/contracts';
 import { groveSlots } from './grove-trees';
 import type { NaturalFeature, VillageState } from '@arbestra/contracts';
-import { groveHalo, groveHaloTrees, TreeHalos, TREE_HALO_LIFT, treeHaloRadius, type TreeHaloGrove } from './tree-halos';
+import {
+  groveHalo,
+  groveHaloTrees,
+  TreeHalos,
+  TREE_HALO_LIFT,
+  treeHaloRadius,
+  treeHalos,
+  type TreeHaloGrove,
+} from './tree-halos';
 import { HALO_MARKER, haloHalfSize } from './halo-marker';
 import { RESOURCE_HALO_COLOURS } from './resource-halos';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
@@ -385,5 +393,57 @@ it('carries the zoom fade as a uniform and frees its material', () => {
   } finally {
     f.store.dispose();
     f.scene.dispose();
+  }
+});
+
+it('validates one tree on its own, and keeps a resting frame O(1) however many trees are offered', () => {
+  const f = fixture();
+  try {
+    // 400 trees offered, one entry each (treeHalos), in a hundred groves.
+    const slots = (id: string, x: number) =>
+      groveSlots({
+        ...grove({ id, cellX: x, cellY: 31 }),
+        rc1: {
+          trees: syntheticGrove(id, x, 4).trees.map((t) => ({ x: t.x, y: t.y, elevation: 5, size: 1, crown: 1 })),
+          rocks: [],
+        },
+      });
+    const groves = Array.from({ length: 100 }, (_, i) => ({
+      id: `g${i}`,
+      x: 2 + (i % 60),
+      slots: slots(`g${i}`, 2 + (i % 60)),
+    }));
+    const offered = groves.flatMap((g) => treeHalos({ id: g.id, cellX: g.x, cellY: 31 }, g.slots, 32));
+    expect(offered).toHaveLength(400);
+    f.halos.setAvailable(offered);
+    f.settle();
+    expect(f.halos.instanceCount).toBe(400);
+    const passes = f.halos.passes,
+      rebuilds = f.halos.rebuilds;
+    for (let frame = 0; frame < 100; frame++) {
+      f.tick();
+      expect(f.halos.instanceWrites).toBe(0);
+    }
+    // At rest, a frame no longer walks the 400 entries: only the clock advances.
+    expect(f.halos.passes).toBe(passes);
+    // The overlay offers the same trees again every 700 ms: still nothing to do.
+    f.halos.setAvailable([...offered]);
+    f.tick();
+    expect(f.halos.passes).toBe(passes);
+    // One tree touched: its own marker validates, no other instance is written, no rebuild.
+    f.halos.setPending([offered[42]!]);
+    f.tick();
+    expect(f.halos.instanceWrites).toBe(1);
+    expect(f.halos.rebuilds).toBe(rebuilds);
+    expect(f.halos.stateAt(42).validatedAt).not.toBeNull();
+    expect(f.halos.stateAt(41).validatedAt).toBeNull();
+    expect(f.halos.stateAt(43).validatedAt).toBeNull();
+    // Once its flash is over, the frames are O(1) again.
+    for (let frame = 0; frame < Math.ceil(HALO_MARKER.flashMs / 40) + 12; frame++) f.tick();
+    const after = f.halos.passes;
+    for (let frame = 0; frame < 20; frame++) f.tick();
+    expect(f.halos.passes).toBe(after);
+  } finally {
+    f.dispose();
   }
 });

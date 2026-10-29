@@ -14,6 +14,8 @@ import { randomUUID } from '../random-uuid';
 import { BuildingThumbnail } from './BuildingThumbnail';
 import { HudIntentQueue, hudFromVillage, requestedPools, canAdjustPool } from './hud-intents';
 import './workforce-hud.css';
+import { woodQueueCounts } from '../scene/wood-queue';
+import { woodQueueLine } from './PlayerPanels';
 
 type Group = 'resting' | 'idle' | 'working';
 type Source = Group | 'carrots';
@@ -314,6 +316,7 @@ export function WorkforceHud({
           {(view === 'pools' ? (['wood', 'stone'] as const) : [view]).map((resource) => (
             <PoolControls
               key={resource}
+              queue={resource === 'wood' ? woodPoolQueue(state) : ''}
               pool={pools.find((p) => p.resource === resource)!}
               confirmed={confirmed.extractionPools.find((p) => p.resource === resource)!}
               pending={intentions.filter((i) => i.kind === 'pool' && i.command.resource === resource).length}
@@ -336,13 +339,29 @@ export function WorkforceHud({
   );
 }
 
+/** The trees the wood pool's queue holds, to cut and to clear (slice 2e). */
+function woodPoolQueue(state: VillageState): string {
+  const total = { cut: 0, clear: 0, wholeCases: 0 };
+  for (const site of state.village.worksites)
+    if (site.poolResource === 'wood') {
+      const counts = woodQueueCounts(site);
+      total.cut += counts.cut;
+      total.clear += counts.clear;
+      total.wholeCases += counts.wholeCases;
+    }
+  return woodQueueLine(total);
+}
+
 function PoolControls({
   pool,
+  queue = '',
   confirmed,
   pending,
   canAdjust,
   onCommand,
 }: {
+  /** What the queue holds, in trees (wood). */
+  queue?: string;
   pool: ExtractionPool;
   confirmed: ExtractionPool;
   pending: number;
@@ -361,6 +380,7 @@ function PoolControls({
           {pool.pendingTargets === 1 ? '' : 's'}
         </small>
       </header>
+      {queue && <p className="extraction-pool-queue">{queue}</p>}
       <img
         className="extraction-pool-art"
         src={`/hud/${pool.resource === 'wood' ? 'woodcutters' : 'stonecutters'}.png`}

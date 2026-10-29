@@ -55,7 +55,7 @@ function feature(
   };
 }
 
-it('gives wood a halo per tree and the other resources a halo per cell', () => {
+it('gives wood a halo per tree, one entry each, and the other resources a halo per cell', () => {
   const wood = feature('wood', 100, 100, 5),
     stone = feature('stone', 101, 100);
   const { cells, groves } = resourceOverlay({
@@ -74,9 +74,38 @@ it('gives wood a halo per tree and the other resources a halo per cell', () => {
     { ...stone, resource: 'stone' },
     { cellX: 90, cellY: 90, garden: true, resource: 'carrot' },
   ]);
-  expect(groves).toHaveLength(1);
+  expect(groves).toHaveLength(5);
   expect(groves[0]).toMatchObject({ featureId: wood.id, cellX: 100, cellY: 100, anchor: { cellX: 96, cellY: 96 } });
-  expect(groves[0]!.trees.map((t) => [t.x, t.y])).toEqual(wood.rc1!.trees.map((t) => [t.x, t.y]));
+  expect(groves.map((g) => g.key)).toEqual([0, 1, 2, 3, 4].map((slot) => `${wood.id}:${slot}`));
+  expect(groves.flatMap((g) => g.trees.map((t) => [t.x, t.y]))).toEqual(wood.rc1!.trees.map((t) => [t.x, t.y]));
+});
+
+it('offers stumps to clear, and leaves out the trees the queue already holds for that mode', () => {
+  const wood = feature('wood', 100, 100, 3, {
+    availableAmount: 0,
+    trees: [0, 1, 2].map((treeIndex) => ({
+      treeIndex,
+      remainingAmount: 0,
+      reservedAmount: 0,
+      felledAt: '2026-10-29T10:00:00.000Z',
+      stumpRemoved: treeIndex === 2,
+    })),
+  });
+  wood.rc1 = { ...wood.rc1!, trees: wood.rc1!.trees.map((t, index) => ({ ...t, index })) };
+  const offer = (mode: 'cut' | 'clear', queued: Record<number, 'cut' | 'clear'> = {}) =>
+    resourceOverlay({
+      gardens: [],
+      features: [wood],
+      shown: () => true,
+      target: { cellX: 100, cellY: 100 },
+      world,
+      wood: { mode, queued: (_id, treeIndex) => (treeIndex === null ? null : (queued[treeIndex] ?? null)) },
+    }).groves.map((g) => g.key);
+  // Stumps only: nothing to cut; both stumps still there to clear, not the removed one.
+  expect(offer('cut')).toEqual([]);
+  expect(offer('clear')).toEqual([`${wood.id}:0`, `${wood.id}:1`]);
+  // A stump queued for clearing is not offered again; one queued for its wood may be taken further.
+  expect(offer('clear', { 0: 'clear', 1: 'cut' })).toEqual([`${wood.id}:1`]);
 });
 
 it('keeps groves whole, nearest the camera target first, until the tree budget is spent', () => {
@@ -92,7 +121,8 @@ it('keeps groves whole, nearest the camera target first, until the tree budget i
     world,
     treeCap: 25,
   });
-  expect(groves.map((g) => g.featureId)).toEqual([farAcrossTheSeam.id, near.id]);
+  expect([...new Set(groves.map((g) => g.featureId))]).toEqual([farAcrossTheSeam.id, near.id]);
+  expect(groves).toHaveLength(20);
   // The nearest grove is always offered, even when it alone exceeds the budget.
   expect(
     resourceOverlay({
@@ -103,7 +133,7 @@ it('keeps groves whole, nearest the camera target first, until the tree budget i
       world,
       treeCap: 3,
     }).groves,
-  ).toHaveLength(1);
+  ).toHaveLength(10);
 });
 
 it('leaves out cells whose terrain is not on screen, and caps the cell halos', () => {
@@ -120,12 +150,24 @@ it('leaves out cells whose terrain is not on screen, and caps the cell halos', (
   expect(groves).toEqual([]);
 });
 
-it('reads the grove a woodland thin instance belongs to', () => {
+it('reads the grove a woodland thin instance belongs to, and the tree it draws', () => {
   const metadata = { instanceFeatureIds: ['grove-a', 'grove-a'], featureId: 'grove-a', cellX: 12, cellY: 34 };
   expect(pickedGrove({ pickedMesh: { metadata }, thinInstanceIndex: 1 })).toEqual({
     featureId: 'grove-a',
     hint: { cellX: 12, cellY: 34 },
   });
+  expect(
+    pickedGrove({
+      pickedMesh: { metadata: { ...metadata, instanceSlots: [0, 1], instanceTrees: [40, null] } },
+      thinInstanceIndex: 0,
+    }),
+  ).toEqual({ featureId: 'grove-a', hint: { cellX: 12, cellY: 34 }, slot: 0, treeIndex: 40 });
+  expect(
+    pickedGrove({
+      pickedMesh: { metadata: { ...metadata, instanceSlots: [0, 1], instanceTrees: [40, null] } },
+      thinInstanceIndex: 1,
+    }),
+  ).toMatchObject({ slot: 1, treeIndex: null });
   expect(pickedGrove({ pickedMesh: { metadata }, thinInstanceIndex: -1 })).toBeNull();
   expect(pickedGrove({ pickedMesh: { metadata }, thinInstanceIndex: 5 })).toBeNull();
   expect(pickedGrove({ pickedMesh: null, thinInstanceIndex: 0 })).toBeNull();

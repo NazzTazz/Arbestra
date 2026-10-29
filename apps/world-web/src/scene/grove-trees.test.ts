@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { groveSlots, treePieceData, treeVariant } from './grove-trees';
+import type { NaturalFeature, WoodlandTreeState } from '@arbestra/contracts';
+import { groveSlots, treePieceData, treeVariant, woodlandSignature } from './grove-trees';
 
-const grove = (remainingAmount: number, cutAmount: number, cleared = false) => ({
+const tree = (
+  treeIndex: number,
+  remainingAmount: number,
+  stumpRemoved = false,
+  reservedAmount = 0,
+): WoodlandTreeState => ({
+  treeIndex,
+  remainingAmount,
+  reservedAmount,
+  felledAt: '2026-10-29T10:00:00.000Z',
+  stumpRemoved,
+});
+const grove = (
+  trees: WoodlandTreeState[] = [],
+  cleared = false,
+  indices: Array<number | undefined> = [40, 41, 45],
+) => ({
   cellX: 10,
   cellY: 20,
   variantSeed: 7,
@@ -10,55 +27,73 @@ const grove = (remainingAmount: number, cutAmount: number, cleared = false) => (
       { x: 10.1, y: 20.2, elevation: 1, size: 1, crown: 1 },
       { x: 10.4, y: 19.9, elevation: 1, size: 1, crown: 1 },
       { x: 9.8, y: 20.3, elevation: 1, size: 1, crown: 1 },
-    ],
+    ].map((t, i) => (indices[i] === undefined ? t : { ...t, index: indices[i] })),
     rocks: [],
   },
-  deposit: { initialAmount: 300, remainingAmount, cutAmount, cleared },
+  deposit: { initialAmount: 1500, remainingAmount: 1500, cleared, ...(trees.length ? { trees } : {}) },
 });
 
-describe('grove slots from the server stock', () => {
-  it('shows three full-grown originals in an untouched grove', () => {
-    const slots = groveSlots(grove(300, 0));
-    expect(slots.map((s) => [s.standing, s.stump, s.lying, s.young])).toEqual([
-      [true, null, 0, null],
-      [true, null, 0, null],
-      [true, null, 0, null],
+describe('grove slots, tree by tree, from the server', () => {
+  it('shows every tree standing in an untouched grove, each named by its RC1 index', () => {
+    const slots = groveSlots(grove());
+    expect(slots.map((s) => [s.treeIndex, s.state, s.standing, s.stump, s.lying, s.available])).toEqual([
+      [40, 'standing', true, null, 0, 500],
+      [41, 'standing', true, null, 0, 500],
+      [45, 'standing', true, null, 0, 500],
     ]);
-    // Full size whatever the stock: the stock removes trees, it no longer shrinks them.
+    // Full size: a tree is cut down, never shrunk.
     expect(slots[0]!.tree.heightScale).toBe(1);
   });
 
-  it('leaves a stump and starts a young tree once a third of a three-tree grove is cut', () => {
-    // 100 cut, then some regrowth: the first slot is a stump, the others stand.
-    const slots = groveSlots(grove(230, 100));
-    expect(slots.map((s) => s.standing)).toEqual([false, true, true]);
-    expect(slots[0]!.stump).toMatch(/^souche-/);
-    expect(slots[0]!.lying).toBe(0);
-    expect(slots[0]!.young?.piece).toBe('pousse-plant');
+  it('draws a felled tree as a trunk on the ground as long as its wood, then a stump, then nothing', () => {
+    const slots = groveSlots(grove([tree(41, 400, false, 100), tree(45, 0), tree(40, 0, true)]));
+    expect(slots.map((s) => s.state)).toEqual(['removed', 'felled', 'stump']);
+    expect(slots[1]).toMatchObject({ standing: false, lying: 0.8, remaining: 400, available: 300 });
+    expect(slots[1]!.stump).toMatch(/^souche-/);
+    expect(slots[2]).toMatchObject({ lying: 0, available: 0 });
+    expect(slots[2]!.stump).toBe(slots[2]!.stumpPiece);
+    // A removed stump leaves nothing, and no young tree grows any more.
+    expect(slots[0]).toMatchObject({ stump: null, lying: 0, standing: false });
+    expect(groveSlots(grove([], true))).toEqual([]);
   });
 
-  it('lays down the trunk of the slot being cut, shorter as it is consumed', () => {
-    const slots = groveSlots(grove(240, 60));
-    expect(slots[0]!.standing).toBe(false);
-    expect(slots[0]!.lying).toBeCloseTo(0.4);
-    expect(slots[0]!.young).toBeNull();
-    expect(slots.slice(1).every((s) => s.standing)).toBe(true);
+  it('numbers the trees of a world without RC1 forest in their drawn order', () => {
+    const procedural = {
+      cellX: 3,
+      cellY: 4,
+      variantSeed: 9,
+      deposit: { initialAmount: 1000, remainingAmount: 600, trees: [tree(1, 100)] },
+    };
+    const slots = groveSlots(procedural);
+    expect(slots.map((s) => [s.treeIndex, s.state])).toEqual([
+      [0, 'standing'],
+      [1, 'felled'],
+    ]);
   });
 
-  it('shows only stumps and the first shoots in a harvested grove, nothing once cleared', () => {
-    const harvested = groveSlots(grove(20, 300));
-    expect(harvested.every((s) => s.stump && !s.standing && !s.lying)).toBe(true);
-    expect(harvested.filter((s) => s.young).length).toBeLessThanOrEqual(1);
-    expect(groveSlots(grove(20, 300, true))).toEqual([]);
+  it('cannot name a tree an older server did not index: it stays standing and undesignatable alone', () => {
+    const slots = groveSlots(grove([tree(41, 0)], false, [40, undefined, 45]));
+    expect(slots.map((s) => [s.treeIndex, s.state])).toEqual([
+      [40, 'standing'],
+      [null, 'standing'],
+      [45, 'standing'],
+    ]);
   });
 
-  it('grows the young trees back to adults beside their stumps, which stay', () => {
-    const slots = groveSlots(grove(300, 300));
-    expect(slots.every((s) => s.stump && s.young?.piece === s.variant && s.young.scale === 1)).toBe(true);
+  it('keeps the meshes of a grove while its trees change, and rebuilds them only for new geometry', () => {
+    const feature = (trees: WoodlandTreeState[] = [], cleared = false) =>
+      ({
+        id: 'g',
+        type: 'woodland',
+        ...grove(trees, cleared),
+        deposit: { ...grove(trees, cleared).deposit },
+      }) as unknown as NaturalFeature;
+    expect(woodlandSignature(feature([tree(41, 300)]))).toBe(woodlandSignature(feature()));
+    expect(woodlandSignature(feature([], true))).not.toBe(woodlandSignature(feature()));
   });
 
   it('is the same for every reader and draws one broadleaf for four firs', () => {
-    expect(groveSlots(grove(240, 60))).toEqual(groveSlots(grove(240, 60)));
+    expect(groveSlots(grove([tree(41, 300)]))).toEqual(groveSlots(grove([tree(41, 300)])));
     const variants = Array.from({ length: 2000 }, (_, i) => treeVariant(3, i));
     const broadleaf = variants.filter((v) => v === 'feuillu-a').length / variants.length;
     expect(broadleaf).toBeGreaterThan(0.15);

@@ -25,6 +25,8 @@ interface Entry {
   failures: number;
   touched: number;
   mutableSignature: string;
+  /** Changes whenever what chunk() returns for this entry may have changed (featureVersion). */
+  featureVersion: number;
 }
 export type TerrainFetch = (
   chunks: Array<{ chunkX: number; chunkY: number }>,
@@ -81,6 +83,16 @@ export class TerrainStore {
   #publishGround(entry: Entry, chunk: TerrainChunk) {
     if (!sameChunkGround(entry.chunk, chunk)) entry.groundRevision = ++this.#groundRevision;
     entry.chunk = chunk;
+    entry.featureVersion = ++this.#featureVersions;
+  }
+  #featureVersions = 0;
+  /**
+   * A value that changes whenever the features or deposits chunk(key) returns
+   * may have changed (a publication, an invalidation, a newer deposit), never
+   * repeated: a cache keyed on it rereads a chunk only after a change (O(1) check).
+   */
+  featureVersion(key: string): number {
+    return this.entries.get(key)?.featureVersion ?? -1;
   }
   /** Local dependency for continuous probes: a whole substrate chunk, or snapshot fallback. */
   groundRevisionAt(x: number, y: number): number {
@@ -147,6 +159,7 @@ export class TerrainStore {
         failures: 0,
         touched: this.now(),
         mutableSignature: '',
+        featureVersion: ++this.#featureVersions,
       };
       this.entries.set(key, entry);
     }
@@ -155,6 +168,7 @@ export class TerrainStore {
   invalidate(key: string): void {
     const e = this.entries.get(key);
     if (e) {
+      e.featureVersion = ++this.#featureVersions;
       e.invalidation++;
       e.freshAt = -Infinity;
       e.retryAt = 0;

@@ -1,5 +1,48 @@
 import type { Building, BuildingTypeDefinition, DepositDetails, VillageState } from '@arbestra/contracts';
 import { useState } from 'react';
+import type { GroveTreeRow } from '../scene/BabylonVillageScene';
+import { woodQueueCounts } from '../scene/wood-queue';
+
+const TREE_STATES: Record<GroveTreeRow['state'], string> = {
+  standing: 'debout',
+  felled: 'abattu',
+  stump: 'souche',
+  removed: 'souche retirée',
+};
+/** Grove sheet rows shown before « et N autres ». */
+const SHEET_TREES = 12;
+/** The trees of a grove, by state: « 3 debout · 1 abattu · 2 souches ». */
+export function groveTreeSummary(trees: readonly GroveTreeRow[]): string {
+  const count = (state: GroveTreeRow['state']) => trees.filter((t) => t.state === state).length;
+  return [
+    [count('standing'), 'debout', 'debout'],
+    [count('felled'), 'abattu', 'abattus'],
+    [count('stump'), 'souche', 'souches'],
+    [count('removed'), 'souche retirée', 'souches retirées'],
+  ]
+    .filter(([n]) => (n as number) > 0)
+    .map(([n, one, many]) => `${n} ${(n as number) > 1 ? many : one}`)
+    .join(' · ');
+}
+/** One tree of the grove sheet: « Arbre 2 · abattu, 300 bois · en file pour le défrichage ». */
+export function groveTreeLine(tree: GroveTreeRow): string {
+  const state = tree.state === 'felled' ? `abattu, ${tree.remaining} bois` : TREE_STATES[tree.state];
+  const queued =
+    tree.queued === 'clear' ? ' · en file pour le défrichage' : tree.queued === 'cut' ? ' · en file pour la coupe' : '';
+  return `Arbre ${tree.slot + 1} · ${state}${queued}`;
+}
+/** The wood queue of a worksite: « 4 arbres à couper · 2 à défricher ». */
+export function woodQueueLine(counts: { cut: number; clear: number; wholeCases: number }): string {
+  return [
+    counts.cut ? `${counts.cut} arbre${counts.cut > 1 ? 's' : ''} à couper` : '',
+    counts.clear ? `${counts.clear} à défricher` : '',
+    counts.wholeCases
+      ? `${counts.wholeCases} bosquet${counts.wholeCases > 1 ? 's' : ''} entier${counts.wholeCases > 1 ? 's' : ''}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 const format = (value: number) => Math.floor(value).toLocaleString('fr-FR');
 const secondsUntil = (iso: string, now: number) => Math.max(0, Math.ceil((Date.parse(iso) - now) / 1_000));
@@ -282,12 +325,15 @@ export function BuildingPanel({
 
 export function DepositPanel({
   details,
+  trees = null,
   unmapped = false,
   loading,
   pending,
   onPrepare,
 }: {
   details: DepositDetails | null;
+  /** The grove's trees as drawn, with what the village's queue does with them. */
+  trees?: GroveTreeRow[] | null;
   unmapped?: boolean;
   loading: boolean;
   pending: boolean;
@@ -336,6 +382,19 @@ export function DepositPanel({
         <>
           {/* No regrowth any more: a felled tree stays down (docs/SPEC-BOIS-ARBRE-UNITE.md). */}
           {details.deposit.cleared && <p>Bosquet défriché</p>}
+          {!details.deposit.cleared && trees?.length ? (
+            <div className="grove-trees">
+              <p>Arbres : {groveTreeSummary(trees)}</p>
+              <ul>
+                {trees.slice(0, SHEET_TREES).map((tree) => (
+                  <li key={tree.slot} data-queued={tree.queued ?? undefined}>
+                    {groveTreeLine(tree)}
+                  </li>
+                ))}
+              </ul>
+              {trees.length > SHEET_TREES && <small>et {trees.length - SHEET_TREES} autres</small>}
+            </div>
+          ) : null}
           <button
             type="button"
             disabled={pending || !access || details.deposit.cleared}
@@ -415,12 +474,21 @@ export function WorksitePanel({
       ) : (
         worksites.map((site) => {
           const done = site.targets.filter((target) => target.status !== 'pending').length;
+          // The common wood queue mixes cutting and clearing: it counts its trees (slice 2e).
+          const queue = site.resourceCode === 'wood' ? woodQueueLine(woodQueueCounts(site)) : '';
           return (
             <div className="worksite-card" key={site.id}>
               <strong>
-                {site.mode === 'extract' ? 'Pierre' : site.mode === 'clear' ? 'Défrichage' : 'Coupe'} · {done}/
-                {site.targets.length}
+                {site.mode === 'extract'
+                  ? 'Pierre'
+                  : site.poolResource === 'wood'
+                    ? 'Bois'
+                    : site.mode === 'clear'
+                      ? 'Défrichage'
+                      : 'Coupe'}{' '}
+                · {done}/{site.targets.length}
               </strong>
+              {queue && <p>File : {queue}</p>}
               <p>
                 {site.status === 'running'
                   ? site.waitReason

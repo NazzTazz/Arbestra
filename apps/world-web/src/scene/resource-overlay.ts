@@ -5,7 +5,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { NaturalFeature } from '@arbestra/contracts';
 import { cellKey, type Cell } from './construction-selection';
 import type { ResourceHaloCell } from './resource-halos';
-import { groveHalo, type TreeHaloGrove } from './tree-halos';
+import { groveHalos, type TreeHaloGrove, type WoodOffer } from './tree-halos';
 import { delta } from './world-space';
 
 /** Cell halos (gardens, stone) nearest the camera target. */
@@ -25,11 +25,14 @@ export interface ResourceOverlayInput {
   world: { widthCells: number; heightCells: number; chunkSize: number };
   cellCap?: number;
   treeCap?: number;
+  /** The wood tool's mode and queue: which trees are offered (tree-halos.ts). */
+  wood?: WoodOffer;
 }
 
 /**
  * What the Exploitation overlay offers: a halo per cell for gardens and stone,
- * a halo per standing tree for wood. Groves are kept whole and taken nearest
+ * a halo per tree on offer for wood (one entry each, so that a tree is
+ * validated and queued on its own). Groves are kept whole and taken nearest
  * first, so the budget never leaves a hole in the middle of the screen.
  */
 export function resourceOverlay(input: ResourceOverlayInput): { cells: ResourceHaloCell[]; groves: TreeHaloGrove[] } {
@@ -42,13 +45,15 @@ export function resourceOverlay(input: ResourceOverlayInput): { cells: ResourceH
     const [cellX, cellY] = key.split(':').map(Number);
     cells.set(key, { cellX: cellX!, cellY: cellY!, garden: true, resource: 'carrot' });
   }
-  const groves = new Map<string, TreeHaloGrove>();
+  const groves = new Map<string, { at: Cell; halos: TreeHaloGrove[] }>();
   for (const f of input.features) {
-    if (!f.deposit || f.deposit.cleared || f.deposit.availableAmount <= 0) continue;
+    if (!f.deposit || f.deposit.cleared) continue;
     if (f.deposit.resourceCode === 'wood') {
-      const grove = groveHalo(f, world.chunkSize);
-      if (grove && !groves.has(grove.featureId) && input.shown(f)) groves.set(grove.featureId, grove);
-    } else cells.set(cellKey(f), { ...f, resource: f.deposit.resourceCode });
+      // Clearing offers stumps too: a case without wood left may still be cleared.
+      if (groves.has(f.id) || !input.shown(f)) continue;
+      const halos = groveHalos(f, world.chunkSize, input.wood);
+      if (halos.length) groves.set(f.id, { at: f, halos });
+    } else if (f.deposit.availableAmount > 0) cells.set(cellKey(f), { ...f, resource: f.deposit.resourceCode });
   }
   const visibleCells = [...cells.values()]
     .filter((c) => input.shown(c))
@@ -56,10 +61,10 @@ export function resourceOverlay(input: ResourceOverlayInput): { cells: ResourceH
     .slice(0, input.cellCap ?? RESOURCE_OVERLAY_CELL_CAP);
   const visibleGroves: TreeHaloGrove[] = [];
   let trees = 0;
-  for (const grove of [...groves.values()].sort((a, b) => distance(a) - distance(b))) {
-    if (visibleGroves.length && trees + grove.trees.length > (input.treeCap ?? RESOURCE_OVERLAY_TREE_CAP)) break;
-    visibleGroves.push(grove);
-    trees += grove.trees.length;
+  for (const grove of [...groves.values()].sort((a, b) => distance(a.at) - distance(b.at))) {
+    if (visibleGroves.length && trees + grove.halos.length > (input.treeCap ?? RESOURCE_OVERLAY_TREE_CAP)) break;
+    visibleGroves.push(...grove.halos);
+    trees += grove.halos.length;
   }
   return { cells: visibleCells, groves: visibleGroves };
 }
@@ -86,18 +91,34 @@ export function groveRayPredicate(ray: Ray, reach = 2.6): (mesh: AbstractMesh, t
   };
 }
 
-/** The grove a pointer pick landed on: a woodland thin instance names its feature. */
+/**
+ * The grove a pointer pick landed on: a woodland thin instance names its
+ * feature, and the tree it draws (its slot in the grove and its server index,
+ * docs/SPEC-GRAMMAIRE-GESTUELLE.md §3), when the grove records them.
+ */
 export function pickedGrove(pick: {
   pickedMesh: { metadata?: unknown } | null;
   thinInstanceIndex: number;
-}): { featureId: string; hint: Cell } | null {
+}): { featureId: string; hint: Cell; slot?: number; treeIndex?: number | null } | null {
   const metadata = pick.pickedMesh?.metadata as
-    | { instanceFeatureIds?: unknown; cellX?: unknown; cellY?: unknown }
+    | {
+        instanceFeatureIds?: unknown;
+        instanceSlots?: unknown;
+        instanceTrees?: unknown;
+        cellX?: unknown;
+        cellY?: unknown;
+      }
     | null
     | undefined;
   if (!metadata || pick.thinInstanceIndex < 0 || !Array.isArray(metadata.instanceFeatureIds)) return null;
   const featureId = metadata.instanceFeatureIds[pick.thinInstanceIndex];
   if (typeof featureId !== 'string' || typeof metadata.cellX !== 'number' || typeof metadata.cellY !== 'number')
     return null;
-  return { featureId, hint: { cellX: metadata.cellX, cellY: metadata.cellY } };
+  const slot = Array.isArray(metadata.instanceSlots) ? metadata.instanceSlots[pick.thinInstanceIndex] : undefined,
+    treeIndex = Array.isArray(metadata.instanceTrees) ? metadata.instanceTrees[pick.thinInstanceIndex] : undefined;
+  return {
+    featureId,
+    hint: { cellX: metadata.cellX, cellY: metadata.cellY },
+    ...(typeof slot === 'number' ? { slot, treeIndex: typeof treeIndex === 'number' ? treeIndex : null } : {}),
+  };
 }

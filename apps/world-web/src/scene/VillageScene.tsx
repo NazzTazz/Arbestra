@@ -15,12 +15,19 @@ import type { InitialLoadProgress } from './initial-village-load';
 
 import type { NaturalFeature, StoneDeposit, VillageState } from '@arbestra/contracts';
 
-import { BabylonVillageScene, type TerrainStatus, type TerrainViewMode } from './BabylonVillageScene';
+import {
+  BabylonVillageScene,
+  type GroveTreeRow,
+  type HarvestTree,
+  type TerrainStatus,
+  type TerrainViewMode,
+} from './BabylonVillageScene';
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import type { AreaPreview, Cell } from './construction-selection';
 import type { HarvestMode } from './halo-marker';
 import type { ActiveWorldMode } from '../ui/world-mode';
 
+const NO_TREES: readonly HarvestTree[] = [];
 interface VillageSceneProps {
   transport?: SceneTransport | undefined;
   observationPose?: ObservationPose | null | undefined;
@@ -37,8 +44,12 @@ interface VillageSceneProps {
   serverOffsetMs: number;
   terrainRef: Ref<TerrainHandle>;
   pendingHarvestCells: Cell[];
+  /** Trees a harvest gesture designated, waiting for their receipt (a validation halo each). */
+  pendingHarvestTrees?: readonly HarvestTree[];
   /** Wood tool mode: halos show « Onde » to cut, « Satellites » to clear. */
   harvestWoodMode?: HarvestMode;
+  /** A long press asks to switch cutting and clearing; false when it does not apply. */
+  onWoodModeToggle?: (point: { x: number; y: number }) => boolean;
   highlightedSiteIds: string[];
   constructionMode?: boolean;
   showTravelPaths?: boolean;
@@ -55,7 +66,7 @@ interface VillageSceneProps {
   preview: AreaPreview | null;
   previewInvalid: boolean;
   onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void;
-  onGardenHarvest: (cell: Cell | null, newGesture?: boolean, previewOnly?: boolean) => void;
+  onGardenHarvest: (cell: Cell | null, newGesture?: boolean, previewOnly?: boolean, tree?: HarvestTree) => void;
   onWorldGestureCancelled?: () => void;
   onSiteSelected: (siteId: string, anchor: ScreenAnchor, inspect?: boolean) => void;
   onFeatureSelected?: (featureId: string, anchor: ScreenAnchor) => void;
@@ -94,6 +105,8 @@ export interface TerrainHandle {
   marketBeacon: (deliveries?: number) => void;
   projectPopulation: (id: string) => ScreenAnchor | null;
   featuresAt: (cell: Cell) => NaturalFeature[];
+  /** A grove's trees for its sheet, as drawn (state, queue). */
+  groveTrees: (featureId: string) => GroveTreeRow[] | null;
   acceptDeposit: (deposit: StoneDeposit) => void;
   showVillage: () => void;
   projectCell: (cell: Cell) => ScreenAnchor | null;
@@ -116,7 +129,9 @@ export function VillageScene({
   serverOffsetMs,
   terrainRef,
   pendingHarvestCells,
+  pendingHarvestTrees = NO_TREES,
   harvestWoodMode = 'cut',
+  onWoodModeToggle,
   highlightedSiteIds,
   constructionMode = false,
   showTravelPaths = false,
@@ -177,7 +192,7 @@ export function VillageScene({
       () => cameraHandlerRef.current(),
       (first, last, commit) => areaHandlerRef.current(first, last, commit),
       (featureId, anchor) => featureHandlerRef.current?.(featureId, anchor),
-      (cell, newGesture, previewOnly) => harvestHandlerRef.current(cell, newGesture, previewOnly),
+      (cell, newGesture, previewOnly, tree) => harvestHandlerRef.current(cell, newGesture, previewOnly, tree),
       () => callbacks.current.onWorldGestureCancelled?.(),
       setLoading,
       (mode) => {
@@ -254,6 +269,7 @@ export function VillageScene({
         sceneRef.current?.setCosmologyPeriod(28800);
       },
       featuresAt: (cell) => sceneRef.current?.featuresAt(cell) ?? [],
+      groveTrees: (featureId) => sceneRef.current?.groveTrees(featureId) ?? null,
       renderLab: () => sceneRef.current?.renderLab() ?? null,
       marketBeacon: (deliveries) => sceneRef.current?.marketBeacon(deliveries),
       acceptDeposit: (deposit) => sceneRef.current?.acceptDeposit(deposit),
@@ -280,8 +296,13 @@ export function VillageScene({
   }, [populationFocus, populationFilter, state.world.id, BabylonVillageScene]);
 
   useEffect(() => {
-    sceneRef.current?.updateHarvestPending(pendingHarvestCells);
-  }, [state, pendingHarvestCells]);
+    sceneRef.current?.updateHarvestPending(pendingHarvestCells, pendingHarvestTrees);
+  }, [state, pendingHarvestCells, pendingHarvestTrees]);
+  const woodToggleRef = useRef(onWoodModeToggle);
+  woodToggleRef.current = onWoodModeToggle;
+  useEffect(() => {
+    sceneRef.current?.setWoodModeToggle((point) => woodToggleRef.current?.(point) ?? false);
+  }, [state.world.id, state.world.generationVersion, state.village.id, BabylonVillageScene, transport]);
   useEffect(() => {
     sceneRef.current?.setHarvestWoodMode(harvestWoodMode);
   }, [harvestWoodMode, state.world.id, BabylonVillageScene]);

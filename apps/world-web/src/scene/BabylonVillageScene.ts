@@ -17,6 +17,7 @@ import {
   infrastructureBlockedPixels,
   infrastructureBarrierAt,
   buildingAccesses,
+  WOOD_PER_TREE,
 } from '@arbestra/contracts';
 import { InhabitantCamera } from './inhabitant-camera';
 import { cameraFocusAt } from './camera-focus';
@@ -66,7 +67,7 @@ import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { COSMOLOGY, TAU, combinedPeriod, cyclePhase, cyclePhases, illumination } from './cosmology';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
-import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { MultiMaterial } from '@babylonjs/core/Materials/multiMaterial';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
@@ -108,7 +109,11 @@ import { RegionalOverview, TorusOverview } from './terrain-overview-view';
 import { RENDER_UNIT_CELLS } from './terrain-unit';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { bakeScenery, cloneWoodland, type SceneryPart } from './scenery-batch';
-import { groveSlots, treePieceData, youngOffset, type GroveSlot, type TreePiece } from './grove-trees';
+import { groveSlots, treePieceData, type GroveSlot, type TreePiece } from './grove-trees';
+import { GroveInstances, type TreeLook } from './grove-instances';
+import { GroveTrunkIndex } from './grove-trunks';
+import { changedCases, queuedMode, woodQueue, type WoodQueue } from './wood-queue';
+import { LongPress, treesAlongSegment, type GestureTree } from './wood-gesture';
 import { VillageRoads } from './village-roads';
 import { setSceneNight, VillageBraziers } from './village-braziers';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
@@ -121,12 +126,33 @@ import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transfor
 import { RenderDiagnostics } from '../dev/render-diagnostics';
 import type { HarvestMode } from './halo-marker';
 import { ResourceHalos, type ResourceHaloCell } from './resource-halos';
-import { groveHalo, TreeHalos, type TreeHaloGrove } from './tree-halos';
+import { TreeHalos, treeHalos, type TreeHaloGrove } from './tree-halos';
 import { MarketBeacon } from './market-beacon';
 import { groveRayPredicate, pickedGrove, resourceOverlay } from './resource-overlay';
 import { WorkerObstacles } from './worker-obstacles';
 
 const TOWN_HALL_DOOR_Z = -1.1;
+/** A rendered tree a gesture can designate (docs/SPEC-GRAMMAIRE-GESTUELLE.md §3). */
+const gestureTree = (featureId: string, slot: GroveSlot): GestureTree => ({
+  featureId,
+  treeIndex: slot.treeIndex,
+  slot: slot.index,
+  x: slot.tree.x,
+  y: slot.tree.y,
+});
+/** A tree a harvest gesture designates: its case and server index (null: the whole case). */
+export interface HarvestTree {
+  featureId: string;
+  treeIndex: number | null;
+}
+/** A tree of a grove sheet: its state and what the village's queue does with it. */
+export interface GroveTreeRow {
+  slot: number;
+  treeIndex: number | null;
+  state: GroveSlot['state'];
+  remaining: number;
+  queued: 'cut' | 'clear' | null;
+}
 import {
   buildingPlan,
   planShapeKey,
@@ -190,7 +216,13 @@ export class BabylonVillageScene {
   #initialRoutesAnnounced = false;
   #initialFailure: string | null = null;
   readonly #onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void;
-  readonly #onGardenHarvest: (cell: Cell | null, newGesture: boolean, previewOnly?: boolean) => void;
+  /** A harvest designation: a cell (gardens, stone), or with `tree` one tree of a wood case. */
+  readonly #onGardenHarvest: (
+    cell: Cell | null,
+    newGesture: boolean,
+    previewOnly?: boolean,
+    tree?: HarvestTree,
+  ) => void;
   readonly #onWorldGestureCancelled: () => void;
   readonly #previewMeshes: Mesh[] = [];
   readonly #resourceHalos: ResourceHalos;
@@ -243,17 +275,34 @@ export class BabylonVillageScene {
   #treeKitMaterial: StandardMaterial | null = null;
   /** Grove trees felled by a worksite, by lot: masked in their grove. */
   readonly #felledTrees = new Map<string, { featureId: string; index: number; timer: number }>();
-  // Grove trunks per chunk and cell for the felling test, which asks thousands
-  // of times a frame: rebuilding the chunk and its groves on each call froze the
-  // page for over a minute. Refreshed at most once a second; felling is checked live.
-  readonly #stageTrunks = new Map<
+  /**
+   * Grove trunks per chunk and cell for the felling test, which asks thousands
+   * of times a frame: rebuilding the chunk and its groves on each call froze the
+   * page for over a minute. A chunk is read again only when it changed, and only
+   * its groves whose trees changed are placed again; felling is checked live.
+   */
+  #trunkIndex: GroveTrunkIndex | null = null;
+  /**
+   * Rendered groves, tree by tree (docs/SPEC-BOIS-ARBRE-UNITE.md §2): their
+   * thin instances, written per tree, and the trees a gesture can designate.
+   * A tree that changes rewrites its own instances (grove-instances.ts).
+   */
+  readonly #groves = new Map<
     string,
-    {
-      at: number;
-      version: number;
-      cells: Map<string, { featureId: string; index: number; x: number; z: number; radius: number }[]>;
-    }
+    { feature: NaturalFeature; instances: GroveInstances; meshes: Map<TreePiece, Mesh>; trees: GestureTree[] }
   >();
+  /** Rendered groves by deposit cell, for the trees a swipe crosses. */
+  readonly #groveCells = new Map<string, Set<string>>();
+  /** The village's wood queue (worksite targets), and the worksites it was read from. */
+  #woodQueue: WoodQueue = new Map();
+  #woodQueueSource: VillageState['village']['worksites'] | null = null;
+  /** Wood tool mode: what a designated tree is for, and which trees are offered. */
+  #woodMode: HarvestMode = 'cut';
+  /** Pending designations of the harvest tool: trees validated, waiting for their receipt. */
+  #pendingTrees: Array<{ featureId: string; treeIndex: number | null }> = [];
+  /** Long press of the harvest gesture: switches cutting and clearing. */
+  readonly #longPress = new LongPress();
+  #onWoodModeToggle: ((point: { x: number; y: number }) => boolean) | null = null;
   readonly #constructionMaterial: StandardMaterial;
   readonly #scaffoldMaterial: StandardMaterial;
   readonly #selectionMaterial: StandardMaterial;
@@ -579,6 +628,10 @@ export class BabylonVillageScene {
     harvest: boolean;
     first: Cell | null;
     lastPoint: Cell | null;
+    /** Harvest: something designated yet (a tap at release, a swipe once it moves). */
+    started?: boolean;
+    /** Harvest: the tree under the press. */
+    firstTree?: GestureTree | null;
   } | null = null;
   #lastDragCell = '';
   #lastPreviewSignature = '';
@@ -664,6 +717,7 @@ export class BabylonVillageScene {
           this.#state.buildingTypes.some((t) => t.code === building.type && t.productionMode === 'processing'));
     }
     const harvest = this.#worldMode === 'exploitation' && first !== null && !event.shiftKey && !workshopInspection;
+    const point = this.#gridPointAtPointer(event);
     this.#pointerDown = {
       x: event.clientX,
       y: event.clientY,
@@ -672,7 +726,9 @@ export class BabylonVillageScene {
       mouseArea,
       harvest,
       first,
-      lastPoint: this.#gridPointAtPointer(event),
+      lastPoint: point,
+      started: false,
+      firstTree: harvest ? this.#treeAtPointer(event, point) : null,
     };
     if (mouseArea || harvest) {
       // Consume only the construction drag. Right-drag, wheel and touch camera
@@ -684,10 +740,11 @@ export class BabylonVillageScene {
       this.#camera.inertialPanningX = this.#camera.inertialPanningY = 0;
       if (first) {
         this.#lastDragCell = cellKey(first);
-        if (harvest) {
-          this.#harvestVisited = new Set([cellKey(first)]);
-          this.#onGardenHarvest(first, true);
-        } else this.#onAreaGesture(first, first, false);
+        // A harvest press designates nothing yet: held still, it switches
+        // cutting and clearing (docs/SPEC-GRAMMAIRE-GESTUELLE.md §2); released,
+        // it is a tap; moved, a swipe.
+        if (harvest) this.#longPress.start(event.clientX, event.clientY, performance.now());
+        else this.#onAreaGesture(first, first, false);
       }
     }
   };
@@ -756,6 +813,12 @@ export class BabylonVillageScene {
     if (this.#pointerDown?.harvest && this.#pointerDown.pointerId === event.pointerId) {
       event.stopImmediatePropagation();
       event.preventDefault();
+      // A long press switched the mode: the rest of the gesture designates nothing.
+      if (this.#longPress.fired) return;
+      if (!this.#pointerDown.started) {
+        if (!this.#longPress.move(event.clientX, event.clientY)) return;
+        this.#beginHarvest();
+      }
       this.#continueHarvest(event);
       return;
     }
@@ -837,8 +900,14 @@ export class BabylonVillageScene {
         this.#handlePointerCancel();
         return;
       }
-      this.#continueHarvest(event);
-      this.#onGardenHarvest(null, false);
+      const switched = this.#longPress.fired;
+      this.#longPress.end();
+      if (!switched) {
+        // A tap designates the element under it.
+        if (!gesture.started) this.#beginHarvest();
+        this.#continueHarvest(event);
+        this.#onGardenHarvest(null, false);
+      }
       this.#pointerDown = null;
       event.stopImmediatePropagation();
       event.preventDefault();
@@ -912,6 +981,7 @@ export class BabylonVillageScene {
     }
     const gesture = this.#pointerDown;
     this.#pointerDown = null;
+    this.#longPress.end();
     this.#lastDragCell = '';
     this.#hoveredHarvestCell = '';
     this.#harvestVisited.clear();
@@ -956,20 +1026,50 @@ export class BabylonVillageScene {
     return element === this.#canvas;
   }
 
+  /**
+   * The first designation of a harvest gesture (a tap, or a press that starts
+   * to move): the tree under the press, else its cell (gardens, stone). It
+   * opens the gesture's draft (`newGesture`).
+   */
+  #beginHarvest(): void {
+    const gesture = this.#pointerDown;
+    if (!gesture?.first) return;
+    gesture.started = true;
+    this.#harvestVisited = new Set([cellKey(gesture.first)]);
+    const tree = gesture.firstTree && this.#designatable(gesture.firstTree) ? gesture.firstTree : null;
+    if (tree) {
+      this.#harvestVisited.add(`tree:${tree.featureId}:${tree.slot}`);
+      this.#onGardenHarvest(this.#groveCell(tree.featureId) ?? gesture.first, true, false, {
+        featureId: tree.featureId,
+        treeIndex: tree.treeIndex,
+      });
+    } else this.#onGardenHarvest(gesture.first, true);
+  }
+
+  /**
+   * The rest of a harvest swipe (docs/SPEC-GRAMMAIRE-GESTUELLE.md §1-§2): every
+   * tree and stump it crosses, each once, in the order met (the tree under the
+   * pointer, and those along the segment since the last sample, read from the
+   * rendered groves of the cells crossed); every garden or stone cell crossed.
+   */
   #continueHarvest(event: PointerEvent): void {
-    // A tree under the pointer selects its grove, whatever ground cell lies behind it.
-    const grove = this.#groveCellAtPointer(event);
-    if (grove && !this.#harvestVisited.has(cellKey(grove))) {
-      this.#harvestVisited.add(cellKey(grove));
-      this.#onGardenHarvest(grove, false);
-    }
     const last = this.#gridPointAtPointer(event),
       previous = this.#pointerDown?.lastPoint;
-    if (!last || !previous || cellKey(last) === cellKey(previous)) return;
-    for (const cell of cellsAlongSegment(previous, last, {
+    const under = this.#treeAtPointer(event, last);
+    if (under) this.#designateTree(under);
+    if (!last || !previous) return;
+    const world = {
       widthCells: this.#worldWidthUnits / TILE_SIZE,
       heightCells: this.#worldHeightUnits / TILE_SIZE,
-    })) {
+    };
+    const crossed = cellsAlongSegment(previous, last, world),
+      start = {
+        cellX: normalize(Math.round(previous.cellX), world.widthCells),
+        cellY: normalize(Math.round(previous.cellY), world.heightCells),
+      };
+    for (const tree of treesAlongSegment(previous, last, this.#treesNear([start, ...crossed], world), world))
+      this.#designateTree(tree);
+    for (const cell of crossed) {
       if (!this.#harvestVisited.has(cellKey(cell))) {
         this.#harvestVisited.add(cellKey(cell));
         this.#onGardenHarvest(cell, false);
@@ -978,13 +1078,55 @@ export class BabylonVillageScene {
     this.#pointerDown!.lastPoint = last;
   }
 
+  /** Whether the wood tool can take this tree now: cutting, a tree with wood free; clearing, anything still there. */
+  #designatable(tree: GestureTree): boolean {
+    const slot = this.#groves.get(tree.featureId)?.instances.slots[tree.slot];
+    if (!slot) return false;
+    return this.#woodMode === 'cut'
+      ? (slot.state === 'standing' || slot.state === 'felled') && slot.available > 0
+      : slot.state !== 'removed';
+  }
+  #designateTree(tree: GestureTree): void {
+    const key = `tree:${tree.featureId}:${tree.slot}`;
+    if (this.#harvestVisited.has(key) || !this.#designatable(tree)) return;
+    this.#harvestVisited.add(key);
+    const cell = this.#groveCell(tree.featureId);
+    if (cell) this.#onGardenHarvest(cell, false, false, { featureId: tree.featureId, treeIndex: tree.treeIndex });
+  }
+  #groveCell(featureId: string): Cell | null {
+    const feature = this.#groves.get(featureId)?.feature;
+    return feature ? { cellX: feature.cellX, cellY: feature.cellY } : null;
+  }
+  /** Rendered trees of the cells a swipe crossed and of their neighbours: an index lookup, O(those trees). */
+  #treesNear(cells: readonly Cell[], world: { widthCells: number; heightCells: number }): GestureTree[] {
+    const groves = new Set<string>();
+    for (const cell of cells)
+      for (const [dx, dy] of [
+        [0, 0],
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const x = (cell.cellX + dx + world.widthCells) % world.widthCells,
+          y = (cell.cellY + dy + world.heightCells) % world.heightCells;
+        for (const id of this.#groveCells.get(`${x}:${y}`) ?? []) groves.add(id);
+      }
+    return [...groves].flatMap((id) => this.#groves.get(id)?.trees ?? []);
+  }
+
   public constructor(
     canvas: HTMLCanvasElement,
     onSiteSelected: (siteId: string, anchor: ScreenAnchor, inspect?: boolean) => void,
     onCameraMoved: () => void,
     onAreaGesture: (first: Cell, last: Cell, commit: boolean) => void,
     onFeatureSelected: (featureId: string, anchor: ScreenAnchor) => void = () => {},
-    onGardenHarvest: (cell: Cell | null, newGesture: boolean, previewOnly?: boolean) => void = () => {},
+    onGardenHarvest: (
+      cell: Cell | null,
+      newGesture: boolean,
+      previewOnly?: boolean,
+      tree?: HarvestTree,
+    ) => void = () => {},
     onWorldGestureCancelled: () => void = () => {},
     onTerrainLoading: (loading: TerrainStatus) => void = () => {},
     onViewChanged: (mode: TerrainViewMode) => void = () => {},
@@ -995,6 +1137,14 @@ export class BabylonVillageScene {
   ) {
     this.#canvas = canvas;
     this.#canvas.dataset.workerModel = 'low-poly';
+    // Browser checks read the rendered trees on demand, never per frame.
+    if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
+      Object.defineProperty(canvas, 'arbestraTreeScreens', { configurable: true, value: () => this.#treeScreens() });
+      Object.defineProperty(canvas, 'arbestraFocusCell', {
+        configurable: true,
+        value: (cell: Cell) => this.focusCell(cell),
+      });
+    }
     this.#onFeatureSelected = onFeatureSelected;
     this.#onSiteSelected = onSiteSelected;
     this.#onCameraMoved = onCameraMoved;
@@ -1419,6 +1569,8 @@ export class BabylonVillageScene {
         }
         frame?.mark('visibility');
         const workerServerNow = Date.now() - this.#serverOffsetMs;
+        // A finger held still sends no event: the long press is polled here, O(1).
+        if (this.#pointerDown?.harvest && this.#longPress.poll(now)) this.#switchWoodMode();
         this.#updateResourceOverlay(now);
         if (this.#space && this.#store) {
           const halosEnabled = this.#worldMode === 'exploitation' && this.#mode === 'village',
@@ -1529,8 +1681,10 @@ export class BabylonVillageScene {
         if (import.meta.env.DEV && this.#mode === 'world')
           this.#canvas.dataset.worldCamera = JSON.stringify(this.#torusOverview?.navigationMetrics());
         // Felling layout of each wood site, readable in dev from the console.
-        if (import.meta.env.DEV || import.meta.env.MODE === 'e2e' || devToolsEnabled())
+        if (import.meta.env.DEV || import.meta.env.MODE === 'e2e' || devToolsEnabled()) {
           this.#canvas.dataset.woodPlan = JSON.stringify(this.#workers.woodPlans);
+          this.#canvas.dataset.woodTrees = `${this.#woodMode} ${this.#groves.size} ${this.#groveWrites} ${this.#treeHalos.passes}`;
+        }
         if (import.meta.env.MODE === 'e2e') {
           const viewport = this.#camera.viewport.toGlobal(
             this.#engine.getRenderWidth(),
@@ -1782,6 +1936,7 @@ export class BabylonVillageScene {
           (features) => this.#buildWoodland(features),
           () => this.#space!.inverse(this.#camera.target.x, this.#camera.target.z),
         );
+        this.#renderer.onWoodlandUnchanged = (feature) => this.#updateGroveTrees(feature);
       }
       const revision = state.science?.geographyRevision ?? 0;
       if (this.#geographyRevision && revision !== this.#geographyRevision) {
@@ -1799,6 +1954,7 @@ export class BabylonVillageScene {
       this.#geographyRevision = revision;
       this.#state = state;
       this.#store!.observe(state);
+      this.#observeWoodQueue(state.village.worksites);
       this.#showTravel = showTravelPaths;
       this.#selectedRoute = selectedRouteId;
       this.#torusOverview?.setGlobalModel(this.#globalModelAvailable());
@@ -2166,6 +2322,8 @@ export class BabylonVillageScene {
         Boolean(this.#renderer?.rendered(c.cellX, c.cellY)) && (store.ground(c.cellX, c.cellY)?.code ?? 0) > 0,
       target: this.#space.inverse(this.#camera.target.x, this.#camera.target.z),
       world: store.world,
+      // Trees already queued for this mode are not offered again (wood-queue.ts).
+      wood: { mode: this.#woodMode, queued: (id, treeIndex) => queuedMode(this.#woodQueue, id, treeIndex) },
     });
     this.#resourceHalos.setAvailable(cells);
     this.#treeHalos.setAvailable(groves);
@@ -2176,11 +2334,15 @@ export class BabylonVillageScene {
    * tree hides the ground cell behind it, so the ray picks the tree itself.
    * At most one pick per rendered frame; pointer events share its result.
    */
-  #grovePick: { frame: number; cell: Cell | null } | null = null;
+  #grovePick: { frame: number; cell: Cell | null; tree: GestureTree | null } | null = null;
   #groveCellAtPointer(event: PointerEvent): Cell | null {
-    if (this.#worldMode !== 'exploitation' || this.#mode !== 'village' || !this.#store) return null;
+    return this.#grovePickAt(event).cell;
+  }
+  #grovePickAt(event: PointerEvent): { cell: Cell | null; tree: GestureTree | null } {
+    if (this.#worldMode !== 'exploitation' || this.#mode !== 'village' || !this.#store)
+      return { cell: null, tree: null };
     const frame = this.#scene.getFrameId();
-    if (this.#grovePick?.frame === frame) return this.#grovePick.cell;
+    if (this.#grovePick?.frame === frame) return this.#grovePick;
     const bounds = this.#canvas.getBoundingClientRect();
     const ray = this.#scene.createPickingRay(
       event.clientX - bounds.left,
@@ -2190,27 +2352,67 @@ export class BabylonVillageScene {
     );
     const pick = this.#scene.pickWithRay(ray, groveRayPredicate(ray));
     const grove = pick ? pickedGrove(pick) : null;
-    const feature = grove
-      ? this.#store
-          .chunk(this.#store.key(grove.hint.cellX, grove.hint.cellY))
-          ?.features.find((f) => f.id === grove.featureId)
-      : undefined;
+    const rendered = grove ? this.#groves.get(grove.featureId) : undefined;
+    const feature =
+      rendered?.feature ??
+      (grove
+        ? this.#store
+            .chunk(this.#store.key(grove.hint.cellX, grove.hint.cellY))
+            ?.features.find((f) => f.id === grove.featureId)
+        : undefined);
     const cell = feature ? { cellX: feature.cellX, cellY: feature.cellY } : null;
-    this.#grovePick = { frame, cell };
-    return cell;
+    // The instance picked names its tree: a tree, a lying trunk or a stump.
+    const tree = grove?.slot !== undefined ? (rendered?.trees[grove.slot] ?? null) : null;
+    this.#grovePick = { frame, cell, tree };
+    return this.#grovePick;
+  }
+  /**
+   * The tree under the pointer (docs/SPEC-GRAMMAIRE-GESTUELLE.md §3): the
+   * woodland instance picked, else, for a low stump or trunk missed by the ray,
+   * the rendered tree whose foot is nearest the ground point, within reach.
+   */
+  #treeAtPointer(event: PointerEvent, point: Cell | null = this.#gridPointAtPointer(event)): GestureTree | null {
+    const picked = this.#grovePickAt(event).tree;
+    if (picked || !point) return picked;
+    const world = { widthCells: this.#worldWidthUnits / TILE_SIZE, heightCells: this.#worldHeightUnits / TILE_SIZE };
+    const cell = {
+      cellX: normalize(Math.round(point.cellX), world.widthCells),
+      cellY: normalize(Math.round(point.cellY), world.heightCells),
+    };
+    return treesAlongSegment(point, point, this.#treesNear([cell], world), world)[0] ?? null;
   }
 
-  /** The wood halos of a pending cell follow its grove's trees; other resources keep their cell halo. */
+  /**
+   * The validation halos of pending wood, tree by tree: the trees a gesture
+   * designated (a whole case when the server cannot name them), and every tree
+   * of a wood cell pending as a whole (the recovery exploitation palette).
+   * Other resources keep their cell halo.
+   */
   #pendingGroves(cells: Cell[]): { groves: TreeHaloGrove[]; others: Cell[] } {
     const groves: TreeHaloGrove[] = [],
-      others: Cell[] = [];
+      others: Cell[] = [],
+      size = this.#store?.world.chunkSize ?? 32,
+      wanted = new Map<string, Set<number> | 'all'>();
+    for (const { featureId, treeIndex } of this.#pendingTrees) {
+      const trees = wanted.get(featureId);
+      if (treeIndex === null) wanted.set(featureId, 'all');
+      else if (trees !== 'all') wanted.set(featureId, (trees ?? new Set()).add(treeIndex));
+    }
     for (const cell of cells) {
       const wood = this.#gardenStages.has(cellKey(cell))
         ? undefined
         : this.featuresAt(cell).find((f) => f.deposit?.resourceCode === 'wood');
-      const grove = wood && this.#store ? groveHalo(wood, this.#store.world.chunkSize) : null;
-      if (grove) groves.push(grove);
-      else if (!wood) others.push(cell);
+      if (wood) wanted.set(wood.id, 'all');
+      else others.push(cell);
+    }
+    for (const [featureId, trees] of wanted) {
+      const grove = this.#groves.get(featureId);
+      if (!grove) continue;
+      const slots = grove.instances.slots.filter(
+        (slot) =>
+          slot.state !== 'removed' && (trees === 'all' || (slot.treeIndex !== null && trees.has(slot.treeIndex))),
+      );
+      groves.push(...treeHalos(grove.feature, slots, size));
     }
     return { groves, others };
   }
@@ -2530,13 +2732,28 @@ export class BabylonVillageScene {
       });
   }
 
-  /** Wood tool mode: halos read « Onde » to cut and « Satellites » to clear. */
+  /** Wood tool mode: halos read « Onde » to cut and « Satellites » to clear; clearing also offers stumps. */
   public setHarvestWoodMode(mode: HarvestMode): void {
+    if (mode !== this.#woodMode) this.#resourceOverlayAt = 0;
+    this.#woodMode = mode;
     this.#treeHalos.setMode(mode);
     this.#resourceHalos.setMode(mode);
   }
+  /** Who switches cutting and clearing on a long press; false when it does not apply (no wood tool). */
+  public setWoodModeToggle(handler: ((point: { x: number; y: number }) => boolean) | null): void {
+    this.#onWoodModeToggle = handler;
+  }
+  #switchWoodMode(): void {
+    const gesture = this.#pointerDown;
+    if (!gesture) return;
+    if (!this.#onWoodModeToggle?.({ x: gesture.x, y: gesture.y })) this.#longPress.disarm();
+  }
 
-  public updateHarvestPending(cells: Cell[]): void {
+  public updateHarvestPending(
+    cells: Cell[],
+    trees: ReadonlyArray<{ featureId: string; treeIndex: number | null }> = [],
+  ): void {
+    this.#pendingTrees = [...trees];
     const { groves, others } = this.#pendingGroves(cells);
     this.#treeHalos.setPending(groves);
     this.#resourceHalos.setPending(
@@ -2656,121 +2873,194 @@ export class BabylonVillageScene {
   }
 
   /**
-   * Groves from the tree kit (blender-elements/arbres): every slot shows its
-   * original tree, or a stump with a young tree beside it, and the slot being
-   * cut its trunk lying down (grove-trees.ts, from the server stock). One
-   * thin-instanced mesh per kit piece and grove group.
+   * Groves from the tree kit (blender-elements/arbres), tree by tree from the
+   * server (grove-trees.ts): a standing tree; a felled one, its trunk on the
+   * ground as long as its wood, beside its stump; a stump; nothing once the
+   * stump is removed. One thin-instanced mesh per kit piece and grove, three
+   * instances per tree: a tree that changes later rewrites its own instances
+   * (#refreshGrove), the grove is not rebuilt.
    */
   #buildWoodland(features: NaturalFeature[]): Mesh[] {
-    if (!features.length) return [];
-    const pieces = new Map<TreePiece, { transforms: number[]; ids: string[]; slots: number[]; felled: boolean[] }>();
-    let slotIndex = -1,
-      felledPiece = false;
-    const put = (piece: TreePiece, transform: Matrix, featureId: string) => {
-      let entry = pieces.get(piece);
-      if (!entry) pieces.set(piece, (entry = { transforms: [], ids: [], slots: [], felled: [] }));
-      entry.transforms.push(...transform.toArray());
-      entry.ids.push(featureId);
-      entry.slots.push(slotIndex);
-      entry.felled.push(felledPiece);
-    };
-    const size = this.#store!.world.chunkSize;
-    for (const feature of features) {
-      if (feature.deposit?.cleared) continue;
-      const ground = this.#store!.ground(feature.cellX, feature.cellY);
-      if (!ground) continue;
-      const anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size };
-      for (const slot of groveSlots(feature)) {
-        const { tree } = slot,
-          { x, z, y, yaw } = this.#slotPlacement(feature, slot, anchor, ground.height),
-          at = { x, z },
-          turn = Quaternion.RotationAxis(Vector3.Up(), yaw);
-        slotIndex = slot.index;
-        // A tree felled by a lot is drawn by the worksite; the grove keeps its place.
-        felledPiece = this.#treeFelled(feature.id, slot.index);
-        const place = (scale: number, heightScale: number, x = at.x, z = at.z) =>
-          Matrix.Compose(new Vector3(scale, heightScale, scale), turn, new Vector3(x, y, z));
-        if (slot.standing) {
-          put(`${slot.variant}-fut`, place(tree.scale, tree.heightScale), feature.id);
-          put(`${slot.variant}-feuillage`, place(tree.scale, tree.heightScale), feature.id);
-        }
-        felledPiece = false;
-        if (slot.stump) put(slot.stump, place(tree.scale, tree.heightScale), feature.id);
-        felledPiece = this.#treeFelled(feature.id, slot.index);
-        if (slot.lying > 0) {
-          // The trunk without its foliage, on its side and resting on the ground.
-          const lay = turn.multiply(Quaternion.RotationAxis(Vector3.Right(), Math.PI / 2));
-          put(
-            `${slot.variant}-fut`,
-            Matrix.Compose(
-              new Vector3(tree.scale, tree.heightScale * slot.lying, tree.scale),
-              lay,
-              new Vector3(at.x, y + 0.19 * tree.scale, at.z),
-            ),
-            feature.id,
-          );
-        }
-        felledPiece = false;
-        if (slot.young) {
-          const offset = youngOffset(feature.variantSeed, slot.index),
-            beside = this.#space!.projectFrom({ cellX: tree.x + offset.x, cellY: tree.y + offset.y }, anchor),
-            scale = slot.young.scale;
-          const piece = slot.young.piece;
-          if (piece === slot.variant) {
-            put(`${piece}-fut`, place(tree.scale * scale, tree.heightScale * scale, beside.x, beside.z), feature.id);
-            put(
-              `${piece}-feuillage`,
-              place(tree.scale * scale, tree.heightScale * scale, beside.x, beside.z),
-              feature.id,
-            );
-          } else
-            put(
-              piece as TreePiece,
-              place(tree.scale * scale, tree.heightScale * scale, beside.x, beside.z),
-              feature.id,
-            );
-        }
-      }
-    }
-    const meshes: Mesh[] = [];
-    for (const [piece, entry] of pieces) {
-      const key = `tree-kit-${piece}`;
-      let source = this.#sceneryGeometry.get(key);
-      if (!source) {
-        source = new BabylonMesh(key, this.#scene);
-        treePieceData(piece).applyToMesh(source);
-        this.#treeKitMaterial ??= (() => {
-          const material = new StandardMaterial('tree-kit', this.#scene);
-          material.diffuseColor = Color3.White();
-          material.specularColor = new Color3(0.03, 0.03, 0.03);
-          return material;
-        })();
-        source.material = this.#treeKitMaterial;
-        source.setEnabled(false);
-        this.#sceneryGeometry.set(key, source);
-      }
-      const matrices = new Float32Array(entry.transforms),
-        drawn = matrices.slice();
-      for (const [i, felled] of entry.felled.entries()) if (felled) drawn.fill(0, i * 16, i * 16 + 15);
-      const mesh = cloneWoodland(source, `woodland-${features[0]!.id}-${piece}`, drawn);
+    return features.flatMap((feature) => this.#buildGrove(feature));
+  }
+  #buildGrove(feature: NaturalFeature): Mesh[] {
+    if (feature.deposit?.cleared) return [];
+    const ground = this.#store!.ground(feature.cellX, feature.cellY);
+    if (!ground) return [];
+    const slots = groveSlots(feature);
+    if (!slots.length) return [];
+    const size = this.#store!.world.chunkSize,
+      anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size };
+    const instances = new GroveInstances(slots, (slot) => this.#slotPlacement(feature, slot, anchor, ground.height));
+    instances.apply((slot) => this.#treeLook(feature.id, slot));
+    const meshes = new Map<TreePiece, Mesh>();
+    for (const [piece, data] of instances.pieces) {
+      const mesh = cloneWoodland(this.#treeKitSource(piece), `woodland-${feature.id}-${piece}`, data.matrices, false);
+      // The clearing tint, per tree, multiplies the kit's vertex colours.
+      mesh.thinInstanceSetBuffer('color', data.colours, 4, false);
       mesh.metadata = {
-        woodlandId: features[0]!.id,
-        featureId: features[0]!.id,
-        instanceFeatureIds: entry.ids,
-        instanceSlots: entry.slots,
-        instanceFellable: entry.felled.map(
-          (_, i) => !piece.startsWith('souche') && !piece.startsWith('pousse') && entry.slots[i]! >= 0,
-        ),
-        matrices,
-        cellX: features[0]!.cellX,
-        cellY: features[0]!.cellY,
+        woodlandId: feature.id,
+        featureId: feature.id,
+        instanceFeatureIds: data.slots.map(() => feature.id),
+        instanceSlots: data.slots,
+        instanceTrees: data.trees,
+        cellX: feature.cellX,
+        cellY: feature.cellY,
       };
       mesh.isPickable = true;
       mesh.thinInstanceEnablePicking = true;
       mesh.addLODLevel(250, null);
-      meshes.push(mesh);
+      // A piece no tree shows yet (stumps of an untouched grove) costs no draw call.
+      mesh.isVisible = data.shown > 0;
+      meshes.set(piece, mesh);
     }
-    return meshes;
+    const grove = { feature, instances, meshes, trees: slots.map((slot) => gestureTree(feature.id, slot)) };
+    this.#groves.set(feature.id, grove);
+    const key = cellKey(feature);
+    this.#groveCells.set(key, (this.#groveCells.get(key) ?? new Set()).add(feature.id));
+    // The renderer disposes a grove's meshes when it rebuilds or evicts it.
+    meshes
+      .values()
+      .next()
+      .value?.onDisposeObservable.addOnce(() => {
+        if (this.#groves.get(feature.id) !== grove) return;
+        this.#groves.delete(feature.id);
+        const ids = this.#groveCells.get(key);
+        ids?.delete(feature.id);
+        if (!ids?.size) this.#groveCells.delete(key);
+      });
+    return [...meshes.values()];
+  }
+  #treeKitSource(piece: TreePiece): Mesh {
+    const key = `tree-kit-${piece}`;
+    let source = this.#sceneryGeometry.get(key);
+    if (!source) {
+      source = new BabylonMesh(key, this.#scene);
+      treePieceData(piece).applyToMesh(source);
+      this.#treeKitMaterial ??= (() => {
+        const material = new StandardMaterial('tree-kit', this.#scene);
+        material.diffuseColor = Color3.White();
+        material.specularColor = new Color3(0.03, 0.03, 0.03);
+        return material;
+      })();
+      source.material = this.#treeKitMaterial;
+      source.setEnabled(false);
+      this.#sceneryGeometry.set(key, source);
+    }
+    return source;
+  }
+  /** What a tree shows beyond its server state: hidden while a worksite fells it, red while queued for clearing. */
+  #treeLook(featureId: string, slot: GroveSlot): TreeLook {
+    return {
+      masked: this.#treeFelled(featureId, slot.index),
+      tint: slot.state !== 'removed' && queuedMode(this.#woodQueue, featureId, slot.treeIndex) === 'clear',
+    };
+  }
+  /**
+   * Draws the trees of a grove whose look changed (a new server state, the
+   * queue, a worksite felling one): O(changed trees) instance writes and
+   * partial uploads, never a rebuild of the grove or of its chunk.
+   */
+  #refreshGrove(
+    grove: { feature: NaturalFeature; instances: GroveInstances; meshes: Map<TreePiece, Mesh> },
+    slots: readonly GroveSlot[] = grove.instances.slots,
+  ): void {
+    const touched = grove.instances.apply((slot) => this.#treeLook(grove.feature.id, slot), slots);
+    if (!touched.length) return;
+    const byPiece = new Map<TreePiece, number[]>();
+    for (const { piece, i } of touched) {
+      const list = byPiece.get(piece);
+      if (list) list.push(i);
+      else byPiece.set(piece, [i]);
+    }
+    for (const [piece, indices] of byPiece) {
+      const mesh = grove.meshes.get(piece);
+      if (!mesh || mesh.isDisposed()) continue;
+      if (indices.length > 4) {
+        mesh.thinInstanceBufferUpdated('matrix');
+        mesh.thinInstanceBufferUpdated('color');
+      } else
+        for (const i of indices) {
+          mesh.thinInstancePartialBufferUpdate('matrix', 1, i);
+          mesh.thinInstancePartialBufferUpdate('color', 1, i);
+        }
+      // A trunk laid down reaches beyond the standing tree's bounds.
+      mesh.thinInstanceRefreshBoundingInfo();
+      mesh.isVisible = grove.instances.pieces.get(piece)!.shown > 0;
+    }
+    this.#groveWrites += touched.length / 3;
+  }
+  /** Tree looks rewritten in rendered groves, for diagnostics and the browser checks. */
+  #groveWrites = 0;
+  /** A woodland unit whose geometry is unchanged: only its trees' state may have changed. */
+  #updateGroveTrees(feature: NaturalFeature): void {
+    const grove = this.#groves.get(feature.id);
+    if (!grove) return;
+    grove.feature = feature;
+    this.#refreshGrove(grove, groveSlots(feature));
+  }
+  /** The village's queue changed: only the groves of the cases whose queue changed are redrawn. */
+  #observeWoodQueue(worksites: VillageState['village']['worksites']): void {
+    if (worksites === this.#woodQueueSource) return;
+    this.#woodQueueSource = worksites;
+    const next = woodQueue(worksites),
+      changed = changedCases(this.#woodQueue, next);
+    this.#woodQueue = next;
+    if (!changed.length) return;
+    for (const id of changed) {
+      const grove = this.#groves.get(id);
+      if (grove) this.#refreshGrove(grove);
+    }
+    // The offer leaves out what is queued: refresh it now.
+    this.#resourceOverlayAt = 0;
+  }
+  /** Rendered trees near the view (screen fractions), their state and clearing tint: diagnostics only. */
+  #treeScreens(): Array<Record<string, unknown>> {
+    if (!this.#space) return [];
+    const viewport = this.#camera.viewport.toGlobal(this.#engine.getRenderWidth(), this.#engine.getRenderHeight()),
+      trees: Array<Record<string, unknown>> = [];
+    for (const grove of this.#groves.values()) {
+      if (![...grove.meshes.values()].some((mesh) => mesh.isEnabled())) continue;
+      for (const slot of grove.instances.slots) {
+        if (slot.state === 'removed' || trees.length >= 400) continue;
+        const at = this.#space.project({ cellX: slot.tree.x, cellY: slot.tree.y }),
+          foot =
+            slot.tree.elevation === undefined
+              ? (this.#store?.ground(slot.tree.x, slot.tree.y)?.height ?? 0)
+              : slot.tree.elevation * TILE_SIZE;
+        const point = Vector3.Project(
+          new Vector3(at.x, foot + 0.15, at.z),
+          Matrix.Identity(),
+          this.#scene.getTransformMatrix(),
+          viewport,
+        );
+        trees.push({
+          featureId: grove.feature.id,
+          cellX: grove.feature.cellX,
+          cellY: grove.feature.cellY,
+          treeIndex: slot.treeIndex,
+          slot: slot.index,
+          state: slot.state,
+          tint: this.#treeLook(grove.feature.id, slot).tint,
+          x: point.x / this.#engine.getRenderWidth(),
+          y: point.y / this.#engine.getRenderHeight(),
+        });
+      }
+    }
+    return trees;
+  }
+  /** Trees of a grove for its sheet: their state and what the queue does with them. */
+  public groveTrees(featureId: string): GroveTreeRow[] | null {
+    const grove = this.#groves.get(featureId);
+    const feature = grove?.feature ?? this.#store?.naturalFeatures().find((f) => f.id === featureId);
+    if (!feature) return null;
+    return (grove?.instances.slots ?? groveSlots(feature)).map((slot) => ({
+      slot: slot.index,
+      treeIndex: slot.treeIndex,
+      state: slot.state,
+      remaining: slot.remaining,
+      queued: slot.state === 'removed' ? null : queuedMode(this.#woodQueue, featureId, slot.treeIndex),
+    }));
   }
 
   /** Where and how a grove slot is drawn: shared by the grove and the tree a worksite fells. */
@@ -2794,43 +3084,36 @@ export class BabylonVillageScene {
     for (const f of this.#felledTrees.values()) if (f.featureId === featureId && f.index === index) return true;
     return false;
   }
-  /** Draw or mask the fellable instances of a grove after a lot starts or ends. */
+  /** Draw or mask the trees of a grove a worksite fells, after a lot starts or ends. */
   #applyFelledTrees(featureId: string) {
-    for (const mesh of this.#scene.meshes) {
-      const meta = mesh.metadata as {
-        woodlandId?: string;
-        instanceSlots?: number[];
-        instanceFellable?: boolean[];
-        matrices?: Float32Array;
-      } | null;
-      if (meta?.woodlandId !== featureId || !meta.instanceSlots || !meta.matrices) continue;
-      const drawn = meta.matrices.slice();
-      for (const [i, index] of meta.instanceSlots.entries())
-        if (meta.instanceFellable?.[i] && this.#treeFelled(featureId, index)) drawn.fill(0, i * 16, i * 16 + 15);
-      (mesh as Mesh).thinInstanceSetBuffer('matrix', drawn, 16, true);
-    }
+    const grove = this.#groves.get(featureId);
+    if (grove) this.#refreshGrove(grove);
   }
   /**
-   * The tree a wood lot fells, in the grove's own order shared by every village
-   * (docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md §3): the trunk already lying, else
-   * the next original standing. Masked in the grove until a minute after the
-   * lot, when the server's cut has redrawn the slot.
+   * The tree a wood lot fells: the one the lot names (`extractions[].treeIndex`,
+   * slice 2d), else the trunk already lying, else the next tree standing. Masked
+   * in the grove until a minute after the lot, when the server's state has
+   * redrawn it. A stump removal fells nothing.
    */
   #fellTree(featureId: string, lotId: string): FelledTree | null {
-    const feature = this.#store?.naturalFeatures().find((f) => f.id === featureId);
-    if (!feature || !this.#space || !this.#store) return null;
+    if (!this.#space || !this.#store) return null;
+    const grove = this.#groves.get(featureId);
+    const feature = grove?.feature ?? this.#store.naturalFeatures().find((f) => f.id === featureId);
+    if (!feature) return null;
     const ground = this.#store.ground(feature.cellX, feature.cellY);
     if (!ground) return null;
-    const slots = groveSlots(feature),
-      slot = slots.find((s) => s.lying > 0) ?? slots.find((s) => s.standing);
-    if (!slot) return null;
+    const slots = grove?.instances.slots ?? groveSlots(feature),
+      named = this.#state?.village.extractions.find((e) => e.id === lotId)?.treeIndex ?? null;
+    const slot =
+      (named !== null ? slots.find((s) => s.treeIndex === named) : undefined) ??
+      slots.find((s) => s.state === 'felled') ??
+      slots.find((s) => s.state === 'standing');
+    if (!slot || (slot.state !== 'standing' && slot.state !== 'felled')) return null;
     const size = this.#store.world.chunkSize,
       anchor = { cellX: Math.floor(feature.cellX / size) * size, cellY: Math.floor(feature.cellY / size) * size },
       place = this.#slotPlacement(feature, slot, anchor, ground.height);
     this.#felledTrees.set(lotId, { featureId, index: slot.index, timer: 0 });
     this.#applyFelledTrees(featureId);
-    const deposit = feature.deposit,
-      share = deposit ? deposit.initialAmount / slots.length : 0;
     return {
       x: place.x,
       z: place.z,
@@ -2838,9 +3121,19 @@ export class BabylonVillageScene {
       scale: slot.tree.scale,
       heightScale: slot.tree.heightScale,
       yaw: place.yaw,
-      lying: slot.lying,
-      share,
+      lying: slot.state === 'felled' ? slot.lying : 0,
+      // A lot takes reserved / 500 of a tree.
+      share: WOOD_PER_TREE,
     };
+  }
+  /** Grove trunks of the villagers' local way, by cell (grove-trunks.ts): a removed stump leaves it. */
+  get #trunks(): GroveTrunkIndex {
+    const store = this.#store!;
+    if (this.#trunkIndex?.source !== store)
+      this.#trunkIndex = new GroveTrunkIndex(store, (feature, slot, anchor, height) =>
+        this.#slotPlacement(feature, slot, anchor, height),
+      );
+    return this.#trunkIndex;
   }
   /**
    * Room for the felling layout (docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md §3):
@@ -2877,7 +3170,7 @@ export class BabylonVillageScene {
           cellX: (cx + dx + this.#space.width) % this.#space.width,
           cellY: (cy + dy + this.#space.height) % this.#space.height,
         };
-        for (const trunk of this.#trunksAt(cell))
+        for (const trunk of this.#trunks.trunksAt(cell, this.#space.version))
           if (
             Math.hypot(point.x - trunk.x, point.z - trunk.z) < trunk.radius + radius &&
             !this.#treeFelled(trunk.featureId, trunk.index)
@@ -2885,43 +3178,6 @@ export class BabylonVillageScene {
             return false;
       }
     return true;
-  }
-  #trunksAt(cell: Cell) {
-    const store = this.#store!,
-      space = this.#space!,
-      key = store.key(cell.cellX, cell.cellY),
-      now = performance.now();
-    let cached = this.#stageTrunks.get(key);
-    if (!cached || cached.version !== space.version || now - cached.at > 1000) {
-      const size = store.world.chunkSize;
-      cached = { at: now, version: space.version, cells: new Map() };
-      for (const feature of store.chunk(key)?.features ?? []) {
-        if (feature.type !== 'woodland') continue;
-        const ground = store.ground(feature.cellX, feature.cellY);
-        if (!ground) continue;
-        const anchor = {
-            cellX: Math.floor(feature.cellX / size) * size,
-            cellY: Math.floor(feature.cellY / size) * size,
-          },
-          trunks = groveSlots(feature)
-            .filter((slot) => slot.standing || slot.stump || slot.young)
-            .map((slot) => {
-              const at = this.#slotPlacement(feature, slot, anchor, ground.height);
-              return {
-                featureId: feature.id,
-                index: slot.index,
-                x: at.x,
-                z: at.z,
-                radius: 0.19 * slot.tree.scale + 0.15,
-              };
-            });
-        const list = cached.cells.get(cellKey(feature));
-        if (list) list.push(...trunks);
-        else cached.cells.set(cellKey(feature), trunks);
-      }
-      this.#stageTrunks.set(key, cached);
-    }
-    return cached.cells.get(cellKey(cell)) ?? [];
   }
   #releaseTree(lotId: string) {
     const felled = this.#felledTrees.get(lotId);

@@ -1,31 +1,52 @@
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import { woodlandTrees, type WoodlandTree } from '@arbestra/contracts';
+import {
+  treeWood,
+  woodlandTrees,
+  WOOD_PER_TREE,
+  type NaturalFeature,
+  type StoneDeposit,
+  type TreeState,
+  type WoodlandTree,
+} from '@arbestra/contracts';
 import kit from './tree-kit.json';
 
 /**
- * What a grove shows from the server stock (docs/SPEC-BOSQUETS-SOUCHES-REPOUSSE.md §2):
- * every tree slot holds its original tree, or a stump with a young tree beside it,
- * the slot being cut showing its trunk lying down. Pure; the same for every player.
+ * What a grove shows, tree by tree, from the server (docs/SPEC-BOIS-ARBRE-UNITE.md
+ * §2, `deposit.trees` since slice 2d): an untouched tree stands; a felled one
+ * lies on the ground, as long as its wood left, beside its stump; then only its
+ * stump; nothing once the stump is removed. No regrowth any more (no young
+ * trees). Pure; the same for every player.
  */
 export type TreePiece = keyof typeof kit.pieces;
 export type TreeVariant = keyof typeof kit.trunkTop;
+export type StumpPiece = 'souche-a' | 'souche-b';
 
 export interface GroveSlot {
+  /** Place of the tree in its grove's drawn order. */
   index: number;
+  /** The server's tree index (the RC1 index, else the drawn order); null when an
+   * older server does not name an RC1 tree: it cannot be designated alone. */
+  treeIndex: number | null;
   /** Full-grown tree of this slot, as the server's navigation sees it. */
   tree: WoodlandTree;
   variant: TreeVariant;
+  state: TreeState;
   /** Original tree still standing. */
   standing: boolean;
-  /** Trunk of the slot being cut, lying down: share of its length left, 0 when none. */
+  /** Trunk of a felled tree on the ground: its wood left over a whole tree's, 0 when none. */
   lying: number;
-  stump: 'souche-a' | 'souche-b' | null;
-  /** Young tree beside the stump: piece and its scale relative to the original tree, or null. */
-  young: { piece: TreePiece | TreeVariant; scale: number } | null;
+  /** Stump drawn (a felled tree or a stump), or null. */
+  stump: StumpPiece | null;
+  /** The kit stump of this tree, whatever its state. */
+  stumpPiece: StumpPiece;
+  /** Wood left on the tree (a whole tree while standing). */
+  remaining: number;
+  /** Wood free to cut: what is left, less the lots already reserved. */
+  available: number;
 }
 
-type GroveInput = Parameters<typeof woodlandTrees>[0] & {
-  deposit?: { initialAmount: number; remainingAmount: number; cutAmount?: number; cleared?: boolean } | null;
+type GroveInput = Pick<NaturalFeature, 'cellX' | 'cellY' | 'variantSeed' | 'rc1'> & {
+  deposit?: Pick<StoneDeposit, 'initialAmount' | 'remainingAmount' | 'cleared' | 'trees'> | null;
 };
 
 const hash = (seed: number, i: number) => {
@@ -35,8 +56,6 @@ const hash = (seed: number, i: number) => {
   return ((h ^ (h >>> 12)) >>> 0) / 4294967296;
 };
 const SAPINS: TreeVariant[] = ['sapin-a', 'sapin-b', 'sapin-c'];
-/** A young tree shows from this share of its slot's wood; smaller, nothing but the stump. */
-const YOUNG_VISIBLE = 0.15;
 
 /** One broadleaf for four firs, drawn from the grove seed and the slot. */
 export function treeVariant(seed: number, index: number): TreeVariant {
@@ -47,57 +66,51 @@ export function treeVariant(seed: number, index: number): TreeVariant {
 export function groveSlots(feature: GroveInput): GroveSlot[] {
   const deposit = feature.deposit;
   if (deposit?.cleared) return [];
-  // Full-grown trees: the stock now removes trees instead of shrinking them.
+  // Full-grown trees: a tree is cut down, never shrunk.
   const trees = woodlandTrees({
     ...feature,
-    deposit: deposit ? { ...deposit, remainingAmount: deposit.initialAmount, cleared: false } : null,
-  } as Parameters<typeof woodlandTrees>[0]);
-  const n = trees.length;
-  if (!n) return [];
-  const initial = deposit?.initialAmount ?? 1,
-    share = initial / n,
-    cut = Math.max(0, deposit?.cutAmount ?? 0),
-    stock = Math.max(0, deposit?.remainingAmount ?? initial);
-  // Slots ever cut, in the grove's own order (shared by every village).
-  const stumps = Math.min(n, Math.ceil(cut / share - 1e-9));
-  const partial = cut / share - Math.floor(cut / share + 1e-9);
-  const lyingSlot = partial > 1e-9 ? Math.min(n, stumps) - 1 : -1,
-    lyingShare = lyingSlot >= 0 ? 1 - partial : 0;
-  // Wood beyond the originals still standing and the lying trunk grows back beside the stumps.
-  let regrown = Math.max(0, stock - (n - stumps) * share - lyingShare * share);
+    deposit: deposit
+      ? { initialAmount: deposit.initialAmount, remainingAmount: deposit.initialAmount, cleared: false }
+      : null,
+  });
+  const rc1 = feature.rc1?.trees.length ? feature.rc1.trees : null,
+    records = new Map((deposit?.trees ?? []).map((t) => [t.treeIndex, t]));
   return trees.map((tree, index) => {
-    const variant = treeVariant(feature.variantSeed, index),
-      stumped = index < stumps;
-    let young: GroveSlot['young'] = null;
-    if (stumped && index !== lyingSlot) {
-      const part = Math.min(1, regrown / share);
-      regrown -= part * share;
-      if (part >= YOUNG_VISIBLE)
-        young =
-          part < 0.4
-            ? { piece: 'pousse-plant', scale: 0.6 + part }
-            : part < 0.75
-              ? { piece: 'pousse-arbuste', scale: 0.5 + part / 2 }
-              : { piece: variant, scale: part };
-    }
+    const treeIndex = rc1 ? (rc1[index]?.index ?? null) : index,
+      wood = treeWood(treeIndex === null ? undefined : records.get(treeIndex)),
+      stumpPiece: StumpPiece = hash(feature.variantSeed, index + 997) < 0.5 ? 'souche-a' : 'souche-b';
     return {
       index,
+      treeIndex,
       tree,
-      variant,
-      standing: !stumped,
-      lying: index === lyingSlot ? lyingShare : 0,
-      stump: stumped ? (hash(feature.variantSeed, index + 997) < 0.5 ? 'souche-a' : 'souche-b') : null,
-      young,
+      variant: treeVariant(feature.variantSeed, index),
+      state: wood.state,
+      standing: wood.state === 'standing',
+      lying: wood.state === 'felled' ? Math.min(1, wood.remaining / WOOD_PER_TREE) : 0,
+      stump: wood.state === 'felled' || wood.state === 'stump' ? stumpPiece : null,
+      stumpPiece,
+      remaining: wood.remaining,
+      available: wood.available,
     };
   });
 }
 
-/** Kit stumps reach 0.4 with their roots: a young tree grows clear of them (Tristan, 27 October). */
-const YOUNG_OFFSET_CELLS = 0.3;
-/** Side offset of a young tree from its stump, in cells, so both stay readable. */
-export function youngOffset(seed: number, index: number) {
-  const angle = hash(seed, index + 31) * Math.PI * 2;
-  return { x: Math.cos(angle) * YOUNG_OFFSET_CELLS, y: Math.sin(angle) * YOUNG_OFFSET_CELLS };
+/**
+ * What decides the geometry of a grove's meshes: its trees and their places,
+ * not their state. A felled tree, a shorter trunk or a removed stump redraws
+ * its own instances (grove-instances.ts), never the grove.
+ */
+export function woodlandSignature(feature: NaturalFeature): string {
+  return JSON.stringify([
+    feature.id,
+    feature.cellX,
+    feature.cellY,
+    feature.variantSeed,
+    feature.rc1?.trees ?? null,
+    feature.deposit?.cleared ?? false,
+    // Without RC1 forest, the stored wood gives the number of trees.
+    feature.rc1 ? null : (feature.deposit?.initialAmount ?? null),
+  ]);
 }
 
 const decoded = new Map<TreePiece, VertexData>();

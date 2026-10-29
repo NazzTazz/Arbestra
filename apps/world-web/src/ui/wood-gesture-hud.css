@@ -1,0 +1,139 @@
+/* Wood tool: mode badge, clearing frame, switch bubble and « Annuler » (docs/SPEC-GRAMMAIRE-GESTUELLE.md §3). */
+.wood-mode-indicator {
+  position: fixed;
+  top: max(0.6rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(214, 196, 140, 0.55);
+  background: rgba(18, 28, 46, 0.82);
+  color: #f3ead2;
+  font-size: 0.85rem;
+  pointer-events: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+.wood-mode-indicator small {
+  opacity: 0.75;
+  font-size: 0.72rem;
+}
+.wood-mode-indicator[data-mode='clear'] {
+  background: rgba(120, 28, 22, 0.88);
+  border-color: rgba(255, 120, 100, 0.85);
+}
+.wood-mode-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 90, 74, 0.7),
+    inset 0 0 38px rgba(255, 90, 74, 0.28);
+}
+.wood-mode-bubble {
+  position: fixed;
+  z-index: 40;
+  transform: translate(-50%, calc(-100% - 18px));
+  padding: 0.3rem 0.7rem;
+  border-radius: 0.5rem;
+  background: rgba(18, 28, 46, 0.92);
+  color: #f3ead2;
+  font-size: 0.85rem;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+  animation: wood-mode-bubble 1.3s ease forwards;
+}
+.wood-mode-bubble[data-mode='clear'] {
+  background: rgba(150, 34, 26, 0.94);
+}
+@keyframes wood-mode-bubble {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 8px));
+  }
+  12%,
+  75% {
+    opacity: 1;
+    transform: translate(-50%, calc(-100% - 18px));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 24px));
+  }
+}
+.harvest-cancel {
+  position: fixed;
+  top: max(0.6rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  max-width: min(22rem, calc(100vw - 1.5rem));
+}
+.harvest-cancel-button {
+  padding: 0.45rem 0.95rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(214, 196, 140, 0.7);
+  background: rgba(18, 28, 46, 0.9);
+  color: #f3ead2;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.harvest-cancel-button:hover {
+  background: rgba(36, 52, 80, 0.95);
+}
+.harvest-cancel-count {
+  margin-left: 0.35rem;
+  font-weight: 400;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.harvest-cancel-result {
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.5rem;
+  background: rgba(18, 28, 46, 0.88);
+  color: #f3ead2;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+.harvest-cancel-result.is-error {
+  background: rgba(120, 28, 22, 0.9);
+}
+.harvest-cancel-result button {
+  margin-left: 0.4rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+/* Grove sheet and pool card: trees and queue. */
+.grove-trees ul {
+  margin: 0.25rem 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.grove-trees li[data-queued='clear'] {
+  color: #ff9b8a;
+}
+.grove-trees li[data-queued='cut'] {
+  color: #e8cf8a;
+}
+.extraction-pool-queue {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}

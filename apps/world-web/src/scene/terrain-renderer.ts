@@ -10,6 +10,7 @@ import { type ChunkDemand, WorldSpace, normalize, delta } from './world-space';
 import type { TerrainStore } from './terrain-store';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
+import { woodlandSignature } from './grove-trees';
 
 interface Unit {
   signature: string;
@@ -86,6 +87,12 @@ export class TerrainRenderer {
   slowestUnit: { kind: string; ms: number } = { kind: '', ms: 0 };
   readonly integrationMs: number[] = [];
   readonly activeIntegrationMs: number[] = [];
+  /**
+   * A grove whose meshes are current (same trees, same places) arrives again,
+   * maybe with other tree states: the scene redraws only the trees that
+   * changed (docs/SPEC-BOIS-ARBRE-UNITE.md §2), the unit is not rebuilt.
+   */
+  onWoodlandUnchanged: ((feature: NaturalFeature) => void) | null = null;
   constructor(
     private readonly scene: Scene,
     private readonly store: TerrainStore,
@@ -226,11 +233,13 @@ export class TerrainRenderer {
       x: number,
       y: number,
       build: () => Mesh[],
+      unchanged?: () => void,
     ) => {
       keys.add(key);
       const id = `${chunkKey}/${key}`;
       if (resident.units.get(key)?.signature === signature) {
         this.#jobs.delete(id);
+        unchanged?.();
         return;
       }
       const distance = Math.max(
@@ -321,7 +330,17 @@ export class TerrainRenderer {
     for (let i = 0; i < woods.length; i++) {
       const batch = woods.slice(i, i + 1);
       const { x, y } = featureCenter(batch[0]!);
-      add(`woodland:${batch[0]!.id}`, JSON.stringify(batch), false, 1, x, y, () => this.woodland(batch));
+      // Geometry only: a tree felled, cut or removed redraws its own instances.
+      add(
+        `woodland:${batch[0]!.id}`,
+        woodlandSignature(batch[0]!),
+        false,
+        1,
+        x,
+        y,
+        () => this.woodland(batch),
+        () => this.onWoodlandUnchanged?.(batch[0]!),
+      );
     }
     const featureKeys = new Set(
       chunk.features.map(

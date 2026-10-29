@@ -7,7 +7,7 @@ import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import type { Scene } from '@babylonjs/core/scene';
 import type { NaturalFeature, WoodlandTree } from '@arbestra/contracts';
-import { groveSlots } from './grove-trees';
+import { groveSlots, type GroveSlot } from './grove-trees';
 import type { Cell } from './construction-selection';
 import { HALO_MARKER, haloHalfSize, HaloMarkerPlugin, type HarvestMode } from './halo-marker';
 import { RESOURCE_HALO_COLOURS } from './resource-halos';
@@ -16,6 +16,8 @@ import { CELL_UNITS, type WorldSpace } from './world-space';
 
 /** A grove whose standing trees each get a halo at their foot. */
 export interface TreeHaloGrove {
+  /** Entry key: the grove, or one of its trees (`treeHaloKey`) so that each tree is offered, validated and dropped on its own. */
+  key?: string;
   featureId: string;
   /** Deposit cell: the selection target of every tree of the grove. */
   cellX: number;
@@ -28,30 +30,81 @@ export interface TreeHaloGrove {
 }
 export type GroveFeature = Pick<NaturalFeature, 'id' | 'cellX' | 'cellY' | 'variantSeed' | 'rc1' | 'deposit'>;
 
-/** The trees of a grove that deserve a halo: the ones drawn, none once cleared or without available stock. */
-export function groveHaloTrees(feature: GroveFeature): WoodlandTree[] {
+/** What the wood tool offers (docs/SPEC-GRAMMAIRE-GESTUELLE.md §1): the mode, and what the queue already holds. */
+export interface WoodOffer {
+  mode: HarvestMode;
+  /** What the village's queue already does with a tree (wood-queue.ts). */
+  queued?: (featureId: string, treeIndex: number | null) => 'cut' | 'clear' | null;
+}
+const CUT: WoodOffer = { mode: 'cut' };
+
+/**
+ * The trees of a grove offered to the wood tool. Cutting: a standing or felled
+ * tree with wood free, not queued yet. Clearing: any tree or stump still there,
+ * not queued for clearing yet (clearing takes a tree queued for its wood further).
+ */
+export function groveHaloSlots(feature: GroveFeature, offer: WoodOffer = CUT): GroveSlot[] {
   const deposit = feature.deposit;
-  if (!deposit || deposit.resourceCode !== 'wood' || deposit.cleared || deposit.availableAmount <= 0) return [];
-  // Around what can be cut: original trees standing and the trunk lying down, not stumps.
-  return groveSlots(feature)
-    .filter((slot) => slot.standing || slot.lying > 0)
-    .map((slot) => slot.tree);
+  if (!deposit || deposit.resourceCode !== 'wood' || deposit.cleared) return [];
+  if (offer.mode === 'cut' && deposit.availableAmount <= 0) return [];
+  return groveSlots(feature).filter((slot) => {
+    const queued = offer.queued?.(feature.id, slot.treeIndex) ?? null;
+    return offer.mode === 'cut'
+      ? (slot.state === 'standing' || slot.state === 'felled') && slot.available > 0 && queued === null
+      : slot.state !== 'removed' && queued !== 'clear';
+  });
 }
 
-export function groveHalo(feature: GroveFeature, chunkSize: number): TreeHaloGrove | null {
-  const trees = groveHaloTrees(feature);
+/** The trees of a grove that deserve a halo: the ones offered, none once cleared or without available stock. */
+export function groveHaloTrees(feature: GroveFeature, offer: WoodOffer = CUT): WoodlandTree[] {
+  return groveHaloSlots(feature, offer).map((slot) => slot.tree);
+}
+
+const anchorOf = (feature: Cell, chunkSize: number): Cell => ({
+  cellX: Math.floor(feature.cellX / chunkSize) * chunkSize,
+  cellY: Math.floor(feature.cellY / chunkSize) * chunkSize,
+});
+
+export function groveHalo(feature: GroveFeature, chunkSize: number, offer: WoodOffer = CUT): TreeHaloGrove | null {
+  const trees = groveHaloTrees(feature, offer);
   if (!trees.length) return null;
   return {
     featureId: feature.id,
     cellX: feature.cellX,
     cellY: feature.cellY,
-    anchor: {
-      cellX: Math.floor(feature.cellX / chunkSize) * chunkSize,
-      cellY: Math.floor(feature.cellY / chunkSize) * chunkSize,
-    },
+    anchor: anchorOf(feature, chunkSize),
     revision: feature.deposit!.revision,
     trees,
   };
+}
+
+/** The halo entry of one tree of a grove, by its drawn slot. */
+export const treeHaloKey = (featureId: string, slot: number): string => `${featureId}:${slot}`;
+
+/** One halo per given tree slot: a tree is offered, validated and dropped on its own. */
+export function treeHalos(
+  feature: Pick<NaturalFeature, 'id' | 'cellX' | 'cellY'>,
+  slots: readonly GroveSlot[],
+  chunkSize: number,
+) {
+  const anchor = anchorOf(feature, chunkSize);
+  return slots.map(
+    (slot): TreeHaloGrove => ({
+      key: treeHaloKey(feature.id, slot.index),
+      featureId: feature.id,
+      cellX: feature.cellX,
+      cellY: feature.cellY,
+      anchor,
+      // A tree's place never changes: only the terrain and the space move it.
+      revision: 0,
+      trees: [slot.tree],
+    }),
+  );
+}
+
+/** The trees of a grove offered to the wood tool, one halo each. */
+export function groveHalos(feature: GroveFeature, chunkSize: number, offer: WoodOffer = CUT): TreeHaloGrove[] {
+  return treeHalos(feature, groveHaloSlots(feature, offer), chunkSize);
 }
 
 /** Ring radius in scene units, just inside the crown's drip line. */
@@ -126,6 +179,16 @@ export class TreeHalos {
   #zoom = 0;
   #instanceCount = 0;
   #pendingShown = 0;
+  /**
+   * Nothing to animate, write or place since the last full pass: a frame then
+   * only advances the clock (O(1)), however many trees are on offer.
+   */
+  #settled = false;
+  #lastEnabled = false;
+  #lastZoom = -1;
+  #lastGroundRevision: number | undefined = undefined;
+  /** Full passes over the entries, for tests and diagnostics. */
+  passes = 0;
   /** Milliseconds spent rebuilding instance matrices, for diagnostics. */
   rebuildMs = 0;
   rebuilds = 0;
@@ -168,6 +231,7 @@ export class TreeHalos {
   }
   /** Wood tool mode: resting halos take its shape; a running validation keeps its own. */
   setMode(mode: HarvestMode): void {
+    if (mode !== this.#mode) this.#settled = false;
     this.#mode = mode;
   }
   setAvailable(groves: TreeHaloGrove[]): void {
@@ -179,8 +243,8 @@ export class TreeHalos {
     this.#sync();
   }
   #sync(): void {
-    const available = new Map(this.#available.map((g) => [g.featureId, g]));
-    const pending = new Map(this.#pending.map((g) => [g.featureId, g]));
+    const available = new Map(this.#available.map((g) => [g.key ?? g.featureId, g]));
+    const pending = new Map(this.#pending.map((g) => [g.key ?? g.featureId, g]));
     for (const [key, grove] of [...available, ...pending])
       if (!this.#entries.has(key)) {
         this.#entries.set(key, {
@@ -211,9 +275,12 @@ export class TreeHalos {
         this.#layoutDirty = true;
       }
       if (pending.has(key) && !entry.pending) entry.select = true;
+      // The same offer again (every overlay refresh) keeps a resting frame O(1).
+      if (entry.available !== available.has(key) || entry.pending !== pending.has(key)) this.#settled = false;
       entry.available = available.has(key);
       entry.pending = pending.has(key);
     }
+    if (this.#layoutDirty) this.#settled = false;
   }
   /** A grove's instance matrices: one per tree over known terrain, tilted to the slope. */
   #place(
@@ -294,7 +361,7 @@ export class TreeHalos {
   update(
     now: number,
     space: WorldSpace,
-    ground: Pick<TerrainStore, 'ground' | 'groundRevisionAt'>,
+    ground: Pick<TerrainStore, 'ground' | 'groundRevisionAt'> & { readonly groundRevision?: number },
     enabled: boolean,
     zoomOpacity: number,
   ): void {
@@ -303,6 +370,27 @@ export class TreeHalos {
     this.#epoch ??= now;
     this.#clock = (now - this.#epoch) / 1000;
     this.#zoom = Math.max(0, Math.min(1, zoomOpacity));
+    // At rest (every fade done, no validation playing, nothing offered anew, same
+    // terrain, space, mode and zoom), a frame is the clock uniform alone.
+    const groundRevision = ground.groundRevision;
+    if (
+      this.#settled &&
+      enabled === this.#lastEnabled &&
+      this.#zoom === this.#lastZoom &&
+      groundRevision !== undefined &&
+      groundRevision === this.#lastGroundRevision &&
+      this.#spaceVersion === space.version
+    ) {
+      this.instanceWrites = 0;
+      this.uploads = 0;
+      return;
+    }
+    this.#lastEnabled = enabled;
+    this.#lastZoom = this.#zoom;
+    const groundChanged = groundRevision === undefined || groundRevision !== this.#lastGroundRevision;
+    this.#lastGroundRevision = groundRevision;
+    this.passes++;
+    let settled = true;
     for (const [key, entry] of this.#entries) {
       const target =
         enabled && ((entry.available && !entry.pending) || entry.select || entry.selectedAt !== null) ? 1 : 0;
@@ -325,8 +413,9 @@ export class TreeHalos {
         this.#layoutDirty = true;
         continue;
       }
-      if (entry.groundRevision !== ground.groundRevisionAt(entry.grove.cellX, entry.grove.cellY))
+      if (groundChanged && entry.groundRevision !== ground.groundRevisionAt(entry.grove.cellX, entry.grove.cellY))
         this.#layoutDirty = true;
+      if (entry.alpha !== target || entry.selectedAt !== null || (entry.select && enabled)) settled = false;
     }
     if (this.#layoutDirty || this.#spaceVersion !== space.version) this.#rebuild(space, ground);
     let shown = false;
@@ -370,6 +459,8 @@ export class TreeHalos {
       this.uploads = ranges.length * 2;
     }
     this.#mesh.setEnabled(shown && this.#instanceCount > 0);
+    // Writes still due (a fade, a flash, a mode switch) keep the next frame a full pass.
+    this.#settled = settled && ranges.length === 0;
   }
   /** Groves whose selection flash is still on screen. */
   get pendingCount(): number {
@@ -404,6 +495,7 @@ export class TreeHalos {
     this.#mesh.thinInstanceSetBuffer('matrix', null, 16);
     this.#mesh.setEnabled(false);
     this.#layoutDirty = true;
+    this.#settled = false;
   }
   dispose(): void {
     this.clear();
