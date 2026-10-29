@@ -181,6 +181,28 @@ Lecture seule ; lignes d'`origin/main` `5970fec`.
 - **Rapports** filtrés par destinataire : exploitation (tout), participants (leurs effectifs, pertes, marchandises), observateurs (événement, lieu, identités effectivement identifiées, issue). La rupture d'un pacte est un événement diplomatique distinct.
 - **Premier cas de soufflerie proposé** : le pacifiste qui escorte ses pierres face au voisin tenté de sacrifier ses quatorze jours de protection.
 
+## 4 decies. Précisions de Tristan sur le moteur (29 octobre)
+
+**Validé (Tristan)** :
+
+- La soufflerie tourne sur le VPS de Strasbourg qui héberge aussi Arbestra ; des binaires Linux existent. La parité soufflerie / jeu se pose donc entre artefacts Linux.
+- La soufflerie sert à équilibrer les unités militaires (monotypes puis types mixtes) et à visualiser les effets du ruleset. Bagaar simule une ère de Waar, un autre jeu.
+- Les 4 classes couvrent les rôles d'Arbestra :
+  - **Soldat** : à pied, unité de base (garde, espion) ;
+  - **Archer** : unité offensive ;
+  - **Chevalier** : unité rapide, à cheval ;
+  - **Lancier** : unité défensive (garde amélioré).
+
+**Proposé (Tristan)** : au-delà de limiter les pertes, l'Oracle peut agir **pendant** le combat, par exemple en faisant souffler le vent : la précision des archers s'effondre. Le moteur a déjà des modificateurs météo, qui ne touchent que l'attaque et la précision, avec leur provenance.
+
+**Astra, puis Claude-Opus** :
+
+- Point de départ : identifier le build Linux qui tourne sur le VPS (commit, features, empreinte, mode d'appel), pas les binaires Windows locaux ni `5970fec` ; ne pas remplacer ce qui tourne.
+- Bagaar hors du raccord. Le cas « escorter ses pierres ou les piller » est un scénario de confrontation de la soufflerie, pas une simulation d'ère.
+- Les 4 classes suffisent ; pas de généralisation à N types. Espion et escorte sont des affectations (un espion est un soldat affecté au renseignement).
+- Oracle : il peut agir sur les conditions du combat, et cette intervention n'exclut pas une limitation des conséquences. Distinguer un vent qui gêne tous les archers (perturbation, pas forcément favorable au défenseur) d'un vent contraire au seul agresseur (protection asymétrique). Effets à mesurer dans la soufflerie, avec et sans intervention, plutôt qu'un pourcentage arbitraire.
+- Fait technique (Claude-Opus) : les requêtes du moteur portent déjà des modificateurs par camp avec provenance ; les deux variantes de vent s'expriment sans modifier le moteur, et la provenance « Oracle » apparaît dans le rapport.
+
 ## 5. Ouvert
 
 1. Mesure du rayon : depuis tous les bâtiments terminés, ou depuis le seul cœur du village ? Risque de *land grab*.
