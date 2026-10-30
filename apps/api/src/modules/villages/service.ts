@@ -982,7 +982,13 @@ export async function readInfrastructureSpatialState(
   plan?: InfrastructurePlan,
   routes = true,
   stroke?: RoadStroke,
-): Promise<{ snapshot: InfrastructureSpatialState; ground: Snapshot['rc1'] }> {
+): Promise<{
+  snapshot: InfrastructureSpatialState;
+  ground: Snapshot['rc1'];
+  /** Rows already read for the geometry; plots are projected only with routes. */
+  occupancies: VillageOccupancyRows;
+  plots: Awaited<ReturnType<typeof projectGardenPlots>>;
+}> {
   if (economy.worldId !== village.worldId || economy.villageId !== village.villageId)
     throw Error('Infrastructure context does not match village economy');
   const [ground, occupancyRows, infrastructure, wood, stone] = await Promise.all([
@@ -1100,7 +1106,49 @@ export async function readInfrastructureSpatialState(
           cells: extraction.path,
         });
   }
-  return { snapshot: context, ground: ground.rc1 };
+  return { snapshot: context, ground: ground.rc1, occupancies: occupancyRows, plots: projectedPlots };
+}
+
+/** Garden plots a selection can name, with the eligibility facts the full
+ * snapshot gives them: one entry per plot under the anchor of its logical
+ * garden (merged component), its building status and any in-progress harvest. */
+function gardenSelectionPlots(
+  occupancyRows: VillageOccupancyRows,
+  projectedPlots: Awaited<ReturnType<typeof projectGardenPlots>>,
+  harvestRows: ReadonlyArray<{
+    buildingId: string;
+    plotCellX: number | null;
+    plotCellY: number | null;
+    stops: ReadonlyArray<{ cellX: number; cellY: number }>;
+  }>,
+  village: Pick<OwnedVillage, 'widthCells' | 'heightCells'>,
+) {
+  const harvestedPlots = new Set(
+    harvestRows
+      .filter((item) => item.plotCellX !== null)
+      .flatMap((item) =>
+        (item.stops.length ? item.stops : [{ cellX: item.plotCellX!, cellY: item.plotCellY! }]).map((plot) =>
+          worldCellKey(plot.cellX, plot.cellY),
+        ),
+      ),
+  );
+  const legacyHarvests = new Set(harvestRows.filter((item) => item.plotCellX === null).map((item) => item.buildingId));
+  const { canonicalByBuilding, componentBuildings } = groupVillageOccupancies(occupancyRows, village);
+  return occupancyRows.flatMap((row) => {
+    const logicalId = canonicalByBuilding.get(row.buildingId) ?? row.buildingId;
+    if (row.buildingType !== 'garden' || row.role !== 'anchor' || row.buildingId !== logicalId) return [];
+    const members = componentBuildings.get(logicalId) ?? new Set([row.buildingId]);
+    const legacyHarvest = [...members].some((id) => legacyHarvests.has(id));
+    return projectedPlots
+      .filter((plot) => members.has(plot.buildingId))
+      .map((plot) => ({
+        cellX: plot.cellX,
+        cellY: plot.cellY,
+        storedCarrots: plot.amount,
+        status: row.status,
+        harvested: legacyHarvest || harvestedPlots.has(worldCellKey(plot.cellX, plot.cellY)),
+      }));
+  });
 }
 
 export async function state(
@@ -2607,8 +2655,19 @@ export async function prepareExploitation(
   request: ExploitationRequest,
 ) {
   // Preparation projects eligibility; only the subsequent command assigns work.
-  const snapshot = request.gardens.length
-    ? await state(tx, accountId, village.worldSlug, economy, false, true, undefined, village)
+  // Gardens need their plots and the village network (the same routes as the
+  // full snapshot, from the command geometry), never a whole VillageState.
+  const gardenContext = request.gardens.length
+    ? await Promise.all([
+        readInfrastructureSpatialState(tx, village, economy),
+        tx
+          .selectFrom('gardenHarvests')
+          .select(['buildingId', 'plotCellX', 'plotCellY', 'stops'])
+          .where('worldId', '=', village.worldId)
+          .where('villageId', '=', village.villageId)
+          .where('status', '=', 'in-progress')
+          .execute(),
+      ])
     : undefined;
   const projectedCohorts = await projectCohorts(tx, village.worldId, village.villageId, economy.through);
   const population = {
@@ -2641,34 +2700,34 @@ export async function prepareExploitation(
       reason: null,
     },
   };
-  const plots =
-    snapshot?.cells.flatMap((c) => c.building?.garden?.plots.map((plot) => ({ plot, building: c.building! })) ?? []) ??
-    [];
+  const plots = gardenContext
+    ? gardenSelectionPlots(gardenContext[0].occupancies, gardenContext[0].plots, gardenContext[1], village)
+    : [];
   const seen = new Set<string>();
   for (const cell of request.gardens) {
     const key = `garden:${cell.cellX}:${cell.cellY}`;
-    const p = plots.find((p) => p.plot.cellX === cell.cellX && p.plot.cellY === cell.cellY);
+    const p = plots.find((p) => p.cellX === cell.cellX && p.cellY === cell.cellY);
     const reason = seen.has(key)
       ? 'duplicate'
       : !p
         ? 'not-found'
-        : p.building.status !== 'completed'
+        : p.status !== 'completed'
           ? 'building-incomplete'
-          : p.plot.harvest || p.building.garden?.harvest
+          : p.harvested
             ? 'already-assigned'
-            : p.plot.storedCarrots < 1
+            : p.storedCarrots < 1
               ? 'empty'
               : null;
     seen.add(key);
     if (reason) preview.excluded.push({ key, reason });
     else {
       preview.gardens.push(cell);
-      preview.estimates.carrot += p!.plot.storedCarrots;
+      preview.estimates.carrot += p!.storedCarrots;
     }
   }
   const plan = preview.gardens.length
     ? planGardenTour(
-        snapshot!.travelRoutes,
+        gardenContext![0].snapshot.travelRoutes,
         { cellX: village.anchorCellX, cellY: village.anchorCellY },
         preview.gardens,
         village,
