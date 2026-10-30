@@ -21,3 +21,11 @@ Côté client (branche `refactor/hud-infrastructure`) : l'avertissement du point
 - Le serveur de la démolition est implémenté dans la session de la synchronisation V2, après la sous-tranche 5c (voirie sans `state()`), directement en V2 : journal, snapshot, lectures bornées.
 - Le client (geste, marques, fiche) reste sur la branche `refactor/hud-infrastructure`.
 - Ordre : 5a (exploitation avec jardins) → 5c (voirie) → démolition serveur → 5b (nivellement).
+
+## Révision du 31 octobre (Tristan, validée)
+
+- **Démolition immédiate pour toutes les cibles**, bâtiments compris, à l'admission de la commande : pas de durée, pas de chantier, **aucun villageois mobilisé**. Remplace la règle du dixième et les points 1, 2, 4, 7, 8 et 9 ci-dessus.
+- **Filet contre l'erreur côté client** : après **Démolir**, un délai d'annulation (sur le modèle des 15 s du défrichage) avant l'envoi de la commande ; une fois envoyée, plus d'annulation serveur.
+- Les dormeurs d'une maison démolie sont relogés immédiatement par la réallocation des lits existante.
+- Inchangés : aucun remboursement, avertissement des ressources stockées perdues (point 3), braseros automatiques supprimés par le balayage (point 5), seules les parcelles touchées d'un jardin fusionné (point 6), hôtel de ville jamais démoli.
+- Conséquence technique : ni table de chantier, ni tâche du worker, ni route d'annulation, ni entité V2 nouvelle ; une commande V2 idempotente qui publie les suppressions.
