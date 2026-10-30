@@ -85,6 +85,25 @@ function leaveCluster(scene: Scene, owner: object, cluster: BrazierCluster): voi
 class ClusteredPointLight extends PointLight {}
 (ClusteredPointLight.prototype as unknown as { _resyncMeshes(): void })._resyncMeshes = () => {};
 
+/**
+ * Takes a light out of the fire cluster before disposing it. Babylon's
+ * `removeLight` hands the light back to the scene (`scene.addLight`), which
+ * adds it to every mesh's light sources; `dispose` then walks every mesh again
+ * and marks their materials dirty: ≈40 ms per fire on Bressuire (browser,
+ * 30 October), 257 ms for six. The light is about to be disposed: it never
+ * rejoins the scene.
+ */
+export function detachClusteredLight(container: ClusteredLightContainer, light: PointLight): void {
+  const scene = light.getScene(),
+    add = scene.addLight;
+  scene.addLight = () => {};
+  try {
+    container.removeLight(light);
+  } finally {
+    scene.addLight = add;
+  }
+}
+
 function brazierLight(clustered: boolean, name: string, position: Vector3, scene: Scene): PointLight {
   const light = clustered
     ? new ClusteredPointLight(name, position, scene, true)
@@ -121,7 +140,7 @@ export function clusteredEffectLight(scene: Scene, owner: object, name: string, 
 export function releaseClusteredEffectLight(scene: Scene, owner: object, light: PointLight): void {
   const cluster = sceneClusters.get(scene);
   if (cluster) {
-    cluster.light.removeLight(light);
+    detachClusteredLight(cluster.light, light);
     leaveCluster(scene, owner, cluster);
   }
   light.dispose();
@@ -250,6 +269,8 @@ export class VillageBraziers {
     tempo: number;
   }> = [];
   #signature = '';
+  /** Fires created and disposed by `updatePoints` since construction (tests, browser checks). */
+  readonly stats = { created: 0, removed: 0 };
   #nextBind = 0;
   #lighting = false;
   #cluster: BrazierCluster | null = null;
@@ -353,6 +374,7 @@ export class VillageBraziers {
       }
       // Every brazier has the same masonry: a native instance of one template.
       // Cloning copied each mesh's properties by reflection (~1 ms per brazier).
+      this.stats.created++;
       const template = this.#masonryTemplate(),
         masonry = template.createInstance('brazier-masonry');
       masonry.position.set(p.x, p.y, p.z);
@@ -428,8 +450,9 @@ export class VillageBraziers {
       });
     }
     for (const item of previous.values()) {
+      this.stats.removed++;
       item.flame.dispose(false);
-      this.#cluster?.light.removeLight(item.light);
+      if (this.#cluster) detachClusteredLight(this.#cluster.light, item.light);
       item.light.dispose();
       for (const mesh of item.meshes) mesh.dispose(false, false);
     }
@@ -538,7 +561,7 @@ export class VillageBraziers {
   #clear(): void {
     for (const item of this.#items) {
       item.flame.dispose(false);
-      this.#cluster?.light.removeLight(item.light);
+      if (this.#cluster) detachClusteredLight(this.#cluster.light, item.light);
       item.light.dispose();
       for (const mesh of item.meshes) mesh.dispose(false, false);
     }

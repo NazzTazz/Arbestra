@@ -1,43 +1,48 @@
 import { randomUUID } from '../random-uuid';
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useId, type RefObject } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useId, type RefObject } from 'react';
 import {
-  prepareInfrastructureEdit,
-  createInfrastructureEditContext,
-  emptyInfrastructure,
+  ROAD_ACCESSORY_PRICES,
+  ROAD_ANCHORS_PER_COMMAND,
   ROAD_CELLS_PER_COMMAND,
-  type InfrastructureOperation,
-  type InfrastructureQuote,
-  type InfrastructureRequest,
+  type RoadAnchorsPreview,
+  type RoadAnchorsPreviewRequest,
+  type RoadAnchorsRequest,
+  type RoadAnchorsResult,
   type RoadCellSurface,
   type RoadCellsPreview,
   type RoadCellsPreviewRequest,
   type RoadCellsRequest,
   type RoadCellsResult,
   type VillageState,
-  type SubPoint,
-  subCellKey,
 } from '@arbestra/contracts';
-import {
-  ApiError,
-  commandInfrastructure,
-  previewInfrastructure,
-  getVillage,
-  type TimedVillageUpdate,
-  type TimedInfrastructureConfirmation,
-} from '../api/client';
+import type { TimedVillageUpdate, TimedInfrastructureConfirmation } from '../api/client';
 import type { TerrainHandle } from '../scene/VillageScene';
-import { villageRequestGeneration } from '../api/village-sync';
 import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { InfrastructureThumbnail } from './InfrastructureThumbnail';
 import { RoadVariantMenu } from './RoadVariantMenu';
 import { subPointCell } from './demolition-selection';
 import { RoadCellGesture, skippedLabel } from './road-cell-gesture';
+import {
+  RoadAnchorGesture,
+  RoadAnchorIndex,
+  highlightedAnchors,
+  skippedAnchorsLabel,
+  snapAnchor,
+  subPointVertex,
+  vertexKey,
+  type RoadAnchorMode,
+  type Vertex,
+} from './road-anchor-gesture';
 import './harvest-feedback.css';
-type Item = { id: string; version: number; position: SubPoint; quarterTurns: number };
 /** Road cells commands of the V2 village session; null while V2 is not ready. */
 export interface RoadCellsApi {
   command: (request: RoadCellsRequest) => Promise<RoadCellsResult>;
   preview: (body: RoadCellsPreviewRequest) => Promise<RoadCellsPreview>;
+}
+/** Road anchors commands of the V2 village session; null while V2 is not ready. */
+export interface RoadAnchorsApi {
+  command: (request: RoadAnchorsRequest) => Promise<RoadAnchorsResult>;
+  preview: (body: RoadAnchorsPreviewRequest) => Promise<RoadAnchorsPreview>;
 }
 const materials = [
   ['none', 'Pas de route'],
@@ -51,43 +56,34 @@ const costLabel = (surface: Surface, sidewalks: boolean) => {
   const stone = surfaceCost(surface) + (sidewalks ? 2 : 0);
   return stone ? `◆ ${stone} / case` : 'Gratuit';
 };
+const brazierPrice = ROAD_ACCESSORY_PRICES.brazier;
 export function InfrastructureTools({
   state,
   scene,
   active,
   roadCells,
-  onSnapshot,
-  onConfirmation,
+  roadAnchors,
   onWorkshop,
 }: {
   state: VillageState;
   scene: RefObject<TerrainHandle | null>;
   active: boolean;
   roadCells: RoadCellsApi | null;
-  onSnapshot: (s: TimedVillageUpdate) => void;
-  onConfirmation: (s: TimedInfrastructureConfirmation) => void;
+  roadAnchors: RoadAnchorsApi | null;
+  /** Legacy stroke plan answers, unused since the lighting tool moved to anchors (S4b); removed with S3. */
+  onSnapshot?: (s: TimedVillageUpdate) => void;
+  onConfirmation?: (s: TimedInfrastructureConfirmation) => void;
   onWorkshop: () => void;
 }) {
   const [family, setFamily] = useState('Voirie'),
     [surface, setSurface] = useState<Surface>('earth'),
     [sidewalks, setSidewalks] = useState(false),
-    [turn, setTurn] = useState(0);
+    [lightMode, setLightMode] = useState<RoadAnchorMode>('place');
   const [menu, setMenu] = useState<{ code: 'earth' | 'stone-1' | 'stone-2'; anchor: HTMLButtonElement } | null>(null),
     menuId = useId();
-  const [point, setPoint] = useState<SubPoint | null>(null),
-    [item, setItem] = useState<Item | null>(null),
-    [armed, setArmed] = useState(false);
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState<string | null>(null),
-    [serverValid, setServerValid] = useState(true),
-    [uncertain, setUncertain] = useState<InfrastructureRequest | null>(null);
-  const session = useRef<string>(randomUUID()),
-    latest = useRef({ state, family, turn, point, item, armed, busy, menu, roadCells });
+  const latest = useRef({ state, family, menu, roadCells, roadAnchors });
   const price = useRef<HTMLSpanElement>(null);
-  const generation = useRef(0),
-    presented = useRef<{ operation: string; revision: number; quote: InfrastructureQuote } | null>(null);
-  const previewInFlight = useRef(false);
-  latest.current = { state, family, turn, point, item, armed, busy, menu, roadCells };
+  latest.current = { state, family, menu, roadCells, roadAnchors };
   // Road cell gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.2), one per village.
   const [, render] = useReducer((n: number) => n + 1, 0);
   const road = useMemo(
@@ -122,47 +118,71 @@ export function InfrastructureTools({
   useEffect(() => {
     road.setMode(surface === 'none' ? { action: 'remove' } : { action: 'place', style: { surface, sidewalks } });
   }, [road, surface, sidewalks]);
-  const pendingKey = `arbestra:infrastructure:${state.world.id}:${state.village.id}`;
-  useEffect(() => {
-    try {
-      const value = JSON.parse(sessionStorage.getItem(pendingKey) ?? 'null') as InfrastructureRequest | null;
-      if (value?.commandId) {
-        setUncertain(value);
-        session.current = value.sessionId;
-      }
-    } catch {
-      /* corrupt local history cannot authorize an action */
-    }
-  }, [pendingKey]);
-  /** Braziers only: roads are placed by cell with the road gesture. */
-  function operation(p: SubPoint | null): InfrastructureOperation | null {
-    const c = latest.current;
-    if (!p || c.family !== 'Éclairage') return null;
-    return c.item
-      ? { kind: 'move', id: c.item.id, version: c.item.version, position: p, quarterTurns: c.turn }
-      : c.armed
-        ? { kind: 'place', position: p, quarterTurns: c.turn }
-        : null;
-  }
-  const op = operation(point),
-    plan = state.infrastructure ?? emptyInfrastructure();
-  const opKey = JSON.stringify(op);
-  const stableOp = useMemo(() => JSON.parse(opKey) as InfrastructureOperation | null, [opKey]);
-  const editContext = useMemo(
-    () => createInfrastructureEditContext(state),
-    [state.world, state.cells, state.travelRoutes, state.infrastructure],
+  // Lighting: anchors of the village's road cells (§5), indexed once per state change.
+  const world = useMemo(
+    () => ({ widthCells: state.world.widthCells, heightCells: state.world.heightCells }),
+    [state.world.widthCells, state.world.heightCells],
   );
-  const prepared = useMemo(() => {
-    try {
-      return stableOp ? prepareInfrastructureEdit(editContext.state, stableOp, 'preview', editContext) : null;
-    } catch {
-      return null;
-    }
-  }, [editContext, stableOp]);
-  const quote = prepared?.quote ?? null;
-  const stone = state.village.resources.find((r) => r.code === 'stone')?.amount ?? 0;
-  const insufficient = Boolean(quote && (quote.stoneDebit > stone || quote.woodDebit > state.village.wood));
+  const anchorIndex = useMemo(
+    () => new RoadAnchorIndex(state.roadCells, state.roadAnchors, world),
+    [state.roadCells, state.roadAnchors, world],
+  );
+  const anchors = useRef(anchorIndex);
+  anchors.current = anchorIndex;
+  const hovered = useRef<Vertex | null>(null),
+    snappedRef = useRef<Vertex | null>(null);
+  const lighting = useMemo(
+    () =>
+      new RoadAnchorGesture({
+        world: { widthCells: state.world.widthCells, heightCells: state.world.heightCells },
+        uuid: randomUUID,
+        designable: (vertex, mode) => anchors.current.designable(vertex, mode),
+        preview: (body) => {
+          const api = latest.current.roadAnchors;
+          return api ? api.preview(body) : Promise.reject(Error('Synchronisation indisponible.'));
+        },
+        command: (request) => {
+          const api = latest.current.roadAnchors;
+          return api ? api.command(request) : Promise.reject(Error('Synchronisation indisponible.'));
+        },
+        added: (vertices) => scene.current?.roadAnchorPreviewAdd(vertices),
+        refused: (vertices) => scene.current?.roadAnchorPreviewAdd(vertices, true),
+        cleared: () => scene.current?.roadAnchorPreviewClear(),
+        tone: (tone) => scene.current?.roadAnchorPreviewTone(tone),
+        changed: render,
+      }),
+    [state.world.id, state.world.widthCells, state.world.heightCells, state.village.id, scene],
+  );
+  useEffect(() => {
+    lighting.resume();
+    return () => {
+      lighting.dispose();
+      scene.current?.roadAnchorPreviewClear();
+      scene.current?.roadAnchorMarkers(null);
+    };
+  }, [lighting, scene]);
+  useEffect(() => {
+    lighting.setMode(lightMode);
+  }, [lighting, lightMode]);
+  /** Bounded highlight around the pointer: at most (2r+1)² lookups, MAX_HIGHLIGHTS
+   * instances; the anchor the pointer snaps to is emphasized when designable. */
+  const highlight = (vertex: Vertex | null, snapped: Vertex | null) => {
+    hovered.current = vertex;
+    snappedRef.current = snapped;
+    const mode = lighting.mode;
+    scene.current?.roadAnchorMarkers(
+      vertex ? highlightedAnchors(anchors.current, vertex, mode) : null,
+      mode === 'remove',
+      snapped && anchors.current.designable(snapped, mode) ? snapped : null,
+    );
+  };
+  useEffect(() => {
+    // The village's anchors or the mode changed: refresh the highlight where the pointer is.
+    if (active && family === 'Éclairage' && hovered.current) highlight(hovered.current, snappedRef.current);
+    else scene.current?.roadAnchorMarkers(null);
+  }, [active, family, anchorIndex, lightMode]);
   const roadQuote = family === 'Voirie' && road.quoteCurrent ? road.quote : null;
+  const lightQuote = family === 'Éclairage' && lighting.quoteCurrent ? lighting.quote : null;
   useEffect(() => {
     if (!active) return;
     // Move the label directly: pointer motion must not schedule extra React renders.
@@ -180,218 +200,44 @@ export function InfrastructureTools({
     window.addEventListener('pointermove', move, { capture: true });
     return () => window.removeEventListener('pointermove', move, { capture: true });
   }, [active]);
-  const clearPending = () => {
-    try {
-      sessionStorage.removeItem(pendingKey);
-    } catch {
-      /* a storage failure cannot turn a successful server response into uncertainty */
-    }
-  };
-  useLayoutEffect(() => {
-    presented.current = active && op && quote ? { operation: opKey, revision: plan.revision, quote } : null;
-  });
-  useEffect(() => {
-    scene.current?.infrastructurePreview(
-      active ? op : null,
-      !serverValid || insufficient,
-      prepared?.next,
-      prepared?.surface,
-    );
-  }, [active, opKey, serverValid, insufficient, scene, prepared]);
-  useEffect(() => {
-    if (!active || !op || busy) return;
-    let cancelled = false;
-    setServerValid(true);
-    const request: InfrastructureRequest = {
-      commandId: randomUUID(),
-      sessionId: session.current,
-      revision: plan.revision,
-      operation: op,
-    };
-    let timer: ReturnType<typeof setTimeout>;
-    const run = () => {
-      if (cancelled) return;
-      // Coalesce obsolete read-only previews instead of queuing server work.
-      if (previewInFlight.current) {
-        timer = setTimeout(run, 120);
-        return;
-      }
-      previewInFlight.current = true;
-      void previewInfrastructure(state.world.slug, state.village.id, request)
-        .then((result) => {
-          if (!cancelled) {
-            setServerValid(result.valid);
-            setError(result.message);
-          }
-        })
-        .catch((reason) => {
-          if (!cancelled) {
-            setServerValid(false);
-            setError(reason instanceof Error ? reason.message : 'Devis indisponible.');
-          }
-        })
-        .finally(() => {
-          previewInFlight.current = false;
-        });
-    };
-    timer = setTimeout(run, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-    // Structural key freezes exactly the geometry being quoted, not render identity.
-  }, [active, opKey, plan.revision, insufficient, scene, busy]);
-  async function send(next: InfrastructureOperation, requestOverride?: InfrastructureRequest) {
-    if (latest.current.busy) return;
-    const c = latest.current,
-      current = c.state.infrastructure ?? emptyInfrastructure();
-    let expected: InfrastructureQuote | undefined;
-    if (!requestOverride && (next.kind === 'place' || next.kind === 'move')) {
-      const shown = presented.current;
-      if (!shown || shown.operation !== JSON.stringify(next) || shown.revision !== current.revision) {
-        setPoint(next.position);
-        setError('Vérifiez l’aperçu actualisé avant de valider.');
-        return;
-      }
-      expected = shown.quote;
-    } else if (next.kind !== 'undo')
-      try {
-        expected = prepareInfrastructureEdit(c.state, next, 'preview').quote;
-      } catch (reason) {
-        setError((reason as Error).message);
-        return;
-      }
-    const request = requestOverride ?? {
-      commandId: randomUUID(),
-      sessionId: session.current,
-      revision: current.revision,
-      operation: next,
-      ...(expected ? { expected } : {}),
-    };
-    const sentGeneration = generation.current,
-      sentRequestGeneration = villageRequestGeneration();
-    setBusy(true);
-    latest.current.busy = true;
-    setError(null);
-    try {
-      sessionStorage.setItem(pendingKey, JSON.stringify(request));
-    } catch {
-      /* memory retains the identity */
-    }
-    try {
-      const result = await commandInfrastructure(
-        c.state.world.slug,
-        c.state.village.id,
-        request,
-        c.state.syncRevision === undefined
-          ? undefined
-          : { revision: c.state.syncRevision, serverTime: c.state.serverTime },
-      );
-      // App remains the sole owner of HTTP/SSE reconciliation.
-      if (
-        (result.requestGeneration !== undefined && result.requestGeneration !== villageRequestGeneration()) ||
-        latest.current.state.world.id !== c.state.world.id ||
-        latest.current.state.village.id !== c.state.village.id
-      )
-        return;
-      if ('confirmation' in result) {
-        if (
-          result.confirmation.commandId !== request.commandId ||
-          result.confirmation.worldId !== c.state.world.id ||
-          result.confirmation.villageId !== c.state.village.id
-        )
-          throw Error('Confirmation Infrastructure incohérente.');
-        onConfirmation(result);
-      } else onSnapshot(result);
-      clearPending();
-      setUncertain(null);
-      if (sentGeneration === generation.current && (next.kind === 'move' || next.kind === 'delete')) {
-        setItem(null);
-        setArmed(false);
-        setPoint(null);
-      }
-      setServerValid(true);
-    } catch (reason) {
-      if (
-        sentRequestGeneration !== villageRequestGeneration() ||
-        latest.current.state.world.id !== c.state.world.id ||
-        latest.current.state.village.id !== c.state.village.id
-      )
-        return;
-      setError(reason instanceof Error ? reason.message : 'Commande impossible.');
-      if (!(reason instanceof ApiError) || reason.status >= 500) setUncertain(request);
-      else {
-        clearPending();
-        setUncertain(null);
-        const fresh = await getVillage(c.state.world.slug, c.state.village.id).catch(() => null);
-        if (fresh) onSnapshot(fresh);
-      }
-    } finally {
-      setBusy(false);
-      latest.current.busy = false;
-    }
-  }
   const handler = useRef<(e: InfrastructureGesture) => void>(() => {});
   handler.current = (e) => {
     const c = latest.current;
-    if (c.family === 'Voirie') {
-      if (e.kind === 'cancel') {
-        setMenu(null);
-        road.cancel();
-        return;
-      }
-      if (e.kind === 'right') {
-        // Right click drops the gesture in progress; the pointer is released too.
-        scene.current?.cancelGesture();
-        road.cancel();
-        return;
-      }
-      const cell =
-        e.point &&
-        subPointCell(e.point, { widthCells: c.state.world.widthCells, heightCells: c.state.world.heightCells });
+    const gesture = c.family === 'Voirie' ? road : lighting;
+    if (e.kind === 'cancel') {
+      setMenu(null);
+      gesture.cancel();
+      if (gesture === lighting) highlight(null, null);
+      return;
+    }
+    if (e.kind === 'right') {
+      // Right click drops the gesture in progress; the pointer is released too.
+      scene.current?.cancelGesture();
+      gesture.cancel();
+      return;
+    }
+    const shape = { widthCells: c.state.world.widthCells, heightCells: c.state.world.heightCells };
+    if (gesture === road) {
+      const cell = e.point && subPointCell(e.point, shape);
       if (!cell) return;
       if (e.kind === 'down') road.down(cell);
       else if (e.kind === 'hover') road.move(cell);
       else if (e.kind === 'up') road.up(cell);
       return;
     }
-    if (e.kind === 'cancel') {
-      setMenu(null);
-      generation.current++;
-      session.current = randomUUID();
-      setItem(null);
-      setPoint(null);
-      setArmed(false);
-      scene.current?.infrastructurePreview(null);
+    if (!e.point) {
+      if (e.kind === 'up') lighting.up(null);
       return;
     }
-    if (c.busy || uncertain) return;
-    if (e.kind === 'hover') {
-      setPoint((previous) => (previous?.x === e.point?.x && previous?.y === e.point?.y ? previous : e.point));
-      return;
-    }
-    if (e.kind === 'right') {
-      if (c.item) void send({ kind: 'delete', id: c.item.id, version: c.item.version, position: c.item.position });
-      else {
-        setArmed(false);
-        setPoint(null);
-      }
-      return;
-    }
-    if (e.kind === 'up' && e.point) {
-      if (!c.item) {
-        const picked = scene.current?.equipmentAt(e.point, e.equipmentId);
-        if (picked) {
-          setItem(picked);
-          setTurn(picked.quarterTurns);
-          setArmed(false);
-          setPoint(picked.position);
-          return;
-        }
-      }
-      const action = operation(e.point);
-      if (action) void send(action);
-    }
+    // Magnetic anchors: an O(1) snap per pointer sample (samples are coalesced per frame).
+    const vertex = subPointVertex(e.point, shape),
+      snapped = snapAnchor(e.point, shape);
+    const key = (v: Vertex | null) => (v ? vertexKey(v) : '');
+    // The highlight changes only when the pointer reaches another vertex or snaps differently.
+    if (key(hovered.current) !== key(vertex) || key(snappedRef.current) !== key(snapped)) highlight(vertex, snapped);
+    if (e.kind === 'down') lighting.down(snapped);
+    else if (e.kind === 'hover') lighting.move(snapped);
+    else if (e.kind === 'up') lighting.up(snapped);
   };
   useEffect(() => {
     if (!active) {
@@ -427,15 +273,6 @@ export function InfrastructureTools({
         scene.current?.cancelGesture();
         handler.current({ kind: 'cancel', point: null });
       }
-      if (
-        e.key.toLowerCase() === 'r' &&
-        !e.repeat &&
-        latest.current.family === 'Éclairage' &&
-        (latest.current.item || latest.current.armed)
-      ) {
-        e.preventDefault();
-        setTurn((t) => (t + 1) % 4);
-      }
     };
     window.addEventListener('contextmenu', context);
     window.addEventListener('keydown', key, true);
@@ -450,8 +287,6 @@ export function InfrastructureTools({
   function chooseFamily(value: string) {
     handler.current({ kind: 'cancel', point: null });
     setFamily(value);
-    setError(null);
-    setTurn(0);
   }
   const chooseStyle = (next: Surface, nextSidewalks: boolean) => {
     setSurface(next);
@@ -477,6 +312,27 @@ export function InfrastructureTools({
             (surface === 'none'
               ? 'Glissez sur les cases à retirer · sans remboursement'
               : 'Glissez de case en case · clic droit ou Échap : annuler le geste'));
+  const anchorCount = lighting.vertices.size;
+  const lightStatus = lighting.drawing
+    ? `${anchorCount} ${anchorCount > 1 ? 'ancrages' : 'ancrage'}${
+        lighting.limited ? ` · ${ROAD_ANCHORS_PER_COMMAND} au plus par geste` : ''
+      }${
+        lightQuote && !lightQuote.valid
+          ? ` · ${lightQuote.message ?? 'Pose impossible.'}`
+          : lightQuote?.skipped.length
+            ? ` · ${skippedAnchorsLabel(lightQuote.skipped)}`
+            : ''
+      }`
+    : lighting.busy
+      ? 'Commande en cours…'
+      : lighting.error
+        ? lighting.error
+        : !roadAnchors
+          ? 'Synchronisation en cours…'
+          : (lighting.notice ??
+            (lightMode === 'remove'
+              ? 'Cliquez ou glissez sur les braseros à retirer · sans remboursement'
+              : 'Cliquez ou glissez sur les ancrages en surbrillance · clic droit ou Échap : annuler'));
   return (
     <>
       <nav className="construction-categories" aria-label="Familles d’infrastructures">
@@ -487,51 +343,51 @@ export function InfrastructureTools({
         ))}
       </nav>
       <section className="construction-showroom infrastructure-showroom" aria-label={`Infrastructure · ${family}`}>
-        {family === 'Voirie' ? (
-          materials.map(([code, name]) => (
-            <button
-              type="button"
-              className="showroom-model"
-              key={code}
-              aria-pressed={code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code}
-              aria-expanded={code === 'none' ? undefined : menu?.code === code}
-              aria-controls={menu?.code === code ? menuId : undefined}
-              onClick={(e) => {
-                if (code === 'none') {
-                  setMenu(null);
-                  chooseStyle('none', false);
-                } else {
-                  const anchor = e.currentTarget;
-                  setMenu((current) => (current?.code === code ? null : { code, anchor }));
-                }
-              }}
-            >
-              <strong>{name}</strong>
-              <InfrastructureThumbnail code={code === 'earth' && surface === 'rubble' ? 'rubble' : code} />
-              <span className="resource-costs">
-                {code === 'none'
-                  ? 'Retirer'
-                  : (code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code)
-                    ? costLabel(surface, sidewalks) + (sidewalks ? ' · trottoirs' : '')
-                    : costLabel(code, false)}
-              </span>
-            </button>
-          ))
-        ) : (
-          <button
-            className="showroom-model"
-            aria-pressed={armed}
-            onClick={() => {
-              setItem(null);
-              setArmed(true);
-              setTurn(0);
-            }}
-          >
-            <strong>Brasero</strong>
-            <InfrastructureThumbnail code="brazier" />
-            <span className="resource-costs">◆ 2 · ▰ 1</span>
-          </button>
-        )}
+        {family === 'Voirie'
+          ? materials.map(([code, name]) => (
+              <button
+                type="button"
+                className="showroom-model"
+                key={code}
+                aria-pressed={code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code}
+                aria-expanded={code === 'none' ? undefined : menu?.code === code}
+                aria-controls={menu?.code === code ? menuId : undefined}
+                onClick={(e) => {
+                  if (code === 'none') {
+                    setMenu(null);
+                    chooseStyle('none', false);
+                  } else {
+                    const anchor = e.currentTarget;
+                    setMenu((current) => (current?.code === code ? null : { code, anchor }));
+                  }
+                }}
+              >
+                <strong>{name}</strong>
+                <InfrastructureThumbnail code={code === 'earth' && surface === 'rubble' ? 'rubble' : code} />
+                <span className="resource-costs">
+                  {code === 'none'
+                    ? 'Retirer'
+                    : (code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code)
+                      ? costLabel(surface, sidewalks) + (sidewalks ? ' · trottoirs' : '')
+                      : costLabel(code, false)}
+                </span>
+              </button>
+            ))
+          : (['place', 'remove'] as const).map((mode) => (
+              <button
+                type="button"
+                className="showroom-model"
+                key={mode}
+                aria-pressed={lightMode === mode}
+                onClick={() => setLightMode(mode)}
+              >
+                <strong>{mode === 'place' ? 'Brasero' : 'Retirer'}</strong>
+                <InfrastructureThumbnail code="brazier" />
+                <span className="resource-costs">
+                  {mode === 'place' ? `◆ ${brazierPrice.stone} · ▰ ${brazierPrice.wood}` : 'Sans remboursement'}
+                </span>
+              </button>
+            ))}
         {import.meta.env.DEV && state.factoryEnabled && (
           <button className="showroom-model workshop-launcher" onClick={onWorkshop}>
             <strong>Créer un bâtiment</strong>
@@ -577,11 +433,22 @@ export function InfrastructureTools({
       <div className="harvest-feedback infrastructure-price">
         <span
           ref={price}
-          hidden={!active || family !== 'Voirie' || !road.drawing || !roadQuote?.valid || !roadQuote.stone}
+          hidden={
+            !active ||
+            (family === 'Voirie'
+              ? !road.drawing || !roadQuote?.valid || !roadQuote.stone
+              : !lighting.drawing || !lightQuote?.valid || !(lightQuote.stone || lightQuote.wood))
+          }
           className="harvest-feedback--stone"
-          title="Débit prévisionnel en pierres"
+          title="Débit prévisionnel"
         >
-          {roadQuote ? '−' + roadQuote.stone.toLocaleString('fr-FR') : ''}
+          {family === 'Voirie'
+            ? roadQuote
+              ? '−' + roadQuote.stone.toLocaleString('fr-FR')
+              : ''
+            : lightQuote
+              ? `−${lightQuote.stone} ◆ · −${lightQuote.wood} ▰`
+              : ''}
         </span>
       </div>
       {active && family === 'Voirie' && (
@@ -594,34 +461,11 @@ export function InfrastructureTools({
           )}
         </aside>
       )}
-      {family === 'Éclairage' && (error || uncertain || item || armed) && (
-        <aside className="construction-feedback infrastructure-feedback" aria-label="Action Infrastructure">
-          {point && plan.manualLighting.includes(subCellKey(point, state.world)) && (
-            <button
-              disabled={
-                busy ||
-                Boolean(uncertain) ||
-                plan.equipment.some((e) => subCellKey(e, state.world) === subCellKey(point, state.world))
-              }
-              onClick={() => void send({ kind: 'lighting', cell: subCellKey(point, state.world) })}
-            >
-              Rétablir l’éclairage automatique
-            </button>
-          )}
-          <span role="status">
-            {busy
-              ? 'Commande en cours…'
-              : (error ??
-                (insufficient
-                  ? 'Ressources insuffisantes.'
-                  : item
-                    ? 'Clic pour déplacer · clic droit pour supprimer · Échap pour annuler'
-                    : armed
-                      ? 'Clic pour placer · R pour tourner'
-                      : 'Choisissez un brasero dans le showroom ou sur la carte'))}
-          </span>
-          {uncertain && (
-            <button disabled={busy} onClick={() => void send(uncertain.operation, uncertain)}>
+      {active && family === 'Éclairage' && (
+        <aside className="construction-feedback infrastructure-feedback" aria-label="Action Éclairage">
+          <span role="status">{lightStatus}</span>
+          {lighting.uncertain && (
+            <button disabled={lighting.busy} onClick={() => lighting.retry()}>
               Vérifier la même commande
             </button>
           )}

@@ -26,6 +26,10 @@ import {
   type RoadCellsPreviewRequest,
   type RoadCellsRequest,
   type RoadCellsResult,
+  type RoadAnchorsPreview,
+  type RoadAnchorsPreviewRequest,
+  type RoadAnchorsRequest,
+  type RoadAnchorsResult,
   type SyncV2Batch,
   type SyncV2State,
   type SyncV2ReadRequest,
@@ -637,6 +641,56 @@ export class SyncV2Transport {
     })) as RoadCellsPreview | null;
     if (typeof input?.valid !== 'boolean' || typeof input.quote?.stone !== 'number')
       throw Error('Devis de voirie invalide.');
+    return input;
+  }
+  /** Road anchors gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §5.1):
+   * one bounded command; its private effects carry the anchors. */
+  async roadAnchors(request: RoadAnchorsRequest): Promise<RoadAnchorsResult> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    const input = (await this.json('/road-anchors', {
+      method: 'POST',
+      headers: { 'x-arbestra-command': request.commandId },
+      body: JSON.stringify(request),
+    })) as {
+      protocol?: unknown;
+      status?: unknown;
+      commandId?: unknown;
+      worldId?: unknown;
+      villageId?: unknown;
+      result?: Partial<Record<keyof RoadAnchorsResult, unknown>>;
+      effects?: SyncV2Batch;
+    } | null;
+    const result = input?.result;
+    if (
+      input?.protocol !== 2 ||
+      input.status !== 'applied' ||
+      input.commandId !== request.commandId ||
+      input.worldId !== this.worldId ||
+      input.villageId !== this.villageId ||
+      !result ||
+      (['placed', 'restored', 'removed', 'unchanged', 'stone', 'wood'] as const).some(
+        (field) => typeof result[field] !== 'number',
+      ) ||
+      (result.skipped !== undefined && !Array.isArray(result.skipped)) ||
+      (input.effects !== undefined && !syncV2BatchIsValid(input.effects))
+    )
+      throw Error('Confirmation d’éclairage invalide.');
+    this.applyEffects(input.effects);
+    return result as RoadAnchorsResult;
+  }
+  /** Read-only quote of a road anchors gesture. */
+  async previewRoadAnchors(body: RoadAnchorsPreviewRequest): Promise<RoadAnchorsPreview> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    const input = (await this.json('/road-anchors/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })) as RoadAnchorsPreview | null;
+    if (
+      typeof input?.valid !== 'boolean' ||
+      typeof input.quote?.stone !== 'number' ||
+      typeof input.quote.wood !== 'number'
+    )
+      throw Error('Devis d’éclairage invalide.');
     return input;
   }
   /** A gesture without a domain result: the UUID travels in a header, the

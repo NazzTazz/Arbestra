@@ -85,6 +85,14 @@ export interface TerrainHandle {
   roadCellsPreviewAdd: (cells: readonly Cell[], refused?: boolean) => void;
   roadCellsPreviewTone: (tone: 'place' | 'remove' | 'invalid') => void;
   roadCellsPreviewClear: () => void;
+  roadAnchorMarkers: (
+    vertices: readonly { vertexX: number; vertexY: number }[] | null,
+    removing?: boolean,
+    snapped?: { vertexX: number; vertexY: number } | null,
+  ) => void;
+  roadAnchorPreviewAdd: (vertices: readonly { vertexX: number; vertexY: number }[], refused?: boolean) => void;
+  roadAnchorPreviewTone: (tone: 'place' | 'remove' | 'invalid') => void;
+  roadAnchorPreviewClear: () => void;
   focusCell: (cell: Cell) => void;
   viewCenter: () => Cell | null;
   naturalFeatures: () => NaturalFeature[];
@@ -296,6 +304,11 @@ export function VillageScene({
       roadCellsPreviewAdd: (cells, refused) => sceneRef.current?.roadCellsPreviewAdd(cells, refused),
       roadCellsPreviewTone: (tone) => sceneRef.current?.roadCellsPreviewTone(tone),
       roadCellsPreviewClear: () => sceneRef.current?.roadCellsPreviewClear(),
+      roadAnchorMarkers: (vertices, removing, snapped) =>
+        sceneRef.current?.roadAnchorMarkers(vertices, removing, snapped),
+      roadAnchorPreviewAdd: (vertices, refused) => sceneRef.current?.roadAnchorPreviewAdd(vertices, refused),
+      roadAnchorPreviewTone: (tone) => sceneRef.current?.roadAnchorPreviewTone(tone),
+      roadAnchorPreviewClear: () => sceneRef.current?.roadAnchorPreviewClear(),
       setWorldMode: (mode) => sceneRef.current?.setWorldMode(mode),
     }),
     [],

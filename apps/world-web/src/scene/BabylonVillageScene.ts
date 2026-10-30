@@ -36,6 +36,7 @@ import { buildInfrastructurePresentation } from './infrastructure-factory';
 import { InfrastructureRenderer, type InfrastructureGesture } from './infrastructure-renderer';
 import { RoadCellTiles } from './road-cell-tiles';
 import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
+import { RoadAnchorBraziers, RoadAnchorMarkers } from './road-anchor-braziers';
 import { TerraformPreview, type TerraformVisual } from './terraform-preview';
 import { selectEquipment } from './equipment-selection';
 import {
@@ -566,6 +567,49 @@ export class BabylonVillageScene {
   #infrastructurePreview: InfrastructureRenderer | null = null;
   #roadCellTiles: RoadCellTiles | null = null;
   #roadCellPreview: RoadCellPreview | null = null;
+  #roadAnchorBraziers: RoadAnchorBraziers | null = null;
+  #roadAnchorMarkers: RoadAnchorMarkers | null = null;
+  #roadAnchorPreview: RoadCellPreview | null = null;
+  #vertexPoint(v: { vertexX: number; vertexY: number }, lift: number) {
+    const p = this.#space!.project({ cellX: v.vertexX - 0.5, cellY: v.vertexY - 0.5 });
+    return { x: p.x, y: (this.#store?.ground(v.vertexX - 0.5, v.vertexY - 0.5)?.height ?? 0) + lift, z: p.z };
+  }
+  /** Highlighted anchors of the lighting tool (bounded by the caller); null clears them. */
+  public roadAnchorMarkers(
+    vertices: readonly { vertexX: number; vertexY: number }[] | null,
+    removing = false,
+    snapped: { vertexX: number; vertexY: number } | null = null,
+  ) {
+    if ((!vertices?.length && !snapped) || !this.#space) {
+      this.#roadAnchorMarkers?.clear();
+      return;
+    }
+    const markers = (this.#roadAnchorMarkers ??= new RoadAnchorMarkers(this.#scene));
+    markers.set(
+      (vertices ?? []).map((v) => this.#vertexPoint(v, 0.06)),
+      TILE_SIZE * 0.22,
+      removing,
+      snapped && this.#vertexPoint(snapped, 0.07),
+    );
+    markers.visible(this.#mode === 'village');
+  }
+  /** Designated anchors of a lighting gesture: one instance per new anchor;
+   * `refused` shows anchors the placement will skip in red. */
+  public roadAnchorPreviewAdd(vertices: readonly { vertexX: number; vertexY: number }[], refused = false) {
+    if (!this.#space) return;
+    const preview = (this.#roadAnchorPreview ??= new RoadCellPreview(this.#scene));
+    for (const v of vertices) {
+      const p = this.#vertexPoint(v, 0.1);
+      preview.add(`${v.vertexX}:${v.vertexY}`, p.x, p.y, p.z, TILE_SIZE * 0.3, refused);
+    }
+    preview.visible(this.#mode === 'village');
+  }
+  public roadAnchorPreviewTone(tone: RoadCellPreviewTone) {
+    (this.#roadAnchorPreview ??= new RoadCellPreview(this.#scene)).tone(tone);
+  }
+  public roadAnchorPreviewClear() {
+    this.#roadAnchorPreview?.clear();
+  }
   /** Designated cells of a road gesture: one instance per new cell, never a
    * rebuild; `refused` shows cells the placement will skip in red. */
   public roadCellsPreviewAdd(cells: readonly { cellX: number; cellY: number }[], refused = false) {
@@ -1717,6 +1761,7 @@ export class BabylonVillageScene {
         this.#updateCosmology(Date.now() + this.#cosmologyServerOffsetMs, now);
         setSceneNight(this.#scene, this.#villageNight);
         this.#villageBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
+        this.#roadAnchorBraziers?.animate(now, this.#villageNight, this.#mode === 'world' ? 0 : 1);
         if (this.#marketBeacon.active && this.#space && this.#marketBeaconAnchor) {
           const foot = this.#space.project(this.#marketBeaconAnchor);
           this.#marketBeacon.update(now, foot.x, this.#marketBeaconAnchor.height, foot.z, this.#mode !== 'world');
@@ -3572,6 +3617,8 @@ export class BabylonVillageScene {
     occupied: Set<string>;
     displayRoutes: ReturnType<typeof villageRoadDisplayRoutes>;
     fires: ReturnType<typeof automaticBraziers>;
+    /** Legacy fire positions in eighths (`x:y`): an anchor brazier there is not drawn twice. */
+    legacyFires: Set<string>;
   } | null = null;
   #deriveTravel(state: VillageState): void {
     const derivedSignature = JSON.stringify([
@@ -3617,6 +3664,7 @@ export class BabylonVillageScene {
       accesses,
       occupied,
       fires,
+      legacyFires: new Set(this.#infrastructureEquipment.map((p) => `${p.x}:${p.y}`)),
       displayRoutes: villageRoadDisplayRoutes(state),
     };
   }
@@ -3731,6 +3779,27 @@ export class BabylonVillageScene {
         state,
         fires,
       );
+    // Road anchor braziers (§5): a command creates or disposes the fires of its anchors only.
+    if (state.roadCells?.length || state.roadAnchors?.length || this.#roadAnchorBraziers) {
+      const started = performance.now();
+      this.#roadAnchorBraziers ??= new RoadAnchorBraziers(this.#scene);
+      const touched = this.#roadAnchorBraziers.update(
+        state.roadCells,
+        state.roadAnchors,
+        this.#space!,
+        (x, y) => (this.#renderer?.hasGround(x, y) ? (this.#store?.ground(x, y)?.height ?? null) : null),
+        this.#travelDerived!.legacyFires,
+        groundIdentity,
+      );
+      if (touched && import.meta.env.DEV) {
+        const ended = performance.now();
+        // Browser checks: when each update ran, its cost, the fires it created or disposed (last 20).
+        const log = (this.#canvas.dataset.anchorBraziersUpdates ?? '').split(' ').filter(Boolean).slice(-19);
+        log.push(`${ended.toFixed(0)}:${(ended - started).toFixed(1)}:${touched}`);
+        this.#canvas.dataset.anchorBraziersUpdates = log.join(' ');
+        this.#canvas.dataset.anchorBraziersHidden = String(this.#roadAnchorBraziers.hiddenByLegacy);
+      }
+    }
     frame?.mark('braziers');
     this.#villageRoads ??= new VillageRoads(this.#scene);
     if (!braziersCurrent)
@@ -4444,6 +4513,8 @@ export class BabylonVillageScene {
     this.#workers.shift(shift.x, shift.z);
     this.#demolitionTint?.shift(shift.x, shift.z);
     this.#roadCellPreview?.shift(shift.x, shift.z);
+    this.#roadAnchorPreview?.shift(shift.x, shift.z);
+    this.#roadAnchorMarkers?.shift(shift.x, shift.z);
     this.#inhabitantCamera.shift(shift.x, shift.z);
     this.#resourceOverlayAt = 0;
     for (const mesh of [
@@ -4822,6 +4893,8 @@ export class BabylonVillageScene {
     this.#roadCellTiles?.visible(mode !== 'world');
     this.#infrastructurePreview?.visible(mode === 'village');
     this.#roadCellPreview?.visible(mode === 'village');
+    this.#roadAnchorPreview?.visible(mode === 'village');
+    this.#roadAnchorMarkers?.visible(mode === 'village');
     if (mode !== 'village') this.#infrastructureGhost?.setEnabled(false);
     this.#regionalVillages.visible(mode !== 'world');
     this.#onCameraMoved();
@@ -5362,6 +5435,9 @@ export class BabylonVillageScene {
     this.#roadCellTiles?.dispose();
     this.#infrastructurePreview?.dispose();
     this.#roadCellPreview?.dispose();
+    this.#roadAnchorPreview?.dispose();
+    this.#roadAnchorMarkers?.dispose();
+    this.#roadAnchorBraziers?.dispose();
     this.#infrastructureGhost?.dispose(false, false);
     for (const job of this.#buildingJobs) job.steps.return(job.parent);
     this.#buildingJobs.length = 0;

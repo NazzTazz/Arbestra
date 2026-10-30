@@ -443,6 +443,13 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         : null,
     [villageV2Mode, villageV2.villageReady, villageV2.roadCells, villageV2.previewRoadCells],
   );
+  const roadAnchorsApi = useMemo(
+    () =>
+      villageV2Mode && villageV2.villageReady
+        ? { command: villageV2.roadAnchors, preview: villageV2.previewRoadAnchors }
+        : null,
+    [villageV2Mode, villageV2.villageReady, villageV2.roadAnchors, villageV2.previewRoadAnchors],
+  );
   villageV2Ref.current = {
     ready: villageV2Mode && villageV2.villageReady,
     refresh: villageV2.refresh,
@@ -2631,6 +2638,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                     !arrivalActive
                   }
                   roadCells={roadCellsApi}
+                  roadAnchors={roadAnchorsApi}
                   onSnapshot={applySnapshot}
                   onConfirmation={applyInfrastructureConfirmation}
                   onWorkshop={() => {

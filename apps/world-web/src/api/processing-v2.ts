@@ -421,6 +421,16 @@ export function useVillageSyncV2({
     if (!current) throw Error('Synchronisation indisponible.');
     return current.previewRoadCells(body);
   }, []);
+  const roadAnchors = useCallback((request: Parameters<SyncV2Transport['roadAnchors']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.roadAnchors(request);
+  }, []);
+  const previewRoadAnchors = useCallback((body: Parameters<SyncV2Transport['previewRoadAnchors']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.previewRoadAnchors(body);
+  }, []);
   /** Immediate delta read, e.g. after a command still answered by V1. */
   const refresh = useCallback(() => {
     transport.current?.reconnect();
@@ -446,5 +456,7 @@ export function useVillageSyncV2({
     changeWorksite,
     roadCells,
     previewRoadCells,
+    roadAnchors,
+    previewRoadAnchors,
   };
 }
