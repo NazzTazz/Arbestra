@@ -17,22 +17,39 @@ function material(scene: Scene, name: string, colour: string, emissive?: string)
   return m;
 }
 
-/** Terraced ground: one side keeps its slope, the other is levelled to a single plateau. */
-function terrace(root: Mesh, scene: Scene) {
-  const grass = material(scene, 'grass', '#6f8a45'),
-    earth = material(scene, 'earth', '#7a5634');
-  for (let x = -2; x <= 2; x++)
-    for (let z = -2; z <= 2; z++) {
-      const height = x >= 1 ? 0.45 : 0.15 + 0.3 * Math.max(0, 2 - Math.hypot(x + 0.5, z * 0.8)) + 0.12 * ((x + z) & 1);
-      const column = MeshBuilder.CreateBox('tool-terrain', { width: 0.5, depth: 0.5, height }, scene);
-      column.position.set(x * 0.5, height / 2, z * 0.5);
-      column.material = earth;
-      column.parent = root;
-      const top = MeshBuilder.CreateBox('tool-grass', { width: 0.5, depth: 0.5, height: 0.06 }, scene);
-      top.position.set(x * 0.5, height + 0.03, z * 0.5);
-      top.material = grass;
-      top.parent = root;
+/**
+ * A piece of construction grid, drawn like a hash sign: one whole cell between
+ * four lines running past it, the cell raised under a blue veil.
+ */
+function terraformCell(root: Mesh, scene: Scene) {
+  const line = material(scene, 'grid-line', '#e8eef2', '#3a4248'),
+    grass = material(scene, 'grass', '#6f8a45'),
+    earth = material(scene, 'earth', '#7a5634'),
+    veil = material(scene, 'veil', '#4f9be0', '#1d4f86');
+  veil.alpha = 0.45;
+  for (const offset of [-0.5, 0.5]) {
+    const along = MeshBuilder.CreateBox('tool-grid-line', { width: 2.3, height: 0.05, depth: 0.07 }, scene);
+    along.position.set(0, 0.025, offset);
+    const across = MeshBuilder.CreateBox('tool-grid-line', { width: 0.07, height: 0.05, depth: 2.3 }, scene);
+    across.position.set(offset, 0.025, 0);
+    for (const bar of [along, across]) {
+      bar.material = line;
+      bar.parent = root;
     }
+  }
+  const height = 0.32;
+  const column = MeshBuilder.CreateBox('tool-terrain', { width: 0.9, depth: 0.9, height }, scene);
+  column.position.y = height / 2;
+  column.material = earth;
+  column.parent = root;
+  const top = MeshBuilder.CreateBox('tool-grass', { width: 0.9, depth: 0.9, height: 0.06 }, scene);
+  top.position.y = height + 0.03;
+  top.material = grass;
+  top.parent = root;
+  const cover = MeshBuilder.CreateBox('tool-veil', { width: 0.96, depth: 0.96, height: height + 0.1 }, scene);
+  cover.position.y = (height + 0.1) / 2;
+  cover.material = veil;
+  cover.parent = root;
 }
 
 function shovel(root: Mesh, scene: Scene, x: number, z: number, lean: number) {
@@ -89,8 +106,7 @@ function rubble(root: Mesh, scene: Scene) {
 
 export function buildToolPresentation(root: Mesh, scene: Scene, code: ToolPresentation) {
   if (code === 'tool:terraform') {
-    terrace(root, scene);
-    shovel(root, scene, 0.8, -0.2, -0.35);
+    terraformCell(root, scene);
   } else if (code === 'tool:demolish') {
     rubble(root, scene);
     hammer(root, scene, 0.15, 0.95, 0.1, -0.6);
