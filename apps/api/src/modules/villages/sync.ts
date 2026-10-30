@@ -12,8 +12,7 @@ export { readVillageProjection } from './service.js';
 import { VillageSyncProjections } from './sync-projections.js';
 import { villageSyncRevision } from './sync-revision.js';
 import { HttpError } from '../../errors.js';
-import { advanceEnergy } from '../population/energy.js';
-import { energyState } from '../population/work.js';
+import { cohortActivityDue } from '../population/work.js';
 import { markHttpStream, operationsFor } from '../operations/telemetry.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
 
@@ -58,32 +57,6 @@ export async function reconcileSyncDeadline(
   const at = (await db.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
   if (!villageTransitionDue(snapshot, at) && !(await cohortActivityDue(db, snapshot.world.id, villageId, at))) return;
   await reconcileVillageForRead(db, accountId, worldSlug, villageId);
-}
-
-/** Rest and fatigue change a cohort's activity at a time no task notifies. */
-async function cohortActivityDue(db: Kysely<Database>, worldId: string, villageId: string, at: Date) {
-  const cohorts = await db
-    .selectFrom('populationCohorts')
-    .selectAll()
-    .where('worldId', '=', worldId)
-    .where('villageId', '=', villageId)
-    .execute();
-  return cohorts.some((c) => advanceEnergy(energyState(c), at).activity !== c.activity);
-}
-
-/** V2 stream tick: the change journal only carries written rows, so an
- * activity change that came due is reconciled first, as the V1 stream did.
- * Dated transitions reach the journal through their worker tasks. */
-export async function reconcileActivityDeadline(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-) {
-  const village = await ownedVillage(db, accountId, worldSlug, villageId);
-  const at = (await db.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
-  if (await cohortActivityDue(db, village.worldId, village.villageId, at))
-    await reconcileVillageForRead(db, accountId, worldSlug, villageId);
 }
 
 export type VillageSyncEvent =

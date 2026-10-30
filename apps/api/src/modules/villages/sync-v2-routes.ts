@@ -14,8 +14,7 @@ import type { Database } from '../../database/schema.js';
 import type { AppConfig } from '../../config.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
-import { reconcileVillageForRead } from './service.js';
-import { reconcileActivityDeadline } from './sync.js';
+import { ownedVillage } from './service.js';
 import { captureSyncV2, type SyncV2SharedInclude } from './sync-v2-capture.js';
 import { serveSyncV2Stream } from './sync-v2-stream.js';
 import { VillagePresentationReader } from './presentation.js';
@@ -119,10 +118,10 @@ export async function registerSyncV2Routes(
     const account = await authenticate(db, request.cookies[config.cookieName]);
     await assertSyncV2Available(db);
     const { worldSlug } = request.params as { worldSlug: string };
-    // Explicit pre-H compatibility adapter. It commits before the single MVCC
-    // capture of values and cursors, and never constructs a legacy snapshot.
-    // It also resolves the default village exactly as the historical read.
-    const economy = await reconcileVillageForRead(db, account.id, worldSlug, villageId);
+    // A pure read: due transitions, admissions, fatigue, rest and beds advance
+    // through their worker notifications (071), so the first capture no longer
+    // wakes the economy. Resolves the default village as the historical read.
+    const village = await ownedVillage(db, account.id, worldSlug, villageId);
     reply.header('Cache-Control', 'no-store');
     // Same encoding as the stream. Schema serializers compile component
     // unions lazily, costing seconds on the first bootstrap of a process.
@@ -135,7 +134,7 @@ export async function registerSyncV2Routes(
           db,
           account.id,
           worldSlug,
-          economy.villageId,
+          village.villageId,
           { protocol: 2, generation: query.generation, scopes: [], cursors: [] },
           { include, pages: acceptsPages(request) },
         ),
@@ -214,8 +213,9 @@ export async function registerSyncV2Routes(
             reply,
             body,
             async (next) => {
+              // Pure tick: an energy change reaches the journal through its
+              // worker notification, not through this reader (071).
               const current = await authenticate(db, token);
-              await reconcileActivityDeadline(db, current.id, worldSlug, villageId);
               const answer = opening ? reply : undefined;
               opening = false;
               return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next, { deltaOnly: true }), answer);

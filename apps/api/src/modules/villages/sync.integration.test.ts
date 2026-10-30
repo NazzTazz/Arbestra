@@ -48,7 +48,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { buildApp } from '../../app.js';
 import { completeConstruction } from './complete-construction.js';
-import { readVillageProjection, reconcileActivityDeadline, reconcileSyncDeadline, VillageSyncSession } from './sync.js';
+import { readVillageProjection, reconcileSyncDeadline, VillageSyncSession } from './sync.js';
 import { villageSyncRevision } from './sync-revision.js';
 import { instrumentHttp, OperationsTelemetry, operationsFor } from '../operations/telemetry.js';
 import { discoverBuildingSuppliesInTransaction } from './service.js';
@@ -901,39 +901,6 @@ it('reconciles a due construction and resting activity without relying on a live
     (await db.selectFrom('populationCohorts').select('activity').where('id', '=', cohortId).executeTakeFirstOrThrow())
       .activity,
   ).toBe('idle');
-});
-
-it('ends a due rest on the V2 stream tick, which only reads the change journal', async () => {
-  const cohortId = randomUUID(),
-    since = new Date(Date.now() - 6 * 3600000);
-  await db
-    .insertInto('populationCohorts')
-    .values({
-      id: cohortId,
-      worldId,
-      villageId,
-      originVillageId: villageId,
-      memberCount: 1,
-      activity: 'resting',
-      energy: 0,
-      energyProgress: 0,
-      energyUpdatedAt: since,
-      restingSince: since,
-      foodUsedSinceRest: 0,
-      harvestId: null,
-      extractionId: null,
-    })
-    .execute();
-  const activity = async () =>
-    (await db.selectFrom('populationCohorts').select('activity').where('id', '=', cohortId).executeTakeFirstOrThrow())
-      .activity;
-  expect(await activity()).toBe('resting');
-  await reconcileActivityDeadline(db, accountId, slug, villageId);
-  expect(await activity()).toBe('idle');
-  // Nothing due any more: the tick does not reconcile again.
-  const before = await revision();
-  await reconcileActivityDeadline(db, accountId, slug, villageId);
-  expect(await revision()).toBe(before);
 });
 
 it('offloads HTTP snapshot navigation without changing the projected routes', async () => {
