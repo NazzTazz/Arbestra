@@ -33,7 +33,7 @@ Détail, preuves et mesures dans l'[inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-
 - **Mesures** (dev, lecture seule) : aperçu Bressuire 455 → 290 ms, Clairière 231 → 160 ms (médianes à chaud) ; lecture remplacée 618 → 161 ms et 221 → 57 ms. Froid inchangé (5 à 7 s, réseau).
 - **Recette proposée** : sur Bressuire, sélectionner des parcelles (dont une enclavée et une vide) : même récapitulatif (exclusions, durée de tournée, équipe) qu'avant, puis lancer : la tournée part.
 
-## Énergie et repos par le worker, lectures V2 pures (30 octobre) — à valider
+## Énergie et repos par le worker, lectures V2 pures (30 octobre) — validé sur staging par Tristan (30 octobre : réveil autonome des cohortes constaté après plusieurs heures de sommeil)
 
 Étape 4 de l'[inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md) (« Autonomie des workers », lot H), règle dans [Économie](docs/architecture/economy.md) (« Repos dans les logements »). Commits `4c8cf03` (4a, migration 071), `fdc2f50` (4b), plus ce commit de docs ; non poussés, non déployés. **Migration 071 appliquée sur la base de test et sur la base de dev locale** (aucune réinitialisation) ; à appliquer avec le prochain déploiement.
 - **Avant** : fatigue, fin de repos et lits n'étaient écrits qu'à la lecture d'un client (bootstrap, tick de `sync/stream`, `GET /village`, `/events`) ou à une commande. Sans joueur connecté, les habitants épuisés restaient « inactifs » en base, sans lit, et le flux V2 ne publiait rien. La reprise après le repos, elle, avait déjà ses réveils (chantiers à la fin du premier repos, jardins d'exploitation et science chaque minute).
