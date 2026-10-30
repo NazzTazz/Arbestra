@@ -10,6 +10,8 @@ import {
   type RoadCellsQuote,
   type RoadCellsRequest,
   type RoadCellsResult,
+  type RoadCellSkip,
+  type RoadCellSkipCode,
   type RoadCellStyle,
   type SyncV2Batch,
 } from '@arbestra/contracts';
@@ -42,6 +44,22 @@ interface Prepared {
   style: Required<RoadCellStyle> | null;
 }
 const cellKey = (c: Cell) => `${c.cellX}:${c.cellY}`;
+const SKIP_MESSAGES: Record<RoadCellSkipCode, string> = {
+  OUTSIDE_INFRASTRUCTURE_REACH: 'Hors du périmètre historique du village.',
+  FOREIGN_INFRASTRUCTURE: 'Un aménagement d’un autre village occupe cet emplacement.',
+  CELL_OCCUPIED: 'Un bâtiment ou un gisement occupe cet emplacement.',
+  INCOMPATIBLE_TERRAIN: 'Cette infrastructure nécessite un terrain praticable.',
+};
+/** A gesture whose every cell is refused; the quote still names them. */
+class RoadCellsRefused extends HttpError {
+  constructor(
+    code: RoadCellSkipCode,
+    readonly skipped: RoadCellSkip[],
+  ) {
+    super(409, code, SKIP_MESSAGES[code]);
+  }
+}
+const skipError = (code: RoadCellSkipCode, skipped: RoadCellSkip[] = []) => new RoadCellsRefused(code, skipped);
 const unnest = (cells: readonly Cell[]) =>
   sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`;
 
@@ -57,13 +75,18 @@ async function prepareRoadCells(
   const { worldId, villageId } = village;
   // A cell named twice in one gesture counts once (Tristan, 30 October).
   const gesture = { ...named, cells: uniqueRoadCells(named.cells) };
+  // Per-cell refusals, first rule wins; a placement skips these cells
+  // (Tristan, 30 October), a removal keeps refusing the whole gesture.
+  const refused = new Map<string, RoadCellSkipCode>();
+  const refuse = (cell: Cell, code: RoadCellSkipCode) => {
+    if (!refused.has(cellKey(cell))) refused.set(cellKey(cell), code);
+  };
   for (const cell of gesture.cells) {
     if (cell.cellX >= village.widthCells || cell.cellY >= village.heightCells)
       throw new HttpError(400, 'INVALID_COORDINATES', 'Coordonnées non canoniques.');
     const dx = wrappedDistance(cell.cellX, village.anchorCellX, village.widthCells),
       dy = wrappedDistance(cell.cellY, village.anchorCellY, village.heightCells);
-    if (dx < -REACH || dx >= REACH || dy < -REACH || dy >= REACH)
-      throw new HttpError(409, 'OUTSIDE_INFRASTRUCTURE_REACH', 'Hors du périmètre historique du village.');
+    if (dx < -REACH || dx >= REACH || dy < -REACH || dy >= REACH) refuse(cell, 'OUTSIDE_INFRASTRUCTURE_REACH');
   }
   const style =
     gesture.action === 'place'
@@ -77,48 +100,58 @@ async function prepareRoadCells(
     .where('worldId', '=', worldId)
     .where(unnest(gesture.cells))
     .execute();
-  if (existing.some((row) => row.villageId !== villageId))
-    throw new HttpError(409, 'FOREIGN_INFRASTRUCTURE', 'Un aménagement d’un autre village occupe cet emplacement.');
-  const own = new Map(existing.map((row) => [cellKey(row), row]));
+  for (const row of existing) if (row.villageId !== villageId) refuse(row, 'FOREIGN_INFRASTRUCTURE');
+  const own = new Map(existing.filter((row) => row.villageId === villageId).map((row) => [cellKey(row), row]));
   const result: RoadCellsResult = { placed: 0, restyled: 0, removed: 0, unchanged: 0, stone: 0 };
   if (!style) {
+    const first = gesture.cells.find((cell) => refused.has(cellKey(cell)));
+    if (first) throw skipError(refused.get(cellKey(first))!);
     const remove = gesture.cells.filter((cell) => own.has(cellKey(cell)));
     result.removed = remove.length;
     result.unchanged = gesture.cells.length - remove.length;
     return { quote: { stone: 0 }, result, place: [], remove, style: null };
   }
   // Same occupancy rules as a manual road: a footprint (any village, any
-  // state) or a blocking deposit refuses the cell; then the terrain.
+  // state) or a blocking deposit refuses the cell; then the terrain. Reads
+  // stay bounded by the named cells.
   const buildings = await tx
     .selectFrom('worldCellOccupancies')
     .select(['cellX', 'cellY'])
     .where('worldId', '=', worldId)
     .where('buildingId', 'is not', null)
     .where(unnest(gesture.cells))
-    .executeTakeFirst();
-  if (buildings) throw new HttpError(409, 'CELL_OCCUPIED', 'L’emprise d’un bâtiment bloque cet emplacement.');
+    .execute();
+  for (const cell of buildings) refuse(cell, 'CELL_OCCUPIED');
   const features = await naturalFeaturesQuery(
     tx,
     worldId,
     gesture.cells.map((c) => ({ minX: c.cellX, maxX: c.cellX + 1, minY: c.cellY, maxY: c.cellY + 1 })),
   ).execute();
-  if (
-    features.some(
-      (f) => f.initialAmount !== null && f.blocksCell !== false && !f.cleared && f.featureState !== 'depleted',
-    )
-  )
-    throw new HttpError(409, 'CELL_OCCUPIED', 'Un gisement occupe cet emplacement.');
+  for (const f of features)
+    if (f.initialAmount !== null && f.blocksCell !== false && !f.cleared && f.featureState !== 'depleted')
+      refuse(f, 'CELL_OCCUPIED');
   const ground = await readVillageGround(tx, village);
-  for (const { cellX, cellY } of gesture.cells) {
+  for (const cell of gesture.cells) {
+    if (refused.has(cellKey(cell))) continue;
+    const { cellX, cellY } = cell;
     const surface = { x: cellX, y: cellY, halfWidth: 0.5, halfHeight: 0.5 };
     if (
       ground.terrainAt(cellX, cellY) !== TERRAIN.grassland ||
       (ground.rc1 && (ground.rc1.field.surfaceReason(surface, null, 0.125) || ground.rc1.field.intersectsTree(surface)))
     )
-      throw new HttpError(409, 'INCOMPATIBLE_TERRAIN', 'Cette infrastructure nécessite un terrain praticable.');
+      refuse(cell, 'INCOMPATIBLE_TERRAIN');
   }
+  const skipped: RoadCellSkip[] = [];
+  for (const cell of gesture.cells) {
+    const code = refused.get(cellKey(cell));
+    if (code) skipped.push({ cellX: cell.cellX, cellY: cell.cellY, code });
+  }
+  // Every cell refused: still a refusal of the gesture, with the first motive.
+  if (skipped.length === gesture.cells.length) throw skipError(skipped[0]!.code, skipped);
+  if (skipped.length) result.skipped = skipped;
   const place: Prepared['place'] = [];
   for (const cell of gesture.cells) {
+    if (refused.has(cellKey(cell))) continue;
     const current = own.get(cellKey(cell)) ?? null;
     if (current && current.surface === style.surface && current.sidewalks === style.sidewalks) {
       result.unchanged++;
@@ -157,7 +190,14 @@ export async function previewRoadCells(
         code: error.code,
         message: error.message,
         quote: { stone: 0 },
-        result: { placed: 0, restyled: 0, removed: 0, unchanged: 0, stone: 0 },
+        result: {
+          placed: 0,
+          restyled: 0,
+          removed: 0,
+          unchanged: 0,
+          stone: 0,
+          ...(error instanceof RoadCellsRefused && error.skipped.length ? { skipped: error.skipped } : {}),
+        },
       };
     }
   });

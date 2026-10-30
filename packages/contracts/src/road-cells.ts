@@ -63,8 +63,28 @@ export const RoadCellsPreviewRequestSchema = Type.Union([
   Type.Object({ action: Type.Literal('remove'), cells }, { additionalProperties: false }),
 ]);
 export type RoadCellsPreviewRequest = Static<typeof RoadCellsPreviewRequestSchema>;
-/** Compact receipt: counts and the stone debited, never the cells themselves
- * (their values travel as V2 effects). */
+/** Per-cell refusals of a placement (Tristan, 30 October): such a cell is
+ * skipped, the valid cells of the gesture are placed. Refusals of the whole
+ * gesture (resources, stale quote, gauge, reused identifier) stay global. */
+export const ROAD_CELL_SKIP_CODES = [
+  'OUTSIDE_INFRASTRUCTURE_REACH',
+  'FOREIGN_INFRASTRUCTURE',
+  'CELL_OCCUPIED',
+  'INCOMPATIBLE_TERRAIN',
+] as const;
+export type RoadCellSkipCode = (typeof ROAD_CELL_SKIP_CODES)[number];
+export const RoadCellSkipSchema = Type.Object(
+  {
+    cellX: coordinate,
+    cellY: coordinate,
+    code: Type.Union(ROAD_CELL_SKIP_CODES.map((value) => Type.Literal(value))),
+  },
+  { additionalProperties: false },
+);
+export type RoadCellSkip = Static<typeof RoadCellSkipSchema>;
+/** Compact receipt: counts and the stone debited, never the placed cells
+ * themselves (their values travel as V2 effects). `skipped` lists the cells a
+ * placement skipped, in gesture order; absent when none was skipped. */
 export const RoadCellsResultSchema = Type.Object(
   {
     placed: Type.Integer({ minimum: 0 }),
@@ -72,10 +92,14 @@ export const RoadCellsResultSchema = Type.Object(
     removed: Type.Integer({ minimum: 0 }),
     unchanged: Type.Integer({ minimum: 0 }),
     stone: Type.Integer({ minimum: 0 }),
+    skipped: Type.Optional(Type.Array(RoadCellSkipSchema, { maxItems: ROAD_CELLS_PER_COMMAND })),
   },
   { additionalProperties: false },
 );
 export type RoadCellsResult = Static<typeof RoadCellsResultSchema>;
+/** Quote of a gesture. A placement with at least one valid cell is valid and
+ * quotes those cells; `result.skipped` names the others. When every cell is
+ * skipped, it is invalid with the code of the first one, and still lists them. */
 export const RoadCellsPreviewSchema = Type.Object(
   {
     valid: Type.Boolean(),

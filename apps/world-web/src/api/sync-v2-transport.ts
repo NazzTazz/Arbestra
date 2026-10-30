@@ -621,6 +621,7 @@ export class SyncV2Transport {
       (['placed', 'restyled', 'removed', 'unchanged', 'stone'] as const).some(
         (field) => typeof result[field] !== 'number',
       ) ||
+      (result.skipped !== undefined && !Array.isArray(result.skipped)) ||
       (input.effects !== undefined && !syncV2BatchIsValid(input.effects))
     )
       throw Error('Confirmation de voirie invalide.');

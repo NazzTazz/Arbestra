@@ -31,7 +31,7 @@ import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { InfrastructureThumbnail } from './InfrastructureThumbnail';
 import { RoadVariantMenu } from './RoadVariantMenu';
 import { subPointCell } from './demolition-selection';
-import { RoadCellGesture } from './road-cell-gesture';
+import { RoadCellGesture, skippedLabel } from './road-cell-gesture';
 import './harvest-feedback.css';
 type Item = { id: string; version: number; position: SubPoint; quarterTurns: number };
 /** Road cells commands of the V2 village session; null while V2 is not ready. */
@@ -104,6 +104,7 @@ export function InfrastructureTools({
           return api ? api.command(request) : Promise.reject(Error('Synchronisation indisponible.'));
         },
         added: (cells) => scene.current?.roadCellsPreviewAdd(cells),
+        refused: (cells) => scene.current?.roadCellsPreviewAdd(cells, true),
         cleared: () => scene.current?.roadCellsPreviewClear(),
         tone: (tone) => scene.current?.roadCellsPreviewTone(tone),
         changed: render,
@@ -459,7 +460,13 @@ export function InfrastructureTools({
   const roadStatus = road.drawing
     ? `${road.cells.size} ${road.cells.size > 1 ? 'cases' : 'case'}${
         road.limited ? ` · ${ROAD_CELLS_PER_COMMAND} au plus par geste` : ''
-      }${roadQuote && !roadQuote.valid ? ` · ${roadQuote.message ?? 'Pose impossible.'}` : ''}`
+      }${
+        roadQuote && !roadQuote.valid
+          ? ` · ${roadQuote.message ?? 'Pose impossible.'}`
+          : roadQuote?.skipped.length
+            ? ` · ${skippedLabel(roadQuote.skipped)}`
+            : ''
+      }`
     : road.busy
       ? 'Commande en cours…'
       : road.error

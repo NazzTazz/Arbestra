@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ROAD_CELLS_PER_COMMAND, type RoadCellsPreview, type RoadCellsRequest } from '@arbestra/contracts';
-import { MAX_SWEEP_STEP, RoadCellGesture, sweptCells4, type Cell } from './road-cell-gesture';
+import { MAX_SWEEP_STEP, RoadCellGesture, summary, sweptCells4, type Cell } from './road-cell-gesture';
 
 const world = { widthCells: 64, heightCells: 32 };
 const c = (cellX: number, cellY: number): Cell => ({ cellX, cellY });
@@ -61,6 +61,7 @@ function harness(previewResult: Partial<RoadCellsPreview> = {}) {
     stone: 8,
   }));
   const added = vi.fn();
+  const refused = vi.fn();
   const cleared = vi.fn();
   let n = 0;
   const gesture = new RoadCellGesture({
@@ -69,6 +70,7 @@ function harness(previewResult: Partial<RoadCellsPreview> = {}) {
     command,
     uuid: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     added,
+    refused,
     cleared,
     setTimer: (run) => timers.push(run),
     clearTimer: () => {},
@@ -77,7 +79,7 @@ function harness(previewResult: Partial<RoadCellsPreview> = {}) {
     while (timers.length) timers.shift()!();
     for (let i = 0; i < 6; i++) await Promise.resolve();
   };
-  return { gesture, preview, command, added, cleared, flush, timers };
+  return { gesture, preview, command, added, refused, cleared, flush, timers };
 }
 
 describe('RoadCellGesture', () => {
@@ -154,6 +156,58 @@ describe('RoadCellGesture', () => {
     expect(h.command).not.toHaveBeenCalled();
     expect(h.gesture.error).toBe('Une case est occupée.');
     expect(h.gesture.cells.size).toBe(0);
+  });
+  it('shows the skipped cells in red, quotes the valid ones and sends the gesture', async () => {
+    // Tristan, 30 October: a building in the middle of a line no longer refuses it.
+    const skipped = [{ cellX: 2, cellY: 1, code: 'CELL_OCCUPIED' as const }];
+    const h = harness({
+      quote: { stone: 8 },
+      result: { placed: 2, restyled: 0, removed: 0, unchanged: 0, stone: 8, skipped },
+    });
+    h.command.mockImplementationOnce(async () => ({
+      placed: 2,
+      restyled: 0,
+      removed: 0,
+      unchanged: 0,
+      stone: 8,
+      skipped,
+    }));
+    h.gesture.setMode({ action: 'place', style: { surface: 'stone-1', sidewalks: false } });
+    h.gesture.down(c(1, 1));
+    h.gesture.move(c(3, 1));
+    await h.flush();
+    expect(h.gesture.quote).toMatchObject({ valid: true, stone: 8, skipped });
+    expect(h.refused).toHaveBeenCalledTimes(1);
+    expect(h.refused.mock.calls[0]![0]).toEqual([c(2, 1)]);
+    // A later quote naming the same cell does not lay it again.
+    h.gesture.up(c(3, 1));
+    await h.flush();
+    expect(h.refused).toHaveBeenCalledTimes(1);
+    expect(h.command).toHaveBeenCalledTimes(1);
+    expect(h.command.mock.calls[0]![0]).toMatchObject({
+      action: 'place',
+      cells: [c(1, 1), c(2, 1), c(3, 1)],
+      expectedQuote: { stone: 8 },
+    });
+    expect(h.gesture.error).toBeNull();
+    expect(h.gesture.notice).toBe('2 cases posées · 1 sautée (bâtiment ou gisement) · −8 ◆');
+  });
+  it('names the main motive of the skipped cells', () => {
+    expect(
+      summary({
+        placed: 3,
+        restyled: 0,
+        removed: 0,
+        unchanged: 0,
+        stone: 0,
+        skipped: [
+          { cellX: 1, cellY: 0, code: 'OUTSIDE_INFRASTRUCTURE_REACH' },
+          { cellX: 2, cellY: 0, code: 'INCOMPATIBLE_TERRAIN' },
+          { cellX: 3, cellY: 0, code: 'INCOMPATIBLE_TERRAIN' },
+        ],
+      }),
+    ).toBe('3 cases posées · 3 sautées (terrain impraticable)');
+    expect(summary({ placed: 1, restyled: 0, removed: 0, unchanged: 0, stone: 0 })).toBe('1 case posée');
   });
   it('removes without a quote and keeps an uncertain outcome for an identical retry', async () => {
     const h = harness();

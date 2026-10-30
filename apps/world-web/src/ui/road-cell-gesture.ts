@@ -2,6 +2,8 @@ import {
   ROAD_CELLS_PER_COMMAND,
   wrapCoordinate,
   wrappedDistance,
+  type RoadCellSkip,
+  type RoadCellSkipCode,
   type RoadCellStyle,
   type RoadCellsPreview,
   type RoadCellsPreviewRequest,
@@ -59,6 +61,8 @@ export interface RoadCellGestureDeps {
   uuid: () => string;
   /** Newly designated cells of the current gesture, once each. */
   added?: (cells: readonly Cell[]) => void;
+  /** Designated cells the current quote skips (shown red), once each. */
+  refused?: (cells: readonly Cell[]) => void;
   /** The designation is dropped (cancel, refusal, acceptance). */
   cleared?: () => void;
   tone?: (tone: RoadCellTone) => void;
@@ -73,6 +77,8 @@ interface Quote {
   valid: boolean;
   message: string | null;
   stone: number;
+  /** Cells the placement will skip (bâtiment, gisement, terrain…). */
+  skipped: RoadCellSkip[];
 }
 
 /**
@@ -93,6 +99,7 @@ export class RoadCellGesture {
   quote: Quote | null = null;
   uncertain: RoadCellsRequest | null = null;
   #last: Cell | null = null;
+  readonly #refused = new Set<string>();
   #version = 0;
   #timer: unknown = null;
   #inFlight = false;
@@ -169,6 +176,7 @@ export class RoadCellGesture {
     this.#last = null;
     this.#sendWhenQuoted = false;
     this.quote = null;
+    this.#refused.clear();
     if (this.cells.size) {
       this.cells.clear();
       this.deps.cleared?.();
@@ -224,12 +232,19 @@ export class RoadCellGesture {
     void this.deps
       .preview(this.#body())
       .then(
-        (result): Quote => ({ version, valid: result.valid, message: result.message, stone: result.quote.stone }),
+        (result): Quote => ({
+          version,
+          valid: result.valid,
+          message: result.message,
+          stone: result.quote.stone,
+          skipped: result.result?.skipped ?? [],
+        }),
         (reason: unknown): Quote => ({
           version,
           valid: false,
           message: reason instanceof Error ? reason.message : 'Devis indisponible.',
           stone: 0,
+          skipped: [],
         }),
       )
       .then((quote) => {
@@ -238,6 +253,7 @@ export class RoadCellGesture {
         if (quote.version === this.#version) {
           this.quote = quote;
           this.deps.tone?.(!quote.valid ? 'invalid' : this.mode.action === 'remove' ? 'remove' : 'place');
+          this.#markRefused(quote.skipped);
           if (this.#sendWhenQuoted && !this.drawing) this.#release();
           this.deps.changed?.();
         } else if (this.cells.size) {
@@ -246,7 +262,20 @@ export class RoadCellGesture {
         }
       });
   }
-  /** The release of a placement: refused cells abort the whole gesture, nothing is posed. */
+  /** Newly skipped cells of the designation, reported once (bounded by the gesture). */
+  #markRefused(skipped: readonly RoadCellSkip[]) {
+    const fresh: Cell[] = [];
+    for (const { cellX, cellY } of skipped) {
+      const k = key({ cellX, cellY });
+      if (this.#refused.has(k) || !this.cells.has(k)) continue;
+      this.#refused.add(k);
+      fresh.push({ cellX, cellY });
+    }
+    if (fresh.length) this.deps.refused?.(fresh);
+  }
+  /** The release of a placement: a quote without any valid cell aborts the
+   * gesture; otherwise the command is sent and the server skips the refused
+   * cells itself (Tristan, 30 October), even one refused since the quote. */
   #release() {
     this.#sendWhenQuoted = false;
     const quote = this.quote!;
@@ -310,11 +339,31 @@ export class RoadCellGesture {
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
+const SKIP_REASONS: Record<RoadCellSkipCode, string> = {
+  CELL_OCCUPIED: 'bâtiment ou gisement',
+  INCOMPATIBLE_TERRAIN: 'terrain impraticable',
+  OUTSIDE_INFRASTRUCTURE_REACH: 'hors du périmètre',
+  FOREIGN_INFRASTRUCTURE: 'route d’un autre village',
+};
+/** « M sautées (motif principal) »: the most frequent motive, the first seen on a tie. */
+export function skippedLabel(skipped: readonly RoadCellSkip[] | undefined): string | null {
+  if (!skipped?.length) return null;
+  const counts = new Map<RoadCellSkipCode, number>();
+  for (const { code } of skipped) counts.set(code, (counts.get(code) ?? 0) + 1);
+  let main = skipped[0]!.code;
+  for (const [code, n] of counts) if (n > counts.get(main)!) main = code;
+  return `${plural(skipped.length, 'sautée', 'sautées')} (${SKIP_REASONS[main] ?? main})`;
+}
 export function summary(result: RoadCellsResult): string {
   const parts = [
     result.placed && plural(result.placed, 'case posée', 'cases posées'),
     result.restyled && plural(result.restyled, 'case modifiée', 'cases modifiées'),
     result.removed && plural(result.removed, 'case retirée', 'cases retirées'),
   ].filter(Boolean);
-  return (parts.length ? parts.join(' · ') : 'Rien à changer') + (result.stone ? ` · −${result.stone} ◆` : '');
+  const skipped = skippedLabel(result.skipped);
+  return (
+    (parts.length ? parts.join(' · ') : 'Rien à changer') +
+    (skipped ? ` · ${skipped}` : '') +
+    (result.stone ? ` · −${result.stone} ◆` : '')
+  );
 }

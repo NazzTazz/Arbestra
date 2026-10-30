@@ -501,6 +501,99 @@ it('counts a cell named twice in one gesture once: quote, command, replay and re
   expect((await roads()).some((r) => r.cellY === 66 && (r.cellX === 65 || r.cellX === 68))).toBe(false);
 }, 60000);
 
+it('skips the refused cells of a placement and places the others; an all-refused gesture is refused', async () => {
+  // Tristan, 30 October: a building or a deposit in the middle of a gesture
+  // no longer refuses it; its cells are skipped and listed in the receipt.
+  const feature = randomUUID();
+  await db
+    .insertInto('worldFeatures')
+    .values({ id: feature, worldId: ids.world, featureTypeCode: 'stone_outcrop', variantSeed: 2, state: 'available' })
+    .execute();
+  await db
+    .insertInto('worldCellOccupancies')
+    .values({ worldId: ids.world, cellX: 62, cellY: 64, buildingId: null, featureId: feature, role: 'body' })
+    .execute();
+  await db
+    .insertInto('stoneDeposits')
+    .values({
+      worldId: ids.world,
+      featureId: feature,
+      cellX: 62,
+      cellY: 64,
+      initialAmount: 100,
+      remainingAmount: 100,
+      reservedAmount: 0,
+      revision: 1,
+      updatedAt: new Date(),
+    })
+    .execute();
+  const style = { surface: 'stone-1', sidewalks: false };
+  // Free, deposit, free, town hall, free, free.
+  const line = [row(61, 64), row(62, 64), row(63, 64), row(64, 64), row(65, 64), row(66, 64)];
+  const skipped = [
+    { cellX: 62, cellY: 64, code: 'CELL_OCCUPIED' },
+    { cellX: 64, cellY: 64, code: 'CELL_OCCUPIED' },
+  ];
+  const expected = { placed: 4, restyled: 0, removed: 0, unchanged: 0, stone: 16, skipped };
+  const quote = await preview({ action: 'place', cells: line, style });
+  expect(quote).toEqual({ valid: true, code: null, message: null, quote: { stone: 16 }, result: expected });
+  const { state: base } = await v2Base();
+  const before = await stone();
+  const command = { commandId: randomUUID(), action: 'place', cells: line, style, expectedQuote: { stone: 16 } };
+  const response = await post('/road-cells', command);
+  expect(response.statusCode, response.body).toBe(200);
+  const confirmation = response.json<RoadCellsConfirmationV2>();
+  expect(confirmation.result).toEqual(expected);
+  expect(await stone()).toBe(before - 16);
+  const posed = (await roads()).filter((r) => r.cellY === 64 && r.cellX >= 60 && r.cellX <= 66);
+  expect(posed.map((r) => r.cellX)).toEqual([61, 63, 65, 66]);
+  // V2 publishes the placed cells only.
+  const journal = (
+    await sql<{ changes: Array<{ component: string; key: string }> }>`select changes from game_sync_changes
+      where world_id=${ids.world} and stream_kind='village' and scope_key=${ids.village}
+      order by revision desc limit 1`.execute(db)
+  ).rows[0]!.changes;
+  expect(
+    journal
+      .filter((c) => c.component === 'roadCells')
+      .map((c) => c.key)
+      .sort(),
+  ).toEqual(['61,64', '63,64', '65,64', '66,64']);
+  const applied = applySyncV2Batch(base, confirmation.effects);
+  expect(applied.kind).toBe('applied');
+  const visible = visibleSyncV2Scope(applied.state.scopes.get(`village:${ids.village}`)!);
+  expect(['61,64', '62,64', '63,64', '64,64'].map((k) => visible.has('roadCells:' + k))).toEqual([
+    true,
+    false,
+    true,
+    false,
+  ]);
+  // Idempotent replay: the receipt with its skipped cells, nothing written.
+  const snapshot = await state();
+  const replay = await post('/road-cells', command);
+  expect(replay.statusCode, replay.body).toBe(200);
+  expect(replay.json<RoadCellsConfirmationV2>().result).toEqual(expected);
+  expect(await state()).toEqual(snapshot);
+  // Every cell refused: a refusal of the whole gesture, the first motive, no write.
+  const blocked = [row(62, 64), row(64, 64), row(100, 64)];
+  const refusedQuote = await preview({ action: 'place', cells: blocked, style });
+  expect(refusedQuote).toMatchObject({ valid: false, code: 'CELL_OCCUPIED', quote: { stone: 0 } });
+  expect(refusedQuote.result.skipped).toEqual([
+    ...skipped,
+    { cellX: 100, cellY: 64, code: 'OUTSIDE_INFRASTRUCTURE_REACH' },
+  ]);
+  const refused = await post('/road-cells', {
+    commandId: randomUUID(),
+    action: 'place',
+    cells: blocked,
+    style,
+    expectedQuote: { stone: 0 },
+  });
+  expect(refused.statusCode).toBe(409);
+  expect(refused.body).toContain('CELL_OCCUPIED');
+  expect(await state()).toEqual(snapshot);
+}, 60000);
+
 it('rolls back cells, debit and receipt when the transaction fails after writing them', async () => {
   const before = await state();
   let inside: { roads: number; stone: string } | undefined;

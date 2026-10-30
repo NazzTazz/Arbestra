@@ -570,8 +570,9 @@ export class BabylonVillageScene {
   #renderedRoadPlan: import('@arbestra/contracts').InfrastructurePlan | null = null;
   #roadCellsRenderer: InfrastructureRenderer | null = null;
   #roadCellPreview: RoadCellPreview | null = null;
-  /** Designated cells of a road gesture: one instance per new cell, never a rebuild. */
-  public roadCellsPreviewAdd(cells: readonly { cellX: number; cellY: number }[]) {
+  /** Designated cells of a road gesture: one instance per new cell, never a
+   * rebuild; `refused` shows cells the placement will skip in red. */
+  public roadCellsPreviewAdd(cells: readonly { cellX: number; cellY: number }[], refused = false) {
     const space = this.#space;
     if (!space) return;
     const preview = (this.#roadCellPreview ??= new RoadCellPreview(this.#scene));
@@ -583,6 +584,7 @@ export class BabylonVillageScene {
         (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.08,
         p.z,
         TILE_SIZE * 0.86,
+        refused,
       );
     }
     preview.visible(this.#mode === 'village');
