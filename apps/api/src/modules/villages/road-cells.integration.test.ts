@@ -166,6 +166,8 @@ afterEach(() => {
 });
 afterAll(async () => {
   await app?.close();
+  // Stone deposits restrict the deletion of their world features.
+  await db.deleteFrom('stoneDeposits').where('worldId', '=', ids.world).execute();
   await db.deleteFrom('worlds').where('id', '=', ids.world).execute();
   await db.deleteFrom('accounts').where('id', 'in', [ids.account, ids.neighbourAccount]).execute();
   await db.destroy();
