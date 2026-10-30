@@ -42,7 +42,7 @@ L'infrastructure est aujourd'hui globalement inutilisable en jeu. La subdivision
 - **Gabarit** :
   - `chemin` : une case de large, chaussée centrée (largeur de rendu fixée par le revêtement et les trottoirs, en subdivisions, sans choix du joueur) ;
   - `charretière` : deux cases de large. **Proposé** : posée avec un pinceau de 2 × 2 cases ; deux cases charretières voisines forment une seule chaussée. Deux chemins parallèles voisins restent deux chemins distincts. Implémentée **après** le chemin, avec les attelages.
-- Persistance **proposée** : une table additive `road_cells (world_id, village_id, cell_x, cell_y, surface, sidewalks, gauge, revision)` au lieu du document JSONB. Elle publie dans le journal V2 par case, se joint à `road_wear`, et borne naturellement lectures et commandes.
+- Persistance **validée** (30 octobre) : une table additive `road_cells (world_id, village_id, cell_x, cell_y, surface, sidewalks, gauge, revision)` au lieu du document JSONB. Elle publie dans le journal V2 par case, se joint à `road_wear`, et borne naturellement lectures et commandes.
 
 ### 4.2 Pose
 
@@ -56,15 +56,15 @@ L'infrastructure est aujourd'hui globalement inutilisable en jeu. La subdivision
 - Pour chaque case, les 4 voisines (routes manuelles, automatiques, accès de bâtiments) déterminent la tuile : bout, droit, coude, T, croisement.
 - Les tuiles viennent de la factory infrastructure (§3). Le rendu reste par chunk, mis à jour seulement pour les cases changées et leurs voisines.
 
-### 4.4 Ouvert
+### 4.4 Tranché le 30 octobre
 
-- **O1 — Raccord entre revêtements différents** sur deux cases voisines : jointure franche (proposé) ou transition.
-- **O2 — Routes automatiques** : gardent-elles leur profil terre étroit, ou deviennent-elles des cases de chemin en terre comme les autres (proposé) ?
-- **O3 — Réserve de pierre au 1/256** : supprimée avec un barème entier par case (proposé), le reliquat actuel étant rendu en pierre lors de la conversion.
+- **O1 — Raccord entre revêtements différents** sur deux cases voisines : **jointure franche** (validé).
+- **O2 — Routes automatiques** : elles deviennent des **cases de chemin en terre** comme les autres (validé).
+- **O3 — Réserve de pierre au 1/256** : **supprimée**, barème entier par case ; le reliquat actuel est rendu en pierre lors de la conversion (validé).
 
 ## 5. Braseros et accessoires
 
-**Recommandation : des points d'ancrage**, plutôt que le placement fin au 1/64.
+**Validé (30 octobre) : des points d'ancrage**, plutôt que le placement fin au 1/64.
 - Un ancrage est un emplacement nommé d'une tuile : par exemple les deux côtés de trottoir d'une case de chemin, les coins et le centre d'une case de place.
 - Un accessoire (brasero, buisson, tonneau) occupe un ancrage. Il se pose d'un clic sur un ancrage libre, mis en évidence pendant l'outil.
 - Les braseros automatiques deviennent des accessoires automatiques sur les ancrages des angles rentrants. La démolition les supprime (décision du 30 octobre).
