@@ -169,9 +169,6 @@ export async function migrateToLatest(databaseUrl = loadConfig().databaseUrl): P
   const migrator = new Migrator({
     db,
     provider: migrationProvider,
-    // 075 is reserved for the presence of player journeys while 076 (road
-    // conversion) may already run: a reserved number lands after a later one.
-    allowUnorderedMigrations: true,
   });
 
   try {
