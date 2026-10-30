@@ -723,6 +723,17 @@ export interface Database {
     createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
     updatedAt: ColumnType<Date, Date | string | undefined, Date | string>;
   };
+  /** Rollback trace of the legacy road conversion (076), one row per converted village. */
+  roadConversionBackups: {
+    worldId: string;
+    villageId: string;
+    plan: JSONColumnType<InfrastructurePlan>;
+    createdCells: JSONColumnType<Array<{ cellX: number; cellY: number }>>;
+    anchors: JSONColumnType<Array<{ vertexX: number; vertexY: number; before: RoadAnchorAccessory | null }>>;
+    stoneCredit: number;
+    report: JSONColumnType<object>;
+    convertedAt: Generated<Timestamp>;
+  };
   roadAnchorReceipts: {
     worldId: string;
     villageId: string;

@@ -25,6 +25,7 @@ import * as populationEnergyNotificationsMigration from './migrations/071_popula
 import * as playerJourneyEventsMigration from './migrations/072_player_journey_events.js';
 import * as roadCellsMigration from './migrations/073_road_cells.js';
 import * as roadAnchorsMigration from './migrations/074_road_anchors.js';
+import * as legacyRoadConversionMigration from './migrations/076_legacy_road_conversion.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -158,6 +159,7 @@ const migrationProvider: MigrationProvider = {
       '072_player_journey_events': playerJourneyEventsMigration,
       '073_road_cells': roadCellsMigration,
       '074_road_anchors': roadAnchorsMigration,
+      '076_legacy_road_conversion': legacyRoadConversionMigration,
     };
   },
 };
@@ -167,6 +169,9 @@ export async function migrateToLatest(databaseUrl = loadConfig().databaseUrl): P
   const migrator = new Migrator({
     db,
     provider: migrationProvider,
+    // 075 is reserved for the presence of player journeys while 076 (road
+    // conversion) may already run: a reserved number lands after a later one.
+    allowUnorderedMigrations: true,
   });
 
   try {
