@@ -16,6 +16,7 @@ import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { createRockSurface, rockOutcropElevation } from './rock-surface';
 import { buildResourcePresentation, isResourceRecipe } from './resource-factory';
 import { buildWorkerPresentation } from './worker-figure';
+import { buildToolPresentation, isToolPresentation } from './tool-presentation';
 
 /** Uses the same generators as the village. The result is centred on its footprint. */
 export function buildPresentation(
@@ -40,7 +41,8 @@ export function buildPresentation(
     });
   }
   const root = new Mesh(`presentation-${code}-${level}`, kit.scene);
-  if (code === 'infrastructure-symbol') {
+  if (isToolPresentation(code)) buildToolPresentation(root, kit.scene, code);
+  else if (code === 'infrastructure-symbol') {
     for (let x = -4; x <= 4; x++)
       for (let z = -4; z <= 4; z++) {
         if (Math.abs(x) > 1 && Math.abs(z) > 1) continue;

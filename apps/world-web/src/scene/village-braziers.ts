@@ -434,6 +434,10 @@ export class VillageBraziers {
       for (const mesh of item.meshes) mesh.dispose(false, false);
     }
   }
+  /** One equipment's masonry, for a transient tint; never called per frame. */
+  meshesOf(id: string): readonly AbstractMesh[] {
+    return this.#items.find((item) => item.point.id === id)?.meshes ?? [];
+  }
   animate(now: number, night: boolean, alpha: number): void {
     const lighting = night && alpha > 0;
     if (lighting !== this.#lighting) {

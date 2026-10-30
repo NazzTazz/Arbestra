@@ -36,6 +36,7 @@ import { SyncV2HttpError } from './api/sync-v2-transport';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import { setFactoryEnabled } from './api/client';
 import { InfrastructureTools } from './ui/InfrastructureTools';
+import { DemolitionTool } from './ui/DemolitionTool';
 import type { RepresentativeInfo } from './scene/village-workers';
 import type { InhabitantCameraMode } from './scene/inhabitant-camera';
 import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
@@ -67,7 +68,7 @@ import {
   type Cell,
   type CellRange,
 } from './scene/construction-selection';
-import { ConstructionPanel, type ConstructionChoice } from './ui/ConstructionPanel';
+import { ConstructionPanel, type ConstructionChoice, type ConstructionDomain } from './ui/ConstructionPanel';
 import { Hud } from './ui/Hud';
 import { usePresentationClock } from './ui/use-presentation-clock';
 import { projectedWood } from './ui/resource-counter';
@@ -250,7 +251,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   const [construction, setConstruction] = useState<ConstructionChoice | null>(
     starter ? { action: 'build', type: null } : null,
   );
-  const [constructionDomain, setConstructionDomain] = useState<'buildings' | 'infrastructure' | 'terrain'>('buildings');
+  const [constructionDomain, setConstructionDomain] = useState<ConstructionDomain>('buildings');
   const [quarterTurns, setQuarterTurns] = useState(0);
   const [houseVariant, setHouseVariant] = useState<'stone' | 'logs' | 'beams'>('logs');
   const [workshop, setWorkshop] = useState<'buildings' | 'infrastructure' | null>(null);
@@ -2586,13 +2587,29 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 if (variant) setHouseVariant(variant);
                 setConstruction({ action: 'build', type });
               }}
-              domain={worldMode === 'terraform' ? 'terrain' : constructionDomain}
+              domain={worldMode === 'terraform' ? 'tools' : constructionDomain}
+              tool={worldMode === 'terraform' ? 'terraform' : null}
+              onTool={(tool) => {
+                clearPreview();
+                clearConstructionError();
+                if (tool === 'terraform') chooseMode(worldMode === 'terraform' ? 'construction' : 'terraform');
+                else if (worldMode === 'terraform') chooseMode('construction');
+                setConstructionDomain('tools');
+                setConstruction({ action: 'build', type: null });
+              }}
               factoryEnabled={import.meta.env.DEV && Boolean(state.factoryEnabled)}
               onWorkshop={() => {
                 clearPreview();
                 cancelWorldGesture();
                 setWorkshop('buildings');
               }}
+              demolition={(active) => (
+                <DemolitionTool
+                  state={sceneState ?? state}
+                  scene={terrainRef}
+                  active={active && worldMode === 'construction' && !showDev && !workshop && !arrivalActive}
+                />
+              )}
               infrastructure={
                 <InfrastructureTools
                   state={sceneState ?? state}
@@ -2617,7 +2634,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
               onDomainChange={(domain) => {
                 clearPreview();
                 clearConstructionError();
-                chooseMode(domain === 'terrain' ? 'terraform' : 'construction');
+                chooseMode('construction');
                 setConstructionDomain(domain);
                 setConstruction({ action: 'build', type: null });
               }}

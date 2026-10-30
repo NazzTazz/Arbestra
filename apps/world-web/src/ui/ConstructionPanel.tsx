@@ -6,6 +6,17 @@ import type { UpgradePreview } from './construction-intent';
 import { BuildingThumbnail } from './BuildingThumbnail';
 import { BUILDING_PRESENTATIONS } from './building-catalog';
 
+export type ConstructionDomain = 'buildings' | 'infrastructure' | 'tools';
+export type ConstructionTool = 'terraform' | 'demolish';
+const DOMAINS = [
+  { id: 'buildings', label: 'Bâtiments', icon: 'dwelling' },
+  { id: 'infrastructure', label: 'Infrastructure', icon: 'infrastructure-symbol' },
+  { id: 'tools', label: 'Outils', icon: 'tools-symbol' },
+] as const;
+const TOOLS = [
+  { id: 'terraform', label: 'Terraformation', icon: 'tool:terraform', detail: 'Niveler le sol', available: true },
+  { id: 'demolish', label: 'Détruire', icon: 'tool:demolish', detail: 'Sans remboursement', available: true },
+] as const;
 export interface ConstructionChoice {
   action: 'build' | 'upgrade' | 'extend';
   type: string | null;
@@ -58,6 +69,9 @@ export function ConstructionPanel({
   onRetry,
   onClearError,
   domain,
+  tool = null,
+  onTool = () => {},
+  demolition = () => null,
   infrastructure,
   factoryEnabled,
   onWorkshop,
@@ -80,8 +94,12 @@ export function ConstructionPanel({
   collapsed: boolean;
   onToggle: () => void;
   onChoose: (type: string, variant?: 'stone' | 'logs' | 'beams') => void;
-  onDomainChange: (domain: 'buildings' | 'infrastructure' | 'terrain') => void;
-  domain: 'buildings' | 'infrastructure' | 'terrain';
+  onDomainChange: (domain: ConstructionDomain) => void;
+  domain: ConstructionDomain;
+  tool?: ConstructionTool | null;
+  onTool?: (tool: ConstructionTool) => void;
+  /** Destroy tool, owned here: it needs no world mode of its own. */
+  demolition?: (active: boolean) => ReactNode;
   infrastructure: ReactNode;
   factoryEnabled: boolean;
   onWorkshop: () => void;
@@ -89,6 +107,8 @@ export function ConstructionPanel({
   onClearError: () => void;
 }) {
   const [category, setCategory] = useState('Habitat');
+  const [demolishing, setDemolishing] = useState(false);
+  const activeTool = tool ?? (domain === 'tools' && demolishing ? 'demolish' : null);
   const definition = definitions.find((item) => item.code === construction.type);
   const groups = ['Habitat', 'Production', 'Savoir', 'Administration'].filter((group) =>
     definitions.some((item) => categoryOf(item.code) === group),
@@ -146,26 +166,21 @@ export function ConstructionPanel({
         aria-label="Palette de construction"
       >
         <div className="construction-families" role="group" aria-label="Domaines de construction">
-          {(['buildings', 'infrastructure', 'terrain'] as const).map((item) => (
+          {DOMAINS.map((item) => (
             <button
-              key={item}
+              key={item.id}
               type="button"
               disabled={locked}
-              aria-label={item === 'buildings' ? 'Bâtiments' : item === 'terrain' ? 'Terraformation' : 'Infrastructure'}
-              title={item === 'buildings' ? 'Bâtiments' : item === 'terrain' ? 'Terraformation' : 'Infrastructure'}
-              aria-pressed={domain === item}
+              aria-label={item.label}
+              title={item.label}
+              aria-pressed={domain === item.id}
               onClick={() => {
-                if (item !== domain) onDomainChange(item);
+                if (item.id !== domain) onDomainChange(item.id);
+                setDemolishing(false);
                 if (collapsed) onToggle();
               }}
             >
-              {item === 'terrain' ? (
-                <span aria-hidden="true" style={{ fontSize: 36 }}>
-                  ▱
-                </span>
-              ) : (
-                <BuildingThumbnail code={item === 'buildings' ? 'dwelling' : 'infrastructure-symbol'} />
-              )}
+              <BuildingThumbnail code={item.icon} />
             </button>
           ))}
         </div>
@@ -212,7 +227,31 @@ export function ConstructionPanel({
           )}
         </aside>
       )}
-      {domain === 'terrain' ? null : domain === 'infrastructure' ? (
+      {domain === 'tools' && demolition(activeTool === 'demolish' && !collapsed)}
+      {domain === 'tools' ? (
+        !collapsed && (
+          <section className="construction-showroom" aria-label="Outils">
+            {TOOLS.map((item) => (
+              <button
+                className="showroom-model"
+                type="button"
+                key={item.id}
+                aria-label={item.label}
+                disabled={locked || !item.available}
+                aria-pressed={activeTool === item.id}
+                onClick={() => {
+                  setDemolishing(item.id === 'demolish' && activeTool !== 'demolish');
+                  onTool(item.id);
+                }}
+              >
+                <strong>{item.label}</strong>
+                <BuildingThumbnail code={item.icon} />
+                {item.available ? <span className="resource-costs">{item.detail}</span> : <em>{item.detail}</em>}
+              </button>
+            ))}
+          </section>
+        )
+      ) : domain === 'infrastructure' ? (
         infrastructure
       ) : (
         <>

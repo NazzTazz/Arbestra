@@ -78,6 +78,9 @@ interface VillageSceneProps {
 export interface TerrainHandle {
   terrainVertexHeight: (x: number, y: number) => number | null;
   terraformPreview: (value: import('./terraform-preview').TerraformVisual | null) => void;
+  /** Marks one swept demolition target; cleared all at once. */
+  demolitionMark: (kind: 'building' | 'road' | 'equipment', id: string) => void;
+  demolitionClear: () => void;
   focusCell: (cell: Cell) => void;
   viewCenter: () => Cell | null;
   naturalFeatures: () => NaturalFeature[];
@@ -284,6 +287,8 @@ export function VillageScene({
       naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],
       terrainVertexHeight: (x, y) => sceneRef.current?.terrainVertexHeight(x, y) ?? null,
       terraformPreview: (value) => sceneRef.current?.terraformPreview(value),
+      demolitionMark: (kind, id) => sceneRef.current?.demolitionMark(kind, id),
+      demolitionClear: () => sceneRef.current?.demolitionClear(),
       setWorldMode: (mode) => sceneRef.current?.setWorldMode(mode),
     }),
     [],
