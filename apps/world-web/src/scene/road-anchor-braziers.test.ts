@@ -119,12 +119,16 @@ it('rewrites the bounded marker set and emphasizes the snapped anchor', () => {
     const mesh = scene.getMeshByName('road-anchor-markers') as Mesh,
       core = scene.getMeshByName('road-anchor-snap-core') as Mesh,
       halo = scene.getMeshByName('road-anchor-snap-halo') as Mesh;
-    // The snapped anchor leaves the plain discs for its glowing core and halo.
+    // Placing, the snapped anchor leaves the plain discs for a halo only: the
+    // brazier ghost stands there and the core would hide it.
     expect(mesh.thinInstanceCount).toBe(11);
     expect(markers.count).toBe(12);
     expect(mesh.thinInstanceGetWorldMatrices()[0]!.m[0]).toBeCloseTo(0.5);
-    expect(core.isEnabled() && halo.isEnabled()).toBe(true);
-    expect(core.position.x).toBe(3);
+    expect([core.isEnabled(), halo.isEnabled()]).toEqual([false, true]);
+    expect(halo.position.x).toBe(3);
+    // Removing, there is no ghost: the snapped anchor glows with its core.
+    markers.set(points, 0.5, true, { x: 3, y: 0, z: 0 });
+    expect([core.isEnabled(), halo.isEnabled()]).toEqual([true, true]);
     expect(halo.scaling.x).toBeGreaterThan(core.scaling.x);
     markers.set(points.slice(0, 2), 0.5, true);
     expect(markers.count).toBe(2);

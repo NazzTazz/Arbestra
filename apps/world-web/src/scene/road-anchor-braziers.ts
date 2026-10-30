@@ -146,7 +146,7 @@ export class RoadAnchorMarkers {
     };
     this.#material = flat('road-anchor-markers', '#5aa8e6', 0.55);
     this.#coreMaterial = flat('road-anchor-snap-core', '#c8f0ff', 0.95);
-    this.#haloMaterial = flat('road-anchor-snap-halo', '#7fd0ff', 0.3);
+    this.#haloMaterial = flat('road-anchor-snap-halo', '#7fd0ff', 0.45);
     this.#mesh = disc('road-anchor-markers', this.#material);
     this.#core = disc('road-anchor-snap-core', this.#coreMaterial);
     this.#halo = disc('road-anchor-snap-halo', this.#haloMaterial);
@@ -181,6 +181,9 @@ export class RoadAnchorMarkers {
     this.#mesh.thinInstanceSetBuffer('matrix', buffer, 16, false);
     this.#mesh.setEnabled(free.length > 0);
     this.#snapped = snapped !== null;
+    // Placing, the brazier ghost stands on the snapped anchor: only the halo
+    // remains under it, so the core does not hide the ghost.
+    this.#cored = this.#snapped && removing;
     for (const [mesh, scale, lift] of [
       [this.#core, size * 1.15, 0.02],
       [this.#halo, size * 2.4, 0],
@@ -189,19 +192,21 @@ export class RoadAnchorMarkers {
         mesh.scaling.set(scale, 0.02, scale);
         mesh.position.set(snapped.x, snapped.y + lift, snapped.z);
       }
-      mesh.setEnabled(this.#snapped);
     }
+    this.#core.setEnabled(this.#cored);
+    this.#halo.setEnabled(this.#snapped);
   }
   #snapped = false;
+  #cored = false;
   clear() {
     if (!this.#mesh.thinInstanceCount && !this.#snapped) return;
     this.#mesh.thinInstanceCount = 0;
-    this.#snapped = false;
+    this.#snapped = this.#cored = false;
     for (const mesh of this.#meshes) mesh.setEnabled(false);
   }
   visible(value: boolean) {
     this.#mesh.setEnabled(value && this.#mesh.thinInstanceCount > 0);
-    this.#core.setEnabled(value && this.#snapped);
+    this.#core.setEnabled(value && this.#cored);
     this.#halo.setEnabled(value && this.#snapped);
   }
   shift(x: number, z: number) {
