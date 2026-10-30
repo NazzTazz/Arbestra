@@ -380,7 +380,9 @@ async function planVillage(
       moved++;
     } else deleted++;
   }
-  const credit = Math.ceil(plan.stoneReserve / 256);
+  // Tristan, 30 October: nothing is refunded, not even the 1/256 reserve; it is
+  // reported and dropped with the plan. The credit path stays for the backup format.
+  const credit = 0;
   for (const cell of create) claims.cells.set(worldId + ':' + cellKey(cell), villageId);
   return {
     village,

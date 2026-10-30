@@ -316,7 +316,7 @@ it('keeps a stroke that ends at a cell centre and drops a quarter-cell stroke (p
   expect(result.strokes).toEqual({ manual: 2, removed: 0, inherited: 0, lost: 1 });
 });
 
-it('converts a legacy plan into road cells and anchors, credits the reserve, empties the plan, and reverts', async () => {
+it('converts a legacy plan into road cells and anchors, drops the reserve unrefunded, empties the plan, and reverts', async () => {
   // Existing road cells: one of the village (kept as it is), one of the neighbour.
   await db
     .insertInto('roadCells')
@@ -359,7 +359,7 @@ it('converts a legacy plan into road cells and anchors, credits the reserve, emp
     },
     braziers: { manual: 2, moved: 1, deleted: 1 },
     suppressions: { entries: 3, translated: 1, abandoned: 2, anchors: 1 },
-    stone: { reserve: 137, credited: 1 },
+    stone: { reserve: 137, credited: 0 },
   });
 
   // The backup keeps the report (read as text: the camel-case plugin would
@@ -409,8 +409,8 @@ it('converts a legacy plan into road cells and anchors, credits the reserve, emp
     { villageId: ids.village, vertexX: 58, vertexY: 63, accessory: 'none' },
     { villageId: ids.village, vertexX: 59, vertexY: 60, accessory: 'brazier' },
   ]);
-  // The reserve of 137/256 comes back as one stone; the plan is emptied.
-  expect(await stone()).toBe(2001);
+  // The reserve of 137/256 is dropped without refund; the plan is emptied.
+  expect(await stone()).toBe(2000);
   expect(await plan()).toEqual({
     revision: 8,
     roads: [],
@@ -435,7 +435,7 @@ it('converts a legacy plan into road cells and anchors, credits the reserve, emp
   expect(keys('roadCells')).toHaveLength(22);
   expect(keys('roadAnchors')).toEqual(['58,63', '59,60']);
   expect(keys('infrastructure')).toEqual(['*']);
-  expect(keys('resources')).toEqual(['stone']);
+  expect(keys('resources')).toEqual([]);
   const after = await captureSyncV2(db, ids.account, slug, ids.village, {
     protocol: 2,
     generation: 4,

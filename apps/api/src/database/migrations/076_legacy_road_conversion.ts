@@ -4,11 +4,11 @@ import type { Database } from '../schema.js';
 import { convertLegacyRoads, revertLegacyRoadConversion } from '../../modules/villages/road-conversion.js';
 
 /** Conversion of the legacy road plans (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md
- * §7, S3). 075 is reserved for the presence of player journeys.
+ * §7, S3). 075 is never used: migrations stay strictly ordered.
  *
  * Each village plan of 028 holding roads, equipment, lighting or a stone
  * reserve becomes road cells (073) and road anchors (074); the reserve is
- * credited in whole stones and the plan is emptied with a new revision, so it
+ * dropped without refund (Tristan, 30 October) and the plan is emptied with a new revision, so it
  * is neither drawn nor navigated twice. All writes go through the V2 triggers
  * and are published at commit. The former plan, the created cells, the
  * anchors written or cleaned and the credit are kept in

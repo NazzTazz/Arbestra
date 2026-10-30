@@ -40,7 +40,7 @@ try {
           `cases ${r.cells.created} créées, ${r.cells.kept} déjà présentes, ${refused} refusées ${JSON.stringify(r.cells.refused)}`,
           `braseros ${r.braziers.moved} déplacés, ${r.braziers.deleted} supprimés`,
           `éclairage ${r.suppressions.translated}/${r.suppressions.entries} traduits (${r.suppressions.anchors} ancrages vides), ${r.suppressions.abandoned} abandonnés`,
-          `pierre rendue ${r.stone.credited} (réserve ${r.stone.reserve}/256)`,
+          `réserve abandonnée ${r.stone.reserve}/256, pierre rendue ${r.stone.credited}`,
         ].join(' · '),
       );
     }
