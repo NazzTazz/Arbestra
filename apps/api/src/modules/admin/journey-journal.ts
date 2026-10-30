@@ -1,5 +1,13 @@
+import type { FastifyInstance } from 'fastify';
 import { sql, type Kysely } from 'kysely';
 import type { Database } from '../../database/schema.js';
+
+// Keyed by the HTTP server, shared by every encapsulated plugin of one app.
+const journals = new WeakMap<FastifyInstance['server'], JourneyJournal>();
+/** The journey journal of an app: tests flush it, the NOC shows its counters. */
+export const journeyJournalFor = (app: FastifyInstance) => journals.get(app.server);
+export const attachJourneyJournal = (app: FastifyInstance, journal: JourneyJournal) =>
+  journals.set(app.server, journal);
 
 /** Outcome of a village command as the server answered it. `error` and
  * `interrupted` are provisional: a later attempt of the same commandId

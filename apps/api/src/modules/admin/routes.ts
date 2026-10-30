@@ -11,6 +11,7 @@ import {
   AdminActivitiesSchema,
   AdminActivityDetailSchema,
   AdminActivityKindSchema,
+  AdminJourneySchema,
   type AdminActivity,
   type AdminRuntimeSnapshot,
   HttpRequestsQuerySchema,
@@ -26,6 +27,7 @@ import { operationsFor } from '../operations/telemetry.js';
 import { HttpDiagnosticReadError } from '../operations/http-diagnostics.js';
 import { requireAdmin } from './auth.js';
 import { AdminReadService, type ActivityFilter } from './service.js';
+import { journeyJournalFor } from './journey-journal.js';
 
 export type AdminRuntimeProvider = () => AdminRuntimeSnapshot | Promise<AdminRuntimeSnapshot>;
 
@@ -148,6 +150,41 @@ export async function registerAdminRoutes(
         },
         (request) =>
           reads.village((request.query as { worldId: string }).worldId, (request.params as { id: string }).id),
+      );
+      admin.get(
+        '/journeys/:id',
+        {
+          schema: {
+            params,
+            querystring: Type.Object(
+              {
+                worldId: Type.Optional(id),
+                villageId: Type.Optional(id),
+                days: Type.Optional(Type.Integer({ minimum: 1, maximum: 90 })),
+              },
+              { additionalProperties: false },
+            ),
+            response: { 200: AdminJourneySchema },
+          },
+        },
+        (request) => {
+          const accountId = (request.params as { id: string }).id,
+            query = request.query as { worldId?: string; villageId?: string; days?: number };
+          if (query.villageId && !query.worldId)
+            throw new HttpError(400, 'WORLD_REQUIRED', 'Le monde est requis pour un village.');
+          return reads.journey(
+            {
+              accountId,
+              ...(query.worldId ? { worldId: query.worldId } : {}),
+              ...(query.villageId ? { villageId: query.villageId } : {}),
+              days: query.days ?? 7,
+            },
+            {
+              admin: (config.adminAccountIds ?? []).includes(accountId.toLowerCase()),
+              collection: journeyJournalFor(request.server)?.status(),
+            },
+          );
+        },
       );
       admin.get(
         '/activities',

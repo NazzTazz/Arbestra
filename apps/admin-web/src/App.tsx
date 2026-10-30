@@ -5,6 +5,7 @@ import { absoluteTime, shortId } from './format';
 import { Empty } from './components';
 import { HttpRequestDetailView, HttpRequestsPageView } from './http-diagnostics';
 import { ObservationPage } from './observation';
+import { JourneyPage } from './journey';
 import {
   AccountPage,
   AccountsPage,
@@ -251,6 +252,7 @@ function Page({ route }: { route: ReturnType<typeof useRoute> }) {
   if (section === 'infrastructure') return <InfrastructurePage queryString={queryString} />;
   if (section === 'worlds') return id ? <WorldPage id={id} /> : <WorldsPage />;
   if (section === 'accounts') return id ? <AccountPage id={id} /> : <AccountsPage worldId={query.get('worldId')} />;
+  if (section === 'journeys' && id) return <JourneyPage accountId={id} query={query} />;
   if (section === 'villages' && id && query.get('worldId'))
     return <VillagePage id={id} worldId={query.get('worldId')!} />;
   if (section === 'activities')
@@ -296,7 +298,8 @@ function Console({ session, onLogout }: { session: AdminSession; onLogout: () =>
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
   }, []);
-  const activeSection = route.section === 'villages' ? 'worlds' : route.section;
+  const activeSection =
+    route.section === 'villages' ? 'worlds' : route.section === 'journeys' ? 'accounts' : route.section;
   async function logout() {
     setLogoutPending(true);
     setLogoutError(null);

@@ -7,6 +7,7 @@ import type {
   AdminActivity,
   AdminActivityDetail,
   AdminDiagnostic,
+  AdminJourney,
   AdminOverview,
   AdminVillage,
   AdminVillageDetail,
@@ -16,6 +17,8 @@ import type {
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
+import { readJourney, type JourneyQuery } from './journey-reads.js';
+import type { JourneyJournalStatus } from './journey-journal.js';
 
 export const ADMIN_CACHE_MS = 15_000;
 const LIST_LIMIT = 100;
@@ -507,5 +510,12 @@ export class AdminReadService {
         diagnostics: diagnoseActivity(current, at),
       };
     });
+  }
+  /** Player journey: sessions, chronology and summary, computed at read time. */
+  journey(
+    query: JourneyQuery,
+    options: { admin: boolean; collection: JourneyJournalStatus | undefined },
+  ): Promise<AdminJourney> {
+    return this.read('journey:' + JSON.stringify(query), (tx, at) => readJourney(tx, at, query, options));
   }
 }

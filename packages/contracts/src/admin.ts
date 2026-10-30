@@ -178,3 +178,81 @@ export const AdminActivityDetailSchema = Type.Object({
   diagnostics: Type.Array(AdminDiagnosticSchema),
 });
 export type AdminActivityDetail = Static<typeof AdminActivityDetailSchema>;
+
+/** Player journey (NOC « Parcours », docs/DESIGN-OBSERVABILITE-PARCOURS.md §2.6).
+ * `action`: a command of the player, as the server answered it; `deferred`:
+ * the later completion of a player's command (building, leveling, market,
+ * science); `automatic`: an accomplishment recorded by the economy. */
+export const AdminJourneySourceSchema = Type.Union([
+  Type.Literal('action'),
+  Type.Literal('deferred'),
+  Type.Literal('automatic'),
+]);
+export const AdminJourneyOutcomeSchema = Type.Union([
+  Type.Literal('accepted'),
+  Type.Literal('pending'),
+  Type.Literal('rejected'),
+  Type.Literal('error'),
+  Type.Literal('interrupted'),
+  Type.Literal('completed'),
+]);
+export const AdminJourneyEventSchema = Type.Object({
+  id: Type.String({ maxLength: 80 }),
+  at: DateTime,
+  source: AdminJourneySourceSchema,
+  type: Type.String({ maxLength: 64 }),
+  subject: Type.Union([Type.String({ maxLength: 40 }), Type.Null()]),
+  outcome: AdminJourneyOutcomeSchema,
+  code: Type.Union([Type.String({ maxLength: 64 }), Type.Null()]),
+  attempts: Count,
+  commandId: NullableId,
+  worldId: Id,
+  villageId: Id,
+  /** Index of the session containing this event, null outside any session. */
+  session: Type.Union([Count, Type.Null()]),
+});
+export type AdminJourneyEvent = Static<typeof AdminJourneyEventSchema>;
+export const AdminJourneySessionSchema = Type.Object({
+  index: Count,
+  startedAt: DateTime,
+  lastActivityAt: DateTime,
+  endedAt: DateTime,
+  activeMinutes: Count,
+  actions: Count,
+  refused: Count,
+  ongoing: Type.Boolean(),
+});
+export type AdminJourneySession = Static<typeof AdminJourneySessionSchema>;
+export const AdminJourneySchema = Type.Object({
+  observedAt: DateTime,
+  account: Type.Object({ id: Id, email: Type.String(), admin: Type.Boolean() }),
+  villages: Type.Array(Type.Object({ id: Id, worldId: Id, worldSlug: Type.String(), name: Type.String() })),
+  scope: Type.Object({ worldId: NullableId, villageId: NullableId, from: DateTime, days: Count }),
+  collection: Type.Object({
+    enabled: Type.Boolean(),
+    dropped: Count,
+    lost: Count,
+    oldestRetainedAt: NullableDate,
+    retentionDays: Count,
+    inactivityMinutes: Count,
+    note: Type.String(),
+  }),
+  sessions: Type.Array(AdminJourneySessionSchema),
+  sessionsTruncated: Type.Boolean(),
+  events: Type.Array(AdminJourneyEventSchema),
+  eventsTruncated: Type.Boolean(),
+  limit: Count,
+  summary: Type.Object({
+    byType: Type.Array(
+      Type.Object({
+        type: Type.String({ maxLength: 64 }),
+        actions: Count,
+        refused: Count,
+        sessions: Count,
+        firstAt: DateTime,
+      }),
+    ),
+    refusals: Type.Array(Type.Object({ type: Type.String({ maxLength: 64 }), code: Type.String(), count: Count })),
+  }),
+});
+export type AdminJourney = Static<typeof AdminJourneySchema>;

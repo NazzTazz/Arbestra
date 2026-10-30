@@ -18,6 +18,7 @@ import { Badge, Chart, DataState, Empty, KeyValues, Metric, Panel, Search, Times
 import { bytes, duration, matches, milliseconds, number, shortId } from './format';
 import { HttpLatencyChart, StatusReasons } from './http-diagnostics';
 import { httpDetailLink, httpListLink } from './http-navigation';
+import { journeyLink } from './journey-data';
 
 export const worldLink = (id: string) => `#/worlds/${encodeURIComponent(id)}`;
 export const villageLink = (village: Pick<AdminVillage, 'id' | 'worldId'>) =>
@@ -27,7 +28,7 @@ export const activityLink = (activity: AdminActivity) =>
   `#/activities/${encodeURIComponent(activity.id)}?worldId=${encodeURIComponent(activity.worldId)}&kind=${activity.kind}${activity.villageId ? `&villageId=${encodeURIComponent(activity.villageId)}` : ''}`;
 const activityNames = { expedition: 'Expédition', science: 'Science', task: 'Tâche planifiée' };
 
-function PageHeading({
+export function PageHeading({
   title,
   description,
   back,
@@ -992,6 +993,9 @@ export function AccountPage({ id }: { id: string }) {
               <Empty>Aucune inscription à un monde.</Empty>
             )}
           </Panel>
+          <p>
+            <a href={journeyLink(id)}>Parcours du joueur (sessions et chronologie) ↗</a>
+          </p>
           <Villages items={data.villages} truncated={data.truncated} />
           <Activities
             items={data.recentActivities}
@@ -1043,6 +1047,10 @@ export function VillagePage({ id, worldId }: { id: string; worldId: string }) {
               rel="noopener noreferrer"
             >
               Observer le village ↗
+            </a>{' '}
+            ·{' '}
+            <a href={journeyLink(data.village.ownerAccountId, { worldId, villageId: id })}>
+              Parcours du joueur dans ce village ↗
             </a>
           </p>
           <Panel title="Diagnostic" subtitle="Lecture des données persistées, sans commande ni réconciliation">

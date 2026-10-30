@@ -3,7 +3,7 @@ import { bindTransactionRefiner } from './modules/navigation/transaction-refinem
 import { ObservationHub } from './modules/admin/observation-hub.js';
 import { registerObservationRoutes } from './modules/admin/observation-routes.js';
 import { instrumentObservationActions } from './modules/admin/observation-actions.js';
-import { JourneyJournal } from './modules/admin/journey-journal.js';
+import { attachJourneyJournal, JourneyJournal } from './modules/admin/journey-journal.js';
 import { randomUUID } from 'node:crypto';
 import { ExpeditionCoordinator } from './modules/science/expeditions.js';
 import { ExpeditionWakeups } from './modules/science/expedition-wakeups.js';
@@ -30,9 +30,7 @@ import { OperationsTelemetry, instrumentHttp, annotateHttpRequest } from './modu
 import { DatabaseProbe } from './modules/operations/database-probe.js';
 import { createHttpLogging } from './modules/operations/http-logging.js';
 
-const journeyJournals = new WeakMap<FastifyInstance, JourneyJournal>();
-/** The journey journal of an app (tests flush it explicitly). */
-export const journeyJournalFor = (app: FastifyInstance) => journeyJournals.get(app);
+export { journeyJournalFor } from './modules/admin/journey-journal.js';
 
 export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise<FastifyInstance> {
   const httpLogging = createHttpLogging(config.nocHttpLogMode);
@@ -218,7 +216,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   // Player journey journal: buffered, flushed every 5 s and at close, never
   // inside a business transaction. Disabled unless JOURNEY_ENABLED=1.
   const journey = new JourneyJournal(db, config.journeyEnabled === true);
-  journeyJournals.set(app, journey);
+  attachJourneyJournal(app, journey);
   journey.start(5000);
   app.addHook('onClose', () => journey.stop());
   instrumentObservationActions(app, observations, journey);

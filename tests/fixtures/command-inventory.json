@@ -49,6 +49,13 @@
     "role": "authentication-health-or-administration"
   },
   {
+    "method": "GET",
+    "url": "/api/admin/journeys/:id",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
     "method": "POST",
     "url": "/api/admin/observations",
     "actions": [],
