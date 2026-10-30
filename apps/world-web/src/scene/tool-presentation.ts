@@ -2,6 +2,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { Scene } from '@babylonjs/core/scene';
 
 export const TOOL_PRESENTATIONS = ['tools-symbol', 'tool:terraform', 'tool:demolish'] as const;
@@ -17,9 +18,19 @@ function material(scene: Scene, name: string, colour: string, emissive?: string)
   return m;
 }
 
+/** A grid line segment between two points, slightly overlapping its neighbours. */
+function gridSegment(root: Mesh, scene: Scene, from: Vector3, to: Vector3, line: StandardMaterial) {
+  const d = to.subtract(from),
+    bar = MeshBuilder.CreateBox('tool-grid-line', { width: 0.07, height: 0.05, depth: d.length() + 0.05 }, scene);
+  bar.position = from.add(to).scale(0.5);
+  bar.rotation.set(-Math.atan2(d.y, Math.hypot(d.x, d.z)), Math.atan2(d.x, d.z), 0);
+  bar.material = line;
+  bar.parent = root;
+}
+
 /**
- * A piece of construction grid, drawn like a hash sign: one whole cell between
- * four lines running past it, the cell raised under a blue veil.
+ * A piece of construction grid, drawn like a hash sign: one whole cell raised under
+ * a blue veil, its four lines running past it and sloping down to the ground.
  */
 function terraformCell(root: Mesh, scene: Scene) {
   const line = material(scene, 'grid-line', '#e8eef2', '#3a4248'),
@@ -27,27 +38,29 @@ function terraformCell(root: Mesh, scene: Scene) {
     earth = material(scene, 'earth', '#7a5634'),
     veil = material(scene, 'veil', '#4f9be0', '#1d4f86');
   veil.alpha = 0.45;
-  for (const offset of [-0.5, 0.5]) {
-    const along = MeshBuilder.CreateBox('tool-grid-line', { width: 2.3, height: 0.05, depth: 0.07 }, scene);
-    along.position.set(0, 0.025, offset);
-    const across = MeshBuilder.CreateBox('tool-grid-line', { width: 0.07, height: 0.05, depth: 2.3 }, scene);
-    across.position.set(offset, 0.025, 0);
-    for (const bar of [along, across]) {
-      bar.material = line;
-      bar.parent = root;
-    }
+  const height = 0.42,
+    top = height + 0.06;
+  for (const o of [-0.5, 0.5]) {
+    const along = [
+        new Vector3(-1.25, 0.025, o),
+        new Vector3(-0.5, top, o),
+        new Vector3(0.5, top, o),
+        new Vector3(1.25, 0.025, o),
+      ],
+      across = along.map((p) => new Vector3(p.z, p.y, p.x));
+    for (const points of [along, across])
+      for (let i = 0; i < 3; i++) gridSegment(root, scene, points[i]!, points[i + 1]!, line);
   }
-  const height = 0.32;
   const column = MeshBuilder.CreateBox('tool-terrain', { width: 0.9, depth: 0.9, height }, scene);
   column.position.y = height / 2;
   column.material = earth;
   column.parent = root;
-  const top = MeshBuilder.CreateBox('tool-grass', { width: 0.9, depth: 0.9, height: 0.06 }, scene);
-  top.position.y = height + 0.03;
-  top.material = grass;
-  top.parent = root;
-  const cover = MeshBuilder.CreateBox('tool-veil', { width: 0.96, depth: 0.96, height: height + 0.1 }, scene);
-  cover.position.y = (height + 0.1) / 2;
+  const turf = MeshBuilder.CreateBox('tool-grass', { width: 0.9, depth: 0.9, height: 0.06 }, scene);
+  turf.position.y = height + 0.03;
+  turf.material = grass;
+  turf.parent = root;
+  const cover = MeshBuilder.CreateBox('tool-veil', { width: 0.96, depth: 0.96, height: top }, scene);
+  cover.position.y = top / 2;
   cover.material = veil;
   cover.parent = root;
 }
