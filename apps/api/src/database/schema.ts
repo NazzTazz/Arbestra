@@ -9,6 +9,7 @@ import type {
   RoadCellGauge,
   RoadCellSurface,
   RoadCellsResult,
+  DemolitionResult,
   RoadAnchorAccessory,
   RoadAnchorsResult,
   TerrainBuildingExterior,
@@ -733,6 +734,14 @@ export interface Database {
     stoneCredit: number;
     report: JSONColumnType<object>;
     convertedAt: Generated<Timestamp>;
+  };
+  demolitionReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<object>;
+    result: JSONColumnType<DemolitionResult>;
+    createdAt: Timestamp;
   };
   roadAnchorReceipts: {
     worldId: string;

@@ -39,9 +39,11 @@ import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
 import { RoadAnchorBraziers, RoadAnchorGhost, RoadAnchorMarkers } from './road-anchor-braziers';
 import { TerraformPreview, type TerraformVisual } from './terraform-preview';
 import { selectEquipment } from './equipment-selection';
+import type { DemolitionTarget } from '../ui/demolition-selection';
 import {
   infrastructureSurface,
   infrastructurePlanSurface,
+  overlayRoadCells,
   wrapCoordinate,
   type InfrastructureOperation,
   type RoadPixel,
@@ -465,42 +467,27 @@ export class BabylonVillageScene {
       );
   }
   #demolitionTint: DemolitionTint | null = null;
-  #demolitionIndex: {
-    state: VillageState;
-    cells: Map<string, Array<{ cellX: number; cellY: number }>>;
-    types: Map<string, string>;
-    roads: Map<string, RoadPixel[]>;
-  } | null = null;
+  #demolitionIndex: { state: VillageState; roads: Map<string, RoadPixel[]> } | null = null;
   #demolitionBuildings = new Map<string, Mesh>();
   #demolitionRoads = new Set<string>();
   #demolitionRoadFrame = 0;
   /** Colours one designated target in red. Called once per newly swept target, never per frame. */
-  public demolitionMark(kind: 'building' | 'road' | 'equipment', id: string) {
+  public demolitionMark(kind: DemolitionTarget, id: string) {
     const state = this.#state,
       space = this.#space;
     if (!state || !space) return;
     if (this.#demolitionIndex?.state !== state) {
-      const cells = new Map<string, Array<{ cellX: number; cellY: number }>>(),
-        types = new Map<string, string>(),
-        roads = new Map<string, RoadPixel[]>();
-      for (const cell of state.cells) {
-        const building = cell.footprint?.buildingId ?? cell.building?.id;
-        if (!building) continue;
-        types.set(building, cell.footprint?.buildingType ?? cell.building?.type ?? '');
-        const list = cells.get(building) ?? [];
-        list.push(cell);
-        cells.set(building, list);
+      // Road pixels of every road cell, as the tiles draw them, grouped by cell.
+      const roads = new Map<string, RoadPixel[]>(),
+        raster = new Map<string, RoadPixel>();
+      overlayRoadCells(raster, state.roadCells ?? [], state.world);
+      for (const p of raster.values()) {
+        const key = `${Math.floor((p.x + 8) / 16) % space.width}:${Math.floor((p.y + 8) / 16) % space.height}`,
+          list = roads.get(key) ?? [];
+        list.push(p);
+        roads.set(key, list);
       }
-      // Same pixel-to-cell rounding as the swipe's road index.
-      if (state.infrastructure)
-        for (const p of infrastructurePlanSurface(state.infrastructure, state.world).values()) {
-          if (!p.manual || p.material === 'none') continue;
-          const key = `${Math.floor((p.x + 8) / 16) % space.width}:${Math.floor((p.y + 8) / 16) % space.height}`,
-            list = roads.get(key) ?? [];
-          list.push(p);
-          roads.set(key, list);
-        }
-      this.#demolitionIndex = { state, cells, types, roads };
+      this.#demolitionIndex = { state, roads };
     }
     const tint = (this.#demolitionTint ??= new DemolitionTint(this.#scene));
     if (kind === 'road') {
@@ -510,19 +497,19 @@ export class BabylonVillageScene {
         this.#demolitionRoadFrame = 0;
         this.#drawDemolitionRoads();
       });
-    } else if (kind === 'equipment') tint.tint(`equipment:${id}`, this.#villageBraziers?.meshesOf(id) ?? []);
-    else if (this.#demolitionIndex.types.get(id) === 'garden')
-      for (const cell of this.#demolitionIndex.cells.get(id) ?? []) {
-        const p = space.project(cell);
-        tint.patch(`garden:${cell.cellX}:${cell.cellY}`, {
-          x: p.x,
-          y: (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.19,
-          z: p.z,
-          width: TILE_SIZE * 0.98,
-          depth: TILE_SIZE * 0.98,
-        });
-      }
-    else {
+    } else if (kind === 'brazier')
+      tint.tint(`brazier:${id}`, this.#roadAnchorBraziers?.fires.meshesOf(`anchor:${id}`) ?? []);
+    else if (kind === 'garden') {
+      const [cellX, cellY] = id.split(':').map(Number) as [number, number],
+        p = space.project({ cellX, cellY });
+      tint.patch(`garden:${id}`, {
+        x: p.x,
+        y: (this.#store?.ground(cellX, cellY)?.height ?? 0) + 0.19,
+        z: p.z,
+        width: TILE_SIZE * 0.98,
+        depth: TILE_SIZE * 0.98,
+      });
+    } else {
       const root = this.#buildingCache.get(id)?.mesh;
       if (!root) return;
       this.#demolitionBuildings.set(id, root);

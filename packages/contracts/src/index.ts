@@ -68,3 +68,4 @@ export * from './village-presentation.js';
 export * from './sync-v2-village-state.js';
 export * from './road-cells.js';
 export * from './road-anchors.js';
+export * from './demolition.js';

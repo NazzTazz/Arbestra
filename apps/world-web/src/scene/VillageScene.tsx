@@ -26,6 +26,7 @@ import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import type { AreaPreview, Cell } from './construction-selection';
 import type { HarvestMode } from './halo-marker';
 import type { ActiveWorldMode } from '../ui/world-mode';
+import type { DemolitionTarget } from '../ui/demolition-selection';
 
 const NO_TREES: readonly HarvestTree[] = [];
 interface VillageSceneProps {
@@ -79,7 +80,7 @@ export interface TerrainHandle {
   terrainVertexHeight: (x: number, y: number) => number | null;
   terraformPreview: (value: import('./terraform-preview').TerraformVisual | null) => void;
   /** Marks one swept demolition target; cleared all at once. */
-  demolitionMark: (kind: 'building' | 'road' | 'equipment', id: string) => void;
+  demolitionMark: (kind: DemolitionTarget, id: string) => void;
   demolitionClear: () => void;
   /** Road cell gesture preview: cells added once each, a tone, cleared at once. */
   roadCellsPreviewAdd: (cells: readonly Cell[], refused?: boolean) => void;

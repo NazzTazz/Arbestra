@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyInfrastructure, type VillageState } from '@arbestra/contracts';
+import type { VillageState } from '@arbestra/contracts';
 import {
   DemolitionSelection,
   MAX_SWEEP_CELLS,
@@ -20,6 +20,15 @@ const cell = (cellX: number, cellY: number, buildingId: string | null, buildingT
   footprint: buildingId ? { buildingId, buildingType, role: 'anchor', state: 'active' } : null,
   canBuild: false,
 });
+const road = (cellX: number, cellY: number) => ({
+  id: `${cellX},${cellY}`,
+  cellX,
+  cellY,
+  surface: 'earth',
+  sidewalks: false,
+  gauge: 'chemin',
+  revision: 1,
+});
 const state = {
   world,
   cells: [
@@ -29,35 +38,10 @@ const state = {
     cell(4, 1, 'garden', 'garden'),
     cell(5, 1, 'garden', 'garden'),
   ],
-  infrastructure: {
-    ...emptyInfrastructure(),
-    revision: 2,
-    roads: [
-      {
-        id: 'a',
-        points: [
-          { x: 48, y: 8 },
-          { x: 80, y: 8 },
-        ],
-        width: 4,
-        material: 'earth',
-        border: false,
-        operation: 'paint',
-      },
-      {
-        id: 'b',
-        points: [
-          { x: 72, y: 8 },
-          { x: 80, y: 8 },
-        ],
-        width: 4,
-        material: 'none',
-        border: false,
-        operation: 'remove',
-      },
-    ],
-    equipment: [{ id: 'brazier', x: 56, y: 8, quarterTurns: 0, version: 1 }],
-  },
+  // A road from 6 to 9 on row 1, (9, 0) and (10, 0) above its end: the vertices
+  // (9, 1) and (10, 1) each touch three road cells, two automatic corners.
+  roadCells: [road(6, 1), road(7, 1), road(8, 1), road(9, 1), road(9, 0), road(10, 0)],
+  roadAnchors: [{ vertexX: 7, vertexY: 1, accessory: 'brazier', revision: 1 }],
 } as unknown as VillageState;
 
 function counted(index: DemolitionIndex) {
@@ -67,8 +51,9 @@ function counted(index: DemolitionIndex) {
     index: {
       world: index.world,
       building: (k: string) => (calls.value++, index.building(k)),
+      garden: (k: string) => (calls.value++, index.garden(k)),
       road: (k: string) => (calls.value++, index.road(k)),
-      equipment: (k: string) => (calls.value++, index.equipment(k)),
+      braziers: (k: string) => (calls.value++, index.braziers(k)),
     } satisfies DemolitionIndex,
   };
 }
@@ -82,12 +67,30 @@ describe('demolition selection', () => {
       sweptCells({ cellX: 0, cellY: 1 }, { cellX: 12, cellY: 1 }, world),
       (k, id) => added.push(`${k}:${id}`),
     );
-    expect([...selection.buildings].sort()).toEqual(['garden', 'house']);
-    // The road spans cells 6-10; the later stroke removes cell 10 and half of cell 9.
+    // Gardens by cell, other buildings by id, the town hall spared.
+    expect([...selection.buildings]).toEqual(['house']);
+    expect([...selection.gardenCells]).toEqual(['4:1', '5:1']);
     expect([...selection.roadCells].sort()).toEqual(['6:1', '7:1', '8:1', '9:1']);
-    expect([...selection.equipment]).toEqual(['brazier']);
+    // The manual brazier and both automatic corners, at corners of swept cells.
+    expect([...selection.braziers].sort()).toEqual(['10:1', '7:1', '9:1']);
     expect(added).toHaveLength(selection.size);
     expect(selection.mark(demolitionIndex(state), [{ cellX: 3, cellY: 1 }])).toBe(0);
+  });
+
+  it('names the command targets: buildings by id, gardens and roads by cell, braziers by vertex', () => {
+    const selection = new DemolitionSelection();
+    selection.mark(demolitionIndex(state), [
+      { cellX: 3, cellY: 1 },
+      { cellX: 4, cellY: 1 },
+      { cellX: 7, cellY: 1 },
+    ]);
+    expect(selection.request('c')).toEqual({
+      commandId: 'c',
+      buildings: [{ id: 'house' }],
+      gardenCells: [{ cellX: 4, cellY: 1 }],
+      roadCells: [{ cellX: 7, cellY: 1 }],
+      braziers: [{ vertexX: 7, vertexY: 1 }],
+    });
   });
 
   it('covers every cell between two samples and wraps across the torus seam', () => {
@@ -101,11 +104,11 @@ describe('demolition selection', () => {
     const cells = sweptCells({ cellX: 0, cellY: 0 }, { cellX: 30, cellY: 15 }, world, 8);
     expect(cells.length).toBeLessThanOrEqual(8);
     selection.mark(index, cells);
-    expect(calls.value).toBe(cells.length * 3);
+    expect(calls.value).toBe(cells.length * 4);
     calls.value = 0;
     const far = sweptCells({ cellX: 0, cellY: 0 }, { cellX: 31, cellY: 15 }, world);
     expect(far.length).toBeLessThanOrEqual(MAX_SWEEP_CELLS);
     selection.mark(index, far);
-    expect(calls.value).toBeLessThanOrEqual(MAX_SWEEP_CELLS * 3);
+    expect(calls.value).toBeLessThanOrEqual(MAX_SWEEP_CELLS * 4);
   });
 });

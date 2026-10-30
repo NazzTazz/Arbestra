@@ -312,6 +312,68 @@ export async function cleanRoadAnchors(
   return stale.length;
 }
 
+/** Writes a prepared anchor change: inserts, accessory updates, deletions. */
+async function writeRoadAnchors(
+  tx: Transaction<Database>,
+  worldId: string,
+  villageId: string,
+  prepared: Prepared,
+  through: Date,
+): Promise<void> {
+  const inserts = prepared.write.filter((w) => w.insert);
+  if (inserts.length)
+    await tx
+      .insertInto('roadAnchors')
+      .values(
+        inserts.map((w) => ({
+          worldId,
+          villageId,
+          vertexX: w.vertexX,
+          vertexY: w.vertexY,
+          accessory: w.accessory,
+          createdAt: through,
+          updatedAt: through,
+        })),
+      )
+      .execute();
+  for (const accessory of ['brazier', 'none'] as const) {
+    const updates = prepared.write.filter((w) => !w.insert && w.accessory === accessory);
+    if (updates.length)
+      await tx
+        .updateTable('roadAnchors')
+        .set({ accessory, revision: sql`revision + 1`, updatedAt: through })
+        .where('worldId', '=', worldId)
+        .where('villageId', '=', villageId)
+        .where(unnestVertices(updates))
+        .execute();
+  }
+  if (prepared.remove.length)
+    await tx
+      .deleteFrom('roadAnchors')
+      .where('worldId', '=', worldId)
+      .where('villageId', '=', villageId)
+      .where(unnestVertices(prepared.remove))
+      .execute();
+}
+
+/** Removal of the accessories shown at `anchors`, inside the caller's village
+ * command (demolition, docs/SPEC-DEMOLITION.md §9): the rules and refusals of
+ * the anchors gesture, against the rows and road cells as they stand now. */
+export async function removeRoadAnchors(
+  tx: Transaction<Database>,
+  village: OwnedVillage,
+  economy: VillageEconomy,
+  anchors: readonly Vertex[],
+): Promise<RoadAnchorsResult> {
+  if (!anchors.length) return { placed: 0, restored: 0, removed: 0, unchanged: 0, stone: 0, wood: 0 };
+  const prepared = await prepareRoadAnchors(tx, village, economy, {
+    action: 'remove',
+    anchors: anchors.map(({ vertexX, vertexY }) => ({ vertexX, vertexY })),
+  });
+  await writeRoadAnchors(tx, village.worldId, village.villageId, prepared, economy.through);
+  return prepared.result;
+}
+
 /** V2-native gesture: village lock (beginVillageEconomy, with the world's
  * exclusive navigation lock: an accessory is an obstacle), bounded reads,
  * refusal without writes, debit, anchor writes, receipt, then terminal
@@ -365,40 +427,7 @@ export async function roadAnchorsCommandV2(
       .filter((code) => prepared.quote[code] > 0)
       .map((code) => ({ resourceCode: code, amount: prepared.quote[code] }));
     if (costs.length) await debit(tx, worldId, villageId, costs, economy.through);
-    const inserts = prepared.write.filter((w) => w.insert);
-    if (inserts.length)
-      await tx
-        .insertInto('roadAnchors')
-        .values(
-          inserts.map((w) => ({
-            worldId,
-            villageId,
-            vertexX: w.vertexX,
-            vertexY: w.vertexY,
-            accessory: w.accessory,
-            createdAt: economy.through,
-            updatedAt: economy.through,
-          })),
-        )
-        .execute();
-    for (const accessory of ['brazier', 'none'] as const) {
-      const updates = prepared.write.filter((w) => !w.insert && w.accessory === accessory);
-      if (updates.length)
-        await tx
-          .updateTable('roadAnchors')
-          .set({ accessory, revision: sql`revision + 1`, updatedAt: economy.through })
-          .where('worldId', '=', worldId)
-          .where('villageId', '=', villageId)
-          .where(unnestVertices(updates))
-          .execute();
-    }
-    if (prepared.remove.length)
-      await tx
-        .deleteFrom('roadAnchors')
-        .where('worldId', '=', worldId)
-        .where('villageId', '=', villageId)
-        .where(unnestVertices(prepared.remove))
-        .execute();
+    await writeRoadAnchors(tx, worldId, villageId, prepared, economy.through);
     await roadAnchorsTestHooks.afterWrites?.(tx);
     await tx
       .insertInto('roadAnchorReceipts')

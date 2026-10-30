@@ -1,6 +1,8 @@
-# Démolition — 29 octobre 2026
+# Démolition — 29 octobre 2026, révisée le 31 octobre
 
-Spec d'une tranche **non implémentée côté serveur**. Le geste client est livré sur la branche `refactor/hud-infrastructure` (voir §8) et reste **à valider** par Tristan. Statuts : **validé** (décision de Tristan, 29 octobre), **proposé** (recommandation à confirmer), **ouvert** (décision manquante), **hors périmètre**.
+Statut : serveur et client **livrés le 31 octobre, à valider** par Tristan en recette sur le dev (§9.6). Statuts : **validé** (décision de Tristan), **proposé** (recommandation à confirmer), **ouvert** (décision manquante), **hors périmètre**.
+
+**Révision du 31 octobre (Tristan, validée)** : la démolition est **immédiate** pour toutes les cibles, sans durée ni villageois ; un délai d'annulation côté client précède l'envoi ([décisions](DECISIONS-DEMOLITION-2026-10-30.md)). Le §9 remplace les §3 à §5, écrits avant les cases de route (S1) et les ancrages (S4), et conservés pour l'historique.
 
 ## 1. Décisions validées
 
@@ -120,6 +122,59 @@ Un ordre d'atelier annulé à l'admission n'est pas rétabli.
   - Bâtiments et braseros : copies teintées de leurs propres maillages, les originaux masqués le temps de la désignation. Matériaux et sources teintés sont mis en cache par original ; une image coûte une couleur par matériau distinct.
   - Routes : une peau rouge suit exactement les pixels de route des cases désignées, reconstruite au plus une fois par image.
   - Jardins : une plaque rouge sur chaque case du jardin, ses plantes la traversant.
+
+## 9. Spécification révisée (31 octobre)
+
+### 9.1 Commande (proposé, dans le cadre validé)
+
+`POST /worlds/:slug/villages/:villageId/demolitions`, V2 seulement (en-têtes de commande V2), modèle `roadCellsCommandV2` :
+
+```
+{ commandId, buildings: [{ id }], gardenCells: [{ cellX, cellY }], roadCells: [{ cellX, cellY }], braziers: [{ vertexX, vertexY }] }
+```
+
+- Bornes : 64 bâtiments, 256 cases de jardin, 256 cases de route (`ROAD_CELLS_PER_COMMAND`), 64 sommets ; au moins une cible. Coordonnées canoniques.
+- Les jardins sont désignés **par case** (décision 6 : seules les parcelles touchées) ; un identifiant de jardin dans `buildings` est refusé (`GARDEN_BY_CELL`).
+- Idempotente par `commandId` (table `demolition_receipts`, migration 077, forme de `road_cell_receipts`) ; même identifiant avec un autre contenu : 409 `COMMAND_REUSED`. Le contenu canonique dédoublonne les cibles.
+- Réponse : `{ protocol: 2, worldId, villageId, commandId, status: 'applied', commandTime, result, effects? }`, `result = { buildings, gardenCells, roadCells, braziers, unchanged }` (comptes).
+
+### 9.2 Admission
+
+1. Rejeu du reçu hors transaction ; puis `ownedVillage`, `beginVillageEconomy(…, true)` (village, verrou de navigation exclusif du monde ; `statement_timestamp()` après acquisition), rejeu concurrent.
+2. Lectures bornées, tous les refus avant toute écriture :
+   - bâtiment absent du village : compté `unchanged` (balayage concurrent) ; hôtel de ville : 409 `TOWN_HALL` ;
+   - case de jardin sans jardin du village : `unchanged` ; case d'un autre village : refus de la commande (`FOREIGN_INFRASTRUCTURE`) ;
+   - routes : règles de retrait des cases (`roadCellRefusals`) ; une case absente est `unchanged`, une case étrangère refuse la commande ;
+   - braseros : règles de retrait des ancrages, évaluées **après** le retrait des cases de la même commande (un retrait peut créer un brasero automatique).
+3. Verrouillage des bâtiments ciblés (`FOR UPDATE`, UUID canonique), après le village.
+
+### 9.3 Effets, dans la transaction de la commande
+
+- **Villageois occupés par une cible**, libérés par `releaseWorkers` : lot d'atelier en cours (le lot entamé est perdu, sans remboursement), activité de science (supprimée, sans attribution de recherche ni de formation), récolte de jardin en cours sur un bâtiment touché ou passant par une case retirée (récolte supprimée, carottes réservées perdues).
+- **Dormeurs** : `rest_building_id` remis à `null` ; ils restent au repos et la réallocation des lits de la fin de commande (`reconcileRestHousing`) les reloge dans une autre maison, puis à l'hôtel de ville, sinon sans lit.
+- **Bâtiments** : `delete from buildings` ; occupations, tampons, extensions, parcelles, récoltes, contributions et ordres d'atelier cascadent. Un logement démoli relance `advancePopulationGrowth(…, true)` : la cible baisse, aucune cohorte n'est supprimée.
+- **Cases de jardin** : une extension en attente est supprimée avec sa réservation ; sinon la parcelle et l'occupation de la case. Une ligne de jardin sans case active restante est supprimée ; si sa case `anchor` est partie, la première case restante (x, puis y) devient l'ancre. Les composantes fusionnées se recalculent d'elles-mêmes.
+- **Routes** : suppression des `road_cells`, puis `cleanRoadAnchors`.
+- **Braseros** : retrait d'ancrage (manuel supprimé ou passé à `none` sur un coin rentrant ; automatique supprimé par une ligne `none`).
+- Reçu, puis `villageCommandResult` (réconciliation de fin, lits) et publication V2. Le journal privé est écrit par les triggers existants ; aucune nouvelle composante de synchronisation.
+- Les tâches planifiées restantes (`building.complete`, `processing.complete`, `science.wake`) sont sans effet sur une cible disparue.
+
+### 9.4 Client (proposé)
+
+- Sélection sur `roadCells` et `roadAnchorAccessories` (braseros automatiques compris), jardins par case.
+- **Démolir** lance un délai d'annulation de 15 s (fiche : décompte et **Annuler**) ; à son terme, une seule commande. Avertissement si une cible détient des ressources stockées (décision 3).
+
+### 9.5 Vérifications
+
+Tests métier (refus, idempotence, rejeu concurrent, effets par catégorie, relogement, cible de croissance, jardin fusionné et changement d'ancre, brasero automatique après retrait), concurrence avec barrières (contre une amélioration et contre un ordre d'atelier), rollback après écritures constatées, puis parcours navigateur.
+
+### 9.6 Livré le 31 octobre — à valider
+
+- Serveur : `demolitionCommandV2` (`apps/api/src/modules/villages/demolition.ts`), route `POST …/demolitions`, migration 077 (`demolition_receipts`), contrat `packages/contracts/src/demolition.ts`. Retrait de cases et d'ancrages partagé avec la voirie (`roadCellsToRemove`, `removeRoadAnchors`) ; abandon de science sans attribution (`abandonScienceAt`).
+- Client : sélection sur `roadCells` et les braseros affichés (manuels et automatiques, aux coins des cases balayées), jardins par case ; délai de 15 s avec décompte et **Annuler** ; avertissement statique dès qu'un bâtiment ou un jardin est désigné (les stocks exacts ne sont pas lus côté client) ; teinte des routes sur le tramage des cases, des braseros d'ancrage par leur clé de rendu.
+- Preuves (base de test) : `demolition.integration.test.ts`, 6 tests verts — effets par catégorie (bâtiments, routes, brasero manuel et coin automatique créé par le retrait, lot d'atelier, formation sans attribution, dormeurs relogés à l'hôtel de ville, effets V2 appliqués, rejeu sans écriture ni publication, `COMMAND_REUSED`), refus sans écriture, jardin fusionné avec changement d'ancre et tournée interrompue, rollback après écritures constatées, deux sérialisations avec une amélioration (barrière bornée, attente PostgreSQL observée). Mutation (lits non libérés) : rouge. Voisins verts : `road-anchors`, `road-cells`, `science` (intégration), `demolition-selection` (4). `tsc` API et client, eslint, prettier.
+- Navigateur (dev, Bressuire, chargement à froid) : balayage de 3 cases de route et 2 braseros, maison isolée en rouge ; décompte puis **Annuler** (rien n'est démoli après 17 s) ; **Démolir** au terme : maison, cases et brasero manuel disparus, capacité 1 000 → 995, aucune erreur console. Un brasero reste visible au coin de l'ancienne route : par lecture, celui de la route automatique (trajets) qui passe dessous, hors périmètre ; à confirmer en recette.
+- Non mesuré : coût par image (la désignation ne touche aucun crochet par image ; teinte reconstruite au plus une fois par image comme avant).
 
 ## Hors périmètre
 

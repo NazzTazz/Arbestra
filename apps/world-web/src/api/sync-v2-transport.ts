@@ -25,6 +25,8 @@ import {
   type RoadCellsPreview,
   type RoadCellsPreviewRequest,
   type RoadCellsRequest,
+  type DemolitionRequest,
+  type DemolitionResult,
   type RoadCellsResult,
   type RoadAnchorsPreview,
   type RoadAnchorsPreviewRequest,
@@ -631,6 +633,40 @@ export class SyncV2Transport {
       throw Error('Confirmation de voirie invalide.');
     this.applyEffects(input.effects);
     return result as RoadCellsResult;
+  }
+  /** Demolition (docs/SPEC-DEMOLITION.md §9): one immediate command per
+   * designation; its private effects remove the targets. */
+  async demolish(request: DemolitionRequest): Promise<DemolitionResult> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    const input = (await this.json('/demolitions', {
+      method: 'POST',
+      headers: { 'x-arbestra-command': request.commandId },
+      body: JSON.stringify(request),
+    })) as {
+      protocol?: unknown;
+      status?: unknown;
+      commandId?: unknown;
+      worldId?: unknown;
+      villageId?: unknown;
+      result?: Partial<Record<keyof DemolitionResult, unknown>>;
+      effects?: SyncV2Batch;
+    } | null;
+    const result = input?.result;
+    if (
+      input?.protocol !== 2 ||
+      input.status !== 'applied' ||
+      input.commandId !== request.commandId ||
+      input.worldId !== this.worldId ||
+      input.villageId !== this.villageId ||
+      !result ||
+      (['buildings', 'gardenCells', 'roadCells', 'braziers', 'unchanged'] as const).some(
+        (field) => typeof result[field] !== 'number',
+      ) ||
+      (input.effects !== undefined && !syncV2BatchIsValid(input.effects))
+    )
+      throw Error('Confirmation de démolition invalide.');
+    this.applyEffects(input.effects);
+    return result as DemolitionResult;
   }
   /** Read-only quote of a road cells gesture. */
   async previewRoadCells(body: RoadCellsPreviewRequest): Promise<RoadCellsPreview> {

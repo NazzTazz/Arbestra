@@ -339,6 +339,48 @@ async function acquireReady(
   }
 }
 
+/** Demolition of the buildings hosting activities (docs/SPEC-DEMOLITION.md
+ * §9): the activities in progress there end without granting research or
+ * training; their workers are released and the activity rows deleted. The
+ * other campuses of the account are woken, as at a completion. Caller holds
+ * the village lock, with `through` read after it. */
+export async function abandonScienceAt(
+  tx: Transaction<Database>,
+  economy: VillageEconomy,
+  buildingIds: readonly string[],
+): Promise<void> {
+  if (!buildingIds.length) return;
+  const activities = await tx
+    .selectFrom('scienceActivities')
+    .select(['id', 'workerCount'])
+    .where('worldId', '=', economy.worldId)
+    .where('villageId', '=', economy.villageId)
+    .where('buildingId', 'in', buildingIds)
+    .where('status', '=', 'in-progress')
+    .orderBy('id')
+    .execute();
+  if (!activities.length) return;
+  const { accountId } = await lockScience(tx, economy);
+  const cohorts = await materializeCohorts(tx, economy.worldId, economy.villageId, economy.through);
+  for (const activity of activities)
+    await releaseWorkers(
+      tx,
+      cohorts.filter((c) => c.scienceActivityId === activity.id),
+      activity.workerCount,
+      economy.through,
+    );
+  await tx
+    .deleteFrom('scienceActivities')
+    .where('worldId', '=', economy.worldId)
+    .where(
+      'id',
+      'in',
+      activities.map((a) => a.id),
+    )
+    .execute();
+  await wakeOtherCampuses(tx, economy, accountId);
+}
+
 /** Called in chronological order with the village's other due transitions. */
 export async function completeScienceAt(tx: Transaction<Database>, economy: VillageEconomy, id: string, at: Date) {
   const { accountId, village } = await lockScience(tx, economy);

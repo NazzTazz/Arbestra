@@ -17,6 +17,7 @@ import { MarketExchangeSchema, TradeOfferSchema, MarketJourneySchema } from './m
 import { ScienceStateSchema } from './science.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
 import { RoadCellSchema, RoadCellsResultSchema } from './road-cells.js';
+import { DemolitionResultSchema } from './demolition.js';
 import { RoadAnchorSchema, RoadAnchorsResultSchema } from './road-anchors.js';
 import { StarterInstallationSchema } from './spawn-installation.js';
 import { SYNC_V2_SPATIAL_COMPONENTS, SyncV2SpatialChangeSchema } from './sync-v2-spatial.js';
@@ -462,6 +463,23 @@ export const RoadCellsConfirmationV2Schema = Type.Object(
   { additionalProperties: false },
 );
 export type RoadCellsConfirmationV2 = Static<typeof RoadCellsConfirmationV2Schema>;
+/** Demolition (docs/SPEC-DEMOLITION.md §9): compact receipt and the private
+ * effects (buildings, garden plots, road cells and anchors, population). A
+ * replay returns the original result without effects. */
+export const DemolitionConfirmationV2Schema = Type.Object(
+  {
+    protocol: Type.Literal(2),
+    worldId: id,
+    villageId: id,
+    commandId: id,
+    status: Type.Literal('applied'),
+    commandTime: time,
+    result: DemolitionResultSchema,
+    effects: Type.Optional(SyncV2BatchSchema),
+  },
+  { additionalProperties: false },
+);
+export type DemolitionConfirmationV2 = Static<typeof DemolitionConfirmationV2Schema>;
 /** Road anchors gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §5.1):
  * compact receipt (counts, stone and wood debited) and the private effects
  * (`roadAnchors`, `resources`). A replay returns the original result and

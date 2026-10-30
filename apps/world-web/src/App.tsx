@@ -443,6 +443,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         : null,
     [villageV2Mode, villageV2.villageReady, villageV2.roadCells, villageV2.previewRoadCells],
   );
+  // Demolition is V2-native too (docs/SPEC-DEMOLITION.md §9).
+  const demolish = villageV2Mode && villageV2.villageReady ? villageV2.demolish : null;
   const roadAnchorsApi = useMemo(
     () =>
       villageV2Mode && villageV2.villageReady
@@ -2622,6 +2624,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 <DemolitionTool
                   state={sceneState ?? state}
                   scene={terrainRef}
+                  demolish={demolish}
+                  onNotice={pushNotification}
                   active={active && worldMode === 'construction' && !showDev && !workshop && !arrivalActive}
                 />
               )}

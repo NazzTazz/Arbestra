@@ -193,6 +193,21 @@ async function prepareRoadCells(
   return { quote: { stone: result.stone }, result, place, remove: [], style };
 }
 
+/** Own cells a removal deletes, with the refusals of the removal gesture (a
+ * foreign or out-of-reach cell refuses all; an absent cell is unchanged).
+ * Shared with demolition (docs/SPEC-DEMOLITION.md §9); no write. */
+export async function roadCellsToRemove(
+  tx: Transaction<Database>,
+  village: OwnedVillage,
+  cells: readonly Cell[],
+): Promise<Cell[]> {
+  if (!cells.length) return [];
+  const { refused, own } = await roadCellRefusals(tx, village, cells, false);
+  const first = cells.find((cell) => refused.has(cellKey(cell)));
+  if (first) throw skipError(refused.get(cellKey(first))!);
+  return cells.filter((cell) => own.has(cellKey(cell)));
+}
+
 /** Read-only quote, in the projection's snapshot: no lock, no write. */
 export async function previewRoadCells(
   db: Kysely<Database>,

@@ -10,7 +10,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## Avant la mise à jour alpha, dans l'ordre (31 octobre)
 
-1. **Démolition côté serveur, directement en V2** ([décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md), spec sur la branche fusionnée : [SPEC-DEMOLITION.md](docs/SPEC-DEMOLITION.md)). L'installation restant en V1, pas de démolition pendant l'installation, à assumer dans la spec.
+1. **Démolition immédiate** ([spec §9](docs/SPEC-DEMOLITION.md), [décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md)) : livrée le 31 octobre, **à valider** en recette sur le dev (migration 077 appliquée). Indisponible pendant l'installation (V1).
 2. **Terraformation : reprise de l'UX** (à spécifier avec Tristan), avec 5b, nivellement et terraformation sans `state()` ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md), étape 5).
 3. **Voirie** ([spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : S1 à S4 validés le 30 octobre ; épaisseur de la terre manuelle corrigée sur sol plat, à revoir en recette.
 4. **Préparer la mise à jour** : répéter les conversions 076 et `network-3` sur une copie de l'alpha, puis déployer.

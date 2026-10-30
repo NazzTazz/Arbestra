@@ -497,7 +497,8 @@ export class VillageBraziers {
   }
   /** One equipment's masonry, for a transient tint; never called per frame. */
   meshesOf(id: string): readonly AbstractMesh[] {
-    return this.#items.find((item) => item.point.id === id)?.meshes ?? [];
+    // Legacy equipment by id, anchor fires by render key (demolition tint).
+    return this.#items.find((item) => item.point.id === id || item.point.renderKey === id)?.meshes ?? [];
   }
   animate(now: number, night: boolean, alpha: number): void {
     const lighting = night && alpha > 0;

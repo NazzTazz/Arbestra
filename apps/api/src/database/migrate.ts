@@ -26,6 +26,7 @@ import * as playerJourneyEventsMigration from './migrations/072_player_journey_e
 import * as roadCellsMigration from './migrations/073_road_cells.js';
 import * as roadAnchorsMigration from './migrations/074_road_anchors.js';
 import * as legacyRoadConversionMigration from './migrations/076_legacy_road_conversion.js';
+import * as demolitionReceiptsMigration from './migrations/077_demolition_receipts.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -160,6 +161,7 @@ const migrationProvider: MigrationProvider = {
       '073_road_cells': roadCellsMigration,
       '074_road_anchors': roadAnchorsMigration,
       '076_legacy_road_conversion': legacyRoadConversionMigration,
+      '077_demolition_receipts': demolitionReceiptsMigration,
     };
   },
 };
