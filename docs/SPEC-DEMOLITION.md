@@ -112,7 +112,10 @@ Un ordre d'atelier annulé à l'admission n'est pas rétabli.
   - sélection en ensembles, à coût constant par case.
   - Test déterministe des cibles, du tore et du nombre de recherches par échantillon.
 - `ui/DemolitionTool.tsx` : geste, fiche, désélection. **Démolir est désactivé** tant que la commande serveur n'existe pas.
-- `scene/demolition-marks.ts` : volumes rouges en instances fines sur une seule boîte. Bâtiments sur leur emprise, routes et braseros par case. Une image coûte une seule mise à jour d'opacité.
+- `scene/demolition-tint.ts` : les cibles elles-mêmes passent en rouge pulsant, sans volume ajouté.
+  - Bâtiments et braseros : copies teintées de leurs propres maillages, les originaux masqués le temps de la désignation. Matériaux et sources teintés sont mis en cache par original ; une image coûte une couleur par matériau distinct.
+  - Routes : une peau rouge suit exactement les pixels de route des cases désignées, reconstruite au plus une fois par image.
+  - Jardins : une plaque rouge sur chaque case du jardin, ses plantes la traversant.
 
 ## Hors périmètre
 

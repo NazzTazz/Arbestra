@@ -41,6 +41,7 @@ import {
   infrastructurePlanSurface,
   wrapCoordinate,
   type InfrastructureOperation,
+  type RoadPixel,
   type SubPoint,
 } from '@arbestra/contracts';
 import { sciencePreview } from '../api/client';
@@ -168,7 +169,8 @@ import type { DoorLane } from './worker-motion';
 const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
-import { DemolitionMarks } from './demolition-marks';
+import { DemolitionTint } from './demolition-tint';
+import { flatRoadGeometry } from './infrastructure-surface-geometry';
 export type TerrainStatus = 'loading' | 'retry' | null;
 export type TerrainViewMode = 'village' | 'region' | 'world';
 
@@ -456,21 +458,25 @@ export class BabylonVillageScene {
           : null,
       );
   }
-  #demolitionMarks: DemolitionMarks | null = null;
+  #demolitionTint: DemolitionTint | null = null;
   #demolitionIndex: {
     state: VillageState;
     cells: Map<string, Array<{ cellX: number; cellY: number }>>;
     types: Map<string, string>;
-    equipment: Map<string, { x: number; y: number }>;
+    roads: Map<string, RoadPixel[]>;
   } | null = null;
-  /** Marks one designated target in red. Called once per newly swept target, never per frame. */
+  #demolitionBuildings = new Map<string, Mesh>();
+  #demolitionRoads = new Set<string>();
+  #demolitionRoadFrame = 0;
+  /** Colours one designated target in red. Called once per newly swept target, never per frame. */
   public demolitionMark(kind: 'building' | 'road' | 'equipment', id: string) {
     const state = this.#state,
       space = this.#space;
     if (!state || !space) return;
     if (this.#demolitionIndex?.state !== state) {
       const cells = new Map<string, Array<{ cellX: number; cellY: number }>>(),
-        types = new Map<string, string>();
+        types = new Map<string, string>(),
+        roads = new Map<string, RoadPixel[]>();
       for (const cell of state.cells) {
         const building = cell.footprint?.buildingId ?? cell.building?.id;
         if (!building) continue;
@@ -479,52 +485,77 @@ export class BabylonVillageScene {
         list.push(cell);
         cells.set(building, list);
       }
-      this.#demolitionIndex = {
-        state,
-        cells,
-        types,
-        equipment: new Map((state.infrastructure?.equipment ?? []).map((e) => [e.id, e])),
-      };
+      // Same pixel-to-cell rounding as the swipe's road index.
+      if (state.infrastructure)
+        for (const p of infrastructurePlanSurface(state.infrastructure, state.world).values()) {
+          if (!p.manual || p.material === 'none') continue;
+          const key = `${Math.floor((p.x + 8) / 16) % space.width}:${Math.floor((p.y + 8) / 16) % space.height}`,
+            list = roads.get(key) ?? [];
+          list.push(p);
+          roads.set(key, list);
+        }
+      this.#demolitionIndex = { state, cells, types, roads };
     }
-    const marks = (this.#demolitionMarks ??= new DemolitionMarks(this.#scene));
-    const ground = (cellX: number, cellY: number) => this.#store?.ground(cellX, cellY)?.height ?? 0;
-    const tile = (key: string, cell: { cellX: number; cellY: number }, height: number) => {
-      const p = space.project(cell);
-      marks.add(key, {
-        x: p.x,
-        y: ground(cell.cellX, cell.cellY) + height / 2,
-        z: p.z,
-        width: TILE_SIZE * 0.96,
-        height,
-        depth: TILE_SIZE * 0.96,
-      });
-    };
+    const tint = (this.#demolitionTint ??= new DemolitionTint(this.#scene));
     if (kind === 'road') {
-      const [cellX, cellY] = id.split(':').map(Number) as [number, number];
-      tile(`road:${id}`, { cellX, cellY }, 0.12);
-    } else if (kind === 'equipment') {
-      const e = this.#demolitionIndex.equipment.get(id);
-      if (!e) return;
-      const p = space.project({ cellX: e.x / 8, cellY: e.y / 8 }),
-        cell = { cellX: Math.floor(e.x / 8 + 0.5) % space.width, cellY: Math.floor(e.y / 8 + 0.5) % space.height };
-      marks.add(`equipment:${id}`, {
-        x: p.x,
-        y: ground(cell.cellX, cell.cellY) + 0.6,
-        z: p.z,
-        width: 0.9,
-        height: 1.2,
-        depth: 0.9,
+      this.#demolitionRoads.add(id);
+      // A swipe adds many cells per frame: the skin is rebuilt once, on the next frame.
+      this.#demolitionRoadFrame ||= requestAnimationFrame(() => {
+        this.#demolitionRoadFrame = 0;
+        this.#drawDemolitionRoads();
       });
-    } else {
-      // Footprint volumes: instanced recipes share one mesh, whose bounds cover every copy.
-      const type = this.#demolitionIndex.types.get(id),
-        height = type === 'garden' ? 0.3 : type === 'dwelling' ? 3.4 : 4.5;
-      for (const cell of this.#demolitionIndex.cells.get(id) ?? [])
-        tile(`building:${id}:${cell.cellX}:${cell.cellY}`, cell, height);
+    } else if (kind === 'equipment') tint.tint(`equipment:${id}`, this.#villageBraziers?.meshesOf(id) ?? []);
+    else if (this.#demolitionIndex.types.get(id) === 'garden')
+      for (const cell of this.#demolitionIndex.cells.get(id) ?? []) {
+        const p = space.project(cell);
+        tint.patch(`garden:${cell.cellX}:${cell.cellY}`, {
+          x: p.x,
+          y: (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.19,
+          z: p.z,
+          width: TILE_SIZE * 0.98,
+          depth: TILE_SIZE * 0.98,
+        });
+      }
+    else {
+      const root = this.#buildingCache.get(id)?.mesh;
+      if (!root) return;
+      this.#demolitionBuildings.set(id, root);
+      tint.tint(`building:${id}`, [root]);
     }
   }
   public demolitionClear() {
-    this.#demolitionMarks?.clear();
+    cancelAnimationFrame(this.#demolitionRoadFrame);
+    this.#demolitionRoadFrame = 0;
+    this.#demolitionRoads.clear();
+    this.#demolitionBuildings.clear();
+    this.#demolitionTint?.clear();
+  }
+  #drawDemolitionRoads() {
+    const index = this.#demolitionIndex;
+    if (!this.#space || !this.#state || !index || !this.#demolitionTint) return;
+    const pixels = new Map<string, RoadPixel>();
+    for (const cell of this.#demolitionRoads)
+      for (const p of index.roads.get(cell) ?? []) pixels.set(`${p.x}:${p.y}`, p);
+    this.#demolitionTint.road(
+      pixels.size
+        ? flatRoadGeometry(
+            pixels,
+            this.#space,
+            (x, y) => this.#store?.ground(x, y)?.height ?? null,
+            this.#state.world.generationVersion === 3,
+            0.07,
+          )
+        : null,
+    );
+  }
+  /** A rebuilt or late-loaded building keeps its designation colour. */
+  #retintDemolition() {
+    for (const [id, root] of this.#demolitionBuildings) {
+      const current = this.#buildingCache.get(id)?.mesh;
+      if (!current || (current === root && this.#demolitionTint?.count(`building:${id}`))) continue;
+      this.#demolitionBuildings.set(id, current);
+      this.#demolitionTint?.tint(`building:${id}`, [current]);
+    }
   }
   public terrainVertexHeight(x: number, y: number) {
     return this.#store?.vertexHeight(x, y) ?? null;
@@ -2238,6 +2269,7 @@ export class BabylonVillageScene {
           cached.mesh.dispose(false, false);
           this.#buildingCache.delete(key);
         }
+      this.#retintDemolition();
       this.#canvas.dataset.factoryBuildingCount = String(plans.size);
       this.#canvas.dataset.factoryGenerationCount = String(this.#factoryGenerationCount);
       this.#canvas.dataset.buildingGenerationCount = String(this.#buildingGenerationCount);
@@ -4359,7 +4391,7 @@ export class BabylonVillageScene {
     this.#camera.position.x -= shift.x;
     this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
-    this.#demolitionMarks?.shift(shift.x, shift.z);
+    this.#demolitionTint?.shift(shift.x, shift.z);
     this.#inhabitantCamera.shift(shift.x, shift.z);
     this.#resourceOverlayAt = 0;
     for (const mesh of [
@@ -5267,7 +5299,8 @@ export class BabylonVillageScene {
 
   public dispose(): void {
     this.#terraformRenderer?.dispose();
-    this.#demolitionMarks?.dispose();
+    cancelAnimationFrame(this.#demolitionRoadFrame);
+    this.#demolitionTint?.dispose();
     cancelAnimationFrame(this.#infrastructureHoverFrame);
     this.#infrastructureHoverFrame = 0;
     this.#infrastructureHoverEvent = null;
