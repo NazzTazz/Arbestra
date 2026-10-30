@@ -14,7 +14,7 @@ Généré le 30 octobre 2026.
 - Une colonne de lumière s'élève au-dessus de l'hôtel de ville quand une transaction de marché crédite le village.
 - Le réseau de déplacement de chaque village est conservé entre les redémarrages de l'API et n'est plus recalculé inutilement quand un bosquet franchit un seuil.
 - Conversion de données au déploiement : le stock de bois existant des bosquets est converti en arbres réels (arbres de 500, cases reconstituées à partir du stock restant, lots en cours conservés).
-- *Technique :* migrations 065 à 069 (bois par arbre, conversion idempotente) et réutilisation des captures de présentation pour accélérer les lectures concurrentes.
+- *Technique :* migrations 063 à 069, appliquées pendant la maintenance après une répétition sur une copie de la base (bois par arbre, conversion idempotente) et réutilisation des captures de présentation pour accélérer les lectures concurrentes.
 
 ## alpha-2026.10.28.3 — 28 octobre 2026
 
