@@ -122,19 +122,41 @@ function nearLegacy(
 export class RoadAnchorMarkers {
   readonly #mesh: Mesh;
   readonly #material: StandardMaterial;
+  // The snapped anchor glows: a bright core over a wide, faint halo (no glow
+  // layer, which would add a full-screen pass to every frame).
+  readonly #core: Mesh;
+  readonly #halo: Mesh;
+  readonly #coreMaterial: StandardMaterial;
+  readonly #haloMaterial: StandardMaterial;
   constructor(scene: Scene) {
-    this.#material = new StandardMaterial('road-anchor-markers', scene);
-    this.#material.specularColor = Color3.Black();
-    this.#material.diffuseColor = Color3.FromHexString('#ffd27a');
-    this.#material.emissiveColor = Color3.FromHexString('#8a5a12');
-    this.#material.alpha = 0.75;
-    this.#mesh = MeshBuilder.CreateCylinder('road-anchor-markers', { diameter: 1, height: 1, tessellation: 12 }, scene);
-    this.#mesh.material = this.#material;
-    this.#mesh.isPickable = false;
-    this.#mesh.setEnabled(false);
+    const disc = (name: string, material: StandardMaterial) => {
+      const mesh = MeshBuilder.CreateCylinder(name, { diameter: 1, height: 1, tessellation: 32 }, scene);
+      mesh.material = material;
+      mesh.isPickable = false;
+      mesh.setEnabled(false);
+      return mesh;
+    };
+    const flat = (name: string, colour: string, alpha: number) => {
+      const material = new StandardMaterial(name, scene);
+      material.specularColor = Color3.Black();
+      material.disableLighting = true;
+      material.emissiveColor = Color3.FromHexString(colour);
+      material.alpha = alpha;
+      return material;
+    };
+    this.#material = flat('road-anchor-markers', '#5aa8e6', 0.55);
+    this.#coreMaterial = flat('road-anchor-snap-core', '#c8f0ff', 0.95);
+    this.#haloMaterial = flat('road-anchor-snap-halo', '#7fd0ff', 0.3);
+    this.#mesh = disc('road-anchor-markers', this.#material);
+    this.#core = disc('road-anchor-snap-core', this.#coreMaterial);
+    this.#halo = disc('road-anchor-snap-halo', this.#haloMaterial);
   }
+  /** Discs drawn: the free anchors, plus the snapped one. */
   get count() {
-    return this.#mesh.thinInstanceCount;
+    return this.#mesh.thinInstanceCount + (this.#snapped ? 1 : 0);
+  }
+  get #meshes() {
+    return [this.#mesh, this.#core, this.#halo];
   }
   /** Replaces the markers (x, y, z in the local plane); bounded by the caller. */
   set(
@@ -143,36 +165,53 @@ export class RoadAnchorMarkers {
     removing: boolean,
     snapped: { x: number; y: number; z: number } | null = null,
   ) {
-    this.#material.diffuseColor = Color3.FromHexString(removing ? '#f0a24a' : '#ffd27a');
-    const all = snapped ? [...points, snapped] : points,
-      buffer = new Float32Array(all.length * 16),
+    this.#material.emissiveColor = Color3.FromHexString(removing ? '#e6865a' : '#5aa8e6');
+    this.#coreMaterial.emissiveColor = Color3.FromHexString(removing ? '#ffd2b8' : '#c8f0ff');
+    this.#haloMaterial.emissiveColor = Color3.FromHexString(removing ? '#ff9a6a' : '#7fd0ff');
+    const free = snapped ? points.filter((p) => p.x !== snapped.x || p.z !== snapped.z) : points,
+      buffer = new Float32Array(free.length * 16),
       m = new Matrix(),
-      scale = new Vector3(size, 0.04, size),
-      // The anchor the pointer snaps to: wider and taller.
-      big = new Vector3(size * 1.8, 0.12, size * 1.8),
       at = new Vector3();
-    all.forEach((p, i) => {
-      at.set(p.x - this.#mesh.position.x, p.y, p.z - this.#mesh.position.z);
-      Matrix.ComposeToRef(snapped && i === points.length ? big : scale, Quaternion.Identity(), at, m);
+    const place = (mesh: Mesh, p: { x: number; y: number; z: number }) =>
+      at.set(p.x - mesh.position.x, p.y, p.z - mesh.position.z);
+    free.forEach((p, i) => {
+      Matrix.ComposeToRef(new Vector3(size, 0.02, size), Quaternion.Identity(), place(this.#mesh, p), m);
       m.copyToArray(buffer, i * 16);
     });
     this.#mesh.thinInstanceSetBuffer('matrix', buffer, 16, false);
-    this.#mesh.setEnabled(all.length > 0);
+    this.#mesh.setEnabled(free.length > 0);
+    this.#snapped = snapped !== null;
+    for (const [mesh, scale, lift] of [
+      [this.#core, size * 1.15, 0.02],
+      [this.#halo, size * 2.4, 0],
+    ] as const) {
+      if (snapped) {
+        mesh.scaling.set(scale, 0.02, scale);
+        mesh.position.set(snapped.x, snapped.y + lift, snapped.z);
+      }
+      mesh.setEnabled(this.#snapped);
+    }
   }
+  #snapped = false;
   clear() {
-    if (!this.#mesh.thinInstanceCount) return;
+    if (!this.#mesh.thinInstanceCount && !this.#snapped) return;
     this.#mesh.thinInstanceCount = 0;
-    this.#mesh.setEnabled(false);
+    this.#snapped = false;
+    for (const mesh of this.#meshes) mesh.setEnabled(false);
   }
   visible(value: boolean) {
     this.#mesh.setEnabled(value && this.#mesh.thinInstanceCount > 0);
+    this.#core.setEnabled(value && this.#snapped);
+    this.#halo.setEnabled(value && this.#snapped);
   }
   shift(x: number, z: number) {
-    this.#mesh.position.x -= x;
-    this.#mesh.position.z -= z;
+    for (const mesh of this.#meshes) {
+      mesh.position.x -= x;
+      mesh.position.z -= z;
+    }
   }
   dispose() {
-    this.#mesh.dispose();
-    this.#material.dispose();
+    for (const mesh of this.#meshes) mesh.dispose();
+    for (const material of [this.#material, this.#coreMaterial, this.#haloMaterial]) material.dispose();
   }
 }

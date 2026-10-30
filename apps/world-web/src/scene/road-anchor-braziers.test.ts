@@ -116,13 +116,19 @@ it('rewrites the bounded marker set and emphasizes the snapped anchor', () => {
   try {
     const points = Array.from({ length: 12 }, (_, i) => ({ x: i, y: 0, z: 0 }));
     markers.set(points, 0.5, false, { x: 3, y: 0, z: 0 });
-    const mesh = scene.getMeshByName('road-anchor-markers') as Mesh;
-    expect(markers.count).toBe(13);
-    const matrices = mesh.thinInstanceGetWorldMatrices();
-    expect(matrices[0]!.m[0]).toBeCloseTo(0.5);
-    expect(matrices[12]!.m[0]).toBeCloseTo(0.9);
+    const mesh = scene.getMeshByName('road-anchor-markers') as Mesh,
+      core = scene.getMeshByName('road-anchor-snap-core') as Mesh,
+      halo = scene.getMeshByName('road-anchor-snap-halo') as Mesh;
+    // The snapped anchor leaves the plain discs for its glowing core and halo.
+    expect(mesh.thinInstanceCount).toBe(11);
+    expect(markers.count).toBe(12);
+    expect(mesh.thinInstanceGetWorldMatrices()[0]!.m[0]).toBeCloseTo(0.5);
+    expect(core.isEnabled() && halo.isEnabled()).toBe(true);
+    expect(core.position.x).toBe(3);
+    expect(halo.scaling.x).toBeGreaterThan(core.scaling.x);
     markers.set(points.slice(0, 2), 0.5, true);
     expect(markers.count).toBe(2);
+    expect(core.isEnabled()).toBe(false);
     markers.clear();
     expect(markers.count).toBe(0);
     expect(mesh.isEnabled()).toBe(false);
