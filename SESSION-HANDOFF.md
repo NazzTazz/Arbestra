@@ -11,7 +11,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 ## À faire, dans l'ordre (30 octobre, soir)
 
 1. **Clôture de la synchro V2** ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) : démolition côté serveur, directement en V2 ([décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md), spec sur la branche fusionnée : [SPEC-DEMOLITION.md](docs/SPEC-DEMOLITION.md)) ; 5b nivellement et terraformation sans `state()` ; tri des autres appels à `state()` (construction, marché, présentation) ; installation en V2 ; NOC sur les lecteurs V2 ; puis lot I (retrait de la V1, 426, migration de nettoyage). Moins urgents : pagination des snapshots de trafic et spatial, couverture de connaissance (1 024 ancres).
-2. **Refonte voirie** ([spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : S3 et S4 validés par Tristan le 30 octobre ; S1-S2 faits, à valider en recette ; restent S5 (factory : buissons, tonneau, modèles de placette 2 × 2 et de place 3 × 3 avec leurs ancrages ; Tristan modélise les éléments dans Blender) et S6 (achat des places dans le HUD). Souhait validé, à faire : un accessoire manuel peut remplacer un brasero automatique.
+2. **Refonte voirie** ([spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : S1 à S4 validés par Tristan le 30 octobre (micro-réserve d'affichage sur les routes, à préciser) ; restent S5 (factory : buissons, tonneau, modèles de placette 2 × 2 et de place 3 × 3 avec leurs ancrages ; Tristan modélise les éléments dans Blender) et S6 (achat des places dans le HUD). Souhait validé, à faire : un accessoire manuel peut remplacer un brasero automatique.
 3. **Tranche trajets** (validée, à spécifier) : le coût ×30 des jardins pousse des trajets vers la recherche fine complète (2,3 à 6,2 s, 32 000 à 37 000 nœuds sur Bressuire, cases 216,213 et 229,220).
 4. **Sortir le worker du processus de l'API** (décision du 29 octobre) : service à part, sans pool. Idée pour plus tard : jauge de retard par village façon RCI.
 5. **Observabilité des parcours** ([conception](docs/DESIGN-OBSERVABILITE-PARCOURS.md)) : A et C faits et validés ; restent B (présence par minute, prochain numéro de migration libre après 076) et D (événements client) ; petits correctifs : purge des `sessions` expirées, flux V2 dans la télémétrie du NOC. Activation sur alpha : feu vert de Tristan.
@@ -22,11 +22,9 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
-| Tranche | Où | Référence |
-|---|---|---|
-| Routes à la case S1, S2a-d (pose, attraction, cases sautées, tuiles en thin instances) | dev | spec §4.5-§4.8 |
+Aucune tranche en attente.
 
-Validés le 30 octobre sur staging : pagination du snapshot privé, énergie et repos par le worker. Validés le 30 octobre sur dev : ancrages S4a-b, conversion des routes S3 (076), exploitation des jardins sans `state()` (5a), image longue après publication V2 et réconciliation paresseuse, journal des parcours et page « Parcours » du NOC (A, C).
+Validés le 30 octobre sur staging : pagination du snapshot privé, énergie et repos par le worker. Validés le 30 octobre sur dev : routes à la case S1, S2a-d, ancrages S4a-b, conversion des routes S3 (076), exploitation des jardins sans `state()` (5a), image longue après publication V2 et réconciliation paresseuse, journal des parcours et page « Parcours » du NOC (A, C).
 
 ## Règles et repères durables
 
