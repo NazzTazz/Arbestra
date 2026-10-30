@@ -88,6 +88,10 @@ Un ordre d'atelier annulé à l'admission n'est pas rétabli.
 - **Synchronisation V2** : le job de démolition est une nouvelle entité du snapshot et du journal. À coordonner avec la clôture V2 en cours.
 - **Démolition pendant une livraison du marché** ou un convoi lié à un bâtiment : sans objet, tant que seul l'hôtel de ville sert de départ, et il est exclu.
 - **Animation** des villageois sur le chantier : reprise du modèle des chantiers animés. Elle reste décorative et ne déclenche aucun crédit.
+- **Amélioration notée — teinte des jardins** : aujourd'hui, un jardin désigné reçoit une plaque rouge par case, traversée par ses plantes (§8). Tristan préférerait voir le jardin lui-même teinté ; la plaque est acceptée en attendant.
+  - Piste : les plantes et le sol des jardins sont dessinés en commun pour tous les jardins (`garden-kit.ts`), comme les arbres. Les arbres reçoivent déjà une couleur par arbre, multipliée à leurs couleurs propres (teinte du défrichage, `thinInstanceSetBuffer('color', …)`). Le même principe ne passerait au rouge que les plantes et le sol des cases désignées.
+  - À vérifier d'abord : que les matériaux du jardin acceptent cette couleur par plante.
+  - Ce code s'exécute à chaque image. Il faudra un test déterministe qui borne les mises à jour (seules les plantes des parcelles désignées sont réécrites, et seulement au marquage), et une mesure navigateur avant/après.
 
 ## 7. Vérifications attendues
 
