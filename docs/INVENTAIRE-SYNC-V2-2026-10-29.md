@@ -42,7 +42,7 @@ Avant le 30 octobre, **ne progressaient qu'à la lecture d'un client ou à une c
 
 ## Audit sync
 
-A fait ; C1 fait (503 `SYNC_SCOPE_TOO_LARGE` avec `Retry-After`, relectures espacées par le client : `25b2ea0`, `447b455`) ; C2 largement fait (restent succès à 128, ancres de la couverture de connaissance à 1 024) ; C3 fait pour le snapshot privé (29 octobre, ci-dessous) ; B fait (`06ed9c6`).
+A fait ; C1 fait (503 `SYNC_SCOPE_TOO_LARGE` avec `Retry-After`, relectures espacées par le client : `25b2ea0`, `447b455`) ; C2 largement fait (restent succès à 128, ancres de la couverture de connaissance à 1 024) ; C3 fait pour le snapshot privé (29 octobre, ci-dessous ; validé sur staging le 30 octobre) ; B fait (`06ed9c6`).
 
 C3, pagination du snapshot privé (29 octobre, [conception](DESIGN-PAGINATION-SNAPSHOT-V2.md)) : un village de plus de 4 096 références se charge en plusieurs pages, chacune dans sa propre capture.
 - **Mécanisme** : la page 1 porte les révisions de tous les flux abonnés (l'ancre) et les flux partagés complets ; les pages suivantes, le seul flux privé, dans l'ordre `(component, key)` octet par octet, au plus 4 096 références et la borne de schéma de chaque composant. Le client garde les pages hors de la session, demande un delta depuis l'ancre, l'applique à l'état assemblé, puis publie une seule fois. Opt-in par l'en-tête `x-arbestra-sync-pages: 1` : sans lui, la réponse est celle d'avant, snapshot complet ou 503. Le flux ne lit plus de snapshot : un curseur à reprendre reçoit `reset` sans lecture d'entités.
@@ -75,7 +75,7 @@ Les bâtiments comptent deux fois (`buildings` et `restHousing`). Arkham illustr
 
 1. ~~Vérifier la publication V2 d'un retrait de souche (S).~~ Fait (`b4e9316`).
 2. ~~Audit B~~ fait (`06ed9c6`) ; ~~C1 côté client~~ fait (`25b2ea0`, `447b455`).
-3. Références : ~~`restHousing` limité aux logements~~ fait (`ce7a646`) ; ~~pagination du snapshot privé~~ faite le 29 octobre, à valider (section « Audit sync »).
+3. Références : ~~`restHousing` limité aux logements~~ fait (`ce7a646`) ; ~~pagination du snapshot privé~~ faite le 29 octobre, validée sur staging par Tristan le 30 octobre (village Test forgé à 4 509 cohortes, environ 4 655 références : chargé aussi vite que d'habitude).
 4. ~~Autonomie de l'énergie et du repos (M), puis lectures pures : bootstraps et flux sans réveil (S à M).~~ Faits le 30 octobre, validés sur staging par Tristan (`4c8cf03`, `fdc2f50`, section « Autonomie des workers ») ; `GET /village` et `/events` V1 gardent leur réveil jusqu'au lot I.
 5. Commandes V2 sans `state()` : ~~exploitation avec jardins (5a)~~ faite le 30 octobre, à valider (section « Étape 5 ») ; restent nivellement, voirie hors routes (L, par famille).
 6. Installation en V2 (M), observation NOC sur les lecteurs V2 (M à L).
