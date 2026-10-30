@@ -6,7 +6,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { ClusteredLightContainer } from '@babylonjs/core/Lights/Clustered/clusteredLightContainer';
 import { roadAnchorSubPoint, type RoadAnchor } from '@arbestra/contracts';
-import { RoadAnchorBraziers, RoadAnchorMarkers } from './road-anchor-braziers';
+import { RoadAnchorBraziers, RoadAnchorGhost, RoadAnchorMarkers } from './road-anchor-braziers';
 import { WorldSpace } from './world-space';
 
 beforeEach(() => {
@@ -168,6 +168,30 @@ it('takes a removed fire out of the light cluster without handing its light back
     expect(sources).toHaveBeenCalledTimes(1);
   } finally {
     braziers.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
+it('moves one translucent brazier ghost, clearer once snapped', () => {
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    ghost = new RoadAnchorGhost(scene);
+  try {
+    const meshes = scene.meshes.length;
+    ghost.set({ x: 1, y: 0.5, z: 2 }, false);
+    expect(ghost.shown).toBe(true);
+    const material = scene.getMaterialByName('road-anchor-ghost')!;
+    const floating = material.alpha;
+    ghost.set({ x: 3, y: 0.5, z: 4 }, true);
+    expect(material.alpha).toBeGreaterThan(floating);
+    expect([ghost.position.x, ghost.position.z]).toEqual([3, 4]);
+    // Following the pointer never creates meshes.
+    expect(scene.meshes.length).toBe(meshes);
+    ghost.set(null, false);
+    expect(ghost.shown).toBe(false);
+  } finally {
+    ghost.dispose();
     scene.dispose();
     engine.dispose();
   }

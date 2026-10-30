@@ -16,6 +16,7 @@ import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import type { Material } from '@babylonjs/core/Materials/material';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { ClusteredLightContainer } from '@babylonjs/core/Lights/Clustered/clusteredLightContainer';
 import '@babylonjs/core/Lights/Clustered/clusteredLightingSceneComponent';
@@ -202,6 +203,43 @@ export function brazierBlocks() {
       };
     }),
   );
+}
+
+/** The brazier's stone pinwheel as one merged mesh, origin at its base. */
+export function brazierMasonry(scene: Scene, material: Material, name: string): Mesh {
+  const meshes: Mesh[] = [];
+  const scale = 0.085;
+  for (const [blockIndex, block] of brazierBlocks().entries()) {
+    const mesh = MeshBuilder.CreateBox(
+      'brazier-block',
+      { width: 3.25 * scale, height: 0.65 * scale, depth: 0.75 * scale },
+      scene,
+    );
+    const positions = mesh.getVerticesData(VertexBuffer.PositionKind)!;
+    // Identical corner coordinates get identical offsets on adjoining faces.
+    for (let v = 0; v < positions.length; v += 3) {
+      const corner = (positions[v]! > 0 ? 1 : 0) + (positions[v + 1]! > 0 ? 2 : 0) + (positions[v + 2]! > 0 ? 4 : 0);
+      for (let axis = 0; axis < 3; axis++) {
+        const n = Math.sin((blockIndex * 8 + corner) * 127.1 + axis * 311.7) * 43758.5453;
+        positions[v + axis]! += (n - Math.floor(n) - 0.5) * scale * 0.12;
+      }
+    }
+    mesh.setVerticesData(VertexBuffer.PositionKind, positions);
+    const normals: number[] = [];
+    VertexData.ComputeNormals(positions, mesh.getIndices()!, normals);
+    mesh.setVerticesData(VertexBuffer.NormalKind, normals);
+    mesh.scaling.setAll(0.98);
+    const rim = (n: number) => Math.sign(n) * (Math.abs(n) < 1 ? 0.375 : 1.625) * scale;
+    mesh.position.set(rim(block.x), block.y * 0.65 * scale, rim(block.z));
+    mesh.rotation.y = block.angle;
+    mesh.material = material;
+    mesh.isPickable = false;
+    meshes.push(mesh);
+  }
+  const merged = Mesh.MergeMeshes(meshes, true, false)!;
+  merged.name = name;
+  merged.isPickable = false;
+  return merged;
 }
 
 /** Only called for the bounded, enabled lights. Preserve Babylon's bindings when unchanged. */
@@ -522,38 +560,7 @@ export class VillageBraziers {
   }
   #masonryTemplate(): Mesh {
     if (this.#masonry) return this.#masonry;
-    const meshes: Mesh[] = [];
-    const scale = 0.085;
-    for (const [blockIndex, block] of brazierBlocks().entries()) {
-      const mesh = MeshBuilder.CreateBox(
-        'brazier-block',
-        { width: 3.25 * scale, height: 0.65 * scale, depth: 0.75 * scale },
-        this.scene,
-      );
-      const positions = mesh.getVerticesData(VertexBuffer.PositionKind)!;
-      // Identical corner coordinates get identical offsets on adjoining faces.
-      for (let v = 0; v < positions.length; v += 3) {
-        const corner = (positions[v]! > 0 ? 1 : 0) + (positions[v + 1]! > 0 ? 2 : 0) + (positions[v + 2]! > 0 ? 4 : 0);
-        for (let axis = 0; axis < 3; axis++) {
-          const n = Math.sin((blockIndex * 8 + corner) * 127.1 + axis * 311.7) * 43758.5453;
-          positions[v + axis]! += (n - Math.floor(n) - 0.5) * scale * 0.12;
-        }
-      }
-      mesh.setVerticesData(VertexBuffer.PositionKind, positions);
-      const normals: number[] = [];
-      VertexData.ComputeNormals(positions, mesh.getIndices()!, normals);
-      mesh.setVerticesData(VertexBuffer.NormalKind, normals);
-      mesh.scaling.setAll(0.98);
-      const rim = (n: number) => Math.sign(n) * (Math.abs(n) < 1 ? 0.375 : 1.625) * scale;
-      mesh.position.set(rim(block.x), block.y * 0.65 * scale, rim(block.z));
-      mesh.rotation.y = block.angle;
-      mesh.material = this.#stone;
-      mesh.isPickable = false;
-      meshes.push(mesh);
-    }
-    this.#masonry = Mesh.MergeMeshes(meshes, true, false)!;
-    this.#masonry.name = 'brazier-masonry-template';
-    this.#masonry.isPickable = false;
+    this.#masonry = brazierMasonry(this.scene, this.#stone, 'brazier-masonry-template');
     // Instances share their source's visibility; the template itself is never drawn.
     this.#masonry.isVisible = false;
     return this.#masonry;

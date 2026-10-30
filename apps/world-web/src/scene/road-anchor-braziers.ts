@@ -12,7 +12,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { VillageBraziers, type BrazierPoint } from './village-braziers';
+import { brazierMasonry, VillageBraziers, type BrazierPoint } from './village-braziers';
 import type { WorldSpace } from './world-space';
 
 type Cell = { cellX: number; cellY: number };
@@ -213,5 +213,47 @@ export class RoadAnchorMarkers {
   dispose() {
     for (const mesh of this.#meshes) mesh.dispose();
     for (const material of [this.#material, this.#coreMaterial, this.#haloMaterial]) material.dispose();
+  }
+}
+
+/**
+ * Translucent brazier following the pointer of the lighting tool: faint where
+ * it floats, clearer once it snaps to an anchor where it can be placed. One
+ * mesh moved per pointer sample; nothing else is rebuilt.
+ */
+export class RoadAnchorGhost {
+  readonly #mesh: Mesh;
+  readonly #material: StandardMaterial;
+  constructor(scene: Scene) {
+    this.#material = new StandardMaterial('road-anchor-ghost', scene);
+    this.#material.specularColor = Color3.Black();
+    this.#material.disableLighting = true;
+    this.#material.emissiveColor = Color3.FromHexString('#bfe6ff');
+    this.#mesh = brazierMasonry(scene, this.#material, 'road-anchor-ghost');
+    this.#mesh.setEnabled(false);
+  }
+  get shown() {
+    return this.#mesh.isEnabled();
+  }
+  get position() {
+    return this.#mesh.position;
+  }
+  /** Shows the ghost at `point` (local plane), or hides it with null. */
+  set(point: { x: number; y: number; z: number } | null, snapped: boolean) {
+    if (!point) {
+      this.#mesh.setEnabled(false);
+      return;
+    }
+    this.#material.alpha = snapped ? 0.6 : 0.25;
+    this.#mesh.position.set(point.x, point.y, point.z);
+    this.#mesh.setEnabled(true);
+  }
+  shift(x: number, z: number) {
+    this.#mesh.position.x -= x;
+    this.#mesh.position.z -= z;
+  }
+  dispose() {
+    this.#mesh.dispose();
+    this.#material.dispose();
   }
 }

@@ -159,6 +159,7 @@ export function InfrastructureTools({
       lighting.dispose();
       scene.current?.roadAnchorPreviewClear();
       scene.current?.roadAnchorMarkers(null);
+      scene.current?.roadAnchorGhost(null, null);
     };
   }, [lighting, scene]);
   useEffect(() => {
@@ -180,6 +181,7 @@ export function InfrastructureTools({
     // The village's anchors or the mode changed: refresh the highlight where the pointer is.
     if (active && family === 'Éclairage' && hovered.current) highlight(hovered.current, snappedRef.current);
     else scene.current?.roadAnchorMarkers(null);
+    if (!active || family !== 'Éclairage' || lightMode !== 'place') scene.current?.roadAnchorGhost(null, null);
   }, [active, family, anchorIndex, lightMode]);
   const roadQuote = family === 'Voirie' && road.quoteCurrent ? road.quote : null;
   const lightQuote = family === 'Éclairage' && lighting.quoteCurrent ? lighting.quote : null;
@@ -207,7 +209,10 @@ export function InfrastructureTools({
     if (e.kind === 'cancel') {
       setMenu(null);
       gesture.cancel();
-      if (gesture === lighting) highlight(null, null);
+      if (gesture === lighting) {
+        highlight(null, null);
+        scene.current?.roadAnchorGhost(null, null);
+      }
       return;
     }
     if (e.kind === 'right') {
@@ -226,6 +231,7 @@ export function InfrastructureTools({
       return;
     }
     if (!e.point) {
+      scene.current?.roadAnchorGhost(null, null);
       if (e.kind === 'up') lighting.up(null);
       return;
     }
@@ -235,6 +241,9 @@ export function InfrastructureTools({
     const key = (v: Vertex | null) => (v ? vertexKey(v) : '');
     // The highlight changes only when the pointer reaches another vertex or snaps differently.
     if (key(hovered.current) !== key(vertex) || key(snappedRef.current) !== key(snapped)) highlight(vertex, snapped);
+    // The brazier ghost follows the pointer and settles on a free anchor it snaps to.
+    if (lighting.mode === 'place')
+      scene.current?.roadAnchorGhost(e.point, snapped && anchors.current.designable(snapped, 'place') ? snapped : null);
     if (e.kind === 'down') lighting.down(snapped);
     else if (e.kind === 'hover') lighting.move(snapped);
     else if (e.kind === 'up') lighting.up(snapped);

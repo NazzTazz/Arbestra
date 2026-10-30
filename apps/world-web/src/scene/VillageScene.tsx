@@ -90,6 +90,10 @@ export interface TerrainHandle {
     removing?: boolean,
     snapped?: { vertexX: number; vertexY: number } | null,
   ) => void;
+  roadAnchorGhost: (
+    point: { x: number; y: number } | null,
+    snapped: { vertexX: number; vertexY: number } | null,
+  ) => void;
   roadAnchorPreviewAdd: (vertices: readonly { vertexX: number; vertexY: number }[], refused?: boolean) => void;
   roadAnchorPreviewTone: (tone: 'place' | 'remove' | 'invalid') => void;
   roadAnchorPreviewClear: () => void;
@@ -306,6 +310,7 @@ export function VillageScene({
       roadCellsPreviewClear: () => sceneRef.current?.roadCellsPreviewClear(),
       roadAnchorMarkers: (vertices, removing, snapped) =>
         sceneRef.current?.roadAnchorMarkers(vertices, removing, snapped),
+      roadAnchorGhost: (point, snapped) => sceneRef.current?.roadAnchorGhost(point, snapped),
       roadAnchorPreviewAdd: (vertices, refused) => sceneRef.current?.roadAnchorPreviewAdd(vertices, refused),
       roadAnchorPreviewTone: (tone) => sceneRef.current?.roadAnchorPreviewTone(tone),
       roadAnchorPreviewClear: () => sceneRef.current?.roadAnchorPreviewClear(),
