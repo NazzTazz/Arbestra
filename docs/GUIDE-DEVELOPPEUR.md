@@ -43,11 +43,11 @@ corepack pnpm dev               # api + clients en parallèle
 
 | Fichier | Contenu |
 |---|---|
-| `server.ts` | Processus de production : construit l'app, démarre le worker (`startScheduledTaskWorker`, table des handlers par type de tâche) et la purge du journal V2. |
+| `server.ts` | Processus de production : construit l'app, démarre le worker (`startScheduledTaskWorker` avec la table `jobs/task-handlers.ts`) et la purge du journal V2. |
 | `app.ts` | `buildApp` : plugins, instrumentation (télémétrie, minutage `dev-timing`, observation NOC), enregistrement de toutes les routes, traduction `HttpError` → réponse. |
 | `config.ts` | `loadConfig` : variables d'environnement. |
 | `database/` | `connection.ts` (pools, `jit=off`), `migrate.ts` (liste ordonnée des migrations), `migrations/NNN_*.ts` (additives, jamais réécrites après déploiement), `schema.ts` (types Kysely, colonnes en camelCase), `seed.ts`, `reset-e2e.ts`. |
-| `jobs/scheduled-tasks.ts` | Boucle du worker : prend une tâche due en `SKIP LOCKED`, appelle son handler dans une transaction, réessaie avec délai progressif. |
+| `jobs/scheduled-tasks.ts` | Boucle du worker : prend une tâche due en `SKIP LOCKED`, appelle son handler dans une transaction, réessaie avec délai progressif. `jobs/task-handlers.ts` : la table des handlers par type de tâche, que les tests utilisent aussi. |
 | `security/` | Mots de passe, sessions opaques, limitation des tentatives. |
 | `errors.ts` | `HttpError(status, code, message)` : seule erreur transmise telle quelle au client. |
 
@@ -137,7 +137,7 @@ Options locales utiles : `localStorage['arbestra:sync-v2']` (V2 en développemen
 | Le verrou et la borne économique | `villages/reconcile-economy.ts` → `beginVillageEconomy` |
 | La pose d'un bâtiment | `villages/construction.ts` → `placeBuilding` ; V2 : `construction-v2.ts` |
 | Ce qui se passe à la fin d'un chantier | `villages/complete-construction.ts` → `completeConstruction` |
-| La liste des tâches du worker | `server.ts` (table des handlers) |
+| La liste des tâches du worker | `jobs/task-handlers.ts` (table des handlers) |
 | L'énergie d'un habitant | `population/energy.ts` → `advanceEnergy` |
 | La fusion et l'affectation des cohortes | `population/work.ts` → `mergeCohorts`, `materializeCohorts`, `workingTeam` |
 | Les coûts et emprises de bâtiments | `packages/contracts/src/building-costs.ts`, `building-footprint.ts` |
