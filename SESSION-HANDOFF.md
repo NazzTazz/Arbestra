@@ -12,6 +12,9 @@ Fait le 29 octobre : recette de Tristan sur staging (`staging-2026.10.29.8`), pu
 4. **Défrichage plus rapide** (Tristan, recette du 29 octobre) : le plafond de 8 chantiers contraint le défrichage arbre par arbre ; à accélérer plus tard (plafond, ou plusieurs souches par chantier).
 5. **Performance du rendu** (antérieure au bois) : ~15 à 28 images/s, ~290 appels de dessin par image, temps dominé par Babylon (`_evaluateActiveMeshes`, `_renderForCamera`, matrices) ; villageois ~2,2 ms par image. Mesure A/B du 29 octobre : la tranche bois n'ajoute ni appel de dessin ni coût mesurable.
 6. **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts listés au §5 et dans les cycles.
+7. **Reçus de récolte par le flux V2** (souhait de Tristan, 30 octobre, « à terme ») : les reçus qui déclenchent les retours de ressources dans le HUD et sur le village (« +500 », « +600 ») doivent arriver par le SSE V2 dès que le worker a traité l'intention, au lieu de la relève à la seconde de `readHarvestReceipts` (`use-harvest-tool.ts`). Le retour immédiat des récoltes et des coupes fait partie du plaisir de jeu.
+
+Ordre décidé le 30 octobre pour la suite immédiate : 5a (fait) → observabilité des parcours joueurs (brief de Tristan, conception en cours : `docs/DESIGN-OBSERVABILITE-PARCOURS.md`) → 5c (voirie hors routes) → démolition côté serveur ([décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md)) → 5b (nivellement).
 
 ## Préparation d'exploitation sans `state()` (30 octobre, étape 5a) — à valider
 
