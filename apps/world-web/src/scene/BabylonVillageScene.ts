@@ -105,6 +105,7 @@ import type {
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import { WorldSpace, terrainDemand, delta, normalize } from './world-space';
 import { ProjectedCells } from './projected-cells';
+import { TravelDerivationInputs } from './travel-derivation';
 import { TerrainStore } from './terrain-store';
 import { TerrainRenderer } from './terrain-renderer';
 import { CloudTransition } from './cloud-transition';
@@ -3639,7 +3640,8 @@ export class BabylonVillageScene {
 
   #travelDerived: {
     state: VillageState;
-    signature: string;
+    /** Latest inputs, compared by identity first (the reconciliation keeps them). */
+    inputs: TravelDerivationInputs;
     accesses: ReturnType<typeof buildingAccesses>;
     occupied: Set<string>;
     displayRoutes: ReturnType<typeof villageRoadDisplayRoutes>;
@@ -3648,31 +3650,10 @@ export class BabylonVillageScene {
     legacyFires: Set<string>;
   } | null = null;
   #deriveTravel(state: VillageState): void {
-    const derivedSignature = JSON.stringify([
-      state.world.id,
-      state.travelRoutes,
-      state.infrastructure,
-      state.cells
-        .filter((c) => c.footprint || c.building)
-        .map((c) => [
-          c.cellX,
-          c.cellY,
-          c.footprint,
-          c.building && [
-            c.building.id,
-            c.building.type,
-            c.building.visualLayout,
-            c.building.quarterTurns,
-            c.building.accesses,
-          ],
-        ]),
-      state.region.originCellX,
-      state.region.originCellY,
-      state.region.terrainCodes,
-      state.region.features.map((f) => [f.cellX, f.cellY, f.deposit?.blocksCell, f.deposit?.cleared, f.deposit?.state]),
-    ]);
-    if (this.#travelDerived?.signature === derivedSignature) {
+    const inputs = new TravelDerivationInputs(state);
+    if (this.#travelDerived && inputs.sameAs(this.#travelDerived.inputs)) {
       this.#travelDerived.state = state;
+      this.#travelDerived.inputs = inputs;
       return;
     }
     const accesses = state.cells.flatMap((c) => (c.building ? buildingAccesses(state, c.building.id) : []));
@@ -3687,7 +3668,7 @@ export class BabylonVillageScene {
     const occupied = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`));
     this.#travelDerived = {
       state,
-      signature: derivedSignature,
+      inputs,
       accesses,
       occupied,
       fires,

@@ -117,3 +117,75 @@ it('compares data like JSON: member order and undefined members are not changes'
     { kind: 'set', path: ['a'], value: [1, 2, 3] },
   ]);
 });
+function largeVillage(): VillageState {
+  const state = fixture();
+  const model = state.cells[0]!;
+  for (let i = 0; i < 300; i++)
+    state.cells.push({ ...structuredClone(model), id: `${100 + i}:7`, cellX: 100 + i, cellY: 7 });
+  const routes = Array.from({ length: 40 }, (_, i) => ({
+    id: `route-${i}`,
+    cells: Array.from({ length: 30 }, (_, j) => ({ x: i + j, y: j, lane: j % 2 })),
+  }));
+  (state as unknown as { travelRoutes: unknown }).travelRoutes = routes;
+  return state;
+}
+it('reconciles lazily: an unchanged subtree is kept without copying, only the changed branch is rebuilt', () => {
+  const before = largeVillage();
+  const stats = { copies: 0, indexes: 0 };
+  expect(reconcileVillageSnapshot(before, structuredClone(before), stats)).toBe(before);
+  // Old eager version: one copy per array/object visited and one index per array.
+  expect(stats).toEqual({ copies: 0, indexes: 0 });
+  const after = completion(before);
+  const next = reconcileVillageSnapshot(before, after, stats);
+  expect(next).toEqual(after);
+  // root, cells, cells[1], its building and its footprint: nothing else is copied.
+  expect(stats).toEqual({ copies: 5, indexes: 0 });
+  expect(next.travelRoutes).toBe(before.travelRoutes);
+  expect(next.cells[2]).toBe(before.cells[2]);
+  expect(next.cells[1]!.building).not.toBe(before.cells[1]!.building);
+});
+it('reconciles arrays and objects like before: moved, changed, added and removed members', () => {
+  const before = JSON.parse(
+    '{"keep":{"deep":[1,2,{"x":1}]},"list":[{"id":"a","v":1},{"id":"b","v":2},{"id":"c","v":3}],' +
+      '"plain":[1,2,3],"reversed":[1,2,3],"obj":{"p":1,"q":2},"shrink":{"p":1,"q":{"r":1}},"gone":{"z":1},' +
+      '"tail":[{"id":"a"},{"id":"b"}],"proto":{"a":1}}',
+  );
+  const after = JSON.parse(
+    '{"list":[{"id":"c","v":3},{"id":"a","v":9},{"id":"d","v":4}],"keep":{"deep":[1,2,{"x":1}]},' +
+      '"plain":[1,2],"reversed":[3,2,1],"obj":{"p":1,"q":2,"r":3},"shrink":{"q":{"r":1}},' +
+      '"tail":[{"id":"a"},{"id":"b"},{"id":"c"}],"proto":{"__proto__":1,"a":1}}',
+  );
+  const stats = { copies: 0, indexes: 0 };
+  const next = reconcileVillageSnapshot(
+    { ...before, world: { id: 'w' }, village: { id: 'v' } } as unknown as VillageState,
+    { ...after, world: { id: 'w' }, village: { id: 'v' } } as unknown as VillageState,
+    stats,
+  ) as unknown as Record<
+    'keep' | 'list' | 'plain' | 'reversed' | 'obj' | 'shrink' | 'tail' | 'proto',
+    Record<string, unknown> & unknown[]
+  >;
+  expect(next).toEqual({ ...after, world: { id: 'w' }, village: { id: 'v' } });
+  expect(Object.keys(next)).toEqual([...Object.keys(after), 'world', 'village']);
+  expect(next.keep).toBe(before.keep);
+  // Keyed members follow their identity across moves; a changed one is a new object.
+  expect(next.list).not.toBe(before.list);
+  expect(next.list[0]).toBe(before.list[2]);
+  expect(next.list[1]).not.toBe(before.list[1]);
+  expect(next.list[1]).not.toBe(after.list[1]);
+  // An unmatched member is reconciled with the member at its position, as before.
+  expect(next.list[2]).not.toBe(after.list[2]);
+  expect(next.plain).not.toBe(before.plain);
+  expect(next.reversed).not.toBe(before.reversed);
+  expect(next.obj).not.toBe(before.obj);
+  expect(Object.keys(next.obj)).toEqual(['p', 'q', 'r']);
+  expect(next.shrink).not.toBe(before.shrink);
+  expect(next.shrink.q).toBe(before.shrink.q);
+  expect('gone' in next).toBe(false);
+  expect(next.tail).not.toBe(before.tail);
+  expect(next.tail[0]).toBe(before.tail[0]);
+  expect(next.tail[1]).toBe(before.tail[1]);
+  expect(Object.hasOwn(next.proto, '__proto__')).toBe(true);
+  expect(Object.getPrototypeOf(next.proto)).toBe(Object.prototype);
+  // Only the reordered list and the grown one needed an index of their entities.
+  expect(stats.indexes).toBe(2);
+});

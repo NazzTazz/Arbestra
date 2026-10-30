@@ -82,6 +82,7 @@ function equal(a: unknown, b: unknown): boolean {
   for (const key of keys) if (!equal(a[key], b[key])) return false;
   return true;
 }
+export const jsonDataEqual: (a: unknown, b: unknown) => boolean = equal;
 function entityKey(v: unknown): string | null {
   if (!record(v)) return null;
   for (const key of ['id', 'featureId', 'code', 'buildingId'])
@@ -221,33 +222,88 @@ export function applyVillageFrame(state: VillageState, input: unknown): VillageF
   }
 }
 
-/** Preserve references on resets too, so presentation caches retain unchanged entities. */
-export function reconcileVillageSnapshot(before: VillageState | null, after: VillageState): VillageState {
+/** Measurement of a reconciliation: arrays/objects built, entity indexes built. */
+export type ReconcileStats = { copies: number; indexes: number };
+/** A plain member, even `__proto__` (JSON data may carry it as an own key). */
+function put(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (key === '__proto__')
+    Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+  else target[key] = value;
+}
+/** Preserve references on resets too, so presentation caches retain unchanged entities.
+ * Lazy: an unchanged node is returned as is without allocation; only the
+ * branches leading to a change are copied (a V2 publication rebuilds the whole
+ * state, so this runs over every node on each publication). */
+export function reconcileVillageSnapshot(
+  before: VillageState | null,
+  after: VillageState,
+  stats?: ReconcileStats,
+): VillageState {
   if (!before || before.world.id !== after.world.id || before.village.id !== after.village.id) return after;
+  // Members of `b` before `stop`, all kept from `a`.
+  function keptMembers(a: Record<string, unknown>, b: Record<string, unknown>, stop: string | null) {
+    const next: Record<string, unknown> = {};
+    for (const key in b) {
+      if (key === stop) break;
+      if (Object.hasOwn(b, key)) put(next, key, a[key]);
+    }
+    return next;
+  }
   // One bottom-up pass: a node whose members all kept their references is kept itself.
   function share(a: unknown, b: unknown): unknown {
     if (a === b) return a;
     if (Array.isArray(a) && Array.isArray(b)) {
-      const keyed = entities(a);
-      let same = a.length === b.length;
-      const next = b.map((v, i) => {
-        const shared = share(keyed?.get(entityKey(v) ?? '') ?? a[i], v);
-        if (shared !== a[i]) same = false;
-        return shared;
-      });
-      return same ? a : next;
+      // Built only when a keyed member is not found at its own position.
+      let keyed: Map<string, unknown> | null | undefined;
+      let next: unknown[] | null = null;
+      for (let i = 0; i < b.length; i++) {
+        const value: unknown = b[i],
+          here: unknown = a[i],
+          key = entityKey(value);
+        let base = here;
+        if (key !== null && (i >= a.length || entityKey(here) !== key)) {
+          if (keyed === undefined) {
+            keyed = entities(a);
+            if (stats) stats.indexes++;
+          }
+          base = keyed?.get(key) ?? here;
+        }
+        const shared = share(base, value);
+        if (next) next.push(shared);
+        else if (shared !== here) {
+          next = a.slice(0, i);
+          next.push(shared);
+        }
+      }
+      if (!next) {
+        if (a.length === b.length) return a;
+        next = a.slice(0, b.length);
+      }
+      if (stats) stats.copies++;
+      return next;
     }
     if (record(a) && record(b)) {
-      const entries = Object.entries(b);
-      let same = entries.length === Object.keys(a).length;
-      const next = Object.fromEntries(
-        entries.map(([k, v]) => {
-          const shared = share(a[k], v);
-          if (shared !== a[k] || !(k in a)) same = false;
-          return [k, shared];
-        }),
-      );
-      return same ? a : next;
+      let next: Record<string, unknown> | null = null,
+        members = 0;
+      for (const key in b) {
+        if (!Object.hasOwn(b, key)) continue;
+        members++;
+        const kept = a[key],
+          shared = share(kept, b[key]);
+        if (next) put(next, key, shared);
+        else if (shared !== kept || !(key in a)) {
+          next = keptMembers(a, b, key);
+          put(next, key, shared);
+        }
+      }
+      if (!next) {
+        let own = 0;
+        for (const key in a) if (Object.hasOwn(a, key)) own++;
+        if (own === members) return a;
+        next = keptMembers(a, b, null);
+      }
+      if (stats) stats.copies++;
+      return next;
     }
     return equal(a, b) ? a : b;
   }
