@@ -6,6 +6,7 @@ import { ScienceStateSchema } from './science.js';
 import { ExploitationOrderSchema, WoodTreesSchema } from './exploitation.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
 import { RoadCellSchema } from './road-cells.js';
+import { RoadAnchorSchema } from './road-anchors.js';
 import { ProcessingRecipeSchema, ProcessingOrderSchema } from './processing.js';
 import { MarketStateSchema } from './market.js';
 
@@ -325,6 +326,9 @@ export const VillageStateSchema = Type.Object({
   infrastructure: Type.Optional(InfrastructurePlanSchema),
   /** Road cells of the village (V2 stream only; the historical reader omits them). */
   roadCells: Type.Optional(Type.Array(RoadCellSchema)),
+  /** Stored anchors of the village (V2 stream only): manual accessories and
+   * suppressed automatic braziers (`accessory: 'none'`). See road-anchors.ts. */
+  roadAnchors: Type.Optional(Type.Array(RoadAnchorSchema)),
   factoryEnabled: Type.Optional(Type.Boolean()),
   science: Type.Optional(ScienceStateSchema),
   serverTime: Type.String({ format: 'date-time' }),

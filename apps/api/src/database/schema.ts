@@ -9,6 +9,8 @@ import type {
   RoadCellGauge,
   RoadCellSurface,
   RoadCellsResult,
+  RoadAnchorAccessory,
+  RoadAnchorsResult,
   TerrainBuildingExterior,
 } from '@arbestra/contracts';
 
@@ -708,6 +710,25 @@ export interface Database {
     commandId: string;
     request: JSONColumnType<object>;
     result: JSONColumnType<RoadCellsResult>;
+    createdAt: Timestamp;
+  };
+  roadAnchors: {
+    worldId: string;
+    villageId: string;
+    vertexX: number;
+    vertexY: number;
+    anchorKey: ColumnType<string, never, never>;
+    accessory: RoadAnchorAccessory;
+    revision: Generated<number>;
+    createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
+    updatedAt: ColumnType<Date, Date | string | undefined, Date | string>;
+  };
+  roadAnchorReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<object>;
+    result: JSONColumnType<RoadAnchorsResult>;
     createdAt: Timestamp;
   };
   exploitationOrders: {

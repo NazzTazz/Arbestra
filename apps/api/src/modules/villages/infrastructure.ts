@@ -13,6 +13,9 @@ import {
   infrastructureSidewalkSurface,
   subCellKey,
   wrappedDistance,
+  roadAnchorAccessories,
+  roadAnchorSubPoint,
+  type RoadAnchorAccessory,
   infrastructureConfirmation,
   type InfrastructureConfirmation,
   type InfrastructurePlan,
@@ -281,7 +284,9 @@ function activePaths(snapshot: VillageState) {
     ...(snapshot.science?.activities.filter((a) => a.villageId === snapshot.village.id).map((a) => a.path) ?? []),
   ];
 }
-async function worldActivePaths(tx: Transaction<Database>, worldId: string) {
+/** Persisted paths of every trip in progress of the world (one read per trip
+ * table, filtered by status; no `state()`). */
+export async function worldActivePaths(tx: Transaction<Database>, worldId: string) {
   // Read persisted trips without locking another village after the local one.
   const paths = await tx
     .selectFrom('depositExtractions')
@@ -320,6 +325,35 @@ async function worldActivePaths(tx: Transaction<Database>, worldId: string) {
     ...science.map((p) => p.pathCells),
     ...trades.map((p) => p.path),
   ];
+}
+/** Accessories shown on the anchors of each village's road cells (stored, and
+ * automatic braziers not suppressed), as legacy equipment at their vertex.
+ * Linear in the cells and rows; ids `anchor:x:y` keep the order stable. */
+type AnchorCell = { villageId: string; cellX: number; cellY: number };
+type AnchorRow = { villageId: string; vertexX: number; vertexY: number; accessory: RoadAnchorAccessory };
+function roadAnchorEquipment(
+  cells: readonly AnchorCell[],
+  rows: readonly AnchorRow[],
+  world: { widthCells: number; heightCells: number },
+): InfrastructurePlan['equipment'] {
+  const byVillage = new Map<string, { cells: AnchorCell[]; rows: AnchorRow[] }>();
+  const entry = (villageId: string) => {
+    let value = byVillage.get(villageId);
+    if (!value) byVillage.set(villageId, (value = { cells: [], rows: [] }));
+    return value;
+  };
+  for (const cell of cells) entry(cell.villageId).cells.push(cell);
+  for (const row of rows) entry(row.villageId).rows.push(row);
+  const equipment: InfrastructurePlan['equipment'] = [];
+  for (const [, value] of [...byVillage].sort(([a], [b]) => a.localeCompare(b)))
+    for (const accessory of roadAnchorAccessories(value.cells, value.rows, world))
+      equipment.push({
+        id: `anchor:${accessory.vertexX}:${accessory.vertexY}`,
+        ...roadAnchorSubPoint(accessory, world),
+        quarterTurns: 0,
+        version: 1,
+      });
+  return equipment;
 }
 /** Nearby physical obstacles participate in routing without granting edit rights. */
 export async function readNavigationInfrastructure(
@@ -361,7 +395,7 @@ export async function readNavigationInfrastructure(
     .innerJoin('villages', (join) =>
       join.onRef('villages.id', '=', 'roadCells.villageId').onRef('villages.worldId', '=', 'roadCells.worldId'),
     )
-    .select(['roadCells.cellX', 'roadCells.cellY', 'roadCells.surface', 'roadCells.sidewalks'])
+    .select(['roadCells.villageId', 'roadCells.cellX', 'roadCells.cellY', 'roadCells.surface', 'roadCells.sidewalks'])
     .where('roadCells.worldId', '=', village.worldId)
     .where(
       sql<boolean>`least(abs(anchor_cell_x-${village.anchorCellX}),${village.widthCells}-abs(anchor_cell_x-${village.anchorCellX})) <= 64`,
@@ -372,11 +406,34 @@ export async function readNavigationInfrastructure(
     .orderBy('roadCells.cellX')
     .orderBy('roadCells.cellY')
     .execute();
+  // Accessories on the anchors of these road cells block passage (Tristan,
+  // 30 October): each one joins the plan as an equipment of the legacy ±1/8
+  // cell footprint at its vertex. Without accessories, nothing is added and
+  // every network fingerprint is unchanged (S4a, §5.1).
+  const anchorRows = roadCells.length
+    ? await tx
+        .selectFrom('roadAnchors')
+        .innerJoin('villages', (join) =>
+          join.onRef('villages.id', '=', 'roadAnchors.villageId').onRef('villages.worldId', '=', 'roadAnchors.worldId'),
+        )
+        .select(['roadAnchors.villageId', 'roadAnchors.vertexX', 'roadAnchors.vertexY', 'roadAnchors.accessory'])
+        .where('roadAnchors.worldId', '=', village.worldId)
+        .where(
+          sql<boolean>`least(abs(anchor_cell_x-${village.anchorCellX}),${village.widthCells}-abs(anchor_cell_x-${village.anchorCellX})) <= 64`,
+        )
+        .where(
+          sql<boolean>`least(abs(anchor_cell_y-${village.anchorCellY}),${village.heightCells}-abs(anchor_cell_y-${village.anchorCellY})) <= 64`,
+        )
+        .execute()
+    : [];
+  const anchorEquipment = roadAnchorEquipment(roadCells, anchorRows, village);
   return {
     ...own,
-    ...(roadCells.length ? { roadCells } : {}),
+    ...(roadCells.length
+      ? { roadCells: roadCells.map(({ cellX, cellY, surface, sidewalks }) => ({ cellX, cellY, surface, sidewalks })) }
+      : {}),
     roads: [...own.roads, ...foreign.flatMap((p) => p.roads)],
-    equipment: [...own.equipment, ...foreign.flatMap((p) => p.equipment)],
+    equipment: [...own.equipment, ...foreign.flatMap((p) => p.equipment), ...anchorEquipment],
     manualLighting: [...own.manualLighting, ...foreign.flatMap((p) => p.manualLighting)],
     suppressedBraziers: [...own.suppressedBraziers, ...foreign.flatMap((p) => p.suppressedBraziers)],
   };

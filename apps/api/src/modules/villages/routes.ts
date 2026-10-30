@@ -15,8 +15,15 @@ import {
   RoadCellsRequestSchema,
   type RoadCellsPreviewRequest,
   type RoadCellsRequest,
+  RoadAnchorsConfirmationV2Schema,
+  RoadAnchorsPreviewRequestSchema,
+  RoadAnchorsPreviewSchema,
+  RoadAnchorsRequestSchema,
+  type RoadAnchorsPreviewRequest,
+  type RoadAnchorsRequest,
 } from '@arbestra/contracts';
 import { previewRoadCells, roadCellsCommandV2 } from './road-cells.js';
+import { previewRoadAnchors, roadAnchorsCommandV2 } from './road-anchors.js';
 import { receiveExpedition, readExpeditionReceipts } from '../science/expeditions.js';
 import { ExpeditionReceiptSchema, type ExpeditionIntent } from '@arbestra/contracts';
 import {
@@ -647,6 +654,49 @@ export async function registerVillageRoutes(
         worldSlug,
         villageId,
         request.body as RoadCellsRequest,
+        Number(request.headers['x-arbestra-generation'] ?? '0'),
+      );
+      observationCommitted(request);
+      return reply.serializer(JSON.stringify).send(confirmation);
+    },
+  );
+  // Road anchors and accessories (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md
+  // §5.1): V2-native, one bounded command per gesture; read-only quote.
+  app.post(
+    '/api/worlds/:worldSlug/villages/:villageId/road-anchors/preview',
+    {
+      schema: {
+        params: VillageParametersSchema,
+        body: RoadAnchorsPreviewRequestSchema,
+        response: { 200: RoadAnchorsPreviewSchema },
+      },
+    },
+    async (request) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+      return previewRoadAnchors(db, account.id, worldSlug, villageId, request.body as RoadAnchorsPreviewRequest);
+    },
+  );
+  app.post(
+    '/api/worlds/:worldSlug/villages/:villageId/road-anchors',
+    {
+      schema: {
+        params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        body: RoadAnchorsRequestSchema,
+        response: { 200: RoadAnchorsConfirmationV2Schema },
+      },
+    },
+    async (request, reply) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+      await assertSyncV2Available(db);
+      const confirmation = await roadAnchorsCommandV2(
+        db,
+        account.id,
+        worldSlug,
+        villageId,
+        request.body as RoadAnchorsRequest,
         Number(request.headers['x-arbestra-generation'] ?? '0'),
       );
       observationCommitted(request);

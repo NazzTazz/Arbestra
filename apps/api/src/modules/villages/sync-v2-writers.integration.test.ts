@@ -11,6 +11,7 @@ import {
   privateSyncLookupTables,
 } from '../../database/migrations/053_game_sync_private_writers.js';
 import { roadCellSyncSource, installRoadCellSync } from '../../database/migrations/073_road_cells.js';
+import { roadAnchorSyncSource, installRoadAnchorSync } from '../../database/migrations/074_road_anchors.js';
 import { privateReaderComponents } from './sync-v2-readers.js';
 
 const url = testDatabaseUrl(),
@@ -26,8 +27,8 @@ const pool = new pg.Pool({
 });
 const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 const world = randomUUID();
-// Later migrations add sources through the same writer (073: road cells).
-const sources = [...privateSyncSources, roadCellSyncSource] as const;
+// Later migrations add sources through the same writer (073: road cells, 074: road anchors).
+const sources = [...privateSyncSources, roadCellSyncSource, roadAnchorSyncSource] as const;
 beforeAll(async () => {
   expect(new Set(sources.map(([, component]) => component))).toEqual(privateReaderComponents);
   await admin.query(`create schema ${schema}`);
@@ -39,7 +40,7 @@ beforeAll(async () => {
     ...privateSyncIndirectSources,
     ...privateSyncLookupTables,
   ]))
-    await pool.query(`create table ${table} (like public.${table} including defaults)`);
+    await pool.query(`create table ${table} (like public.${table} including defaults including generated)`);
   for (const [table, , key] of sources) {
     const columns = (
       await pool.query('select column_name from information_schema.columns where table_schema=$1 and table_name=$2', [
@@ -56,6 +57,7 @@ beforeAll(async () => {
   }
   await writers(db);
   await installRoadCellSync(db);
+  await installRoadAnchorSync(db);
 }, 60000);
 afterAll(async () => {
   await db.destroy();

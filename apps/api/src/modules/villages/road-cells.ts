@@ -23,6 +23,7 @@ import { TERRAIN } from '../worlds/generation.js';
 import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { projectVillageResource } from './economy.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
+import { cleanRoadAnchors } from './road-anchors.js';
 import {
   debit,
   ownedVillage,
@@ -318,6 +319,16 @@ export async function roadCellsCommandV2(
         .where('villageId', '=', villageId)
         .where(unnest(prepared.remove))
         .execute();
+    // Anchors of the changed cells (S4a): an accessory leaves with the last
+    // road cell of its village touching its vertex; a suppression (`none`)
+    // leaves when its vertex is no longer a re-entrant corner.
+    await cleanRoadAnchors(
+      tx,
+      worldId,
+      villageId,
+      [...prepared.place.filter((cell) => cell.insert), ...prepared.remove],
+      village,
+    );
     await roadCellsTestHooks.afterWrites?.(tx);
     await tx
       .insertInto('roadCellReceipts')

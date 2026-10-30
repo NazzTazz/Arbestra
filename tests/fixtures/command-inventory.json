@@ -673,6 +673,20 @@
   },
   {
     "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/road-anchors",
+    "actions": ["place", "remove"],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/road-anchors/preview",
+    "actions": ["place", "remove"],
+    "lot": "D",
+    "role": "read"
+  },
+  {
+    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/road-cells",
     "actions": ["place", "remove"],
     "lot": "D",
