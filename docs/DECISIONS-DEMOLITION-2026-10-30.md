@@ -11,6 +11,10 @@ Complète [SPEC-DEMOLITION.md](SPEC-DEMOLITION.md), écrite sur la branche `refa
 5. **Braseros automatiques** : le balayage les supprime aussi.
 6. **Jardins fusionnés** : seules les **parcelles touchées** sont supprimées, pas le jardin logique entier.
 7. **Annulation** possible jusqu'à l'achèvement, idempotente, sans coût ni restitution.
+8. **Commande mixte** : routes et braseros disparaissent à l'admission ; les bâtiments de la même commande gardent leur chantier.
+9. **Dormeurs à l'achèvement** : réveillés, ils redeviennent disponibles avec l'énergie récupérée jusque-là ; ils ne sont pas recouchés dans une autre maison.
+
+Côté client (branche `refactor/hud-infrastructure`) : l'avertissement du point 3 et le marquage des braseros automatiques du point 5 (`demolition-selection.ts` ne marque aujourd'hui que les braseros manuels).
 
 ## Organisation
 
