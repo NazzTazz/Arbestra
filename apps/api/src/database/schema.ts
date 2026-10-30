@@ -457,6 +457,25 @@ export interface VillageAccomplishmentsTable {
   completedAt: Timestamp;
 }
 
+export interface PlayerJourneyEventsTable {
+  id: string;
+  worldId: string;
+  villageId: string;
+  accountId: string;
+  source: 'command' | 'client';
+  type: string;
+  occurredAt: Timestamp;
+  clientAt: Timestamp | null;
+  commandId: string | null;
+  intentId: string | null;
+  outcome: 'accepted' | 'pending' | 'rejected' | 'error' | 'interrupted' | 'observed';
+  code: string | null;
+  statusCode: number | null;
+  subject: string | null;
+  tool: string | null;
+  attempts: Generated<number>;
+}
+
 export interface SessionsTable {
   id: Generated<string>;
   tokenHash: string;
@@ -836,6 +855,7 @@ export interface Database {
   stoneDeposits: StoneDepositsTable;
   depositExtractions: DepositExtractionsTable;
   sessions: SessionsTable;
+  playerJourneyEvents: PlayerJourneyEventsTable;
 }
 
 export interface ProcessingRecipesTable {

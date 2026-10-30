@@ -22,6 +22,7 @@ import { persistRc1Resources, removeSpawnTrees } from './rc1-resources.js';
 import type { SpawnCompute } from './spawn-compute.js';
 import type { InstallationPlan } from './installation-plan.js';
 import type { ElementPlan } from './element-plan.js';
+import { observationVillage } from '../admin/observation-actions.js';
 function fail(code: string, message: string): never {
   throw new HttpError(409, code, message);
 }
@@ -331,6 +332,7 @@ export async function poseRemainingStarter(
       .where('villages.ownerAccountId', '=', accountId)
       .executeTakeFirst();
     if (!village) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
+    observationVillage(accountId, village.worldId, villageId);
     const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], true);
     const row = await tx
       .selectFrom('villageStarterInstallations')

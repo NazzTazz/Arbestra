@@ -45,7 +45,7 @@ corepack pnpm dev               # api + clients en parallèle
 |---|---|
 | `server.ts` | Processus de production : construit l'app, démarre le worker (`startScheduledTaskWorker` avec la table `jobs/task-handlers.ts`) et la purge du journal V2. |
 | `app.ts` | `buildApp` : plugins, instrumentation (télémétrie, minutage `dev-timing`, observation NOC), enregistrement de toutes les routes, traduction `HttpError` → réponse. |
-| `config.ts` | `loadConfig` : variables d'environnement. |
+| `config.ts` | `loadConfig` : variables d'environnement. `JOURNEY_ENABLED` (`0` par défaut, `1` pour activer) : journal des parcours joueur ([conception](DESIGN-OBSERVABILITE-PARCOURS.md)). |
 | `database/` | `connection.ts` (pools, `jit=off`), `migrate.ts` (liste ordonnée des migrations), `migrations/NNN_*.ts` (additives, jamais réécrites après déploiement), `schema.ts` (types Kysely, colonnes en camelCase), `seed.ts`, `reset-e2e.ts`. |
 | `jobs/scheduled-tasks.ts` | Boucle du worker : prend une tâche due en `SKIP LOCKED`, appelle son handler dans une transaction, réessaie avec délai progressif. `jobs/task-handlers.ts` : la table des handlers par type de tâche, que les tests utilisent aussi. |
 | `security/` | Mots de passe, sessions opaques, limitation des tentatives. |
@@ -64,7 +64,7 @@ corepack pnpm dev               # api + clients en parallèle
 | `navigation` | Calcul de trajets hors transaction (pool de workers CPU `compute.ts`), cache de routes, réseau RC1. |
 | `worlds` | Génération et lecture du terrain, sol RC1, vues d'ensemble, routes `/terrain`. |
 | `world-generator` | Générateur de mondes (opérateur), candidats, ouverture RC1. |
-| `admin` | NOC : authentification séparée, lectures de supervision, observation d'un village en direct. |
+| `admin` | NOC : authentification séparée, lectures de supervision, observation d'un village en direct, journal des parcours joueur (`journey-journal.ts`, alimenté par le crochet `observation-actions.ts`). |
 | `operations` | Télémétrie, journalisation HTTP, minutage `Server-Timing`, sonde base. |
 
 ### Le module `villages` en détail

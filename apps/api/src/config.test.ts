@@ -88,4 +88,12 @@ describe('administrator and proxy configuration', () => {
       expect(() => loadConfig({ ...base, TRUSTED_PROXY_CIDRS: value })).toThrow(/TRUSTED_PROXY_CIDRS/);
     }
   });
+
+  it('keeps the player journey journal off unless JOURNEY_ENABLED=1', () => {
+    expect(loadConfig(base).journeyEnabled).toBe(false);
+    expect(loadConfig({ ...base, JOURNEY_ENABLED: '0' }).journeyEnabled).toBe(false);
+    expect(loadConfig({ ...base, JOURNEY_ENABLED: '1' }).journeyEnabled).toBe(true);
+    for (const value of ['true', 'yes', '2'])
+      expect(() => loadConfig({ ...base, JOURNEY_ENABLED: value })).toThrow(/JOURNEY_ENABLED/);
+  });
 });

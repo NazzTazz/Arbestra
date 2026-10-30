@@ -16,6 +16,8 @@ export interface AppConfig {
   readonly worldOrigin?: string;
   readonly trustedProxyCidrs?: readonly string[];
   readonly expeditionWorkerEnabled?: boolean;
+  /** Player journey journal (JOURNEY_ENABLED=1); off by default. */
+  readonly journeyEnabled?: boolean;
   readonly expeditionWorkerCount?: 1 | 2;
   readonly worldGeneratorOperatorEmails?: readonly string[];
   readonly databaseUrl: string;
@@ -110,6 +112,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   if (logMode !== 'anomalies' && logMode !== 'off') throw new Error('NOC_HTTP_LOG_MODE must be anomalies or off');
   if (environment.EXPEDITION_WORKERS && !/^[12]$/.test(environment.EXPEDITION_WORKERS))
     throw Error('EXPEDITION_WORKERS must be 1 or 2');
+  if (environment.JOURNEY_ENABLED && !/^[01]$/.test(environment.JOURNEY_ENABLED))
+    throw Error('JOURNEY_ENABLED must be 0 or 1');
 
   return {
     nocHttpSlowMs: Number(slowText),
@@ -119,6 +123,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     ...(worldOrigin ? { worldOrigin } : {}),
     trustedProxyCidrs: trustedProxyCidrs(environment.TRUSTED_PROXY_CIDRS),
     databaseUrl,
+    journeyEnabled: environment.JOURNEY_ENABLED === '1',
     expeditionWorkerCount: environment.EXPEDITION_WORKERS === '2' ? 2 : 1,
     worldGeneratorOperatorEmails: (environment.WORLD_GENERATOR_OPERATOR_EMAILS ?? '')
       .split(',')

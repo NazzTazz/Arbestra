@@ -4,6 +4,7 @@ import { createDatabase } from './database/connection.js';
 import { startScheduledTaskWorker } from './jobs/scheduled-tasks.js';
 import { scheduledTaskHandlers } from './jobs/task-handlers.js';
 import { startSyncJournalRetention } from './modules/villages/sync-v2-retention.js';
+import { startJourneyRetention } from './modules/admin/journey-journal.js';
 import { operationsFor } from './modules/operations/telemetry.js';
 import { observeScheduler } from './modules/operations/scheduler-observer.js';
 
@@ -24,7 +25,14 @@ const stopRetention = startSyncJournalRetention(db, 5 * 60000, () =>
   app.log.error({ code: 'SYNC_RETENTION_FAILED' }, 'Synchronization journal retention failed'),
 );
 
+// Player journey rows are kept 90 days (bounded pass at start, then every 6 h),
+// whether or not collection is enabled.
+const stopJourneyRetention = startJourneyRetention(db, 6 * 3600000, () =>
+  app.log.error({ code: 'JOURNEY_RETENTION_FAILED' }, 'Player journey retention failed'),
+);
+
 const shutdown = async () => {
+  await stopJourneyRetention();
   await stopRetention();
   await stopWorker();
   await app.close();
