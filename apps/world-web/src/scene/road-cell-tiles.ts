@@ -147,8 +147,13 @@ export function roadTileGeometry(
  * Raise of a tilted tile above its plane: the stone paving tops sit only
  * 3 mm above the ground they were cut for, and a plane is not the terrain
  * (z-fighting and terrain showing through the paving in the browser).
+ * Earth and rubble already lie 1.5 cm above their plane, as automatic roads
+ * above the terrain: raised again, they looked thicker than the automatic
+ * roads they join.
  */
 export const TILT_CLEARANCE = 0.02;
+export const roadCellClearance = (surface: RoadCellSurface) =>
+  surface === 'earth' || surface === 'rubble' ? 0 : TILT_CLEARANCE;
 /** The cell's ground plane: slopes per scene unit along x and z, and its height at the centre. */
 export interface RoadCellPlane {
   slopeX: number;
@@ -166,6 +171,7 @@ export function roadCellPlane(
   x: number,
   y: number,
   followTerrain: boolean,
+  clearance = TILT_CLEARANCE,
 ): RoadCellPlane | null {
   const centre = ground(x, y);
   if (centre === null) return null;
@@ -197,7 +203,7 @@ export function roadCellPlane(
     [-0.5, 0],
   ] as const)
     check(dx, dy, ground(x + dx, y + dy));
-  return { slopeX, slopeZ, height: mean + lift + TILT_CLEARANCE };
+  return { slopeX, slopeZ, height: mean + lift + clearance };
 }
 
 const COS = [1, 0, -1, 0],
@@ -434,7 +440,7 @@ export class RoadCellTiles {
           roadCellMask((k) => this.#byKey.has(k), cell.cellX, cell.cellY, world),
         ),
         tile = this.#tile(shape, cell.surface, cell.sidewalks),
-        plane = roadCellPlane(ground, cell.cellX, cell.cellY, followTerrain);
+        plane = roadCellPlane(ground, cell.cellX, cell.cellY, followTerrain, roadCellClearance(cell.surface));
       let target = placed;
       if (target && target.tile !== tile) {
         this.#remove(key, target);

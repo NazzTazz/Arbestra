@@ -11,6 +11,7 @@ import {
   RoadCellTiles,
   TILT_CLEARANCE,
   roadCellPlane,
+  roadCellClearance,
   roadTileFor,
   roadTileGeometry,
   type RoadTileShape,
@@ -243,8 +244,9 @@ describe('road cell tiles', () => {
       });
       // Cells 5 to 9 read a column from x >= 6 (their east corners).
       expect(tiles.stats.writes - before).toBe(5);
-      expect(tiles.matrix(8, 3)![13]).toBeCloseTo(2 + TILT_CLEARANCE, 6);
-      expect(tiles.matrix(2, 3)![13]).toBeCloseTo(1 + TILT_CLEARANCE, 6);
+      // Earth lies on its plane, 1.5 cm up like the automatic roads: no stone clearance.
+      expect(tiles.matrix(8, 3)![13]).toBeCloseTo(2, 6);
+      expect(tiles.matrix(2, 3)![13]).toBeCloseTo(1, 6);
       // A rebased origin moves instances without building or planning anything.
       const built = tiles.stats.tilesBuilt;
       space.origin = { cellX: 16, cellY: 0 };
@@ -268,5 +270,8 @@ describe('road cell tiles', () => {
     // Off RC1, flat at the cell's height.
     expect(roadCellPlane(() => 2, 3, 3, false)).toEqual({ slopeX: 0, slopeZ: 0, height: 2 });
     expect(roadCellPlane(() => null, 3, 3, true)).toBeNull();
+    expect(roadCellPlane((x) => 0.4 * x, 10, 10, true, roadCellClearance('earth'))!.height).toBeCloseTo(4, 6);
+    expect(roadCellClearance('rubble')).toBe(0);
+    expect(roadCellClearance('stone-1')).toBe(TILT_CLEARANCE);
   });
 });
