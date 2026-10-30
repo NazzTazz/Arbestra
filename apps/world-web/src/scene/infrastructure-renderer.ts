@@ -35,6 +35,140 @@ interface LayerDefinition {
   key: string;
   generate: (read: (x: number, y: number) => number | null) => Mesh[];
 }
+/** The ground cell a vertex reads: continuous on RC1, the nearest cell centre otherwise. */
+function groundCell(v: number, size: number, followTerrain: boolean): number {
+  return followTerrain ? ((v % size) + size) % size : ((Math.floor(v + 0.5) % size) + size) % size;
+}
+/**
+ * Clipped masonry modules of one stone layer: boxes for the runs of `group`
+ * within each module, clipped by `pixels` (the whole layer). Shared by the
+ * stroke renderer and the road cell tiles (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.6).
+ */
+export function masonryPieces(
+  code: 'stone-1' | 'stone-2',
+  group: Iterable<{ x: number; y: number }>,
+  pixels: ReadonlyMap<string, unknown>,
+  space: WorldSpace,
+  read: (x: number, y: number) => number | null,
+  followTerrain: boolean,
+  pavementHeight: number,
+): BuildingGeometry[] {
+  const cell = (v: number, size: number) => groundCell(v, size, followTerrain);
+  const length = code === 'stone-1' ? 6 : 8,
+    depth = code === 'stone-1' ? 2 : 4;
+  const pieces: BuildingGeometry[] = [],
+    seen = new Set<string>();
+  const box = (x: number, y: number, width: number, depth: number, top: number) => {
+    const p = space.project({ cellX: x, cellY: y }),
+      piece = BuildingGeometry.box(code, { width, height: pavementHeight, depth });
+    piece.position = new Vector3(p.x, top - pavementHeight / 2, p.z);
+    if (followTerrain) {
+      const centre = read(cell(x, space.width), cell(y, space.height)),
+        positions = piece.data.positions!;
+      for (let i = 0; i < positions.length; i += 3) {
+        const cx = cell(x + positions[i]! / 2.5, space.width),
+          cy = cell(y + positions[i + 2]! / 2.5, space.height);
+        positions[i + 1]! += (read(cx, cy) ?? centre ?? 0) - (centre ?? 0);
+      }
+      VertexData.ComputeNormals(positions, piece.data.indices!, piece.data.normals!);
+    }
+    pieces.push(piece);
+  };
+  // Only changed material layers regenerate their clipped masonry modules.
+  for (const p of group) {
+    const x = (p.x + 0.5) / 16,
+      y = (p.y + 0.5) / 16,
+      h = read(cell(x, space.width), cell(y, space.height));
+    if (h === null) continue;
+    const row = Math.floor(p.y / depth),
+      shift = ((row % 2) * length) / 2;
+    const bx = Math.floor((p.x - shift) / length) * length + shift,
+      by = row * depth,
+      key = bx + ':' + by;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const runs: Array<{ x0: number; x1: number; y0: number; y1: number }> = [];
+    for (let yy = by; yy < by + depth; yy++) {
+      let first: number | null = null;
+      for (let xx = bx; xx <= bx + length; xx++) {
+        const included =
+          xx < bx + length &&
+          pixels.has(
+            `${(xx + space.width * 16) % (space.width * 16)}:${(yy + space.height * 16) % (space.height * 16)}`,
+          );
+        if (included && first === null) first = xx;
+        if (!included && first !== null) {
+          const prior = runs.find((r) => r.x0 === first && r.x1 === xx && r.y1 === yy);
+          if (prior) prior.y1++;
+          else runs.push({ x0: first, x1: xx, y0: yy, y1: yy + 1 });
+          first = null;
+        }
+      }
+    }
+    for (const r of runs)
+      box(
+        (r.x0 + r.x1) / 32,
+        (r.y0 + r.y1) / 32,
+        ((r.x1 - r.x0) * 2.5) / 16 - 0.012,
+        ((r.y1 - r.y0) * 2.5) / 16 - 0.008,
+        (followTerrain
+          ? (read(cell((r.x0 + r.x1) / 32, space.width), cell((r.y0 + r.y1) / 32, space.height)) ?? h)
+          : h) + 0.003,
+      );
+  }
+  return pieces;
+}
+/** One raised curb stone (a sidewalk fragment), or null where the ground is unknown. */
+export function curbStonePiece(
+  stone: SidewalkStone,
+  space: WorldSpace,
+  read: (x: number, y: number) => number | null,
+  followTerrain: boolean,
+  curbHeight: number,
+): BuildingGeometry | null {
+  const cell = (v: number, size: number) => groundCell(v, size, followTerrain);
+  const polygon = stone.polygon,
+    n = polygon.length,
+    x = polygon.reduce((s, p) => s + p.x, 0) / n / 16,
+    y = polygon.reduce((s, p) => s + p.y, 0) / n / 16;
+  const h = read(cell(x, space.width), cell(y, space.height));
+  if (h === null) return null;
+  const positions: number[] = [],
+    indices: number[] = [],
+    normals: number[] = [],
+    uvs: number[] = [];
+  const point = (i: number, top: boolean) => {
+    const q = polygon[i]!,
+      cx = q.x / 16,
+      cy = q.y / 16,
+      p = space.project({ cellX: cx, cellY: cy });
+    const height = followTerrain ? (read(cell(cx, space.width), cell(cy, space.height)) ?? h) : h;
+    return [p.x, height + 0.004 + (top ? curbHeight : 0), p.z];
+  };
+  const face = (vertices: number[][], triangles: number[]) => {
+    const offset = positions.length / 3;
+    positions.push(...vertices.flat());
+    for (const v of vertices)
+      uvs.push(stone.axis === 'x' ? v[0]! / 3.75 : v[2]! / 3.75, stone.axis === 'x' ? v[2]! / 0.3125 : v[0]! / 0.3125);
+    indices.push(...triangles.map((i) => i + offset));
+  };
+  face(
+    polygon.map((_, i) => point(i, true)),
+    Array.from({ length: n - 2 }, (_, i) => [0, i + 1, i + 2]).flat(),
+  );
+  face(
+    polygon.map((_, i) => point(i, false)),
+    Array.from({ length: n - 2 }, (_, i) => [0, i + 2, i + 1]).flat(),
+  );
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    face([point(i, false), point(j, false), point(j, true), point(i, true)], [0, 1, 2, 0, 2, 3]);
+  }
+  VertexData.ComputeNormals(positions, indices, normals);
+  const data = new VertexData();
+  Object.assign(data, { positions, indices, normals, uvs });
+  return new BuildingGeometry('border', data);
+}
 export class InfrastructureRenderer {
   #meshes: Mesh[] = [];
   #signature = '';
@@ -167,8 +301,6 @@ export class InfrastructureRenderer {
         surfaceOverride ?? infrastructurePlanSurface(plan, { widthCells: space.width, heightCells: space.height });
     }
     const surface = this.#surface;
-    const cell = (v: number, size: number) =>
-      dimensions.followTerrain ? ((v % size) + size) % size : ((Math.floor(v + 0.5) % size) + size) % size;
     if (preview !== this.#preview) {
       this.#meshes.forEach((m) => m.dispose(false, false));
       this.#meshes = [];
@@ -288,69 +420,12 @@ export class InfrastructureRenderer {
           group.push(p);
         }
         for (const [sector, group] of sectors)
-          layer(code + ':' + sector, [pavementHeight, group.map((p) => [p.x, p.y])], (read) => {
-            const pieces: BuildingGeometry[] = [],
-              seen = new Set<string>();
-            const box = (x: number, y: number, width: number, depth: number, top: number) => {
-              const p = space.project({ cellX: x, cellY: y }),
-                piece = BuildingGeometry.box(code, { width, height: pavementHeight, depth });
-              piece.position = new Vector3(p.x, top - pavementHeight / 2, p.z);
-              if (dimensions.followTerrain) {
-                const centre = read(cell(x, space.width), cell(y, space.height)),
-                  positions = piece.data.positions!;
-                for (let i = 0; i < positions.length; i += 3) {
-                  const cx = cell(x + positions[i]! / 2.5, space.width),
-                    cy = cell(y + positions[i + 2]! / 2.5, space.height);
-                  positions[i + 1]! += (read(cx, cy) ?? centre ?? 0) - (centre ?? 0);
-                }
-                VertexData.ComputeNormals(positions, piece.data.indices!, piece.data.normals!);
-              }
-              pieces.push(piece);
-            };
-            // Only changed material layers regenerate their clipped masonry modules.
-            for (const p of group) {
-              const x = (p.x + 0.5) / 16,
-                y = (p.y + 0.5) / 16,
-                h = read(cell(x, space.width), cell(y, space.height));
-              if (h === null) continue;
-              const row = Math.floor(p.y / depth),
-                shift = ((row % 2) * length) / 2;
-              const bx = Math.floor((p.x - shift) / length) * length + shift,
-                by = row * depth,
-                key = bx + ':' + by;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              const runs: Array<{ x0: number; x1: number; y0: number; y1: number }> = [];
-              for (let yy = by; yy < by + depth; yy++) {
-                let first: number | null = null;
-                for (let xx = bx; xx <= bx + length; xx++) {
-                  const included =
-                    xx < bx + length &&
-                    pixels.has(
-                      `${(xx + space.width * 16) % (space.width * 16)}:${(yy + space.height * 16) % (space.height * 16)}`,
-                    );
-                  if (included && first === null) first = xx;
-                  if (!included && first !== null) {
-                    const prior = runs.find((r) => r.x0 === first && r.x1 === xx && r.y1 === yy);
-                    if (prior) prior.y1++;
-                    else runs.push({ x0: first, x1: xx, y0: yy, y1: yy + 1 });
-                    first = null;
-                  }
-                }
-              }
-              for (const r of runs)
-                box(
-                  (r.x0 + r.x1) / 32,
-                  (r.y0 + r.y1) / 32,
-                  ((r.x1 - r.x0) * 2.5) / 16 - 0.012,
-                  ((r.y1 - r.y0) * 2.5) / 16 - 0.008,
-                  (dimensions.followTerrain
-                    ? (read(cell((r.x0 + r.x1) / 32, space.width), cell((r.y0 + r.y1) / 32, space.height)) ?? h)
-                    : h) + 0.003,
-                );
-            }
-            return this.#merge(code, pieces);
-          });
+          layer(code + ':' + sector, [pavementHeight, group.map((p) => [p.x, p.y])], (read) =>
+            this.#merge(
+              code,
+              masonryPieces(code, group, pixels, space, read, dimensions.followTerrain ?? false, pavementHeight),
+            ),
+          );
       }
     const borderSectors = new Map<string, SidewalkStone[]>();
     for (const stone of this.#paving) {
@@ -369,50 +444,8 @@ export class InfrastructureRenderer {
       layer('border:' + sector, [curbHeight, stones], (read) => {
         const pieces: BuildingGeometry[] = [];
         for (const stone of stones) {
-          const polygon = stone.polygon,
-            n = polygon.length,
-            x = polygon.reduce((s, p) => s + p.x, 0) / n / 16,
-            y = polygon.reduce((s, p) => s + p.y, 0) / n / 16;
-          const h = read(cell(x, space.width), cell(y, space.height));
-          if (h === null) continue;
-          const positions: number[] = [],
-            indices: number[] = [],
-            normals: number[] = [],
-            uvs: number[] = [];
-          const point = (i: number, top: boolean) => {
-            const q = polygon[i]!,
-              cx = q.x / 16,
-              cy = q.y / 16,
-              p = space.project({ cellX: cx, cellY: cy });
-            const height = dimensions.followTerrain ? (read(cell(cx, space.width), cell(cy, space.height)) ?? h) : h;
-            return [p.x, height + 0.004 + (top ? curbHeight : 0), p.z];
-          };
-          const face = (vertices: number[][], triangles: number[]) => {
-            const offset = positions.length / 3;
-            positions.push(...vertices.flat());
-            for (const v of vertices)
-              uvs.push(
-                stone.axis === 'x' ? v[0]! / 3.75 : v[2]! / 3.75,
-                stone.axis === 'x' ? v[2]! / 0.3125 : v[0]! / 0.3125,
-              );
-            indices.push(...triangles.map((i) => i + offset));
-          };
-          face(
-            polygon.map((_, i) => point(i, true)),
-            Array.from({ length: n - 2 }, (_, i) => [0, i + 1, i + 2]).flat(),
-          );
-          face(
-            polygon.map((_, i) => point(i, false)),
-            Array.from({ length: n - 2 }, (_, i) => [0, i + 2, i + 1]).flat(),
-          );
-          for (let i = 0; i < n; i++) {
-            const j = (i + 1) % n;
-            face([point(i, false), point(j, false), point(j, true), point(i, true)], [0, 1, 2, 0, 2, 3]);
-          }
-          VertexData.ComputeNormals(positions, indices, normals);
-          const data = new VertexData();
-          Object.assign(data, { positions, indices, normals, uvs });
-          pieces.push(new BuildingGeometry('border', data));
+          const piece = curbStonePiece(stone, space, read, dimensions.followTerrain ?? false, curbHeight);
+          if (piece) pieces.push(piece);
         }
         return this.#merge('border', pieces);
       });
