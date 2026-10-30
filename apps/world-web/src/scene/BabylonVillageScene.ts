@@ -104,6 +104,7 @@ import type {
 
 import type { ScreenAnchor } from '../ui/WorldContextMenu';
 import { WorldSpace, terrainDemand, delta, normalize } from './world-space';
+import { ProjectedCells } from './projected-cells';
 import { TerrainStore } from './terrain-store';
 import { TerrainRenderer } from './terrain-renderer';
 import { CloudTransition } from './cloud-transition';
@@ -435,6 +436,7 @@ export class BabylonVillageScene {
   #hoveredHarvestCell = '';
   #harvestVisited = new Set<string>();
   #villageAnchor: Cell = { cellX: 0, cellY: 0 };
+  #projectedCells = new ProjectedCells<VillageCell>();
   #space: WorldSpace | null = null;
   #store: TerrainStore | null = null;
   #renderer: TerrainRenderer | null = null;
@@ -2065,6 +2067,7 @@ export class BabylonVillageScene {
         this.#requestedWorld = this.#worldFromWheel = false;
         this.#setMode('village');
         this.#space = new WorldSpace(state.world.widthCells, state.world.heightCells, this.#villageAnchor);
+        this.#projectedCells = new ProjectedCells();
         this.#store = new TerrainStore(state, (chunks, signal, updatesOnly) =>
           this.#preparing
             ? fetch(
@@ -2134,9 +2137,16 @@ export class BabylonVillageScene {
       this.#showTravel = showTravelPaths;
       this.#selectedRoute = selectedRouteId;
       this.#torusOverview?.setGlobalModel(this.#globalModelAvailable());
+      // Unchanged cells keep their copy, so the idle itineraries cached by cell
+      // identity survive each publication (village-workers.ts, #idleMissions).
+      const anchor = this.#villageAnchor;
       state = {
         ...state,
-        cells: state.cells.map((c) => ({ ...c, ...this.#space!.projectFrom(c, this.#villageAnchor) })),
+        cells: this.#projectedCells.project(
+          state.cells,
+          `${this.#space!.version}:${anchor.cellX}:${anchor.cellY}`,
+          (c) => this.#space!.projectFrom(c, anchor),
+        ),
       };
 
       if (import.meta.env.MODE === 'e2e') {

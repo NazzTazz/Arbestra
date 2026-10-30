@@ -14,6 +14,7 @@ import {
 } from './worker-motion';
 import { gardenStride } from './worker-gestures';
 import { buildingPlan, doorConnector, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE } from './building-plan';
+import { ProjectedCells } from './projected-cells';
 
 const epoch = Date.parse('2026-10-02T12:00:00Z');
 function gardenSnapshot(): VillageState {
@@ -1131,6 +1132,44 @@ it('recomputes a home itinerary only when its cell, the routes or the scene geom
     expect(leisurePath).toHaveBeenCalledTimes(10);
     f.view.sync({ ...state, cells: [state.cells[0]!, house], travelRoutes: [...state.travelRoutes] }, epoch + 4000);
     expect(leisurePath).toHaveBeenCalledTimes(14);
+  } finally {
+    f.dispose();
+  }
+});
+it('keeps home itineraries through the scene projection of each published state', () => {
+  // The scene hands the workers its own copies of the cells, projected into
+  // its local frame at every state update. Copying every cell each time
+  // defeated the cache above: every V2 publication recomputed both spokes of
+  // every home (Bressuire, 30 October: 59 homes, 118 calls, 60 to 320 ms).
+  const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
+    void lane;
+    return p.map((c) => new Vector3(c.cellX, 0, c.cellY));
+  });
+  const f = fixture(() => true, { leisurePath, leisureVersion: () => 'ground-1' });
+  const projection = new ProjectedCells<VillageState['cells'][number]>();
+  const project = (state: VillageState, frame = 'frame-1', shift = 0) => ({
+    ...state,
+    cells: projection.project(state.cells, frame, (cell) => ({ x: (cell.cellX - shift) * 2.5, z: cell.cellY * 2.5 })),
+  });
+  try {
+    const state = idleSnapshot();
+    f.view.sync(project(state), epoch);
+    expect(leisurePath).toHaveBeenCalledTimes(4);
+    // Publications that keep the home cells (a road cell, a stock change):
+    // the reconciled state keeps their objects, the projection its copies.
+    for (let i = 1; i <= 5; i++) f.view.sync(project({ ...state, village: { ...state.village } }), epoch + i * 1000);
+    expect(leisurePath).toHaveBeenCalledTimes(4);
+    // A changed home recomputes its own spokes only.
+    const house = { ...state.cells[1]!, building: { ...state.cells[1]!.building! } };
+    const changed = { ...state, cells: [state.cells[0]!, house] };
+    f.view.sync(project(changed), epoch + 6000);
+    expect(leisurePath).toHaveBeenCalledTimes(6);
+    expect(leisurePath.mock.calls.slice(4).map((c) => c[0])).toEqual(['house', 'house']);
+    // A rebased local frame moves every copy.
+    const rebased = project(changed, 'frame-2', 8);
+    expect(rebased.cells.map((c) => c.x)).toEqual([-20, -20]);
+    expect(project(changed, 'frame-2', 8).cells).toEqual(rebased.cells);
+    expect(project(changed, 'frame-2', 8).cells[1]).toBe(rebased.cells[1]);
   } finally {
     f.dispose();
   }
