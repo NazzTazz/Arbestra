@@ -60,6 +60,7 @@
 - Le travail en cours se montre sur le dev local (`corepack pnpm dev`, http://localhost:5174). Statut **à valider** tant que Tristan n'a pas fait la recette en local. L'alpha ne reçoit que des tranches finies et validées, sauf correctif d'incident en production.
 - Avant une recette, le serveur de dev est stable (pas de redémarrages en boucle) et un chargement à froid est annoncé comme tel.
 - Mettre à jour le handoff courant et uniquement les docs de référence affectées. Ne pas recopier un ancien compte de tests comme résultat actuel.
+- Le handoff reste un index court : une tranche y ajoute ou modifie **une ligne** (statut et lien), dans « À faire » ou « À valider ». Ses preuves, mesures et incidents vont dans sa spec ou l'inventaire concerné et dans le message de commit, jamais dans le handoff. Au-delà d'environ 10 Ko, archiver le détail dans `docs/HANDOFF-ARCHIVE-<date>.md`.
 - Formater le code avant de committer : `corepack pnpm format` (Prettier, code seulement ; vérification `corepack pnpm format:check`). Un reformatage de masse va dans un commit dédié, ajouté à `.git-blame-ignore-revs`.
 - Commit/push lorsqu'autorisés pour la tâche, sans confirmation supplémentaire. Examiner les fichiers inclus, `git diff --cached --check`, puis vérifier branche et résultat du push. Aucun force-push par défaut.
 - Le bilan final donne le résultat, les preuves, les limites restantes et l'état Git réel. Une relecture distincte peut être utile ; elle ne remplace pas l'auto-validation de l'implémenteur.
