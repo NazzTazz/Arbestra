@@ -407,7 +407,6 @@ it('refuses without writing: reused identifier, building, deposit, terrain, reac
     [{ ...accepted, commandId: randomUUID(), cells: [row(63, 70)] }, 409, 'CELL_OCCUPIED'],
     [{ ...accepted, commandId: randomUUID(), cells: [row(60, 70)] }, 409, 'INCOMPATIBLE_TERRAIN'],
     [{ ...accepted, commandId: randomUUID(), cells: [row(100, 64)] }, 409, 'OUTSIDE_INFRASTRUCTURE_REACH'],
-    [{ ...accepted, commandId: randomUUID(), cells: [row(64, 72), row(64, 72)] }, 400, 'INVALID_CELLS'],
     [
       { ...accepted, commandId: randomUUID(), cells: [row(64, 72)], style: { ...style, gauge: 'charretiere' } },
       409,
@@ -456,6 +455,50 @@ it('refuses without writing: reused identifier, building, deposit, terrain, reac
     .where('villageId', '=', ids.village)
     .where('resourceCode', '=', 'stone')
     .execute();
+}, 60000);
+
+it('counts a cell named twice in one gesture once: quote, command, replay and removal', async () => {
+  // Tristan, 30 October: a gesture that passes over a cell twice is not refused.
+  const style = { surface: 'stone-1', sidewalks: false };
+  const twice = [row(68, 66), row(65, 66), row(68, 66)];
+  const quote = await preview({ action: 'place', cells: twice, style });
+  expect(quote).toMatchObject({ valid: true, quote: { stone: 8 } });
+  expect(quote.result).toEqual({ placed: 2, restyled: 0, removed: 0, unchanged: 0, stone: 8 });
+  const before = await stone();
+  const command = { commandId: randomUUID(), action: 'place', cells: twice, style, expectedQuote: { stone: 8 } };
+  const response = await post('/road-cells', command);
+  expect(response.statusCode, response.body).toBe(200);
+  expect(response.json<RoadCellsConfirmationV2>().result).toEqual({
+    placed: 2,
+    restyled: 0,
+    removed: 0,
+    unchanged: 0,
+    stone: 8,
+  });
+  expect(await stone()).toBe(before - 8);
+  expect((await roads()).filter((r) => r.cellY === 66 && r.cellX !== 67).map((r) => [r.cellX, r.revision])).toEqual([
+    [65, 1],
+    [68, 1],
+  ]);
+  // The same identifier with the cell named once is the same gesture: a replay.
+  const snapshot = await state();
+  const replay = await post('/road-cells', { ...command, cells: [row(68, 66), row(65, 66)] });
+  expect(replay.statusCode, replay.body).toBe(200);
+  expect(await state()).toEqual(snapshot);
+  const removal = await post('/road-cells', {
+    commandId: randomUUID(),
+    action: 'remove',
+    cells: [row(65, 66), row(68, 66), row(65, 66)],
+  });
+  expect(removal.statusCode, removal.body).toBe(200);
+  expect(removal.json<RoadCellsConfirmationV2>().result).toEqual({
+    placed: 0,
+    restyled: 0,
+    removed: 2,
+    unchanged: 0,
+    stone: 0,
+  });
+  expect((await roads()).some((r) => r.cellY === 66 && (r.cellX === 65 || r.cellX === 68))).toBe(false);
 }, 60000);
 
 it('rolls back cells, debit and receipt when the transaction fails after writing them', async () => {

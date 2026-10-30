@@ -101,6 +101,18 @@ export const RoadCellSchema = Type.Object(
   { additionalProperties: false },
 );
 export type RoadCell = Static<typeof RoadCellSchema>;
+/** A gesture may pass over the same cell twice (Tristan, 30 October: not a
+ * refusal). Each cell counts once, in first-seen order; command, quote and the
+ * idempotent content of a `commandId` all use this list. */
+export function uniqueRoadCells<T extends RoadCellPosition>(cells: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return cells.filter((cell) => {
+    const key = cell.cellX + ':' + cell.cellY;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 export const roadCellsRequestIsValid = (value: unknown): value is RoadCellsRequest =>
   Value.Check(RoadCellsRequestSchema, value);
 

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import {
   roadCellStoneCost,
+  uniqueRoadCells,
   wrappedDistance,
   type RoadCellsConfirmationV2,
   type RoadCellsPreview,
@@ -51,15 +52,14 @@ async function prepareRoadCells(
   tx: Transaction<Database>,
   village: OwnedVillage,
   economy: VillageEconomy,
-  gesture: Gesture,
+  named: Gesture,
 ): Promise<Prepared> {
   const { worldId, villageId } = village;
-  const seen = new Set<string>();
+  // A cell named twice in one gesture counts once (Tristan, 30 October).
+  const gesture = { ...named, cells: uniqueRoadCells(named.cells) };
   for (const cell of gesture.cells) {
     if (cell.cellX >= village.widthCells || cell.cellY >= village.heightCells)
       throw new HttpError(400, 'INVALID_COORDINATES', 'Coordonnées non canoniques.');
-    if (seen.has(cellKey(cell))) throw new HttpError(400, 'INVALID_CELLS', 'Une case est nommée deux fois.');
-    seen.add(cellKey(cell));
     const dx = wrappedDistance(cell.cellX, village.anchorCellX, village.widthCells),
       dy = wrappedDistance(cell.cellY, village.anchorCellY, village.heightCells);
     if (dx < -REACH || dx >= REACH || dy < -REACH || dy >= REACH)
@@ -163,12 +163,14 @@ export async function previewRoadCells(
   });
 }
 
-/** Canonical content of a gesture: what one command identifier names. */
+/** Canonical content of a gesture: what one command identifier names. A cell
+ * named twice is the same gesture as the cell named once. */
 function canonical(request: RoadCellsRequest) {
+  const cells = uniqueRoadCells(request.cells).map(({ cellX, cellY }) => ({ cellX, cellY }));
   return request.action === 'place'
     ? {
         action: request.action,
-        cells: request.cells.map(({ cellX, cellY }) => ({ cellX, cellY })),
+        cells,
         style: {
           surface: request.style.surface,
           sidewalks: request.style.sidewalks,
@@ -176,7 +178,7 @@ function canonical(request: RoadCellsRequest) {
         },
         expectedQuote: { stone: request.expectedQuote.stone },
       }
-    : { action: request.action, cells: request.cells.map(({ cellX, cellY }) => ({ cellX, cellY })) };
+    : { action: request.action, cells };
 }
 
 /** Test seam: runs after the cells and the debit are written, before the

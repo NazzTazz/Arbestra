@@ -13,6 +13,7 @@ import {
   infrastructureBlockedPixels,
   infrastructureBarrierAt,
   pixelKey,
+  type RoadPixel,
 } from './infrastructure.js';
 
 export interface TravelCell {
@@ -80,6 +81,19 @@ export function blocksTravelFootprint(footprint: TravelNetworkState['cells'][num
  * bound (0.7 per step) remains admissible.
  */
 export const GARDEN_CROSSING_COST = 30;
+/**
+ * Cost factor of a coarse step along a road: road cells and manual or
+ * inherited strokes of the plan (Tristan, 30 October: roads draw villagers off
+ * their desire lines). Before, the coarse search ignored roads, so a road only
+ * mattered when the fine search left the coarse corridor. Same factor as a road
+ * or guide step of the fine search and as a shared coarse track. Tunable in
+ * [0.7, 1]: below 0.7 every A* lower bound of this file (0.7 per step) would
+ * have to follow. A road k cells aside costs 2k extra steps and saves 0.3 per
+ * step along it: it draws a route that can follow it for more than about 7k
+ * cells (one aside: 7, two: 14, three: 20, four: 27); five or more cells aside
+ * exceed the coarse detour allowance (+8 steps) and never draw it.
+ */
+export const ROAD_STEP_COST = 0.7;
 /** Active garden plots, by cell, with the garden (building) they belong to. */
 function gardenOwners(state: Pick<TravelNetworkState, 'cells'>): Map<string, string> {
   const owners = new Map<string, string>();
@@ -297,6 +311,40 @@ function navigationGeometry(state: TravelNetworkState) {
   );
   return { surface, curbPixels };
 }
+/**
+ * Edges of the coarse grid that follow a road: the centre-to-centre segment is
+ * manual pixels end to end (two neighbouring road cells always qualify; a
+ * manual stroke when it runs along cell centres). Built once per network,
+ * linear in the manual pixels; a search step then costs one lookup.
+ */
+function coarseRoadEdges(
+  surface: ReadonlyMap<string, RoadPixel>,
+  world: { widthCells: number; heightCells: number },
+): Set<string> {
+  const edges = new Set<string>(),
+    w = world.widthCells * 16,
+    h = world.heightCells * 16;
+  for (const p of surface.values()) {
+    if (!p.manual || p.x % 16 || p.y % 16) continue;
+    const from = { cellX: p.x / 16, cellY: p.y / 16 };
+    for (const [dx, dy] of [
+      [1, 0],
+      [0, 1],
+    ] as const) {
+      let along = true;
+      for (let i = 1; along && i <= 16; i++)
+        along = surface.get(pixelKey(wrap(p.x + dx * i, w), wrap(p.y + dy * i, h)))?.manual === true;
+      if (along)
+        edges.add(
+          edgeKey(
+            key(from),
+            key({ cellX: wrap(from.cellX + dx, world.widthCells), cellY: wrap(from.cellY + dy, world.heightCells) }),
+          ),
+        );
+    }
+  }
+  return edges;
+}
 export function buildTravelNetwork(
   state: TravelNetworkState,
   woodlandTargets: readonly string[] = [],
@@ -383,6 +431,7 @@ export function buildTravelNetwork(
     return copyNetwork(cached);
   }
   const walk = passageInspector(ground, world);
+  const roads = geometry ? coarseRoadEdges(geometry.surface, world) : new Set<string>();
   const hall = state.cells.find(
     (c) =>
       c.building &&
@@ -478,7 +527,8 @@ export function buildTravelNetwork(
         const owner = gardens.size ? gardens.get(cellKey) : undefined;
         const cost =
           current.cost +
-          (shared.has(edge) ? 0.7 : 1) * (owner !== undefined && owner !== ownGarden ? GARDEN_CROSSING_COST : 1) +
+          (shared.has(edge) ? 0.7 : roads.size && roads.has(edge) ? ROAD_STEP_COST : 1) *
+            (owner !== undefined && owner !== ownGarden ? GARDEN_CROSSING_COST : 1) +
           (current.direction >= 0 && current.direction !== direction ? 0.05 : 0);
         const stateKey = `${cellKey}:${direction}`;
         if (cost >= (best.get(stateKey) ?? Infinity)) continue;

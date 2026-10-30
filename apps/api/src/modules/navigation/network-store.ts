@@ -9,8 +9,9 @@ const zip = promisify(gzip),
 
 /** Part of every network fingerprint: bump the last digit when the planner's
  * output changes for an identical input, or stored networks would be reused.
- * network-2 (29 October): active gardens are no longer ordinary roads. */
-export const TRAVEL_NETWORK_VERSION = `${ROUTE_POLICY_VERSION}/${HIERARCHICAL_ROUTE_VERSION}/network-2`;
+ * network-2 (29 October): active gardens are no longer ordinary roads.
+ * network-3 (30 October): roads draw the coarse search (ROAD_STEP_COST). */
+export const TRAVEL_NETWORK_VERSION = `${ROUTE_POLICY_VERSION}/${HIERARCHICAL_ROUTE_VERSION}/network-3`;
 
 export interface TravelNetworkStore {
   load(worldId: string, villageId: string, fingerprint: string): Promise<TravelRoute[] | null>;
