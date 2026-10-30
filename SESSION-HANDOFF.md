@@ -14,7 +14,7 @@ Fait le 29 octobre : recette de Tristan sur staging (`staging-2026.10.29.8`), pu
 6. **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts listés au §5 et dans les cycles.
 7. **Reçus de récolte par le flux V2** (souhait de Tristan, 30 octobre, « à terme ») : les reçus qui déclenchent les retours de ressources dans le HUD et sur le village (« +500 », « +600 ») doivent arriver par le SSE V2 dès que le worker a traité l'intention, au lieu de la relève à la seconde de `readHarvestReceipts` (`use-harvest-tool.ts`). Le retour immédiat des récoltes et des coupes fait partie du plaisir de jeu.
 
-Infrastructure à la case : S1 fait le 30 octobre (à valider, section ci-dessous) ; S2a (dédoublonnage, routes qui attirent les trajets) fait le 30 octobre, à valider ; S2b (client) fait le 30 octobre, à valider, **budget de rendu dépassé** (sections ci-dessous) ; S2d (cases interdites sautées) fait le 30 octobre, à valider.
+Infrastructure à la case : S1 fait le 30 octobre (à valider, section ci-dessous) ; S2a (dédoublonnage, routes qui attirent les trajets) fait le 30 octobre, à valider ; S2b (client) fait le 30 octobre, à valider ; son rendu par secteurs, qui dépassait le budget, est remplacé en S2c par des thin instances de tuiles (fait le 30 octobre, à valider, section ci-dessous) ; S2d (cases interdites sautées) fait le 30 octobre, à valider.
 
 ## Routes à la case, S2d : les cases interdites sont sautées (30 octobre) — à valider
 
@@ -34,6 +34,14 @@ Ordre décidé le 30 octobre pour la suite immédiate : 5a (fait) → observabil
 - **Mesure** (Bressuire, lecture seule, ancien et nouveau planificateur dans le même processus, machine chargée) : 157 centres de case routés par l'ancien plan ; trajets modifiés (`cbb7d1a1…` → `c3b9c6bc…`), longueur 2 417 → 2 424 cases, nœuds 36 568 → 37 987 ; à froid 5,5 à 10,7 s avant, 1,2 à 7,5 s après (bruit) ; sans route, empreinte et nœuds identiques. Recherches fines 216,213 et 229,220 (non modifiées) : 37 264 et 33 118 nœuds avant comme après ; la tranche trajets reste à faire.
 - **Limites** : le témoin `planRoute` des ressources lointaines et la recherche d'un chantier local (`stoneTravelPath`) n'ont pas l'attraction grossière (seulement ×0,7 en recherche fine).
 - **Recette proposée** : sur Bressuire, poser une ligne de cases parallèle à un trajet habituel (2 à 3 cases à côté, sur une quinzaine de cases) et vérifier que les villageois l'empruntent après recalcul ; une route à 5 cases ou plus ne doit rien changer.
+
+## Routes à la case, S2c : rendu des cases par thin instances de tuiles (30 octobre) — à valider
+
+[Spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md) §4.6. Client seulement, non poussé, non déployé. Décision de Tristan : remplacer le rendu par secteurs de S2b (budget dépassé).
+- **Livré** : `scene/road-cell-tiles.ts` : une tuile par forme × revêtement × trottoirs, construite à la première utilisation pour une case canonique avec les recettes existantes (`masonryPieces` et `curbStonePiece` extraites d'`infrastructure-renderer.ts`, rendu de l'ancien plan inchangé) ; une case = une instance tournée par quarts de tour et cisaillée sur le plan moyen du terrain (+2 cm de garde) ; pose/retrait = instances de la case et de ses 4 voisines ; autres formes d'un style préparées en tâches de fond. `road-cells-plan.ts` supprimé.
+- **Preuves** : `road-cells-render.test` (7 : 16 masques → tuile et rotation, géométrie dans la case pour les 48 tuiles, couture du tore, pose/retrait ≤ 5 instances et ≤ 45 lectures de sol sans maillage hors première utilisation, terrain et rebasage, plan incliné) ; `infrastructure-renderer`, `infrastructure-factory` verts ; `tsc` world-web, eslint, prettier.
+- **Mesures** : banc Node, pose d'une case à 20 : S2b 29 à 554 ms selon le revêtement ; S2c 0,1 à 1,2 ms tuiles prêtes, 1 à 93 ms quand la pose crée une tuile (bordures). Navigateur (Bressuire, machine très chargée) : 1,4 à 3,5 ms par pose, retrait ou restyle, 12,6 ms pour une première pose en grands pavés ; 60 s avec poses : p50 67 ms, p95 133 ms, 124 images > 100 ms (base de la machine, aussi hors poses) ; village prêt à chaud 115 s. **Budget de 100 ms par image à revérifier sur une machine au repos.**
+- **Écarts visuels** : appareillage fixe par tuile, trottoir arrêté au bord de sa case, surface plane par case (marches possibles sur forte pente, non constatées). Captures de nuit seulement.
 
 ## Routes à la case, S2b : outil de pose et rendu (30 octobre) — à valider, bloqué par le budget de rendu
 
