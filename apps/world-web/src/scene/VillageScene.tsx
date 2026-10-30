@@ -81,6 +81,10 @@ export interface TerrainHandle {
   /** Marks one swept demolition target; cleared all at once. */
   demolitionMark: (kind: 'building' | 'road' | 'equipment', id: string) => void;
   demolitionClear: () => void;
+  /** Road cell gesture preview: cells added once each, a tone, cleared at once. */
+  roadCellsPreviewAdd: (cells: readonly Cell[]) => void;
+  roadCellsPreviewTone: (tone: 'place' | 'remove' | 'invalid') => void;
+  roadCellsPreviewClear: () => void;
   focusCell: (cell: Cell) => void;
   viewCenter: () => Cell | null;
   naturalFeatures: () => NaturalFeature[];
@@ -289,6 +293,9 @@ export function VillageScene({
       terraformPreview: (value) => sceneRef.current?.terraformPreview(value),
       demolitionMark: (kind, id) => sceneRef.current?.demolitionMark(kind, id),
       demolitionClear: () => sceneRef.current?.demolitionClear(),
+      roadCellsPreviewAdd: (cells) => sceneRef.current?.roadCellsPreviewAdd(cells),
+      roadCellsPreviewTone: (tone) => sceneRef.current?.roadCellsPreviewTone(tone),
+      roadCellsPreviewClear: () => sceneRef.current?.roadCellsPreviewClear(),
       setWorldMode: (mode) => sceneRef.current?.setWorldMode(mode),
     }),
     [],

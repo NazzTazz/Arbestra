@@ -1,5 +1,5 @@
 import type { ObservationPose } from '@arbestra/contracts';
-import { interpolateObservationPose } from '@arbestra/contracts';
+import { emptyInfrastructure, interpolateObservationPose } from '@arbestra/contracts';
 import { playerSceneTransport, type SceneTransport } from './scene-transport';
 import {
   clientTime,
@@ -34,6 +34,8 @@ import { buildUniversityMonuments } from './university-factory';
 import { clonePreviewMaterial, bakedPlanKey, loadBakedBuilding, buildingAssets } from './building-assets';
 import { buildInfrastructurePresentation } from './infrastructure-factory';
 import { InfrastructureRenderer, type InfrastructureGesture } from './infrastructure-renderer';
+import { RoadCellsPlan } from './road-cells-plan';
+import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
 import { TerraformPreview, type TerraformVisual } from './terraform-preview';
 import { selectEquipment } from './equipment-selection';
 import {
@@ -167,6 +169,8 @@ import {
 } from './building-plan';
 import type { DoorLane } from './worker-motion';
 const TILE_SIZE = 2.5;
+/** Base of the road cells renderer: no stroke, so a gesture never replays the historical plan. */
+const EMPTY_ROAD_PLAN = Object.freeze(emptyInfrastructure());
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
 import { DemolitionTint } from './demolition-tint';
@@ -562,6 +566,33 @@ export class BabylonVillageScene {
   }
   #infrastructureRenderer: InfrastructureRenderer | null = null;
   #infrastructurePreview: InfrastructureRenderer | null = null;
+  readonly #roadCellsPlan = new RoadCellsPlan();
+  #renderedRoadPlan: import('@arbestra/contracts').InfrastructurePlan | null = null;
+  #roadCellsRenderer: InfrastructureRenderer | null = null;
+  #roadCellPreview: RoadCellPreview | null = null;
+  /** Designated cells of a road gesture: one instance per new cell, never a rebuild. */
+  public roadCellsPreviewAdd(cells: readonly { cellX: number; cellY: number }[]) {
+    const space = this.#space;
+    if (!space) return;
+    const preview = (this.#roadCellPreview ??= new RoadCellPreview(this.#scene));
+    for (const cell of cells) {
+      const p = space.project(cell);
+      preview.add(
+        `${cell.cellX}:${cell.cellY}`,
+        p.x,
+        (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.08,
+        p.z,
+        TILE_SIZE * 0.86,
+      );
+    }
+    preview.visible(this.#mode === 'village');
+  }
+  public roadCellsPreviewTone(tone: RoadCellPreviewTone) {
+    (this.#roadCellPreview ??= new RoadCellPreview(this.#scene)).tone(tone);
+  }
+  public roadCellsPreviewClear() {
+    this.#roadCellPreview?.clear();
+  }
   #infrastructureHandler: ((gesture: InfrastructureGesture) => void) | null = null;
   #infrastructureHoverFrame = 0;
   #infrastructureHoverEvent: PointerEvent | null = null;
@@ -3635,6 +3666,30 @@ export class BabylonVillageScene {
       );
       this.#infrastructureRenderer.visible(this.#mode !== 'world');
     }
+    // Road cells have their own renderer (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.3):
+    // a gesture rasterizes and regenerates only the cells' sectors, never the
+    // historical stroke plan, which stays drawn as is until its conversion (S3).
+    const roadPlan = this.#roadCellsPlan.compose(EMPTY_ROAD_PLAN, state.roadCells);
+    if (roadPlan !== EMPTY_ROAD_PLAN || this.#roadCellsRenderer) {
+      const changed = roadPlan !== this.#renderedRoadPlan,
+        started = changed ? performance.now() : 0;
+      this.#renderedRoadPlan = roadPlan;
+      this.#roadCellsRenderer ??= new InfrastructureRenderer(this.#scene, true);
+      this.#roadCellsRenderer.update(
+        roadPlan,
+        this.#space!,
+        (x, y) => (this.#renderer?.hasGround(x, y) ? (this.#store?.ground(x, y)?.height ?? null) : null),
+        false,
+        this.#renderer?.groundVersion ?? 0,
+        undefined,
+        false,
+        accesses,
+        { followTerrain: state.world.generationVersion === 3, groundIdentity, groundCellIdentity },
+      );
+      if (changed && import.meta.env.DEV)
+        this.#canvas.dataset.roadCellsUpdateMs = (performance.now() - started).toFixed(1);
+      this.#roadCellsRenderer.visible(this.#mode !== 'world');
+    }
     frame?.mark('roadsManual');
     this.#renderer?.setRoads(displayRoutes);
     this.#villageBraziers ??= new VillageBraziers(this.#scene);
@@ -4392,6 +4447,7 @@ export class BabylonVillageScene {
     this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
     this.#demolitionTint?.shift(shift.x, shift.z);
+    this.#roadCellPreview?.shift(shift.x, shift.z);
     this.#inhabitantCamera.shift(shift.x, shift.z);
     this.#resourceOverlayAt = 0;
     for (const mesh of [
@@ -4767,7 +4823,9 @@ export class BabylonVillageScene {
     this.#buildableArea?.setEnabled(mode === 'village');
     for (const mesh of this.#previewMeshes) mesh.setEnabled(mode === 'village');
     this.#infrastructureRenderer?.visible(mode !== 'world');
+    this.#roadCellsRenderer?.visible(mode !== 'world');
     this.#infrastructurePreview?.visible(mode === 'village');
+    this.#roadCellPreview?.visible(mode === 'village');
     if (mode !== 'village') this.#infrastructureGhost?.setEnabled(false);
     this.#regionalVillages.visible(mode !== 'world');
     this.#onCameraMoved();
@@ -5305,7 +5363,9 @@ export class BabylonVillageScene {
     this.#infrastructureHoverFrame = 0;
     this.#infrastructureHoverEvent = null;
     this.#infrastructureRenderer?.dispose();
+    this.#roadCellsRenderer?.dispose();
     this.#infrastructurePreview?.dispose();
+    this.#roadCellPreview?.dispose();
     this.#infrastructureGhost?.dispose(false, false);
     for (const job of this.#buildingJobs) job.steps.return(job.parent);
     this.#buildingJobs.length = 0;

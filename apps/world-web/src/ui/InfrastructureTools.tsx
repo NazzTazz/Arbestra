@@ -1,17 +1,20 @@
 import { randomUUID } from '../random-uuid';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useId, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useId, type RefObject } from 'react';
 import {
-  applyVillageFrame,
-  applyInfrastructureConfirmation,
   prepareInfrastructureEdit,
   createInfrastructureEditContext,
   emptyInfrastructure,
+  ROAD_CELLS_PER_COMMAND,
   type InfrastructureOperation,
   type InfrastructureQuote,
   type InfrastructureRequest,
+  type RoadCellSurface,
+  type RoadCellsPreview,
+  type RoadCellsPreviewRequest,
+  type RoadCellsRequest,
+  type RoadCellsResult,
   type VillageState,
   type SubPoint,
-  type RoadMaterial,
   subCellKey,
 } from '@arbestra/contracts';
 import {
@@ -27,18 +30,32 @@ import { villageRequestGeneration } from '../api/village-sync';
 import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { InfrastructureThumbnail } from './InfrastructureThumbnail';
 import { RoadVariantMenu } from './RoadVariantMenu';
+import { subPointCell } from './demolition-selection';
+import { RoadCellGesture } from './road-cell-gesture';
 import './harvest-feedback.css';
 type Item = { id: string; version: number; position: SubPoint; quarterTurns: number };
+/** Road cells commands of the V2 village session; null while V2 is not ready. */
+export interface RoadCellsApi {
+  command: (request: RoadCellsRequest) => Promise<RoadCellsResult>;
+  preview: (body: RoadCellsPreviewRequest) => Promise<RoadCellsPreview>;
+}
 const materials = [
   ['none', 'Pas de route'],
   ['earth', 'Terre'],
   ['stone-1', 'Petite Pierre'],
   ['stone-2', 'Grands Pavés'],
 ] as const;
+type Surface = RoadCellSurface | 'none';
+const surfaceCost = (surface: Surface) => (surface === 'stone-1' || surface === 'stone-2' ? 4 : 0);
+const costLabel = (surface: Surface, sidewalks: boolean) => {
+  const stone = surfaceCost(surface) + (sidewalks ? 2 : 0);
+  return stone ? `◆ ${stone} / case` : 'Gratuit';
+};
 export function InfrastructureTools({
   state,
   scene,
   active,
+  roadCells,
   onSnapshot,
   onConfirmation,
   onWorkshop,
@@ -46,21 +63,18 @@ export function InfrastructureTools({
   state: VillageState;
   scene: RefObject<TerrainHandle | null>;
   active: boolean;
+  roadCells: RoadCellsApi | null;
   onSnapshot: (s: TimedVillageUpdate) => void;
   onConfirmation: (s: TimedInfrastructureConfirmation) => void;
   onWorkshop: () => void;
 }) {
   const [family, setFamily] = useState('Voirie'),
-    [material, setMaterial] = useState<RoadMaterial>('earth'),
-    [width, setWidth] = useState(4),
-    [border, setBorder] = useState(false),
-    [invert, setInvert] = useState(false),
+    [surface, setSurface] = useState<Surface>('earth'),
+    [sidewalks, setSidewalks] = useState(false),
     [turn, setTurn] = useState(0);
   const [menu, setMenu] = useState<{ code: 'earth' | 'stone-1' | 'stone-2'; anchor: HTMLButtonElement } | null>(null),
     menuId = useId();
-  const remove = family === 'Voirie' && material === 'none';
-  const [anchor, setAnchor] = useState<SubPoint | null>(null),
-    [point, setPoint] = useState<SubPoint | null>(null),
+  const [point, setPoint] = useState<SubPoint | null>(null),
     [item, setItem] = useState<Item | null>(null),
     [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false),
@@ -68,44 +82,45 @@ export function InfrastructureTools({
     [serverValid, setServerValid] = useState(true),
     [uncertain, setUncertain] = useState<InfrastructureRequest | null>(null);
   const session = useRef<string>(randomUUID()),
-    stack = useRef<Array<{ id: string; anchor: SubPoint }>>([]),
-    down = useRef<SubPoint | null>(null),
-    latest = useRef({
-      state,
-      family,
-      material,
-      width,
-      border,
-      remove,
-      invert,
-      turn,
-      anchor,
-      point,
-      item,
-      armed,
-      busy,
-      menu,
-    });
+    latest = useRef({ state, family, turn, point, item, armed, busy, menu, roadCells });
   const price = useRef<HTMLSpanElement>(null);
   const generation = useRef(0),
     presented = useRef<{ operation: string; revision: number; quote: InfrastructureQuote } | null>(null);
   const previewInFlight = useRef(false);
-  latest.current = {
-    state,
-    family,
-    material,
-    width,
-    border,
-    remove,
-    invert,
-    turn,
-    anchor,
-    point,
-    item,
-    armed,
-    busy,
-    menu,
-  };
+  latest.current = { state, family, turn, point, item, armed, busy, menu, roadCells };
+  // Road cell gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.2), one per village.
+  const [, render] = useReducer((n: number) => n + 1, 0);
+  const road = useMemo(
+    () =>
+      new RoadCellGesture({
+        world: { widthCells: state.world.widthCells, heightCells: state.world.heightCells },
+        uuid: randomUUID,
+        preview: (body) => {
+          const api = latest.current.roadCells;
+          return api ? api.preview(body) : Promise.reject(Error('Synchronisation indisponible.'));
+        },
+        command: (request) => {
+          const api = latest.current.roadCells;
+          return api ? api.command(request) : Promise.reject(Error('Synchronisation indisponible.'));
+        },
+        added: (cells) => scene.current?.roadCellsPreviewAdd(cells),
+        cleared: () => scene.current?.roadCellsPreviewClear(),
+        tone: (tone) => scene.current?.roadCellsPreviewTone(tone),
+        changed: render,
+      }),
+    [state.world.id, state.world.widthCells, state.world.heightCells, state.village.id, scene],
+  );
+  useEffect(() => {
+    // Strict mode remounts effects: the same controller is resumed.
+    road.resume();
+    return () => {
+      road.dispose();
+      scene.current?.roadCellsPreviewClear();
+    };
+  }, [road, scene]);
+  useEffect(() => {
+    road.setMode(surface === 'none' ? { action: 'remove' } : { action: 'place', style: { surface, sidewalks } });
+  }, [road, surface, sidewalks]);
   const pendingKey = `arbestra:infrastructure:${state.world.id}:${state.village.id}`;
   useEffect(() => {
     try {
@@ -118,31 +133,15 @@ export function InfrastructureTools({
       /* corrupt local history cannot authorize an action */
     }
   }, [pendingKey]);
-  function operation(p: SubPoint | null, first = latest.current.anchor): InfrastructureOperation | null {
+  /** Braziers only: roads are placed by cell with the road gesture. */
+  function operation(p: SubPoint | null): InfrastructureOperation | null {
     const c = latest.current;
-    if (!p) return null;
-    if (c.family === 'Éclairage')
-      return c.item
-        ? { kind: 'move', id: c.item.id, version: c.item.version, position: p, quarterTurns: c.turn }
-        : c.armed
-          ? { kind: 'place', position: p, quarterTurns: c.turn }
-          : null;
-    if (!first || (first.x === p.x && first.y === p.y)) return null;
-    const points =
-      first.x === p.x || first.y === p.y
-        ? [first, p]
-        : [first, c.invert ? { x: first.x, y: p.y } : { x: p.x, y: first.y }, p];
-    return {
-      kind: 'road',
-      stroke: {
-        id: 'preview',
-        points,
-        width: c.width,
-        material: c.material,
-        border: c.border,
-        operation: c.remove ? 'remove' : c.family === 'Bordures' ? 'border' : 'paint',
-      },
-    };
+    if (!p || c.family !== 'Éclairage') return null;
+    return c.item
+      ? { kind: 'move', id: c.item.id, version: c.item.version, position: p, quarterTurns: c.turn }
+      : c.armed
+        ? { kind: 'place', position: p, quarterTurns: c.turn }
+        : null;
   }
   const op = operation(point),
     plan = state.infrastructure ?? emptyInfrastructure();
@@ -160,11 +159,9 @@ export function InfrastructureTools({
     }
   }, [editContext, stableOp]);
   const quote = prepared?.quote ?? null;
-  const insufficient = Boolean(
-    quote &&
-      (quote.stoneDebit > (state.village.resources.find((r) => r.code === 'stone')?.amount ?? 0) ||
-        quote.woodDebit > state.village.wood),
-  );
+  const stone = state.village.resources.find((r) => r.code === 'stone')?.amount ?? 0;
+  const insufficient = Boolean(quote && (quote.stoneDebit > stone || quote.woodDebit > state.village.wood));
+  const roadQuote = family === 'Voirie' && road.quoteCurrent ? road.quote : null;
   useEffect(() => {
     if (!active) return;
     // Move the label directly: pointer motion must not schedule extra React renders.
@@ -248,16 +245,10 @@ export function InfrastructureTools({
     const c = latest.current,
       current = c.state.infrastructure ?? emptyInfrastructure();
     let expected: InfrastructureQuote | undefined;
-    if (!requestOverride && ['road', 'place', 'move'].includes(next.kind)) {
+    if (!requestOverride && (next.kind === 'place' || next.kind === 'move')) {
       const shown = presented.current;
       if (!shown || shown.operation !== JSON.stringify(next) || shown.revision !== current.revision) {
-        setPoint(
-          next.kind === 'road'
-            ? next.stroke.points.at(-1)!
-            : next.kind === 'place' || next.kind === 'move'
-              ? next.position
-              : null,
-        );
+        setPoint(next.position);
         setError('Vérifiez l’aperçu actualisé avant de valider.');
         return;
       }
@@ -295,7 +286,6 @@ export function InfrastructureTools({
           ? undefined
           : { revision: c.state.syncRevision, serverTime: c.state.serverTime },
       );
-      // Inspect the accepted command against its exact transport base for undo history.
       // App remains the sole owner of HTTP/SSE reconciliation.
       if (
         (result.requestGeneration !== undefined && result.requestGeneration !== villageRequestGeneration()) ||
@@ -303,7 +293,6 @@ export function InfrastructureTools({
         latest.current.state.village.id !== c.state.village.id
       )
         return;
-      let acceptedRevision: number;
       if ('confirmation' in result) {
         if (
           result.confirmation.commandId !== request.commandId ||
@@ -311,33 +300,14 @@ export function InfrastructureTools({
           result.confirmation.villageId !== c.state.village.id
         )
           throw Error('Confirmation Infrastructure incohérente.');
-        const applied = applyInfrastructureConfirmation(current, result.confirmation);
-        acceptedRevision = applied.kind === 'applied' ? applied.plan.revision : result.confirmation.toRevision;
         onConfirmation(result);
-      } else {
-        const applied = 'frame' in result ? applyVillageFrame(c.state, result.frame) : null;
-        acceptedRevision =
-          ('state' in result ? result.state : applied?.kind === 'applied' ? applied.state : latest.current.state)
-            .infrastructure?.revision ?? current.revision;
-        onSnapshot(result);
-      }
+      } else onSnapshot(result);
       clearPending();
       setUncertain(null);
-      if (sentGeneration === generation.current) {
-        if (next.kind === 'road') {
-          if (acceptedRevision > request.revision && !stack.current.some((entry) => entry.id === request.commandId))
-            stack.current.push({ id: request.commandId, anchor: next.stroke.points[0]! });
-          setAnchor(next.stroke.points.at(-1)!);
-        }
-        if (next.kind === 'undo') {
-          const previous = stack.current.pop();
-          setAnchor(previous?.anchor ?? null);
-        }
-        if (next.kind === 'move' || next.kind === 'delete') {
-          setItem(null);
-          setArmed(false);
-          setPoint(null);
-        }
+      if (sentGeneration === generation.current && (next.kind === 'move' || next.kind === 'delete')) {
+        setItem(null);
+        setArmed(false);
+        setPoint(null);
       }
       setServerValid(true);
     } catch (reason) {
@@ -362,70 +332,63 @@ export function InfrastructureTools({
   }
   const handler = useRef<(e: InfrastructureGesture) => void>(() => {});
   handler.current = (e) => {
+    const c = latest.current;
+    if (c.family === 'Voirie') {
+      if (e.kind === 'cancel') {
+        setMenu(null);
+        road.cancel();
+        return;
+      }
+      if (e.kind === 'right') {
+        // Right click drops the gesture in progress; the pointer is released too.
+        scene.current?.cancelGesture();
+        road.cancel();
+        return;
+      }
+      const cell =
+        e.point &&
+        subPointCell(e.point, { widthCells: c.state.world.widthCells, heightCells: c.state.world.heightCells });
+      if (!cell) return;
+      if (e.kind === 'down') road.down(cell);
+      else if (e.kind === 'hover') road.move(cell);
+      else if (e.kind === 'up') road.up(cell);
+      return;
+    }
     if (e.kind === 'cancel') {
       setMenu(null);
       generation.current++;
-      stack.current = [];
       session.current = randomUUID();
-      down.current = null;
-      setAnchor(null);
       setItem(null);
       setPoint(null);
       setArmed(false);
       scene.current?.infrastructurePreview(null);
       return;
     }
-    if (latest.current.busy || uncertain) return;
-    const c = latest.current;
+    if (c.busy || uncertain) return;
     if (e.kind === 'hover') {
       setPoint((previous) => (previous?.x === e.point?.x && previous?.y === e.point?.y ? previous : e.point));
       return;
     }
-    if (e.kind === 'down') {
-      down.current = e.point;
-      if (!c.anchor && c.family !== 'Éclairage') {
-        setAnchor(e.point);
-        setPoint(e.point);
-      }
-      return;
-    }
     if (e.kind === 'right') {
-      if (c.family === 'Éclairage') {
-        if (c.item) void send({ kind: 'delete', id: c.item.id, version: c.item.version, position: c.item.position });
-        else {
-          setArmed(false);
-          setPoint(null);
-        }
-      } else {
-        const last = stack.current.at(-1);
-        if (last) void send({ kind: 'undo', target: last.id });
-        else setAnchor(null);
+      if (c.item) void send({ kind: 'delete', id: c.item.id, version: c.item.version, position: c.item.position });
+      else {
+        setArmed(false);
+        setPoint(null);
       }
       return;
     }
     if (e.kind === 'up' && e.point) {
-      if (c.family === 'Éclairage') {
-        if (!c.item) {
-          const picked = scene.current?.equipmentAt(e.point, e.equipmentId);
-          if (picked) {
-            setItem(picked);
-            setTurn(picked.quarterTurns);
-            setArmed(false);
-            setPoint(picked.position);
-            return;
-          }
+      if (!c.item) {
+        const picked = scene.current?.equipmentAt(e.point, e.equipmentId);
+        if (picked) {
+          setItem(picked);
+          setTurn(picked.quarterTurns);
+          setArmed(false);
+          setPoint(picked.position);
+          return;
         }
-        const action = operation(e.point);
-        if (action) void send(action);
-        return;
       }
-      const first = c.anchor ?? down.current;
-      if (!c.anchor && !e.drag) {
-        setAnchor(e.point);
-        setPoint(e.point);
-        return;
-      }
-      const action = operation(e.point, first);
+      const action = operation(e.point);
       if (action) void send(action);
     }
   };
@@ -464,18 +427,6 @@ export function InfrastructureTools({
         handler.current({ kind: 'cancel', point: null });
       }
       if (
-        e.key.toLowerCase() === 'a' &&
-        !e.repeat &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        latest.current.family === 'Voirie'
-      ) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        setInvert((v) => !v);
-      }
-      if (
         e.key.toLowerCase() === 'r' &&
         !e.repeat &&
         latest.current.family === 'Éclairage' &&
@@ -501,37 +452,32 @@ export function InfrastructureTools({
     setError(null);
     setTurn(0);
   }
+  const chooseStyle = (next: Surface, nextSidewalks: boolean) => {
+    setSurface(next);
+    setSidewalks(nextSidewalks);
+  };
+  const roadStatus = road.drawing
+    ? `${road.cells.size} ${road.cells.size > 1 ? 'cases' : 'case'}${
+        road.limited ? ` · ${ROAD_CELLS_PER_COMMAND} au plus par geste` : ''
+      }${roadQuote && !roadQuote.valid ? ` · ${roadQuote.message ?? 'Pose impossible.'}` : ''}`
+    : road.busy
+      ? 'Commande en cours…'
+      : road.error
+        ? road.error
+        : !roadCells
+          ? 'Synchronisation en cours…'
+          : (road.notice ??
+            (surface === 'none'
+              ? 'Glissez sur les cases à retirer · sans remboursement'
+              : 'Glissez de case en case · clic droit ou Échap : annuler le geste'));
   return (
     <>
       <nav className="construction-categories" aria-label="Familles d’infrastructures">
-        {['Voirie', 'Bordures', 'Éclairage'].map((f) => (
+        {['Voirie', 'Éclairage'].map((f) => (
           <button key={f} aria-pressed={family === f} onClick={() => chooseFamily(f)}>
-            {f === 'Bordures' ? 'Trottoirs' : f}
+            {f}
           </button>
         ))}
-        {family === 'Voirie' && (
-          <button
-            type="button"
-            className="road-elbow-toggle"
-            aria-label="Inverser le coude"
-            aria-keyshortcuts="A"
-            title="Inverser le coude (A)"
-            aria-pressed={invert}
-            onClick={() => setInvert((v) => !v)}
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22">
-              <path
-                d={invert ? 'M4 19V5h16M16 1l4 4-4 4' : 'M4 19h16V5M16 9l4-4 4 4'}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <kbd>A</kbd>
-          </button>
-        )}
       </nav>
       <section className="construction-showroom infrastructure-showroom" aria-label={`Infrastructure · ${family}`}>
         {family === 'Voirie' ? (
@@ -540,14 +486,13 @@ export function InfrastructureTools({
               type="button"
               className="showroom-model"
               key={code}
-              aria-pressed={code === 'earth' ? material === 'earth' || material === 'rubble' : material === code}
+              aria-pressed={code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code}
               aria-expanded={code === 'none' ? undefined : menu?.code === code}
               aria-controls={menu?.code === code ? menuId : undefined}
               onClick={(e) => {
                 if (code === 'none') {
                   setMenu(null);
-                  setMaterial('none');
-                  setBorder(false);
+                  chooseStyle('none', false);
                 } else {
                   const anchor = e.currentTarget;
                   setMenu((current) => (current?.code === code ? null : { code, anchor }));
@@ -555,18 +500,16 @@ export function InfrastructureTools({
               }}
             >
               <strong>{name}</strong>
-              <InfrastructureThumbnail code={code === 'earth' && material === 'rubble' ? 'rubble' : code} />
+              <InfrastructureThumbnail code={code === 'earth' && surface === 'rubble' ? 'rubble' : code} />
               <span className="resource-costs">
-                {code === 'none' ? 'Supprimer' : code.startsWith('stone') ? '◆ 4 / case²' : 'Gratuit'}
+                {code === 'none'
+                  ? 'Retirer'
+                  : (code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code)
+                    ? costLabel(surface, sidewalks) + (sidewalks ? ' · trottoirs' : '')
+                    : costLabel(code, false)}
               </span>
             </button>
           ))
-        ) : family === 'Bordures' ? (
-          <button className="showroom-model" onClick={() => setBorder((b) => !b)} aria-pressed={border}>
-            <strong>{border ? 'Pierre' : 'Sans trottoir'}</strong>
-            <InfrastructureThumbnail code="border" />
-            <span className="resource-costs">◆ 1 / case / côté</span>
-          </button>
         ) : (
           <button
             className="showroom-model"
@@ -603,59 +546,50 @@ export function InfrastructureTools({
           }
           onClose={() => setMenu(null)}
         >
-          {menu.code === 'earth'
-            ? (['earth', 'rubble'] as const).map((code) => (
-                <button
-                  type="button"
-                  key={code}
-                  aria-pressed={material === code}
-                  onClick={() => {
-                    setMaterial(code);
-                    setWidth(4);
-                    setBorder(false);
-                    menu.anchor.focus();
-                    setMenu(null);
-                  }}
-                >
-                  <strong>{code === 'earth' ? 'Terre battue' : 'Gravats'}</strong>
-                  <InfrastructureThumbnail code={code} />
-                  <small>Gratuit</small>
-                </button>
-              ))
-            : ([4, 6] as const).flatMap((size) =>
-                [false, true].map((sidewalk) => (
-                  <button
-                    type="button"
-                    key={size + ':' + sidewalk}
-                    aria-pressed={material === menu.code && width === size && border === sidewalk}
-                    onClick={() => {
-                      setMaterial(menu.code);
-                      setWidth(size);
-                      setBorder(sidewalk);
-                      menu.anchor.focus();
-                      setMenu(null);
-                    }}
-                  >
-                    <strong>{size} de large</strong>
-                    <small>{sidewalk ? 'Avec trottoirs' : 'Sans trottoir'}</small>
-                  </button>
-                )),
-              )}
+          {(menu.code === 'earth' ? (['earth', 'rubble'] as const) : [menu.code]).flatMap((code) =>
+            [false, true].map((withSidewalks) => (
+              <button
+                type="button"
+                key={code + ':' + withSidewalks}
+                aria-pressed={surface === code && sidewalks === withSidewalks}
+                onClick={() => {
+                  chooseStyle(code, withSidewalks);
+                  menu.anchor.focus();
+                  setMenu(null);
+                }}
+              >
+                <strong>{code === 'earth' ? 'Terre battue' : code === 'rubble' ? 'Gravats' : 'Chaussée'}</strong>
+                <small>
+                  {withSidewalks ? 'Avec trottoirs' : 'Sans trottoir'} · {costLabel(code, withSidewalks)}
+                </small>
+              </button>
+            )),
+          )}
         </RoadVariantMenu>
       )}
       <div className="harvest-feedback infrastructure-price">
         <span
           ref={price}
-          hidden={!active || op?.kind !== 'road' || !quote}
+          hidden={!active || family !== 'Voirie' || !road.drawing || !roadQuote?.valid || !roadQuote.stone}
           className="harvest-feedback--stone"
           title="Débit prévisionnel en pierres"
         >
-          {busy ? '…' : quote ? '−' + quote.stoneDebit.toLocaleString('fr-FR') : ''}
+          {roadQuote ? '−' + roadQuote.stone.toLocaleString('fr-FR') : ''}
         </span>
       </div>
-      {(error || uncertain || (family === 'Éclairage' && (item || armed))) && (
+      {active && family === 'Voirie' && (
+        <aside className="construction-feedback infrastructure-feedback" aria-label="Action Voirie">
+          <span role="status">{roadStatus}</span>
+          {road.uncertain && (
+            <button disabled={road.busy} onClick={() => road.retry()}>
+              Vérifier la même commande
+            </button>
+          )}
+        </aside>
+      )}
+      {family === 'Éclairage' && (error || uncertain || item || armed) && (
         <aside className="construction-feedback infrastructure-feedback" aria-label="Action Infrastructure">
-          {family === 'Éclairage' && point && plan.manualLighting.includes(subCellKey(point, state.world)) && (
+          {point && plan.manualLighting.includes(subCellKey(point, state.world)) && (
             <button
               disabled={
                 busy ||
@@ -673,15 +607,11 @@ export function InfrastructureTools({
               : (error ??
                 (insufficient
                   ? 'Ressources insuffisantes.'
-                  : family === 'Éclairage'
-                    ? item
-                      ? 'Clic pour déplacer · clic droit pour supprimer · Échap pour annuler'
-                      : armed
-                        ? 'Clic pour placer · R pour tourner'
-                        : 'Choisissez un brasero dans le showroom ou sur la carte'
-                    : anchor
-                      ? 'Clic pour poursuivre · clic droit : annuler · Échap : terminer'
-                      : 'Choisissez votre point de départ'))}
+                  : item
+                    ? 'Clic pour déplacer · clic droit pour supprimer · Échap pour annuler'
+                    : armed
+                      ? 'Clic pour placer · R pour tourner'
+                      : 'Choisissez un brasero dans le showroom ou sur la carte'))}
           </span>
           {uncertain && (
             <button disabled={busy} onClick={() => void send(uncertain.operation, uncertain)}>

@@ -411,6 +411,16 @@ export function useVillageSyncV2({
     if (!current) throw Error('Synchronisation indisponible.');
     return current.changeWorksite(id, change);
   }, []);
+  const roadCells = useCallback((request: Parameters<SyncV2Transport['roadCells']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.roadCells(request);
+  }, []);
+  const previewRoadCells = useCallback((body: Parameters<SyncV2Transport['previewRoadCells']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.previewRoadCells(body);
+  }, []);
   /** Immediate delta read, e.g. after a command still answered by V1. */
   const refresh = useCallback(() => {
     transport.current?.reconnect();
@@ -434,5 +444,7 @@ export function useVillageSyncV2({
     level,
     terraform,
     changeWorksite,
+    roadCells,
+    previewRoadCells,
   };
 }

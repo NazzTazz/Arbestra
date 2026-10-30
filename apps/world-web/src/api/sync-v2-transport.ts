@@ -22,6 +22,10 @@ import {
   type VillagePresentation,
   type ProcessingCommand,
   type ProcessingConfirmationV2,
+  type RoadCellsPreview,
+  type RoadCellsPreviewRequest,
+  type RoadCellsRequest,
+  type RoadCellsResult,
   type SyncV2Batch,
   type SyncV2State,
   type SyncV2ReadRequest,
@@ -588,6 +592,51 @@ export class SyncV2Transport {
   /** Mixed exploitation order; its own UUID identifies the gesture. */
   exploit(request: ExploitationRequest): Promise<VillageCommandConfirmationV2> {
     return this.gesture('/exploitation', request.commandId, request);
+  }
+  /** Road cells gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.2):
+   * one bounded command; its private effects carry the cells. */
+  async roadCells(request: RoadCellsRequest): Promise<RoadCellsResult> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    const input = (await this.json('/road-cells', {
+      method: 'POST',
+      headers: { 'x-arbestra-command': request.commandId },
+      body: JSON.stringify(request),
+    })) as {
+      protocol?: unknown;
+      status?: unknown;
+      commandId?: unknown;
+      worldId?: unknown;
+      villageId?: unknown;
+      result?: Partial<Record<keyof RoadCellsResult, unknown>>;
+      effects?: SyncV2Batch;
+    } | null;
+    const result = input?.result;
+    if (
+      input?.protocol !== 2 ||
+      input.status !== 'applied' ||
+      input.commandId !== request.commandId ||
+      input.worldId !== this.worldId ||
+      input.villageId !== this.villageId ||
+      !result ||
+      (['placed', 'restyled', 'removed', 'unchanged', 'stone'] as const).some(
+        (field) => typeof result[field] !== 'number',
+      ) ||
+      (input.effects !== undefined && !syncV2BatchIsValid(input.effects))
+    )
+      throw Error('Confirmation de voirie invalide.');
+    this.applyEffects(input.effects);
+    return result as RoadCellsResult;
+  }
+  /** Read-only quote of a road cells gesture. */
+  async previewRoadCells(body: RoadCellsPreviewRequest): Promise<RoadCellsPreview> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    const input = (await this.json('/road-cells/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })) as RoadCellsPreview | null;
+    if (typeof input?.valid !== 'boolean' || typeof input.quote?.stone !== 'number')
+      throw Error('Devis de voirie invalide.');
+    return input;
   }
   /** A gesture without a domain result: the UUID travels in a header, the
    * commit's effects update the session at once. */

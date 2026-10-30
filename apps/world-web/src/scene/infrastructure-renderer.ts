@@ -94,7 +94,7 @@ export class InfrastructureRenderer {
     const reprojected = this.#moveOrigin(space, preview);
     space = this.#space!;
     const planKey = JSON.stringify([
-      surfaceOverride ? [...surfaceOverride] : [plan.roads, plan.inheritedRoads, plan.inheritedCells],
+      surfaceOverride ? [...surfaceOverride] : [plan.roads, plan.inheritedRoads, plan.inheritedCells, plan.roadCells],
       space.width,
       space.height,
     ]);

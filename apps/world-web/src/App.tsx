@@ -435,6 +435,14 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onExpired: expireSession,
     onNotice: pushNotification,
   });
+  // Road cells are V2-native: the tool waits for the V2 village session.
+  const roadCellsApi = useMemo(
+    () =>
+      villageV2Mode && villageV2.villageReady
+        ? { command: villageV2.roadCells, preview: villageV2.previewRoadCells }
+        : null,
+    [villageV2Mode, villageV2.villageReady, villageV2.roadCells, villageV2.previewRoadCells],
+  );
   villageV2Ref.current = {
     ready: villageV2Mode && villageV2.villageReady,
     refresh: villageV2.refresh,
@@ -2622,6 +2630,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                     !workshop &&
                     !arrivalActive
                   }
+                  roadCells={roadCellsApi}
                   onSnapshot={applySnapshot}
                   onConfirmation={applyInfrastructureConfirmation}
                   onWorkshop={() => {
