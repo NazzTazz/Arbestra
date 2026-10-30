@@ -1,6 +1,6 @@
 # Observabilité des parcours joueur — audit et conception (30 octobre 2026)
 
-Étapes 1 et 2 du brief de Tristan (« Observabilité produit et parcours joueur »). **Statut : proposé, rien d'implémenté.** Les arbitrages du §5 sont ouverts. Lecture du code de la branche `wip/v2-commandes-bornees` (`7acaf07`) et de la base de dev locale en lecture seule (3 comptes).
+Étapes 1 et 2 du brief de Tristan (« Observabilité produit et parcours joueur »). **Statut (30 octobre) : arbitrages du §5 validés par Tristan ; sous-tranches A et C implémentées, à valider (§6) ; B et D à faire.** Lecture du code de la branche `wip/v2-commandes-bornees` (`7acaf07`) et de la base de dev locale en lecture seule (3 comptes).
 
 ## 1. Existant réutilisable
 
@@ -159,6 +159,8 @@ Aucune sous-tranche ne modifie `api/client.ts`. `App.tsx` reste au plus à une l
 
 ## 5. Arbitrages pour Tristan
 
+**Validés le 30 octobre** : toutes les recommandations ci-dessous (15 min et minute ; 90 jours ; interrupteur global désactivé par défaut ; comptes admin collectés et marqués ; pas de coordonnées ; abandon relevé seulement au changement d'outil ou de village et à la fermeture de l'onglet ; purge des `sessions` et comptage du flux V2 en petits correctifs séparés, hors tranche). Les testeurs ont consenti au préalable à être observés ; Tristan les prévient. **L'activation sur alpha reste soumise à son feu vert explicite.**
+
 1. **Seuil d'inactivité de 15 min, granularité à la minute.** Recommandation : oui. C'est simple, stable, et assez précis pour quelques testeurs.
 2. **Rétention de 90 jours.** Recommandation : 90 jours, qui couvrent une saison d'alpha ; à raccourcir (30 jours) si ce n'est que du débogage d'expérience.
 3. **Consentement.** Recommandation : journal serveur et présence pour tous les testeurs informés ; événements client et drapeau `input` seulement après leur accord explicite. Interrupteur global désactivé tant que l'information n'est pas faite.
@@ -166,3 +168,33 @@ Aucune sous-tranche ne modifie `api/client.ts`. `App.tsx` reste au plus à une l
 5. **Coordonnées des cibles.** Recommandation : ne pas les collecter. Codes de catalogue et nombre de cases seulement ; à rouvrir si une étude de placement en a besoin.
 6. **Abandon.** Recommandation : seulement au changement d'outil ou de village et à la fermeture de l'onglet avec une intention ouverte ; pas de délai heuristique.
 7. **Hors périmètre, signalé.** La purge des `sessions` d'authentification expirées (jamais faite) et le comptage du flux V2 dans la télémétrie du NOC. Recommandation : deux petits correctifs séparés, pas dans cette tranche.
+
+## 6. Livré (30 octobre) — à valider
+
+### A — journal des commandes (commit `241a91d`)
+
+- **Interrupteur** `JOURNEY_ENABLED` (`0` par défaut, `1` pour activer ; toute autre valeur refuse le démarrage). Désactivé, rien n'est écrit et le crochet se comporte comme avant.
+- **Crochet** `instrumentObservationActions` indépendant de l'observation NOC : l'action est liée au village par la lecture de propriété existante (`observationVillage`) si le journal est actif **ou** si le village est observé ; le hub n'est alimenté que dans le second cas, comme avant. `discover-cat-eyes` et `villages/:villageId/starter` sont couverts (l'installation appelle désormais `observationVillage` après sa lecture de propriété). `commandId` : corps, sinon en-tête `x-arbestra-command`.
+- **Une ligne par requête**, enregistrée quand le handler est terminé **et** la réponse finie ou coupée : `accepted`, `pending` ou `rejected` (code métier d'un `HttpError` 4xx) d'après l'issue métier ; sinon `error` (réponse envoyée) ou `interrupted` (connexion coupée). Une commande engagée dont la réponse est perdue reste `accepted`, sans statut HTTP. Type = route sans paramètres (`buildings.upgrade`, `harvest-intents.cancel`) ; sujet = `buildingType`, sinon `action`, s'il respecte `^[a-z0-9-]{1,40}$` ; ni coordonnées ni quantités.
+- **Tampon** (`modules/admin/journey-journal.ts`) : 2 000 entrées, au-delà compteur `dropped` ; vidage toutes les 5 s et à la fermeture de l'app, par un seul `insert … select from jsonb_to_recordset … on conflict`, hors de toute transaction métier (une ligne dont le village ou le compte a disparu est ignorée). Un vidage en échec est retenté une fois, puis compté `lost`. Perte maximale au plantage : 5 s.
+- **Rejeu** : unicité `(world_id, village_id, type, command_id)` pour `source='command'`. Le type est dans la clé pour qu'une annulation de récolte, qui porte dans sa route le `commandId` de l'intention, ne fusionne pas avec elle. Les tentatives s'additionnent ; une issue provisoire (`error`, `interrupted`) est remplacée par la suivante ; une issue finale est gardée et ne gagne qu'un statut HTTP manquant. Même règle en mémoire et en SQL.
+- **Migration 072** `player_journey_events` (schéma du §2.4 ; `player_presence_minutes` reportée à B), cascade avec compte, monde et village. Appliquée à la base de test et à la base de dev locale.
+- **Purge** : `pruneJourneyEvents`, au plus 5 000 lignes de plus de 90 jours par passe, les plus anciennes d'abord, verrou consultatif d'exclusion ; au démarrage de `server.ts` puis toutes les 6 h, que la collecte soit active ou non.
+- **Preuves** : `journey.integration` (9 cas : acceptée sans écriture avant vidage ; refusée avec son code et sans effet métier ; rejouée dans un même vidage puis entre deux vidages ; coupée par le client pendant l'attente du verrou du village (attente PostgreSQL observée), puis rejouée = une ligne `accepted`, 2 tentatives ; issue provisoire remplacée ; tampon borné ; interrupteur désactivé ; purge bornée ; cascade du compte), `observation-actions.test` (couverture de l'inventaire des mutations, types, sujets), `config.test`. Constat rouge par mutation : avec l'ancien filtrage (`if (!hub.collecting)`) et l'ancienne liste de routes, les cas « acceptée », « refusée » et « inventaire » échouent. Suites connexes vertes : `observation.integration` (11), `command-inventory.integration`, `service.integration`.
+- **Mesure** (base de test, geste « repos », 50 requêtes par configuration alternées requête par requête, 3 passages) : avant (HEAD, code identique dans les deux colonnes) p50 64 / 90 / 78 ms, p95 76 / 223 / 99 ms ; après, journal désactivé p50 117 / 60 / 60, p95 194 / 78 / 69 ; activé p50 119 / 59 / 61, p95 180 / 80 / 72. Différence dans le bruit de la machine. Vidage de 2 000 lignes : 1,2 s, hors requête.
+
+### C — page « Parcours » du NOC (commit `a8100af`)
+
+- **API** `GET /api/admin/journeys/:accountId?worldId&villageId&days` (1 à 90, 7 par défaut) dans le plugin `/api/admin` : `requireAdmin` et journal d'audit `admin.access` comme les autres vues, cache court du NOC, transaction en lecture seule bornée (2 s). Lecture dans `modules/admin/journey-reads.ts`, contrat `AdminJourneySchema`.
+- **Sessions**, dérivées des seules commandes tant que B n'existe pas (la page le dit) : îlots de commandes séparés de moins de 15 min (fonctions de fenêtre SQL) ; début, dernière activité, fin = dernière + 1 min, minutes actives = minutes contenant une commande, actions, refus, « en cours » si la dernière commande a moins de 15 min. 200 sessions au plus.
+- **Chronologie** (500 événements au plus, troncature signalée) : actions du joueur (journal) ; fins différées reliées à une commande (`building.complete` par le dernier reçu du bâtiment, avec son `commandId` ; `leveling.complete` ; `market.complete` sans ressource ni montant ; `science.complete`) ; accomplissements (`automatic`). Les notifications et transitions de l'économie n'y figurent pas. Chaque événement porte sa session (ou « hors session ») et le temps écoulé depuis le début de la session. Filtres dans la page : session, source, issue (dont « refus, erreurs, interruptions »), activité.
+- **Synthèse** : par activité (actions, refus, sessions, première fois), refus par motif ; compteurs sessions, minutes actives, actions, refus. Comptes admin marqués « Compte administrateur ». La page signale une collecte désactivée, la plus ancienne donnée conservée et les entrées perdues.
+- **Liens** depuis la fiche compte et la fiche village (`#/journeys/:accountId?worldId&villageId`).
+- **Preuves** : `journey-reads.integration` (5 cas sur données préparées : accès refusé sans session admin ; trois sessions séparées par 30 min et 2 h, minutes actives avec deux commandes dans une même minute, session en cours ; fin de construction hors session avec son `commandId` ; accomplissement dans sa session ; notification `population.energy` absente ; rejeu affiché une fois avec 2 tentatives ; synthèse et refus ; périmètres compte, village, période ; autre compte en 404 ; compte admin marqué), `journey-data.test` (filtres, libellés, temps depuis le début). Code neuf : pas de constat rouge. Inventaire des routes complété (`GET /api/admin/journeys/:id`).
+- **Navigateur** (NOC de dev, port 5175, API de dev existante non relancée) : lien depuis la fiche compte puis depuis la fiche village de Bressuire, page affichée sans erreur console ; bandeau « collecte désactivée » (le dev n'a pas `JOURNEY_ENABLED=1`), compte marqué administrateur, chronologie réelle des fins de construction de Bressuire « hors session », sélecteurs de village et de période. **Non vérifié en navigateur** : sessions et commandes réelles, faute de collecte active sur le dev.
+
+### Limites et suite
+
+- Sur le dev et l'alpha, rien n'est collecté tant que `JOURNEY_ENABLED=1` n'est pas posé et l'API redémarrée (l'alpha attend le feu vert de Tristan).
+- Sessions sans présence : un joueur qui regarde sans agir n'a pas de session ; une déconnexion n'est pas distinguée d'une inactivité. B (présence par minute) corrigera ce point ; D (événements client) ajoutera intentions, annulations et abandons.
+- Pas de pagination au-delà de 500 événements : réduire la période.
