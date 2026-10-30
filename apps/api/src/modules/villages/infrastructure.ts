@@ -353,8 +353,28 @@ export async function readNavigationInfrastructure(
     .execute();
   const own = local ?? rows.find((r) => r.villageId === village.villageId)?.plan ?? emptyInfrastructure(),
     foreign = rows.filter((r) => r.villageId !== village.villageId).map((r) => r.plan);
+  // Road cells of the same villages, whoever owns them, drawn over the plans
+  // (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.5). Without any, the plan
+  // is unchanged and so is every network fingerprint.
+  const roadCells = await tx
+    .selectFrom('roadCells')
+    .innerJoin('villages', (join) =>
+      join.onRef('villages.id', '=', 'roadCells.villageId').onRef('villages.worldId', '=', 'roadCells.worldId'),
+    )
+    .select(['roadCells.cellX', 'roadCells.cellY', 'roadCells.surface', 'roadCells.sidewalks'])
+    .where('roadCells.worldId', '=', village.worldId)
+    .where(
+      sql<boolean>`least(abs(anchor_cell_x-${village.anchorCellX}),${village.widthCells}-abs(anchor_cell_x-${village.anchorCellX})) <= 64`,
+    )
+    .where(
+      sql<boolean>`least(abs(anchor_cell_y-${village.anchorCellY}),${village.heightCells}-abs(anchor_cell_y-${village.anchorCellY})) <= 64`,
+    )
+    .orderBy('roadCells.cellX')
+    .orderBy('roadCells.cellY')
+    .execute();
   return {
     ...own,
+    ...(roadCells.length ? { roadCells } : {}),
     roads: [...own.roads, ...foreign.flatMap((p) => p.roads)],
     equipment: [...own.equipment, ...foreign.flatMap((p) => p.equipment)],
     manualLighting: [...own.manualLighting, ...foreign.flatMap((p) => p.manualLighting)],
@@ -668,6 +688,19 @@ export async function assertNoInfrastructure(
 ) {
   await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);
   const wanted = new Set(cells.map((c) => `${c.cellX}:${c.cellY}`));
+  // Road cells of any village (073), read under the same lock as their writer.
+  if (
+    cells.length &&
+    (await tx
+      .selectFrom('roadCells')
+      .select('cellX')
+      .where('worldId', '=', worldId)
+      .where(
+        sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`,
+      )
+      .executeTakeFirst())
+  )
+    throw new HttpError(409, 'INFRASTRUCTURE_OCCUPIED', 'Retirez la route de cette case avant de construire.');
   // Neighbor-owned plans remain protected even where historical perimeters overlap.
   const plans = await tx.selectFrom('villageInfrastructure').select('plan').where('worldId', '=', worldId).execute();
   for (const { plan } of plans) {

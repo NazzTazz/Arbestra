@@ -66,3 +66,4 @@ export * from './sync-v2-spatial.js';
 export * from './sync-v2-shared.js';
 export * from './village-presentation.js';
 export * from './sync-v2-village-state.js';
+export * from './road-cells.js';

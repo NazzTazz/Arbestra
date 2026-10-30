@@ -351,6 +351,7 @@ export function buildTravelNetwork(
       state.infrastructure.inheritedRoads,
       state.infrastructure.inheritedCells,
       [...state.infrastructure.equipment].sort((a, b) => a.id.localeCompare(b.id)).map((e) => [e.id, e.x, e.y]),
+      state.infrastructure.roadCells,
     ],
   ]);
   const alias = networkAliases.get(input),
@@ -650,6 +651,7 @@ function refinementCache(state: TravelNetworkState, ground?: TravelGround): Refi
       state.infrastructure.inheritedRoads,
       state.infrastructure.inheritedCells,
       [...state.infrastructure.equipment].sort((a, b) => a.x - b.x || a.y - b.y).map((e) => [e.x, e.y]),
+      state.infrastructure.roadCells,
     ],
   ]);
   if (signature.length > 1048576) return undefined;

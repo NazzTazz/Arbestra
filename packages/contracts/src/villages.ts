@@ -5,6 +5,7 @@ import { ExtractionPoolSchema } from './hud-workforce.js';
 import { ScienceStateSchema } from './science.js';
 import { ExploitationOrderSchema, WoodTreesSchema } from './exploitation.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
+import { RoadCellSchema } from './road-cells.js';
 import { ProcessingRecipeSchema, ProcessingOrderSchema } from './processing.js';
 import { MarketStateSchema } from './market.js';
 
@@ -322,6 +323,8 @@ export type VillageAccomplishment = Static<typeof VillageAccomplishmentSchema>;
 export const VillageStateSchema = Type.Object({
   syncRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   infrastructure: Type.Optional(InfrastructurePlanSchema),
+  /** Road cells of the village (V2 stream only; the historical reader omits them). */
+  roadCells: Type.Optional(Type.Array(RoadCellSchema)),
   factoryEnabled: Type.Optional(Type.Boolean()),
   science: Type.Optional(ScienceStateSchema),
   serverTime: Type.String({ format: 'date-time' }),

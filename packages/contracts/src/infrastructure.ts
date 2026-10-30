@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { VillageState } from './villages.js';
 import { type BuildingAccess, type BuildingAccessState } from './building-access.js';
 import { coarseTravelPath, type TravelRoute } from './travel-paths.js';
+import { RoadCellSchema, type RoadCell } from './road-cells.js';
 
 export const SUBDIVISIONS = 8;
 export const MATERIAL_UNITS = 256;
@@ -37,6 +38,10 @@ export const InfrastructurePlanSchema = Type.Object({
   stoneReserve: Type.Integer({ minimum: 0, maximum: 255 }),
   inheritedRoads: Type.Optional(Type.Array(RoadStrokeSchema)),
   inheritedCells: Type.Optional(Type.Array(Type.String())),
+  /** Navigation input only, never stored in the JSONB plan: the road cells
+   * (road_cells) of this village and its neighbours, merged by the server's
+   * navigation reader and rasterized over the manual surface. */
+  roadCells: Type.Optional(Type.Array(Type.Pick(RoadCellSchema, ['cellX', 'cellY', 'surface', 'sidewalks']))),
 });
 export type InfrastructurePlan = Static<typeof InfrastructurePlanSchema>;
 export const emptyInfrastructure = (): InfrastructurePlan => ({
@@ -234,7 +239,59 @@ export function infrastructurePlanSurface(
     if (!captured.has(cell)) base.delete(key);
     else p.inherited = true;
   }
-  return infrastructureSurface(plan.roads, world, base);
+  const surface = infrastructureSurface(plan.roads, world, base);
+  if (plan.roadCells?.length) overlayRoadCells(surface, plan.roadCells, world);
+  return surface;
+}
+/** Road cells drawn as a centred chemin over the manual surface, as manual
+ * pixels: navigation prefers them exactly as it prefers a manual road. Each
+ * cell paints its centre square (half a cell wide, the automatic road width)
+ * and one arm towards each neighbouring road cell; isolated, only the centre.
+ * Linear in the cells: no stroke history to replay. */
+export function overlayRoadCells(
+  surface: Map<string, RoadPixel>,
+  cells: readonly Pick<RoadCell, 'cellX' | 'cellY' | 'surface' | 'sidewalks'>[],
+  world: { widthCells: number; heightCells: number },
+): void {
+  const present = new Set(cells.map((c) => c.cellX + ':' + c.cellY)),
+    w = world.widthCells * 16,
+    h = world.heightCells * 16;
+  const paint = (x0: number, y0: number, x1: number, y1: number, axes: number, cell: (typeof cells)[number]) => {
+    for (let y = y0; y < y1; y++)
+      for (let x = x0; x < x1; x++) {
+        const xx = wrapCoordinate(x, w),
+          yy = wrapCoordinate(y, h),
+          key = pixelKey(xx, yy),
+          old = surface.get(key);
+        surface.set(key, {
+          x: xx,
+          y: yy,
+          material: cell.surface,
+          border: cell.sidewalks,
+          manual: true,
+          axes: (old?.manual ? old.axes : 0) | axes,
+        });
+      }
+  };
+  for (const cell of cells) {
+    const cx = cell.cellX * 16,
+      cy = cell.cellY * 16,
+      at = (dx: number, dy: number) =>
+        present.has(
+          wrapCoordinate(cell.cellX + dx, world.widthCells) + ':' + wrapCoordinate(cell.cellY + dy, world.heightCells),
+        );
+    const east = at(1, 0),
+      west = at(-1, 0),
+      south = at(0, 1),
+      north = at(0, -1);
+    const horizontal = east || west,
+      vertical = south || north;
+    paint(cx - 4, cy - 4, cx + 4, cy + 4, (horizontal ? 1 : 0) | (vertical ? 2 : 0) || 1, cell);
+    if (east) paint(cx + 4, cy - 4, cx + 8, cy + 4, 1, cell);
+    if (west) paint(cx - 8, cy - 4, cx - 4, cy + 4, 1, cell);
+    if (south) paint(cx - 4, cy + 4, cx + 4, cy + 8, 2, cell);
+    if (north) paint(cx - 4, cy - 8, cx + 4, cy - 4, 2, cell);
+  }
 }
 /** Shared presentation recipe for every automatic route, including resource branches. */
 export const AUTOMATIC_ROAD_STYLE = Object.freeze({

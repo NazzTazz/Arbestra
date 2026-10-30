@@ -269,6 +269,16 @@ async function inputs(
         .where('i.worldId', '=', wid)
         .where(near(cells, sql.ref('n.anchorCellX'), sql.ref('n.anchorCellY'), v, 34)),
     ).as('plans'),
+    // Road cells of any village on the footprint (073), under the same lock.
+    jsonArrayFrom(
+      tx
+        .selectFrom('roadCells')
+        .select(['cellX', 'cellY'])
+        .where('worldId', '=', wid)
+        .where(
+          sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`,
+        ),
+    ).as('roadCells'),
     paths.as('paths'),
     jsonArrayFrom(
       tx
@@ -390,6 +400,7 @@ function validateSpace(
   )
     fail('LEVELING_NEARBY', 'Attendez la fin du nivellement avant de construire sur cette emprise ou contre son bord.');
   const wanted = new Set(cells.map((c) => `${c.cellX}:${c.cellY}`));
+  if (data.roadCells.length) fail('INFRASTRUCTURE_OCCUPIED', 'Retirez la route de cette case avant de construire.');
   for (const { plan } of data.plans) validatePlan(plan, wanted, v);
   if (data.paths.some((path) => cells.some((c) => pathPassageIntersectsBox(path, c, 0.5, 0.5, v))))
     fail('ENGAGED_PASSAGE', 'Une équipe utilise encore cette emprise.');

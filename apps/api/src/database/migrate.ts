@@ -23,6 +23,7 @@ import * as woodlandStumpNavigationMigration from './migrations/069_woodland_stu
 import * as woodlandTreesSyncV2Migration from './migrations/070_woodland_trees_sync_v2.js';
 import * as populationEnergyNotificationsMigration from './migrations/071_population_energy_notifications.js';
 import * as playerJourneyEventsMigration from './migrations/072_player_journey_events.js';
+import * as roadCellsMigration from './migrations/073_road_cells.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -154,6 +155,7 @@ const migrationProvider: MigrationProvider = {
       '070_woodland_trees_sync_v2': woodlandTreesSyncV2Migration,
       '071_population_energy_notifications': populationEnergyNotificationsMigration,
       '072_player_journey_events': playerJourneyEventsMigration,
+      '073_road_cells': roadCellsMigration,
     };
   },
 };

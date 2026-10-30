@@ -673,6 +673,20 @@
   },
   {
     "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/road-cells",
+    "actions": ["place", "remove"],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/road-cells/preview",
+    "actions": ["place", "remove"],
+    "lot": "D",
+    "role": "read"
+  },
+  {
+    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/science",
     "actions": ["explore", "pause", "recall", "research", "resume", "survey", "train"],
     "lot": "G",

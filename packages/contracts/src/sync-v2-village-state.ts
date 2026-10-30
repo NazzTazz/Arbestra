@@ -213,9 +213,12 @@ export function villageStateFromSyncV2(
       ),
     },
   };
+  // No road cell means no field, as for the historical reader.
+  const roadCells = list('roadCells').sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY);
   // No stored plan means the empty plan, as for the historical reader.
   return {
     infrastructure: list('infrastructure')[0]?.plan ?? emptyInfrastructure(),
+    ...(roadCells.length ? { roadCells } : {}),
     factoryEnabled: game.factoryEnabled,
     science: science.state,
     serverTime: observedAt,

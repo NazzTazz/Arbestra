@@ -16,6 +16,7 @@ import { LevelingJobSchema } from './leveling.js';
 import { MarketExchangeSchema, TradeOfferSchema, MarketJourneySchema } from './market.js';
 import { ScienceStateSchema } from './science.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
+import { RoadCellSchema, RoadCellsResultSchema } from './road-cells.js';
 import { StarterInstallationSchema } from './spawn-installation.js';
 import { SYNC_V2_SPATIAL_COMPONENTS, SyncV2SpatialChangeSchema } from './sync-v2-spatial.js';
 import {
@@ -89,6 +90,7 @@ export const SYNC_V2_PRIVATE_COMPONENTS = [
   'identity',
   'infrastructure',
   'installation',
+  'roadCells',
 ] as const;
 export const SyncV2IdentitySchema = Type.Object(
   { id, name: Type.String(), anchorCellX: Type.Integer(), anchorCellY: Type.Integer() },
@@ -359,6 +361,14 @@ export const SyncV2ChangeSchema = Type.Union([
     },
     { additionalProperties: false },
   ),
+  Type.Object(
+    {
+      component: Type.Literal('roadCells'),
+      upsert: Type.Array(RoadCellSchema, { maxItems: LIVE_ENTITIES }),
+      remove: Type.Array(Type.String({ pattern: '^[0-9]+,[0-9]+$' }), { maxItems: LIVE_ENTITIES }),
+    },
+    { additionalProperties: false },
+  ),
 ]);
 const group = { stream: SyncV2StreamSchema, changes: Type.Array(SyncV2ChangeSchema, { maxItems: 32 }) };
 export const SyncV2BatchSchema = Type.Object(
@@ -425,6 +435,23 @@ export const VillageCommandConfirmationV2Schema = Type.Object(
   { additionalProperties: false },
 );
 export type VillageCommandConfirmationV2 = Static<typeof VillageCommandConfirmationV2Schema>;
+/** Road cells gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.2):
+ * compact receipt (counts, stone debited) and the private effects. A replay
+ * returns the original result and instant, without effects. */
+export const RoadCellsConfirmationV2Schema = Type.Object(
+  {
+    protocol: Type.Literal(2),
+    worldId: id,
+    villageId: id,
+    commandId: id,
+    status: Type.Literal('applied'),
+    commandTime: time,
+    result: RoadCellsResultSchema,
+    effects: Type.Optional(SyncV2BatchSchema),
+  },
+  { additionalProperties: false },
+);
+export type RoadCellsConfirmationV2 = Static<typeof RoadCellsConfirmationV2Schema>;
 export const villageCommandConfirmationV2IsValid = (value: unknown): value is VillageCommandConfirmationV2 =>
   Value.Check(VillageCommandConfirmationV2Schema, value);
 export const constructionConfirmationV2IsValid = (value: unknown): value is ConstructionConfirmationV2 =>

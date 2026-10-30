@@ -8,6 +8,15 @@ import {
 import { previewLeveling, commandLeveling, commandTerraform } from './leveling.js';
 import { TerraformCommandSchema, TerraformChangedSchema, type TerraformCommand } from '@arbestra/contracts';
 import { observationCommitted } from '../admin/observation-actions.js';
+import {
+  RoadCellsConfirmationV2Schema,
+  RoadCellsPreviewRequestSchema,
+  RoadCellsPreviewSchema,
+  RoadCellsRequestSchema,
+  type RoadCellsPreviewRequest,
+  type RoadCellsRequest,
+} from '@arbestra/contracts';
+import { previewRoadCells, roadCellsCommandV2 } from './road-cells.js';
 import { receiveExpedition, readExpeditionReceipts } from '../science/expeditions.js';
 import { ExpeditionReceiptSchema, type ExpeditionIntent } from '@arbestra/contracts';
 import {
@@ -601,6 +610,49 @@ export async function registerVillageRoutes(
         return response;
       },
     );
+  // Road cells (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4): V2-native,
+  // one bounded command per gesture; the quote is a read-only projection.
+  app.post(
+    '/api/worlds/:worldSlug/villages/:villageId/road-cells/preview',
+    {
+      schema: {
+        params: VillageParametersSchema,
+        body: RoadCellsPreviewRequestSchema,
+        response: { 200: RoadCellsPreviewSchema },
+      },
+    },
+    async (request) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+      return previewRoadCells(db, account.id, worldSlug, villageId, request.body as RoadCellsPreviewRequest);
+    },
+  );
+  app.post(
+    '/api/worlds/:worldSlug/villages/:villageId/road-cells',
+    {
+      schema: {
+        params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        body: RoadCellsRequestSchema,
+        response: { 200: RoadCellsConfirmationV2Schema },
+      },
+    },
+    async (request, reply) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+      await assertSyncV2Available(db);
+      const confirmation = await roadCellsCommandV2(
+        db,
+        account.id,
+        worldSlug,
+        villageId,
+        request.body as RoadCellsRequest,
+        Number(request.headers['x-arbestra-generation'] ?? '0'),
+      );
+      observationCommitted(request);
+      return reply.serializer(JSON.stringify).send(confirmation);
+    },
+  );
   for (const preview of [true, false])
     app.post(
       `/api/worlds/:worldSlug/villages/:villageId/exploitation${preview ? '/preview' : ''}`,

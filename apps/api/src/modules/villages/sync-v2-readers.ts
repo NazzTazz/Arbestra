@@ -47,6 +47,7 @@ export const privateReaderComponents = new Set<SyncV2Change['component']>([
   'identity',
   'infrastructure',
   'installation',
+  'roadCells',
 ]);
 
 /** Enumeration is reserved for an explicit scope snapshot. Ordinary deltas
@@ -113,6 +114,8 @@ function privateReferenceQueries(context: VillageEconomy): RawBuilder<SyncEntity
         and d.village_id=o.village_id and w.exploitation_order_id=o.id and d.status='in-progress'))`);
   queries.push(sql<SyncEntityReference>`select 'gardenPlots'::text as component,cell_x::text||','||cell_y::text as key
     from garden_plots where world_id=${worldId} and village_id=${villageId}`);
+  queries.push(sql<SyncEntityReference>`select 'roadCells'::text as component,cell_x::text||','||cell_y::text as key
+    from road_cells where world_id=${worldId} and village_id=${villageId}`);
   queries.push(sql<SyncEntityReference>`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
     where world_id=${worldId} and (village_id=${villageId} or destination_village_id=${villageId})
     and returns_at > ${context.through}`);
@@ -504,6 +507,28 @@ export async function readRegisteredPrivateChanges(
         void _resource;
         return { ...row, id: `${row.cellX},${row.cellY}`, productionUpdatedAt: row.productionUpdatedAt.toISOString() };
       });
+      changes.push({ component, upsert, remove: ids.filter((id) => !upsert.some((row) => row.id === id)) });
+    } else if (component === 'roadCells') {
+      const cells = ids.map((id) => {
+        if (!/^[0-9]+,[0-9]+$/.test(id)) throw Error('Invalid road cell key');
+        const [cellX, cellY] = id.split(',').map(Number) as [number, number];
+        if (!Number.isSafeInteger(cellX) || !Number.isSafeInteger(cellY)) throw Error('Invalid road cell coordinate');
+        return { cellX, cellY };
+      });
+      // A cell keyed here that now belongs to another village is a removal
+      // for this stream: the reader filters by owner.
+      const rows = await tx
+        .selectFrom('roadCells')
+        .select(['cellX', 'cellY', 'surface', 'sidewalks', 'gauge', 'revision'])
+        .where('worldId', '=', worldId)
+        .where('villageId', '=', villageId)
+        .where(
+          sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`,
+        )
+        .orderBy('cellX')
+        .orderBy('cellY')
+        .execute();
+      const upsert = rows.map((row) => ({ id: `${row.cellX},${row.cellY}`, ...row }));
       changes.push({ component, upsert, remove: ids.filter((id) => !upsert.some((row) => row.id === id)) });
     } else if (component === 'gardenHarvests') {
       if (ids.length > 4096) throw new RangeError('Too many harvest ids');

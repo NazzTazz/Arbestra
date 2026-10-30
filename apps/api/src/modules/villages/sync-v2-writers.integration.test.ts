@@ -10,6 +10,7 @@ import {
   privateSyncIndirectSources,
   privateSyncLookupTables,
 } from '../../database/migrations/053_game_sync_private_writers.js';
+import { roadCellSyncSource, installRoadCellSync } from '../../database/migrations/073_road_cells.js';
 import { privateReaderComponents } from './sync-v2-readers.js';
 
 const url = testDatabaseUrl(),
@@ -25,19 +26,21 @@ const pool = new pg.Pool({
 });
 const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 const world = randomUUID();
+// Later migrations add sources through the same writer (073: road cells).
+const sources = [...privateSyncSources, roadCellSyncSource] as const;
 beforeAll(async () => {
-  expect(new Set(privateSyncSources.map(([, component]) => component))).toEqual(privateReaderComponents);
+  expect(new Set(sources.map(([, component]) => component))).toEqual(privateReaderComponents);
   await admin.query(`create schema ${schema}`);
   await foundation(db);
   // Real column definitions, isolated rows and no foreign keys to production
   // fixtures. An incorrect table/key mapping fails this setup or the checks.
   for (const table of new Set([
-    ...privateSyncSources.map(([table]) => table),
+    ...sources.map(([table]) => table),
     ...privateSyncIndirectSources,
     ...privateSyncLookupTables,
   ]))
     await pool.query(`create table ${table} (like public.${table} including defaults)`);
-  for (const [table, , key] of privateSyncSources) {
+  for (const [table, , key] of sources) {
     const columns = (
       await pool.query('select column_name from information_schema.columns where table_schema=$1 and table_name=$2', [
         schema,
@@ -52,6 +55,7 @@ beforeAll(async () => {
     } else if (key !== '*') expect(columns).toContain(key.replace(/^\?/, ''));
   }
   await writers(db);
+  await installRoadCellSync(db);
 }, 60000);
 afterAll(async () => {
   await db.destroy();

@@ -3376,3 +3376,5 @@ export async function discoverCatEyes(
     return { newlyCompleted: inserted.length > 0, villageState: await state(tx, accountId, worldSlug, economy) };
   });
 }
+/** Terrain window of a village (RC1 field or chunks), for bounded commands. */
+export { snapshot as readVillageGround };

@@ -6,6 +6,9 @@ import type {
   ExploitationRequest,
   InfrastructurePlan,
   InfrastructureQuote,
+  RoadCellGauge,
+  RoadCellSurface,
+  RoadCellsResult,
   TerrainBuildingExterior,
 } from '@arbestra/contracts';
 
@@ -687,6 +690,26 @@ export interface Database {
     createdAt: Generated<Timestamp>;
   };
   worldFactorySettings: { worldId: string; enabled: boolean };
+  roadCells: {
+    worldId: string;
+    villageId: string;
+    cellX: number;
+    cellY: number;
+    surface: RoadCellSurface;
+    sidewalks: boolean;
+    gauge: Generated<RoadCellGauge>;
+    revision: Generated<number>;
+    createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
+    updatedAt: ColumnType<Date, Date | string | undefined, Date | string>;
+  };
+  roadCellReceipts: {
+    worldId: string;
+    villageId: string;
+    commandId: string;
+    request: JSONColumnType<object>;
+    result: JSONColumnType<RoadCellsResult>;
+    createdAt: Timestamp;
+  };
   exploitationOrders: {
     id: Generated<string>;
     worldId: string;
