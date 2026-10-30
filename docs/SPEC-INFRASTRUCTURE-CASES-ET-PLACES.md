@@ -113,7 +113,12 @@ Décision de Tristan du 30 octobre : une case interdite au milieu d'un geste de 
 - Un accessoire (brasero, buisson, tonneau) occupe un ancrage. Il se pose d'un clic sur un ancrage libre, mis en évidence pendant l'outil.
 - Les braseros automatiques deviennent des accessoires automatiques sur les ancrages des angles rentrants. La démolition les supprime (décision du 30 octobre).
 - Avantages : pose facile, cohérente avec les futures places des joueurs (décision 7), aucune géométrie fine à valider côté serveur, rendu par instances.
-- **Ouvert — O4** : liste exacte des ancrages par tuile (chemin, coude, croisement, case de place).
+- **O4, tranché par Tristan le 30 octobre** :
+  - une case de route a **un ancrage à chacun de ses 4 coins**, quelle que soit sa forme ; les braseros **automatiques** occupent les coins rentrants ;
+  - les ancrages d'une **case de place** sont choisis par le **designer de la place** (S5), pas fixés par tuile ;
+  - **ailleurs, plus de brasero** : aucun accessoire hors d'un ancrage ;
+  - **les accessoires bloquent le passage** (« un buisson bloque le passage, c'est physique ») : leur emprise est un obstacle de navigation.
+- **Constat du 30 octobre** : poser un brasero par l'ancienne commande est lent (relecture complète de l'état, recalcul des chemins actifs pour un équipement bloquant, réponse en projection complète). S4 passe avant S3 et remplace ce chemin.
 
 ## 6. Embellissements et places
 
