@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceEnergy, beginRest, type EnergyState } from './energy.js';
+import { advanceEnergy, beginRest, nextActivityChangeAt, type EnergyState } from './energy.js';
 
 const at = new Date('2026-09-05T00:00:00.000Z');
 const idle = (): EnergyState => ({
@@ -62,5 +62,45 @@ describe('population energy', () => {
     const later = new Date(at.getTime() + 5 * 3_600_000);
     expect(advanceEnergy(resting, later)).toEqual(advanceEnergy(awake, later));
     expect(advanceEnergy(resting, later).foodUsedSinceRest).toBe(2);
+  });
+  it('dates the next activity change at the exact millisecond advanceEnergy switches', () => {
+    const UNITS = 79_200_000;
+    // Deterministic pseudo-random states, including both boundaries.
+    let seed = 7;
+    const random = (n: number) => ((seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) % n) / 1;
+    const states: EnergyState[] = [
+      { ...idle(), energy: 0, progress: 0 },
+      { ...idle(), activity: 'working', energy: 0, progress: 1 },
+      { ...idle(), activity: 'resting', restingSince: at, energy: 9, progress: UNITS - 1 },
+      { ...idle(), activity: 'resting', restingSince: at, energy: 0, progress: 0 },
+    ];
+    for (let i = 0; i < 300; i++) {
+      const exact = random(10 * UNITS + 1);
+      states.push({
+        ...idle(),
+        activity: (['idle', 'working', 'resting'] as const)[i % 3]!,
+        restingSince: i % 3 === 2 ? new Date(at.getTime() - random(6 * 3_600_000)) : null,
+        energy: Math.floor(exact / UNITS),
+        progress: exact % UNITS,
+      });
+    }
+    for (const state of states) {
+      const change = nextActivityChangeAt(state);
+      if (state.activity === 'resting' && state.energy === 10 && state.progress === 0) {
+        expect(change).toEqual(at);
+        continue;
+      }
+      expect(change.getTime()).toBeGreaterThan(at.getTime());
+      expect(advanceEnergy(state, new Date(change.getTime() - 1)).activity).toBe(state.activity);
+      expect(advanceEnergy(state, change).activity).not.toBe(state.activity);
+    }
+    // A full-energy rest not yet woken changes at its own cursor.
+    expect(nextActivityChangeAt({ ...idle(), activity: 'resting', restingSince: at })).toEqual(at);
+    // Exhaustion and full rest: 22 idle hours, 10 working hours, 5 resting hours.
+    expect(nextActivityChangeAt(idle()).getTime() - at.getTime()).toBe(22 * 3_600_000);
+    expect(nextActivityChangeAt({ ...idle(), activity: 'working' }).getTime() - at.getTime()).toBe(36_000_000);
+    expect(
+      nextActivityChangeAt({ ...idle(), activity: 'resting', restingSince: at, energy: 0 }).getTime() - at.getTime(),
+    ).toBe(5 * 3_600_000);
   });
 });

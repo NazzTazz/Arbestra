@@ -1,4 +1,5 @@
 import { advancePopulationGrowth } from '../population/growth.js';
+import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../population/work.js';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { AvailableWorlds, JoinWorldRequest } from '@arbestra/contracts';
@@ -282,7 +283,7 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
         .values({ worldId: world.id, villageId, plan: JSON.stringify(placement.infrastructure) })
         .execute();
       await tx.insertInto('villagePopulations').values({ worldId: world.id, villageId }).execute();
-      await tx
+      const founders = await tx
         .insertInto('populationCohorts')
         .values({
           worldId: world.id,
@@ -298,7 +299,10 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
           harvestId: null,
           extractionId: null,
         })
+        .returningAll()
         .execute();
+      // Founders tire 22 hours after the village starts, offline as well.
+      await ensurePopulationEnergyWake(tx, world.id, villageId, nextPopulationEnergyAt(founders, through));
       await advancePopulationGrowth(tx, world.id, villageId, through, true);
       return { villageId };
     }

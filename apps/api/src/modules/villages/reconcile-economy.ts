@@ -1,6 +1,7 @@
 import { hasActiveLeveling, completeLevelingAt } from './leveling.js';
 import { devTime } from '../operations/dev-timing.js';
 import { advancePopulationGrowth } from '../population/growth.js';
+import { reconcileRestHousing } from '../population/work.js';
 import { sql, type Transaction } from 'kysely';
 
 import type { Database } from '../../database/schema.js';
@@ -368,6 +369,11 @@ export async function reconcileVillageEconomy(
       through = transition.through;
     }
     await advancePopulationGrowth(transaction, economy.worldId, economy.villageId, economy.through);
+    // Completions release teams to rest or idleness: house them at H and keep
+    // the next energy notification, as reads and commands did, so that a
+    // worker task alone leaves the population reconciled. Only once every
+    // transition up to H has been applied (never after a partial catch-up).
+    if (transitions) await reconcileRestHousing(transaction, economy.worldId, economy.villageId, economy.through);
     return { complete: true, transitions, lastTransitionAt: through };
   });
 }

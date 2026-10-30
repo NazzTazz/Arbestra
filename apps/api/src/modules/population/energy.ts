@@ -70,6 +70,20 @@ export function advanceEnergy(state: EnergyState, through: Date): EnergyState {
   };
 }
 
+/** First instant at which advanceEnergy changes this activity on its own: an
+ * exhaustion (idle or working → resting) or a full rest (resting → idle).
+ * advanceEnergy(state, t) keeps the activity for every t from updatedAt up to
+ * one millisecond before; a full rest not yet woken changes at updatedAt. */
+export function nextActivityChangeAt(state: EnergyState): Date {
+  const exact = state.energy * UNITS + state.progress,
+    start = state.updatedAt.getTime();
+  if (state.activity === 'resting' && exact === 10 * UNITS) return new Date(start);
+  const rate = RATE_PER_MILLISECOND[state.activity];
+  const untilBoundary = Math.ceil(Math.abs((rate < 0 ? 0 : 10 * UNITS) - exact) / Math.abs(rate));
+  // The boundary is crossed only once some time elapses (remaining > 0).
+  return new Date(start + Math.max(1, untilBoundary));
+}
+
 export function canWorkFor(state: EnergyState, milliseconds: number): boolean {
   const exact = state.energy * UNITS + state.progress + RATE_PER_MILLISECOND.working * milliseconds;
   return exact >= 0;

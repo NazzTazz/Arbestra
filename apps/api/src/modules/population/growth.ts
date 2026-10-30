@@ -1,6 +1,7 @@
 import { sql, type SqlBool, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import { housingCapacity } from './housing.js';
+import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from './work.js';
 
 export const POPULATION_ARRIVAL_TASK = 'population.arrive';
 export const POPULATION_ARRIVAL_INTERVAL_MS = 60_000;
@@ -51,7 +52,7 @@ export async function advancePopulationGrowth(
     );
     const first = next.getTime();
     // Each arrival retains its own energy clock, including offline catch-up.
-    await tx
+    const arrivals = await tx
       .insertInto('populationCohorts')
       .values(
         Array.from({ length: count }, (_, i) => ({
@@ -67,7 +68,10 @@ export async function advancePopulationGrowth(
           foodUsedSinceRest: 0,
         })),
       )
+      .returningAll()
       .execute();
+    // The first arrival tires 22 hours after it came, offline as well.
+    await ensurePopulationEnergyWake(tx, worldId, villageId, nextPopulationEnergyAt(arrivals, through));
     next = count === missing ? null : new Date(first + count * POPULATION_ARRIVAL_INTERVAL_MS);
   }
   if (row.nextArrivalAt?.getTime() !== next?.getTime())

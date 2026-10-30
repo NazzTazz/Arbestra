@@ -7,6 +7,7 @@ import { hashPassword } from '../security/passwords.js';
 import { createDatabase } from './connection.js';
 import { generateWorld } from '../modules/worlds/generation.js';
 import { configureTownHallFactory } from '../modules/villages/service.js';
+import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../modules/population/work.js';
 
 export const DEVELOPMENT_IDS = {
   account: '10000000-0000-4000-8000-000000000001',
@@ -158,8 +159,8 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
         .where('worldId', '=', DEVELOPMENT_IDS.world)
         .where('villageId', '=', DEVELOPMENT_IDS.village)
         .executeTakeFirst();
-      if (!existingPopulation)
-        await transaction
+      if (!existingPopulation) {
+        const founders = await transaction
           .insertInto('populationCohorts')
           .values({
             worldId: DEVELOPMENT_IDS.world,
@@ -175,7 +176,16 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
             harvestId: null,
             extractionId: null,
           })
+          .returningAll()
           .execute();
+        // Founders tire 22 hours later, through the worker (071).
+        await ensurePopulationEnergyWake(
+          transaction,
+          DEVELOPMENT_IDS.world,
+          DEVELOPMENT_IDS.village,
+          nextPopulationEnergyAt(founders, founders[0]!.energyUpdatedAt),
+        );
+      }
       await transaction
         .insertInto('buildingHiddenSupplies')
         .values({

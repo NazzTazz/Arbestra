@@ -1,5 +1,6 @@
 import { flattenVertexTerrain } from '../worlds/terrain-vertices.js';
 import { advancePopulationGrowth } from '../population/growth.js';
+import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../population/work.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
@@ -270,7 +271,7 @@ export async function installVillage(
       .values({ worldId: world.id, villageId, plan: JSON.stringify(emptyInfrastructure()) })
       .execute();
     await tx.insertInto('villagePopulations').values({ worldId: world.id, villageId }).execute();
-    await tx
+    const founders = await tx
       .insertInto('populationCohorts')
       .values({
         worldId: world.id,
@@ -286,7 +287,10 @@ export async function installVillage(
         harvestId: null,
         extractionId: null,
       })
+      .returningAll()
       .execute();
+    // Founders tire 22 hours after the village starts, offline as well.
+    await ensurePopulationEnergyWake(tx, world.id, villageId, nextPopulationEnergyAt(founders, through));
     await advancePopulationGrowth(tx, world.id, villageId, through, true);
     const row = await tx
       .insertInto('villageStarterInstallations')

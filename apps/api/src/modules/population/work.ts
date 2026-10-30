@@ -1,6 +1,6 @@
-import { sql, type Selectable, type Transaction } from 'kysely';
+import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type { Database, PopulationCohortsTable } from '../../database/schema.js';
-import { advanceEnergy, canWorkFor, type EnergyState } from './energy.js';
+import { advanceEnergy, canWorkFor, nextActivityChangeAt, type EnergyState } from './energy.js';
 import { allocateRestHousing } from './housing.js';
 
 type Cohort = Selectable<PopulationCohortsTable>;
@@ -226,14 +226,78 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
   return allocateRestHousing(tx, worldId, villageId, cohorts);
 }
 
+export const POPULATION_ENERGY_TASK = 'population.energy';
+
+/** Rest and fatigue change a cohort's activity at a time no completion
+ * notifies: true when one has come due at `at` without being written. */
+export async function cohortActivityDue(db: Kysely<Database>, worldId: string, villageId: string, at: Date) {
+  const cohorts = await db
+    .selectFrom('populationCohorts')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('villageId', '=', villageId)
+    .execute();
+  return cohorts.some((c) => advanceEnergy(energyState(c), at).activity !== c.activity);
+}
+
+/** True when a rest without work has ended by `at` without being written:
+ * inhabitants available again, the only energy change that admissions use. */
+export async function cohortRestEnded(db: Kysely<Database>, worldId: string, villageId: string, at: Date) {
+  const cohorts = await db
+    .selectFrom('populationCohorts')
+    .selectAll()
+    .where('worldId', '=', worldId)
+    .where('villageId', '=', villageId)
+    .where('activity', '=', 'resting')
+    .execute();
+  return cohorts.some((c) => withoutAssignment(c) && advanceEnergy(energyState(c), at).activity === 'idle');
+}
+
+/** Next instant at which an inhabitant without work tires or wakes on its own,
+ * from its energy projected at `through`. Assigned teams change activity with
+ * their work's completion, which has its own notification. */
+export function nextPopulationEnergyAt(cohorts: readonly Cohort[], through: Date): Date | null {
+  let next: number | null = null;
+  for (const cohort of cohorts) {
+    if (!withoutAssignment(cohort)) continue;
+    const at = nextActivityChangeAt(advanceEnergy(energyState(cohort), through)).getTime();
+    if (next === null || at < next) next = at;
+  }
+  return next === null ? null : new Date(next);
+}
+
+/** Caller holds the village lock. Keeps one pending population.energy
+ * notification no later than `at`: a new one only when none is due earlier.
+ * Existing notifications are read, never locked, updated or acknowledged. A
+ * handler excludes its own notification, still pending until it returns. */
+export async function ensurePopulationEnergyWake(
+  tx: Transaction<Database>,
+  worldId: string,
+  villageId: string,
+  at: Date | null,
+  ownTaskId?: string,
+) {
+  if (!at) return;
+  await sql`insert into scheduled_tasks(world_id,task_type,subject_id,payload,due_at,available_at)
+    select ${worldId}::uuid,${POPULATION_ENERGY_TASK},${villageId}::uuid,
+      jsonb_build_object('villageId',${villageId}::text),${at},${at}
+    where not exists(select 1 from scheduled_tasks where world_id=${worldId}::uuid
+      and task_type=${POPULATION_ENERGY_TASK} and subject_id=${villageId}::uuid and completed_at is null
+      and due_at<=${at} ${ownTaskId ? sql`and id<>${ownTaskId}::uuid` : sql``})
+    on conflict (world_id,subject_id,due_at) where task_type='population.energy' and completed_at is null
+    do nothing`.execute(tx);
+}
+
 /** Snapshots only persist activity transitions and bed changes, not every
  * cohort's energy cursor on each polling request. Full work materialization
- * remains in commands and chronological completions. */
+ * remains in commands and chronological completions. Every caller ends with
+ * the next energy notification of the village (worker autonomy, 071). */
 export async function reconcileRestHousing(
   tx: Transaction<Database>,
   worldId: string,
   villageId: string,
   through: Date,
+  ownTaskId?: string,
 ) {
   const cohorts = await tx
     .selectFrom('populationCohorts')
@@ -263,7 +327,9 @@ export async function reconcileRestHousing(
       .execute();
     Object.assign(cohort, values);
   }
-  return allocateRestHousing(tx, worldId, villageId, cohorts);
+  const housed = await allocateRestHousing(tx, worldId, villageId, cohorts);
+  await ensurePopulationEnergyWake(tx, worldId, villageId, nextPopulationEnergyAt(housed, through), ownTaskId);
+  return housed;
 }
 
 export function eligibleWorkers(cohorts: Cohort[], durationMs: number): Cohort[] {

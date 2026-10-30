@@ -27,6 +27,7 @@ import { COMPLETE_STONE_EXTRACTION_TASK } from '../deposits/stone-extractions.js
 import { WAKE_EXTRACTION_WORKSITE_TASK } from '../deposits/worksites.js';
 import { admitVillageWorksites } from './worksite-admission.js';
 import { admitScience } from '../science/service.js';
+import { POPULATION_ENERGY_TASK, cohortRestEnded, reconcileRestHousing } from '../population/work.js';
 
 export const COMPLETE_CONSTRUCTION_TASK = 'building.complete';
 export async function arrivePopulation(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
@@ -135,6 +136,30 @@ export async function wakeExtractionWorksite(transaction: Transaction<Database>,
   if (!site || site.status !== 'running' || site.wakeVersion !== version) return;
   const economy = await beginVillageEconomy(transaction, task.worldId, site.villageId);
   await admitVillageWorksites(transaction, economy);
+}
+
+export { POPULATION_ENERGY_TASK };
+/** An inhabitant without work tires or wakes at a time no completion notifies.
+ * The deadline runs what a client read used to trigger for it, with no client:
+ * economy at H, admissions when a rest ended (inhabitants available again; an
+ * exhaustion frees nobody and other admissions keep their own wakes), then the
+ * activities and beds at H. Village first, then the economic locks; the
+ * successor is scheduled before the scheduler acknowledges this notification,
+ * and no other notification is read for update, modified or acknowledged. */
+export async function wakePopulationEnergy(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
+  const village = await transaction
+    .selectFrom('villages')
+    .select('id')
+    .where('worldId', '=', task.worldId)
+    .where('id', '=', task.subjectId)
+    .executeTakeFirst();
+  if (!village) return;
+  const economy = await beginVillageEconomy(transaction, task.worldId, village.id);
+  if (await cohortRestEnded(transaction, task.worldId, village.id, economy.through)) {
+    await admitVillageWorksites(transaction, economy);
+    await admitScience(transaction, economy);
+  }
+  await reconcileRestHousing(transaction, task.worldId, village.id, economy.through, task.id);
 }
 
 export async function completeLeveling(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {

@@ -11,6 +11,7 @@ import {
   assignWorkers,
   eligibleWorkers,
   materializeCohorts,
+  reconcileRestHousing,
   releaseWorkers,
   withoutAssignment,
   energyState,
@@ -560,6 +561,7 @@ export async function admitScience(tx: Transaction<Database>, economy: VillageEc
     .orderBy('programCode')
     .orderBy('buildingId')
     .execute();
+  let rested = false;
   for (const contribution of contributions) {
     const program = await tx
       .selectFrom('sciencePrograms')
@@ -595,7 +597,8 @@ export async function admitScience(tx: Transaction<Database>, economy: VillageEc
       )
         continue;
       const rest = beginRest(energyState(cohort));
-      if (rest)
+      if (rest) {
+        rested = true;
         await tx
           .updateTable('populationCohorts')
           .set({ activity: rest.activity, restingSince: rest.restingSince })
@@ -603,6 +606,7 @@ export async function admitScience(tx: Transaction<Database>, economy: VillageEc
           .where('villageId', '=', economy.villageId)
           .where('id', '=', cohort.id)
           .execute();
+      }
     }
     const workers = Math.min(
       capacity.workers,
@@ -630,6 +634,9 @@ export async function admitScience(tx: Transaction<Database>, economy: VillageEc
         .where('programCode', '=', program.code)
         .execute();
   }
+  // A rest begun here takes its bed now and wakes through the worker, even
+  // when this admission is the last step of a worker task (071).
+  if (rested) await reconcileRestHousing(tx, economy.worldId, economy.villageId, economy.through);
   // Rest/centre waiting must progress offline. Missing evidence instead wakes
   // at the survey return or solar deadline; it needs no minute-by-minute polling.
   const pendingPrograms = contributions.length
