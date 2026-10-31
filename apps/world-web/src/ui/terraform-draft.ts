@@ -161,7 +161,7 @@ export function footprintTerraformVisual(
   buildingType: 'university' | 'stonemason',
   anchor: { cellX: number; cellY: number },
   quarterTurns: number,
-  world: VillageState['world'],
+  world: { widthCells: number; heightCells: number },
   heightAt: (x: number, y: number) => number,
 ): TerraformVisual {
   const cells = fixedBuildingFootprint(buildingType, anchor, quarterTurns, world);
