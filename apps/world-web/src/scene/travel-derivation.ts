@@ -51,6 +51,8 @@ export class TravelDerivationInputs {
       a.region.originCellY === b.region.originCellY &&
       same(a.travelRoutes, b.travelRoutes) &&
       same(a.infrastructure, b.infrastructure) &&
+      // Road cells mask the automatic roads drawn under them.
+      same(a.roadCells, b.roadCells) &&
       same(a.region.terrainCodes, b.region.terrainCodes) &&
       (a.cells === b.cells || jsonDataEqual(previous.buildings, this.buildings)) &&
       (a.region.features === b.region.features || jsonDataEqual(previous.features, this.features))

@@ -9,9 +9,12 @@ export const ROAD_HALF_WIDTH = 0.47;
 
 /** Share the displayed automatic road footprint with worksite obstacle checks. */
 export function villageRoadDisplayRoutes(
-  state: Pick<VillageState, 'travelRoutes' | 'cells' | 'world' | 'infrastructure'>,
+  state: Pick<VillageState, 'travelRoutes' | 'cells' | 'world' | 'infrastructure' | 'roadCells'>,
 ): TravelRoute[] {
   const masked = new Set(state.cells.filter((c) => c.footprint || c.building).map(roadKey));
+  // A road cell replaces the automatic road on its cell: drawn on top of it,
+  // both near the same height, they z-fight (alpha, 1 November).
+  for (const c of state.roadCells ?? []) masked.add(roadKey(c));
   if (state.infrastructure)
     for (const p of infrastructurePlanSurface(state.infrastructure, state.world).values())
       masked.add(

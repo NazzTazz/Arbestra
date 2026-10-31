@@ -40,3 +40,27 @@ it('does not reserve invisible automatic road strips across manually painted wor
   ]);
   expect(villageRoadDisplayRoutes(state)).toEqual([]);
 });
+
+it('masks the automatic road under road cells, which are drawn in its place', () => {
+  const state = {
+    world: { widthCells: 16, heightCells: 16 },
+    infrastructure: emptyInfrastructure(),
+    cells: [{ cellX: 4, cellY: 1, footprint: { buildingId: 'house' } }],
+    roadCells: [{ id: '2,1', cellX: 2, cellY: 1, surface: 'rubble', sidewalks: false, gauge: 'chemin', revision: 1 }],
+    travelRoutes: [
+      {
+        id: 'house',
+        kind: 'building',
+        destination: { cellX: 4, cellY: 1 },
+        cells: Array.from({ length: 5 }, (_, cellX) => ({ cellX, cellY: 1 })),
+      },
+    ],
+  } as unknown as VillageState;
+  // Cell 2 carries a rubble road cell: the automatic strip stops on each side of it.
+  expect(villageRoadDisplayRoutes(state).map((r) => r.cells)).toEqual([
+    [
+      { cellX: 0, cellY: 1 },
+      { cellX: 1, cellY: 1 },
+    ],
+  ]);
+});
