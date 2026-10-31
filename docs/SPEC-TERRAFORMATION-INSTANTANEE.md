@@ -69,3 +69,12 @@ Constaté dans le navigateur :
 - Défaut trouvé en navigateur et corrigé : la validation locale ignorait les cases de route (elle ne lisait que l'ancien plan, vidé par 076) ; un trait dont le raccord touche une route partait au serveur et revenait refusé (`INFRASTRUCTURE_OCCUPIED`). Régression `ui/terraform-draft.test.ts` (4 tests, rouge sans le correctif), qui couvre aussi la fusion des aperçus et l'aperçu d'emprise.
 - Navigateur, Bressuire : trait refusé localement près d'une route (message affiché, rien envoyé) ; trait accepté sur l'herbe : aperçu, « Annuler 9 s », envoi au terme, réponse `applied` (1 geste, 6 sommets), relief visible avant et après rechargement.
 - Non vérifié en navigateur : nivellement d'emprise (université, tailleur de pierre sur une pente) suivi du placement ; mesure du temps de commande.
+
+## 9. Nivellement transparent (Tristan, 31 octobre, validé)
+
+- Le nivellement d'emprise est **transparent** : poser une université ou un tailleur de pierre sur une pente nivelle puis construit, d'un seul clic. L'aperçu reste valide (« Le terrain sera nivelé automatiquement, sans coût. ») ; au clic, la commande `terrain-edits` part **sans délai**, puis la construction sur sa confirmation. Un refus du nivellement s'affiche dans la fiche et rien n'est construit. Remplace le passage par le lot de 10 s pour l'emprise (§5).
+- L'aperçu vérifie aussi l'**anneau** de cases dont les sommets changent (le serveur l'exige constructible et sans route) et le signale avant le clic.
+- Le placement lit les hauteurs vivantes de la scène (`previewArea`, paramètre `vertexHeight`) : l'instantané de la région n'est pas rafraîchi par une retouche.
+- Terraformation libre : notification « Terrain modifié. » à l'application du lot.
+- Vérifié : tests `construction-selection` (anneau, route dans l'anneau, sol vivant ; rouges sans les correctifs) ; navigateur, refus d'un nivellement dont l'anneau touche une route (message dans la fiche, aucune construction) ; en base de dev, nivellement (42 sommets) à 16:18:40 suivi de l'université de Bressuire à 16:18:51, posée par Tristan.
+- Lenteur signalée par Tristan : commande serveur ~0,35 s à chaud, 3,3 s à froid, 1,9 s observée au clic ; hypothèse non vérifiée : la construction qui suit reconstruit le réseau de trajets invalidé par le nouveau relief (5 à 7 s sur Bressuire). À mesurer.

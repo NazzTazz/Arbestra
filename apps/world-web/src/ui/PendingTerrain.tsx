@@ -63,7 +63,8 @@ export function usePendingTerrain({
     }
     publish({ ...pending, sending: true });
     try {
-      await command({ commandId: randomUUID(), gestures: pending.gestures });
+      const result = await command({ commandId: randomUUID(), gestures: pending.gestures });
+      notice(result.gestures ? 'Terrain modifié.' : 'Le terrain était déjà à cette hauteur.');
     } catch (error) {
       notice(error instanceof Error ? error.message : 'Terraformation refusée.', 'warning');
     }

@@ -75,9 +75,11 @@ describe('construction selection', () => {
   });
   it('requires leveling for a gently sloping university even when every cell is individually buildable', () => {
     const cells = rectangleCells({ first: at(2046, 1022), last: at(2, 3) }, world, true).cells;
+    // The leveling ring around the footprint is free too.
+    const around = rectangleCells({ first: at(2045, 1021), last: at(3, 4) }, world, true).cells;
     const state = {
       world,
-      cells: cells.map((c) => ({ ...c, canBuild: true })),
+      cells: around.map((c) => ({ ...c, canBuild: true })),
       region: {
         originCellX: 2046,
         originCellY: 1022,
@@ -87,9 +89,15 @@ describe('construction selection', () => {
       },
     } as VillageState;
     const area = previewArea(state, { first: at(2046, 1022), last: at(2, 3) }, true, undefined, 'university');
-    expect(area.error).toBe('Cette emprise doit être nivelée avant de construire.');
+    // Leveled transparently at placement: a valid preview that asks for leveling.
+    expect(area.error).toBeNull();
     expect(area.needsLeveling).toBe(true);
     expect(area.obstacleCells).toEqual([]);
+    // A road cell in the ring: the server would refuse the leveling, the preview says so.
+    const withRoad = { ...state, roadCells: [{ id: '3,0', cellX: 3, cellY: 0 }] } as unknown as VillageState;
+    const blocked = previewArea(withRoad, { first: at(2046, 1022), last: at(2, 3) }, true, undefined, 'university');
+    expect(blocked.error).toMatch(/déborderait sur une route/);
+    expect(blocked.obstacleCells).toEqual([{ cellX: 3, cellY: 0 }]);
     state.region.elevations.fill(25);
     expect(
       previewArea(state, { first: at(2046, 1022), last: at(2, 3) }, true, undefined, 'university').error,

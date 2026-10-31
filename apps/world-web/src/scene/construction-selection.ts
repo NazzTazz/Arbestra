@@ -1,4 +1,4 @@
-import { footprintVertices, fixedBuildingFootprint, isBuildingFootprintFlat } from '@arbestra/contracts';
+import { footprintVertices, fixedBuildingFootprint, isBuildingFootprintFlat, vertexCells } from '@arbestra/contracts';
 import type { VillageState } from '@arbestra/contracts';
 
 export interface Cell {
@@ -164,7 +164,8 @@ export function previewArea(
     if (heights.some((h) => !Number.isFinite(h))) return { ...result, error: 'Terrain en cours de chargement.' };
     if (!isBuildingFootprintFlat(heights))
       return offersLeveling
-        ? { ...result, needsLeveling: true, error: 'Cette emprise doit être nivelée avant de construire.' }
+        ? // Leveled transparently at placement, instant and free (docs/SPEC-TERRAFORMATION-INSTANTANEE.md).
+          levelingRing(state, result, free)
         : {
             ...result,
             error: 'Construction impossible sur une pente. Préparez une surface plane avec la terraformation.',
@@ -183,4 +184,23 @@ export function previewCells(cells: Cell[], canBuild: (cell: Cell) => boolean, p
     error:
       pendingReason ?? (obstacleCells.length ? 'Une case est occupée, hors de portée ou non constructible.' : null),
   };
+}
+
+/** A transparent footprint leveling also rewrites the corners of the ring of
+ * cells around the footprint: the server requires that ring to be buildable,
+ * free of roads (assertBuildableCells). The preview says so before the click. */
+function levelingRing(state: VillageState, result: AreaPreview, free: ReadonlySet<string>): AreaPreview {
+  const inside = new Set(result.cells.map(cellKey));
+  const roads = new Set((state.roadCells ?? []).map(cellKey));
+  const blocked = vertexCells(footprintVertices(result.cells, state.world), state.world).filter(
+    (c) => !inside.has(cellKey(c)) && (!free.has(cellKey(c)) || roads.has(cellKey(c))),
+  );
+  return blocked.length
+    ? {
+        ...result,
+        needsLeveling: true,
+        obstacleCells: blocked,
+        error: 'Le nivellement déborderait sur une route ou un bâtiment voisin : éloignez l’emprise.',
+      }
+    : { ...result, needsLeveling: true };
 }

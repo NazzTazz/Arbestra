@@ -212,7 +212,7 @@ export function ConstructionPanel({
               {status}
             </div>
           )}
-          {area?.needsLeveling && <p>Cliquez sur l’emprise pour préparer le terrain.</p>}
+          {area?.needsLeveling && <p>Le terrain sera nivelé automatiquement, sans coût.</p>}
           {(intentState === 'uncertain' || intentState === 'error') && (
             <div className="intent-buttons">
               <button type="button" disabled={pending} onClick={onRetry}>

@@ -84,7 +84,8 @@ import { BuildingPanel, DepositPanel, WorksitePanel } from './ui/PlayerPanels';
 import { HarvestCancelButton, WoodModeBubble, WoodModeIndicator } from './ui/WoodGestureHud';
 import { CountdownCancelButton, usePendingDemolition } from './ui/PendingDemolition';
 import { usePendingTerrain } from './ui/PendingTerrain';
-import { footprintTerraformVisual, mergeTerraformVisuals } from './ui/terraform-draft';
+import type { TerrainEditGesture } from '@arbestra/contracts';
+import { mergeTerraformVisuals } from './ui/terraform-draft';
 import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
@@ -1401,19 +1402,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       construction.type,
       liveVertexHeight,
     );
-    if (nextArea.needsLeveling && (construction.type === 'university' || construction.type === 'stonemason')) {
-      // Instant and free footprint leveling (docs/SPEC-TERRAFORMATION-INSTANTANEE.md):
-      // the gesture joins the waiting terrain batch; the building is placed afterwards.
-      const heightAt = (x: number, y: number) => terrainRef.current?.terrainVertexHeight(x, y) ?? NaN;
-      try {
-        const visual = footprintTerraformVisual(construction.type, last, quarterTurns, state.world, heightAt);
-        if (pendingTerrain.add({ buildingType: construction.type, anchor: { ...last }, quarterTurns }, visual))
-          pushNotification('Emprise nivelée dans 10 s. Placez le bâtiment ensuite.');
-      } catch {
-        pushNotification('Cette emprise ne peut pas être nivelée ici.', 'warning');
-      }
-      return;
-    }
+    // A sloped campus or stonemason footprint is leveled transparently, then built (Tristan, 31 October).
+    const leveling: TerrainEditGesture | null =
+      nextArea.needsLeveling && (construction.type === 'university' || construction.type === 'stonemason')
+        ? { buildingType: construction.type, anchor: { ...last }, quarterTurns }
+        : null;
     const currentLevel = buildingId
       ? (state.cells.find((cell) => cell.building?.id === buildingId)?.building?.level ?? 1)
       : 1;
@@ -1479,6 +1472,23 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           expectedCosts: nextCosts,
           success: 'Construction lancée',
         };
+    if (leveling) {
+      const level = villageV2Mode && villageV2.villageReady ? villageV2.terrainEdits : null;
+      if (!level) {
+        setError('Synchronisation du village en cours, réessayez dans un instant.');
+        return;
+      }
+      void (async () => {
+        try {
+          await level({ commandId: randomUUID(), gestures: [leveling] });
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : 'Le terrain ne peut pas être nivelé ici.');
+          return;
+        }
+        void executeConstruction(command);
+      })();
+      return;
+    }
     void executeConstruction(command);
   }
   function newMixedRequest(): ExploitationRequest {
