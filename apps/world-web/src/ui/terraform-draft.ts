@@ -1,5 +1,7 @@
 import {
+  fixedBuildingFootprint,
   footprintVertices,
+  vertexLeveling,
   infrastructurePlanSurface,
   infrastructureSidewalkSurface,
   spawnDelta,
@@ -116,4 +118,68 @@ export function localTerraform(
         ? 'Le terrain est déjà à cette hauteur.'
         : null;
   return { visual: { quote, origin: request.anchor, invalidCells, sourceHeights }, error };
+}
+/** One preview for a whole waiting batch: cells and rings joined, a shared
+ * vertex at the height of the later gesture, source heights from the first. */
+export function mergeTerraformVisuals(visuals: readonly TerraformVisual[]): TerraformVisual | null {
+  if (!visuals.length) return null;
+  if (visuals.length === 1) return visuals[0]!;
+  const cellKey = (c: { cellX: number; cellY: number }) => `${c.cellX}:${c.cellY}`;
+  const vertexId = (v: { vertexX: number; vertexY: number }) => `${v.vertexX}:${v.vertexY}`;
+  const cells = new Map<string, { cellX: number; cellY: number }>(),
+    affected = new Map<string, { cellX: number; cellY: number }>(),
+    invalid = new Map<string, { cellX: number; cellY: number }>(),
+    vertices = new Map<string, { vertexX: number; vertexY: number; height: number }>(),
+    sources = new Map<string, { vertexX: number; vertexY: number; height: number }>();
+  for (const visual of visuals) {
+    for (const c of visual.quote.cells) cells.set(cellKey(c), c);
+    for (const c of visual.quote.affectedCells ?? visual.quote.cells) affected.set(cellKey(c), c);
+    for (const c of visual.invalidCells) invalid.set(cellKey(c), c);
+    for (const v of visual.quote.vertices ?? []) vertices.set(vertexId(v), v);
+    for (const v of visual.sourceHeights) if (!sources.has(vertexId(v))) sources.set(vertexId(v), v);
+  }
+  const last = visuals.at(-1)!;
+  return {
+    origin: last.origin,
+    invalidCells: [...invalid.values()],
+    sourceHeights: [...sources.values()],
+    quote: {
+      ...last.quote,
+      cells: [...cells.values()],
+      affectedCells: [...affected.values()],
+      vertices: [...vertices.values()],
+    },
+  };
+}
+/** Preview of an instant footprint leveling (university, stonemason). */
+export function footprintTerraformVisual(
+  buildingType: 'university' | 'stonemason',
+  anchor: { cellX: number; cellY: number },
+  quarterTurns: number,
+  world: VillageState['world'],
+  heightAt: (x: number, y: number) => number,
+): TerraformVisual {
+  const cells = fixedBuildingFootprint(buildingType, anchor, quarterTurns, world);
+  const plan = vertexLeveling(cells, world, heightAt, 1);
+  return {
+    origin: anchor,
+    invalidCells: [],
+    sourceHeights: footprintVertices(plan.affectedCells, world).map((v) => ({
+      ...v,
+      height: heightAt(v.vertexX, v.vertexY),
+    })),
+    quote: {
+      model: 'vertices',
+      height: plan.height,
+      cells,
+      affectedCells: plan.affectedCells,
+      vertices: plan.vertices,
+      workMs: 1,
+      transportMs: 0,
+      durationMs: 1,
+      stoneDebit: 0,
+      stoneCredit: 0,
+      signature: '',
+    },
+  };
 }

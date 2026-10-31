@@ -78,28 +78,29 @@ export function usePendingDemolition({
   return { pending, schedule, cancel };
 }
 
-/** « Annuler », top right, like the clearing gesture's, while the order waits. */
-export function DemolitionCancelButton({
-  pending,
+/** « Annuler N s », like the clearing gesture's, while a delayed order waits.
+ * The App stacks these buttons in one top-right region. */
+export function CountdownCancelButton({
+  deadline,
+  label,
   onCancel,
 }: {
-  pending: PendingDemolition | null;
+  deadline: number | null;
+  label: string;
   onCancel: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!pending || pending.sending) return;
+    if (deadline === null) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);
-  }, [pending]);
-  if (!pending || pending.sending) return null;
-  const seconds = Math.max(1, Math.ceil((pending.deadline - now) / 1000));
+  }, [deadline]);
+  if (deadline === null) return null;
+  const seconds = Math.max(1, Math.ceil((deadline - now) / 1000));
   return (
-    <div className="harvest-cancel" role="region" aria-label="Annuler la démolition">
-      <button type="button" className="harvest-cancel-button" onClick={onCancel}>
-        Annuler <span className="harvest-cancel-count">{seconds} s</span>
-      </button>
-    </div>
+    <button type="button" className="harvest-cancel-button" aria-label={label} onClick={onCancel}>
+      Annuler <span className="harvest-cancel-count">{seconds} s</span>
+    </button>
   );
 }

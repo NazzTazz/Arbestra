@@ -18,6 +18,7 @@ import { ScienceStateSchema } from './science.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
 import { RoadCellSchema, RoadCellsResultSchema } from './road-cells.js';
 import { DemolitionResultSchema } from './demolition.js';
+import { TerrainEditsResultSchema } from './terrain-edits.js';
 import { RoadAnchorSchema, RoadAnchorsResultSchema } from './road-anchors.js';
 import { StarterInstallationSchema } from './spawn-installation.js';
 import { SYNC_V2_SPATIAL_COMPONENTS, SyncV2SpatialChangeSchema } from './sync-v2-spatial.js';
@@ -480,6 +481,22 @@ export const DemolitionConfirmationV2Schema = Type.Object(
   { additionalProperties: false },
 );
 export type DemolitionConfirmationV2 = Static<typeof DemolitionConfirmationV2Schema>;
+/** Instant terrain edits (docs/SPEC-TERRAFORMATION-INSTANTANEE.md): compact
+ * receipt; the heights travel as shared ground effects. */
+export const TerrainEditsConfirmationV2Schema = Type.Object(
+  {
+    protocol: Type.Literal(2),
+    worldId: id,
+    villageId: id,
+    commandId: id,
+    status: Type.Literal('applied'),
+    commandTime: time,
+    result: TerrainEditsResultSchema,
+    effects: Type.Optional(SyncV2BatchSchema),
+  },
+  { additionalProperties: false },
+);
+export type TerrainEditsConfirmationV2 = Static<typeof TerrainEditsConfirmationV2Schema>;
 /** Road anchors gesture (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §5.1):
  * compact receipt (counts, stone and wood debited) and the private effects
  * (`roadAnchors`, `resources`). A replay returns the original result and

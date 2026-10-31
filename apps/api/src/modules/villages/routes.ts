@@ -16,6 +16,9 @@ import {
   DemolitionRequestSchema,
   DemolitionConfirmationV2Schema,
   type DemolitionRequest,
+  TerrainEditsRequestSchema,
+  TerrainEditsConfirmationV2Schema,
+  type TerrainEditsRequest,
   type RoadCellsPreviewRequest,
   type RoadCellsRequest,
   RoadAnchorsConfirmationV2Schema,
@@ -27,6 +30,7 @@ import {
 } from '@arbestra/contracts';
 import { previewRoadCells, roadCellsCommandV2 } from './road-cells.js';
 import { demolitionCommandV2 } from './demolition.js';
+import { terrainEditsCommandV2 } from './terrain-edits.js';
 import { previewRoadAnchors, roadAnchorsCommandV2 } from './road-anchors.js';
 import { receiveExpedition, readExpeditionReceipts } from '../science/expeditions.js';
 import { ExpeditionReceiptSchema, type ExpeditionIntent } from '@arbestra/contracts';
@@ -658,6 +662,34 @@ export async function registerVillageRoutes(
         worldSlug,
         villageId,
         request.body as RoadCellsRequest,
+        Number(request.headers['x-arbestra-generation'] ?? '0'),
+      );
+      observationCommitted(request);
+      return reply.serializer(JSON.stringify).send(confirmation);
+    },
+  );
+  // Instant terrain edits (docs/SPEC-TERRAFORMATION-INSTANTANEE.md): V2-native,
+  // one batch of gestures per command, applied at admission.
+  app.post(
+    '/api/worlds/:worldSlug/villages/:villageId/terrain-edits',
+    {
+      schema: {
+        params: VillageParametersSchema,
+        headers: VillageCommandV2HeadersSchema,
+        body: TerrainEditsRequestSchema,
+        response: { 200: TerrainEditsConfirmationV2Schema },
+      },
+    },
+    async (request, reply) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+      await assertSyncV2Available(db);
+      const confirmation = await terrainEditsCommandV2(
+        db,
+        account.id,
+        worldSlug,
+        villageId,
+        request.body as TerrainEditsRequest,
         Number(request.headers['x-arbestra-generation'] ?? '0'),
       );
       observationCommitted(request);

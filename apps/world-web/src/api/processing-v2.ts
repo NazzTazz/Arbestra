@@ -416,6 +416,11 @@ export function useVillageSyncV2({
     if (!current) throw Error('Synchronisation indisponible.');
     return current.roadCells(request);
   }, []);
+  const terrainEdits = useCallback((request: Parameters<SyncV2Transport['terrainEdits']>[0]) => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    return current.terrainEdits(request);
+  }, []);
   const demolish = useCallback((request: Parameters<SyncV2Transport['demolish']>[0]) => {
     const current = transport.current;
     if (!current) throw Error('Synchronisation indisponible.');
@@ -461,6 +466,7 @@ export function useVillageSyncV2({
     changeWorksite,
     roadCells,
     demolish,
+    terrainEdits,
     previewRoadCells,
     roadAnchors,
     previewRoadAnchors,

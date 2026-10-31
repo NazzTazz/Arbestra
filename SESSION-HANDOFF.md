@@ -1,4 +1,4 @@
-# Reprise — état au 31 octobre 2026
+# Reprise — état au 31 octobre 2026, nuit
 
 Index court : une ligne par chantier, le détail est dans la spec ou l'inventaire liés. Preuves, mesures et incidents des tranches : [archive du 30 octobre](docs/HANDOFF-ARCHIVE-2026-10-30.md) (et [celle du 23](docs/HANDOFF-ARCHIVE-2026-10-23.md)). Changelog des versions alpha : [docs/CHANGELOG-ALPHA.md](docs/CHANGELOG-ALPHA.md).
 
@@ -11,7 +11,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 ## Avant la mise à jour alpha, dans l'ordre (31 octobre)
 
 1. **Démolition immédiate** ([spec §9](docs/SPEC-DEMOLITION.md), [décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md)) : livrée le 31 octobre, **à valider** en recette sur le dev (migration 077 appliquée). Indisponible pendant l'installation (V1).
-2. **Terraformation : reprise de l'UX** (à spécifier avec Tristan), avec 5b, nivellement et terraformation sans `state()` ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md), étape 5).
+2. **Terraformation instantanée et gratuite** ([spec](docs/SPEC-TERRAFORMATION-INSTANTANEE.md), [décisions](docs/DECISIONS-TERRAFORMATION-2026-10-31.md), inclut 5b) : **en cours** — serveur et client écrits, reprise au §7 de la spec.
 3. **Voirie** ([spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : S1 à S4 validés le 30 octobre ; épaisseur de la terre manuelle corrigée sur sol plat, à revoir en recette.
 4. **Préparer la mise à jour** : répéter les conversions 076 et `network-3` sur une copie de l'alpha, puis déployer.
 

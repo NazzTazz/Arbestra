@@ -1,6 +1,4 @@
-import { LevelingPanel } from './ui/LevelingPanel';
 import { TerraformPanel } from './ui/TerraformPanel';
-import type { LevelingRequest } from '@arbestra/contracts';
 import { useObservationPublisher } from './observation';
 import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
 import { useExpeditions } from './ui/use-expeditions';
@@ -84,12 +82,14 @@ import { OracleJournal } from './ui/OracleJournal';
 import { useOracleHint } from './ui/useOracleHint';
 import { BuildingPanel, DepositPanel, WorksitePanel } from './ui/PlayerPanels';
 import { HarvestCancelButton, WoodModeBubble, WoodModeIndicator } from './ui/WoodGestureHud';
-import { DemolitionCancelButton, usePendingDemolition } from './ui/PendingDemolition';
+import { CountdownCancelButton, usePendingDemolition } from './ui/PendingDemolition';
+import { usePendingTerrain } from './ui/PendingTerrain';
+import { footprintTerraformVisual, mergeTerraformVisuals } from './ui/terraform-draft';
+import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
 import { commandScience } from './api/client';
-import { commandLeveling, commandTerraform } from './api/client';
 import { DevDrawer } from './ui/DevDrawer';
 import {
   configuredExploitation,
@@ -161,8 +161,6 @@ function gardenReady(garden: Garden, serverNow: number): number {
 export function App({ starter }: { starter?: StarterController } = {}) {
   const beforeTownHall = starter?.beforeTownHall ?? false;
   const starterActive = Boolean(starter?.active);
-  const [levelingPreview, setLevelingPreview] = useState<import('@arbestra/contracts').LevelingPreview | null>(null);
-  const [leveling, setLeveling] = useState<Omit<LevelingRequest, 'workerCount'> | null>(null);
   const [canonicalState, setState] = useState<VillageState | null>(starter?.state ?? null);
   const [constructionPresentation, setConstructionPresentation] = useState<ConstructionConfirmation | null>(null);
   const constructionPresentationRef = useRef<ConstructionConfirmation | null>(null);
@@ -453,6 +451,18 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onNotice: pushNotification,
     onSettled: () => terrainRef.current?.demolitionClear(),
   });
+  // Instant terrain edits, batched for 10 s after the last gesture (docs/SPEC-TERRAFORMATION-INSTANTANEE.md).
+  const pendingTerrain = usePendingTerrain({
+    edit: villageV2Mode && villageV2.villageReady ? villageV2.terrainEdits : null,
+    villageKey: state ? `${state.world.id}:${state.village.id}` : '',
+    onNotice: pushNotification,
+  });
+  const [terrainDraft, setTerrainDraft] = useState<TerraformVisual | null>(null);
+  useEffect(() => {
+    terrainRef.current?.terraformPreview(
+      mergeTerraformVisuals([...(pendingTerrain.batch?.visuals ?? []), ...(terrainDraft ? [terrainDraft] : [])]),
+    );
+  }, [pendingTerrain.batch, terrainDraft]);
   const roadAnchorsApi = useMemo(
     () =>
       villageV2Mode && villageV2.villageReady
@@ -1215,7 +1225,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (!initialReady || leveling) return;
+      if (!initialReady) return;
       if (
         event.repeat ||
         event.ctrlKey ||
@@ -1334,7 +1344,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
 
   function handleAreaGesture(first: Cell, last: Cell, commit: boolean) {
     if (
-      leveling ||
       paletteCollapsed ||
       modeRef.current !== 'construction' ||
       terrainView !== 'village' ||
@@ -1389,7 +1398,16 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       construction.type,
     );
     if (nextArea.needsLeveling && (construction.type === 'university' || construction.type === 'stonemason')) {
-      setLeveling({ buildingType: construction.type, anchor: { ...last }, quarterTurns });
+      // Instant and free footprint leveling (docs/SPEC-TERRAFORMATION-INSTANTANEE.md):
+      // the gesture joins the waiting terrain batch; the building is placed afterwards.
+      const heightAt = (x: number, y: number) => terrainRef.current?.terrainVertexHeight(x, y) ?? NaN;
+      try {
+        const visual = footprintTerraformVisual(construction.type, last, quarterTurns, state.world, heightAt);
+        if (pendingTerrain.add({ buildingType: construction.type, anchor: { ...last }, quarterTurns }, visual))
+          pushNotification('Emprise nivelée dans 10 s. Placez le bâtiment ensuite.');
+      } catch {
+        pushNotification('Cette emprise ne peut pas être nivelée ici.', 'warning');
+      }
       return;
     }
     const currentLevel = buildingId
@@ -2084,18 +2102,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                   terrainView === 'village'
             }
             preview={
-              !paletteCollapsed && worldMode === 'construction'
-                ? starterActive
-                  ? starter!.preview
-                  : leveling && levelingPreview
-                    ? {
-                        cells: levelingPreview.quote.affectedCells ?? levelingPreview.quote.cells,
-                        count: (levelingPreview.quote.affectedCells ?? levelingPreview.quote.cells).length,
-                        error: null,
-                        needsLeveling: true,
-                      }
-                    : area
-                : null
+              !paletteCollapsed && worldMode === 'construction' ? (starterActive ? starter!.preview : area) : null
             }
             previewInvalid={starterActive ? Boolean(starter!.preview.error) : Boolean(selectionError)}
             onAreaGesture={
@@ -2167,8 +2174,23 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef} />
         {woodToolActive && <WoodModeIndicator mode={exploitationSettings.woodMode} />}
         <WoodModeBubble bubble={woodModeBubble} />
-        {terrainView === 'village' && (
-          <DemolitionCancelButton pending={pendingDemolition.pending} onCancel={pendingDemolition.cancel} />
+        {terrainView === 'village' && (pendingDemolition.pending || pendingTerrain.batch) && (
+          <div className="harvest-cancel" role="region" aria-label="Ordres en attente">
+            <CountdownCancelButton
+              deadline={
+                pendingDemolition.pending && !pendingDemolition.pending.sending
+                  ? pendingDemolition.pending.deadline
+                  : null
+              }
+              label="Annuler la démolition"
+              onCancel={pendingDemolition.cancel}
+            />
+            <CountdownCancelButton
+              deadline={pendingTerrain.batch && !pendingTerrain.batch.sending ? pendingTerrain.batch.deadline : null}
+              label="Annuler la terraformation"
+              onCancel={pendingTerrain.cancel}
+            />
+          </div>
         )}
         {worldMode === 'exploitation' && terrainView === 'village' && (
           <HarvestCancelButton
@@ -2675,42 +2697,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           </div>
         ) : null}
         {worldMode === 'terraform' && terrainView === 'village' && !arrivalActive && !beforeTownHall && !showDev && (
-          <TerraformPanel
-            state={state}
-            scene={terrainRef}
-            onSnapshot={applySnapshot}
-            submit={(command) => {
-              const v2 = villageV2Ref.current;
-              return v2.ready && v2.terraform
-                ? v2.terraform(command)
-                : commandTerraform(state.world.slug, state.village.id, command);
-            }}
-            onStarted={() => pushNotification('Chantier de terraformation lancé.')}
-          />
-        )}
-        {leveling && (
-          <LevelingPanel
-            slug={state.world.slug}
-            villageId={state.village.id}
-            request={leveling}
-            onPreview={setLevelingPreview}
-            onSnapshot={applySnapshot}
-            submit={async (command) => {
-              const v2 = villageV2Ref.current;
-              if (!v2.ready || !v2.level) return commandLeveling(state.world.slug, state.village.id, command);
-              await v2.level(command);
-            }}
-            onClose={() => {
-              setLeveling(null);
-              setLevelingPreview(null);
-            }}
-            onStarted={() => {
-              setLeveling(null);
-              setLevelingPreview(null);
-              clearPreview();
-              pushNotification('Chantier de nivellement lancé. Vous pourrez construire à sa fin.');
-            }}
-          />
+          <TerraformPanel state={state} scene={terrainRef} onGesture={pendingTerrain.add} onDraft={setTerrainDraft} />
         )}
         {workshop && (
           <section className="factory-workshop" aria-label="Atelier">
