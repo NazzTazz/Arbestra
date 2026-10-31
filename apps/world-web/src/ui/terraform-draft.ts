@@ -102,8 +102,13 @@ export function localTerraform(
   const quote = terraformQuote(request, state.world, heightAt, travel);
   const free = new Set(state.cells.filter((c) => c.canBuild).map((c) => `${c.cellX}:${c.cellY}`));
   const protectedCells = protectedInfrastructure(state);
+  // Road cells (S1) are refused by the server like the legacy plan's roads.
+  const roadCells = new Set((state.roadCells ?? []).map((c) => `${c.cellX}:${c.cellY}`));
   const invalidCells = quote.affectedCells!.filter(
-    (c) => !free.has(`${c.cellX}:${c.cellY}`) || protectedCells.has(`${c.cellX}:${c.cellY}`),
+    (c) =>
+      !free.has(`${c.cellX}:${c.cellY}`) ||
+      protectedCells.has(`${c.cellX}:${c.cellY}`) ||
+      roadCells.has(`${c.cellX}:${c.cellY}`),
   );
   const sourceHeights = footprintVertices(quote.affectedCells!, state.world).map((v) => ({
     ...v,

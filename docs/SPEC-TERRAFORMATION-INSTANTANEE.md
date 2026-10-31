@@ -1,6 +1,6 @@
 # Terraformation instantanée — 31 octobre 2026
 
-Statut : **en cours** (reprise : §7). Remplace, pour les nouveaux gestes, le chantier de nivellement de [SPEC-TERRAFORMATION-LIBRE.md](SPEC-TERRAFORMATION-LIBRE.md) et de [SPEC-NIVELLEMENT-PLACEMENT.md](SPEC-NIVELLEMENT-PLACEMENT.md). Décisions : [DECISIONS-TERRAFORMATION-2026-10-31.md](DECISIONS-TERRAFORMATION-2026-10-31.md). Statuts : **validé** (Tristan), **proposé** (recommandation dans le cadre validé), **hors périmètre**.
+Statut : **à valider** par Tristan en recette sur le dev (§8). Remplace, pour les nouveaux gestes, le chantier de nivellement de [SPEC-TERRAFORMATION-LIBRE.md](SPEC-TERRAFORMATION-LIBRE.md) et de [SPEC-NIVELLEMENT-PLACEMENT.md](SPEC-NIVELLEMENT-PLACEMENT.md). Décisions : [DECISIONS-TERRAFORMATION-2026-10-31.md](DECISIONS-TERRAFORMATION-2026-10-31.md). Statuts : **validé** (Tristan), **proposé** (recommandation dans le cadre validé), **hors périmètre**.
 
 ## 1. Validé
 
@@ -62,3 +62,10 @@ Constaté dans le navigateur :
 3. ~~Modèle du monde alpha~~ : **sommets partagés** (Tristan, 31 octobre), rien à convertir. Recette en dev : sur `recette-sommets`, ou après conversion de `rc1-dev` (`activateTerrainVertices`, sauvegarde `pg_dump` avant) pour la faire sur Bressuire comme sur l'alpha.
 4. Le refus serveur n'est montré que par une notification brève : envisager de garder l'aperçu en rouge.
 5. Commit final, handoff « à valider ».
+
+## 8. Recette préparée le 31 octobre (midi)
+
+- `rc1-dev` converti au modèle à sommets partagés, comme l'alpha (`activateTerrainVertices` : audit sans obstacle, 186 sommets, écart maximal des fondations 5·10⁻⁷). Sauvegarde préalable de la base de dev : `../arbestra-backups/dev-2026-10-31-before-rc1-vertices.dump` (`pg_dump -Fc`).
+- Défaut trouvé en navigateur et corrigé : la validation locale ignorait les cases de route (elle ne lisait que l'ancien plan, vidé par 076) ; un trait dont le raccord touche une route partait au serveur et revenait refusé (`INFRASTRUCTURE_OCCUPIED`). Régression `ui/terraform-draft.test.ts` (4 tests, rouge sans le correctif), qui couvre aussi la fusion des aperçus et l'aperçu d'emprise.
+- Navigateur, Bressuire : trait refusé localement près d'une route (message affiché, rien envoyé) ; trait accepté sur l'herbe : aperçu, « Annuler 9 s », envoi au terme, réponse `applied` (1 geste, 6 sommets), relief visible avant et après rechargement.
+- Non vérifié en navigateur : nivellement d'emprise (université, tailleur de pierre sur une pente) suivi du placement ; mesure du temps de commande.
