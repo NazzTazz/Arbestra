@@ -2,7 +2,7 @@ import { jsonDataEqual, type VillageState } from '@arbestra/contracts';
 
 export type TravelDerivationState = Pick<
   VillageState,
-  'world' | 'travelRoutes' | 'infrastructure' | 'cells' | 'region'
+  'world' | 'travelRoutes' | 'infrastructure' | 'cells' | 'region' | 'roadCells'
 >;
 
 /** Inputs of the scene's travel derivation (accesses, barriers, braziers,
