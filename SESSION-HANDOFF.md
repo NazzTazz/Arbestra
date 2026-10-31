@@ -6,7 +6,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 - Branche `wip/v2-commandes-bornees`, poussée, `main` à jour. **Alpha** : `alpha-2026.10.31.1` (31 octobre, `56219ad`) : voirie à la case, démolition, terraformation instantanée, migrations 070 à 078 ; conversion 076 : 7 villages, 359 cases de route, 1 case refusée (GemussGarten, terrain), braseros manuels supprimés 100 sur 121 (Catmark 89 sur 90), 21 déplacés ou gardés ; bilan dans `road_conversion_backups`. **Staging** : `staging-2026.10.30.2` ; village Test forgé à 4 509 cohortes, à garder.
 - **Prochaine étape** : refonte des réseaux et du pathfinding ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md)), puis le backlog ci-dessous.
-- **Dev local** : API lancée avec `JOURNEY_ENABLED=1` (journal des parcours actif) ; migrations jusqu'à 076 appliquées (routes de Bressuire, Clairière, Les Collines converties ; Bressuire garde 1 pierre rendue par la répétition, avant la décision « on ne rend rien »).
+- **Dev local** : API lancée avec `JOURNEY_ENABLED=1` (journal des parcours actif) ; migrations jusqu'à 078 ; `rc1-dev` converti en sommets partagés le 31 octobre comme l'alpha (sauvegarde préalable dans `../arbestra-backups/`).
 
 ## Backlog (après l'alpha du 31 octobre)
 
