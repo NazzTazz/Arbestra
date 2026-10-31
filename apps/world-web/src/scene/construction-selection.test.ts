@@ -59,6 +59,20 @@ describe('construction selection', () => {
     vertexHeights.fill(0.25);
     expect(previewArea(state, range, true, undefined, 'university').error).toBeNull();
   });
+  it('reads the live ground once an instant edit leveled the footprint, not the stale snapshot', () => {
+    const range = { first: at(10, 10), last: at(14, 15) },
+      cells = rectangleCells(range, world, true).cells;
+    // The snapshot still has the slope; the scene's ground is flat after the edit.
+    const vertexHeights = Array(42).fill(0.25);
+    vertexHeights[14] = 0.4;
+    const state = {
+      world,
+      cells: cells.map((c) => ({ ...c, canBuild: true })),
+      region: { originCellX: 10, originCellY: 10, width: 5, height: 6, elevations: Array(30).fill(25), vertexHeights },
+    } as VillageState;
+    expect(previewArea(state, range, true, undefined, 'university', () => 0.3).error).toBeNull();
+    expect(previewArea(state, range, true, undefined, 'university', () => NaN).needsLeveling).toBe(true);
+  });
   it('requires leveling for a gently sloping university even when every cell is individually buildable', () => {
     const cells = rectangleCells({ first: at(2046, 1022), last: at(2, 3) }, world, true).cells;
     const state = {

@@ -948,6 +948,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     : null;
   const extensionId = context?.action === 'extend' ? context.buildingId : undefined;
   const spatial = definition?.progressionMode === 'spatial';
+  // The scene's ground follows instant terrain edits; the snapshot's region does not.
+  const liveVertexHeight = (x: number, y: number) => terrainRef.current?.terrainVertexHeight(x, y) ?? NaN;
   const area = useMemo(
     () =>
       state && selection && context?.action !== 'upgrade'
@@ -961,6 +963,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             spatial || construction?.type === 'university' || construction?.type === 'stonemason',
             extensionId,
             construction?.type ?? undefined,
+            liveVertexHeight,
           )
         : null,
     [state, selection, spatial, extensionId, construction?.type, context?.action, quarterTurns],
@@ -1396,6 +1399,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       Boolean(spatial || construction.type === 'university' || construction.type === 'stonemason'),
       buildingId,
       construction.type,
+      liveVertexHeight,
     );
     if (nextArea.needsLeveling && (construction.type === 'university' || construction.type === 'stonemason')) {
       // Instant and free footprint leveling (docs/SPEC-TERRAFORMATION-INSTANTANEE.md):

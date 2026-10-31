@@ -112,6 +112,9 @@ export function previewArea(
   spatial: boolean,
   extensionBuildingId?: string,
   buildingType?: string,
+  /** Current vertex heights (the scene's ground, kept up to date by the ground
+   * stream); `state.region` is a snapshot that an instant terrain edit does not refresh. */
+  vertexHeight?: (x: number, y: number) => number,
 ): AreaPreview {
   const preview = rectangleCells(range, state.world, spatial);
   if (preview.error) return preview;
@@ -143,6 +146,8 @@ export function previewArea(
   if (!result.error && (offersLeveling || (buildingType && buildingType !== 'garden' && state.region.vertexHeights))) {
     const heights = state.region.vertexHeights
       ? footprintVertices(result.cells, state.world).map((v) => {
+          const live = vertexHeight?.(v.vertexX, v.vertexY);
+          if (live !== undefined && Number.isFinite(live)) return live * 100;
           const x = normalize(v.vertexX - state.region.originCellX, state.world.widthCells),
             y = normalize(v.vertexY - state.region.originCellY, state.world.heightCells);
           return x <= state.region.width && y <= state.region.height
