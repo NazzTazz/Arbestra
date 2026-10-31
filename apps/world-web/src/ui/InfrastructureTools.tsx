@@ -44,8 +44,8 @@ export interface RoadAnchorsApi {
   command: (request: RoadAnchorsRequest) => Promise<RoadAnchorsResult>;
   preview: (body: RoadAnchorsPreviewRequest) => Promise<RoadAnchorsPreview>;
 }
+// Removal is the Détruire tool's (Tristan, 31 October): no « Pas de route » here.
 const materials = [
-  ['none', 'Pas de route'],
   ['earth', 'Terre'],
   ['stone-1', 'Petite Pierre'],
   ['stone-2', 'Grands Pavés'],
@@ -359,30 +359,24 @@ export function InfrastructureTools({
                 className="showroom-model"
                 key={code}
                 aria-pressed={code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code}
-                aria-expanded={code === 'none' ? undefined : menu?.code === code}
+                aria-expanded={menu?.code === code}
                 aria-controls={menu?.code === code ? menuId : undefined}
                 onClick={(e) => {
-                  if (code === 'none') {
-                    setMenu(null);
-                    chooseStyle('none', false);
-                  } else {
-                    const anchor = e.currentTarget;
-                    setMenu((current) => (current?.code === code ? null : { code, anchor }));
-                  }
+                  const anchor = e.currentTarget;
+                  setMenu((current) => (current?.code === code ? null : { code, anchor }));
                 }}
               >
                 <strong>{name}</strong>
                 <InfrastructureThumbnail code={code === 'earth' && surface === 'rubble' ? 'rubble' : code} />
                 <span className="resource-costs">
-                  {code === 'none'
-                    ? 'Retirer'
-                    : (code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code)
-                      ? costLabel(surface, sidewalks) + (sidewalks ? ' · trottoirs' : '')
-                      : costLabel(code, false)}
+                  {(code === 'earth' ? surface === 'earth' || surface === 'rubble' : surface === code)
+                    ? costLabel(surface, sidewalks) + (sidewalks ? ' · trottoirs' : '')
+                    : costLabel(code, false)}
                 </span>
               </button>
             ))
-          : (['place', 'remove'] as const).map((mode) => (
+          : // Braziers are removed with the Détruire tool (Tristan, 31 October).
+            (['place'] as const).map((mode) => (
               <button
                 type="button"
                 className="showroom-model"

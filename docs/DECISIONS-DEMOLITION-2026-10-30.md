@@ -29,3 +29,9 @@ Côté client (branche `refactor/hud-infrastructure`) : l'avertissement du point
 - Les dormeurs d'une maison démolie sont relogés immédiatement par la réallocation des lits existante.
 - Inchangés : aucun remboursement, avertissement des ressources stockées perdues (point 3), braseros automatiques supprimés par le balayage (point 5), seules les parcelles touchées d'un jardin fusionné (point 6), hôtel de ville jamais démoli.
 - Conséquence technique : ni table de chantier, ni tâche du worker, ni route d'annulation, ni entité V2 nouvelle ; une commande V2 idempotente qui publie les suppressions.
+
+## Ajustements du 31 octobre (Tristan, validés)
+
+- Délai d'annulation de **10 s** ; affichage réduit à un bouton **Annuler** comme pour le défrichage.
+- L'ordre en attente persiste à travers les changements de mode du HUD.
+- Les outils « Pas de route » et « Retirer » (éclairage) sont retirés de la palette Infrastructure : Détruire les remplace.

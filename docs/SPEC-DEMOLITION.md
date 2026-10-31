@@ -176,6 +176,12 @@ Tests métier (refus, idempotence, rejeu concurrent, effets par catégorie, relo
 - Navigateur (dev, Bressuire, chargement à froid) : balayage de 3 cases de route et 2 braseros, maison isolée en rouge ; décompte puis **Annuler** (rien n'est démoli après 17 s) ; **Démolir** au terme : maison, cases et brasero manuel disparus, capacité 1 000 → 995, aucune erreur console. Un brasero reste visible au coin de l'ancienne route : par lecture, celui de la route automatique (trajets) qui passe dessous, hors périmètre ; à confirmer en recette.
 - Non mesuré : coût par image (la désignation ne touche aucun crochet par image ; teinte reconstruite au plus une fois par image comme avant).
 
+### 9.7 Ajustements du 31 octobre (Tristan, validés)
+
+- **Démolir** confie la désignation à un ordre en attente tenu par l'App (`ui/PendingDemolition.tsx`) : délai de **10 s**, un simple bouton **Annuler N s** en haut à droite comme pour le défrichage, sans décompte dans la fiche. L'ordre et ses marques rouges survivent à un changement de mode du HUD ou d'outil ; un changement de village l'abandonne sans l'envoyer. Une seule désignation en attente à la fois (l'outil est figé pendant le délai).
+- Les retraits de la palette Infrastructure (« Pas de route », Éclairage → « Retirer ») sont supprimés : **Détruire** est l'unique outil de retrait. Les commandes serveur de retrait restent, réutilisées par la démolition.
+- Navigateur (dev, Bressuire) : palette sans les deux boutons ; ordre lancé puis passage en Vue libre, puis en Population : bouton visible, marques conservées, envoi au terme en Population (reçu en base, marques effacées) ; **Annuler** dans le même mode et après passage en Population : aucun envoi (journal des requêtes de la page et absence de reçu). Un essai d'annulation fait juste après un redémarrage de l'API de dev est parti quand même ; non reproduit ensuite en deux essais, cause non établie.
+
 ## Hors périmètre
 
 Remboursement, démolition de l'hôtel de ville, routes automatiques, déplacement de bâtiment, démolition par d'autres joueurs ou militaire.

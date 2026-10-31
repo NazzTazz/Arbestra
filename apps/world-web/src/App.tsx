@@ -84,6 +84,7 @@ import { OracleJournal } from './ui/OracleJournal';
 import { useOracleHint } from './ui/useOracleHint';
 import { BuildingPanel, DepositPanel, WorksitePanel } from './ui/PlayerPanels';
 import { HarvestCancelButton, WoodModeBubble, WoodModeIndicator } from './ui/WoodGestureHud';
+import { DemolitionCancelButton, usePendingDemolition } from './ui/PendingDemolition';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
@@ -445,6 +446,13 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   );
   // Demolition is V2-native too (docs/SPEC-DEMOLITION.md §9).
   const demolish = villageV2Mode && villageV2.villageReady ? villageV2.demolish : null;
+  // The waiting order survives mode and tool changes, not a change of village.
+  const pendingDemolition = usePendingDemolition({
+    demolish,
+    villageKey: state ? `${state.world.id}:${state.village.id}` : '',
+    onNotice: pushNotification,
+    onSettled: () => terrainRef.current?.demolitionClear(),
+  });
   const roadAnchorsApi = useMemo(
     () =>
       villageV2Mode && villageV2.villageReady
@@ -2159,6 +2167,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef} />
         {woodToolActive && <WoodModeIndicator mode={exploitationSettings.woodMode} />}
         <WoodModeBubble bubble={woodModeBubble} />
+        {terrainView === 'village' && (
+          <DemolitionCancelButton pending={pendingDemolition.pending} onCancel={pendingDemolition.cancel} />
+        )}
         {worldMode === 'exploitation' && terrainView === 'village' && (
           <HarvestCancelButton
             gesture={harvest.lastGesture}
@@ -2624,8 +2635,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 <DemolitionTool
                   state={sceneState ?? state}
                   scene={terrainRef}
-                  demolish={demolish}
-                  onNotice={pushNotification}
+                  ready={Boolean(demolish)}
+                  pending={Boolean(pendingDemolition.pending)}
+                  onSchedule={pendingDemolition.schedule}
                   active={active && worldMode === 'construction' && !showDev && !workshop && !arrivalActive}
                 />
               )}
