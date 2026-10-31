@@ -11,7 +11,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 ## Avant la mise à jour alpha, dans l'ordre (31 octobre)
 
 1. **Démolition immédiate** ([spec §9](docs/SPEC-DEMOLITION.md), [décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md)) : livrée le 31 octobre, **à valider** en recette sur le dev (migration 077 appliquée). Indisponible pendant l'installation (V1).
-2. **Terraformation instantanée et gratuite** ([spec](docs/SPEC-TERRAFORMATION-INSTANTANEE.md), [décisions](docs/DECISIONS-TERRAFORMATION-2026-10-31.md), inclut 5b) : **à valider** en recette sur le dev (Bressuire, `rc1-dev` converti en sommets partagés).
+2. **Terraformation instantanée et gratuite** ([spec](docs/SPEC-TERRAFORMATION-INSTANTANEE.md), [décisions](docs/DECISIONS-TERRAFORMATION-2026-10-31.md), inclut 5b) : terraformation libre et nivellement transparent recettés par Tristan le 31 octobre ; lenteur de la commande (contrôle d'accès, trajets) laissée en attente de la refonte des trajets ([dette](docs/DETTE-TECHNIQUE.md)).
 3. **Voirie** ([spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : S1 à S4 validés le 30 octobre ; épaisseur de la terre manuelle corrigée sur sol plat, à revoir en recette.
 4. **Préparer la mise à jour** : répéter les conversions 076 et `network-3` sur une copie de l'alpha, puis déployer.
 
@@ -19,7 +19,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 - **Voirie** : S5 (factory : buissons, tonneau, modèles de placette 2 × 2 et de place 3 × 3 avec leurs ancrages ; Tristan modélise les éléments dans Blender), S6 (achat des places dans le HUD), un accessoire manuel peut remplacer un brasero automatique (souhait validé), raccord des routes de terre en pente ([dette](docs/DETTE-TECHNIQUE.md)).
 - **Synchro V2** ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) : installation en V2, NOC sur les lecteurs V2, lot I (retrait de la V1, 426, migration de nettoyage ; voirie hors routes à passer en V2 avant), pagination des snapshots de trafic et spatial, couverture de connaissance (1 024 ancres). Proposé, non tranché : tri des autres appels à `state()` (construction, marché, présentation).
-- **Tranche trajets** (validée, à spécifier) : le coût ×30 des jardins pousse des trajets vers la recherche fine complète (2,3 à 6,2 s, 32 000 à 37 000 nœuds sur Bressuire, cases 216,213 et 229,220).
+- **Trajets : refonte de la méthode** (Tristan y réfléchit, 31 octobre ; plus de correctif ponctuel d'ici là) : constats dans la [dette](docs/DETTE-TECHNIQUE.md) ; le coût ×30 des jardins pousse aussi des trajets vers la recherche fine complète (2,3 à 6,2 s sur Bressuire).
 - **Sortir le worker du processus de l'API** (décision du 29 octobre) : service à part, sans pool. Idée : jauge de retard par village façon RCI.
 - **Observabilité des parcours** ([conception](docs/DESIGN-OBSERVABILITE-PARCOURS.md)) : A et C validés ; restent B (présence par minute, prochain numéro de migration libre après 076) et D (événements client) ; purge des `sessions` expirées, flux V2 dans la télémétrie du NOC. Activation sur alpha : feu vert de Tristan.
 - **Reçus de récolte par le flux V2** : le « +500 » dès que le worker a traité l'intention, sans la relève à la seconde de `readHarvestReceipts`.
