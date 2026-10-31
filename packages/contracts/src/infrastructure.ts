@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 import type { VillageState } from './villages.js';
 import { type BuildingAccess, type BuildingAccessState } from './building-access.js';

@@ -1,11 +1,8 @@
-import { Type, FormatRegistry, type Static } from '@sinclair/typebox';
+import './formats.js';
+import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { VillageStateSchema, type VillageState } from './villages.js';
 
-if (!FormatRegistry.Has('uuid'))
-  FormatRegistry.Set('uuid', (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
-if (!FormatRegistry.Has('date-time'))
-  FormatRegistry.Set('date-time', (value) => /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)));
 export const villageSnapshotIsValid = (value: unknown): value is VillageState => Value.Check(VillageStateSchema, value);
 
 const Path = Type.Array(Type.String());

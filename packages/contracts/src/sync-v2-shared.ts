@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type } from '@sinclair/typebox';
 import { ScienceStateSchema } from './science.js';
 import { VillageStateSchema } from './villages.js';

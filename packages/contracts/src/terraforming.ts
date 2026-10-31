@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { LevelingQuoteSchema, LevelingPreviewSchema, type LevelingQuote } from './leveling.js';
 import { footprintVertices, vertexLeveling } from './terrain-vertices.js';

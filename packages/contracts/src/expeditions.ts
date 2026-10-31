@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 const point = Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) });
 export const ExpeditionIntentSchema = Type.Object({

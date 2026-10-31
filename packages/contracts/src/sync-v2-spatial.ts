@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type } from '@sinclair/typebox';
 import { NaturalFeatureSchema } from './villages.js';
 import { TerrainChunkSchema, TerrainBuildingExteriorSchema } from './terrain.js';

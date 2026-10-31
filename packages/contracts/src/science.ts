@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 
 export const ScienceDisciplineSchema = Type.Union([

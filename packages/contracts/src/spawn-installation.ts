@@ -1,3 +1,4 @@
+import './formats.js';
 import { transformFootprint, type SpatialDimensions } from './building-footprint.js';
 import { RC1_WORLD } from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';

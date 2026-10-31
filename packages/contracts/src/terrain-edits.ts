@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 
 /** Instant terrain edits (docs/SPEC-TERRAFORMATION-INSTANTANEE.md): one batch

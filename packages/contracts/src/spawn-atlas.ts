@@ -1,3 +1,4 @@
+import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { spawnDelta, type SpawnPoint, type SpawnSurface } from './spawn-map.js';
 

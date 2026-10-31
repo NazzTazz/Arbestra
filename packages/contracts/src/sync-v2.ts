@@ -1,4 +1,5 @@
-import { Type, FormatRegistry, type Static } from '@sinclair/typebox';
+import './formats.js';
+import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { ProcessingOrderSchema, ProcessingCommandSchema, type ProcessingCommand } from './processing.js';
 import {
@@ -29,11 +30,6 @@ import {
   SYNC_V2_TRAFFIC_COMPONENTS,
   SyncV2SharedChangeSchema,
 } from './sync-v2-shared.js';
-
-if (!FormatRegistry.Has('uuid'))
-  FormatRegistry.Set('uuid', (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
-if (!FormatRegistry.Has('date-time'))
-  FormatRegistry.Set('date-time', (value) => /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)));
 
 // Foundation only: a stream must not be activated until its entire component
 // registry and every writer are covered. These schemas do not negotiate V2.

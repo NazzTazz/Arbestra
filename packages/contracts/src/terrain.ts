@@ -1,3 +1,4 @@
+import './formats.js';
 import { Rc1GroundSchema } from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { NaturalFeatureSchema } from './villages.js';
