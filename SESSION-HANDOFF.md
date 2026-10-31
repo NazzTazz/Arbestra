@@ -4,18 +4,11 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## Environnements
 
-- Branche `wip/v2-commandes-bornees`, poussée. **Alpha** : `alpha-2026.10.29.1` (bois par arbre, migrations jusqu'à 069). **Staging** : `staging-2026.10.30.2` (`d7eb743` : pagination du snapshot V2, énergie et repos par le worker, migrations 070-071), validé par Tristan ; village Test forgé à 4 509 cohortes, à garder.
-- **Prochain alpha** : une seule grosse mise à jour (décision de Tristan du 31 octobre) : démolition des bâtiments, nouvelle voirie (S1-S4), terraformation reprise. Elle portera les migrations 070 à 076 (075 n'existe pas : migrations strictement ordonnées) et deux conversions à répéter sur une copie de l'alpha : routes en cases (076, comptage `apps/api/src/road-conversion-count.ts`, lecture seule, accord de Tristan requis) et réseau de trajets `network-3` (recalcul une fois par village).
+- Branche `wip/v2-commandes-bornees`, poussée, `main` à jour. **Alpha** : `alpha-2026.10.31.1` (31 octobre, `56219ad`) : voirie à la case, démolition, terraformation instantanée, migrations 070 à 078 ; conversion 076 : 7 villages, 359 cases de route, 1 case refusée (GemussGarten, terrain), braseros manuels supprimés 100 sur 121 (Catmark 89 sur 90), 21 déplacés ou gardés ; bilan dans `road_conversion_backups`. **Staging** : `staging-2026.10.30.2` ; village Test forgé à 4 509 cohortes, à garder.
+- **Prochaine étape** : refonte des réseaux et du pathfinding ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md)), puis le backlog ci-dessous.
 - **Dev local** : API lancée avec `JOURNEY_ENABLED=1` (journal des parcours actif) ; migrations jusqu'à 076 appliquées (routes de Bressuire, Clairière, Les Collines converties ; Bressuire garde 1 pierre rendue par la répétition, avant la décision « on ne rend rien »).
 
-## Avant la mise à jour alpha, dans l'ordre (31 octobre)
-
-1. **Démolition immédiate** ([spec §9](docs/SPEC-DEMOLITION.md), [décisions](docs/DECISIONS-DEMOLITION-2026-10-30.md)) : livrée le 31 octobre, **à valider** en recette sur le dev (migration 077 appliquée). Indisponible pendant l'installation (V1).
-2. **Terraformation instantanée et gratuite** ([spec](docs/SPEC-TERRAFORMATION-INSTANTANEE.md), [décisions](docs/DECISIONS-TERRAFORMATION-2026-10-31.md), inclut 5b) : terraformation libre et nivellement transparent recettés par Tristan le 31 octobre ; lenteur de la commande (contrôle d'accès, trajets) laissée en attente de la refonte des trajets ([dette](docs/DETTE-TECHNIQUE.md)).
-3. **Voirie** ([spec](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : S1 à S4 validés le 30 octobre ; épaisseur de la terre manuelle corrigée sur sol plat, à revoir en recette.
-4. **Préparer la mise à jour** : répéter les conversions 076 et `network-3` sur une copie de l'alpha, puis déployer.
-
-## Après la mise à jour (backlog)
+## Backlog (après l'alpha du 31 octobre)
 
 - **Voirie** : S5 (factory : buissons, tonneau, modèles de placette 2 × 2 et de place 3 × 3 avec leurs ancrages ; Tristan modélise les éléments dans Blender), S6 (achat des places dans le HUD), un accessoire manuel peut remplacer un brasero automatique (souhait validé), raccord des routes de terre en pente ([dette](docs/DETTE-TECHNIQUE.md)).
 - **Synchro V2** ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) : installation en V2, NOC sur les lecteurs V2, lot I (retrait de la V1, 426, migration de nettoyage ; voirie hors routes à passer en V2 avant), pagination des snapshots de trafic et spatial, couverture de connaissance (1 024 ancres). Proposé, non tranché : tri des autres appels à `state()` (construction, marché, présentation).
