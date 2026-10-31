@@ -169,10 +169,6 @@ describe('road cell tiles', () => {
         cell(31, 42, 'stone-1', true),
       ];
       tiles.update(cells, space, ground, options);
-      // Rubble (like earth) wins the depth test against the terrain under its plane;
-      // stone keeps its geometric clearance (alpha, 1 November).
-      expect(scene.getMaterialByName('road-cell-rubble')?.zOffset).toBeLessThan(0);
-      expect(scene.getMaterialByName('road-cell-stone-1')?.zOffset).toBe(0);
       const meshes = new Set(tiles.meshes),
         built = tiles.stats.tilesBuilt,
         before = { ...tiles.stats };

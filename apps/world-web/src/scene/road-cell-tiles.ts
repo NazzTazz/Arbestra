@@ -316,13 +316,6 @@ export class RoadCellTiles {
       material = new StandardMaterial(`road-cell-${code}`, this.#scene);
       material.diffuseColor = Color3.FromHexString(COLOURS[code]);
       material.specularColor = Color3.Black();
-      // Earth and rubble lie only 1.5 cm above their tile plane (roadCellClearance):
-      // a depth offset keeps the terrain between the plane's samples from
-      // showing through at a distance, without raising the road (alpha, 1 November).
-      if (code === 'earth' || code === 'rubble') {
-        material.zOffset = -2;
-        material.zOffsetUnits = -4;
-      }
       this.#materials.set(code, material);
     }
     return material;
