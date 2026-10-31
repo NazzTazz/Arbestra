@@ -2,7 +2,19 @@
 
 Résumé orienté joueur et testeur de chaque version `alpha-*` déployée, de la plus récente à la plus ancienne. Chaque version couvre les commits depuis le tag alpha précédent ; la première (alpha-2026.10.16.1) regroupe l'historique antérieur, soit le socle de l'alpha.
 
-Généré le 30 octobre 2026.
+Généré le 31 octobre 2026.
+
+## alpha-2026.10.31.1 — 31 octobre 2026
+
+- **Nouvelle voirie à la case** : les routes se posent case par case (terre, petite pierre, grands pavés, trottoirs), les coudes et carrefours se forment seuls, et les routes attirent les trajets des habitants. Les braseros s'accrochent aux coins des routes ; un brasero automatique apparaît aux coins rentrants.
+- **Vos anciennes routes sont converties** en cases de route au déploiement, avec leurs braseros. La réserve de pierre de l'ancien système n'est pas remboursée.
+- **Démolition** : outil « Détruire » dans Constructions → Outils. Un balayage désigne bâtiments, cases de jardin, cases de route et braseros (jamais l'hôtel de ville) ; « Démolir » laisse 10 s pour annuler (bouton en haut à droite, valable même en changeant de mode), puis tout disparaît d'un coup, sans villageois et sans remboursement. Les ressources stockées dans un bâtiment démoli sont perdues.
+- **Terraformation instantanée et gratuite** : plus de chantier ni d'habitants. Le premier trait prélève la hauteur du sol, ↑ ↓ la changent ; chaque trait relance un délai de 10 s pour annuler, puis le terrain change. Une retouche peut couper un accès : c'est au joueur de le rétablir.
+- **Nivellement transparent** : une université ou un tailleur de pierre posé sur une pente nivelle son emprise puis se construit, d'un seul clic.
+- Les outils « Pas de route » et « Retirer » (éclairage) disparaissent : « Détruire » les remplace.
+- Les routes de terre tracées à la main ont la même épaisseur que les routes automatiques.
+- Gros villages : le chargement du village est paginé ; l'énergie et le repos des habitants avancent même sans joueur connecté.
+- *Technique :* migrations 070 à 078 (075 inutilisée) : synchronisation V2 des arbres, réveils d'énergie, journal des parcours (désactivé), cases de route, ancrages, conversion des anciennes routes, reçus de démolition et de terraformation ; appliquées pendant la maintenance du déploiement, sauvegarde préalable.
 
 ## alpha-2026.10.29.1 — 29 octobre 2026
 
