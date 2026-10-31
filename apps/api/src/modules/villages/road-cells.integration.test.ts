@@ -406,7 +406,6 @@ it('refuses without writing: reused identifier, building, deposit, terrain, reac
     [{ ...accepted, commandId: randomUUID(), cells: [row(72, 64)] }, 409, 'CELL_OCCUPIED'],
     [{ ...accepted, commandId: randomUUID(), cells: [row(63, 70)] }, 409, 'CELL_OCCUPIED'],
     [{ ...accepted, commandId: randomUUID(), cells: [row(60, 70)] }, 409, 'INCOMPATIBLE_TERRAIN'],
-    [{ ...accepted, commandId: randomUUID(), cells: [row(100, 64)] }, 409, 'OUTSIDE_INFRASTRUCTURE_REACH'],
     [
       { ...accepted, commandId: randomUUID(), cells: [row(64, 72)], style: { ...style, gauge: 'charretiere' } },
       409,
@@ -575,13 +574,10 @@ it('skips the refused cells of a placement and places the others; an all-refused
   expect(replay.json<RoadCellsConfirmationV2>().result).toEqual(expected);
   expect(await state()).toEqual(snapshot);
   // Every cell refused: a refusal of the whole gesture, the first motive, no write.
-  const blocked = [row(62, 64), row(64, 64), row(100, 64)];
+  const blocked = [row(62, 64), row(64, 64), row(60, 70)];
   const refusedQuote = await preview({ action: 'place', cells: blocked, style });
   expect(refusedQuote).toMatchObject({ valid: false, code: 'CELL_OCCUPIED', quote: { stone: 0 } });
-  expect(refusedQuote.result.skipped).toEqual([
-    ...skipped,
-    { cellX: 100, cellY: 64, code: 'OUTSIDE_INFRASTRUCTURE_REACH' },
-  ]);
+  expect(refusedQuote.result.skipped).toEqual([...skipped, { cellX: 60, cellY: 70, code: 'INCOMPATIBLE_TERRAIN' }]);
   const refused = await post('/road-cells', {
     commandId: randomUUID(),
     action: 'place',
@@ -592,6 +588,36 @@ it('skips the refused cells of a placement and places the others; an all-refused
   expect(refused.statusCode).toBe(409);
   expect(refused.body).toContain('CELL_OCCUPIED');
   expect(await state()).toEqual(snapshot);
+  // No fixed perimeter any more (Tristan, 1 November): next to a far house of
+  // the village, 44 cells from the town hall (beyond the old 32), a road is
+  // accepted. (On this legacy-terrain world the terrain window follows the
+  // village's footprints; on RC1 worlds the ground is read anywhere.)
+  const far = (
+    await db
+      .insertInto('buildings')
+      .values({
+        worldId: ids.world,
+        villageId: ids.village,
+        buildingType: 'dwelling',
+        level: 1,
+        status: 'completed',
+        completedAt: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+  ).id;
+  await db
+    .insertInto('worldCellOccupancies')
+    .values({ worldId: ids.world, cellX: 110, cellY: 64, buildingId: far, featureId: null, role: 'anchor' })
+    .execute();
+  try {
+    expect(await preview({ action: 'place', cells: [row(108, 64)], style })).toMatchObject({
+      valid: true,
+      result: { placed: 1 },
+    });
+  } finally {
+    await db.deleteFrom('buildings').where('id', '=', far).execute();
+  }
 }, 60000);
 
 it('rolls back cells, debit and receipt when the transaction fails after writing them', async () => {

@@ -3,7 +3,6 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import {
   roadCellStoneCost,
   uniqueRoadCells,
-  wrappedDistance,
   type RoadCellsConfirmationV2,
   type RoadCellsPreview,
   type RoadCellsPreviewRequest,
@@ -34,8 +33,6 @@ import {
   type OwnedVillage,
 } from './service.js';
 
-/** Historical perimeter of the manual roads (assertInfrastructurePosition). */
-const REACH = 32;
 type Cell = { cellX: number; cellY: number };
 type Gesture = RoadCellsPreviewRequest;
 interface Prepared {
@@ -66,7 +63,7 @@ const unnest = (cells: readonly Cell[]) =>
   sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`;
 
 /** Per-cell refusals of road cells, first rule wins (S2d), with the village's
- * own existing cells. Reach and foreign cells always; with `placement`, also
+ * own existing cells. Foreign cells always (no fixed perimeter since 1 November); with `placement`, also
  * footprints (any village), blocking deposits and terrain. Bounded reads: the
  * named cells and the village's terrain window. Shared with the conversion of
  * the legacy plan (S3). Coordinates must be canonical. */
@@ -85,11 +82,6 @@ export async function roadCellRefusals(
     if (!refused.has(cellKey(cell))) refused.set(cellKey(cell), code);
   };
   if (!cells.length) return { refused, own: new Map() };
-  for (const cell of cells) {
-    const dx = wrappedDistance(cell.cellX, village.anchorCellX, village.widthCells),
-      dy = wrappedDistance(cell.cellY, village.anchorCellY, village.heightCells);
-    if (dx < -REACH || dx >= REACH || dy < -REACH || dy >= REACH) refuse(cell, 'OUTSIDE_INFRASTRUCTURE_REACH');
-  }
   const existing = await tx
     .selectFrom('roadCells')
     .select(['villageId', 'cellX', 'cellY', 'surface', 'sidewalks'])
@@ -194,7 +186,7 @@ async function prepareRoadCells(
 }
 
 /** Own cells a removal deletes, with the refusals of the removal gesture (a
- * foreign or out-of-reach cell refuses all; an absent cell is unchanged).
+ * foreign cell refuses all; an absent cell is unchanged).
  * Shared with demolition (docs/SPEC-DEMOLITION.md §9); no write. */
 export async function roadCellsToRemove(
   tx: Transaction<Database>,
