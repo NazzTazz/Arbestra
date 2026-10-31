@@ -512,6 +512,13 @@
   },
   {
     "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/demolitions",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes",
     "actions": [],
     "lot": "G",
@@ -737,6 +744,13 @@
   {
     "method": "POST",
     "url": "/api/worlds/:worldSlug/villages/:villageId/terraform",
+    "actions": [],
+    "lot": "D",
+    "role": "mutation"
+  },
+  {
+    "method": "POST",
+    "url": "/api/worlds/:worldSlug/villages/:villageId/terrain-edits",
     "actions": [],
     "lot": "D",
     "role": "mutation"

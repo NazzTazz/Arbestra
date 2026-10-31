@@ -1,5 +1,4 @@
 import pg from 'pg';
-import { migrateToLatest } from './migrate.js';
 import { testDatabaseUrl } from './test-environment.js';
 
 /** Number of Vitest workers running database test files in parallel. Each
@@ -32,6 +31,10 @@ export async function cloneTestDatabases(): Promise<void> {
   } catch {
     return; // No database configured: unit tests only.
   }
+  // Imported on use: the setup file loads this module before every test file,
+  // and the migrations import game modules (076: road conversion → RC1 ground)
+  // that a test's vi.mock must still be able to replace.
+  const { migrateToLatest } = await import('./migrate.js');
   await migrateToLatest(template);
   const target = new URL(template),
     name = target.pathname.slice(1);
