@@ -59,6 +59,6 @@ Constaté dans le navigateur :
 À faire demain :
 1. ~~Vérifier eslint et les tests du client~~ : eslint sans erreur, `tsc` client vert, tests `apps/world-web/src` 127 fichiers verts (fin de session, après le commit `64378a0`).
 2. Recette navigateur sur `?world=recette-sommets` : traits, décompte remis à 10 s, Annuler, application et rafraîchissement du sol, nivellement d'emprise puis placement. Mesurer le temps de la commande.
-3. Décision à demander à Tristan : modèle du monde alpha (terrasses ou sommets ?). Sur un monde en terrasses, masquer la terraformation libre ou convertir le monde (`activateTerrainVertices`, opération lourde à préparer).
+3. ~~Modèle du monde alpha~~ : **sommets partagés** (Tristan, 31 octobre), rien à convertir. Recette en dev : sur `recette-sommets`, ou après conversion de `rc1-dev` (`activateTerrainVertices`, sauvegarde `pg_dump` avant) pour la faire sur Bressuire comme sur l'alpha.
 4. Le refus serveur n'est montré que par une notification brève : envisager de garder l'aperçu en rouge.
 5. Commit final, handoff « à valider ».
