@@ -78,3 +78,10 @@ Constaté dans le navigateur :
 - Terraformation libre : notification « Terrain modifié. » à l'application du lot.
 - Vérifié : tests `construction-selection` (anneau, route dans l'anneau, sol vivant ; rouges sans les correctifs) ; navigateur, refus d'un nivellement dont l'anneau touche une route (message dans la fiche, aucune construction) ; en base de dev, nivellement (42 sommets) à 16:18:40 suivi de l'université de Bressuire à 16:18:51, posée par Tristan.
 - Lenteur signalée par Tristan : commande serveur ~0,35 s à chaud, 3,3 s à froid, 1,9 s observée au clic ; hypothèse non vérifiée : la construction qui suit reconstruit le réseau de trajets invalidé par le nouveau relief (5 à 7 s sur Bressuire). À mesurer.
+
+## 10. Plus de contrôle d'accès (31 octobre, invariants de navigation)
+
+- Conformément aux [invariants du 31 octobre](DECISIONS-NAVIGATION-2026-10-31.md) et à la direction 1 du [diagnostic](DIAGNOSTIC-NAVIGATION-2026-10-31.md), la retouche est **purement géométrique** : le contrôle `LEVELING_ACCESS` (deux réseaux complets du village, sur le fil principal, sous le verrou exclusif du monde) est retiré de `terrainEditsCommandV2`. Une retouche peut isoler un bâtiment (douves) ; l'inaccessibilité est constatée à la demande de trajet (`DESTINATION_UNREACHABLE`, exclusions `unreachable`). Remplace le point 3 du §3.
+- Restent : sélection, limites d'instances, cases constructibles et anneau, eau, fondations voisines. L'ancien chantier `/leveling` garde son contrôle jusqu'au lot I.
+- Non traité, décision de game design ouverte : sort d'un trajet engagé dont le passage devient impraticable (diagnostic §7).
+- Preuves : test « accepts an edit that cuts a building off » (douves autour d'une maison), rouge avec l'ancien code (`Ces retouches couperaient l’accès d’un bâtiment.`) ; suite `terrain-edits` 6/6. Mesure en dev (écritures annulées, geste libre) : 3,3 s → 1,5 s au premier appel du processus, ~0,35 s → ~0,15 s à chaud ; plus aucun calcul de réseau dans la commande. L'invalidation mondiale des réseaux de village à la lecture suivante demeure ([dette](DETTE-TECHNIQUE.md)).

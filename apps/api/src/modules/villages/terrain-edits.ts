@@ -1,7 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import {
-  buildTravelNetwork,
   fixedBuildingFootprint,
   footprintVertices,
   isBuildingFootprintFlat,
@@ -16,24 +15,15 @@ import {
   type TerrainEditsConfirmationV2,
   type TerrainEditsRequest,
   type TerrainEditsResult,
-  type VillageState,
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { editedRc1Field } from '../onboarding/rc1-field.js';
-import { rc1NetworkGround } from '../navigation/rc1-network-ground.js';
-import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
-import { readNavigationInfrastructure } from './infrastructure.js';
+import { beginVillageEconomy } from './reconcile-economy.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
-import {
-  assertBuildableCells,
-  ownedVillage,
-  readInfrastructureSpatialState,
-  villageCommandResult,
-  type OwnedVillage,
-} from './service.js';
+import { assertBuildableCells, ownedVillage, villageCommandResult, type OwnedVillage } from './service.js';
 
 /** Instant terrain edits (docs/SPEC-TERRAFORMATION-INSTANTANEE.md): one batch
  * of gestures from the client's 10 s window, applied in order at admission,
@@ -77,8 +67,6 @@ interface Applied {
   vertices: Map<string, Vertex>;
   /** Footprint terraces (worlds without shared vertices). */
   terraces: Map<string, Cell & { height: number }>;
-  /** Footprints leveled for a building: they must stay reachable. */
-  sites: Array<{ id: string; buildingType: string; anchor: Cell; quarterTurns: number; cells: Cell[] }>;
   gestures: number;
   unchanged: number;
 }
@@ -88,7 +76,6 @@ interface Applied {
 async function prepareTerrainEdits(
   tx: Transaction<Database>,
   v: OwnedVillage,
-  economy: VillageEconomy,
   gestures: readonly TerrainEditGesture[],
 ): Promise<Applied> {
   if (v.generationVersion !== 3)
@@ -96,7 +83,7 @@ async function prepareTerrainEdits(
   const ground = await readRc1Ground(tx, v.worldId);
   const source = await readRc1Source(tx, v.worldId);
   const geometry = ground.field.geometry;
-  const applied: Applied = { vertices: new Map(), terraces: new Map(), sites: [], gestures: 0, unchanged: 0 };
+  const applied: Applied = { vertices: new Map(), terraces: new Map(), gestures: 0, unchanged: 0 };
   const heightAt = (x: number, y: number) =>
     applied.vertices.get(`${wrap(x, v.widthCells)}:${wrap(y, v.heightCells)}`)?.height ?? geometry!.height(x, y);
   const fieldWith = (vertices: Map<string, Vertex>, terraces: Map<string, Cell & { height: number }>) =>
@@ -245,113 +232,10 @@ async function prepareTerrainEdits(
     applied.terraces = terraces;
     field = future;
     applied.gestures++;
-    if (!free)
-      applied.sites.push({
-        id: `terrain-edit-${index}`,
-        buildingType: gesture.buildingType,
-        anchor: gesture.anchor,
-        quarterTurns: gesture.quarterTurns,
-        cells,
-      });
   }
-  if (applied.gestures) await assertAccess(tx, v, economy, ground, source, applied, field);
+  // No connectivity guarantee (docs/DECISIONS-NAVIGATION-2026-10-31.md): an edit
+  // may cut a building off; navigation notices it when a trip is requested.
   return applied;
-}
-
-/** No existing building loses its access, and a leveled footprint stays
- * reachable, on the final field. Command geometry only, never `state()`. */
-async function assertAccess(
-  tx: Transaction<Database>,
-  v: OwnedVillage,
-  economy: VillageEconomy,
-  ground: Awaited<ReturnType<typeof readRc1Ground>>,
-  source: Awaited<ReturnType<typeof readRc1Source>>,
-  applied: Applied,
-  finalField: Awaited<ReturnType<typeof readRc1Ground>>['field'],
-) {
-  const { snapshot } = await readInfrastructureSpatialState(tx, v, economy, undefined, false);
-  const infrastructure = await readNavigationInfrastructure(tx, v);
-  // Neighbours participate as physical obstacles, never as editable buildings.
-  const foreign = await tx
-    .selectFrom('worldCellOccupancies as o')
-    .innerJoin('buildings as b', (j) => j.onRef('b.worldId', '=', 'o.worldId').onRef('b.id', '=', 'o.buildingId'))
-    .select(['o.cellX', 'o.cellY', 'o.role', 'b.id', 'b.buildingType', 'b.visualLayout', 'b.quarterTurns'])
-    .where('o.worldId', '=', v.worldId)
-    .where('b.villageId', '!=', v.villageId)
-    .execute();
-  const foreignCells = foreign.filter(
-    (c) =>
-      wrap(c.cellX - snapshot.region.originCellX, v.widthCells) < snapshot.region.width &&
-      wrap(c.cellY - snapshot.region.originCellY, v.heightCells) < snapshot.region.height,
-  );
-  const foreignKeys = new Set(foreignCells.map(key));
-  const current = {
-    ...snapshot,
-    infrastructure,
-    cells: [
-      ...snapshot.cells.filter((c) => !foreignKeys.has(key(c))),
-      ...foreignCells.map((c) => ({
-        cellX: c.cellX,
-        cellY: c.cellY,
-        footprint: { buildingId: c.id },
-        building:
-          c.role === 'anchor'
-            ? { id: c.id, type: c.buildingType, quarterTurns: c.quarterTurns, visualLayout: c.visualLayout }
-            : null,
-      })),
-    ],
-  } as unknown as VillageState;
-  const sites = new Map<string, { id: string; anchor: boolean; type: string; quarterTurns: number }>();
-  for (const site of applied.sites)
-    for (const c of site.cells)
-      sites.set(key(c), {
-        id: site.id,
-        anchor: c.cellX === site.anchor.cellX && c.cellY === site.anchor.cellY,
-        type: site.buildingType,
-        quarterTurns: site.quarterTurns,
-      });
-  const futureState = sites.size
-    ? ({
-        ...current,
-        cells: [
-          ...current.cells.filter((c) => !sites.has(key(c))),
-          ...[...sites].map(([k, s]) => {
-            const [cellX, cellY] = k.split(':').map(Number) as [number, number];
-            return {
-              cellX,
-              cellY,
-              footprint: { buildingId: s.id },
-              building: s.anchor ? { id: s.id, type: s.type, quarterTurns: s.quarterTurns } : null,
-            };
-          }),
-        ],
-      } as unknown as VillageState)
-    : current;
-  const existing = buildTravelNetwork(current, [], ground.navigation)
-    .filter((r) => r.kind === 'building')
-    .map((r) => r.id);
-  const future = rc1NetworkGround(
-    source.data,
-    source.field,
-    {
-      ...ground.navigationEdits,
-      terraces: [...ground.terraces.filter((c) => !applied.terraces.has(key(c))), ...applied.terraces.values()].sort(
-        (a, b) => a.cellX - b.cellX || a.cellY - b.cellY,
-      ),
-      ...(ground.field.geometry
-        ? {
-            vertices: [
-              ...(ground.navigationEdits.vertices ?? []).filter((p) => !applied.vertices.has(vertexKey(p))),
-              ...applied.vertices.values(),
-            ].sort((a, b) => a.vertexX - b.vertexX || a.vertexY - b.vertexY),
-          }
-        : {}),
-    },
-    finalField,
-  );
-  const after = new Set(buildTravelNetwork(futureState, [], future).map((r) => r.id));
-  if (existing.some((id) => !after.has(id)) || applied.sites.some((s) => !after.has(s.id)))
-    throw new HttpError(409, 'LEVELING_ACCESS', 'Ces retouches couperaient l’accès d’un bâtiment.');
 }
 
 /** Test seam: runs after the height writes, before the receipt and the
@@ -410,7 +294,7 @@ export async function terrainEditsCommandV2(
     // A concurrent first attempt of the same identifier committed meanwhile.
     const raced = await replay(tx, village);
     if (raced) return raced;
-    const applied = await prepareTerrainEdits(tx, village, economy, request.gestures);
+    const applied = await prepareTerrainEdits(tx, village, request.gestures);
     if (applied.vertices.size)
       await tx
         .insertInto('worldTerrainVertices')

@@ -401,3 +401,17 @@ it('rolls the heights and the receipt back when the transaction fails after writ
   // ...and nothing survives it.
   expect(await rows()).toEqual(before);
 }, 120000);
+
+it('accepts an edit that cuts a building off: no connectivity guarantee (moats are legitimate)', async () => {
+  // A wall of steep ground at Chebyshev distance 2 around the dwelling at (55,200):
+  // its corners are untouched (no foundation refusal), its access is cut.
+  const ring: Array<[number, number]> = [];
+  for (let dy = -2; dy <= 2; dy++)
+    for (let dx = -2; dx <= 2; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === 2) ring.push([55 + dx, 200 + dy]);
+  const before = await heights();
+  const confirmation = await edit([free(ring, 3)]);
+  expect(confirmation.result.gestures).toBe(1);
+  const ground = await readRc1Ground(db, worldId);
+  expect(ground.field.geometry!.height(53, 198)).toBe(3);
+  await restore(before, await heights());
+}, 120000);
