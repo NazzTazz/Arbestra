@@ -2,7 +2,13 @@
 
 Résumé orienté joueur et testeur de chaque version `alpha-*` déployée, de la plus récente à la plus ancienne. Chaque version couvre les commits depuis le tag alpha précédent ; la première (alpha-2026.10.16.1) regroupe l'historique antérieur, soit le socle de l'alpha.
 
-Généré le 31 octobre 2026.
+Généré le 1er novembre 2026.
+
+## alpha-2026.11.01.1 — 1er novembre 2026
+
+- Plus de moiré quand on pose une route (gravats, terre, pierre) par-dessus une route automatique : la route automatique s'efface sous les routes posées.
+- Les routes ne sont plus limitées à 32 cases autour de l'hôtel de ville (« Hors du périmètre historique du village ») : on peut en poser partout où le terrain le permet.
+- *Technique :* correctif client et serveur, sans migration.
 
 ## alpha-2026.10.31.1 — 31 octobre 2026
 
