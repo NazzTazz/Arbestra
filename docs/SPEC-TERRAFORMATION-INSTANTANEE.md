@@ -57,7 +57,7 @@ Constaté dans le navigateur :
 - Sur `rc1-dev` (Bressuire), lot envoyé au terme du décompte, refusé `LEVELING_UNAVAILABLE` : ce monde est au modèle **terrasses**, la terraformation libre exige les sommets partagés (limite antérieure, l'ancien chantier refusait aussi). Seul `recette-sommets` (« Les Collines », même compte) est au modèle sommets. Aperçu et décompte fonctionnaient.
 
 À faire demain :
-1. Vérifier le résultat de eslint et des tests `apps/world-web/src` lancés en fin de session (non confirmés), puis `sync-v2-transport.test.ts` et `terraform-preview.test.ts`.
+1. ~~Vérifier eslint et les tests du client~~ : eslint sans erreur, `tsc` client vert, tests `apps/world-web/src` 127 fichiers verts (fin de session, après le commit `64378a0`).
 2. Recette navigateur sur `?world=recette-sommets` : traits, décompte remis à 10 s, Annuler, application et rafraîchissement du sol, nivellement d'emprise puis placement. Mesurer le temps de la commande.
 3. Décision à demander à Tristan : modèle du monde alpha (terrasses ou sommets ?). Sur un monde en terrasses, masquer la terraformation libre ou convertir le monde (`activateTerrainVertices`, opération lourde à préparer).
 4. Le refus serveur n'est montré que par une notification brève : envisager de garder l'aperçu en rouge.
