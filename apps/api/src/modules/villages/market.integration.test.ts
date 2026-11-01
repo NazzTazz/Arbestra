@@ -10,9 +10,9 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import type { Database } from '../../database/schema.js';
 import { commandMarket, previewMarket, marketSnapshot, COMPLETE_MARKET_TASK } from './market.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
-import { getVillageState, upgradeBuilding } from './service.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { deliverMarket } from './complete-construction.js';
+import { getVillageState, upgradeBuilding } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url),

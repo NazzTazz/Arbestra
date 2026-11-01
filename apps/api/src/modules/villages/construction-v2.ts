@@ -115,7 +115,6 @@ export function upgradeBuildingV2(
       input.commandId,
       input.expectedCosts,
       input.expectedLevel,
-      'commit',
       afterWrites,
     ),
   );
@@ -142,7 +141,6 @@ export function expandGardenV2(
       durationOverride,
       input.commandId,
       input.expectedCosts,
-      'commit',
       afterWrites,
     ),
   );

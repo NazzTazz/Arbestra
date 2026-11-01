@@ -11,8 +11,8 @@ import { hashSessionToken } from '../../security/sessions.js';
 import { buildApp } from '../../app.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
 import { databaseTravelNetworkStore } from '../navigation/network-store.js';
-import { constructBuilding, readVillageProjection } from './service.js';
 import { VillagePresentationReader, villagePresentation } from './presentation.js';
+import { constructBuilding, readVillageProjection } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);

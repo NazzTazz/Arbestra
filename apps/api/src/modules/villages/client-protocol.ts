@@ -1,4 +1,4 @@
-import type { FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { HttpError } from '../../errors.js';
 
 /** What an old tab shows its player: it only displays `error.message`. */
@@ -27,7 +27,15 @@ export async function requireProtocolV2ExceptExpeditions(request: FastifyRequest
   return requireProtocolV2(request);
 }
 
-/** Retired reads (`GET /village`, the `/events` stream): refused for every caller. */
-export async function refuseRetiredRead(): Promise<never> {
-  throw clientUpgradeRequired();
+/**
+ * The historical village read and event stream (retired in lot I): an old tab
+ * still polls them every couple of seconds, so they answer 426 for every
+ * caller, before authentication, instead of a bare 404.
+ */
+export function registerRetiredVillageReads(app: FastifyInstance): void {
+  const refuse = async (): Promise<never> => {
+    throw clientUpgradeRequired();
+  };
+  for (const url of ['/api/worlds/:worldSlug/village', '/api/worlds/:worldSlug/villages/:villageId/events'])
+    app.get(url, { onRequest: refuse }, refuse);
 }

@@ -3,7 +3,7 @@ import type { VillageState } from '@arbestra/contracts';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
-import { getVillageState } from '../../apps/api/src/modules/villages/service';
+import { getVillageState } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 
 // The dev client reveals a village only after its modules, terrain, routes and
 // first frame: 20 to 40 s, more on a busy machine. Each load gets this budget

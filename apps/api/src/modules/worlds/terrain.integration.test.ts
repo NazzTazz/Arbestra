@@ -16,7 +16,7 @@ import { DEVELOPMENT_IDS, DEVELOPMENT_CELLS } from '../../database/seed.js';
 import type { Database } from '../../database/schema.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { getTerrain, getTerrainUpdates, parseTerrainChunks } from './terrain.js';
-import { constructBuilding } from '../villages/service.js';
+import { constructBuilding } from '../villages/legacy-commands.fixture.js';
 
 describe.sequential('read-only streamed terrain', () => {
   const databaseUrl = testDatabaseUrl();

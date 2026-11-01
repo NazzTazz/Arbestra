@@ -3,7 +3,6 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import { readWorksites } from '../deposits/worksites.js';
 import { readExtraction, readExtractions } from '../deposits/stone-extractions.js';
-import { constructBuildingArea } from './service.js';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { createDatabase } from '../../database/connection.js';
@@ -13,6 +12,7 @@ import { hashSessionToken } from '../../security/sessions.js';
 import { buildApp } from '../../app.js';
 import { operationsFor } from '../operations/telemetry.js';
 import { HttpError } from '../../errors.js';
+import { constructBuildingArea } from './legacy-commands.fixture.js';
 
 // What survives of the former synchronization suite (V1 reads, the SSE stream and
 // COUNT revisions left in lot I): the receipts read, the classification of HTTP

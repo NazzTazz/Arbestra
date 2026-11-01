@@ -218,18 +218,6 @@ export async function materializeCohorts(tx: Transaction<Database>, worldId: str
 
 export const POPULATION_ENERGY_TASK = 'population.energy';
 
-/** Rest and fatigue change a cohort's activity at a time no completion
- * notifies: true when one has come due at `at` without being written. */
-export async function cohortActivityDue(db: Kysely<Database>, worldId: string, villageId: string, at: Date) {
-  const cohorts = await db
-    .selectFrom('populationCohorts')
-    .selectAll()
-    .where('worldId', '=', worldId)
-    .where('villageId', '=', villageId)
-    .execute();
-  return cohorts.some((c) => advanceEnergy(energyState(c), at).activity !== c.activity);
-}
-
 /** True when a rest without work has ended by `at` without being written:
  * inhabitants available again, the only energy change that admissions use. */
 export async function cohortRestEnded(db: Kysely<Database>, worldId: string, villageId: string, at: Date) {

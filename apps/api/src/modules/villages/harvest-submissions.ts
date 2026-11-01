@@ -64,28 +64,6 @@ export async function receiveHarvestIntent(
     return pendingHarvestReceipt(request.commandId);
   });
 }
-export async function readHarvestReceipts(
-  db: Kysely<Database>,
-  accountId: string,
-  slug: string,
-  villageId: string,
-  ids: string[],
-): Promise<HarvestReceipt[]> {
-  if (ids.length > 64 || ids.some((id) => !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)))
-    throw new HttpError(400, 'HARVEST_IDS_INVALID', 'Identifiants invalides.');
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, slug, villageId);
-    const rows = await tx
-      .selectFrom('harvestSubmissions')
-      .select(['commandId', 'receipt'])
-      .where('worldId', '=', village.worldId)
-      .where('villageId', '=', villageId)
-      .where('accountId', '=', accountId)
-      .where('commandId', 'in', ids)
-      .execute();
-    return rows.map((r) => r.receipt ?? pendingHarvestReceipt(r.commandId));
-  });
-}
 export async function processHarvestSubmission(tx: Transaction<Database>, task: ScheduledTask): Promise<void> {
   if (typeof task.payload.villageId !== 'string' || typeof task.payload.commandId !== 'string') return;
   const row = await tx

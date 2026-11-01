@@ -15,7 +15,8 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { COMPLETE_CONSTRUCTION_TASK, completeConstruction } from './complete-construction.js';
 import { villageCommandConfirmationV2IsValid } from '@arbestra/contracts';
-import { configureTownHallFactory, getVillageState } from './service.js';
+import { configureTownHallFactory } from './service.js';
+import { getVillageState } from './legacy-commands.fixture.js';
 
 const databaseUrl = testDatabaseUrl();
 const taskHandlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction };

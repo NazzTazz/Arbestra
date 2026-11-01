@@ -8,9 +8,9 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { verifyPassword } from '../../security/passwords.js';
-import { getVillageState, discoverBuildingSupplies } from '../villages/service.js';
 import { joinWorld } from './service.js';
 import { STARTER_VILLAGE } from './starter-village.js';
+import { getVillageState, discoverBuildingSupplies } from '../villages/legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   named = new URL(url);

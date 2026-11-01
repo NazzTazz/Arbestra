@@ -672,7 +672,6 @@ it('serializes an upgrade and a demolition of the same building: the upgrade fir
     undefined,
     undefined,
     undefined,
-    'commit',
     gate.wait,
   ).catch((error) => error);
   try {

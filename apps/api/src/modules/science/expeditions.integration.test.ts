@@ -1,4 +1,3 @@
-import { constructBuildingArea } from '../villages/service.js';
 import { recognizedDepositRoute } from './deposit-access.js';
 import { assertNoInfrastructure } from '../villages/infrastructure.js';
 import { canWalkSpawnSegment } from '@arbestra/contracts';
@@ -11,7 +10,6 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { migrateToLatest } from '../../database/migrate.js';
 import {
   receiveExpedition,
-  readExpeditionReceipts,
   acquireExpedition,
   finaliseExpedition,
   renewExpeditionLease,
@@ -25,6 +23,7 @@ import { loadNavigationContext, navigationRevision } from '../navigation/context
 import { buildApp } from '../../app.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import type { FastifyInstance } from 'fastify';
+import { constructBuildingArea, readExpeditionReceipts } from '../villages/legacy-commands.fixture.js';
 const url = testDatabaseUrl(),
   target = new URL(url);
 if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))

@@ -11,9 +11,8 @@ import {
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
-import { ownedVillage, state, villageCommandResult, withVillageProjection } from './service.js';
+import { ownedVillage, villageCommandResult, withVillageProjection } from './service.js';
 import type { AfterConstructionWrites, ConstructionCommit } from './service.js';
-import type { VillageState } from '@arbestra/contracts';
 import { beginVillageEconomy } from './reconcile-economy.js';
 import { navigationRevision, loadNavigationContext } from '../navigation/context.js';
 import {
@@ -357,25 +356,8 @@ export async function commandPlayerMarket(
   villageId: string,
   command: TradeCommand,
   compute?: NavigationExecutor,
-): Promise<VillageState>;
-export async function commandPlayerMarket(
-  db: Kysely<Database>,
-  accountId: string,
-  slug: string,
-  villageId: string,
-  command: TradeCommand,
-  compute: NavigationExecutor | undefined,
-  afterWrites: AfterConstructionWrites,
-): Promise<ConstructionCommit>;
-export async function commandPlayerMarket(
-  db: Kysely<Database>,
-  accountId: string,
-  slug: string,
-  villageId: string,
-  command: TradeCommand,
-  compute?: NavigationExecutor,
   afterWrites?: AfterConstructionWrites,
-): Promise<VillageState | ConstructionCommit> {
+): Promise<ConstructionCommit> {
   villageId = villageId.toLowerCase();
   // Retry receipts are checked before route preparation; a completed exchange
   // can be recovered even if its announcement is no longer open.
@@ -416,21 +398,19 @@ export async function commandPlayerMarket(
     if (receipt) {
       if (!isDeepStrictEqual(receipt.request, command))
         throw new HttpError(409, 'COMMAND_REUSED', 'Identifiant utilisé pour une autre commande.');
-      // A V2 replay publishes nothing; its effects were sent with the original.
-      if (afterWrites) return ctx;
-    } else {
-      if (command.action === 'publish') await publishTrade(tx, ctx, command);
-      else if (command.action === 'cancel') await cancelTrade(tx, ctx, command.offerId);
-      else if (command.action === 'oracle') await directOracle(tx, ctx, command);
-      else if (prepared) await acceptTrade(tx, ctx, command.offerId, prepared);
-      else throw new HttpError(409, 'TRADE_CHANGED', 'Vérifiez de nouveau cette annonce.');
-      await tx
-        .insertInto('tradeReceipts')
-        .values({ worldId: ctx.worldId, villageId, commandId: command.commandId, request: JSON.stringify(command) })
-        .execute();
+      // A replay publishes nothing; its effects were sent with the original.
+      return ctx;
     }
-    if (afterWrites) return villageCommandResult(tx, accountId, slug, current, ctx, 'commit', undefined, afterWrites);
-    return state(tx, accountId, slug, ctx);
+    if (command.action === 'publish') await publishTrade(tx, ctx, command);
+    else if (command.action === 'cancel') await cancelTrade(tx, ctx, command.offerId);
+    else if (command.action === 'oracle') await directOracle(tx, ctx, command);
+    else if (prepared) await acceptTrade(tx, ctx, command.offerId, prepared);
+    else throw new HttpError(409, 'TRADE_CHANGED', 'Vérifiez de nouveau cette annonce.');
+    await tx
+      .insertInto('tradeReceipts')
+      .values({ worldId: ctx.worldId, villageId, commandId: command.commandId, request: JSON.stringify(command) })
+      .execute();
+    return villageCommandResult(tx, current, ctx, undefined, afterWrites);
   });
 }
 export async function browsePlayerMarket(

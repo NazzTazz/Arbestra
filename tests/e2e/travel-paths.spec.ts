@@ -5,8 +5,11 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
-import { constructBuildingArea, reconcileVillageForRead } from '../../apps/api/src/modules/villages/service';
-import { harvestGarden } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
+import {
+  harvestGarden,
+  constructBuildingArea,
+  reconcileVillageForRead,
+} from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 import { devOption, openVillage } from './world-interactions';
 
 test.setTimeout(90_000);

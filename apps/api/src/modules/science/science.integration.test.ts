@@ -14,7 +14,8 @@ import { SCIENCE_PROGRAMS } from './programs.js';
 import { getTerrain, getTerrainUpdates } from '../worlds/terrain.js';
 import { wakeScience } from './worker.js';
 import { getTerrainVillages } from '../worlds/terrain-villages.js';
-import { constructBuilding, state, getStoneDepositDetails } from '../villages/service.js';
+import { state, getStoneDepositDetails } from '../villages/service.js';
+import { constructBuilding } from '../villages/legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url),

@@ -357,7 +357,7 @@ export async function demolitionCommandV2(
       })
       .execute();
     let effects: SyncV2Batch | undefined;
-    await villageCommandResult(tx, accountId, slug, village, economy, 'commit', request.commandId, async (t, e) => {
+    await villageCommandResult(tx, village, economy, request.commandId, async (t, e) => {
       effects = await publishPrivateEffects(t, e, generation);
     });
     return {

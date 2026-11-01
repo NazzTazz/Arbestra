@@ -9,7 +9,7 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { capturePrivateSync, captureSyncV2 } from './sync-v2-capture.js';
 import { servePrivateSyncStream } from './sync-v2-stream.js';
-import { getVillageState } from './service.js';
+import { getVillageState } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);

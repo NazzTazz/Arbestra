@@ -13,7 +13,12 @@ import { commandProcessing, processingSnapshot, readProcessingOrders, COMPLETE_P
 import { readCommandReceipts } from './command-receipts.js';
 import { completeProcessing } from './complete-construction.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from './reconcile-economy.js';
-import { constructBuilding, getVillageState, commandVillageProcessing, upgradeBuilding } from './service.js';
+import {
+  constructBuilding,
+  getVillageState,
+  commandVillageProcessing,
+  upgradeBuilding,
+} from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url),

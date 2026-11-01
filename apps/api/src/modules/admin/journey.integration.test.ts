@@ -62,11 +62,14 @@ async function app(journeyEnabled: boolean) {
   apps.push(instance);
   return instance;
 }
+/** Population gestures answer on the V2 contract; a client without the header is refused. */
+const V2 = { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' };
 const gesture = (instance: FastifyInstance, payload: object) =>
   instance.inject({
     method: 'POST',
     url: `/api/worlds/${slug}/villages/${villageId}/population/gestures`,
     cookies: { arbestra_session: token },
+    headers: V2,
     payload,
   });
 
@@ -237,7 +240,7 @@ check('keeps one accepted action when the first attempt is cut by the client, th
     await until(() => holding, 'village lock');
     const cut = fetch(`http://127.0.0.1:${address.port}/api/worlds/${slug}/villages/${villageId}/population/gestures`, {
       method: 'POST',
-      headers: { cookie: `arbestra_session=${token}`, 'content-type': 'application/json' },
+      headers: { cookie: `arbestra_session=${token}`, 'content-type': 'application/json', ...V2 },
       body: JSON.stringify({ commandId, action: 'rest' }),
       signal: controller.signal,
     }).catch((error: unknown) => error);

@@ -13,21 +13,18 @@ import { clearWoodland } from './woodland.js';
 import { completeStoneExtractionAt, readStoneDeposit, startStoneExtraction } from './stone-extractions.js';
 import { admitWorksites, createWorksite } from './worksites.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
+import { readVillageDepositDetails, ownedVillage, prepareWorksiteSelection, state } from '../villages/service.js';
 import {
-  readVillageDepositDetails,
-  ownedVillage,
-  prepareWorksiteSelection,
+  startVillageStoneExtraction,
   reconcileVillageForRead,
-  state,
-} from '../villages/service.js';
-import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
+  readHarvestReceipts,
+} from '../villages/legacy-commands.fixture.js';
 import { admitVillageWorksites } from '../villages/worksite-admission.js';
 import { acceptHarvestIntent } from '../villages/harvest-intents.js';
 import { cancelHarvestIntent, cancelHarvestIntentIn } from '../villages/harvest-cancellations.js';
 import {
   HARVEST_SUBMISSION_TASK,
   processHarvestSubmission,
-  readHarvestReceipts,
   receiveHarvestIntent,
 } from '../villages/harvest-submissions.js';
 import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';

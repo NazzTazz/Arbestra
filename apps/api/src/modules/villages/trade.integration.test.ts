@@ -8,17 +8,18 @@ import { DEVELOPMENT_IDS as seedIds } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import type { Database } from '../../database/schema.js';
 import { publishTrade, TRADE_WAKE_TASK } from './trade-economy.js';
-import { acceptTrade, beginTradePair, commandPlayerMarket, browsePlayerMarket } from './trade-service.js';
+import { acceptTrade, beginTradePair, browsePlayerMarket } from './trade-service.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { navigationRevision } from '../navigation/context.js';
 import { NavigationCompute } from '../navigation/compute.js';
-import { prepareTrade } from './trade-service.js';
+import { prepareTrade, commandPlayerMarket as commandPlayerMarketCommit } from './trade-service.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { wakeTrade } from './complete-construction.js';
 import { assertNoInfrastructure } from './infrastructure.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
 import { spawnSpatialState } from '../onboarding/spawn-state.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
+import { commandPlayerMarket } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url);
@@ -301,7 +302,7 @@ it('reserves at publication, replays exactly and returns the reserve only once o
 it('answers a publication on the V2 contract with its effects, then replays without publishing', async () => {
   const command = publication();
   const published: string[] = [];
-  const commit = await commandPlayerMarket(
+  const commit = await commandPlayerMarketCommit(
     db,
     ids.account,
     slug,
@@ -317,7 +318,7 @@ it('answers a publication on the V2 contract with its effects, then replays with
   // The effects alone carry the reserved stock.
   expect(published).toHaveLength(1);
   expect(published[0]).toContain('"amount":1500');
-  const replay = await commandPlayerMarket(db, ids.account, slug, ids.village, command, undefined, async () => {
+  const replay = await commandPlayerMarketCommit(db, ids.account, slug, ids.village, command, undefined, async () => {
     published.push('replay');
   });
   expect(replay).toMatchObject({ worldId: ids.world, villageId: ids.village });

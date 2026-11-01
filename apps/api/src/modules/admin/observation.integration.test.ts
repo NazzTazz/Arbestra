@@ -15,7 +15,6 @@ import { observationSource, registerObservationRoutes } from './observation-rout
 import { VillagePresentationReader } from '../villages/presentation.js';
 import { instrumentObservationActions, observationCommitted } from './observation-actions.js';
 import { NavigationCompute } from '../navigation/compute.js';
-import { registerVillageSync } from '../villages/sync.js';
 import { ownedVillage } from '../villages/service.js';
 import { authenticate } from '../auth/service.js';
 import { receiveHarvestIntent } from '../villages/harvest-submissions.js';
@@ -182,7 +181,6 @@ beforeAll(async () => {
       ])
       .execute();
   });
-  await registerVillageSync(app, db, config, navigation);
   await registerObservationRoutes(app, db, config, hub, presentations);
   instrumentObservationActions(app, hub);
   app.post('/api/worlds/:worldSlug/villages/:villageId/harvest-intents', async (request) => {

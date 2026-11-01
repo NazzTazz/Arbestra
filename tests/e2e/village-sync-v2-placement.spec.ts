@@ -3,8 +3,8 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
-import { getVillageState } from '../../apps/api/src/modules/villages/service';
 import { clickCell, openVillage } from './world-interactions';
+import { getVillageState } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 
 // A placement confirmed on the V2 contract shows its building at once, without
 // waiting for the presentation reread (whose travel network is recomputed).

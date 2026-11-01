@@ -132,40 +132,6 @@ export async function receiveExpedition(
     return receipt;
   });
 }
-export async function readExpeditionReceipts(
-  db: Kysely<Database>,
-  accountId: string,
-  slug: string,
-  villageId: string,
-  ids?: string[],
-  before?: string,
-): Promise<ExpeditionReceipt[]> {
-  return db.transaction().execute(async (tx) => {
-    const village = await ownedVillage(tx, accountId, slug, villageId);
-    if (ids && (ids.length > 64 || ids.some((id) => !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id))))
-      throw new HttpError(400, 'EXPEDITION_IDS_INVALID', 'Identifiants invalides.');
-    if (before && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(before))
-      throw new HttpError(400, 'EXPEDITION_CURSOR_INVALID', 'Curseur invalide.');
-    const query = () =>
-      tx
-        .selectFrom('expeditionSubmissions')
-        .select(['receipt', 'receivedOrder'])
-        .where('worldId', '=', village.worldId)
-        .where('villageId', '=', villageId)
-        .where('accountId', '=', accountId);
-    if (ids) return (await query().where('commandId', 'in', ids).execute()).map((r) => r.receipt);
-    const pending = await query()
-      .where(sql<boolean>`receipt->>'status'='pending'`)
-      .execute();
-    let history = query().where(sql<boolean>`receipt->>'status'<>'pending'`);
-    if (before) {
-      const cursor = await query().where('commandId', '=', before).executeTakeFirst();
-      if (!cursor) throw new HttpError(400, 'EXPEDITION_CURSOR_INVALID', 'Curseur invalide.');
-      history = history.where('receivedOrder', '<', cursor.receivedOrder);
-    }
-    return [...pending, ...(await history.orderBy('receivedOrder', 'desc').limit(64).execute())].map((r) => r.receipt);
-  });
-}
 export async function acquireExpedition(db: Kysely<Database>): Promise<Submission | undefined> {
   return db.transaction().execute(async (tx) => {
     const row = await tx

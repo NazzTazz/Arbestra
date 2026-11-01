@@ -23,7 +23,7 @@ import { previewRoadCells, roadCellsCommandV2 } from './road-cells.js';
 import { demolitionCommandV2 } from './demolition.js';
 import { terrainEditsCommandV2 } from './terrain-edits.js';
 import { previewRoadAnchors, roadAnchorsCommandV2 } from './road-anchors.js';
-import { receiveExpedition, readExpeditionReceipts } from '../science/expeditions.js';
+import { receiveExpedition } from '../science/expeditions.js';
 import { ExpeditionReceiptSchema, type ExpeditionIntent } from '@arbestra/contracts';
 import {
   HarvestCancelReceiptSchema,
@@ -31,24 +31,23 @@ import {
   HarvestReceiptSchema,
   type HarvestIntent,
 } from '@arbestra/contracts';
-import { receiveHarvestIntent, readHarvestReceipts } from './harvest-submissions.js';
+import { receiveHarvestIntent } from './harvest-submissions.js';
 import { cancelHarvestIntent } from './harvest-cancellations.js';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import {
   ExtractionPoolCommandSchema,
   PopulationGestureSchema,
-  HudWorkforceConfirmationSchema,
   HudWorkforceConfirmationV2Schema,
   type ExtractionPoolCommand,
   type HudWorkforceIntent,
   type PopulationGesture,
 } from '@arbestra/contracts';
-import { commandHudWorkforce, commandHudWorkforceV2 } from './hud-workforce.js';
+import { commandHudWorkforceV2 } from './hud-workforce.js';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
 import { ProcessingCommandSchema, ProcessingPreviewSchema, type ProcessingCommand } from '@arbestra/contracts';
-import { commandVillageProcessing, previewVillageProcessing } from './service.js';
+import { previewVillageProcessing } from './service.js';
 import {
   CommandReceiptReadSchema,
   CommandReceiptReadResponseSchema,
@@ -64,31 +63,19 @@ import { TradeCommandSchema, TradePageSchema, TradePreviewSchema, type TradeComm
 import { commandPlayerMarket, browsePlayerMarket, previewPlayerTrade } from './trade-service.js';
 import type { NavigationExecutor } from '../navigation/compute.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import {
-  ConstructionConfirmationSchema,
-  VillageCommandResponseSchema,
-  type VillageState,
-  type VillageSyncBase,
-} from '@arbestra/contracts';
-import { readConstructionConfirmation } from './service.js';
 import type { AfterConstructionWrites, ConstructionCommit } from './service.js';
 import { discoverBuildingSuppliesInTransaction } from './service.js';
-import { VillageCommandConfirmationV2Schema } from '@arbestra/contracts';
+import { ConstructionConfirmationV2Schema, VillageCommandConfirmationV2Schema } from '@arbestra/contracts';
 import { villageCommandV2 } from './command-v2.js';
-import type { VillageSyncProjections } from './sync-projections.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
-import { villageSyncRevision } from './sync-revision.js';
 import type { Kysely } from 'kysely';
 
 import {
-  CatDiscoveryResponseSchema,
   BuildRequestSchema,
   DepositDetailsSchema,
   ExpansionRequestSchema,
-  ExtractionWorksiteResponseSchema,
   ChangeExtractionWorksiteRequestSchema,
   UpgradeRequestSchema,
-  VillageStateSchema,
 } from '@arbestra/contracts';
 import type { ChangeExtractionWorksiteRequest } from '@arbestra/contracts';
 import { ExploitationRequestSchema, ExploitationPreviewSchema, type ExploitationRequest } from '@arbestra/contracts';
@@ -98,21 +85,13 @@ import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
-import { callerFrames } from '../operations/http-logging.js';
-import { refuseRetiredRead, requireProtocolV2, requireProtocolV2ExceptExpeditions } from './client-protocol.js';
 import {
-  discoverCatEyes,
-  constructBuilding,
-  constructBuildingArea,
-  discoverBuildingSupplies,
-  expandGarden,
-  getStoneDepositDetails,
-  getVillageState,
-  changeVillageWorksite,
-  upgradeBuilding,
-} from './service.js';
+  registerRetiredVillageReads,
+  requireProtocolV2,
+  requireProtocolV2ExceptExpeditions,
+} from './client-protocol.js';
+import { discoverCatEyes, getStoneDepositDetails, changeVillageWorksite } from './service.js';
 
-const WorldParametersSchema = Type.Object({ worldSlug: Type.String({ minLength: 1, maxLength: 64 }) });
 const VillageParametersSchema = Type.Object({
   worldSlug: Type.String({ minLength: 1, maxLength: 64 }),
   villageId: Type.String({ format: 'uuid' }),
@@ -123,65 +102,28 @@ const BuildingParametersSchema = Type.Object({
   buildingId: Type.String({ format: 'uuid' }),
 });
 
-const VillageMutationResponseSchema = Type.Union([VillageStateSchema, VillageCommandResponseSchema]);
-const VillageSyncHeadersSchema = Type.Object(
-  {
-    'x-village-sync': Type.Optional(Type.Literal('1')),
-    'x-village-revision': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
-    'x-village-server-time': Type.Optional(Type.String({ format: 'date-time', maxLength: 48 })),
-  },
-  { additionalProperties: true },
-);
-const ProcessingHeadersSchema = Type.Object(
-  {
-    ...VillageSyncHeadersSchema.properties,
-    'x-arbestra-protocol': Type.Optional(Type.Literal('2')),
-    'x-arbestra-generation': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
-  },
-  { additionalProperties: true },
-);
-/** V2 gestures without a body identifier carry the client's UUID in a header. */
+/** Every command answers on the V2 contract: the protocol and stream generation
+ * travel in headers (a client without the protocol header is refused by
+ * `requireProtocolV2`), and gestures without a body identifier carry the
+ * client's UUID in `x-arbestra-command`. */
 const VillageCommandV2HeadersSchema = Type.Object(
   {
-    ...VillageSyncHeadersSchema.properties,
     'x-arbestra-protocol': Type.Optional(Type.Literal('2')),
     'x-arbestra-generation': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
     'x-arbestra-command': Type.Optional(Type.String({ format: 'uuid' })),
   },
   { additionalProperties: true },
 );
-const ConstructionHeadersSchema = Type.Object(
-  {
-    ...VillageSyncHeadersSchema.properties,
-    'x-construction-confirmation': Type.Optional(Type.Literal('1')),
-    'x-arbestra-protocol': Type.Optional(Type.Literal('2')),
-    'x-arbestra-generation': Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
-  },
-  { additionalProperties: true },
-);
-const ConstructionMutationResponseSchema = Type.Union([ConstructionConfirmationSchema, VillageMutationResponseSchema]);
-function villageReplyOptions(headers: FastifyRequest['headers']) {
-  const replyMode = headers['x-village-sync'] === '1' ? ('commit' as const) : ('snapshot' as const);
-  const revision = headers['x-village-revision'],
-    serverTime = headers['x-village-server-time'];
-  let base: VillageSyncBase | undefined;
-  if (typeof revision === 'string' && typeof serverTime === 'string') {
-    const value = Number(revision);
-    if (!Number.isSafeInteger(value)) throw new HttpError(400, 'INVALID_REVISION', 'Révision invalide.');
-    base = { revision: value, serverTime };
-  }
-  return { replyMode, base };
-}
 
 export async function registerVillageRoutes(
   app: FastifyInstance,
   db: Kysely<Database>,
   config: AppConfig,
-  projections: VillageSyncProjections,
   navigation: TravelNetworkExecutor,
 ): Promise<void> {
-  const hudResponse = HudWorkforceConfirmationSchema;
-  /** Answers a gesture on the V2 contract when the client asked for it. */
+  // The historical village read and event stream: an old tab is told to reload.
+  registerRetiredVillageReads(app);
+  /** Answers a gesture on the V2 contract. */
   const villageV2 = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -197,32 +139,26 @@ export async function registerVillageRoutes(
     observationCommitted(request);
     return reply.serializer(JSON.stringify).send(confirmation);
   };
-  // Workforce HUD gestures: the V2 contract (result and private effects) when
-  // the client asks for it; the historical answer only without the header.
+  // Workforce HUD gestures: the result and the private effects of the commit.
   const hudGesture = async (request: FastifyRequest, reply: FastifyReply, intent: HudWorkforceIntent) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-    if (request.headers['x-arbestra-protocol'] === '2') {
-      await assertSyncV2Available(db);
-      const confirmation = await commandHudWorkforceV2(
-        db,
-        account.id,
-        worldSlug,
-        villageId,
-        intent,
-        Number(request.headers['x-arbestra-generation'] ?? '0'),
-      );
-      observationCommitted(request);
-      return reply.serializer(JSON.stringify).send(confirmation);
-    }
-    const result = await commandHudWorkforce(db, account.id, worldSlug, villageId, intent);
+    await assertSyncV2Available(db);
+    const confirmation = await commandHudWorkforceV2(
+      db,
+      account.id,
+      worldSlug,
+      villageId,
+      intent,
+      Number(request.headers['x-arbestra-generation'] ?? '0'),
+    );
     observationCommitted(request);
-    return result;
+    return reply.serializer(JSON.stringify).send(confirmation);
   };
   const hudSchema = {
     params: VillageParametersSchema,
     headers: VillageCommandV2HeadersSchema,
-    response: { 200: Type.Union([hudResponse, HudWorkforceConfirmationV2Schema]) },
+    response: { 200: HudWorkforceConfirmationV2Schema },
   };
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/extraction-pools',
@@ -234,41 +170,6 @@ export async function registerVillageRoutes(
     { onRequest: requireProtocolV2, schema: { ...hudSchema, body: PopulationGestureSchema } },
     (request, reply) => hudGesture(request, reply, { kind: 'population', command: request.body as PopulationGesture }),
   );
-  const commandResponse = async (
-    reply: FastifyReply,
-    accountId: string,
-    worldSlug: string,
-    result: VillageState | ConstructionCommit,
-    base: VillageSyncBase | undefined,
-  ) => {
-    if ('cells' in result) {
-      reply.serializer(reply.compileSerializationSchema(VillageStateSchema));
-      return result;
-    }
-    // Read after COMMIT: reject shared projections started before this command.
-    const minimum = (await villageSyncRevision(db, result.worldId)).revision;
-    const response = await projections.commandResponse(accountId, worldSlug, result, base, minimum);
-    // The server already selected the envelope. Compiling the whole nested union
-    // makes its lazy validators recompile the village on the first action.
-    const schema = VillageCommandResponseSchema.anyOf[response.kind === 'frame' ? 0 : 1];
-    reply.serializer(reply.compileSerializationSchema(schema));
-    return response;
-  };
-  const constructionResponse = async (
-    request: FastifyRequest,
-    reply: FastifyReply,
-    accountId: string,
-    worldSlug: string,
-    result: VillageState | ConstructionCommit,
-    base: VillageSyncBase | undefined,
-  ) => {
-    if (!('cells' in result) && result.commandId && request.headers['x-construction-confirmation'] === '1') {
-      const confirmed = await readConstructionConfirmation(db, accountId, worldSlug, result);
-      reply.serializer(reply.compileSerializationSchema(ConstructionConfirmationSchema, '201'));
-      return confirmed;
-    }
-    return commandResponse(reply, accountId, worldSlug, result, base);
-  };
   const tradeNavigation = navigation as TravelNetworkExecutor & NavigationExecutor;
   app.get(
     '/api/worlds/:worldSlug/villages/:villageId/market/offers',
@@ -319,42 +220,19 @@ export async function registerVillageRoutes(
         params: VillageParametersSchema,
         headers: VillageCommandV2HeadersSchema,
         body: TradeCommandSchema,
-        response: { 200: Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]) },
+        response: { 200: VillageCommandConfirmationV2Schema },
       },
     },
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
       const command = request.body as TradeCommand;
-      if (request.headers['x-arbestra-protocol'] === '2')
-        return villageV2(
-          request,
-          reply,
-          (afterWrites) =>
-            commandPlayerMarket(db, account.id, worldSlug, villageId, command, tradeNavigation, afterWrites),
-          command.commandId,
-        );
-      return commandPlayerMarket(db, account.id, worldSlug, villageId, command, tradeNavigation);
-    },
-  );
-  app.get(
-    '/api/worlds/:worldSlug/villages/:villageId/harvest-intents',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        querystring: Type.Object({ ids: Type.String({ maxLength: 2400 }) }),
-        response: { 200: Type.Array(HarvestReceiptSchema) },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return readHarvestReceipts(
-        db,
-        account.id,
-        worldSlug,
-        villageId,
-        (request.query as { ids: string }).ids.split(','),
+      return villageV2(
+        request,
+        reply,
+        (afterWrites) =>
+          commandPlayerMarket(db, account.id, worldSlug, villageId, command, tradeNavigation, afterWrites),
+        command.commandId,
       );
     },
   );
@@ -418,43 +296,30 @@ export async function registerVillageRoutes(
       onRequest: requireProtocolV2,
       schema: {
         params: VillageParametersSchema,
-        headers: ProcessingHeadersSchema,
+        headers: VillageCommandV2HeadersSchema,
         body: ProcessingCommandSchema,
-        response: { 200: Type.Union([ProcessingConfirmationV2Schema, VillageMutationResponseSchema]) },
+        response: { 200: ProcessingConfirmationV2Schema },
       },
     },
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      if (request.headers['x-arbestra-protocol'] === '2') {
-        await assertSyncV2Available(db);
-        const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
-        if (!Number.isSafeInteger(generation))
-          throw new HttpError(400, 'INVALID_SYNC_GENERATION', 'Génération invalide.');
-        const result = await commandProcessingV2(
-          db,
-          account.id,
-          worldSlug,
-          villageId,
-          request.body as ProcessingCommand,
-          generation,
-        );
-        observationCommitted(request);
-        // Same wire encoding as the V2 stream. fast-json-stringify compiles
-        // the component unions lazily: seconds on the first command of a process.
-        return reply.serializer(JSON.stringify).send(result);
-      }
-      const options = villageReplyOptions(request.headers);
-      const result = await commandVillageProcessing(
+      await assertSyncV2Available(db);
+      const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
+      if (!Number.isSafeInteger(generation))
+        throw new HttpError(400, 'INVALID_SYNC_GENERATION', 'Génération invalide.');
+      const result = await commandProcessingV2(
         db,
         account.id,
         worldSlug,
         villageId,
         request.body as ProcessingCommand,
-        options.replyMode,
+        generation,
       );
       observationCommitted(request);
-      return commandResponse(reply, account.id, worldSlug, result, options.base);
+      // Same wire encoding as the V2 stream. fast-json-stringify compiles
+      // the component unions lazily: seconds on the first command of a process.
+      return reply.serializer(JSON.stringify).send(result);
     },
   );
   app.post(
@@ -636,32 +501,20 @@ export async function registerVillageRoutes(
           params: VillageParametersSchema,
           headers: VillageCommandV2HeadersSchema,
           body: ExploitationRequestSchema,
-          response: {
-            200: preview
-              ? ExploitationPreviewSchema
-              : Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]),
-          },
+          response: { 200: preview ? ExploitationPreviewSchema : VillageCommandConfirmationV2Schema },
         },
       },
       async (request, reply) => {
         const account = await authenticate(db, request.cookies[config.cookieName]);
         const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
         const order = request.body as ExploitationRequest;
-        if (!preview && request.headers['x-arbestra-protocol'] === '2') {
-          // The order's own UUID identifies the gesture.
-          return villageV2(
-            request,
-            reply,
-            (afterWrites) => startVillageExploitation(db, account.id, worldSlug, villageId, order, afterWrites),
-            order.commandId,
-          );
-        }
-        return (preview ? previewVillageExploitation : startVillageExploitation)(
-          db,
-          account.id,
-          worldSlug,
-          villageId,
-          request.body as ExploitationRequest,
+        if (preview) return previewVillageExploitation(db, account.id, worldSlug, villageId, order);
+        // The order's own UUID identifies the gesture.
+        return villageV2(
+          request,
+          reply,
+          (afterWrites) => startVillageExploitation(db, account.id, worldSlug, villageId, order, afterWrites),
+          order.commandId,
         );
       },
     );
@@ -675,7 +528,7 @@ export async function registerVillageRoutes(
         headers: VillageCommandV2HeadersSchema,
         body: ScienceCommandSchema,
         response: {
-          200: Type.Union([VillageMutationResponseSchema, ExpeditionReceiptSchema, VillageCommandConfirmationV2Schema]),
+          200: Type.Union([ExpeditionReceiptSchema, VillageCommandConfirmationV2Schema]),
           202: ExpeditionReceiptSchema,
         },
       },
@@ -693,64 +546,8 @@ export async function registerVillageRoutes(
           .serializer(reply.compileSerializationSchema(ExpeditionReceiptSchema))
           .send(receipt);
       }
-      if (request.headers['x-arbestra-protocol'] === '2')
-        return villageV2(request, reply, (afterWrites) =>
-          commandVillageScience(db, account.id, worldSlug, villageId, command, 'commit', afterWrites),
-        );
-      const options = villageReplyOptions(request.headers);
-      const result = await commandVillageScience(db, account.id, worldSlug, villageId, command, options.replyMode);
-      observationCommitted(request);
-      return commandResponse(reply, account.id, worldSlug, result, options.base);
-    },
-  );
-  app.get(
-    '/api/worlds/:worldSlug/villages/:villageId/science/expeditions',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        querystring: Type.Object({
-          ids: Type.Optional(Type.String({ maxLength: 2400 })),
-          before: Type.Optional(Type.String({ format: 'uuid' })),
-        }),
-        response: { 200: Type.Array(ExpeditionReceiptSchema) },
-      },
-    },
-    async (request, reply) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const { ids, before } = request.query as { ids?: string; before?: string };
-      const receipts = await readExpeditionReceipts(db, account.id, worldSlug, villageId, ids?.split(','), before);
-      const history = receipts.filter((r) => r.status !== 'pending');
-      if (!ids && history.length === 64) reply.header('x-expedition-next-before', history.at(-1)!.commandId);
-      return receipts;
-    },
-  );
-  app.get(
-    '/api/worlds/:worldSlug/village',
-    {
-      // Retired (lot I): an old tab still polls it, answered 426 before authentication.
-      onRequest: refuseRetiredRead,
-      schema: {
-        params: WorldParametersSchema,
-        querystring: Type.Object({ villageId: Type.Optional(Type.String({ format: 'uuid' })) }),
-        response: { 200: VillageStateSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug } = request.params as { worldSlug: string };
-      const caller = request.headers['x-arbestra-caller'];
-      if (typeof caller === 'string')
-        request.log.warn(
-          { code: 'LEGACY_VILLAGE_READ', frames: callerFrames(caller.split(' ')) },
-          'Legacy village read under V2',
-        );
-      return getVillageState(
-        db,
-        account.id,
-        worldSlug,
-        (request.query as { villageId?: string }).villageId,
-        navigation,
+      return villageV2(request, reply, (afterWrites) =>
+        commandVillageScience(db, account.id, worldSlug, villageId, command, afterWrites),
       );
     },
   );
@@ -762,17 +559,15 @@ export async function registerVillageRoutes(
       schema: {
         params: VillageParametersSchema,
         headers: VillageCommandV2HeadersSchema,
-        response: { 200: Type.Union([CatDiscoveryResponseSchema, VillageCommandConfirmationV2Schema]) },
+        response: { 200: VillageCommandConfirmationV2Schema },
       },
     },
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      if (request.headers['x-arbestra-protocol'] === '2')
-        return villageV2(request, reply, (afterWrites) =>
-          discoverCatEyes(db, account.id, worldSlug, villageId, afterWrites),
-        );
-      return discoverCatEyes(db, account.id, worldSlug, villageId);
+      return villageV2(request, reply, (afterWrites) =>
+        discoverCatEyes(db, account.id, worldSlug, villageId, afterWrites),
+      );
     },
   );
 
@@ -783,13 +578,12 @@ export async function registerVillageRoutes(
       schema: {
         params: VillageParametersSchema,
         body: BuildRequestSchema,
-        headers: ConstructionHeadersSchema,
-        response: { 201: ConstructionMutationResponseSchema },
+        headers: VillageCommandV2HeadersSchema,
+        response: { 201: ConstructionConfirmationV2Schema },
       },
     },
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
-      const options = villageReplyOptions(request.headers);
       const { worldSlug, villageId } = request.params as {
         worldSlug: string;
         villageId: string;
@@ -803,71 +597,32 @@ export async function registerVillageRoutes(
         anchorCellX?: number;
         anchorCellY?: number;
         cells?: Array<{ cellX: number; cellY: number }>;
-        cellX?: number;
-        cellY?: number;
       };
-      if (request.headers['x-arbestra-protocol'] === '2') {
-        // V2 mutations always carry their idempotent identity and the spatial form.
-        if (!body.commandId || !body.cells || body.anchorCellX === undefined || body.anchorCellY === undefined)
-          throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
-        await assertSyncV2Available(db);
-        const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
-        const confirmation = await placeBuildingV2(
-          db,
-          account.id,
-          worldSlug,
-          villageId,
-          {
-            buildingType: body.buildingType as BuildingType,
-            anchor: { cellX: body.anchorCellX, cellY: body.anchorCellY },
-            cells: body.cells,
-            commandId: body.commandId,
-            expectedCosts: body.expectedCosts,
-            quarterTurns: body.quarterTurns ?? 0,
-            houseVariant: body.houseVariant ?? 'stone',
-          },
-          config.constructionDurationOverrideMs,
-          generation,
-        );
-        observationCommitted(request);
-        // Same wire encoding as the V2 stream (see the workshop route).
-        return reply.status(201).serializer(JSON.stringify).send(confirmation);
-      }
-      const state = body.cells
-        ? await constructBuildingArea(
-            db,
-            account.id,
-            worldSlug,
-            villageId,
-            body.buildingType,
-            { cellX: body.anchorCellX!, cellY: body.anchorCellY! },
-            body.cells,
-            config.constructionDurationOverrideMs,
-            body.commandId,
-            body.expectedCosts,
-            body.quarterTurns,
-            body.houseVariant,
-            options.replyMode,
-          )
-        : await constructBuilding(
-            db,
-            account.id,
-            worldSlug,
-            villageId,
-            body.cellX!,
-            body.cellY!,
-            body.buildingType,
-            config.constructionDurationOverrideMs,
-            body.commandId,
-            body.expectedCosts,
-            body.quarterTurns,
-            body.houseVariant,
-            options.replyMode,
-          );
+      // Placements always carry their idempotent identity and the spatial form.
+      if (!body.commandId || !body.cells || body.anchorCellX === undefined || body.anchorCellY === undefined)
+        throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
+      await assertSyncV2Available(db);
+      const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
+      const confirmation = await placeBuildingV2(
+        db,
+        account.id,
+        worldSlug,
+        villageId,
+        {
+          buildingType: body.buildingType as BuildingType,
+          anchor: { cellX: body.anchorCellX, cellY: body.anchorCellY },
+          cells: body.cells,
+          commandId: body.commandId,
+          expectedCosts: body.expectedCosts,
+          quarterTurns: body.quarterTurns ?? 0,
+          houseVariant: body.houseVariant ?? 'stone',
+        },
+        config.constructionDurationOverrideMs,
+        generation,
+      );
       observationCommitted(request);
-      return reply
-        .status(201)
-        .send(await constructionResponse(request, reply, account.id, worldSlug, state, options.base));
+      // Same wire encoding as the V2 stream (see the workshop route).
+      return reply.status(201).serializer(JSON.stringify).send(confirmation);
     },
   );
 
@@ -878,13 +633,12 @@ export async function registerVillageRoutes(
       schema: {
         params: BuildingParametersSchema,
         body: ExpansionRequestSchema,
-        headers: ConstructionHeadersSchema,
-        response: { 201: ConstructionMutationResponseSchema },
+        headers: VillageCommandV2HeadersSchema,
+        response: { 201: ConstructionConfirmationV2Schema },
       },
     },
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
-      const options = villageReplyOptions(request.headers);
       const { worldSlug, villageId, buildingId } = request.params as {
         worldSlug: string;
         villageId: string;
@@ -895,38 +649,20 @@ export async function registerVillageRoutes(
         commandId?: string;
         expectedCosts?: Array<{ resourceCode: string; amount: number }>;
       };
-      if (request.headers['x-arbestra-protocol'] === '2') {
-        if (!commandId) throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
-        await assertSyncV2Available(db);
-        const confirmation = await expandGardenV2(
-          db,
-          account.id,
-          worldSlug,
-          villageId,
-          buildingId,
-          { cells, commandId, expectedCosts },
-          config.constructionDurationOverrideMs,
-          Number(request.headers['x-arbestra-generation'] ?? '0'),
-        );
-        observationCommitted(request);
-        return reply.status(201).serializer(JSON.stringify).send(confirmation);
-      }
-      const state = await expandGarden(
+      if (!commandId) throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
+      await assertSyncV2Available(db);
+      const confirmation = await expandGardenV2(
         db,
         account.id,
         worldSlug,
         villageId,
         buildingId,
-        cells,
+        { cells, commandId, expectedCosts },
         config.constructionDurationOverrideMs,
-        commandId,
-        expectedCosts,
-        options.replyMode,
+        Number(request.headers['x-arbestra-generation'] ?? '0'),
       );
       observationCommitted(request);
-      return reply
-        .status(201)
-        .send(await constructionResponse(request, reply, account.id, worldSlug, state, options.base));
+      return reply.status(201).serializer(JSON.stringify).send(confirmation);
     },
   );
 
@@ -937,13 +673,12 @@ export async function registerVillageRoutes(
       schema: {
         params: BuildingParametersSchema,
         body: UpgradeRequestSchema,
-        headers: ConstructionHeadersSchema,
-        response: { 201: ConstructionMutationResponseSchema },
+        headers: VillageCommandV2HeadersSchema,
+        response: { 201: ConstructionConfirmationV2Schema },
       },
     },
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
-      const options = villageReplyOptions(request.headers);
       const { worldSlug, villageId, buildingId } = request.params as {
         worldSlug: string;
         villageId: string;
@@ -954,41 +689,21 @@ export async function registerVillageRoutes(
         expectedCosts?: Array<{ resourceCode: string; amount: number }>;
         expectedLevel?: number;
       };
-      if (request.headers['x-arbestra-protocol'] === '2') {
-        if (!upgrade.commandId)
-          throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
-        await assertSyncV2Available(db);
-        const confirmation = await upgradeBuildingV2(
-          db,
-          account.id,
-          worldSlug,
-          villageId,
-          buildingId,
-          { commandId: upgrade.commandId, expectedCosts: upgrade.expectedCosts, expectedLevel: upgrade.expectedLevel },
-          config.constructionDurationOverrideMs,
-          Number(request.headers['x-arbestra-generation'] ?? '0'),
-        );
-        observationCommitted(request);
-        return reply.status(201).serializer(JSON.stringify).send(confirmation);
-      }
-      const state = await upgradeBuilding(
+      if (!upgrade.commandId)
+        throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
+      await assertSyncV2Available(db);
+      const confirmation = await upgradeBuildingV2(
         db,
         account.id,
         worldSlug,
         villageId,
         buildingId,
-        undefined,
-        undefined,
+        { commandId: upgrade.commandId, expectedCosts: upgrade.expectedCosts, expectedLevel: upgrade.expectedLevel },
         config.constructionDurationOverrideMs,
-        (request.body as { commandId?: string }).commandId,
-        (request.body as { expectedCosts?: Array<{ resourceCode: string; amount: number }> }).expectedCosts,
-        (request.body as { expectedLevel?: number }).expectedLevel,
-        options.replyMode,
+        Number(request.headers['x-arbestra-generation'] ?? '0'),
       );
       observationCommitted(request);
-      return reply
-        .status(201)
-        .send(await constructionResponse(request, reply, account.id, worldSlug, state, options.base));
+      return reply.status(201).serializer(JSON.stringify).send(confirmation);
     },
   );
 
@@ -1019,7 +734,7 @@ export async function registerVillageRoutes(
         params: Type.Object({ ...VillageParametersSchema.properties, worksiteId: Type.String({ format: 'uuid' }) }),
         headers: VillageCommandV2HeadersSchema,
         body: ChangeExtractionWorksiteRequestSchema,
-        response: { 200: Type.Union([ExtractionWorksiteResponseSchema, VillageCommandConfirmationV2Schema]) },
+        response: { 200: VillageCommandConfirmationV2Schema },
       },
     },
     async (request, reply) => {
@@ -1030,20 +745,11 @@ export async function registerVillageRoutes(
         worksiteId: string;
       };
       const change = request.body as ChangeExtractionWorksiteRequest;
-      if (request.headers['x-arbestra-protocol'] === '2')
-        return villageV2(
-          request,
-          reply,
-          (afterWrites) => changeVillageWorksite(db, account.id, worldSlug, villageId, worksiteId, change, afterWrites),
-          change.commandId,
-        );
-      return changeVillageWorksite(
-        db,
-        account.id,
-        worldSlug,
-        villageId,
-        worksiteId,
-        request.body as ChangeExtractionWorksiteRequest,
+      return villageV2(
+        request,
+        reply,
+        (afterWrites) => changeVillageWorksite(db, account.id, worldSlug, villageId, worksiteId, change, afterWrites),
+        change.commandId,
       );
     },
   );
@@ -1055,7 +761,7 @@ export async function registerVillageRoutes(
       schema: {
         params: BuildingParametersSchema,
         headers: VillageCommandV2HeadersSchema,
-        response: { 200: Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]) },
+        response: { 200: VillageCommandConfirmationV2Schema },
       },
     },
     async (request, reply) => {
@@ -1065,15 +771,13 @@ export async function registerVillageRoutes(
         villageId: string;
         buildingId: string;
       };
-      if (request.headers['x-arbestra-protocol'] === '2')
-        return villageV2(request, reply, (afterWrites) =>
-          db
-            .transaction()
-            .execute((tx) =>
-              discoverBuildingSuppliesInTransaction(tx, account.id, worldSlug, villageId, buildingId, afterWrites),
-            ),
-        );
-      return discoverBuildingSupplies(db, account.id, worldSlug, villageId, buildingId);
+      return villageV2(request, reply, (afterWrites) =>
+        db
+          .transaction()
+          .execute((tx) =>
+            discoverBuildingSuppliesInTransaction(tx, account.id, worldSlug, villageId, buildingId, afterWrites),
+          ),
+      );
     },
   );
 }

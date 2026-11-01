@@ -50,7 +50,7 @@ Arbestra est un monolithe modulaire TypeScript :
 - PostgreSQL 17 est la source de vérité, avec `world_id` dans chaque agrégat de monde ;
 - `contracts` contient les contrats JSON et la géométrie cosmologique déterministe partagée entre serveur et rendu.
 
-HTTP JSON porte les commandes. La [synchronisation du village](./village-synchronization.md) utilise une copie locale et des trames autoritaires SSE, avec détection durable des modifications et reprise par snapshot cohérent. WebSocket, Redis et queues externes restent absents.
+HTTP JSON porte les commandes. La [synchronisation du village](./village-synchronization.md) est le protocole V2 : journal de changements par flux, lots SSE, reprise par snapshot (le protocole V1 que ce document décrit est retiré depuis le lot I.3, 1er novembre 2026). WebSocket, Redis et queues externes restent absents.
 
 ## Direction produit, distincte de l'architecture livrée
 

@@ -459,7 +459,7 @@
     "url": "/api/worlds/:worldSlug/village",
     "actions": [],
     "lot": "H",
-    "role": "read"
+    "role": "retired: always 426 CLIENT_UPGRADE_REQUIRED (lot I.3)"
   },
   {
     "method": "GET",
@@ -529,7 +529,7 @@
     "url": "/api/worlds/:worldSlug/villages/:villageId/events",
     "actions": [],
     "lot": "H",
-    "role": "synchronization"
+    "role": "retired: always 426 CLIENT_UPGRADE_REQUIRED (lot I.3)"
   },
   {
     "method": "POST",
@@ -555,13 +555,6 @@
   {
     "method": "GET",
     "url": "/api/worlds/:worldSlug/villages/:villageId/features/:featureId",
-    "actions": [],
-    "lot": "E",
-    "role": "read"
-  },
-  {
-    "method": "GET",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/harvest-intents",
     "actions": [],
     "lot": "E",
     "role": "read"
@@ -684,13 +677,6 @@
     "actions": ["explore", "pause", "recall", "research", "resume", "survey", "train"],
     "lot": "G",
     "role": "mutation"
-  },
-  {
-    "method": "GET",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/science/expeditions",
-    "actions": [],
-    "lot": "G",
-    "role": "read"
   },
   {
     "method": "POST",

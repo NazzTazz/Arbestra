@@ -9,7 +9,7 @@ import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { up } from '../../database/migrations/056_village_economy_catchups.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { advanceEconomyCatchup, requestEconomyCatchup, ECONOMY_CATCHUP_TASK } from './economy-catchup.js';
-import { commandVillageProcessing } from './service.js';
+import { commandVillageProcessing } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);

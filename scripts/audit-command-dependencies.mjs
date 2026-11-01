@@ -36,9 +36,7 @@ for (const path of files) {
         kind = ['insertInto', 'updateTable', 'deleteFrom'].includes(method) ? 'write' : 'read';
         target = node.arguments[0]?.getText(source);
       } else if (
-        /^(state|beginVillageEconomy|reconcileVillageEconomy|finalizeVillageEconomy|villageCommandResult|readVillageProjection|reconcileSyncDeadline)$/.test(
-          method,
-        )
+        /^(state|beginVillageEconomy|reconcileVillageEconomy|finalizeVillageEconomy|villageCommandResult)$/.test(method)
       ) {
         kind = 'economy-or-projection';
         target = call;

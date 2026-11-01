@@ -1,14 +1,11 @@
-import { placeBuilding } from './construction.js';
 import { villageTerrainRegion } from './terrain-region.js';
 import { footprintVertices, isBuildingFootprintFlat } from '@arbestra/contracts';
 import { observationVillage } from '../admin/observation-actions.js';
-import { devTime, devTimeSync } from '../operations/dev-timing.js';
+import { devTime } from '../operations/dev-timing.js';
 import { fixedBuildingFootprint, withinBuildReach, BUILD_REACH as BUILD_RADIUS } from '@arbestra/contracts';
 import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
-import { villageSyncRevision } from './sync-revision.js';
-import { VillageReadReconciliations } from './read-reconciliation.js';
-import { networkJob, networkState, type NetworkJob, type TravelNetworkExecutor } from '../navigation/network-job.js';
+import { networkJob, networkState, type NetworkJob } from '../navigation/network-job.js';
 import { commandTravelNetwork, transactionRefiner } from '../navigation/transaction-refinement.js';
 import { naturalFeaturesQuery } from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
@@ -61,14 +58,7 @@ import {
   projectVillageResource,
   projectVillageResources,
 } from './economy.js';
-import {
-  beginVillageEconomy,
-  beginProcessingCommand,
-  reconcileVillageEconomy,
-  type VillageEconomy,
-  type ReconciliationBudget,
-} from './reconcile-economy.js';
-import { requestEconomyCatchup, ScopeCatchingUp } from './economy-catchup.js';
+import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
 import { planGardenTour } from '@arbestra/contracts';
 import { projectPopulation } from '../population/projection.js';
@@ -111,10 +101,8 @@ import {
 } from '../deposits/worksites.js';
 import { readExtractionPools } from '../deposits/extraction-pools.js';
 import { admitExploitationGardens, readExploitationOrders } from './exploitation-budget.js';
-import { commandProcessing, previewProcessing, processingSnapshot } from './processing.js';
+import { previewProcessing, processingSnapshot } from './processing.js';
 import { marketSnapshot } from './market.js';
-import type { MarketCommand } from '@arbestra/contracts';
-import type { ProcessingCommand } from '@arbestra/contracts';
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
 
 const CELL_SIZE = 2.5;
@@ -722,7 +710,7 @@ function protectedCell(
 }
 
 /** Final writes common to command replies and ordinary snapshots. */
-async function admitVillageWork(tx: Transaction<Database>, economy: VillageEconomy, village: OwnedVillage) {
+export async function admitVillageWork(tx: Transaction<Database>, economy: VillageEconomy, village: OwnedVillage) {
   await admitExploitationGardens(tx, economy);
   await admitWorksites(tx, economy, village, (featureId) => stoneTravelPath(tx, village, featureId));
   await admitScience(tx, economy);
@@ -740,7 +728,6 @@ async function finalizeVillageEconomy(
     if (admit) await admitVillageWork(tx, economy, village);
   });
 }
-export type ConstructionReplyMode = 'snapshot' | 'commit';
 /** Runs last in the command transaction, after a new (not replayed) commit. */
 export type AfterConstructionWrites = (tx: Transaction<Database>, economy: VillageEconomy) => Promise<void>;
 export interface ConstructionCommit {
@@ -748,22 +735,16 @@ export interface ConstructionCommit {
   villageId: string;
   through: Date;
   commandId?: string;
-  confirmation?: import('@arbestra/contracts').ConstructionConfirmation;
 }
-export type ConstructionResult<Mode extends ConstructionReplyMode> = Mode extends 'commit'
-  ? ConstructionCommit
-  : VillageState;
-export async function villageCommandResult<Mode extends ConstructionReplyMode>(
+/** The end of a command: the due work and admissions at its bound, the rest
+ * housing, then the V2 publication of its private effects. */
+export async function villageCommandResult(
   tx: Transaction<Database>,
-  accountId: string,
-  worldSlug: string,
   village: OwnedVillage,
   economy: VillageEconomy,
-  mode: Mode,
   commandId?: string,
   afterWrites?: AfterConstructionWrites,
-): Promise<ConstructionResult<Mode>> {
-  if (mode === 'snapshot') return (await state(tx, accountId, worldSlug, economy)) as ConstructionResult<Mode>;
+): Promise<ConstructionCommit> {
   await finalizeVillageEconomy(tx, economy, village);
   await reconcileRestHousing(tx, village.worldId, village.villageId, economy.through);
   // Terminal step of a committed command (V2 publication): no write after it.
@@ -773,7 +754,7 @@ export async function villageCommandResult<Mode extends ConstructionReplyMode>(
     villageId: village.villageId,
     through: economy.through,
     ...(commandId ? { commandId } : {}),
-  } as ConstructionResult<Mode>;
+  };
 }
 
 /** A coherent projection for transport, with no economic writes or locks. */
@@ -794,90 +775,6 @@ export function withVillageProjection<T>(
       await sql`select set_config('arbestra.economy_through', ${through.toISOString()}, true)`.execute(tx);
       return read(tx, { worldId: village.worldId, villageId, through }, village);
     });
-}
-
-/** Inspection needs persisted infrastructure and committed paths, never speculative routing. */
-export async function readVillageObservation(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-) {
-  const village = await ownedVillage(db, accountId, worldSlug, villageId);
-  // Parse/check immutable geography before starting the bounded transaction.
-  // The snapshot revalidates its row identity and reads every mutable edit.
-  if (village.generationVersion === 3) await readRc1Source(db, village.worldId);
-  return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy, currentVillage) =>
-    state(tx, accountId, worldSlug, economy, false, true, 'observation', currentVillage),
-  );
-}
-
-export async function readVillageProjection(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  compute?: TravelNetworkExecutor,
-) {
-  // The low-level inline reader remains usable by transactional integration
-  // callers. Every application HTTP/SSE projection injects the shared CPU pool.
-  if (!compute)
-    return withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy, village) =>
-      state(tx, accountId, worldSlug, economy, false, true, undefined, village),
-    );
-  let projected: VillageState | undefined;
-  const routes = await compute.network(async (known) => {
-    let captured:
-      | { input: NetworkJob['state']; ground: Awaited<ReturnType<typeof readRc1Ground>> | undefined }
-      | undefined;
-    projected = await withVillageProjection(db, accountId, worldSlug, villageId, (tx, economy, village) =>
-      state(
-        tx,
-        accountId,
-        worldSlug,
-        economy,
-        false,
-        true,
-        (input, ground) => {
-          captured = { input, ground };
-        },
-        village,
-      ),
-    );
-    // All data comes from that one MVCC snapshot. SQL is finished before worker
-    // transfer/search, and the result does not acquire a newer revision or H.
-    if (!captured) throw Error('Missing navigation projection');
-    const { input, ground } = captured;
-    return devTimeSync('navigation_input', () => networkJob(input, ground, known));
-  });
-  if (!projected) throw Error('Missing village projection');
-  projected.travelRoutes.unshift(...routes); // Committed woodland paths were captured with the snapshot.
-  return projected;
-}
-
-/** Post-commit scoped response. Reuse authoritative cells/stocks without display routing. */
-export async function readConstructionConfirmation(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  commit: ConstructionCommit,
-): Promise<import('@arbestra/contracts').ConstructionConfirmation> {
-  if (commit.confirmation) return commit.confirmation;
-  if (!commit.commandId) throw Error('Construction confirmation requires an idempotent command');
-  const projected = await withVillageProjection(db, accountId, worldSlug, commit.villageId, (tx, economy, village) =>
-    state(tx, accountId, worldSlug, economy, false, true, 'construction', village),
-  );
-  return {
-    kind: 'construction',
-    commandId: commit.commandId,
-    worldId: commit.worldId,
-    villageId: commit.villageId,
-    commandTime: commit.through.toISOString(),
-    serverTime: projected.serverTime,
-    minimumRevision: projected.syncRevision!,
-    cells: projected.cells,
-    resources: projected.village.resources,
-  };
 }
 
 /** The same persisted footprints and garden components serve projection and road validation. */
@@ -1157,10 +1054,7 @@ export async function state(
   existingEconomy?: VillageEconomy,
   admit = true,
   readOnly = false,
-  deferNavigation?:
-    | 'observation'
-    | 'construction'
-    | ((input: NetworkJob['state'], ground: Awaited<ReturnType<typeof readRc1Ground>> | undefined) => void),
+  deferNavigation?: (input: NetworkJob['state'], ground: Awaited<ReturnType<typeof readRc1Ground>> | undefined) => void,
   projectionVillage?: OwnedVillage,
 ): Promise<VillageState> {
   return devTime('snapshot', async () => {
@@ -1178,7 +1072,6 @@ export async function state(
       throw new Error('Village economy context does not match the requested village');
     if (!readOnly) await finalizeVillageEconomy(tx, economy, village, admit);
     const at = economy.through;
-    const syncBefore = await villageSyncRevision(tx, village.worldId);
     const occupancies = readVillageOccupancies(tx, village);
     const [ground, resourcesRows, definitions, occupancyRows, protectedRows, hiddenSupplyRows, accomplishmentRows] =
       await devTime('snapshot_reads', () =>
@@ -1517,7 +1410,6 @@ export async function state(
                 }
               : null,
             canBuild:
-              deferNavigation !== 'observation' &&
               available.has(key) &&
               !row &&
               !featureCells.has(key) &&
@@ -1532,29 +1424,24 @@ export async function state(
               !protectedCell(cellX, cellY, protectedRows, village),
           };
         })
-        // Keep the same spatial support for the shared renderer, but inspection
-        // never needs the expensive terrain suitability previews for commands.
-        .filter((cell) => deferNavigation === 'observation' || cell.canBuild || cell.footprint !== null),
+        .filter((cell) => cell.canBuild || cell.footprint !== null),
     };
     villageState.infrastructure = await devTime('infrastructure', () =>
       readInfrastructure(tx, village.worldId, village.villageId),
     );
     villageState.factoryEnabled = await factoryCapability(tx, village.worldId);
-    if (deferNavigation === 'observation' || deferNavigation === 'construction') villageState.travelRoutes = [];
-    else {
-      const navigationInfrastructure = await devTime('infrastructure', () =>
-        readNavigationInfrastructure(tx, village, villageState.infrastructure),
+    const navigationInfrastructure = await devTime('infrastructure', () =>
+      readNavigationInfrastructure(tx, village, villageState.infrastructure),
+    );
+    if (deferNavigation) {
+      deferNavigation(networkState({ ...villageState, infrastructure: navigationInfrastructure }), ground.rc1);
+      villageState.travelRoutes = [];
+    } else
+      villageState.travelRoutes = await commandTravelNetwork(
+        tx,
+        { ...villageState, infrastructure: navigationInfrastructure },
+        ground.rc1,
       );
-      if (deferNavigation) {
-        deferNavigation(networkState({ ...villageState, infrastructure: navigationInfrastructure }), ground.rc1);
-        villageState.travelRoutes = [];
-      } else
-        villageState.travelRoutes = await commandTravelNetwork(
-          tx,
-          { ...villageState, infrastructure: navigationInfrastructure },
-          ground.rc1,
-        );
-    }
     // Reuse committed mission paths; do not search routes to every woodland in the snapshot.
     for (const extraction of villageState.village.extractions)
       if (extraction.resourceCode === 'wood' && extraction.path.length) {
@@ -1565,10 +1452,6 @@ export async function state(
           cells: extraction.path,
         });
       }
-    const syncAfter = readOnly && projectionVillage ? syncBefore : await villageSyncRevision(tx, village.worldId);
-    // A concurrent world commit can invalidate READ COMMITTED assembly. The
-    // HTTP adapter replaces such a snapshot after commit with a coherent reader.
-    if (syncBefore.others === syncAfter.others) villageState.syncRevision = syncAfter.revision;
     return villageState;
   });
 }
@@ -1743,144 +1626,21 @@ async function reserveSelection(
   }
 }
 
-const readReconciliations = new WeakMap<Kysely<Database>, VillageReadReconciliations>();
-
-/** Read-side wakeup: finish all economic writes, but do not build a transport
- * snapshot while holding village/deposit/navigation locks. */
-export async function reconcileVillageForRead(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId?: string,
-) {
-  // Resolve the default village and check this caller before joining a flight.
-  const candidate = await ownedVillage(db, accountId, worldSlug, villageId);
-  let reconciliations = readReconciliations.get(db);
-  if (!reconciliations) {
-    reconciliations = new VillageReadReconciliations((owner, slug, id) =>
-      db.transaction().execute(async (tx) => {
-        const village = await ownedVillage(tx, owner, slug, id);
-        if (village.generationVersion === 3) await readRc1Source(tx, village.worldId);
-        const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-        // No command took place after begin: all due transitions are already at H.
-        await devTime('admission', () => admitVillageWork(tx, economy, village));
-        await reconcileRestHousing(tx, village.worldId, village.villageId, economy.through);
-        return economy;
-      }),
-    );
-    readReconciliations.set(db, reconciliations);
-  }
-  return reconciliations.run(accountId, worldSlug, candidate.worldId, candidate.villageId);
-}
-
-export function getVillageState(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId?: string,
-  compute?: TravelNetworkExecutor,
-) {
-  return devTime('village', async () => {
-    const committed = await reconcileVillageForRead(db, accountId, worldSlug, villageId);
-    // This fresh MVCC view starts after the wakeup committed; its own serverTime
-    // and revision cover every projected field. Commands retain their existing H.
-    return readVillageProjection(db, accountId, worldSlug, committed.villageId, compute);
-  });
-}
-
-export async function commandVillageScience<Mode extends ConstructionReplyMode = 'snapshot'>(
+export async function commandVillageScience(
   db: Kysely<Database>,
   accountId: string,
   worldSlug: string,
   villageId: string,
   command: ScienceCommand,
-  replyMode: Mode = 'snapshot' as Mode,
   afterWrites?: AfterConstructionWrites,
-): Promise<ConstructionResult<Mode>> {
+): Promise<ConstructionCommit> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await scienceCommand(tx, economy, command);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, undefined, afterWrites);
+    return villageCommandResult(tx, village, economy, undefined, afterWrites);
   });
-}
-
-/** Durable receipts are immutable. A retry only needs ownership, request equality
- * and a fresh read-only transport projection; it must not wake unrelated work. */
-async function replayVillageCommand(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  command: MarketCommand | ProcessingCommand,
-  table: 'marketExchanges' | 'processingCommandReceipts',
-): Promise<ConstructionCommit | undefined> {
-  const village = await ownedVillage(db, accountId, worldSlug, villageId);
-  const previous = await db
-    .selectFrom(table)
-    .select(['request', sql<Date>`statement_timestamp()`.as('through')])
-    .where('worldId', '=', village.worldId)
-    .where('villageId', '=', villageId)
-    .where('commandId', '=', command.commandId)
-    .executeTakeFirst();
-  if (!previous) return;
-  if (!isDeepStrictEqual(previous.request, command))
-    throw new HttpError(409, 'COMMAND_REUSED', 'Identifiant de commande déjà utilisé.');
-  return {
-    worldId: village.worldId,
-    villageId: village.villageId,
-    through: previous.through,
-    commandId: command.commandId,
-  };
-}
-
-export async function commandVillageProcessing<Mode extends ConstructionReplyMode = 'snapshot'>(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  command: ProcessingCommand,
-  replyMode: Mode = 'snapshot' as Mode,
-  budget?: ReconciliationBudget,
-): Promise<ConstructionResult<Mode>> {
-  if (replyMode === 'commit') {
-    const replay = await replayVillageCommand(
-      db,
-      accountId,
-      worldSlug,
-      villageId,
-      command,
-      'processingCommandReceipts',
-    );
-    if (replay) return replay as ConstructionResult<Mode>;
-  }
-  return db
-    .transaction()
-    .execute(async (tx) => {
-      const village = await ownedVillage(tx, accountId, worldSlug, villageId);
-      if (replyMode === 'commit') {
-        const prepared = await beginProcessingCommand(tx, village.worldId, village.villageId, command, budget);
-        if (prepared.catchingUp) throw new ScopeCatchingUp();
-        if (!prepared.replay) {
-          await commandProcessing(tx, prepared.economy, command);
-          if (prepared.reconciled)
-            await reconcileRestHousing(tx, village.worldId, village.villageId, prepared.economy.through);
-        }
-        // Processing durations are strictly positive; the command cannot create
-        // a new completion at H. Do not run unrelated admissions as a finalizer.
-        return { ...prepared.economy, commandId: command.commandId } as ConstructionResult<Mode>;
-      }
-      const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-      await commandProcessing(tx, economy, command);
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, command.commandId);
-    })
-    .catch(async (error) => {
-      // Kysely has completed ROLLBACK before this separate durable wakeup.
-      // There is no command receipt or deferred command intent on this path.
-      if (error instanceof ScopeCatchingUp) await requestEconomyCatchup(db, accountId, worldSlug, villageId);
-      throw error;
-    });
 }
 
 export async function previewVillageProcessing(
@@ -2135,87 +1895,7 @@ async function finishBuildingCommand(
     .execute();
 }
 
-/** Compatibility adapters share the bounded placement command. Only explicit
- * snapshot callers request the complete read-only presentation afterwards. */
-async function placementResult<Mode extends ConstructionReplyMode>(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  confirmed: import('@arbestra/contracts').ConstructionConfirmation,
-  mode: Mode,
-): Promise<ConstructionResult<Mode>> {
-  if (mode === 'snapshot')
-    return (await readVillageProjection(db, accountId, worldSlug, confirmed.villageId)) as ConstructionResult<Mode>;
-  return {
-    worldId: confirmed.worldId,
-    villageId: confirmed.villageId,
-    through: new Date(confirmed.commandTime),
-    commandId: confirmed.commandId,
-    confirmation: confirmed,
-  } as ConstructionResult<Mode>;
-}
-export async function constructBuilding<Mode extends ConstructionReplyMode = 'snapshot'>(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  cellX: number,
-  cellY: number,
-  buildingType: BuildingType,
-  durationOverride: number | null,
-  commandId?: string,
-  expectedCosts?: ExpectedCost[],
-  quarterTurns = 0,
-  houseVariant: 'stone' | 'logs' | 'beams' = 'stone',
-  replyMode: Mode = 'snapshot' as Mode,
-): Promise<ConstructionResult<Mode>> {
-  const fixed = buildingType === 'university' || buildingType === 'stonemason';
-  const confirmed = await placeBuilding(
-    db,
-    accountId,
-    worldSlug,
-    villageId,
-    {
-      buildingType,
-      anchor: { cellX, cellY },
-      cells: fixed ? fixedBuildingFootprint(buildingType, { cellX, cellY }, quarterTurns) : [{ cellX, cellY }],
-      commandId,
-      expectedCosts,
-      quarterTurns,
-      houseVariant,
-      legacy: !fixed,
-    },
-    durationOverride,
-  );
-  return placementResult(db, accountId, worldSlug, confirmed, replyMode);
-}
-export async function constructBuildingArea<Mode extends ConstructionReplyMode = 'snapshot'>(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  buildingType: BuildingType,
-  anchor: SpatialCell,
-  rawCells: SpatialCell[],
-  durationOverride: number | null,
-  commandId?: string,
-  expectedCosts?: ExpectedCost[],
-  quarterTurns = 0,
-  houseVariant: 'stone' | 'logs' | 'beams' = 'stone',
-  replyMode: Mode = 'snapshot' as Mode,
-): Promise<ConstructionResult<Mode>> {
-  const confirmed = await placeBuilding(
-    db,
-    accountId,
-    worldSlug,
-    villageId,
-    { buildingType, anchor, cells: rawCells, commandId, expectedCosts, quarterTurns, houseVariant },
-    durationOverride,
-  );
-  return placementResult(db, accountId, worldSlug, confirmed, replyMode);
-}
-
-export async function expandGarden<Mode extends ConstructionReplyMode = 'snapshot'>(
+export async function expandGarden(
   db: Kysely<Database>,
   accountId: string,
   worldSlug: string,
@@ -2225,9 +1905,8 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
   durationOverride: number | null,
   commandId?: string,
   expectedCosts?: ExpectedCost[],
-  replyMode: Mode = 'snapshot' as Mode,
   afterWrites?: AfterConstructionWrites,
-): Promise<ConstructionResult<Mode>> {
+): Promise<ConstructionCommit> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
@@ -2256,7 +1935,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
       expectedCosts: canonicalCosts(expectedCosts),
     };
     if (await claimBuildingCommand(tx, village, commandId, 'expand', commandRequest))
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+      return villageCommandResult(tx, village, economy, commandId);
     const building = await tx
       .selectFrom('buildings')
       .selectAll()
@@ -2366,8 +2045,7 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
       )
     )
       throw new HttpError(409, 'INVALID_BUILDING_EXTENSION', 'L’extension doit toucher le jardin actif.');
-    if (newCells.length === 0)
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId, afterWrites);
+    if (newCells.length === 0) return villageCommandResult(tx, village, economy, commandId, afterWrites);
     await assertBuildableCells(tx, village, newCells);
     const item = await definition(tx, 'garden', 1);
     const actualCosts = scaledCosts(item.costs, newCells.length);
@@ -2402,11 +2080,11 @@ export async function expandGarden<Mode extends ConstructionReplyMode = 'snapsho
       })
       .execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId, afterWrites);
+    return villageCommandResult(tx, village, economy, commandId, afterWrites);
   });
 }
 
-export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snapshot'>(
+export async function upgradeBuilding(
   db: Kysely<Database>,
   accountId: string,
   worldSlug: string,
@@ -2418,9 +2096,8 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
   commandId?: string,
   expectedCosts?: ExpectedCost[],
   expectedLevel?: number,
-  replyMode: Mode = 'snapshot' as Mode,
   afterWrites?: AfterConstructionWrites,
-): Promise<ConstructionResult<Mode>> {
+): Promise<ConstructionCommit> {
   // Compatibility for saved clients/tests from the old single-cell Garden UX.
   // The HTTP API uses /expansions; both paths now create the same expansion.
   if (extensionCellX !== undefined && extensionCellY !== undefined)
@@ -2434,7 +2111,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
       durationOverride,
       commandId,
       expectedCosts,
-      replyMode,
+      afterWrites,
     );
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
@@ -2467,7 +2144,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
       expectedCosts: canonicalCosts(expectedCosts),
     };
     if (await claimBuildingCommand(tx, village, commandId, 'upgrade', commandRequest))
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId);
+      return villageCommandResult(tx, village, economy, commandId);
     const building = await tx
       .selectFrom('buildings')
       .innerJoin('worldCellOccupancies', (join) =>
@@ -2566,7 +2243,7 @@ export async function upgradeBuilding<Mode extends ConstructionReplyMode = 'snap
       })
       .execute();
     await finishBuildingCommand(tx, village, commandId, building.id);
-    return villageCommandResult(tx, accountId, worldSlug, village, economy, replyMode, commandId, afterWrites);
+    return villageCommandResult(tx, village, economy, commandId, afterWrites);
   });
 }
 /** Starts a server-authoritative stone extraction. The feature UUID, not a viewport cell, is the target. */
@@ -2878,24 +2555,9 @@ export async function startVillageExploitation(
   worldSlug: string,
   villageId: string,
   rawRequest: ExploitationRequest,
-): Promise<VillageState>;
-export async function startVillageExploitation(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  rawRequest: ExploitationRequest,
-  afterWrites: AfterConstructionWrites,
-): Promise<ConstructionCommit>;
-export async function startVillageExploitation(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  rawRequest: ExploitationRequest,
   afterWrites?: AfterConstructionWrites,
-): Promise<VillageState | ConstructionCommit> {
-  return db.transaction().execute(async (tx): Promise<VillageState | ConstructionCommit> => {
+): Promise<ConstructionCommit> {
+  return db.transaction().execute(async (tx): Promise<ConstructionCommit> => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const request = canonicalExploitation(rawRequest, village);
     const economy = await beginVillageEconomy(
@@ -2916,9 +2578,8 @@ export async function startVillageExploitation(
     if (previous) {
       if (!isDeepStrictEqual(previous.request, request))
         throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée différemment.');
-      // A V2 replay publishes nothing; its effects were sent with the original.
-      if (afterWrites) return { worldId: village.worldId, villageId, through: economy.through };
-      return state(tx, accountId, worldSlug, economy);
+      // A replay publishes nothing; its effects were sent with the original.
+      return { worldId: village.worldId, villageId, through: economy.through };
     }
     if (!request.gardens.length && !request.wood.length && !request.stone.length)
       throw new HttpError(400, 'EXPLOITATION_EMPTY', 'Sélectionner au moins une ressource.');
@@ -3019,25 +2680,12 @@ export async function startVillageExploitation(
           'Aucune équipe ne peut partir maintenant ; aucune activité n’a été lancée.',
         );
     };
-    // V2: the admission runs in the commit finalizer; the order alone is
-    // read back before the terminal publication, in the same transaction.
-    if (afterWrites)
-      return villageCommandResult(
-        tx,
-        accountId,
-        worldSlug,
-        village,
-        economy,
-        'commit',
-        undefined,
-        async (tx, economy) => {
-          departed((await readExploitationOrders(tx, economy, undefined, [order.id]))[0]?.mobilized);
-          await afterWrites(tx, economy);
-        },
-      );
-    const snapshot = await state(tx, accountId, worldSlug, economy);
-    departed(snapshot.village.exploitationOrders?.find((item) => item.id === order.id)?.mobilized);
-    return snapshot;
+    // The admission runs in the commit finalizer; the order alone is read
+    // back before the terminal publication, in the same transaction.
+    return villageCommandResult(tx, village, economy, undefined, async (tx, economy) => {
+      departed((await readExploitationOrders(tx, economy, undefined, [order.id]))[0]?.mobilized);
+      await afterWrites?.(tx, economy);
+    });
   });
 }
 
@@ -3184,36 +2832,14 @@ export async function changeVillageWorksite(
   villageId: string,
   worksiteId: string,
   request: ChangeExtractionWorksiteRequest,
-): Promise<{ villageState: VillageState; worksite: VillageState['village']['worksites'][number] }>;
-export async function changeVillageWorksite(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  worksiteId: string,
-  request: ChangeExtractionWorksiteRequest,
-  afterWrites: AfterConstructionWrites,
-): Promise<ConstructionCommit>;
-export async function changeVillageWorksite(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  worksiteId: string,
-  request: ChangeExtractionWorksiteRequest,
   afterWrites?: AfterConstructionWrites,
-) {
+): Promise<ConstructionCommit> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
     await changeWorksite(tx, economy, worksiteId, request);
-    if (afterWrites)
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, 'commit', undefined, afterWrites);
-    const villageState = await state(tx, accountId, worldSlug, economy);
-    const worksite = villageState.village.worksites.find((site) => site.id === worksiteId);
-    if (!worksite) throw new Error('Changed worksite missing from snapshot');
-    return { villageState, worksite };
+    return villageCommandResult(tx, village, economy, undefined, afterWrites);
   });
 }
 
@@ -3223,31 +2849,12 @@ export async function discoverBuildingSuppliesInTransaction(
   worldSlug: string,
   villageId: string,
   buildingId: string,
-): Promise<VillageState>;
-export async function discoverBuildingSuppliesInTransaction(
-  tx: Transaction<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  buildingId: string,
-  afterWrites: AfterConstructionWrites,
-): Promise<ConstructionCommit>;
-export async function discoverBuildingSuppliesInTransaction(
-  tx: Transaction<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  buildingId: string,
   afterWrites?: AfterConstructionWrites,
-): Promise<VillageState | ConstructionCommit> {
+): Promise<ConstructionCommit> {
   const village = await ownedVillage(tx, accountId, worldSlug, villageId);
   if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
   const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-  // The V2 contract answers with the commit's effects instead of a village state.
-  const reply = () =>
-    afterWrites
-      ? villageCommandResult(tx, accountId, worldSlug, village, economy, 'commit', undefined, afterWrites)
-      : state(tx, accountId, worldSlug, economy);
+  const reply = () => villageCommandResult(tx, village, economy, undefined, afterWrites);
   const supply = await tx
     .selectFrom('buildingHiddenSupplies')
     .selectAll()
@@ -3295,44 +2902,19 @@ export async function discoverBuildingSuppliesInTransaction(
   return reply();
 }
 
-export async function discoverBuildingSupplies(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  buildingId: string,
-): Promise<VillageState> {
-  return db
-    .transaction()
-    .execute((tx) => discoverBuildingSuppliesInTransaction(tx, accountId, worldSlug, villageId, buildingId));
-}
-
 /** Visual discovery is reported by the client; ownership, time and uniqueness are authoritative. */
 export async function discoverCatEyes(
   db: Kysely<Database>,
   accountId: string,
   worldSlug: string,
   villageId: string,
-): Promise<{ newlyCompleted: boolean; villageState: VillageState }>;
-export async function discoverCatEyes(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
-  afterWrites: AfterConstructionWrites,
-): Promise<ConstructionCommit>;
-export async function discoverCatEyes(
-  db: Kysely<Database>,
-  accountId: string,
-  worldSlug: string,
-  villageId: string,
   afterWrites?: AfterConstructionWrites,
-) {
+): Promise<ConstructionCommit> {
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
-    const inserted = await tx
+    await tx
       .insertInto('villageAccomplishments')
       .values({
         worldId: village.worldId,
@@ -3341,11 +2923,8 @@ export async function discoverCatEyes(
         completedAt: economy.through,
       })
       .onConflict((oc) => oc.columns(['worldId', 'villageId', 'code']).doNothing())
-      .returning('code')
       .execute();
-    if (afterWrites)
-      return villageCommandResult(tx, accountId, worldSlug, village, economy, 'commit', undefined, afterWrites);
-    return { newlyCompleted: inserted.length > 0, villageState: await state(tx, accountId, worldSlug, economy) };
+    return villageCommandResult(tx, village, economy, undefined, afterWrites);
   });
 }
 /** Terrain window of a village (RC1 field or chunks), for bounded commands. */

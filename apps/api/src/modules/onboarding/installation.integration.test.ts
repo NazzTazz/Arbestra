@@ -1,8 +1,4 @@
-import {
-  receiveHarvestIntent,
-  readHarvestReceipts,
-  processHarvestSubmission,
-} from '../villages/harvest-submissions.js';
+import { receiveHarvestIntent, processHarvestSubmission } from '../villages/harvest-submissions.js';
 import { acceptHarvestIntent } from '../villages/harvest-intents.js';
 import { wakeExtractionWorksite } from '../villages/complete-construction.js';
 import { createSpawnTerrainField, buildTravelNetwork } from '@arbestra/contracts';
@@ -13,15 +9,15 @@ import { buildApp } from '../../app.js';
 import { loadConfig } from '../../config.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { beginVillageEconomy, reconcileVillageEconomy } from '../villages/reconcile-economy.js';
+import { ownedVillage, stoneTravelPath } from '../villages/service.js';
 import {
-  ownedVillage,
-  stoneTravelPath,
+  startVillageStoneExtraction,
+  readHarvestReceipts,
   constructBuilding,
   constructBuildingArea,
   getVillageState,
   readVillageProjection,
-} from '../villages/service.js';
-import { startVillageStoneExtraction } from '../villages/legacy-commands.fixture.js';
+} from '../villages/legacy-commands.fixture.js';
 import { getTerrain, getTerrainUpdates } from '../worlds/terrain.js';
 import { readFileSync } from 'node:fs';
 import { sql } from 'kysely';

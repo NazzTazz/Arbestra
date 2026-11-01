@@ -9,12 +9,12 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import type { Database } from '../../database/schema.js';
 import { DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
+import { materializeCohorts } from './work.js';
 import {
   discoverBuildingSupplies,
   discoverBuildingSuppliesInTransaction,
   getVillageState,
-} from '../villages/service.js';
-import { materializeCohorts } from './work.js';
+} from '../villages/legacy-commands.fixture.js';
 
 const databaseUrl = testDatabaseUrl();
 let db: Kysely<Database>;

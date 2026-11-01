@@ -10,7 +10,7 @@ Monolithe TypeScript (Node 24, pnpm), une base PostgreSQL 17 source de vérité.
 
 | Paquet | Rôle |
 |---|---|
-| `apps/api` | Fastify : routes HTTP, règles métier, sessions, worker de tâches planifiées, flux SSE. Tout ce qui décide (ressources, droits, durées). |
+| `apps/api` | Fastify : routes HTTP, règles métier, sessions, worker de tâches planifiées, flux SSE V2. Tout ce qui décide (ressources, droits, durées). |
 | `apps/world-web` | Client du monde : React (état, panneaux, HUD) + Babylon.js (rendu 3D, sélection spatiale). N'invente aucune valeur économique. |
 | `apps/play-web` | Compte, lobby, choix du monde. |
 | `apps/admin-web` | Console NOC : supervision, diagnostic HTTP, observation d'un village. |
@@ -57,7 +57,7 @@ corepack pnpm dev               # api + clients en parallèle
 |---|---|
 | `auth` | Connexion, `authenticate` (cookie → compte). |
 | `onboarding` | Carte de spawn, atlas, installation RC1 d'un nouveau village (`installation.ts`), kit de départ. |
-| `villages` | Cœur du jeu : construction, économie, exploitation, marché, atelier, voirie, nivellement, synchronisation V1 et V2. Voir ci-dessous. |
+| `villages` | Cœur du jeu : construction, économie, exploitation, marché, atelier, voirie, nivellement, synchronisation V2 (la V1 est retirée). Voir ci-dessous. |
 | `population` | Cohortes d'habitants : énergie (`energy.ts`), affectations et fusion (`work.ts`), croissance (`growth.ts`), logement (`housing.ts`), gestes (`gestures.ts`), récolte des Jardins et tournées (`garden-harvest.ts`, `garden-tour.ts`), projections (`projection.ts`). |
 | `deposits` | Gisements : pierre (`stone-extractions.ts`), bois (`woodland.ts`), chantiers (`worksites.ts`), réserves communes d'extraction (`extraction-pools.ts`). |
 | `science` | Université : programmes, connaissances, expéditions asynchrones et leur worker. |
@@ -71,8 +71,8 @@ corepack pnpm dev               # api + clients en parallèle
 
 | Fichier | Gère |
 |---|---|
-| `routes.ts` | Toutes les routes de commande d'un village (`POST /api/worlds/:worldSlug/villages/:villageId/...`). Négociation V1/V2 par l'en-tête `x-arbestra-protocol: 2`. |
-| `service.ts` | Le gros des services historiques : `ownedVillage`, `state` (état complet V1), `villageCommandResult`, constructions, améliorations, science, atelier, exploitation, population, découvertes. |
+| `routes.ts` | Toutes les routes de commande d'un village (`POST /api/worlds/:worldSlug/villages/:villageId/...`). Toute commande exige l'en-tête `x-arbestra-protocol: 2` (`client-protocol.ts`) : sans lui, `426 CLIENT_UPGRADE_REQUIRED` avant toute exécution. `GET /village` et `/events` répondent aussi `426`. |
+| `service.ts` | Le gros des services historiques : `ownedVillage`, `state` (état complet du village, appelé par la présentation V2), `villageCommandResult`, constructions, améliorations, science, atelier, exploitation, population, découvertes. |
 | `reconcile-economy.ts` | `beginVillageEconomy` (verrou village puis verrous métier, borne temporelle), `reconcileVillageEconomy` (rattrape les transitions dues). |
 | `construction.ts` / `complete-construction.ts` | Pose d'un bâtiment (`placeBuilding`) ; fins de chantier et la plupart des handlers du worker (`completeConstruction`, `arrivePopulation`, `completeGardenHarvest`…). |
 | `processing*.ts` | Atelier : lots, dépendances, contrat V2. |
@@ -81,18 +81,17 @@ corepack pnpm dev               # api + clients en parallèle
 | `leveling.ts` | Nivellement et terraformation. |
 | `harvest-intents.ts`, `harvest-submissions.ts` | Récoltes au geste : intention reçue, traitée par le worker, reçu. |
 | `exploitation-budget.ts`, `worksite-admission.ts` | Ordres d'exploitation mixtes, plafonds, admissions. |
-| `sync.ts`, `sync-projections.ts`, `sync-revision.ts` | **V1** : SSE `/events`, trames et snapshots complets. En cours de retrait. |
+| `client-protocol.ts` | Refus `426` des clients sans le protocole V2 et des routes V1 retirées. |
+| `legacy-commands.fixture.ts` | **Tests seulement** : anciennes commandes à réponse « état complet » (`constructBuilding`, `getVillageState`, `commandPlayerMarket`…) que les scénarios de test continuent d'utiliser. Jamais importé par le code de production. |
 | `sync-v2-*.ts`, `command-v2.ts`, `construction-v2.ts` | **V2** : voir §5. |
 
 ## 4. Cycle d'une commande
 
-1. **Route** (`routes.ts`) : valide le schéma TypeBox, `authenticate`, choisit le contrat (V2 si `x-arbestra-protocol: 2`).
+1. **Route** (`routes.ts`) : le crochet `requireProtocolV2` refuse d'abord (426) une requête sans `x-arbestra-protocol: 2`, puis le schéma TypeBox est validé et `authenticate` s'exécute.
 2. **Service** : ouvre une transaction, `ownedVillage` vérifie le propriétaire et le monde, puis `beginVillageEconomy` prend le verrou du village **avant** tout verrou métier. La borne `statement_timestamp()` est lue après l'acquisition ; commande et réponse partagent cette borne.
 3. **Règles** : lectures sous verrou, refus par `HttpError` (4xx = refus métier, rien n'est écrit), écritures. Les commandes idempotentes stockent un reçu par `commandId`.
 4. **Finalisation** : `villageCommandResult` → `finalizeVillageEconomy` (admissions, réveils) et `reconcileRestHousing`.
-5. **Réponse** :
-   - V1 : `state()` reconstruit l'état complet du village (coûteux) ou une trame ;
-   - V2 : `publishPrivateEffects` publie le journal en **dernière** opération de la transaction et renvoie les effets privés (`ConstructionConfirmationV2`, `ProcessingConfirmationV2`, `VillageCommandConfirmationV2`). Toute écriture métier après la publication est refusée.
+5. **Réponse** : `publishPrivateEffects` publie le journal en **dernière** opération de la transaction et renvoie les effets privés (`ConstructionConfirmationV2`, `ProcessingConfirmationV2`, `VillageCommandConfirmationV2`). Toute écriture métier après la publication est refusée.
 
 Ordre des verrous (voir l'[audit de concurrence](AUDIT-CONCURRENCE-ECONOMIE-2026-10-23.md)) : tâche planifiée → village(s) triés par UUID → verrou consultatif `infrastructure:<world>` → gisements par UUID → lignes locales → flux V2. Ne jamais prendre un village après un gisement.
 
@@ -114,10 +113,10 @@ Ajouter une table métier lisible en V2 : trigger de collecte dans une migration
 
 | Emplacement | Contenu |
 |---|---|
-| `App.tsx` | Orchestration : état du village, mode (construction, exploitation, population…), commandes (`runAction`, `executeConstruction`, `submitExploitation`), choix V1/V2 via `villageV2Ref`. |
-| `api/client.ts` | Appels HTTP historiques (V1) et lectures diverses. |
+| `App.tsx` | Orchestration : état du village, mode (construction, exploitation, population…), commandes (`runAction`, `executeConstruction`, `submitExploitation`) par le transport V2. |
+| `api/client.ts` | Lectures et reçus (aperçus, marché, reçus d'expédition et de récolte). |
 | `api/sync-v2-*.ts`, `api/processing-v2.ts` | Transport V2 et hook React. |
-| `api/village-sync.ts`, `sse-reader.ts` | Flux V1 (repli quand la V2 est indisponible). |
+| `api/sse-reader.ts`, `reconnect.ts`, `initial-village.ts` | Lecture du flux SSE V2, reprises espacées, premier chargement du village. |
 | `ui/` | Panneaux React : construction, exploitation, marché, science, HUD, voirie, nivellement, terraformation. |
 | `scene/BabylonVillageScene.ts` | Scène Babylon : terrain, bâtiments, sélection, caméras. |
 | `scene/*-factory.ts`, `building-*.ts` | Modèles procéduraux des bâtiments, niveaux de détail, miniatures. |
@@ -133,7 +132,7 @@ Option locale utile : `localStorage['arbestra:timing']='1'` (en-têtes `Server-T
 
 | Je cherche | Fichier / fonction |
 |---|---|
-| L'état complet V1 d'un village | `villages/service.ts` → `state` |
+| L'état complet d'un village (présentation V2, tests) | `villages/service.ts` → `state` |
 | Le verrou et la borne économique | `villages/reconcile-economy.ts` → `beginVillageEconomy` |
 | La pose d'un bâtiment | `villages/construction.ts` → `placeBuilding` ; V2 : `construction-v2.ts` |
 | Ce qui se passe à la fin d'un chantier | `villages/complete-construction.ts` → `completeConstruction` |
@@ -150,7 +149,7 @@ Option locale utile : `localStorage['arbestra:timing']='1'` (en-têtes `Server-T
 
 ## 8. Pièges connus
 
-- Un gros village peut dépasser les plafonds V2 (4 096 références par snapshot, 1 024 identifiants par composant pour la plupart des lecteurs) : l'échec donne un 500 et un repli V1 silencieux. Voir l'[audit sync V2](AUDIT-SYNC-V2-2026-10-23.md).
+- Un gros village peut dépasser les plafonds V2 (4 096 références par snapshot, 1 024 identifiants par composant pour la plupart des lecteurs) : l'échec donne un 500, puis l'écran « Connexion au village impossible » du client (plus de repli V1). Voir l'[audit sync V2](AUDIT-SYNC-V2-2026-10-23.md).
 - Les triggers par ligne coûtent cher sur les écritures en masse : préférer une instruction unique (voir 058, 060, 061).
 - Les migrations déployées ne se modifient pas ; une correction est une nouvelle migration.
 - Un test qui partage une transaction de fixture ne peut pas publier puis écrire : la publication V2 est terminale.

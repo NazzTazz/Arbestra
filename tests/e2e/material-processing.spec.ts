@@ -4,8 +4,8 @@ import { createDatabase } from '../../apps/api/src/database/connection';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
 import { DEVELOPMENT_IDS as ids } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
-import { constructBuilding, getVillageState } from '../../apps/api/src/modules/villages/service';
 import { waitForVillage } from './world-interactions';
+import { constructBuilding, getVillageState } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 
 test('le tailleur est inspectable en Exploitation et transforme un lot après sa pause', async ({
   page,

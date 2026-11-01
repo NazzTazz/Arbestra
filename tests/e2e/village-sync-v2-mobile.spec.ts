@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
-import { constructBuilding } from '../../apps/api/src/modules/villages/service';
 import { waitForVillage } from './world-interactions';
+import { constructBuilding } from '../../apps/api/src/modules/villages/legacy-commands.fixture';
 const expect = baseExpect.configure({ timeout: 30000 });
 
 // V2 village mode on a touch device, in a world created after the V2

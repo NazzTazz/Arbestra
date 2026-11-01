@@ -110,7 +110,7 @@ const closure = (start) => {
     node.writes.forEach((x) => writes.add(x));
     node.review.forEach((x) => review.add(x));
     if (
-      /^(state|beginVillageEconomy|reconcileVillageEconomy|finalizeVillageEconomy|villageCommandResult|readVillageProjection|reconcileSyncDeadline)$/.test(
+      /^(state|beginVillageEconomy|reconcileVillageEconomy|finalizeVillageEconomy|villageCommandResult)$/.test(
         node.name,
       )
     )

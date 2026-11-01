@@ -6,9 +6,9 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { buildApp } from '../../app.js';
-import { constructBuilding, getVillageState } from './service.js';
 import { knownGeography } from '../science/knowledge.js';
 import { fixedBuildingFootprint } from '@arbestra/contracts';
+import { constructBuilding, getVillageState } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url);

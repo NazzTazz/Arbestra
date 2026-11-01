@@ -117,7 +117,7 @@ describe('development timing', () => {
       leftEntered = gate(),
       rightEntered = gate();
     app.get(
-      '/api/worlds/:worldSlug/village',
+      '/api/worlds/:worldSlug/village/bootstrap',
       { schema: { response: { 200: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] } } } },
       async (request) => {
         const isLeft = (request.params as { worldSlug: string }).worldSlug === 'left';
@@ -129,8 +129,8 @@ describe('development timing', () => {
         });
       },
     );
-    const a = app.inject({ url: '/api/worlds/left/village', headers: { 'x-arbestra-dev-timing': '1' } });
-    const b = app.inject({ url: '/api/worlds/right/village', headers: { 'x-arbestra-dev-timing': '1' } });
+    const a = app.inject({ url: '/api/worlds/left/village/bootstrap', headers: { 'x-arbestra-dev-timing': '1' } });
+    const b = app.inject({ url: '/api/worlds/right/village/bootstrap', headers: { 'x-arbestra-dev-timing': '1' } });
     try {
       await bounded(Promise.all([leftEntered.promise, rightEntered.promise]));
       right.release();
@@ -164,16 +164,16 @@ describe('development timing', () => {
       for (const method of ['GET', 'POST'] as const)
         app.route({
           method,
-          url: '/api/worlds/:worldSlug/village',
+          url: '/api/worlds/:worldSlug/village/bootstrap',
           handler: () => devTimeSync('auth', () => ({ ok: true })),
         });
       app.get('/other', () => ({ ok: true }));
       try {
         for (const [method, url, optIn] of [
-          ['GET', '/api/worlds/test/village', false],
-          ['POST', '/api/worlds/test/village', true],
+          ['GET', '/api/worlds/test/village/bootstrap', false],
+          ['POST', '/api/worlds/test/village/bootstrap', true],
           ['GET', '/other', true],
-          ['GET', '/api/worlds/test/village', true],
+          ['GET', '/api/worlds/test/village/bootstrap', true],
         ] as const) {
           const response = await app.inject({ method, url, headers: optIn ? { 'x-arbestra-dev-timing': '1' } : {} });
           expect(response.statusCode).toBe(200);

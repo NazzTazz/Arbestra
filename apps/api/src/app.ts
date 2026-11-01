@@ -6,7 +6,6 @@ import { instrumentObservationActions } from './modules/admin/observation-action
 import { attachJourneyJournal, JourneyJournal } from './modules/admin/journey-journal.js';
 import { randomUUID } from 'node:crypto';
 import { ExpeditionCoordinator } from './modules/science/expeditions.js';
-import { ExpeditionWakeups } from './modules/science/expedition-wakeups.js';
 import { registerWorldGeneratorRoutes } from './modules/world-generator/routes.js';
 import { registerOnboardingRoutes } from './modules/onboarding/routes.js';
 import cookie from '@fastify/cookie';
@@ -23,7 +22,6 @@ import { registerAuthRoutes } from './modules/auth/routes.js';
 import { registerVillageRoutes } from './modules/villages/routes.js';
 import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
 import { registerFactorySettings } from './modules/villages/factory-settings.js';
-import { registerVillageSync } from './modules/villages/sync.js';
 import { createVillagePresentationReader, registerSyncV2Routes } from './modules/villages/sync-v2-routes.js';
 import { registerAdminAuthRoutes } from './modules/admin/auth.js';
 import { registerAdminRoutes } from './modules/admin/routes.js';
@@ -104,16 +102,6 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));
-  const wakeups = new ExpeditionWakeups(config.databaseUrl, () => {
-    operations.event(
-      'EXPEDITION_LISTENER_INTERRUPTED',
-      'Le canal de réveil des expéditions est interrompu.',
-      'warning',
-    );
-    app.log.warn({ code: 'EXPEDITION_LISTENER_INTERRUPTED' }, 'Expedition listener interrupted');
-  });
-  await wakeups.start();
-  app.addHook('preClose', () => wakeups.close());
   // A big village's first network takes ~36 s on alpha (Pinkystan, 27
   // October). A 30 s bound killed the worker and its caches, so every retry
   // started cold and failed again.
@@ -126,7 +114,6 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
     await navigation.start();
   } catch (error) {
     await navigation.close();
-    await wakeups.close();
     throw error;
   }
   // Commands holding a village lock route on their own lane: they queue behind
@@ -141,7 +128,6 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   } catch (error) {
     await commandNavigation.close();
     await navigation.close();
-    await wakeups.close();
     throw error;
   }
   const unbindRefiner = bindTransactionRefiner(db, {
@@ -200,20 +186,6 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
       note: 'Cycle local de préparation ; les refus métier sont distincts des échecs de calcul.',
     };
   });
-  operations.observeWorker('expedition-listener', () => {
-    const state = wakeups.observation;
-    return {
-      id: 'expedition-listener',
-      label: 'Réveil PostgreSQL / SSE',
-      active: state.connected ? 1 : 0,
-      status: state.closed ? 'unavailable' : state.connected ? 'available' : 'degraded',
-      lastObservedAt: new Date().toISOString(),
-      lastSuccessAt: state.lastSuccessAt,
-      lastErrorAt: state.lastErrorAt,
-      note: 'Connexion LISTEN locale observée ; ne prouve pas la livraison réseau au navigateur.',
-    };
-  });
-  const villageProjections = await registerVillageSync(app, db, config, navigation, wakeups);
   const observations = new ObservationHub();
   const presentations = createVillagePresentationReader(app, db, navigation);
   await registerObservationRoutes(app, db, config, observations, presentations);
@@ -231,7 +203,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerAdminRoutes(app, db, config, async () => operations.snapshot(await databaseProbe.read()));
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
-  await registerVillageRoutes(app, db, config, villageProjections, navigation);
+  await registerVillageRoutes(app, db, config, navigation);
   await registerSyncV2Routes(app, db, config, navigation, presentations);
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app, db, config);

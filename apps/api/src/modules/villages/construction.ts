@@ -23,7 +23,6 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { rc1AbsentTrees, removedStumpsSql } from '../deposits/woodland.js';
-import { villageSyncRevision } from './sync-revision.js';
 import type { OwnedVillage } from './service.js';
 import type { VillageEconomy } from './reconcile-economy.js';
 import { normalizeCell, wrappedDelta, toroidalChebyshev } from '../worlds/coordinates.js';
@@ -665,8 +664,7 @@ export async function placeBuilding(
       })),
     };
   });
-  // V2 callers order by their journal, not by this V1 fence (a world count).
-  if (afterWrites) return { ...confirmed, minimumRevision: 0 };
-  // Fence after COMMIT: an old coherent SSE projection cannot cover this receipt.
-  return { ...confirmed, minimumRevision: (await villageSyncRevision(db, confirmed.worldId)).revision };
+  // The contract still names the V1 fence (a world count); V2 orders by its journal, so it is 0.
+  // It leaves with the contract (lot I.4).
+  return { ...confirmed, minimumRevision: 0 };
 }

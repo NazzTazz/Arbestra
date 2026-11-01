@@ -14,11 +14,11 @@ import { appendPoolTargets, changeExtractionPool, readExtractionPools } from '..
 import { admitWorksites, changeWorksite } from '../deposits/worksites.js';
 import { completeStoneExtractionAt } from '../deposits/stone-extractions.js';
 import { populationGesture } from '../population/gestures.js';
-import { commandHudWorkforce } from './hud-workforce.js';
 import { commandProcessing, completeProcessingAt } from './processing.js';
 import { admitScience, scienceCommand } from '../science/service.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { up as migrateHud } from '../../database/migrations/050_hud_workforce.js';
+import { commandHudWorkforce } from './legacy-commands.fixture.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
