@@ -18,8 +18,9 @@ import {
   type VillageState,
 } from '@arbestra/contracts';
 import type { TimedVillageState } from './client';
-import { SyncV2Transport } from './sync-v2-transport';
+import { SyncV2HttpError, SyncV2Transport } from './sync-v2-transport';
 import { SyncV2SessionExpired } from './sync-v2-session';
+import { SpacedRetry } from './reconnect';
 import { adoptInitialSyncV2, SYNC_V2_VILLAGE_INCLUDE } from './sync-v2-initial';
 import { hudFromVillage, type HudSettlement } from '../ui/hud-intents';
 
@@ -179,9 +180,10 @@ export function scopeTooLargeMessage(retryInMs: number): string {
   return `Village trop grand pour être synchronisé ; nouvel essai dans ${delay}.`;
 }
 
-/** One V2 transport per mounted village. The workshop always uses it when
- * the server negotiates V2; the whole village only in village mode. A server
- * that does not negotiate V2 leaves both on their historical path. */
+/** One V2 transport per mounted village. When it cannot start (`unavailable`),
+ * it tries again at a spaced cadence, and `retry` tries at once: the caller
+ * shows the player a connection screen meanwhile, the game falls back on
+ * nothing else. */
 export function useVillageSyncV2({
   worldSlug,
   worldId,
@@ -199,6 +201,10 @@ export function useVillageSyncV2({
   const [expeditionReceipts, setExpeditionReceipts] = useState<ExpeditionReceipt[] | null>(null);
   const [harvestReceipts, setHarvestReceipts] = useState<HarvestReceipt[] | null>(null);
   const [unresolved, setUnresolved] = useState<ProcessingCommand[]>([]);
+  // Each failed start schedules the next one by bumping `attempt`, which runs the effect again.
+  const [attempt, setAttempt] = useState(0);
+  const reconnect = useRef<SpacedRetry | null>(null);
+  reconnect.current ??= new SpacedRetry(() => setAttempt((n) => n + 1));
   const transport = useRef<SyncV2Transport | null>(null);
   const expired = useRef(onExpired);
   expired.current = onExpired;
@@ -210,7 +216,9 @@ export function useVillageSyncV2({
   // The workforce HUD's basis after a confirmed gesture, read from the session.
   const hudBasis = useRef<(owner: SyncV2Transport) => HudWorkforceState | null>(() => null);
   useEffect(() => {
+    const retrying = reconnect.current!;
     if (!enabled || !worldId || !villageId) {
+      retrying.reset();
       setStatus('off');
       return;
     }
@@ -351,6 +359,7 @@ export function useVillageSyncV2({
       if (transport.current === current) setUnresolved(list);
     };
     if (adopted) {
+      retrying.reset();
       current.rebind(handlers);
       presentation = adopted.presentation;
       const last = adopted.latest();
@@ -361,7 +370,9 @@ export function useVillageSyncV2({
       emit();
       void recover();
     } else {
-      setStatus('starting');
+      // After a failed start the status stays `unavailable` until one succeeds:
+      // the connection screen does not flicker between attempts.
+      if (!retrying.failures) setStatus('starting');
       void (async () => {
         try {
           await current.start();
@@ -370,17 +381,23 @@ export function useVillageSyncV2({
           current.close();
           transport.current = null;
           if (error instanceof SyncV2SessionExpired) {
+            retrying.reset();
             setStatus('off');
             expired.current();
-          } else setStatus('unavailable');
+          } else {
+            setStatus('unavailable');
+            retrying.failed(error instanceof SyncV2HttpError ? error.retryAfterMs : 0);
+          }
           return;
         }
         if (transport.current !== current) return;
+        retrying.reset();
         setStatus('ready');
         void recover();
       })();
     }
     return () => {
+      retrying.cancel();
       if (deferred) clearTimeout(deferred);
       current.close();
       if (transport.current === current) transport.current = null;
@@ -390,7 +407,7 @@ export function useVillageSyncV2({
       setUnresolved([]);
       setVillageReady(false);
     };
-  }, [enabled, village, worldSlug, worldId, villageId]);
+  }, [enabled, village, worldSlug, worldId, villageId, attempt]);
   const command = useCallback(async (command: ProcessingCommand) => {
     const current = transport.current;
     if (!current) throw Error('Synchronisation indisponible.');
@@ -502,10 +519,12 @@ export function useVillageSyncV2({
     if (!current) throw Error('Synchronisation indisponible.');
     return current.previewRoadAnchors(body);
   }, []);
-  /** Immediate delta read, e.g. after a command still answered by V1. */
+  /** Immediate delta read, e.g. after a change the stream has not carried yet. */
   const refresh = useCallback(() => {
     transport.current?.reconnect();
   }, []);
+  /** The player's retry of a start that failed. */
+  const retry = useCallback(() => reconnect.current?.now(), []);
   return {
     status,
     villageReady,
@@ -516,6 +535,7 @@ export function useVillageSyncV2({
     command,
     discard,
     refresh,
+    retry,
     construct,
     upgrade,
     expand,

@@ -25,6 +25,8 @@ import { commandProcessing } from './api/client';
 import { processingCommandBuilding, useVillageSyncV2 } from './api/processing-v2';
 import { SYNC_V2_VILLAGE } from './api/sync-v2-initial';
 import { SyncV2HttpError } from './api/sync-v2-transport';
+import { SyncV2SessionExpired } from './api/sync-v2-session';
+import { RECONNECT_BACKOFF_MS, SpacedRetry } from './api/reconnect';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import { setFactoryEnabled } from './api/client';
 import { InfrastructureTools } from './ui/InfrastructureTools';
@@ -104,12 +106,19 @@ import {
 
 import { WorldLoading } from './ui/WorldLoading';
 import type { InitialLoadProgress } from './scene/initial-village-load';
-import { initialVillageRead, initialWorldName, requestedWorldSlug } from './api/initial-village';
+import {
+  initialVillageRead,
+  initialWorldName,
+  requestedWorldSlug,
+  retryInitialVillageRead,
+} from './api/initial-village';
 import { worldPage } from './api/world-address';
 let sceneModule: Promise<typeof import('./scene/VillageScene')> | undefined;
 const loadScene = () => (sceneModule ??= import('./scene/VillageScene'));
 const VillageScene = lazy(() => loadScene().then((module) => ({ default: module.VillageScene })));
 const worldSlug = requestedWorldSlug;
+const CONNECTION_LOST = 'Connexion au village impossible.';
+const CONNECTION_LOST_DETAIL = 'Nouvelle tentative automatique en cours. Vos demandes en attente sont conservées.';
 const LOBBY_URL = import.meta.env.VITE_LOBBY_URL ?? `${window.location.protocol}//${window.location.hostname}:5173`;
 const populationAnchor = (): ScreenAnchor => ({ x: window.innerWidth / 2, y: window.innerHeight - 220 });
 
@@ -187,6 +196,10 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   const sceneKey = state ? `${state.world.id}:${state.world.generationVersion}:${state.village.id}` : '';
   const initialReady = initialProgress?.key === sceneKey && initialProgress.progress.phase === 'ready';
   const [needsLogin, setNeedsLogin] = useState(false);
+  // The first read of the village gave up (a busy or failing server): the
+  // "connection impossible" screen, whose retries continue while it shows.
+  const [initialLost, setInitialLost] = useState(false);
+  const initialRetry = useRef<SpacedRetry | null>(null);
   const expireSession = useCallback(() => setNeedsLogin(true), []);
   // Set after the V2 hook below: once V2 owns the village, V1 responses only
   // trigger an immediate V2 delta read instead of replacing the state.
@@ -400,6 +413,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onExpired: expireSession,
     onNotice: pushNotification,
   });
+  // The village's synchronization could not start: nothing else takes over, the
+  // game says so over the paused scene while the hook retries at a spaced cadence.
+  const villageLost = villageV2.status === 'unavailable';
   // Receipts of expeditions and harvest gestures: the V2 stream delivers them as the
   // worker writes them; the historical reads remain only without V2 (arbestra:sync-v2=0).
   const receiptsFromStream = villageV2Mode && villageV2.status !== 'unavailable';
@@ -767,25 +783,50 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   useEffect(() => {
     void loadScene().catch(() => {});
     if (starter) return;
-    let cancelled = false;
-    initialFlight.current ??= initialVillageRead();
+    let cancelled = false,
+      attempting = false;
+    // Single attempts at the capped cadence, after the bounded retries behind the loading screen.
+    const again = new SpacedRetry(() => {
+      if (attempting) return;
+      attempting = true;
+      void settle(retryInitialVillageRead()).finally(() => (attempting = false));
+    }, RECONNECT_BACKOFF_MS.length);
+    initialRetry.current = again;
+    const settle = (flight: Promise<TimedVillageState>) => {
+      initialFlight.current = flight;
+      return flight
+        .then((snapshot) => {
+          if (cancelled) return;
+          again.reset();
+          setInitialLost(false);
+          applySnapshot(snapshot);
+        })
+        .catch((reason: unknown) => {
+          if (cancelled) return;
+          // An expired session goes straight to the login screen, a missing
+          // village or world is final: the server's own message is shown.
+          if (reason instanceof SyncV2SessionExpired) setNeedsLogin(true);
+          else if (reason instanceof SyncV2HttpError && reason.status === 404) setError(reason.message);
+          else {
+            setInitialLost(true);
+            again.failed();
+            return;
+          }
+          again.reset();
+          setInitialLost(false);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
     void initialWorldName().then((name) => {
       if (!cancelled && name) setWorldLabel(name);
     });
-    void initialFlight.current
-      .then((snapshot) => {
-        if (!cancelled) applySnapshot(snapshot);
-      })
-      .catch((reason) => {
-        if (cancelled) return;
-        if (reason instanceof ApiError && reason.status === 401) setNeedsLogin(true);
-        else setError(reason instanceof Error ? reason.message : 'Chargement impossible.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    void settle(initialFlight.current ?? initialVillageRead());
     return () => {
       cancelled = true;
+      again.stop();
+      if (initialRetry.current === again) initialRetry.current = null;
     };
   }, [applySnapshot]);
   useEffect(() => {
@@ -2018,7 +2059,15 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       />
     );
   if (!state)
-    return (
+    return initialLost ? (
+      <WorldLoading
+        worldName={worldLabel}
+        error={CONNECTION_LOST}
+        detail={CONNECTION_LOST_DETAIL}
+        onRetry={() => initialRetry.current?.now()}
+        lobbyUrl={LOBBY_URL}
+      />
+    ) : (
       <WorldLoading
         worldName={worldLabel}
         error={error ?? 'Village indisponible.'}
@@ -2050,8 +2099,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       <main
         className="game-shell"
         data-initial-loading={!initialReady}
-        inert={!initialReady}
-        aria-hidden={!initialReady}
+        inert={!initialReady || villageLost}
+        aria-hidden={!initialReady || villageLost}
       >
         {initialReady && !starter && state.world.generationVersion === 3 && (
           <StarterResume slug={worldSlug} villageId={state.village.id} />
@@ -2724,6 +2773,15 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           message="Préparation de la scène"
           progress={initialProgress?.key === sceneKey ? initialProgress.progress : undefined}
           onRetry={() => location.reload()}
+          lobbyUrl={LOBBY_URL}
+        />
+      )}
+      {villageLost && (
+        <WorldLoading
+          worldName={state.world.name}
+          error={CONNECTION_LOST}
+          detail={CONNECTION_LOST_DETAIL}
+          onRetry={villageV2.retry}
           lobbyUrl={LOBBY_URL}
         />
       )}

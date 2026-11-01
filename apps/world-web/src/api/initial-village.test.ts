@@ -1,44 +1,88 @@
 import { afterEach, expect, it, vi } from 'vitest';
-const getVillage = vi.hoisted(() => vi.fn());
-const v2 = vi.hoisted(() => ({ enabled: false, read: vi.fn() }));
-vi.mock('./client', () => ({ getVillage }));
-vi.mock('./sync-v2-initial', () => ({
-  get SYNC_V2_VILLAGE() {
-    return v2.enabled;
-  },
-  initialSyncV2Read: v2.read,
-}));
+const v2 = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('./sync-v2-initial', () => ({ initialSyncV2Read: v2.read }));
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.resetModules();
-  getVillage.mockReset();
   v2.read.mockReset();
-  v2.enabled = false;
 });
-// Modules are reset between tests: the error class must be the instance the
-// module under test checks against, not a copy imported at the top.
+// Modules are reset between tests: the error classes must be the instances the
+// module under test checks against, not copies imported at the top.
 const load = async () => {
-  const [village, transport] = await Promise.all([import('./initial-village'), import('./sync-v2-transport')]);
-  return { ...village, SyncV2HttpError: transport.SyncV2HttpError };
+  const [village, transport, session, reconnect] = await Promise.all([
+    import('./initial-village'),
+    import('./sync-v2-transport'),
+    import('./sync-v2-session'),
+    import('./reconnect'),
+  ]);
+  return {
+    ...village,
+    SyncV2HttpError: transport.SyncV2HttpError,
+    SyncV2SessionExpired: session.SyncV2SessionExpired,
+    RECONNECT_BACKOFF_MS: reconnect.RECONNECT_BACKOFF_MS,
+  };
 };
 const snapshot = { state: { world: { id: 'world' } }, serverOffsetMs: 0 };
-it('shares the V2 bootstrap and keeps the historical read for a server without V2', async () => {
+it('shares the V2 bootstrap with App and repeated development mounts', async () => {
   vi.stubGlobal('location', { href: 'http://localhost/village?world=another-world' });
-  v2.enabled = true;
-  const { initialVillageRead, SyncV2HttpError } = await load();
-  v2.read.mockRejectedValue(new SyncV2HttpError(404, 'NOT_FOUND', 'Route absente.'));
-  getVillage.mockResolvedValue(snapshot);
-  const early = initialVillageRead();
-  expect(initialVillageRead()).toBe(early);
+  const { initialVillageRead } = await load();
+  v2.read.mockResolvedValue(snapshot);
+  const early = initialVillageRead(),
+    mounted = initialVillageRead(),
+    remounted = initialVillageRead();
+  expect(mounted).toBe(early);
+  expect(remounted).toBe(early);
   expect(await early).toBe(snapshot);
   expect(v2.read).toHaveBeenCalledExactlyOnceWith('another-world');
-  expect(getVillage).toHaveBeenCalledExactlyOnceWith('another-world');
 });
-it('retries a busy V2 server instead of loading it with the historical read', async () => {
+it('keeps a failed early read observable by App without silently starting another request', async () => {
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=unavailable' });
+  const { initialVillageRead } = await load();
+  v2.read.mockRejectedValue(new Error('offline'));
+  vi.useFakeTimers();
+  const failed = initialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
+  await vi.runAllTimersAsync();
+  expect(await failed).toMatchObject({ message: 'offline' });
+  const calls = v2.read.mock.calls.length;
+  await expect(initialVillageRead()).rejects.toThrow('offline');
+  expect(v2.read).toHaveBeenCalledTimes(calls);
+});
+it('sends an expired session straight to the login screen: one attempt, the session error itself', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=expired' });
+  const { initialVillageRead, SyncV2SessionExpired } = await load();
+  v2.read.mockRejectedValue(new SyncV2SessionExpired());
+  const outcome = initialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
+  // Neither a wait nor a second attempt: the rejection needs no timer at all.
+  expect(await outcome).toBeInstanceOf(SyncV2SessionExpired);
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(v2.read).toHaveBeenCalledExactlyOnceWith('expired');
+});
+it('stops at once on a missing village or world, with the server refusal for the screen', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=empty' });
+  const { initialVillageRead, SyncV2HttpError } = await load();
+  v2.read.mockRejectedValue(new SyncV2HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.'));
+  const outcome = initialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
+  const error = await outcome;
+  expect(error).toBeInstanceOf(SyncV2HttpError);
+  expect(error).toMatchObject({ status: 404, message: 'Village introuvable dans ce monde.' });
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(v2.read).toHaveBeenCalledExactlyOnceWith('empty');
+});
+it('retries a busy V2 server behind the loading screen', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/village?world=busy' });
-  v2.enabled = true;
   const { initialVillageRead, SyncV2HttpError } = await load();
   v2.read
     .mockRejectedValueOnce(new SyncV2HttpError(503, 'INTERNAL_ERROR', 'Indisponible.', 0))
@@ -47,15 +91,13 @@ it('retries a busy V2 server instead of loading it with the historical read', as
   await vi.advanceTimersByTimeAsync(1000);
   expect(await read).toBe(snapshot);
   expect(v2.read).toHaveBeenCalledTimes(2);
-  expect(getVillage).not.toHaveBeenCalled();
 });
 // Incident: a presentation slower than the CPU lane queue answered 503 twice
 // in a row and the player was left on the error screen for a loaded server.
 it('keeps retrying a saturated V2 server with a capped back-off, behind the loading screen', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/village?world=saturated' });
-  v2.enabled = true;
-  const { initialVillageRead, INITIAL_READ_BACKOFF_MS, SyncV2HttpError } = await load();
+  const { initialVillageRead, RECONNECT_BACKOFF_MS, SyncV2HttpError } = await load();
   const busy = () => new SyncV2HttpError(503, 'INTERNAL_ERROR', 'Indisponible.', 0);
   v2.read
     .mockRejectedValueOnce(busy())
@@ -69,7 +111,7 @@ it('keeps retrying a saturated V2 server with a capped back-off, behind the load
   let settled: unknown;
   const read = initialVillageRead().then((value) => (settled = value));
   // Each failure waits its step before the next attempt: 1, 2, 5, 10, 20, 30, 30 s.
-  const steps = [...INITIAL_READ_BACKOFF_MS, INITIAL_READ_BACKOFF_MS.at(-1)!];
+  const steps = [...RECONNECT_BACKOFF_MS, RECONNECT_BACKOFF_MS.at(-1)!];
   for (const [index, step] of steps.entries()) {
     await vi.advanceTimersByTimeAsync(step - 1);
     expect(v2.read, `attempt ${index + 1}`).toHaveBeenCalledTimes(index + 1);
@@ -78,29 +120,45 @@ it('keeps retrying a saturated V2 server with a capped back-off, behind the load
   }
   expect(await read).toBe(snapshot);
   expect(v2.read).toHaveBeenCalledTimes(steps.length + 1);
-  expect(getVillage).not.toHaveBeenCalled();
 });
-it('lengthens a step for a longer Retry-After and still goes historical on a later 404', async () => {
+it('lengthens a step for a longer Retry-After, then a later missing village still stops the sequence', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/village?world=older' });
-  v2.enabled = true;
   const { initialVillageRead, SyncV2HttpError } = await load();
-  getVillage.mockResolvedValue(snapshot);
   v2.read
     .mockRejectedValueOnce(new SyncV2HttpError(503, 'NAVIGATION_BUSY', 'Occupé.', 1500))
-    .mockRejectedValueOnce(new SyncV2HttpError(404, 'NOT_FOUND', 'Route absente.'));
-  const read = initialVillageRead();
+    .mockRejectedValueOnce(new SyncV2HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.'));
+  const outcome = initialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
   await vi.advanceTimersByTimeAsync(1499);
   expect(v2.read).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(1);
-  expect(await read).toBe(snapshot);
+  expect(await outcome).toMatchObject({ status: 404 });
   expect(v2.read).toHaveBeenCalledTimes(2);
-  expect(getVillage).toHaveBeenCalledExactlyOnceWith('older');
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(v2.read).toHaveBeenCalledTimes(2);
 });
-it('gives up on the error screen only after the attempt bound', async () => {
+it('ends a session that expires after some retries on the session error, not on a retry', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=lapsed' });
+  const { initialVillageRead, SyncV2HttpError, SyncV2SessionExpired } = await load();
+  v2.read
+    .mockRejectedValueOnce(new SyncV2HttpError(503, 'INTERNAL_ERROR', 'Indisponible.', 0))
+    .mockRejectedValueOnce(new SyncV2SessionExpired());
+  const outcome = initialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(await outcome).toBeInstanceOf(SyncV2SessionExpired);
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(v2.read).toHaveBeenCalledTimes(2);
+});
+it('gives up on the connection screen only after the attempt bound, with the last error', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('location', { href: 'http://localhost/village?world=down' });
-  v2.enabled = true;
   const { initialVillageRead, INITIAL_READ_ATTEMPTS, SyncV2HttpError } = await load();
   v2.read.mockRejectedValue(new SyncV2HttpError(503, 'INTERNAL_ERROR', 'Indisponible.', 0));
   const outcome = initialVillageRead().then(
@@ -110,33 +168,44 @@ it('gives up on the error screen only after the attempt bound', async () => {
   await vi.advanceTimersByTimeAsync(30000 * INITIAL_READ_ATTEMPTS);
   expect(v2.read).toHaveBeenCalledTimes(INITIAL_READ_ATTEMPTS);
   expect(await outcome).toBeInstanceOf(SyncV2HttpError);
-  expect(getVillage).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(v2.read).toHaveBeenCalledTimes(INITIAL_READ_ATTEMPTS);
 });
-// Historical transport (localStorage arbestra:sync-v2=0 or VITE_SYNC_V2=0).
-it('shares the early read with App and repeated development mounts', async () => {
-  vi.stubGlobal('location', { href: 'http://localhost/village?world=another-world' });
-  let release!: (value: unknown) => void;
-  getVillage.mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        release = resolve;
-      }),
+it('retries once on demand after the sequence gave up, and later callers share that attempt', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=again' });
+  const { initialVillageRead, retryInitialVillageRead, INITIAL_READ_ATTEMPTS, SyncV2HttpError } = await load();
+  const busy = () => new SyncV2HttpError(503, 'INTERNAL_ERROR', 'Indisponible.', 0);
+  v2.read.mockRejectedValue(busy());
+  const gaveUp = initialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
   );
-  const { initialVillageRead } = await import('./initial-village');
-  const early = initialVillageRead(),
-    mounted = initialVillageRead(),
-    remounted = initialVillageRead();
-  expect(getVillage).toHaveBeenCalledExactlyOnceWith('another-world');
-  expect(mounted).toBe(early);
-  expect(remounted).toBe(early);
-  release(snapshot);
-  expect(await mounted).toBe(snapshot);
+  await vi.advanceTimersByTimeAsync(30000 * INITIAL_READ_ATTEMPTS);
+  expect(await gaveUp).toBeInstanceOf(SyncV2HttpError);
+  expect(v2.read).toHaveBeenCalledTimes(INITIAL_READ_ATTEMPTS);
+  // One attempt and no wait of its own: the screen schedules the next one.
+  const single = retryInitialVillageRead().then(
+    () => 'resolved',
+    (error: unknown) => error,
+  );
+  expect(await single).toBeInstanceOf(SyncV2HttpError);
+  expect(v2.read).toHaveBeenCalledTimes(INITIAL_READ_ATTEMPTS + 1);
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(v2.read).toHaveBeenCalledTimes(INITIAL_READ_ATTEMPTS + 1);
+  // The server is back: the next attempt resolves, and App's own call shares it.
+  v2.read.mockResolvedValueOnce(snapshot);
+  const recovered = retryInitialVillageRead();
+  expect(initialVillageRead()).toBe(recovered);
+  expect(await recovered).toBe(snapshot);
+  expect(v2.read).toHaveBeenCalledTimes(INITIAL_READ_ATTEMPTS + 2);
 });
-it('keeps a failed early read observable by App without silently starting another request', async () => {
-  vi.stubGlobal('location', { href: 'http://localhost/village?world=unavailable' });
-  getVillage.mockRejectedValue(new Error('offline'));
-  const { initialVillageRead } = await import('./initial-village');
-  await expect(initialVillageRead()).rejects.toThrow('offline');
-  await expect(initialVillageRead()).rejects.toThrow('offline');
-  expect(getVillage).toHaveBeenCalledTimes(1);
+it('keeps a missing session or village final for the on-demand retry too', async () => {
+  vi.stubGlobal('location', { href: 'http://localhost/village?world=final' });
+  const { retryInitialVillageRead, SyncV2HttpError, SyncV2SessionExpired } = await load();
+  v2.read.mockRejectedValueOnce(new SyncV2SessionExpired());
+  await expect(retryInitialVillageRead()).rejects.toBeInstanceOf(SyncV2SessionExpired);
+  v2.read.mockRejectedValueOnce(new SyncV2HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable dans ce monde.'));
+  await expect(retryInitialVillageRead()).rejects.toMatchObject({ status: 404 });
+  expect(v2.read).toHaveBeenCalledTimes(2);
 });

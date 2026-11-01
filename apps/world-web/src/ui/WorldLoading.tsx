@@ -14,6 +14,7 @@ export function WorldLoading({
   progress,
   message = 'Préparation du monde',
   error,
+  detail,
   onRetry,
   lobbyUrl,
 }: {
@@ -21,6 +22,8 @@ export function WorldLoading({
   progress?: InitialLoadProgress | undefined;
   message?: string;
   error?: string | null | undefined;
+  /** A second line under the problem, e.g. what the game does about it. */
+  detail?: string | undefined;
   onRetry?: (() => void) | undefined;
   lobbyUrl?: string | undefined;
 }) {
@@ -39,6 +42,7 @@ export function WorldLoading({
             {problem || (progress ? labels[progress.phase] : message)}
             {!problem && '…'}
           </p>
+          {problem && detail && <p className="world-loading-detail">{detail}</p>}
           {progress?.phase === 'terrain' && progress.total > 0 && (
             <p className="world-loading-detail">
               {progress.completed} / {progress.total} tuiles préparées
