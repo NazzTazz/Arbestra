@@ -35,10 +35,11 @@ export function stoneExtractionDuration(workerCount: number, amount = STONE_EXTR
   return Math.ceil((STONE_EXTRACTION_BASE_MS * amount) / (STONE_EXTRACTION_LOT * workerCount));
 }
 
-/** Removing a stump yields no wood and lasts what a lot of 100 lasts for one
- * inhabitant, whoever is sent (docs/SPEC-BOIS-ARBRE-UNITE.md §7). */
+/** Removing a stump yields no wood: one inhabitant, one minute of work per
+ * stump, plus the round trip (Tristan, 1 November 2026; it was the 10 minutes
+ * of a lot of 100). docs/SPEC-BOIS-ARBRE-UNITE.md §7. */
 export const STUMP_REMOVAL_WORKERS = 1;
-export const STUMP_REMOVAL_MS = stoneExtractionDuration(STUMP_REMOVAL_WORKERS, STONE_EXTRACTION_LOT);
+export const STUMP_REMOVAL_MS = 60_000;
 
 async function readRangeFootprints(tx: Transaction<Database>, village: ExtractionVillage) {
   return tx

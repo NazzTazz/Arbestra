@@ -122,7 +122,7 @@ Un arbre est un arbre RC1 d'une case de bois : (monde, gisement, indice d'arbre)
   - **dev** : on peut supprimer et recréer les données de bois sans précaution ;
   - **alpha** : il faut du bois pour tout le monde, et **ne jamais ajouter d'arbre trop près des bâtiments des joueurs**. Le compteur de bois coupé est recalculé en arbres de 500. Une case à moitié coupée garde la moitié de ses arbres debout.
 - **Ordre des lots** : la case la plus proche d'abord, puis l'ordre de désignation.
-- **Ouvert 1. Retirer une souche** : combien de travail ? Proposition : la durée d'un lot de 100 pour un habitant, sans bois rapporté.
+- **Tranché le 1er novembre 2026. Retirer une souche** : un habitant, une minute de travail par souche, plus le trajet aller-retour, sans bois rapporté (auparavant la durée d'un lot de 100, soit 10 minutes).
 - **Ouvert 2. « Trop près des bâtiments »** : quelle distance minimale pour un arbre ajouté (complément de départ, mondes sans arbres RC1) ? Proposition : 2 cases de toute emprise de bâtiment, route ou terrasse.
 - **Exception assumée** à la règle « pas d'entité persistante par arbre décoratif » (AGENTS.md, doc RC1) : l'arbre devient une unité de jeu. Une ligne par arbre n'existe qu'à partir de sa première coupe.
 

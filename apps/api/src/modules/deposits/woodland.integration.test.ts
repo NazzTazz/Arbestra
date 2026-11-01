@@ -327,7 +327,7 @@ it('clears a case of two trees: ten lots of wood, two stumps removed one by one,
     // A stump: one inhabitant, the time of a lot of 100 for one inhabitant.
     for (const stump of lots.slice(10)) {
       expect(stump.workerCount).toBe(1);
-      expect(stump.completesAt.getTime() - stump.startedAt.getTime()).toBe(600_000 + 2 * transportMs);
+      expect(stump.completesAt.getTime() - stump.startedAt.getTime()).toBe(60_000 + 2 * transportMs);
     }
     expect((await tree(tx, id, 0))!.stumpRemovedAt).toEqual(lots[10]!.completesAt);
     expect((await tree(tx, id, 1))!.stumpRemovedAt).toEqual(lots[11]!.completesAt);

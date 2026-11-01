@@ -22,7 +22,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
-Aucune tranche en attente.
+- **Défrichage plus rapide** (1er novembre) : retirer une souche prend une minute de travail pour un habitant, plus le trajet (au lieu de 10 minutes).
 
 Validés le 1er novembre sur dev : HUD des habitants au contrat V2 (I.1), client sans V1 (I.2, écran de connexion après environ une minute), reçus d'expédition et de récolte par le flux V2 (migration 079), NOC sur les lecteurs V2 (récolte en cours et villageois visibles), installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).
 
