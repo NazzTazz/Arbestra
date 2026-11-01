@@ -110,7 +110,7 @@ export interface FelledTree extends WorkerPoint {
 interface Mission {
   id: string;
   key: string;
-  resource: 'wood' | 'stone' | 'garden' | 'idle' | 'survey' | 'trade' | 'leveling';
+  resource: 'wood' | 'stone' | 'garden' | 'idle' | 'survey' | 'trade';
   count: number;
   /** Wood reserved by an extraction lot; absent for other missions. */
   reserved?: number;
@@ -249,7 +249,6 @@ const PILE_LOG = { length: 0.32, diameter: 0.075 };
 const WORKER_HATS: Record<Mission['resource'], VillagerHat | null> = {
   wood: 'bonnet',
   stone: 'casque',
-  leveling: 'casque',
   garden: 'paille',
   survey: 'beret',
   idle: null,
@@ -413,20 +412,6 @@ export class VillageWorkers {
         startedAt: Date.parse(journey.startedAt),
         completesAt: Date.parse(journey.returnsAt),
         transportMs: Date.parse(journey.arrivesAt) - Date.parse(journey.startedAt),
-      });
-    }
-    for (const job of state.village.levelingJobs ?? []) {
-      missions.push({
-        id: job.id,
-        key: `${identity}:leveling:${job.id}`,
-        resource: 'leveling',
-        count: job.workerCount,
-        featureId: job.featureId,
-        path: job.path,
-        target: job.path.at(-1)!,
-        startedAt: Date.parse(job.startedAt),
-        completesAt: Date.parse(job.completesAt),
-        transportMs: job.transportMs,
       });
     }
     missions.push(...this.#idleMissions(state));
@@ -608,21 +593,12 @@ export class VillageWorkers {
       stop > 0 || m.resource === 'trade'
         ? (this.hooks.localPath ?? this.hooks.path)(path)
         : this.hooks.path(path, lane);
-    const passage =
-      m.resource === 'wood' || m.resource === 'stone' || m.resource === 'leveling'
-        ? workerPassagePath(vectors)
-        : vectors;
+    const passage = m.resource === 'wood' || m.resource === 'stone' ? workerPassagePath(vectors) : vectors;
     const p = passage.map((v, i) =>
       this.#point(v, v.width ?? (stop === 0 && i < 2 ? 0.5 : (this.hooks.width?.(v) ?? 0.8))),
     );
     if (!p.length) p.push(this.#point(this.hooks.project(m.target)));
-    if (
-      m.resource !== 'garden' &&
-      m.resource !== 'survey' &&
-      m.resource !== 'trade' &&
-      m.resource !== 'leveling' &&
-      p.length > 1
-    ) {
+    if (m.resource !== 'garden' && m.resource !== 'survey' && m.resource !== 'trade' && p.length > 1) {
       const a = p[p.length - 2]!,
         b = p[p.length - 1]!,
         length = Math.hypot(b.x - a.x, b.z - a.z);
@@ -655,13 +631,11 @@ export class VillageWorkers {
       ![...this.#groups.values()].some(
         (g) => g.mission.id !== m.id && g.layout.stations.some((s) => Math.hypot(p.x - s.x, p.z - s.z) < r + 0.27),
       );
-    const layout = worksiteLayout(m.resource === 'leveling' ? 'stone' : m.resource, m.count, target, last, available);
+    const layout = worksiteLayout(m.resource, m.count, target, last, available);
     // Prefer posts outside traffic. A road crossing a nearly cleared woodland
     // remains walkable; it must not make every valid physical post impossible.
     return layout.variant === 'blocked' && m.resource !== 'garden'
-      ? worksiteLayout(m.resource === 'leveling' ? 'stone' : m.resource, m.count, target, last, (p, r) =>
-          available(p, r, true),
-        )
+      ? worksiteLayout(m.resource, m.count, target, last, (p, r) => available(p, r, true))
       : layout;
   }
   #create(mission: Mission, now: number): Group {
@@ -1669,10 +1643,6 @@ export class VillageWorkers {
           .flatMap((s) => (s.workAt ? [s, s.workAt] : [s]))
           .map((s) => Math.hypot(s.x - target.x, s.z - target.z) + WORKER_CLEARANCE),
       );
-      // Terrassiers work beside the reserved pad, potentially at the final
-      // road bend. Leave before the traffic gate's one-metre exit clearance
-      // sees a teammate already working there.
-      if (g.mission.resource === 'leveling') distance += 1;
       this.#installationDistances.set(g.layout, distance);
     }
     return distance;
@@ -1742,7 +1712,7 @@ export class VillageWorkers {
     const returnAt = m.stops?.length
       ? m.startedAt + m.stops[m.stops.length - 1]!.workEndsAfterMs
       : m.completesAt - m.transportMs;
-    const extraction = ['wood', 'stone', 'leveling'].includes(m.resource);
+    const extraction = m.resource === 'wood' || m.resource === 'stone';
     // A latecomer still on the road when the team leaves joins the return from
     // where it stands, empty-handed, instead of walking in only to walk out loaded.
     if (extraction && !m.stops?.length && now >= returnAt && p.phase === 'outbound') this.#turnBack(p, g, now);
@@ -2273,7 +2243,7 @@ export class VillageWorkers {
       ((p.phase === 'load' || p.phase === 'inbound') && p.worked) ||
       (g.stop > 0 && g.mission.resource === 'garden' && !gardening) ||
       (working && role === 'carry' && (p.role !== 'carry' || p.actor.distance > 1.25));
-    p.cargo.setEnabled(loaded && g.mission.resource !== 'survey' && g.mission.resource !== 'leveling');
+    p.cargo.setEnabled(loaded && g.mission.resource !== 'survey');
     this.#showTool(p, working && isGestureRole(role) ? ROLE_TOOL[role] : null);
     p.basket?.setEnabled(gardening);
     const pose = scratchPose;
@@ -2430,7 +2400,7 @@ export class VillageWorkers {
           mode:
             m.resource === 'idle'
               ? 'Balade'
-              : m.resource === 'wood' || m.resource === 'stone' || m.resource === 'leveling'
+              : m.resource === 'wood' || m.resource === 'stone'
                 ? 'Chantier'
                 : m.resource === 'garden'
                   ? 'Mission de récolte'

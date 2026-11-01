@@ -304,7 +304,7 @@ export function teamActivity(seed: number, resource: string, count: number, role
   const block = Math.floor(t / GESTURE_BLOCK_S),
     local = (t - block * GESTURE_BLOCK_S) / GESTURE_BLOCK_S,
     jitter = (draw(blockSeed(seed ^ 0x2545f491, block), 0) * 2 - 1) * 0.08;
-  if (resource === 'stone' || resource === 'leveling') {
+  if (resource === 'stone') {
     if (count === 1) return local < 0.5 + jitter ? 'pick' : local < 0.83 + jitter / 2 ? 'break' : 'carry';
     if (count === 2 && role === 'break') return local < 0.67 + jitter ? 'break' : 'carry';
   }

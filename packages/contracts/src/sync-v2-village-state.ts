@@ -200,7 +200,6 @@ export function villageStateFromSyncV2(
     exploitationOrders: list('exploitationOrders')
       .sort((a, b) => byTime(b.confirmedAt, a.confirmedAt))
       .slice(0, 32),
-    levelingJobs: list('levelingJobs').sort((a, b) => a.id.localeCompare(b.id)),
     processingOrders: processing,
     market: {
       ...presentation.market,

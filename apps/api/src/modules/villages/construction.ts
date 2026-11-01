@@ -164,7 +164,6 @@ async function inputs(
     union all select s->'path' from garden_harvests, jsonb_array_elements(stops) s where world_id=${wid}::uuid and status='in-progress'
     union all select path_cells from science_activities where world_id=${wid}::uuid and status='in-progress'
     union all select path from trade_journeys where world_id=${wid}::uuid and returns_at>statement_timestamp()
-    union all select path from leveling_jobs where world_id=${wid}::uuid and completed_at is null
   ) paths cross join lateral (
     -- Coordinates read once per point; the footprint is a constant VALUES list
     -- (not JSON parsed again for each of the world's path segments).
@@ -256,11 +255,6 @@ async function inputs(
         .where('status', '=', 'protected')
         .where(near(cells, sql.ref('centerCellX'), sql.ref('centerCellY'), v, sql.ref('innerRadius'))),
     ).as('clearings'),
-    jsonArrayFrom(
-      tx.selectFrom('levelingJobs').select('quote').where('worldId', '=', wid).where('completedAt', 'is', null)
-        .where(sql<boolean>`exists(select 1 from jsonb_to_recordset(quote->'cells') q("cellX" int,"cellY" int)
-        where ${near(cells, sql.raw('q."cellX"'), sql.raw('q."cellY"'), v, 1)})`),
-    ).as('leveling'),
     jsonArrayFrom(
       tx
         .selectFrom('villageInfrastructure as i')
@@ -391,14 +385,6 @@ function validateSpace(
   type: BuildingType,
 ) {
   if (data.occupied.length) fail('CELL_OCCUPIED', 'Cette case est déjà occupée.');
-  if (
-    data.leveling.some((j) =>
-      j.quote.cells.some((p) =>
-        cells.some((c) => toroidalChebyshev(c.cellX, c.cellY, p.cellX, p.cellY, v.widthCells, v.heightCells) <= 1),
-      ),
-    )
-  )
-    fail('LEVELING_NEARBY', 'Attendez la fin du nivellement avant de construire sur cette emprise ou contre son bord.');
   const wanted = new Set(cells.map((c) => `${c.cellX}:${c.cellY}`));
   if (data.roadCells.length) fail('INFRASTRUCTURE_OCCUPIED', 'Retirez la route de cette case avant de construire.');
   for (const { plan } of data.plans) validatePlan(plan, wanted, v);

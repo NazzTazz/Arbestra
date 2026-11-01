@@ -449,20 +449,26 @@ it('skips invalid anchors, refuses without writing when all are invalid, and gua
 
   // A trip in progress of another village crossing the vertex (60,70): the
   // anchor is skipped (ENGAGED_PASSAGE), the free one (62,70) is placed.
+  await db
+    .insertInto('playerScience')
+    .values({ worldId: ids.world, accountId: ids.neighbourAccount })
+    .onConflict((c) => c.doNothing())
+    .execute();
   const job = await db
-    .insertInto('levelingJobs')
+    .insertInto('scienceActivities')
     .values({
       worldId: ids.world,
       villageId: ids.neighbour,
-      featureId: randomUUID(),
-      commandId: randomUUID(),
-      request: JSON.stringify({}),
-      quote: JSON.stringify({}),
-      // Diagonal from (59,69) to (60,70): through the vertex at (59.5, 69.5).
-      path: JSON.stringify([cell(59, 69), cell(60, 70)]),
+      accountId: ids.neighbourAccount,
+      kind: 'survey',
+      status: 'in-progress',
       workerCount: 1,
+      workMs: 0,
+      surveyCells: sql`'[]'::jsonb`,
       startedAt: new Date(),
       completesAt: new Date(Date.now() + 86400000),
+      // Diagonal from (59,69) to (60,70): through the vertex at (59.5, 69.5).
+      pathCells: sql`${JSON.stringify([cell(59, 69), cell(60, 70)])}::jsonb`,
     })
     .returning('id')
     .executeTakeFirstOrThrow();
@@ -502,7 +508,7 @@ it('skips invalid anchors, refuses without writing when all are invalid, and gua
       },
     });
   } finally {
-    await db.deleteFrom('levelingJobs').where('id', '=', job.id).execute();
+    await db.deleteFrom('scienceActivities').where('id', '=', job.id).execute();
   }
   // Resources: one stone short.
   await db

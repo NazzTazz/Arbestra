@@ -16,13 +16,16 @@ import { readExtractionPools } from '../deposits/extraction-pools.js';
 import { readExtractions } from '../deposits/stone-extractions.js';
 import { readWorksites } from '../deposits/worksites.js';
 import { readExploitationOrders } from './exploitation-budget.js';
-import { levelingSnapshot } from './leveling.js';
 import { ownTradeOffers, readPrivateTradeJourneys } from './trade-economy.js';
 
 export interface SyncEntityReference {
   component: string;
   key: string;
 }
+/** Withdrawn components the retained journal may still name (deferred
+ * leveling, until 30 October 2026 on alpha). They carry no state any more:
+ * skipped rather than refused. Drop with the lot I cleanup migration. */
+const retiredPrivateComponents = new Set(['levelingJobs']);
 export const privateReaderComponents = new Set<SyncV2Change['component']>([
   'resources',
   'processingOrders',
@@ -38,7 +41,6 @@ export const privateReaderComponents = new Set<SyncV2Change['component']>([
   'extractions',
   'worksites',
   'exploitationOrders',
-  'levelingJobs',
   'marketExchanges',
   'tradeOffers',
   'tradeJourneys',
@@ -91,7 +93,6 @@ function privateReferenceQueries(context: VillageEconomy): RawBuilder<SyncEntity
     running('gardenHarvests', 'garden_harvests', sql`status='in-progress'`),
     running('extractions', 'deposit_extractions', sql`status='in-progress'`),
     running('buildingExpansions', 'building_expansions', sql`status='under-construction'`),
-    running('levelingJobs', 'leveling_jobs', sql`completed_at is null`),
     running('tradeOffers', 'trade_offers', sql`status='open'`),
     running('scienceActivities', 'science_activities', sql`status='in-progress'`),
     recent('processingOrders', 'processing_orders', sql`status not in ('completed','cancelled')`, 'created_at', 20),
@@ -237,6 +238,7 @@ export async function readRegisteredPrivateChanges(
   const selections = new Map<SyncV2Change['component'], Set<string>>();
   if (references.length > 4096) throw new RangeError('Synchronization selection too large');
   for (const reference of references) {
+    if (retiredPrivateComponents.has(reference.component)) continue;
     if (!privateReaderComponents.has(reference.component as SyncV2Change['component']))
       throw new Error(`Unregistered private synchronization component: ${reference.component}`);
     const component = reference.component as SyncV2Change['component'];
@@ -367,9 +369,6 @@ export async function readRegisteredPrivateChanges(
       changes.push({ component, upsert: rows, remove: ids.filter((id) => !rows.some((row) => row.id === id)) });
     } else if (component === 'exploitationOrders') {
       const rows = await readExploitationOrders(tx, context, undefined, ids);
-      changes.push({ component, upsert: rows, remove: ids.filter((id) => !rows.some((row) => row.id === id)) });
-    } else if (component === 'levelingJobs') {
-      const rows = await levelingSnapshot(tx, context, ids);
       changes.push({ component, upsert: rows, remove: ids.filter((id) => !rows.some((row) => row.id === id)) });
     } else if (component === 'tradeOffers') {
       const rows = await ownTradeOffers(tx, context, ids);

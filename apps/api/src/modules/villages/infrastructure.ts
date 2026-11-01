@@ -62,14 +62,7 @@ export async function worldActivePaths(tx: Transaction<Database>, worldId: strin
     .where('worldId', '=', worldId)
     .where('returnsAt', '>', sql<Date>`statement_timestamp()`)
     .execute();
-  const leveling = await tx
-    .selectFrom('levelingJobs')
-    .select('path')
-    .where('worldId', '=', worldId)
-    .where('completedAt', 'is', null)
-    .execute();
   return [
-    ...leveling.map((j) => j.path),
     ...paths.map((p) => p.pathCells ?? []),
     ...harvests.flatMap((p) => [p.pathCells ?? [], p.returnPathCells ?? [], ...(p.stops?.map((s) => s.path) ?? [])]),
     ...science.map((p) => p.pathCells),

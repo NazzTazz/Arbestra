@@ -233,7 +233,7 @@ export async function auditTerrainVertices(db: Kysely<Database>, worldId: string
       issues.push(`Trajet d’extraction à préserver : ${extraction.id}`);
   }
   // Other persisted contracts must finish under the model which quoted them.
-  for (const table of ['levelingJobs', 'tradeDeliveries', 'gardenHarvests', 'scienceActivities'] as const) {
+  for (const table of ['tradeDeliveries', 'gardenHarvests', 'scienceActivities'] as const) {
     const active = await db
       .selectFrom(table)
       .select('id')

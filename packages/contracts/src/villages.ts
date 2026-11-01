@@ -1,5 +1,4 @@
 import './formats.js';
-import { LevelingJobSchema } from './leveling.js';
 import { Rc1FeatureGeometrySchema } from './rc1-runtime.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { ExtractionPoolSchema } from './hud-workforce.js';
@@ -389,7 +388,6 @@ export const VillageStateSchema = Type.Object({
                 Type.Literal('science'),
                 Type.Literal('processing'),
                 Type.Literal('trade'),
-                Type.Literal('leveling'),
                 Type.Null(),
               ]),
             ),
@@ -413,7 +411,6 @@ export const VillageStateSchema = Type.Object({
     worksites: Type.Array(ExtractionWorksiteSchema),
     extractionPools: Type.Optional(Type.Array(ExtractionPoolSchema)),
     exploitationOrders: Type.Optional(Type.Array(ExploitationOrderSchema)),
-    levelingJobs: Type.Optional(Type.Array(LevelingJobSchema)),
     processingOrders: Type.Optional(Type.Array(ProcessingOrderSchema)),
     market: Type.Optional(MarketStateSchema),
   }),

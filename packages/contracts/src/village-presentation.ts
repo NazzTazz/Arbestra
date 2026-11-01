@@ -65,5 +65,4 @@ export const VILLAGE_PRESENTATION_COMPONENTS = [
   'extractions',
   'infrastructure',
   'installation',
-  'levelingJobs',
 ] as const satisfies readonly SyncV2Change['component'][];

@@ -5,14 +5,6 @@ import { allocateRestHousing } from './housing.js';
 
 type Cohort = Selectable<PopulationCohortsTable>;
 type Assignment =
-  | {
-      harvestId: null;
-      extractionId: null;
-      scienceActivityId: null;
-      processingLotId: null;
-      tradeJourneyId: null;
-      levelingJobId: string;
-    }
   | { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: null; tradeJourneyId: string }
   | { harvestId: null; extractionId: null; scienceActivityId: null; processingLotId: string }
   | { harvestId: string; extractionId: null; scienceActivityId?: null }
@@ -158,7 +150,6 @@ export function withoutAssignment(
     scienceActivityId?: string | null;
     processingLotId?: string | null;
     tradeJourneyId?: string | null;
-    levelingJobId?: string | null;
   },
 ): boolean {
   return (
@@ -166,8 +157,7 @@ export function withoutAssignment(
     cohort.extractionId === null &&
     !cohort.scienceActivityId &&
     !cohort.processingLotId &&
-    !cohort.tradeJourneyId &&
-    !cohort.levelingJobId
+    !cohort.tradeJourneyId
   );
 }
 
@@ -434,7 +424,6 @@ export async function releaseWorkers(
         scienceActivityId: null,
         processingLotId: null,
         tradeJourneyId: null,
-        levelingJobId: null,
         restBuildingId: null,
       })
       .where('worldId', '=', cohort.worldId)

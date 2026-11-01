@@ -2,7 +2,6 @@ import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 
 const Cell = Type.Object({ cellX: Type.Integer({ minimum: 0 }), cellY: Type.Integer({ minimum: 0 }) });
-const Point = Type.Object({ cellX: Type.Number(), cellY: Type.Number() });
 export const LevelingRequestSchema = Type.Object(
   {
     buildingType: Type.Union([Type.Literal('university'), Type.Literal('stonemason')]),
@@ -41,23 +40,10 @@ export const LevelingCommandSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export const LevelingJobSchema = Type.Object({
-  id: Type.String({ format: 'uuid' }),
-  featureId: Type.String({ format: 'uuid' }),
-  buildingType: Type.Union([LevelingRequestSchema.properties.buildingType, Type.Literal('terrain')]),
-  cells: Type.Array(Cell),
-  height: Type.Number(),
-  workerCount: Type.Integer(),
-  path: Type.Array(Point),
-  transportMs: Type.Integer(),
-  startedAt: Type.String({ format: 'date-time' }),
-  completesAt: Type.String({ format: 'date-time' }),
-});
 export type LevelingRequest = Static<typeof LevelingRequestSchema>;
 export type LevelingQuote = Static<typeof LevelingQuoteSchema>;
 export type LevelingPreview = Static<typeof LevelingPreviewSchema>;
 export type LevelingCommand = Static<typeof LevelingCommandSchema>;
-export type LevelingJob = Static<typeof LevelingJobSchema>;
 
 export const LEVELING_WORK_MS_PER_QUARTER = 60_000;
 

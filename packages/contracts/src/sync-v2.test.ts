@@ -52,7 +52,6 @@ function batch(coverage: SyncV2Batch['coverage'], from: string, to: string, amou
                 { component: 'extractions' as const, upsert: [], remove: [] },
                 { component: 'worksites' as const, upsert: [], remove: [] },
                 { component: 'exploitationOrders' as const, upsert: [], remove: [] },
-                { component: 'levelingJobs' as const, upsert: [], remove: [] },
                 { component: 'marketExchanges' as const, upsert: [], remove: [] },
                 { component: 'tradeOffers' as const, upsert: [], remove: [] },
                 { component: 'tradeJourneys' as const, upsert: [], remove: [] },

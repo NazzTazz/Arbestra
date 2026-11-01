@@ -36,13 +36,7 @@ export function projectPopulation(
       restingSince: c.energy.restingSince?.toISOString() ?? null,
       energy: displayedEnergy(c.energy),
       cartographer: c.cartographer,
-      assignmentId:
-        c.harvestId ??
-        c.extractionId ??
-        c.scienceActivityId ??
-        c.processingLotId ??
-        c.tradeJourneyId ??
-        c.levelingJobId,
+      assignmentId: c.harvestId ?? c.extractionId ?? c.scienceActivityId ?? c.processingLotId ?? c.tradeJourneyId,
       assignmentKind: c.harvestId
         ? 'garden'
         : c.extractionId
@@ -53,9 +47,7 @@ export function projectPopulation(
               ? 'processing'
               : c.tradeJourneyId
                 ? 'trade'
-                : c.levelingJobId
-                  ? 'leveling'
-                  : null,
+                : null,
     })),
     restHousing: homes
       .filter((home) => housingCapacity(home.buildingType, home.level) > 0)

@@ -1,5 +1,4 @@
 import { placeBuilding } from './construction.js';
-import { levelingSnapshot } from './leveling.js';
 import { villageTerrainRegion } from './terrain-region.js';
 import { footprintVertices, isBuildingFootprintFlat } from '@arbestra/contracts';
 import { observationVillage } from '../admin/observation-actions.js';
@@ -1337,7 +1336,6 @@ export async function state(
           gardens: harvestRows,
           extractions: extractionRows,
         }),
-        levelingJobs: await levelingSnapshot(tx, economy),
         processingOrders: await processingSnapshot(tx, economy),
         market: await marketSnapshot(tx, economy),
       },
@@ -1654,26 +1652,6 @@ export async function assertBuildableCells(
   cells: readonly SpatialCell[],
 ) {
   if (!cells.length) return;
-  const leveling = await tx
-    .selectFrom('levelingJobs')
-    .select('quote')
-    .where('worldId', '=', village.worldId)
-    .where('completedAt', 'is', null)
-    .execute();
-  if (
-    leveling.some((j) =>
-      j.quote.cells.some((p) =>
-        cells.some(
-          (c) => toroidalChebyshev(c.cellX, c.cellY, p.cellX, p.cellY, village.widthCells, village.heightCells) <= 1,
-        ),
-      ),
-    )
-  )
-    throw new HttpError(
-      409,
-      'LEVELING_NEARBY',
-      'Attendez la fin du nivellement avant de construire sur cette emprise ou contre son bord.',
-    );
   await assertNoInfrastructure(tx, village.worldId, cells, village);
   const ground = await snapshot(tx, village),
     protectedRows = await clearings(tx, village.worldId);
@@ -2676,13 +2654,7 @@ export async function prepareExploitation(
       id: c.id,
       memberCount: c.memberCount,
       activity: c.activity,
-      assignmentId:
-        c.harvestId ??
-        c.extractionId ??
-        c.scienceActivityId ??
-        c.processingLotId ??
-        c.tradeJourneyId ??
-        c.levelingJobId,
+      assignmentId: c.harvestId ?? c.extractionId ?? c.scienceActivityId ?? c.processingLotId ?? c.tradeJourneyId,
     })),
   };
   const preview: ExploitationPreview = {

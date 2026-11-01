@@ -13,7 +13,6 @@ import {
 } from './villages.js';
 import { ExtractionPoolSchema } from './hud-workforce.js';
 import { ExploitationOrderSchema } from './exploitation.js';
-import { LevelingJobSchema } from './leveling.js';
 import { MarketExchangeSchema, TradeOfferSchema, MarketJourneySchema } from './market.js';
 import { ScienceStateSchema } from './science.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
@@ -80,7 +79,6 @@ export const SYNC_V2_PRIVATE_COMPONENTS = [
   'extractions',
   'worksites',
   'exploitationOrders',
-  'levelingJobs',
   'marketExchanges',
   'tradeOffers',
   'tradeJourneys',
@@ -283,14 +281,6 @@ export const SyncV2ChangeSchema = Type.Union([
     {
       component: Type.Literal('exploitationOrders'),
       upsert: Type.Array(ExploitationOrderSchema, { maxItems: 1024 }),
-      remove: Type.Array(id, { maxItems: 1024 }),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      component: Type.Literal('levelingJobs'),
-      upsert: Type.Array(LevelingJobSchema, { maxItems: 1024 }),
       remove: Type.Array(id, { maxItems: 1024 }),
     },
     { additionalProperties: false },

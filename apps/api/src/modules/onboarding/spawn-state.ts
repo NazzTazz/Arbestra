@@ -97,13 +97,6 @@ export async function spawnSpatialState(db: Kysely<Database>, worldId: string) {
     .where('returnsAt', '>', sql<Date>`statement_timestamp()`)
     .execute();
   for (const row of trades) protect(row.path);
-  const leveling = await db
-    .selectFrom('levelingJobs')
-    .select('path')
-    .where('worldId', '=', worldId)
-    .where('completedAt', 'is', null)
-    .execute();
-  for (const row of leveling) protect(row.path);
   // Reserved wood can still have feature.state=available while workers are away.
   const reserved = await db
     .selectFrom('woodlandDeposits')

@@ -35,8 +35,7 @@ export async function allocateRestHousing(
         c.extractionId === null &&
         !c.scienceActivityId &&
         !c.processingLotId &&
-        !c.tradeJourneyId &&
-        !c.levelingJobId,
+        !c.tradeJourneyId,
     )
     .sort((a, b) => (a.restingSince?.getTime() ?? 0) - (b.restingSince?.getTime() ?? 0) || a.id.localeCompare(b.id));
   const plans = new Map<string, Array<{ buildingId: string | null; memberCount: number }>>();
