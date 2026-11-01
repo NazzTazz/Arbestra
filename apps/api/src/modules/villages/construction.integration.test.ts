@@ -9,7 +9,11 @@ import type { Database } from '../../database/schema.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { buildApp } from '../../app.js';
 import { hashSessionToken } from '../../security/sessions.js';
-import { constructionConfirmationIsValid, emptyInfrastructure } from '@arbestra/contracts';
+import {
+  constructionConfirmationV2IsValid,
+  emptyInfrastructure,
+  type ConstructionConfirmationV2,
+} from '@arbestra/contracts';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-map.js';
 import { clearWoodland } from '../deposits/woodland.js';
 
@@ -64,9 +68,20 @@ const post = (body: object, id = villageId) =>
     method: 'POST',
     url: `/api/worlds/${slug}/villages/${id}/buildings`,
     cookies: { arbestra_session: token },
-    headers: { 'x-village-sync': '1', 'x-construction-confirmation': '1' },
+    headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '4' },
     payload: body,
   });
+/** The building a V2 acknowledgement created or replayed, read back from the database. */
+const created = async (response: { json: () => unknown }) => {
+  const ack = response.json() as ConstructionConfirmationV2;
+  expect(constructionConfirmationV2IsValid(ack)).toBe(true);
+  const building = await db
+    .selectFrom('buildings')
+    .selectAll()
+    .where('id', '=', ack.result.buildingId!)
+    .executeTakeFirstOrThrow();
+  return { ack, building };
+};
 async function cleanup() {
   await db.deleteFrom('populationCohorts').where('worldId', '=', worldId).execute();
   // A wood case refers to its feature without cascade; its trees follow it.
@@ -226,26 +241,26 @@ it('creates only the requested building and debit, without reconciling unrelated
   const response = await post(payload());
   capture = false;
   expect(response.statusCode, errors.at(-1)?.stack ?? response.body).toBe(201);
-  const ack = response.json();
-  expect(constructionConfirmationIsValid(ack)).toBe(true);
+  const { ack, building } = await created(response);
   expect(await db.selectFrom('buildings').selectAll().where('id', '=', dueId).executeTakeFirstOrThrow()).toEqual(
     before,
   );
-  expect(ack.cells).toHaveLength(1);
-  expect(ack.cells[0]).toMatchObject({
-    cellX: 66,
-    cellY: 64,
-    canBuild: false,
-    building: { type: 'dwelling', status: 'under-construction' },
-  });
-  expect(ack.commandTime).toBe(ack.cells[0].building.constructionStartedAt);
-  expect(ack.serverTime).toBe(ack.commandTime);
-  expect(ack.resources.find((r: { code: string }) => r.code === 'wood').amount).toBe(1975);
+  expect(building).toMatchObject({ buildingType: 'dwelling', status: 'under-construction' });
+  expect(
+    await db
+      .selectFrom('worldCellOccupancies')
+      .select(['cellX', 'cellY', 'role'])
+      .where('buildingId', '=', building.id)
+      .execute(),
+  ).toEqual([{ cellX: 66, cellY: 64, role: 'anchor' }]);
+  expect(ack.commandTime).toBe(building.constructionStartedAt!.toISOString());
+  expect(await wood()).toBe(1975);
   expect(await db.selectFrom('scheduledTasks').select('id').where('worldId', '=', worldId).execute()).toHaveLength(1);
-  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(5);
-  expect(statements.join('\n')).not.toMatch(
-    /reconcile|science_programs|population_cohorts|processing_orders|exploitation_orders/i,
-  );
+  // The V2 answer: the availability probe, the command's own statements (owner, bound,
+  // debit, reservation) and the private effects read at H (buildings, stock, rest housing).
+  // The former historical confirmation took five.
+  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(14);
+  expect(statements.join('\n')).not.toMatch(/reconcile|science_programs|processing_orders|exploitation_orders/i);
 });
 
 it('protects nearby equipment and sparse engaged paths without advancing their missions', async () => {
@@ -329,7 +344,8 @@ it('replays exactly once and rejects a reused identity with a different intentio
     second = await post(body);
   expect(first.statusCode, errors.at(-1)?.message).toBe(201);
   expect(second.statusCode, errors.at(-1)?.message).toBe(201);
-  expect(first.json().cells[0].building.id).toBe(second.json().cells[0].building.id);
+  const firstBuilding = (await created(first)).building;
+  expect((await created(second)).building.id).toBe(firstBuilding.id);
   expect(await wood()).toBe(1975);
   const conflict = await post({ ...body, ...{ anchorCellX: 67, cells: [{ cellX: 67, cellY: 64 }] } });
   expect(conflict.json().code).toBe('COMMAND_ID_CONFLICT');
@@ -338,13 +354,11 @@ it('replays exactly once and rejects a reused identity with a different intentio
     await db.selectFrom('buildingCommandReceipts').select('commandId').where('worldId', '=', worldId).execute(),
   ).toHaveLength(1);
   expect(await db.selectFrom('scheduledTasks').select('id').where('worldId', '=', worldId).execute()).toHaveLength(1);
-  await db
-    .updateTable('buildings')
-    .set({ targetLevel: 2 })
-    .where('id', '=', first.json().cells[0].building.id)
-    .execute();
+  // A replay answers its original result, even once the building is being upgraded.
+  await db.updateTable('buildings').set({ targetLevel: 2 }).where('id', '=', firstBuilding.id).execute();
   const upgrading = await post(body);
-  expect(upgrading.json().cells[0].footprint.state).toBe('active');
+  expect(upgrading.statusCode).toBe(201);
+  expect((await created(upgrading)).building.id).toBe(firstBuilding.id);
   expect(await wood()).toBe(1975);
 });
 
@@ -421,22 +435,26 @@ it('reserves a 25-cell garden in the same SQL budget and debits only its area', 
   const response = await post(body);
   capture = false;
   expect(response.statusCode, errors.at(-1)?.stack ?? response.body).toBe(201);
-  expect(response.json().cells).toHaveLength(25);
+  const garden = await created(response);
+  expect(
+    await db.selectFrom('worldCellOccupancies').select('cellX').where('buildingId', '=', garden.building.id).execute(),
+  ).toHaveLength(25);
   expect(await wood()).toBe(750);
-  expect(response.json().cells.filter((c: { building: unknown }) => c.building)).toHaveLength(1);
   expect(
     await db.selectFrom('buildingResourceBuffers').select('buildingId').where('worldId', '=', worldId).execute(),
   ).toHaveLength(1);
-  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(5);
+  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(9);
   await db
     .updateTable('buildings')
     .set({ status: 'completed', completedAt: new Date() })
-    .where('id', '=', response.json().cells[0].building.id)
+    .where('id', '=', garden.building.id)
     .execute();
   const retry = await post(body);
   expect(retry.statusCode).toBe(201);
-  expect(retry.json().cells).toEqual([]);
-  expect(await wood()).toBe(750); // Never reintroduce the physical anchor of a now-fusible garden.
+  // A now-fusible garden has no physical anchor to report: the replay names no building.
+  expect(retry.json().result).toEqual({ buildingId: null });
+  expect(await wood()).toBe(750);
+  expect(await db.selectFrom('buildings').select('id').where('worldId', '=', worldId).execute()).toHaveLength(3);
 });
 
 it('canonicalizes a seam-crossing placement and keeps its retry idempotent', async () => {
@@ -458,7 +476,14 @@ it('canonicalizes a seam-crossing placement and keeps its retry idempotent', asy
     second = await post({ ...body, anchorCellX: 511, cells: [{ cellX: 511, cellY: 0 }] });
   expect(first.statusCode, errors.at(-1)?.message).toBe(201);
   expect(second.statusCode).toBe(201);
-  expect(second.json().cells[0]).toMatchObject({ cellX: 511, cellY: 0, x: -2.5, z: 0 });
+  expect((await created(second)).building.id).toBe((await created(first)).building.id);
+  expect(
+    await db
+      .selectFrom('worldCellOccupancies')
+      .select(['cellX', 'cellY'])
+      .where('buildingId', '=', (await created(first)).building.id)
+      .execute(),
+  ).toEqual([{ cellX: 511, cellY: 0 }]);
   expect(await wood()).toBe(1975);
 });
 
@@ -554,7 +579,7 @@ it('rolls back all placement writes after an identified failure following observ
   expect(await stored()).toEqual(before);
 });
 
-it('validates only the selected RC1 vertices, rejects slopes, then creates with five warm SQL calls', async () => {
+it('validates only the selected RC1 vertices, rejects slopes, then creates with a bounded number of warm SQL calls', async () => {
   const artifact = JSON.parse(readFileSync('apps/world-web/public/studies/t1-alpha512-rc1.json', 'utf8'));
   await db
     .updateTable('worlds')
@@ -596,8 +621,8 @@ it('validates only the selected RC1 vertices, rejects slopes, then creates with 
       response = await post(payload(x, 20));
     capture = false;
     expect(response.statusCode, errors.at(-1)?.stack ?? response.body).toBe(201);
-    expect(response.json().cells).toHaveLength(1);
-    expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(5);
+    expect((await created(response)).building.buildingType).toBe('dwelling');
+    expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(14);
     samples.push({
       ms: Math.round(performance.now() - started),
       sqlCalls: statements.length,
@@ -611,7 +636,7 @@ it('validates only the selected RC1 vertices, rejects slopes, then creates with 
   );
 }, 120000);
 
-it('refuses to build on a wood case while a stump stands, even after a read, and builds once it is cleared', async () => {
+it('refuses to build on a wood case while a stump stands, and builds once it is cleared', async () => {
   const featureId = randomUUID(),
     t = new Date();
   await db.transaction().execute(async (tx) => {
@@ -645,10 +670,7 @@ it('refuses to build on a wood case while a stump stands, even after a read, and
       .values({ worldId, featureId, cellX: 67, cellY: 64, buildingId: null, role: 'body' })
       .execute();
   });
-  // The former read freed a case under 10 % of its wood; a stump now keeps it occupied.
-  expect(
-    (await app.inject({ url: `/api/worlds/${slug}/village`, cookies: { arbestra_session: token } })).statusCode,
-  ).toBe(200);
+  // A stump keeps the case occupied (the former read freed a case under 10 % of its wood).
   expect((await post(payload(67, 64))).json().code, errors.at(-1)?.stack).toBe('CELL_OCCUPIED');
   expect(await wood()).toBe(2000);
   // One stump removed (its trunk leaves the navigation): the other keeps the case occupied.

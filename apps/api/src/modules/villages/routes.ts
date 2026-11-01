@@ -99,6 +99,7 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { authenticate } from '../auth/service.js';
 import { callerFrames } from '../operations/http-logging.js';
+import { refuseRetiredRead, requireProtocolV2, requireProtocolV2ExceptExpeditions } from './client-protocol.js';
 import {
   discoverCatEyes,
   constructBuilding,
@@ -225,12 +226,12 @@ export async function registerVillageRoutes(
   };
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/extraction-pools',
-    { schema: { ...hudSchema, body: ExtractionPoolCommandSchema } },
+    { onRequest: requireProtocolV2, schema: { ...hudSchema, body: ExtractionPoolCommandSchema } },
     (request, reply) => hudGesture(request, reply, { kind: 'pool', command: request.body as ExtractionPoolCommand }),
   );
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/population/gestures',
-    { schema: { ...hudSchema, body: PopulationGestureSchema } },
+    { onRequest: requireProtocolV2, schema: { ...hudSchema, body: PopulationGestureSchema } },
     (request, reply) => hudGesture(request, reply, { kind: 'population', command: request.body as PopulationGesture }),
   );
   const commandResponse = async (
@@ -313,6 +314,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/market/trades',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: VillageParametersSchema,
         headers: VillageCommandV2HeadersSchema,
@@ -413,6 +415,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/processing',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: VillageParametersSchema,
         headers: ProcessingHeadersSchema,
@@ -627,6 +630,8 @@ export async function registerVillageRoutes(
     app.post(
       `/api/worlds/:worldSlug/villages/:villageId/exploitation${preview ? '/preview' : ''}`,
       {
+        // The preview is a read with no historical twin: no protocol header.
+        ...(preview ? {} : { onRequest: requireProtocolV2 }),
         schema: {
           params: VillageParametersSchema,
           headers: VillageCommandV2HeadersSchema,
@@ -663,6 +668,8 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/science',
     {
+      // Expedition receipts (survey, explore) carry no protocol header; the rest does.
+      preValidation: requireProtocolV2ExceptExpeditions,
       schema: {
         params: VillageParametersSchema,
         headers: VillageCommandV2HeadersSchema,
@@ -721,6 +728,8 @@ export async function registerVillageRoutes(
   app.get(
     '/api/worlds/:worldSlug/village',
     {
+      // Retired (lot I): an old tab still polls it, answered 426 before authentication.
+      onRequest: refuseRetiredRead,
       schema: {
         params: WorldParametersSchema,
         querystring: Type.Object({ villageId: Type.Optional(Type.String({ format: 'uuid' })) }),
@@ -749,6 +758,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/discover-cat-eyes',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: VillageParametersSchema,
         headers: VillageCommandV2HeadersSchema,
@@ -769,6 +779,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/buildings',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: VillageParametersSchema,
         body: BuildRequestSchema,
@@ -863,6 +874,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/expansions',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: BuildingParametersSchema,
         body: ExpansionRequestSchema,
@@ -921,6 +933,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/upgrade',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: BuildingParametersSchema,
         body: UpgradeRequestSchema,
@@ -1001,6 +1014,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/worksites/:worksiteId',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: Type.Object({ ...VillageParametersSchema.properties, worksiteId: Type.String({ format: 'uuid' }) }),
         headers: VillageCommandV2HeadersSchema,
@@ -1037,6 +1051,7 @@ export async function registerVillageRoutes(
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/buildings/:buildingId/discover-supplies',
     {
+      onRequest: requireProtocolV2,
       schema: {
         params: BuildingParametersSchema,
         headers: VillageCommandV2HeadersSchema,

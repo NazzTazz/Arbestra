@@ -12,6 +12,7 @@ export { readVillageProjection } from './service.js';
 import { VillageSyncProjections } from './sync-projections.js';
 import { villageSyncRevision } from './sync-revision.js';
 import { HttpError } from '../../errors.js';
+import { refuseRetiredRead } from './client-protocol.js';
 import { cohortActivityDue } from '../population/work.js';
 import { markHttpStream, operationsFor } from '../operations/telemetry.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
@@ -143,6 +144,8 @@ export async function registerVillageSync(
   app.get(
     '/api/worlds/:worldSlug/villages/:villageId/events',
     {
+      // Retired (lot I): an old tab reconnects every 2 s, answered 426 before authentication.
+      onRequest: refuseRetiredRead,
       schema: {
         params: Type.Object({
           worldSlug: Type.String({ minLength: 1, maxLength: 64 }),

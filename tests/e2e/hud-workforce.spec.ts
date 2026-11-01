@@ -280,6 +280,7 @@ test('règle les deux ressources et accumule les gestes Population à la souris 
       .returning('id')
       .executeTakeFirstOrThrow();
     const response = await page.request.post(`${worldBase}/api/worlds/${slug}/villages/${villageId}/processing`, {
+      headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' },
       data: { commandId: randomUUID(), action: 'start', buildingId: building.id, lots: 2, workerCount: 1 },
     });
     expect(response.ok()).toBe(true);

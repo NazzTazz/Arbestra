@@ -4,8 +4,6 @@ import type { FastifyInstance } from 'fastify';
 import { sql, type Kysely } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { VillageState } from '@arbestra/contracts';
-
 import { buildApp } from '../../app.js';
 import type { AppConfig } from '../../config.js';
 import { createDatabase } from '../../database/connection.js';
@@ -16,10 +14,12 @@ import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { processNextScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { COMPLETE_CONSTRUCTION_TASK, completeConstruction } from './complete-construction.js';
+import { villageCommandConfirmationV2IsValid } from '@arbestra/contracts';
 import { configureTownHallFactory, getVillageState } from './service.js';
 
 const databaseUrl = testDatabaseUrl();
 const taskHandlers = { [COMPLETE_CONSTRUCTION_TASK]: completeConstruction };
+const V2 = { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' };
 
 describe.sequential('deferred construction with PostgreSQL', () => {
   let app: FastifyInstance;
@@ -152,13 +152,8 @@ describe.sequential('deferred construction with PostgreSQL', () => {
       productionMode: 'none',
     });
     const cookie = await authenticatedCookie();
-    const response = await app.inject({
-      method: 'POST',
-      url: `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/buildings`,
-      headers: { cookie },
-      payload: { buildingType: 'barracks', ...DEVELOPMENT_CELLS.dwelling },
-    });
-    expect(response.statusCode).toBe(409);
+    const response = await requestConstruction(cookie, 'barracks');
+    expect(response.statusCode, response.body).toBe(409);
     expect(await db.selectFrom('buildings').select('id').where('buildingType', '=', 'barracks').execute()).toHaveLength(
       0,
     );
@@ -205,12 +200,20 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     ).toHaveLength(1);
   });
 
-  async function requestConstruction(cookie: string) {
+  /** A bounded V2 placement on the seeded dwelling site, each call with its own command identifier. */
+  async function requestConstruction(cookie: string, buildingType = 'dwelling') {
+    const { cellX, cellY } = DEVELOPMENT_CELLS.dwelling;
     return app.inject({
       method: 'POST',
       url: `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/buildings`,
-      headers: { cookie },
-      payload: { buildingType: 'dwelling', ...DEVELOPMENT_CELLS.dwelling },
+      headers: { cookie, ...V2 },
+      payload: {
+        commandId: randomUUID(),
+        buildingType,
+        anchorCellX: cellX,
+        anchorCellY: cellY,
+        cells: [{ cellX, cellY }],
+      },
     });
   }
 
@@ -242,57 +245,68 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     return building.id;
   }
 
-  it('records cat eyes once with ownership checks and returns the persistent journal on retry', async () => {
+  it('records cat eyes once with ownership checks and keeps the first journal entry on retry', async () => {
     const url = `/api/worlds/aube/villages/${DEVELOPMENT_IDS.village}/discover-cat-eyes`;
-    expect((await app.inject({ method: 'POST', url })).statusCode).toBe(401);
-    const cookie = await authenticatedCookie(),
-      headers = { cookie };
-    expect((await app.inject({ method: 'POST', url: url.replace('aube', 'unknown'), headers })).statusCode).toBe(404);
-    expect(
-      (await app.inject({ method: 'POST', url: url.replace(DEVELOPMENT_IDS.village, randomUUID()), headers }))
-        .statusCode,
-    ).toBe(404);
-    const first = await app.inject({ method: 'POST', url, headers });
-    expect(first.statusCode).toBe(200);
-    expect(first.json().newlyCompleted).toBe(true);
-    const entry = first
-      .json()
-      .villageState.village.accomplishments.find((item: { code: string }) => item.code === 'cat-eyes');
-    expect(entry).toEqual({ code: 'cat-eyes', completedAt: first.json().villageState.serverTime });
-    const retry = await app.inject({ method: 'POST', url, headers });
-    expect(retry.statusCode).toBe(200);
-    expect(retry.json().newlyCompleted).toBe(false);
-    expect(
-      retry.json().villageState.village.accomplishments.filter((item: { code: string }) => item.code === 'cat-eyes'),
-    ).toEqual([entry]);
-    const snapshot = await app.inject({ url: '/api/worlds/aube/village', headers });
-    expect(snapshot.json().village.accomplishments).toContainEqual(entry);
-    expect(snapshot.json().village.resources.find((item: { code: string }) => item.code === 'carrot').amount).toBe(
-      first.json().villageState.village.resources.find((item: { code: string }) => item.code === 'carrot').amount,
-    );
+    const gesture = () => ({ ...V2, 'x-arbestra-command': randomUUID() });
+    expect((await app.inject({ method: 'POST', url, headers: gesture() })).statusCode).toBe(401);
+    const cookie = await authenticatedCookie();
+    const send = (path: string) => app.inject({ method: 'POST', url: path, headers: { cookie, ...gesture() } });
+    expect((await send(url.replace('aube', 'unknown'))).statusCode).toBe(404);
+    expect((await send(url.replace(DEVELOPMENT_IDS.village, randomUUID()))).statusCode).toBe(404);
+    const journal = () =>
+      db
+        .selectFrom('villageAccomplishments')
+        .select(['code', 'completedAt'])
+        .where('villageId', '=', DEVELOPMENT_IDS.village)
+        .where('code', '=', 'cat-eyes')
+        .execute();
+    expect(await journal()).toEqual([]);
+    const first = await send(url);
+    expect(first.statusCode, first.body).toBe(200);
+    expect(villageCommandConfirmationV2IsValid(first.json())).toBe(true);
+    const entry = await journal();
+    expect(entry).toHaveLength(1);
+    // The entry is dated by the command's own bound, which the acknowledgement reports.
+    expect(entry[0]!.completedAt.toISOString()).toBe(first.json().commandTime);
+    const retry = await send(url);
+    expect(retry.statusCode, retry.body).toBe(200);
+    expect(await journal()).toEqual(entry);
   });
 
   it('creates the action and task atomically with PostgreSQL time', async () => {
     const response = await requestConstruction(await authenticatedCookie());
-    expect(response.statusCode).toBe(201);
-    const state = response.json<VillageState>();
-    const building = state.cells.find(
-      (cell) => cell.cellX === DEVELOPMENT_CELLS.dwelling.cellX && cell.cellY === DEVELOPMENT_CELLS.dwelling.cellY,
-    )?.building;
-    expect(state.village.wood).toBe(2000);
-    expect(state.village.resources.find((r) => r.code === 'timber')?.amount).toBe(0);
-    expect(state.village.resources.find((r) => r.code === 'cut-stone')?.amount).toBe(0);
-    expect(building?.status).toBe('under-construction');
-    expect(Date.parse(building!.constructionCompletesAt!) - Date.parse(building!.constructionStartedAt!)).toBe(10_000);
-    // Legacy full snapshots are captured after commit; the scoped ACK retains H.
-    expect(Date.parse(state.serverTime)).toBeGreaterThanOrEqual(Date.parse(building!.constructionStartedAt!));
+    expect(response.statusCode, response.body).toBe(201);
+    const ack = response.json<{ commandTime: string; result: { buildingId: string } }>();
+    const amount = async (resourceCode: string) =>
+      Number(
+        (
+          await db
+            .selectFrom('villageResources')
+            .select('amount')
+            .where('villageId', '=', DEVELOPMENT_IDS.village)
+            .where('resourceCode', '=', resourceCode)
+            .executeTakeFirstOrThrow()
+        ).amount,
+      );
+    expect(await amount('wood')).toBe(2000);
+    expect(await amount('timber')).toBe(0);
+    expect(await amount('cut-stone')).toBe(0);
+    const building = await db
+      .selectFrom('buildings')
+      .selectAll()
+      .where('id', '=', ack.result.buildingId)
+      .executeTakeFirstOrThrow();
+    expect(building.status).toBe('under-construction');
+    expect(building.constructionCompletesAt!.getTime() - building.constructionStartedAt!.getTime()).toBe(10_000);
+    // The acknowledgement retains the command's bound H, which dates the construction.
+    expect(ack.commandTime).toBe(building.constructionStartedAt!.toISOString());
     const task = await db
       .selectFrom('scheduledTasks')
       .selectAll()
-      .where('subjectId', '=', building!.id)
+      .where('subjectId', '=', building.id)
       .executeTakeFirstOrThrow();
     expect(task.worldId).toBe(DEVELOPMENT_IDS.world);
-    expect(task.dueAt.getTime()).toBe(Date.parse(building!.constructionCompletesAt!));
+    expect(task.dueAt.getTime()).toBe(building.constructionCompletesAt!.getTime());
   });
 
   it('rejects concurrent duplicate construction and debits once', async () => {
@@ -432,18 +446,9 @@ describe.sequential('deferred construction with PostgreSQL', () => {
     expect((await processNextScheduledTask(db, taskHandlers))?.outcome).toBe('completed');
   });
 
-  it('reconciles an overdue deadline on read and survives restart', async () => {
-    const cookie = await authenticatedCookie();
-    await requestConstruction(cookie);
+  it('completes an overdue construction through the worker after a restart', async () => {
+    await requestConstruction(await authenticatedCookie());
     const id = await makeConstructionDue();
-    const state = (
-      await app.inject({ method: 'GET', url: '/api/worlds/aube/village', headers: { cookie } })
-    ).json<VillageState>();
-    expect(
-      state.cells.find(
-        (cell) => cell.cellX === DEVELOPMENT_CELLS.dwelling.cellX && cell.cellY === DEVELOPMENT_CELLS.dwelling.cellY,
-      )?.building?.status,
-    ).toBe('completed');
     const restarted = createDatabase(databaseUrl);
     try {
       expect((await processNextScheduledTask(restarted, taskHandlers))?.outcome).toBe('completed');

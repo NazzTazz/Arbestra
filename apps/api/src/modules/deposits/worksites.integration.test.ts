@@ -908,21 +908,36 @@ describe('HTTP worksite contract', () => {
     const order = { commandId: randomUUID(), mode: 'cut' as const, workerCap: 2, featureIds: [featureId] };
     const started = await startVillageWorksite(db, DEVELOPMENT_IDS.account, 'aube', villageId, order);
     const siteId = started.worksite.id;
-    const paused = await app.inject({
+    const v2 = { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' };
+    const status = async () =>
+      (await db.selectFrom('extractionWorksites').select('status').where('id', '=', siteId).executeTakeFirstOrThrow())
+        .status;
+    // A request without the protocol header is told to reload; nothing changes.
+    const refused = await app.inject({
       method: 'POST',
       url: `${base}/${siteId}`,
       cookies,
       payload: { commandId: randomUUID(), action: 'pause' },
     });
+    expect(refused.statusCode, refused.body).toBe(426);
+    expect(await status()).not.toBe('paused');
+    // The V2 answer is the confirmation and its effects, not a village state.
+    const paused = await app.inject({
+      method: 'POST',
+      url: `${base}/${siteId}`,
+      cookies,
+      headers: v2,
+      payload: { commandId: randomUUID(), action: 'pause' },
+    });
     expect(paused.statusCode, paused.body).toBe(200);
-    expect(paused.json().worksite.status).toBe('paused');
-    // V2: a resume is answered by its confirmation and effects, not a village state.
+    expect(villageCommandConfirmationV2IsValid(paused.json())).toBe(true);
+    expect(await status()).toBe('paused');
     const commandId = randomUUID();
     const resumed = await app.inject({
       method: 'POST',
       url: `${base}/${siteId}`,
       cookies,
-      headers: { 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' },
+      headers: v2,
       payload: { commandId, action: 'resume' },
     });
     expect(resumed.statusCode, resumed.body).toBe(200);

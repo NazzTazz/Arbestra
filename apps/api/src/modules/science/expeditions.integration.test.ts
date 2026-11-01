@@ -2,10 +2,9 @@ import { constructBuildingArea } from '../villages/service.js';
 import { recognizedDepositRoute } from './deposit-access.js';
 import { assertNoInfrastructure } from '../villages/infrastructure.js';
 import { canWalkSpawnSegment } from '@arbestra/contracts';
-import { VillageSyncProjections } from '../villages/sync-projections.js';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
-import { beforeAll, beforeEach, afterAll, describe, it, expect, vi } from 'vitest';
+import { beforeAll, beforeEach, afterAll, describe, it, expect } from 'vitest';
 import { ROUTE_POLICY_VERSION, type ExpeditionIntent, type RouteQuery, type RouteResult } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
@@ -729,129 +728,22 @@ describe.sequential('durable FIFO expedition admission on a private world', () =
     expect(writerFinished).toBe(true);
     expect((await readExpeditionReceipts(db, account, slug, village))[0]!.status).toBe('admitted');
   });
-  it('sends a durable refusal by SSE without changing village revision, then rejoins it', async () => {
-    if (!app.server.listening) await app.listen({ host: '127.0.0.1', port: 0 });
-    const port = (app.server.address() as { port: number }).port,
-      r = request();
-    await send(r);
-    const response = await fetch(
-      'http://127.0.0.1:' + port + '/api/worlds/' + slug + '/villages/' + village + '/events',
-      { headers: { cookie: 'arbestra_session=' + token }, signal: AbortSignal.timeout(15000) },
-    );
-    const reader = response.body!.getReader(),
-      decoder = new TextDecoder();
-    let buffer = '';
-    const receipt = async (status: string) => {
-      for (;;) {
-        let end: number;
-        while ((end = buffer.indexOf('\n\n')) >= 0) {
-          const event = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          if (event.includes('event: expedition-receipt')) {
-            const line = event.split('\n').find((l) => l.startsWith('data: '));
-            const value = JSON.parse(line!.slice(6));
-            if (value.commandId === r.commandId && value.status === status) return value;
-          }
-        }
-        const next = await reader.read();
-        if (next.done) throw Error('SSE ended before receipt');
-        buffer += decoder.decode(next.value, { stream: true });
-      }
-    };
-    try {
-      await receipt('pending');
-      const revision = await navigationRevision(db, world);
-      await db
-        .updateTable('expeditionSubmissions')
-        .set({ expiresAt: new Date(Date.now() - 1000) })
-        .where('worldId', '=', world)
-        .execute();
-      await expireExpeditions(db);
-      expect(await receipt('failed')).toMatchObject({ code: 'EXPEDITION_EXPIRED' });
-      expect(await navigationRevision(db, world)).toBe(revision);
-      expect((await readExpeditionReceipts(db, account, slug, village, [r.commandId]))[0]!.status).toBe('failed');
-    } finally {
-      await reader.cancel();
-    }
-  });
-
-  it('delivers a committed receipt while the initial village projection is deliberately held', async () => {
-    if (!app.server.listening) await app.listen({ host: '127.0.0.1', port: 0 });
-    let release!: () => void, enter!: () => void, finish!: () => void;
-    const gate = new Promise<void>((r) => {
-        release = r;
-      }),
-      entered = new Promise<void>((r) => {
-        enter = r;
-      }),
-      finished = new Promise<void>((r) => {
-        finish = r;
-      });
-    const original = VillageSyncProjections.prototype.read;
-    const spy = vi.spyOn(VillageSyncProjections.prototype, 'read').mockImplementationOnce(async function (
-      this: VillageSyncProjections,
-      ...args: Parameters<typeof original>
-    ) {
-      enter();
-      await gate;
-      try {
-        return await original.apply(this, args);
-      } finally {
-        finish();
-      }
-    });
+  it('expires a pending expedition into a durable refusal without changing the navigation revision', async () => {
     const r = request();
     await send(r);
-    const port = (app.server.address() as { port: number }).port;
-    const response = await fetch(
-      'http://127.0.0.1:' + port + '/api/worlds/' + slug + '/villages/' + village + '/events',
-      { headers: { cookie: 'arbestra_session=' + token }, signal: AbortSignal.timeout(15000) },
-    );
-    const reader = response.body!.getReader();
-    try {
-      await Promise.race([
-        entered,
-        new Promise((_, reject) => setTimeout(() => reject(Error('projection barrier timeout')), 5000)),
-      ]);
-      await db
-        .updateTable('expeditionSubmissions')
-        .set({ expiresAt: new Date(Date.now() - 1000) })
-        .where('worldId', '=', world)
-        .execute();
-      await expireExpeditions(db);
-      const received = (async () => {
-        const decoder = new TextDecoder();
-        let text = '';
-        for (;;) {
-          const chunk = await reader.read();
-          if (chunk.done) throw Error('SSE closed before terminal');
-          text += decoder.decode(chunk.value, { stream: true });
-          const events = text.split('\n\n');
-          text = events.pop()!;
-          for (const event of events)
-            if (event.includes('event: expedition-receipt')) {
-              const value = JSON.parse(
-                event
-                  .split('\n')
-                  .find((l) => l.startsWith('data: '))!
-                  .slice(6),
-              );
-              if (value.commandId === r.commandId && value.status === 'failed') return value;
-            }
-        }
-      })();
-      expect(
-        await Promise.race([
-          received,
-          new Promise((_, reject) => setTimeout(() => reject(Error('receipt held behind projection')), 3000)),
-        ]),
-      ).toMatchObject({ status: 'failed', code: 'EXPEDITION_EXPIRED' });
-    } finally {
-      release();
-      spy.mockRestore();
-      await reader.cancel();
-      await finished;
-    }
+    expect((await readExpeditionReceipts(db, account, slug, village, [r.commandId]))[0]!.status).toBe('pending');
+    const revision = await navigationRevision(db, world);
+    await db
+      .updateTable('expeditionSubmissions')
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where('worldId', '=', world)
+      .execute();
+    await expireExpeditions(db);
+    expect((await readExpeditionReceipts(db, account, slug, village, [r.commandId]))[0]).toMatchObject({
+      status: 'failed',
+      code: 'EXPEDITION_EXPIRED',
+    });
+    expect(await navigationRevision(db, world)).toBe(revision);
   });
   it('recalls a fractional journey from its real position and reports only its travelled prefix', async () => {
     const path = [

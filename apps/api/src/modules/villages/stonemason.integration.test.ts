@@ -8,6 +8,7 @@ import { testDatabaseUrl } from '../../database/test-environment.js';
 import { buildApp } from '../../app.js';
 import { constructBuilding, getVillageState } from './service.js';
 import { knownGeography } from '../science/knowledge.js';
+import { fixedBuildingFootprint } from '@arbestra/contracts';
 
 const url = testDatabaseUrl(),
   db = createDatabase(url);
@@ -204,15 +205,32 @@ it('allows production construction with DEV workshops disabled and never install
     const response = await app.inject({
       method: 'POST',
       url: `/api/worlds/aube/villages/${ids.village}/buildings`,
-      headers: { cookie },
-      payload: { buildingType: 'stonemason', cellX: anchor.cellX, cellY: anchor.cellY },
+      headers: { cookie, 'x-arbestra-protocol': '2', 'x-arbestra-generation': '1' },
+      payload: {
+        commandId: randomUUID(),
+        buildingType: 'stonemason',
+        anchorCellX: anchor.cellX,
+        anchorCellY: anchor.cellY,
+        cells: fixedBuildingFootprint('stonemason', anchor),
+      },
     });
-    expect(response.statusCode).toBe(201);
+    expect(response.statusCode, response.body).toBe(201);
+    const { buildingId } = response.json<{ result: { buildingId: string } }>().result;
     expect(
-      response.json().cells.find((c: { building?: { type: string } }) => c.building?.type === 'stonemason').building
-        .status,
+      (await db.selectFrom('buildings').select('status').where('id', '=', buildingId).executeTakeFirstOrThrow()).status,
     ).toBe('under-construction');
-    expect(response.json().village.resources.find((r: { code: string }) => r.code === 'stone').amount).toBe(75);
+    expect(
+      Number(
+        (
+          await db
+            .selectFrom('villageResources')
+            .select('amount')
+            .where('villageId', '=', ids.village)
+            .where('resourceCode', '=', 'stone')
+            .executeTakeFirstOrThrow()
+        ).amount,
+      ),
+    ).toBe(75);
   } finally {
     await app.close();
   }

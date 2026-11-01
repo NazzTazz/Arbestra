@@ -4,7 +4,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 import type { FastifyInstance } from 'fastify';
 import {
   applySyncV2Batch,
-  hudWorkforceConfirmationIsValid,
   hudWorkforceConfirmationV2IsValid,
   visibleSyncV2Scope,
   type HudWorkforceConfirmationV2,
@@ -18,13 +17,12 @@ import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { buildApp } from '../../app.js';
 import { hashSessionToken } from '../../security/sessions.js';
-import * as syncRevision from './sync-revision.js';
 import * as extractionPools from '../deposits/extraction-pools.js';
 import { captureSyncV2 } from './sync-v2-capture.js';
 import { commandHudWorkforceV2 } from './hud-workforce.js';
 
 // The workforce HUD on the V2 contract (lot I.1): the result and the private
-// effects of the commit, never the world's COUNT revision.
+// effects of the commit, in the V2 contract only (a client without the protocol header is refused).
 const url = testDatabaseUrl(),
   target = new URL(url);
 if (target.hostname !== '127.0.0.1' || !/^\/arbestra(_\d+)?_test$/.test(target.pathname))
@@ -209,40 +207,21 @@ it('changes an extraction pool on the same contract and publishes the pool', asy
   expect(visible.get('extractionPools:wood')).toMatchObject({ resource: 'wood', siteCount: 2 });
 });
 
-it('never reads the COUNT revision on the V2 path, while the historical path still does', async () => {
-  const revision = vi.spyOn(syncRevision, 'villageSyncRevision').mockRejectedValue(new Error('COUNT read on V2'));
+it('refuses a client without the protocol header and applies nothing', async () => {
+  const before = { stream: await stream(), receipts: await receipts() };
   for (const [path, payload] of [
     ['/population/gestures', rest()],
     ['/extraction-pools', sitesUp()],
-    ['/population/gestures', { commandId: randomUUID(), action: 'feed', group: 'idle' }],
   ] as const) {
-    const response = await post(path, payload);
-    expect(response.statusCode, response.body).toBe(200);
+    const response = await post(path, payload, null);
+    expect(response.statusCode, response.body).toBe(426);
+    expect(response.json()).toEqual({
+      code: 'CLIENT_UPGRADE_REQUIRED',
+      message: "Une nouvelle version d'Arbestra est disponible. Rechargez la page.",
+    });
   }
-  // A replay does not read it either.
-  const again = rest();
-  expect((await post('/population/gestures', again)).statusCode).toBe(200);
-  expect((await post('/population/gestures', again)).statusCode).toBe(200);
-  expect(revision).not.toHaveBeenCalled();
-  // Control: the historical contract (no protocol header) does, so the spy observes the call.
-  const historical = await post('/extraction-pools', sitesUp(), null);
-  expect(historical.statusCode).toBe(500);
-  expect(revision).toHaveBeenCalled();
-});
-
-it('keeps the historical answer for a client without the protocol header', async () => {
-  const command = rest();
-  const response = await post('/population/gestures', command, null);
-  expect(response.statusCode, response.body).toBe(200);
-  const confirmation = response.json();
-  expect(hudWorkforceConfirmationIsValid(confirmation)).toBe(true);
-  expect(confirmation).toMatchObject({
-    commandId: command.commandId,
-    affected: 10,
-    hud: { population: { resting: 10, available: 15 } },
-  });
-  expect(typeof confirmation.hud.minimumRevision).toBe('number');
-  expect(confirmation).not.toHaveProperty('effects');
+  expect(await stream()).toBe(before.stream);
+  expect(await receipts()).toEqual(before.receipts);
 });
 
 it('replays an exact V2 gesture from its receipt once, without effects, and refuses another use of the identifier', async () => {
