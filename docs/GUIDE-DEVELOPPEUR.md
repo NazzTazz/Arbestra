@@ -126,7 +126,7 @@ Ajouter une table métier lisible en V2 : trigger de collecte dans une migration
 | `scene/village-roads.ts`, `infrastructure-*.ts` | Voirie et équipements. |
 | `spawn-map/` | Carte de spawn et installation. |
 
-Options locales utiles : `localStorage['arbestra:sync-v2']` (V2 en développement), `localStorage['arbestra:timing']='1'` (en-têtes `Server-Timing`, aussi en production).
+Option locale utile : `localStorage['arbestra:timing']='1'` (en-têtes `Server-Timing`, aussi en production).
 `localStorage['arbestra:dev']='1'` ouvre le laboratoire (bouton DEV) sur un build déployé, sur cet appareil seulement : overlay de statistiques (dont temps GPU), inspection des routes, section Rendu (interrupteurs Babylon, familles de meshes masquables, `scene/render-lab.ts`). Ateliers et laboratoire cosmologique restent réservés au développement. Les pages monde autorisent aussi le profileur JS (`Document-Policy: js-profiling`, source maps publiées).
 
 ## 7. Où trouver…

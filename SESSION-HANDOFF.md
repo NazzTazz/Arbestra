@@ -23,6 +23,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 ## À valider (recette de Tristan)
 
 - **HUD des habitants au contrat V2** (lot I.1, sans migration) : glisser-déposer Population et Chantiers, rechargement avec gestes en attente, deux onglets ([inventaire du lot I](docs/INVENTAIRE-LOT-I-2026-11-01.md)) ; recette navigateur demandée.
+- **Client sans synchronisation V1** (lot I.2, sans migration, serveur inchangé) : chargement à froid, session expirée, monde sans village, écran « Connexion au village impossible », commandes, kit d'installation, zéro `GET /village` ni `/events` dans le Réseau ([inventaire du lot I](docs/INVENTAIRE-LOT-I-2026-11-01.md), section I.2) ; recette navigateur demandée.
 
 Validés le 1er novembre sur dev : reçus d'expédition et de récolte par le flux V2 (migration 079), NOC sur les lecteurs V2 (récolte en cours et villageois visibles), installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).
 
