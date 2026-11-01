@@ -230,8 +230,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     discoverCatEyes?: ReturnType<typeof useVillageSyncV2>['discoverCatEyes'];
     exploit?: ReturnType<typeof useVillageSyncV2>['exploit'];
     trade?: ReturnType<typeof useVillageSyncV2>['trade'];
-    level?: ReturnType<typeof useVillageSyncV2>['level'];
-    terraform?: ReturnType<typeof useVillageSyncV2>['terraform'];
     changeWorksite?: ReturnType<typeof useVillageSyncV2>['changeWorksite'];
   }>({ ready: false, refresh: () => {} });
   const [error, setError] = useState<string | null>(null);
@@ -482,8 +480,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     discoverCatEyes: villageV2.discoverCatEyes,
     exploit: villageV2.exploit,
     trade: villageV2.trade,
-    level: villageV2.level,
-    terraform: villageV2.terraform,
     changeWorksite: villageV2.changeWorksite,
   };
   const discoverEyes = useCallback(async () => {

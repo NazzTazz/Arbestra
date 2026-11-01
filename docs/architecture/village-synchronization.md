@@ -109,6 +109,8 @@ La suppression du snapshot **dans la transaction de commande** réduit la durée
 
 ## Confirmation ciblée de voirie
 
+**Retirée le 1er novembre 2026** avec la route `/infrastructure` (`infrastructureCommand`), remplacée par les cases de route et les ancrages. `InfrastructureConfirmation` et son application côté client restent utilisées par la présentation de la voirie.
+
 11 octobre, base relue d40a43bbeb3c76853b91ea1a581fd88c4f5ff63c. Avec `x-infrastructure-confirmation: 1`, une commande de route ou son annulation sans changement d'équipement reçoit `InfrastructureConfirmation` après le commit. Le corps contient monde/village, UUID, heure conservée dans le reçu, révisions du plan, devis et changements du plan. Pour les nouveaux reçus, cette heure est la borne économique H ; les reçus historiques conservent leur date de création déjà enregistrée. Il ne contient ni snapshot, ni `syncRevision`, ni heure de projection globale. Équipements et clients historiques gardent les réponses décrites plus haut.
 
 `InfrastructurePlan.revision` est le compteur du composant voirie ; `syncRevision` reste l'époque autoritaire du monde couvrant le village complet. Ces compteurs ne sont jamais substitués l'un à l'autre. `infrastructureCommand` conserve le finaliseur économique, les permissions, le terrain courant, les verrous, la revalidation du devis, les reçus et le rollback. Une retransmission utilise les plans avant/après, le devis et la date du reçu original. Les débits nuls terre/gravats n'appellent plus la mutation des stocks ; la réconciliation économique commune reste active.

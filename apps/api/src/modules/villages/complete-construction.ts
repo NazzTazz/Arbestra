@@ -161,13 +161,3 @@ export async function wakePopulationEnergy(transaction: Transaction<Database>, t
   }
   await reconcileRestHousing(transaction, task.worldId, village.id, economy.through, task.id);
 }
-
-export async function completeLeveling(transaction: Transaction<Database>, task: ScheduledTask): Promise<void> {
-  const job = await transaction
-    .selectFrom('levelingJobs')
-    .select('villageId')
-    .where('worldId', '=', task.worldId)
-    .where('id', '=', task.subjectId)
-    .executeTakeFirst();
-  if (job) await beginVillageEconomy(transaction, task.worldId, job.villageId, undefined, [], [], true);
-}

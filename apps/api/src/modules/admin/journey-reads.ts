@@ -148,14 +148,6 @@ export async function readJourney(
             and n.building_id=r.building_id and n.created_at>r.created_at)
         order by b.completed_at desc limit ${limit}`.execute(tx)
     ).rows,
-    ...(
-      await sql<EventRow>`select 'leveling:'||l.id as id, l.completed_at as at, 'deferred' as source,
-        'leveling.complete' as type, l.request->>'buildingType' as subject, 'completed' as outcome, null as code,
-        1 as attempts, l.command_id, l.world_id, l.village_id
-        from villages v join leveling_jobs l on l.world_id=v.world_id and l.village_id=v.id
-        where ${owned} and l.completed_at is not null and l.completed_at>=${from}
-        order by l.completed_at desc limit ${limit}`.execute(tx)
-    ).rows,
     // A market exchange is only a fact here: no resource, amount or price.
     ...(
       await sql<EventRow>`select 'market:'||m.id as id, m.completed_at as at, 'deferred' as source,

@@ -9,7 +9,6 @@ import { createSpawnTerrainField, buildTravelNetwork } from '@arbestra/contracts
 import { NavigationCompute } from '../navigation/compute.js';
 import { rc1NetworkGround } from '../navigation/rc1-network-ground.js';
 import type { NetworkJob, TravelNetworkExecutor } from '../navigation/network-job.js';
-import { infrastructurePreview, infrastructureCommand } from '../villages/infrastructure.js';
 import { buildApp } from '../../app.js';
 import { loadConfig } from '../../config.js';
 import { hashSessionToken } from '../../security/sessions.js';
@@ -287,41 +286,6 @@ describe('effective RC1 installation on isolated worlds', () => {
             randomUUID(),
           ),
         ).rejects.toMatchObject({ code: 'TERRAIN_NOT_BUILDABLE' });
-        expect(await read()).toEqual(before);
-        const field = createSpawnTerrainField(artifact),
-          positions = Array.from({ length: 49 }, (_, i) => ({
-            x: 194 * 8 + (i % 7) - 3,
-            y: 251 * 8 + Math.floor(i / 7) - 3,
-          }));
-        const position = positions.find((p) =>
-          field.intersectsRock({ x: p.x / 8, y: p.y / 8, halfWidth: 0.125, halfHeight: 0.125 }),
-        )!;
-        expect(position).toBeDefined();
-        const request = {
-          commandId: randomUUID(),
-          sessionId: randomUUID(),
-          revision: 0,
-          operation: { kind: 'place' as const, position, quarterTurns: 0 },
-        };
-        expect(await infrastructurePreview(db, accountId, f.slug, installed.villageId, request)).toMatchObject({
-          valid: false,
-          message: 'Cet aménagement rencontre un obstacle naturel.',
-        });
-        await expect(infrastructureCommand(db, accountId, f.slug, installed.villageId, request)).rejects.toMatchObject({
-          code: 'INCOMPATIBLE_TERRAIN',
-        });
-        expect(await db.selectFrom('infrastructureReceipts').selectAll().where('worldId', '=', f.id).execute()).toEqual(
-          [],
-        );
-        expect(
-          (
-            await db
-              .selectFrom('villageInfrastructure')
-              .select('plan')
-              .where('worldId', '=', f.id)
-              .executeTakeFirstOrThrow()
-          ).plan.equipment,
-        ).toEqual([]);
         expect(await read()).toEqual(before);
       })()),
     300000,

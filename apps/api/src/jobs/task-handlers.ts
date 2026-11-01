@@ -1,5 +1,4 @@
 import type { ScheduledTaskHandlers } from './scheduled-tasks.js';
-import { COMPLETE_LEVELING_TASK } from '../modules/villages/leveling.js';
 import { POPULATION_ARRIVAL_TASK } from '../modules/population/growth.js';
 import { HARVEST_SUBMISSION_TASK, processHarvestSubmission } from '../modules/villages/harvest-submissions.js';
 import { SCIENCE_WAKE_TASK } from '../modules/science/service.js';
@@ -19,7 +18,6 @@ import {
   completeConstruction,
   completeExpansion,
   completeGardenHarvest,
-  completeLeveling,
   completeProcessing,
   completeStoneExtraction,
   deliverMarket,
@@ -32,7 +30,6 @@ import {
  * scheduler through this same registry. */
 export const scheduledTaskHandlers: ScheduledTaskHandlers = {
   [ECONOMY_CATCHUP_TASK]: advanceEconomyCatchup,
-  [COMPLETE_LEVELING_TASK]: completeLeveling,
   [TRADE_WAKE_TASK]: wakeTrade,
   [POPULATION_ARRIVAL_TASK]: arrivePopulation,
   [HARVEST_SUBMISSION_TASK]: processHarvestSubmission,

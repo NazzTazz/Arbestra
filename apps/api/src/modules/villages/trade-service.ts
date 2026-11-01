@@ -1,4 +1,3 @@
-import { hasActiveLeveling } from './leveling.js';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import {
@@ -248,13 +247,9 @@ export async function beginTradePair(tx: Transaction<Database>, worldId: string,
       .where('id', '=', id)
       .forUpdate()
       .executeTakeFirstOrThrow();
-  const navigationWrite = await hasActiveLeveling(tx, worldId, sorted);
-  if (navigationWrite)
-    await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
-  else await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
+  await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
   const through = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
-  for (const id of sorted)
-    await beginVillageEconomy(tx, worldId, id, undefined, [], [], navigationWrite, sorted, through);
+  for (const id of sorted) await beginVillageEconomy(tx, worldId, id, undefined, [], [], false, sorted, through);
   return through;
 }
 

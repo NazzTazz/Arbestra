@@ -182,8 +182,7 @@ export type AdminActivityDetail = Static<typeof AdminActivityDetailSchema>;
 
 /** Player journey (NOC « Parcours », docs/DESIGN-OBSERVABILITE-PARCOURS.md §2.6).
  * `action`: a command of the player, as the server answered it; `deferred`:
- * the later completion of a player's command (building, leveling, market,
- * science); `automatic`: an accomplishment recorded by the economy. */
+ * the later completion of a player's command (building, market, science); `automatic`: an accomplishment recorded by the economy. */
 export const AdminJourneySourceSchema = Type.Union([
   Type.Literal('action'),
   Type.Literal('deferred'),

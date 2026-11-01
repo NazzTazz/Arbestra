@@ -490,16 +490,14 @@ it('sends bodyless gestures with their identity in a header and refuses a foreig
   }
 });
 
-it('routes leveling, worksite changes and terraforming, passing an adjusted terraform quote through', async () => {
+it('routes worksite changes', async () => {
   const paths: string[] = [];
-  let changed = false;
   const request: typeof fetch = async (url, init) => {
     if (String(url).endsWith('/sync/stream'))
       return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
     const headers = new Headers(init?.headers);
     if (String(url).endsWith('/sync/read')) return json(bootstrap(Number(headers.get('x-arbestra-generation'))));
     paths.push(String(url).replace(/.*villages\/[^/]+/, ''));
-    if (changed) return json({ status: 'changed', preview: { valid: true, message: null, quote: {} } });
     return json({
       protocol: 2,
       worldId,
@@ -518,12 +516,8 @@ it('routes leveling, worksite changes and terraforming, passing an adjusted terr
   try {
     await transport.start(true);
     const commandId = '99999999-9999-4999-8999-999999999999';
-    await transport.level({ commandId } as never);
     await transport.changeWorksite(epoch, { commandId, action: 'pause' });
-    await expect(transport.terraform({ commandId } as never)).resolves.toEqual({ status: 'started' });
-    changed = true;
-    await expect(transport.terraform({ commandId } as never)).resolves.toMatchObject({ status: 'changed' });
-    expect(paths).toEqual(['/leveling', `/worksites/${epoch}`, '/terraform', '/terraform']);
+    expect(paths).toEqual([`/worksites/${epoch}`]);
   } finally {
     transport.close();
   }

@@ -178,34 +178,6 @@ export async function previewProcessing(
   );
 }
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
-import type { InfrastructureRequest, InfrastructurePreview } from '@arbestra/contracts';
-export async function previewInfrastructure(
-  slug: string,
-  villageId: string,
-  request: InfrastructureRequest,
-): Promise<InfrastructurePreview> {
-  return parseResponse(
-    await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure/preview`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-    }),
-  );
-}
-export function commandInfrastructure(
-  slug: string,
-  villageId: string,
-  request: InfrastructureRequest,
-  base?: VillageSyncBase,
-) {
-  return requestVillageCommandState(
-    `/api/worlds/${encodeURIComponent(slug)}/villages/${villageId}/infrastructure`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) },
-    base,
-    true,
-  );
-}
 
 export async function previewExploitation(
   worldSlug: string,
@@ -631,71 +603,6 @@ export async function setFactoryEnabled(
   return getVillage(worldSlug, villageId);
 }
 import { timedFetch as fetch, timedJson } from '../dev/statistics';
-
-export async function previewLeveling(
-  slug: string,
-  villageId: string,
-  request: import('@arbestra/contracts').LevelingRequest,
-  signal?: AbortSignal,
-): Promise<import('@arbestra/contracts').LevelingPreview> {
-  return parseResponse(
-    await fetch(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/leveling/preview`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-      signal: signal ?? null,
-    }),
-  );
-}
-export function commandLeveling(
-  slug: string,
-  villageId: string,
-  command: import('@arbestra/contracts').LevelingCommand,
-): Promise<TimedVillageState> {
-  return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/leveling`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-}
-
-export async function commandTerraform(
-  slug: string,
-  villageId: string,
-  command: import('@arbestra/contracts').TerraformCommand,
-): Promise<
-  | { status: 'changed'; preview: import('@arbestra/contracts').LevelingPreview }
-  | { status: 'started'; snapshot: TimedVillageState }
-> {
-  const sentAt = Date.now(),
-    requestGeneration = villageRequestGeneration();
-  const response = await fetch(
-    `/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/terraform`,
-    {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(command),
-      signal: AbortSignal.timeout(60000),
-    },
-  );
-  const receivedAt = Date.now(),
-    result = await parseResponse<
-      | { status: 'changed'; preview: import('@arbestra/contracts').LevelingPreview }
-      | { status: 'started'; state: VillageState }
-    >(response);
-  return result.status === 'changed'
-    ? result
-    : {
-        status: 'started',
-        snapshot: {
-          state: result.state,
-          requestGeneration,
-          serverOffsetMs: Date.parse(result.state.serverTime) - (sentAt + receivedAt) / 2,
-        },
-      };
-}
 
 import { hudWorkforceConfirmationIsValid, type HudWorkforceIntent } from '@arbestra/contracts';
 export type { HudWorkforceIntent } from '@arbestra/contracts';

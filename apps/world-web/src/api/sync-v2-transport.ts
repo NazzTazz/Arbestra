@@ -13,10 +13,7 @@ import {
   type ConstructionConfirmationV2,
   type ExploitationRequest,
   type ChangeExtractionWorksiteRequest,
-  type LevelingCommand,
-  type LevelingPreview,
   type ScienceCommand,
-  type TerraformCommand,
   type TradeCommand,
   type VillageCommandConfirmationV2,
   type VillagePresentation,
@@ -573,29 +570,9 @@ export class SyncV2Transport {
   trade(command: TradeCommand): Promise<VillageCommandConfirmationV2> {
     return this.gesture('/market/trades', command.commandId, command);
   }
-  /** Leveling site with its receipt UUID. */
-  level(command: LevelingCommand): Promise<VillageCommandConfirmationV2> {
-    return this.gesture('/leveling', command.commandId, command);
-  }
   /** Pause, resume, stop or cap change of an extraction worksite. */
   changeWorksite(worksiteId: string, change: ChangeExtractionWorksiteRequest): Promise<VillageCommandConfirmationV2> {
     return this.gesture(`/worksites/${encodeURIComponent(worksiteId)}`, change.commandId, change);
-  }
-  /** Terraforming: either started (V2 confirmation and effects) or an
-   * adjusted quote, rolled back without effects, for the player to confirm. */
-  async terraform(
-    command: TerraformCommand,
-  ): Promise<{ status: 'started' } | { status: 'changed'; preview: LevelingPreview }> {
-    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
-    const input = await this.json('/terraform', {
-      method: 'POST',
-      headers: { 'x-arbestra-command': command.commandId },
-      body: JSON.stringify(command),
-    });
-    if (input && typeof input === 'object' && (input as { status?: unknown }).status === 'changed')
-      return input as { status: 'changed'; preview: LevelingPreview };
-    this.confirmed(input, command.commandId);
-    return { status: 'started' };
   }
   /** Mixed exploitation order; its own UUID identifies the gesture. */
   exploit(request: ExploitationRequest): Promise<VillageCommandConfirmationV2> {

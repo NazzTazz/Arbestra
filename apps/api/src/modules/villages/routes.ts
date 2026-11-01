@@ -1,12 +1,3 @@
-import {
-  LevelingRequestSchema,
-  LevelingCommandSchema,
-  LevelingPreviewSchema,
-  type LevelingRequest,
-  type LevelingCommand,
-} from '@arbestra/contracts';
-import { previewLeveling, commandLeveling, commandTerraform } from './leveling.js';
-import { TerraformCommandSchema, TerraformChangedSchema, type TerraformCommand } from '@arbestra/contracts';
 import { observationCommitted } from '../admin/observation-actions.js';
 import {
   RoadCellsConfirmationV2Schema,
@@ -54,13 +45,6 @@ import {
 import { commandHudWorkforce } from './hud-workforce.js';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
-import {
-  InfrastructureRequestSchema,
-  type InfrastructureRequest,
-  InfrastructurePreviewSchema,
-  InfrastructureConfirmationSchema,
-} from '@arbestra/contracts';
-import { infrastructureCommand, infrastructurePreview } from './infrastructure.js';
 import { ProcessingCommandSchema, ProcessingPreviewSchema, type ProcessingCommand } from '@arbestra/contracts';
 import { commandVillageProcessing, previewVillageProcessing } from './service.js';
 import {
@@ -163,10 +147,6 @@ const VillageCommandV2HeadersSchema = Type.Object(
   },
   { additionalProperties: true },
 );
-const InfrastructureHeadersSchema = Type.Object(
-  { ...VillageSyncHeadersSchema.properties, 'x-infrastructure-confirmation': Type.Optional(Type.Literal('1')) },
-  { additionalProperties: true },
-);
 const ConstructionHeadersSchema = Type.Object(
   {
     ...VillageSyncHeadersSchema.properties,
@@ -177,11 +157,6 @@ const ConstructionHeadersSchema = Type.Object(
   { additionalProperties: true },
 );
 const ConstructionMutationResponseSchema = Type.Union([ConstructionConfirmationSchema, VillageMutationResponseSchema]);
-const InfrastructureMutationResponseSchema = Type.Union([
-  InfrastructureConfirmationSchema,
-  VillageCommandResponseSchema,
-  VillageStateSchema,
-]);
 function villageReplyOptions(headers: FastifyRequest['headers']) {
   const replyMode = headers['x-village-sync'] === '1' ? ('commit' as const) : ('snapshot' as const);
   const revision = headers['x-village-revision'],
@@ -194,9 +169,6 @@ function villageReplyOptions(headers: FastifyRequest['headers']) {
   }
   return { replyMode, base };
 }
-
-/** Internal signal: a terraform quote changed, nothing was committed. */
-class TerraformQuoteChanged extends Error {}
 
 export async function registerVillageRoutes(
   app: FastifyInstance,
@@ -289,89 +261,6 @@ export async function registerVillageRoutes(
     }
     return commandResponse(reply, accountId, worldSlug, result, base);
   };
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/leveling/preview',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        body: LevelingRequestSchema,
-        response: { 200: LevelingPreviewSchema },
-      },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      return previewLeveling(db, account.id, worldSlug, villageId, request.body as LevelingRequest);
-    },
-  );
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/terraform',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        headers: VillageCommandV2HeadersSchema,
-        body: TerraformCommandSchema,
-        response: {
-          200: Type.Union([
-            TerraformChangedSchema,
-            Type.Object({ status: Type.Literal('started'), state: VillageStateSchema }),
-            VillageCommandConfirmationV2Schema,
-          ]),
-        },
-      },
-    },
-    async (request, reply) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const command = request.body as TerraformCommand;
-      if (request.headers['x-arbestra-protocol'] === '2') {
-        // An adjusted quote rolled back without effects keeps its compact answer.
-        let changed: unknown;
-        const sent = await villageV2(
-          request,
-          reply,
-          async (afterWrites) => {
-            const result = await commandTerraform(db, account.id, worldSlug, villageId, command, afterWrites);
-            if (result.status === 'changed') {
-              changed = result;
-              throw new TerraformQuoteChanged();
-            }
-            return result.state;
-          },
-          command.commandId,
-        ).catch((error) => {
-          if (error instanceof TerraformQuoteChanged) return undefined;
-          throw error;
-        });
-        return sent ?? reply.serializer(JSON.stringify).send(changed);
-      }
-      return commandTerraform(db, account.id, worldSlug, villageId, command);
-    },
-  );
-  app.post(
-    '/api/worlds/:worldSlug/villages/:villageId/leveling',
-    {
-      schema: {
-        params: VillageParametersSchema,
-        headers: VillageCommandV2HeadersSchema,
-        body: LevelingCommandSchema,
-        response: { 200: Type.Union([VillageStateSchema, VillageCommandConfirmationV2Schema]) },
-      },
-    },
-    async (request, reply) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const command = request.body as LevelingCommand;
-      if (request.headers['x-arbestra-protocol'] === '2')
-        return villageV2(
-          request,
-          reply,
-          (afterWrites) => commandLeveling(db, account.id, worldSlug, villageId, command, afterWrites),
-          command.commandId,
-        );
-      return commandLeveling(db, account.id, worldSlug, villageId, command);
-    },
-  );
   const tradeNavigation = navigation as TravelNetworkExecutor & NavigationExecutor;
   app.get(
     '/api/worlds/:worldSlug/villages/:villageId/market/offers',
@@ -585,46 +474,6 @@ export async function registerVillageRoutes(
       return previewVillageProcessing(db, account.id, worldSlug, villageId, buildingId, workerCount, orderId);
     },
   );
-  for (const preview of [true, false])
-    app.post(
-      `/api/worlds/:worldSlug/villages/:villageId/infrastructure${preview ? '/preview' : ''}`,
-      {
-        schema: {
-          params: VillageParametersSchema,
-          body: InfrastructureRequestSchema,
-          ...(!preview ? { headers: InfrastructureHeadersSchema } : {}),
-          response: { 200: preview ? InfrastructurePreviewSchema : InfrastructureMutationResponseSchema },
-        },
-      },
-      async (request, reply) => {
-        const account = await authenticate(db, request.cookies[config.cookieName]);
-        const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-        if (preview)
-          return infrastructurePreview(db, account.id, worldSlug, villageId, request.body as InfrastructureRequest);
-        const options = villageReplyOptions(request.headers),
-          started = performance.now();
-        const result = await infrastructureCommand(
-          db,
-          account.id,
-          worldSlug,
-          villageId,
-          request.body as InfrastructureRequest,
-          request.headers['x-infrastructure-confirmation'] === '1' ? 'confirmation' : options.replyMode,
-        );
-        observationCommitted(request);
-        const committed = performance.now(),
-          response =
-            'kind' in result ? result : await commandResponse(reply, account.id, worldSlug, result, options.base);
-        reply.header(
-          'server-timing',
-          `road_tx;dur=${(committed - started).toFixed(1)}, road_sync;dur=${(performance.now() - committed).toFixed(1)}`,
-        );
-        // Keep the first compact reply independent of the complete-village union's lazy validator.
-        if ('kind' in response && response.kind === 'infrastructure-confirmation')
-          reply.serializer(reply.compileSerializationSchema(InfrastructureConfirmationSchema, '200'));
-        return response;
-      },
-    );
   // Road cells (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4): V2-native,
   // one bounded command per gesture; the quote is a read-only projection.
   app.post(

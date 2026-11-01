@@ -1,4 +1,3 @@
-import { hasActiveLeveling, completeLevelingAt } from './leveling.js';
 import { devTime } from '../operations/dev-timing.js';
 import { advancePopulationGrowth } from '../population/growth.js';
 import { reconcileRestHousing } from '../population/work.js';
@@ -34,7 +33,6 @@ export interface ReconciliationProgress {
 export const COMMAND_CATCHUP_BUDGET: Readonly<ReconciliationBudget> = { maxTransitions: 64, maxWorkMs: 200 };
 
 type DueTransition =
-  | { id: string; through: Date; type: 'leveling' }
   | { id: string; through: Date; type: 'construction' }
   | { id: string; through: Date; type: 'expansion' }
   | { id: string; through: Date; type: 'harvest' }
@@ -136,8 +134,6 @@ export async function readDueVillageTransitions(
       where world_id=${worldId} and village_id=${villageId} and status='open' and oracle_eligible=true and oracle_at<=${through}
     union all select id, due_at, 'trade-delivery' from trade_deliveries
       where world_id=${worldId} and village_id=${villageId} and completed_at is null and due_at<=${through}
-    union all select id, completes_at, 'leveling' from leveling_jobs
-      where world_id=${worldId} and village_id=${villageId} and completed_at is null and completes_at<=${through}
     ) due ${limit === undefined ? sql`` : sql`order by date_trunc('milliseconds',through),id,type limit ${limit}`}
   `.execute(transaction);
   return result.rows.sort(
@@ -170,7 +166,6 @@ export async function beginVillageEconomy(
     );
     // Readers may admit trips, including automatic worksite relaunches. Acquire
     // before deposits; a spatial writer must never upgrade a shared lock later.
-    navigationWrite ||= await hasActiveLeveling(transaction, worldId, lockedPeers);
     const navigationKey = `infrastructure:${worldId}`;
     await devTime('navigation_lock', async () => {
       if (navigationWrite)
@@ -307,9 +302,7 @@ export async function reconcileVillageEconomy(
         return { complete: false, transitions, lastTransitionAt: through };
       const transition = due.shift()!;
       await advancePopulationGrowth(transaction, economy.worldId, economy.villageId, transition.through);
-      if (transition.type === 'leveling')
-        await completeLevelingAt(transaction, economy, transition.id, transition.through);
-      else if (transition.type === 'construction')
+      if (transition.type === 'construction')
         await completeConstructionAt(transaction, economy, transition.id, transition.through);
       else if (transition.type === 'expansion')
         await completeExpansionAt(transaction, economy, transition.id, transition.through);

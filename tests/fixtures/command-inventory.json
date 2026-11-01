@@ -581,34 +581,6 @@
     "role": "mutation"
   },
   {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/infrastructure",
-    "actions": [],
-    "lot": "D",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/infrastructure/preview",
-    "actions": [],
-    "lot": "D",
-    "role": "read"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/leveling",
-    "actions": [],
-    "lot": "D",
-    "role": "mutation"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/leveling/preview",
-    "actions": [],
-    "lot": "D",
-    "role": "read"
-  },
-  {
     "method": "GET",
     "url": "/api/worlds/:worldSlug/villages/:villageId/market/offers",
     "actions": [],
@@ -740,13 +712,6 @@
     "actions": [],
     "lot": "B",
     "role": "Read-only targeted SSE subscription"
-  },
-  {
-    "method": "POST",
-    "url": "/api/worlds/:worldSlug/villages/:villageId/terraform",
-    "actions": [],
-    "lot": "D",
-    "role": "mutation"
   },
   {
     "method": "POST",

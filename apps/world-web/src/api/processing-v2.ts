@@ -396,16 +396,6 @@ export function useVillageSyncV2({
     if (!current) throw Error('Synchronisation indisponible.');
     return current.trade(command);
   }, []);
-  const level = useCallback((command: Parameters<SyncV2Transport['level']>[0]) => {
-    const current = transport.current;
-    if (!current) throw Error('Synchronisation indisponible.');
-    return current.level(command);
-  }, []);
-  const terraform = useCallback((command: Parameters<SyncV2Transport['terraform']>[0]) => {
-    const current = transport.current;
-    if (!current) throw Error('Synchronisation indisponible.');
-    return current.terraform(command);
-  }, []);
   const changeWorksite = useCallback((id: string, change: Parameters<SyncV2Transport['changeWorksite']>[1]) => {
     const current = transport.current;
     if (!current) throw Error('Synchronisation indisponible.');
@@ -461,8 +451,6 @@ export function useVillageSyncV2({
     discoverCatEyes,
     exploit,
     trade,
-    level,
-    terraform,
     changeWorksite,
     roadCells,
     demolish,
