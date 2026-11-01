@@ -7,18 +7,8 @@ import {
 import type { TimedVillageState } from './client';
 import { SyncV2Transport } from './sync-v2-transport';
 
-// Whole-village V2 synchronization is the default (production since 23
-// October, development and browser tests since 24 October). During the V1
-// removal, localStorage arbestra:sync-v2=0 still selects the historical V1
-// transport for comparison; VITE_SYNC_V2=0 does the same for a whole build.
-export const SYNC_V2_VILLAGE = (() => {
-  try {
-    if (localStorage.getItem('arbestra:sync-v2') === '0') return false;
-  } catch {
-    /* Storage unavailable: keep the default. */
-  }
-  return import.meta.env.VITE_SYNC_V2 !== '0';
-})();
+// The whole village is synchronized through V2 (streams + presentation); the
+// shared scopes it reads besides its private stream:
 export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic'] as const;
 
 type Latest = { state: SyncV2State; observedAt: string; batch: SyncV2Batch };
@@ -29,8 +19,7 @@ export interface InitialSyncV2 {
 }
 let handoff: InitialSyncV2 | null = null;
 
-/** First village state from V2 (bootstrap + presentation), without the
- * historical village read. The open session is kept for the mounted village,
+/** First village state from V2 (bootstrap + presentation). The open session is kept for the mounted village,
  * which adopts it instead of bootstrapping a second time. */
 export function initialSyncV2Read(worldSlug: string): Promise<TimedVillageState> {
   return readSyncV2Village(worldSlug, true);
@@ -60,7 +49,7 @@ async function readSyncV2Village(worldSlug: string, keep: boolean): Promise<Time
     if (!presentation || !current || !state) throw Error('Projection V2 incomplète.');
     if (keep) handoff = { transport, presentation, latest: () => latest ?? current };
     else transport.close();
-    return { state, serverOffsetMs: Date.parse(current.observedAt) - Date.now(), source: 'v2' };
+    return { state, serverOffsetMs: Date.parse(current.observedAt) - Date.now() };
   } catch (error) {
     transport.close();
     throw error;

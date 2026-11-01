@@ -9,8 +9,6 @@ esac
 export VITE_LOBBY_URL="https://play.$domain"
 export VITE_WORLD_CLIENT_URL="https://{world}.$domain/village"
 export VITE_WORLD_HOST="{world}.$domain"
-# Deployed clients run the whole village on the V2 synchronization.
-export VITE_SYNC_V2=1
 pnpm build
 # A portable Linux production dependency tree; no install or compilation on VPS.
 bundle=$(mktemp -d)

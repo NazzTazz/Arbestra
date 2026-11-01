@@ -3,13 +3,7 @@ import { useObservationPublisher } from './observation';
 import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
 import { useExpeditions } from './ui/use-expeditions';
 import { useHarvestTool } from './ui/use-harvest-tool';
-import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
-import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
-import {
-  acceptConstructionPresentation,
-  currentConstructionPresentation,
-  constructionPresentationState,
-} from './api/construction-presentation';
+import { reconcileVillageSnapshot } from '@arbestra/contracts';
 import { HarvestFeedbackLayer } from './ui/HarvestFeedback';
 import { ExploitationShowroom, type ExploitationCategory } from './ui/ExploitationShowroom';
 import { nearestExploitationTarget, type ExploitationChoice } from './ui/exploitation-navigation';
@@ -19,47 +13,23 @@ import { randomUUID } from './random-uuid';
 import { RepresentativePanel } from './ui/RepresentativePanel';
 import { ProcessingPanel } from './ui/ProcessingPanel';
 import { MarketPanel } from './ui/MarketPanel';
-import { commandPlayerMarket } from './api/client';
 import { constructionCosts } from '@arbestra/contracts';
-import { commandProcessing } from './api/client';
 import { processingCommandBuilding, useVillageSyncV2 } from './api/processing-v2';
-import { SYNC_V2_VILLAGE } from './api/sync-v2-initial';
 import { SyncV2HttpError } from './api/sync-v2-transport';
 import { SyncV2SessionExpired } from './api/sync-v2-session';
 import { RECONNECT_BACKOFF_MS, SpacedRetry } from './api/reconnect';
 import type { ProcessingCommand } from '@arbestra/contracts';
-import { setFactoryEnabled } from './api/client';
 import { InfrastructureTools } from './ui/InfrastructureTools';
 import { DemolitionTool } from './ui/DemolitionTool';
 import type { RepresentativeInfo } from './scene/village-workers';
 import type { InhabitantCameraMode } from './scene/inhabitant-camera';
 import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
-import { discoverCatEyes } from './api/client';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type {
-  BuildingType,
-  ConstructionConfirmation,
-  DepositDetails,
-  Garden,
-  HudWorkforceIntent,
-  VillageState,
-} from '@arbestra/contracts';
+import type { BuildingType, DepositDetails, Garden, VillageState } from '@arbestra/contracts';
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
-import {
-  ApiError,
-  buildBuilding,
-  changeWorksite,
-  commandHudWorkforce,
-  discoverOrRefreshSupplies,
-  expandGarden,
-  getStoneDepositDetails,
-  getVillage,
-  type TimedVillageState,
-  type TimedVillageUpdate,
-  upgradeBuilding,
-} from './api/client';
+import { ApiError, getStoneDepositDetails, setFactoryEnabled, type TimedVillageState } from './api/client';
 import {
   campusRange,
   stonemasonRange,
@@ -78,7 +48,7 @@ import { completedMarketTransactions, marketCommandDelivers } from './ui/market-
 import { WorldModeNavigation, type ActiveWorldMode } from './ui/world-mode';
 import { WorldModeBar } from './ui/WorldModeBar';
 import { ExploitationPalette, type ExploitationIntentState, type ExploitationSettings } from './ui/ExploitationPanel';
-import { previewExploitation, startExploitation } from './api/client';
+import { previewExploitation } from './api/client';
 import type { ExploitationRequest, ExploitationPreview } from '@arbestra/contracts';
 import { type GameNotification } from './ui/NotificationStack';
 import { OracleJournal } from './ui/OracleJournal';
@@ -91,10 +61,8 @@ import type { TerrainEditGesture } from '@arbestra/contracts';
 import { mergeTerraformVisuals } from './ui/terraform-draft';
 import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
-import type { HudSettlement } from './ui/hud-intents';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
-import { commandScience } from './api/client';
 import { DevDrawer } from './ui/DevDrawer';
 import {
   configuredExploitation,
@@ -173,21 +141,9 @@ function gardenReady(garden: Garden, serverNow: number): number {
 export function App({ starter }: { starter?: StarterController } = {}) {
   const beforeTownHall = starter?.beforeTownHall ?? false;
   const starterActive = Boolean(starter?.active);
-  const [canonicalState, setState] = useState<VillageState | null>(starter?.state ?? null);
-  const [constructionPresentation, setConstructionPresentation] = useState<ConstructionConfirmation | null>(null);
-  const constructionPresentationRef = useRef<ConstructionConfirmation | null>(null);
-  const state = useMemo(
-    () => constructionPresentationState(canonicalState, constructionPresentation),
-    [canonicalState, constructionPresentation],
-  );
-  const resourceServerTime = canonicalState
-    ? (currentConstructionPresentation(canonicalState, constructionPresentation)?.serverTime ??
-      canonicalState.serverTime)
-    : '';
-  const observationActive = useObservationPublisher(starterActive ? null : canonicalState);
+  const [state, setState] = useState<VillageState | null>(starter?.state ?? null);
+  const observationActive = useObservationPublisher(starterActive ? null : state);
   const stateRef = useRef<VillageState | null>(starter?.state ?? null);
-  const synchronization = useRef<VillageSynchronization | null>(null);
-  const refreshFlight = useRef<Promise<void> | null>(null);
   const initialFlight = useRef<Promise<TimedVillageState> | null>(null);
   const offsetRef = useRef(0);
   const [loading, setLoading] = useState(!starter);
@@ -201,21 +157,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   const [initialLost, setInitialLost] = useState(false);
   const initialRetry = useRef<SpacedRetry | null>(null);
   const expireSession = useCallback(() => setNeedsLogin(true), []);
-  // Set after the V2 hook below: once V2 owns the village, V1 responses only
-  // trigger an immediate V2 delta read instead of replacing the state.
-  const villageV2Ref = useRef<{
-    ready: boolean;
-    refresh: () => void;
-    construct?: ReturnType<typeof useVillageSyncV2>['construct'];
-    upgrade?: ReturnType<typeof useVillageSyncV2>['upgrade'];
-    expand?: ReturnType<typeof useVillageSyncV2>['expand'];
-    science?: ReturnType<typeof useVillageSyncV2>['science'];
-    discoverSupplies?: ReturnType<typeof useVillageSyncV2>['discoverSupplies'];
-    discoverCatEyes?: ReturnType<typeof useVillageSyncV2>['discoverCatEyes'];
-    exploit?: ReturnType<typeof useVillageSyncV2>['exploit'];
-    trade?: ReturnType<typeof useVillageSyncV2>['trade'];
-    changeWorksite?: ReturnType<typeof useVillageSyncV2>['changeWorksite'];
-  }>({ ready: false, refresh: () => {} });
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
   const actionInFlight = useRef(false);
@@ -284,49 +225,16 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   const starterRef = useRef(starter);
   starterRef.current = starter;
   const applySnapshot = useCallback(
-    (update: TimedVillageUpdate) => {
+    (update: TimedVillageState) => {
       return clientTime('apply', () => {
         const previous = stateRef.current;
-        if (update.requestGeneration !== undefined && update.requestGeneration !== villageRequestGeneration()) return;
-        let snapshot: TimedVillageState;
-        if ('frame' in update) {
-          if (!previous) {
-            synchronization.current?.reconnect();
-            return;
-          }
-          const result = applyVillageFrame(previous, update.frame);
-          if (result.kind === 'resync') {
-            synchronization.current?.reconnect();
-            return;
-          }
-          if (result.kind !== 'applied') return;
-          snapshot = {
-            state: result.state,
-            serverOffsetMs: update.serverOffsetMs,
-            ...(update.requestGeneration !== undefined ? { requestGeneration: update.requestGeneration } : {}),
-          };
-        } else snapshot = update;
-        const fromV2 = 'state' in update && update.source === 'v2';
-        if (!fromV2 && villageV2Ref.current.ready) {
-          villageV2Ref.current.refresh();
-          return;
-        }
         if (
           previous &&
-          (previous.world.id !== snapshot.state.world.id || previous.village.id !== snapshot.state.village.id)
+          (previous.world.id !== update.state.world.id || previous.village.id !== update.state.village.id)
         )
           return;
-        // The V2 session orders its own states; V1 revisions do not apply to them.
-        if (!fromV2) {
-          if (previous?.syncRevision !== undefined) {
-            if (snapshot.state.syncRevision === undefined) {
-              synchronization.current?.reconnect();
-              return;
-            }
-          }
-          if (previous && latestVillageSnapshot(previous, snapshot.state) === previous) return;
-        }
-        snapshot = { ...snapshot, state: reconcileVillageSnapshot(previous, snapshot.state) };
+        // The V2 session orders its own states: no revision or clock comparison here.
+        const snapshot: TimedVillageState = { ...update, state: reconcileVillageSnapshot(previous, update.state) };
         if (previous) {
           if (previous.science && snapshot.state.science) {
             const before = previous.science,
@@ -386,11 +294,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         // Same pair as the "+N": the column rises with the credited amounts.
         const deliveries = completedMarketTransactions(previous, snapshot.state);
         if (deliveries) terrainRef.current?.marketBeacon(deliveries);
-        const confirmed = currentConstructionPresentation(snapshot.state, constructionPresentationRef.current);
-        if (confirmed !== constructionPresentationRef.current) {
-          constructionPresentationRef.current = confirmed;
-          setConstructionPresentation(confirmed);
-        }
         stateRef.current = snapshot.state;
         setState(snapshot.state);
         starterRef.current?.onSnapshot(snapshot.state);
@@ -402,13 +305,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   );
 
   // The starter kit too: before the town hall, the V2 hook is not enabled at all.
-  const villageV2Mode = SYNC_V2_VILLAGE;
   const villageV2 = useVillageSyncV2({
     worldSlug,
     worldId: state?.world.id,
     villageId: state?.village.id,
     enabled: initialReady && !needsLogin && !beforeTownHall,
-    village: villageV2Mode,
     onState: applySnapshot,
     onExpired: expireSession,
     onNotice: pushNotification,
@@ -417,25 +318,21 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   // game says so over the paused scene while the hook retries at a spaced cadence.
   const villageLost = villageV2.status === 'unavailable';
   // Receipts of expeditions and harvest gestures: the V2 stream delivers them as the
-  // worker writes them; the historical reads remain only without V2 (arbestra:sync-v2=0).
-  const receiptsFromStream = villageV2Mode && villageV2.status !== 'unavailable';
+  // worker writes them (null while its first snapshot is not loaded).
   const expeditions = useExpeditions(
     worldSlug,
     state?.world.id,
     state?.village.id,
     !needsLogin && initialReady,
-    receiptsFromStream ? villageV2.expeditionReceipts : undefined,
+    villageV2.expeditionReceipts,
   );
   // Road cells are V2-native: the tool waits for the V2 village session.
   const roadCellsApi = useMemo(
-    () =>
-      villageV2Mode && villageV2.villageReady
-        ? { command: villageV2.roadCells, preview: villageV2.previewRoadCells }
-        : null,
-    [villageV2Mode, villageV2.villageReady, villageV2.roadCells, villageV2.previewRoadCells],
+    () => (villageV2.villageReady ? { command: villageV2.roadCells, preview: villageV2.previewRoadCells } : null),
+    [villageV2.villageReady, villageV2.roadCells, villageV2.previewRoadCells],
   );
   // Demolition is V2-native too (docs/SPEC-DEMOLITION.md §9).
-  const demolish = villageV2Mode && villageV2.villageReady ? villageV2.demolish : null;
+  const demolish = villageV2.villageReady ? villageV2.demolish : null;
   // The waiting order survives mode and tool changes, not a change of village.
   const pendingDemolition = usePendingDemolition({
     demolish,
@@ -445,7 +342,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   });
   // Instant terrain edits, batched for 10 s after the last gesture (docs/SPEC-TERRAFORMATION-INSTANTANEE.md).
   const pendingTerrain = usePendingTerrain({
-    edit: villageV2Mode && villageV2.villageReady ? villageV2.terrainEdits : null,
+    edit: villageV2.villageReady ? villageV2.terrainEdits : null,
     villageKey: state ? `${state.world.id}:${state.village.id}` : '',
     onNotice: pushNotification,
   });
@@ -456,64 +353,26 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     );
   }, [pendingTerrain.batch, terrainDraft]);
   const roadAnchorsApi = useMemo(
-    () =>
-      villageV2Mode && villageV2.villageReady
-        ? { command: villageV2.roadAnchors, preview: villageV2.previewRoadAnchors }
-        : null,
-    [villageV2Mode, villageV2.villageReady, villageV2.roadAnchors, villageV2.previewRoadAnchors],
+    () => (villageV2.villageReady ? { command: villageV2.roadAnchors, preview: villageV2.previewRoadAnchors } : null),
+    [villageV2.villageReady, villageV2.roadAnchors, villageV2.previewRoadAnchors],
   );
-  villageV2Ref.current = {
-    ready: villageV2Mode && villageV2.villageReady,
-    refresh: villageV2.refresh,
-    construct: villageV2.construct,
-    upgrade: villageV2.upgrade,
-    expand: villageV2.expand,
-    science: villageV2.science,
-    discoverSupplies: villageV2.discoverSupplies,
-    discoverCatEyes: villageV2.discoverCatEyes,
-    exploit: villageV2.exploit,
-    trade: villageV2.trade,
-    changeWorksite: villageV2.changeWorksite,
-  };
-  // Workforce HUD gestures follow the village's synchronization: on V2 they wait
-  // for the stream (a gesture saved before a reload is replayed once it is ready,
-  // never through the historical route), and the historical routes serve only a
-  // client that runs without V2 or whose V2 could not start.
-  const hudSlug = state?.world.slug,
-    hudVillageId = state?.village.id;
-  const hudHistorical = !villageV2Mode || villageV2.status === 'unavailable';
-  const hudCommand = useMemo<((intent: HudWorkforceIntent) => Promise<HudSettlement>) | null>(
-    () =>
-      hudHistorical
-        ? hudSlug && hudVillageId
-          ? (intent) => commandHudWorkforce(hudSlug, hudVillageId, intent)
-          : null
-        : villageV2.villageReady
-          ? villageV2.hudWorkforce
-          : null,
-    [hudHistorical, hudSlug, hudVillageId, villageV2.villageReady, villageV2.hudWorkforce],
-  );
+  // Workforce HUD gestures wait for the stream: a gesture saved before a reload,
+  // or made while the connection is down, is sent once the session is ready.
+  const hudCommand = villageV2.villageReady ? villageV2.hudWorkforce : null;
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
     if (!current || catRequest.current || current.village.accomplishments.some((item) => item.code === 'cat-eyes'))
       return;
     catRequest.current = true;
     try {
-      const v2 = villageV2Ref.current;
-      // On V2 the confirmation's effects carry the accomplishment.
-      if (v2.ready && v2.discoverCatEyes) {
-        await v2.discoverCatEyes();
-        return;
-      }
-      const result = await discoverCatEyes(current.world.slug, current.village.id);
-      if (stateRef.current?.village.id !== current.village.id) return;
-      applySnapshot(result);
+      // The confirmation's effects carry the accomplishment.
+      await villageV2.discoverCatEyes();
     } catch {
       /* The scene retries only while a valid observation continues. */
     } finally {
       catRequest.current = false;
     }
-  }, [applySnapshot]);
+  }, [villageV2.discoverCatEyes]);
 
   useEffect(() => {
     if (!starter) return;
@@ -524,12 +383,14 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       if (
         stateRef.current?.village.id !== starter.state.village.id ||
         stateRef.current.world.id !== starter.state.world.id
-      ) {
-        synchronization.current?.close();
-        synchronization.current = null;
+      )
         stateRef.current = null;
-      }
-      applySnapshot({ state: starter.state, serverOffsetMs: offsetRef.current });
+      // Once the village synchronizes itself, the pose reaches it through its own
+      // streams: a reread replaces the starter's one-shot read, which could be older.
+      // The state the village just published and the starter echoed back needs nothing.
+      if (stateRef.current && villageV2.villageReady) {
+        if (starter.state !== stateRef.current) villageV2.refresh();
+      } else applySnapshot({ state: starter.state, serverOffsetMs: offsetRef.current });
     }
     setLoading(false);
   }, [starter?.state, starter?.beforeTownHall, applySnapshot]);
@@ -594,7 +455,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     scene: terrainRef,
     slug: worldSlug,
     woodMode: exploitationSettings.woodMode,
-    receipts: receiptsFromStream ? villageV2.harvestReceipts : undefined,
+    receipts: villageV2.harvestReceipts,
     enabled:
       worldMode === 'exploitation' &&
       exploitationCategory === 'exploit' &&
@@ -756,29 +617,11 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     };
   }, [previewRequest]);
 
-  const refresh = useCallback(async () => {
+  // Back on the page: an immediate delta read of the village's streams.
+  const refresh = useCallback(() => {
     if (beforeTownHall || !initialReady) return;
-    if (villageV2Ref.current.ready) {
-      villageV2Ref.current.refresh();
-      return;
-    }
-    if (synchronization.current) {
-      synchronization.current.reconnect();
-      return;
-    }
-    if (actionInFlight.current) return;
-    if (refreshFlight.current) return refreshFlight.current;
-    refreshFlight.current = (async () => {
-      try {
-        applySnapshot(await getVillage(worldSlug, stateRef.current?.village.id));
-      } catch {
-        /* Background refresh is best effort. */
-      }
-    })().finally(() => {
-      refreshFlight.current = null;
-    });
-    return refreshFlight.current;
-  }, [applySnapshot, beforeTownHall, initialReady]);
+    villageV2.refresh();
+  }, [villageV2.refresh, beforeTownHall, initialReady]);
 
   useEffect(() => {
     void loadScene().catch(() => {});
@@ -868,43 +711,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   );
   const now = usePresentationClock(livePanelClock);
 
-  // V1 stream only while V2 does not own the village (or is unavailable).
-  const villageV1Stream = !villageV2Mode || villageV2.status === 'unavailable';
-  useEffect(() => {
-    if (
-      !villageV1Stream ||
-      !initialReady ||
-      needsLogin ||
-      beforeTownHall ||
-      !state ||
-      state.village.id !== stateRef.current?.village.id
-    )
-      return;
-    const stream = new VillageSynchronization(state.world.slug, state.world.id, state.village.id, {
-      current: () => stateRef.current,
-      onExpeditionReceipt: expeditions.receive,
-      accept: applySnapshot,
-      offset: () => offsetRef.current,
-      onExpired: () => setNeedsLogin(true),
-    });
-    synchronization.current = stream;
-    return () => {
-      stream.close();
-      if (synchronization.current === stream) synchronization.current = null;
-    };
-  }, [
-    state?.world.id,
-    state?.village.id,
-    beforeTownHall,
-    needsLogin,
-    applySnapshot,
-    expeditions.receive,
-    initialReady,
-    villageV1Stream,
-  ]);
   useEffect(() => {
     const visible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') refresh();
     };
     document.addEventListener('visibilitychange', visible);
     window.addEventListener('focus', visible);
@@ -1019,7 +828,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     houseVariant,
   ).map((cost) => ({ ...cost, amount: cost.amount * (spatial ? (area?.count ?? 0) : 1) }));
   const serverNow = now + serverOffsetMs;
-  const displayedWood = state ? projectedWood(state.village, resourceServerTime, serverNow) : 0;
+  const displayedWood = state ? projectedWood(state.village, state.serverTime, serverNow) : 0;
   const affordable = costs.every(
     (cost) =>
       cost.amount <=
@@ -1071,19 +880,14 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setConstruction(null);
     clearPreview();
   }
-  async function runAction(
-    action: () => Promise<TimedVillageUpdate | void>,
-    success?: string,
-    exit = false,
-  ): Promise<boolean> {
+  async function runAction(action: () => Promise<void>, success?: string, exit = false): Promise<boolean> {
     if (actionInFlight.current) return false;
     actionInFlight.current = true;
     setPendingAction(true);
     setError(null);
     try {
       // A V2 gesture has already updated the session through its effects.
-      const result = await action();
-      if (result) applySnapshot(result);
+      await action();
       markOracleProgress();
       if (exit) exitConstruction();
       if (success) pushNotification(success);
@@ -1100,8 +904,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   }
 
   async function runProcessing(command: ProcessingCommand): Promise<boolean> {
-    if (villageV2.status !== 'ready')
-      return runAction(() => commandProcessing(worldSlug, stateRef.current!.village.id, command));
     if (actionInFlight.current) return false;
     actionInFlight.current = true;
     setPendingAction(true);
@@ -1138,30 +940,23 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setConstructionIntentState('submitting');
     sessionStorage.setItem(pendingConstructionKey(command.villageId), JSON.stringify(command));
     try {
-      const current = stateRef.current;
-      const syncBase =
-        current?.village.id === command.villageId &&
-        current.world.slug === command.worldSlug &&
-        current.syncRevision !== undefined
-          ? { revision: current.syncRevision, serverTime: current.serverTime }
-          : undefined;
-      const v2 = villageV2Ref.current;
       // Construction commands on the V2 contract: their ACK effects update the
-      // village; a new footprint also rereads the presentation.
-      if (command.kind === 'upgrade' && v2.ready && v2.upgrade)
-        await v2.upgrade(command.buildingId, {
+      // village; a new footprint also rereads the presentation. Without a
+      // session the call refuses, and the saved intention stays to be verified.
+      if (command.kind === 'upgrade')
+        await villageV2.upgrade(command.buildingId, {
           commandId: command.commandId,
           expectedCosts: command.expectedCosts,
           expectedLevel: command.expectedLevel,
         });
-      else if (command.kind === 'expand' && v2.ready && v2.expand)
-        await v2.expand(command.buildingId, {
+      else if (command.kind === 'expand')
+        await villageV2.expand(command.buildingId, {
           commandId: command.commandId,
           cells: command.cells,
           expectedCosts: command.expectedCosts,
         });
-      else if (command.kind === 'build' && v2.ready && v2.construct)
-        await v2.construct({
+      else
+        await villageV2.construct({
           commandId: command.commandId,
           buildingType: command.buildingType,
           anchorCellX: command.anchor.cellX,
@@ -1171,56 +966,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           quarterTurns: command.quarterTurns ?? 0,
           houseVariant: command.houseVariant ?? 'stone',
         });
-      else {
-        const snapshot =
-          command.kind === 'build'
-            ? await buildBuilding(
-                command.worldSlug,
-                command.villageId,
-                command.buildingType,
-                command.anchor,
-                command.cells,
-                command.commandId,
-                command.expectedCosts,
-                command.quarterTurns,
-                command.houseVariant,
-                syncBase,
-              )
-            : command.kind === 'expand'
-              ? await expandGarden(
-                  command.worldSlug,
-                  command.villageId,
-                  command.buildingId,
-                  command.cells,
-                  command.commandId,
-                  command.expectedCosts,
-                  syncBase,
-                )
-              : await upgradeBuilding(
-                  command.worldSlug,
-                  command.villageId,
-                  command.buildingId,
-                  command.commandId,
-                  command.expectedCosts,
-                  command.expectedLevel,
-                  syncBase,
-                );
-        if ('construction' in snapshot && villageV2Ref.current.ready) villageV2Ref.current.refresh();
-        else if ('construction' in snapshot) {
-          const current = stateRef.current;
-          if (current) {
-            const confirmed = acceptConstructionPresentation(
-              current,
-              constructionPresentationRef.current,
-              snapshot.construction,
-              snapshot.requestGeneration,
-              villageRequestGeneration(),
-            );
-            constructionPresentationRef.current = confirmed;
-            setConstructionPresentation(confirmed);
-          }
-        } else applySnapshot(snapshot);
-      }
       markOracleProgress();
       clearPreview();
       sessionStorage.removeItem(pendingConstructionKey(command.villageId));
@@ -1506,7 +1251,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           success: 'Construction lancée',
         };
     if (leveling) {
-      const level = villageV2Mode && villageV2.villageReady ? villageV2.terrainEdits : null;
+      const level = villageV2.villageReady ? villageV2.terrainEdits : null;
       if (!level) {
         setError('Synchronisation du village en cours, réessayez dans un instant.');
         return;
@@ -1815,10 +1560,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setExploitationIntentState('submitting');
     sessionStorage.setItem(pendingExploitationKey(current.village.id), JSON.stringify(request));
     try {
-      const v2 = villageV2Ref.current;
-      // On V2 the confirmation's effects have already updated the village.
-      if (v2.ready && v2.exploit) await v2.exploit(request);
-      else applySnapshot(await startExploitation(worldSlug, current.village.id, request));
+      // The confirmation's effects have already updated the village.
+      await villageV2.exploit(request);
       const after = stateRef.current?.village.id === current.village.id ? stateRef.current : null;
       markOracleProgress();
       succeeded = true;
@@ -1959,13 +1702,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     setPendingAction(true);
     setError(null);
     try {
-      const v2 = villageV2Ref.current;
-      if (v2.ready && v2.discoverSupplies) await v2.discoverSupplies(buildingId);
-      else {
-        const result = await discoverOrRefreshSupplies(worldSlug, currentState.village.id, buildingId);
-        applySnapshot(result.snapshot);
-        if (result.alreadyDiscovered) pushNotification('Les réserves avaient déjà été fouillées');
-      }
+      await villageV2.discoverSupplies(buildingId);
       markOracleProgress();
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Fouille impossible.';
@@ -1977,7 +1714,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     }
   }
   function useConstructionTarget(siteId: string, anchor: ScreenAnchor, inspect = false) {
-    const current = constructionPresentationState(stateRef.current, constructionPresentationRef.current);
+    const current = stateRef.current;
     if (
       !current ||
       !construction ||
@@ -2042,9 +1779,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     if (!state || modeRef.current !== 'exploitation') return;
     const change = { commandId: randomUUID(), action, ...(cap === undefined ? {} : { workerCap: cap }) };
     void runAction(async () => {
-      const v2 = villageV2Ref.current;
-      if (!v2.ready || !v2.changeWorksite) return changeWorksite(worldSlug, state.village.id, id, change);
-      await v2.changeWorksite(id, change);
+      await villageV2.changeWorksite(id, change);
     });
   }
 
@@ -2339,7 +2074,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             cancelWorldGesture();
           }}
           state={state}
-          resourceServerTime={resourceServerTime}
           displayedWood={displayedWood}
           serverOffsetMs={serverOffsetMs}
           notifications={notifications}
@@ -2379,15 +2113,19 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                   return;
                 }
                 void runAction(async () => {
-                  const v2 = villageV2Ref.current;
-                  if (!v2.ready || !v2.science) return commandScience(worldSlug, state.village.id, command);
-                  await v2.science(command);
+                  await villageV2.science(command);
                 }, 'Université · commande prise en compte');
               }}
             />
           )}
         <DevDrawer
-          onFactory={(enabled) => void runAction(() => setFactoryEnabled(worldSlug, enabled, state.village.id))}
+          onFactory={(enabled) =>
+            void runAction(async () => {
+              await setFactoryEnabled(worldSlug, enabled);
+              // The shared stream carries the new access: read it now.
+              villageV2.refresh();
+            })
+          }
           noclip={noclip}
           onNoclip={setNoclip}
           open={showDev}
@@ -2557,9 +2295,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 error={error}
                 onCommand={async (command) => {
                   const done = await runAction(async () => {
-                    const v2 = villageV2Ref.current;
-                    if (!v2.ready || !v2.trade) return commandPlayerMarket(worldSlug, state.village.id, command);
-                    await v2.trade(command);
+                    await villageV2.trade(command);
                   });
                   // A direct Oracle purchase leaves no trace in the state; its credit
                   // (and the "+N") was applied before the command resolved.

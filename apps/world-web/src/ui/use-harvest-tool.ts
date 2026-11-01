@@ -1,6 +1,6 @@
 ﻿import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { HarvestIntent, HarvestReceipt, VillageState } from '@arbestra/contracts';
-import { ApiError, cancelHarvestIntent, sendHarvestIntent, readHarvestReceipts } from '../api/client';
+import { ApiError, cancelHarvestIntent, sendHarvestIntent } from '../api/client';
 import { randomUUID } from '../random-uuid';
 import type { Cell } from '../scene/construction-selection';
 import type { TerrainHandle } from '../scene/VillageScene';
@@ -105,12 +105,10 @@ export function useHarvestTool({
   /** What a wood gesture queues its trees for (cut, or clear: wood then stump). */
   woodMode?: 'cut' | 'clear';
   /**
-   * Where the receipts of the gestures come from. Undefined: the historical
-   * read every second (`arbestra:sync-v2=0`, until the V1 removal). Null or a
-   * list: the V2 stream, which delivers each receipt when the worker writes
-   * it (null while its first snapshot is not loaded).
+   * The receipts of the gestures, from the V2 stream: it delivers each one when
+   * the worker writes it (null while its first snapshot is not loaded).
    */
-  receipts?: ReadonlyArray<HarvestReceipt> | null | undefined;
+  receipts: ReadonlyArray<HarvestReceipt> | null;
   onAccepted: () => void;
 }) {
   const [filter, setFilter] = useState<HarvestFilter>('gardens');
@@ -325,46 +323,7 @@ export function useHarvestTool({
       holdTimer.current = null;
     };
   }, [storageKey]);
-  const viaStream = receipts !== undefined;
-  useEffect(() => {
-    // The V2 stream delivers the receipts: no read.
-    if (viaStream) return;
-    let cancelled = false,
-      busy = false;
-    const poll = async () => {
-      const village = current.current.state,
-        ids = queue.current
-          .filter((d) => d.submitted)
-          .slice(0, 64)
-          .map((d) => d.intent.commandId);
-      if (busy || !village || !ids.length) return;
-      busy = true;
-      try {
-        const receipts = await readHarvestReceipts(slug, village.village.id, ids);
-        if (cancelled) return;
-        for (const receipt of receipts) {
-          if (receipt.pending) continue;
-          const item = queue.current.find((d) => d.intent.commandId === receipt.commandId);
-          if (!item) continue;
-          queue.current = queue.current.filter((d) => d !== item);
-          flash(receipt, item);
-          current.current.onAccepted();
-        }
-        persist();
-        setNetworkError(false);
-      } catch {
-        if (!cancelled) setNetworkError(true);
-      } finally {
-        busy = false;
-      }
-    };
-    const timer = setInterval(() => void poll(), 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [storageKey, viaStream]);
-  // From the V2 stream: each gesture settles when the worker writes its receipt.
+  // Each gesture settles when the worker writes its receipt to the V2 stream.
   useEffect(() => {
     if (!receipts || !storageKey) return;
     let changed = false;

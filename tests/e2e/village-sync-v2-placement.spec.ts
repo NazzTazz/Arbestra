@@ -14,7 +14,6 @@ test('une pose V2 apparaît dès la confirmation, avant la relecture de présent
 }, testInfo) => {
   test.skip(isMobile, 'Parcours de pose vérifié avec le cadrage desktop.');
   test.setTimeout(300_000);
-  await page.addInitScript(() => localStorage.setItem('arbestra:sync-v2', '1'));
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   await resetE2eState();

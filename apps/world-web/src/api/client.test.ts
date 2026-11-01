@@ -1,49 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { discoverOrRefreshSupplies } from './client';
-import { getStoneDepositDetails } from './client';
-import { buildBuilding } from './client';
-import { getVillage } from './client';
+import { getStoneDepositDetails, setFactoryEnabled } from './client';
 
 afterEach(() => vi.unstubAllGlobals());
-
-it('bounds construction waiting and retransmits the same id after an uncertain timeout', async () => {
-  const controller = new AbortController(),
-    deadline = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
-  const fetchMock = vi
-    .fn()
-    .mockImplementationOnce(
-      (_url, init: RequestInit) =>
-        new Promise((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))),
-    );
-  vi.stubGlobal('fetch', fetchMock);
-  try {
-    const pending = buildBuilding('rc1', 'village', 'university', { cellX: 1, cellY: 2 }, [], 'same-command');
-    controller.abort(new DOMException('Response deadline', 'TimeoutError'));
-    await expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
-    expect(deadline).toHaveBeenCalledWith(15000);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ serverTime: '2026-10-10T20:00:00Z' })));
-    await buildBuilding('rc1', 'village', 'university', { cellX: 1, cellY: 2 }, [], 'same-command');
-    expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
-  } finally {
-    deadline.mockRestore();
-  }
-});
-
-it('refreshes the village after another tab claimed the supplies, without repeating the claim', async () => {
-  const snapshot = { serverTime: '2026-09-06T18:00:00Z', village: { carrots: 2050 } };
-  const fetchMock = vi
-    .fn()
-    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'SUPPLIES_ALREADY_DISCOVERED' }), { status: 409 }))
-    .mockResolvedValueOnce(new Response(JSON.stringify(snapshot)));
-  vi.stubGlobal('fetch', fetchMock);
-  const result = await discoverOrRefreshSupplies('aube', 'village', 'hall');
-  expect(result).toMatchObject({ alreadyDiscovered: true, snapshot: { state: snapshot } });
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(fetchMock.mock.calls[1]).toEqual([
-    '/api/worlds/aube/village',
-    expect.objectContaining({ credentials: 'same-origin' }),
-  ]);
-});
 
 it('preserves the server refusal code for the deposit menu', async () => {
   vi.stubGlobal(
@@ -60,117 +18,24 @@ it('preserves the server refusal code for the deposit menu', async () => {
   });
 });
 
-const syncFixture = async () =>
-  JSON.parse(
-    (await import('node:fs')).readFileSync(
-      new URL('../../../../tests/fixtures/village-sync-state.json', import.meta.url),
-      'utf8',
-    ),
-  );
-it('negotiates a construction confirmation and validates the command and village before acknowledging it', async () => {
-  const state = await syncFixture(),
-    commandId = crypto.randomUUID();
-  const confirmation = {
-    kind: 'construction',
-    worldId: state.world.id,
-    villageId: state.village.id,
-    commandId,
-    commandTime: state.serverTime,
-    serverTime: state.serverTime,
-    minimumRevision: 2,
-    cells: state.cells,
-    resources: state.village.resources,
-  };
-  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(confirmation))));
+it('switches the workshop access with one write and reads no village back', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ enabled: true, canConfigure: true })));
   vi.stubGlobal('fetch', fetchMock);
-  const send = () =>
-    buildBuilding(
-      state.world.slug,
-      state.village.id,
-      'dwelling',
-      { cellX: 66, cellY: 64 },
-      [{ cellX: 66, cellY: 64 }],
-      commandId,
-    );
-  expect(await send()).toMatchObject({ construction: confirmation });
-  expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({ 'x-construction-confirmation': '1' });
-  await send();
-  expect(fetchMock.mock.calls[1]![1].body).toBe(fetchMock.mock.calls[0]![1].body);
-  confirmation.commandId = crypto.randomUUID();
-  await expect(send()).rejects.toThrow('Confirmation de construction incohérente');
-  confirmation.commandId = commandId;
-  confirmation.villageId = crypto.randomUUID();
-  await expect(send()).rejects.toThrow('Confirmation de construction incohérente');
-});
-it('requests and parses an authoritative construction frame without changing the command payload', async () => {
-  const { villageFrame } = await import('@arbestra/contracts'),
-    state = await syncFixture(),
-    frame = villageFrame(state, { ...state, syncRevision: 2, village: { ...state.village, wood: 75 } });
-  const fetchMock = vi
-    .fn()
-    .mockResolvedValue(
-      new Response(
-        JSON.stringify({ kind: 'frame', commandTime: state.serverTime, serverTime: state.serverTime, frame }),
-      ),
-    );
-  vi.stubGlobal('fetch', fetchMock);
-  const base = { revision: state.syncRevision, serverTime: state.serverTime };
-  const reply = await buildBuilding(
-    state.world.slug,
-    state.village.id,
-    'dwelling',
-    { cellX: 66, cellY: 64 },
-    [{ cellX: 66, cellY: 64 }],
-    'same-command',
-    [],
-    0,
-    'logs',
-    base,
-  );
-  expect(reply).toMatchObject({ frame });
-  expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({
-    'x-village-sync': '1',
-    'x-village-revision': '1',
-    'x-village-server-time': state.serverTime,
-  });
-  const body = fetchMock.mock.calls[0]![1].body;
-  fetchMock.mockResolvedValue(
-    new Response(
-      JSON.stringify({ kind: 'snapshot', commandTime: state.serverTime, serverTime: state.serverTime, state }),
-    ),
-  );
-  expect(
-    await buildBuilding(
-      state.world.slug,
-      state.village.id,
-      'dwelling',
-      { cellX: 66, cellY: 64 },
-      [{ cellX: 66, cellY: 64 }],
-      'same-command',
-      [],
-      0,
-      'logs',
-      { ...base, revision: 2 },
-    ),
-  ).toMatchObject({ state });
-  expect(fetchMock.mock.calls[1]![1].body).toBe(body);
-});
-it('rejects a malformed incremental response as uncertain rather than accepting a partial village', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue(new Response(JSON.stringify({ kind: 'frame', frame: { toRevision: 2 } }))),
-  );
-  await expect(buildBuilding('rc1', 'village', 'dwelling', { cellX: 1, cellY: 2 }, [], 'same-command')).rejects.toThrow(
-    'Réponse de synchronisation invalide',
-  );
+  await expect(setFactoryEnabled('aube', true)).resolves.toBeUndefined();
+  // The V2 streams carry the new access: the legacy snapshot read is gone.
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock.mock.calls[0]![0]).toBe('/api/worlds/aube/dev/factory-access');
+  expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: true }) });
 });
 
-it('names the caller of a legacy village read by file positions', async () => {
-  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ serverTime: '2026-10-26T10:00:00Z' })));
-  vi.stubGlobal('fetch', fetchMock);
-  await getVillage('aube', 'village');
-  const caller = new Headers(fetchMock.mock.calls[0]![1].headers).get('x-arbestra-caller')!;
-  expect(caller.split(' ')[0]).toMatch(/^client\.ts:\d+:\d+$/);
-  expect(caller).toMatch(/client\.test\.ts:\d+:\d+/);
-  for (const frame of caller.split(' ')) expect(frame).toMatch(/^[\w.-]+:\d+:\d+$/);
+it('reports a refused workshop switch instead of ignoring it', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 'DEV_ONLY', message: 'Réglage disponible uniquement en développement.' }), {
+        status: 404,
+      }),
+    ),
+  );
+  await expect(setFactoryEnabled('aube', false)).rejects.toMatchObject({ status: 404, code: 'DEV_ONLY' });
 });

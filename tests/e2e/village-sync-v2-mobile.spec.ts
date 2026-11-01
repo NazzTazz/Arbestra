@@ -28,7 +28,6 @@ test('le village V2 se charge et suit une construction extérieure sur mobile', 
     const path = new URL(request.url()).pathname;
     if (path.startsWith('/api/')) requests.push({ method: request.method(), path });
   });
-  await page.addInitScript(() => localStorage.setItem('arbestra:sync-v2', '1'));
   try {
     await db.transaction().execute(async (tx) => {
       const now = new Date();

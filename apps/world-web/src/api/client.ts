@@ -14,36 +14,6 @@ export async function sendExpedition(
     }),
   );
 }
-export async function readExpeditionReceipts(
-  slug: string,
-  villageId: string,
-  ids?: string[],
-): Promise<ExpeditionReceipt[]> {
-  return parseResponse(
-    await fetch(
-      '/api/worlds/' +
-        encodeURIComponent(slug) +
-        '/villages/' +
-        encodeURIComponent(villageId) +
-        '/science/expeditions' +
-        (ids ? '?ids=' + encodeURIComponent(ids.join(',')) : ''),
-      { credentials: 'same-origin', signal: AbortSignal.timeout(10000) },
-    ),
-  );
-}
-export async function readHarvestReceipts(slug: string, villageId: string, ids: string[]): Promise<HarvestReceipt[]> {
-  return parseResponse(
-    await fetch(
-      '/api/worlds/' +
-        encodeURIComponent(slug) +
-        '/villages/' +
-        encodeURIComponent(villageId) +
-        '/harvest-intents?ids=' +
-        encodeURIComponent(ids.join(',')),
-      { signal: AbortSignal.timeout(10000), credentials: 'same-origin' },
-    ),
-  );
-}
 import type { HarvestIntent, HarvestReceipt } from '@arbestra/contracts';
 export async function sendHarvestIntent(
   slug: string,
@@ -82,19 +52,7 @@ export async function cancelHarvestIntent(
     ),
   );
 }
-import { randomUUID } from '../random-uuid';
-import { villageRequestGeneration } from './village-sync';
-import { SYNC_V2_VILLAGE } from './sync-v2-initial';
-import {
-  constructionConfirmationIsValid,
-  type ConstructionConfirmation,
-  villageCommandResponseIsValid,
-  type VillageFrame,
-  type VillageSyncBase,
-} from '@arbestra/contracts';
 import type {
-  CatDiscoveryResponse,
-  BuildingType,
   DepositDetails,
   VillageState,
   TerrainResponse,
@@ -102,25 +60,11 @@ import type {
   TerrainOverview,
   TerrainVegetationOverview,
   TerrainVillageOverview,
-  ChangeExtractionWorksiteRequest,
-  ExtractionWorksite,
 } from '@arbestra/contracts';
-import type { ScienceCommand } from '@arbestra/contracts';
-import type { ProcessingCommand, ProcessingPreview } from '@arbestra/contracts';
-import type { TradeCommand, TradePage, TradePreview } from '@arbestra/contracts';
+import type { ProcessingPreview } from '@arbestra/contracts';
+import type { TradePage, TradePreview } from '@arbestra/contracts';
 const tradeUrl = (slug: string, villageId: string) =>
   `/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/market`;
-export function commandPlayerMarket(
-  slug: string,
-  villageId: string,
-  command: TradeCommand,
-): Promise<TimedVillageState> {
-  return requestState(tradeUrl(slug, villageId) + '/trades', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-}
 export async function browseMarket(
   slug: string,
   villageId: string,
@@ -144,17 +88,6 @@ export async function previewTrade(slug: string, villageId: string, offerId: str
       body: JSON.stringify({ offerId }),
     }),
   );
-}
-export function commandProcessing(
-  slug: string,
-  villageId: string,
-  command: ProcessingCommand,
-): Promise<TimedVillageState> {
-  return requestState(`/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/processing`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(command),
-  });
 }
 export async function previewProcessing(
   slug: string,
@@ -196,64 +129,12 @@ export async function previewExploitation(
     ),
   );
 }
-export function startExploitation(
-  worldSlug: string,
-  villageId: string,
-  order: ExploitationRequest,
-): Promise<TimedVillageState> {
-  return requestState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/exploitation`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(order),
-    },
-  );
-}
 
 export const sciencePreview = () =>
   import.meta.env.DEV &&
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('sciencePreview') === '1';
 const terrainHeaders = () => (sciencePreview() ? { 'x-arbestra-science-preview': '1' } : {});
-
-export function commandScience(
-  worldSlug: string,
-  villageId: string,
-  command: ScienceCommand,
-): Promise<TimedVillageState> {
-  return requestState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/science`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(command) },
-  );
-}
-
-export async function changeWorksite(
-  worldSlug: string,
-  villageId: string,
-  worksiteId: string,
-  order: ChangeExtractionWorksiteRequest,
-): Promise<TimedVillageState & { worksite: ExtractionWorksite }> {
-  const requestedAt = Date.now();
-  const requestGeneration = villageRequestGeneration();
-  const response = await fetch(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/worksites/${encodeURIComponent(worksiteId)}`,
-    {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(order),
-    },
-  );
-  const receivedAt = Date.now(),
-    result = await parseResponse<{ villageState: VillageState; worksite: ExtractionWorksite }>(response);
-  return {
-    state: result.villageState,
-    worksite: result.worksite,
-    requestGeneration,
-    serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2,
-  };
-}
 
 export class ApiError extends Error {
   public constructor(
@@ -275,108 +156,10 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return timedJson<T>(response);
 }
 
+/** A village state projected from the V2 streams, with the server's clock offset. */
 export interface TimedVillageState {
   state: VillageState;
   serverOffsetMs: number;
-  requestGeneration?: number;
-  /** Projected from the V2 streams; never ordered by the V1 revision. */
-  source?: 'v2';
-}
-
-export interface TimedVillageFrame {
-  frame: VillageFrame;
-  serverOffsetMs: number;
-  requestGeneration?: number;
-}
-export type TimedVillageUpdate = TimedVillageState | TimedVillageFrame;
-export interface TimedConstructionConfirmation {
-  construction: ConstructionConfirmation;
-  requestGeneration: number;
-}
-export type TimedConstructionUpdate = TimedVillageUpdate | TimedConstructionConfirmation;
-
-async function villageRequest(request: Promise<Response>, requestedAt: number): Promise<TimedVillageState> {
-  const requestGeneration = villageRequestGeneration();
-  const response = await request;
-  const receivedAt = Date.now();
-  const state = await parseResponse<VillageState>(response);
-  return { state, serverOffsetMs: Date.parse(state.serverTime) - (requestedAt + receivedAt) / 2, requestGeneration };
-}
-
-function requestState(path: string, init?: RequestInit): Promise<TimedVillageState> {
-  const requestedAt = Date.now();
-  return villageRequest(fetch(path, { credentials: 'same-origin', ...init }), requestedAt);
-}
-function requestVillageCommandState(
-  path: string,
-  init: RequestInit,
-  base?: VillageSyncBase,
-  confirmation?: false,
-): Promise<TimedVillageUpdate>;
-function requestVillageCommandState(
-  path: string,
-  init: RequestInit,
-  base: VillageSyncBase | undefined,
-  confirmation: { commandId: string; villageId: string },
-): Promise<TimedConstructionUpdate>;
-async function requestVillageCommandState(
-  path: string,
-  init: RequestInit,
-  base?: VillageSyncBase,
-  confirmation: { commandId: string; villageId: string } | false = false,
-): Promise<TimedVillageUpdate | TimedConstructionConfirmation> {
-  const requestedAt = Date.now(),
-    requestGeneration = villageRequestGeneration();
-  const headers = {
-    ...init.headers,
-    'x-village-sync': '1',
-    ...(confirmation ? { 'x-construction-confirmation': '1' } : {}),
-    ...(base
-      ? {
-          'x-village-revision': String(base.revision),
-          'x-village-server-time': base.serverTime,
-        }
-      : {}),
-  };
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...init,
-    headers,
-    signal: AbortSignal.timeout(15_000),
-  });
-  const receivedAt = Date.now(),
-    data = await parseResponse<unknown>(response);
-  if (confirmation && constructionConfirmationIsValid(data)) {
-    if (data.commandId !== confirmation.commandId || data.villageId !== confirmation.villageId)
-      throw Error('Confirmation de construction incohérente.');
-    return { construction: data, requestGeneration };
-  }
-  if (villageCommandResponseIsValid(data)) {
-    const timed = { requestGeneration, serverOffsetMs: Date.parse(data.serverTime) - (requestedAt + receivedAt) / 2 };
-    return data.kind === 'frame' ? { ...timed, frame: data.frame } : { ...timed, state: data.state };
-  }
-  if (data && typeof data === 'object' && 'kind' in data) throw Error('Réponse de synchronisation invalide.');
-  // Existing servers and saved clients retain the full-snapshot contract.
-  const state = data as VillageState;
-  return { state, requestGeneration, serverOffsetMs: Date.parse(state.serverTime) - (requestedAt + receivedAt) / 2 };
-}
-
-// Under V2 nothing should read the legacy snapshot any more. Each remaining
-// read names its caller by bundled file positions only (no names, no text),
-// which the build's source maps resolve; the API journals them.
-function legacyCaller(): Record<string, string> {
-  if (!SYNC_V2_VILLAGE) return {};
-  const frames = [...(new Error().stack ?? '').matchAll(/([\w.-]+\.[jt]sx?)(?:\?[^:\s)]*)?:(\d+):(\d+)/g)]
-    .slice(1, 17)
-    .map((frame) => `${frame[1]}:${frame[2]}:${frame[3]}`);
-  return frames.length ? { 'x-arbestra-caller': frames.join(' ') } : {};
-}
-
-export function getVillage(worldSlug: string, villageId?: string): Promise<TimedVillageState> {
-  return requestState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/village${villageId ? `?villageId=${encodeURIComponent(villageId)}` : ''}`,
-    { signal: AbortSignal.timeout(90_000), headers: legacyCaller() },
-  );
 }
 
 export async function getTerrain(
@@ -445,101 +228,6 @@ export async function getTerrainVegetationOverview(
   );
 }
 
-export function buildBuilding(
-  worldSlug: string,
-  villageId: string,
-  buildingType: BuildingType,
-  anchor: { cellX: number; cellY: number },
-  cells: Array<{ cellX: number; cellY: number }>,
-  commandId: string = randomUUID(),
-  expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
-  quarterTurns = 0,
-  houseVariant: 'stone' | 'logs' | 'beams' = 'stone',
-  syncBase?: VillageSyncBase,
-): Promise<TimedConstructionUpdate> {
-  return requestVillageCommandState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        commandId,
-        expectedCosts,
-        quarterTurns,
-        houseVariant,
-        buildingType,
-        anchorCellX: anchor.cellX,
-        anchorCellY: anchor.cellY,
-        cells,
-      }),
-    },
-    syncBase,
-    { commandId, villageId },
-  );
-}
-
-export function expandGarden(
-  worldSlug: string,
-  villageId: string,
-  buildingId: string,
-  cells: Array<{ cellX: number; cellY: number }>,
-  commandId: string = randomUUID(),
-  expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
-  syncBase?: VillageSyncBase,
-): Promise<TimedConstructionUpdate> {
-  return requestVillageCommandState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/expansions`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandId, expectedCosts, cells }),
-    },
-    syncBase,
-    { commandId, villageId },
-  );
-}
-
-export function upgradeBuilding(
-  worldSlug: string,
-  villageId: string,
-  buildingId: string,
-  commandId: string = randomUUID(),
-  expectedCosts: Array<{ resourceCode: string; amount: number }> = [],
-  expectedLevel?: number,
-  syncBase?: VillageSyncBase,
-): Promise<TimedConstructionUpdate> {
-  return requestVillageCommandState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/upgrade`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandId, expectedCosts, expectedLevel }),
-    },
-    syncBase,
-    { commandId, villageId },
-  );
-}
-
-export function discoverBuildingSupplies(
-  worldSlug: string,
-  villageId: string,
-  buildingId: string,
-): Promise<TimedVillageState> {
-  return requestState(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/buildings/${encodeURIComponent(buildingId)}/discover-supplies`,
-    { method: 'POST' },
-  );
-}
-
-export async function discoverOrRefreshSupplies(worldSlug: string, villageId: string, buildingId: string) {
-  try {
-    return { snapshot: await discoverBuildingSupplies(worldSlug, villageId, buildingId), alreadyDiscovered: false };
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.code !== 'SUPPLIES_ALREADY_DISCOVERED') throw error;
-    return { snapshot: await getVillage(worldSlug), alreadyDiscovered: true };
-  }
-}
-
 export async function getStoneDepositDetails(
   worldSlug: string,
   villageId: string,
@@ -553,30 +241,9 @@ export async function getStoneDepositDetails(
   );
 }
 
-export async function discoverCatEyes(
-  worldSlug: string,
-  villageId: string,
-): Promise<TimedVillageState & { newlyCompleted: boolean }> {
-  const requestedAt = Date.now();
-  const requestGeneration = villageRequestGeneration();
-  const response = await fetch(
-    `/api/worlds/${encodeURIComponent(worldSlug)}/villages/${encodeURIComponent(villageId)}/discover-cat-eyes`,
-    { method: 'POST', credentials: 'same-origin' },
-  );
-  const receivedAt = Date.now(),
-    result = await parseResponse<CatDiscoveryResponse>(response);
-  return {
-    state: result.villageState,
-    newlyCompleted: result.newlyCompleted,
-    requestGeneration,
-    serverOffsetMs: Date.parse(result.villageState.serverTime) - (requestedAt + receivedAt) / 2,
-  };
-}
-export async function setFactoryEnabled(
-  worldSlug: string,
-  enabled: boolean,
-  villageId?: string,
-): Promise<TimedVillageState> {
+/** Development switch of the workshop access. The village learns the new value
+ * through its V2 streams: the caller asks for a refresh, there is nothing to read. */
+export async function setFactoryEnabled(worldSlug: string, enabled: boolean): Promise<void> {
   const response = await fetch(`/api/worlds/${encodeURIComponent(worldSlug)}/dev/factory-access`, {
     method: 'PUT',
     credentials: 'same-origin',
@@ -584,29 +251,5 @@ export async function setFactoryEnabled(
     body: JSON.stringify({ enabled }),
   });
   await parseResponse(response);
-  return getVillage(worldSlug, villageId);
 }
 import { timedFetch as fetch, timedJson } from '../dev/statistics';
-
-import { hudWorkforceConfirmationIsValid, type HudWorkforceIntent } from '@arbestra/contracts';
-export type { HudWorkforceIntent } from '@arbestra/contracts';
-export async function commandHudWorkforce(slug: string, villageId: string, intent: HudWorkforceIntent) {
-  const response = await fetch(
-    `/api/worlds/${encodeURIComponent(slug)}/villages/${encodeURIComponent(villageId)}/${intent.kind === 'pool' ? 'extraction-pools' : 'population/gestures'}`,
-    {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(intent.command),
-      signal: AbortSignal.timeout(15000),
-    },
-  );
-  const result = await parseResponse<unknown>(response);
-  if (
-    !hudWorkforceConfirmationIsValid(result) ||
-    result.commandId !== intent.command.commandId ||
-    result.hud.villageId !== villageId
-  )
-    throw Error('Confirmation de geste invalide.');
-  return result;
-}

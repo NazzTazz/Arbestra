@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { VillageState } from '@arbestra/contracts';
 import { resetE2eState } from '../../apps/api/src/database/reset-e2e';
-import { chooseMode, devOption, openVillage } from './world-interactions';
+import { chooseMode, devOption, openVillage, seededVillageState } from './world-interactions';
 
 test.setTimeout(180_000);
 async function stats(page: Page) {
@@ -38,9 +37,7 @@ test('streaming au-delà du village, coins du tore, retour et conservation hors 
     if (message.type() === 'error' && /shader|Babylon|GLSL/i.test(message.text())) errors.push(message.text());
   });
   const canvas = await openVillage(page);
-  const state = (await (
-    await page.request.get('http://localhost:5274/api/worlds/aube/village')
-  ).json()) as VillageState;
+  const state = await seededVillageState();
   const { anchorCellX: x, anchorCellY: y } = state.village;
   await center(page, x, y);
   for (const step of [1, 2, 3, 4])

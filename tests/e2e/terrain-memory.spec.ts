@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
-import type { VillageState } from '@arbestra/contracts';
-import { waitForVillage } from './world-interactions';
+import { seededVillageState, waitForVillage } from './world-interactions';
 
 test.setTimeout(480_000);
 test.use({
@@ -23,7 +22,7 @@ test('mémoire bornée après déplacements répétés et rechargement à cadenc
   await page.goto('http://localhost:5274/?world=aube&terrainPerf=1');
   const canvas = page.getByTestId('village-canvas');
   await waitForVillage(canvas);
-  const state = (await (await page.request.get('/api/worlds/aube/village')).json()) as VillageState;
+  const state = await seededVillageState();
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
   const stats = () =>

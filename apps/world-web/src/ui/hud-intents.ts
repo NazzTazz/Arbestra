@@ -10,10 +10,9 @@ import {
 
 /**
  * What a settled gesture gives back. `hud` is the authoritative state right
- * after it: the historical route sends it fenced by `minimumRevision`; on V2 it
- * is read from the stream session once the confirmation's effects are applied,
- * ordered by the session's own instants. Absent when that state cannot be
- * projected yet: the previous basis stays until a newer village state replaces it.
+ * after it: read from the stream session once the confirmation's effects are
+ * applied, ordered by the session's own instants. Absent when that state cannot
+ * be projected yet: the previous basis stays until a newer village state replaces it.
  */
 export type HudSettlement = Omit<HudWorkforceConfirmation, 'hud'> & { hud?: HudWorkforceState };
 
@@ -32,7 +31,8 @@ export function hudFromVillage(state: VillageState): HudWorkforceState {
     worldId: state.world.id,
     villageId: state.village.id,
     serverTime: state.serverTime,
-    minimumRevision: state.syncRevision ?? 0,
+    // No COUNT revision any more; the contract field goes in lot I.4.
+    minimumRevision: 0,
     population: {
       available: population.available,
       resting: population.resting,
@@ -129,18 +129,15 @@ export class HudIntentQueue {
   }
   /**
    * Adopts a newer village state as the basis, only while no gesture is pending.
-   * `revisioned` is false for a V2 village state (the only kind once the
-   * historical stream is gone): it has no COUNT revision and orders itself by
-   * the instant its session observed it. The basis a V2 gesture leaves is
-   * stamped with the session's latest instant, so a state observed before the
-   * confirmation never replaces it.
+   * A V2 village state orders itself by the instant its session observed it.
+   * The basis a gesture leaves is stamped with the session's latest instant, so
+   * a state observed before the confirmation never replaces it.
    */
-  synchronize(next: HudWorkforceState, revisioned = true) {
+  synchronize(next: HudWorkforceState) {
     if (
       this.items.length ||
       next.worldId !== this.confirmed.worldId ||
       next.villageId !== this.confirmed.villageId ||
-      (revisioned && next.minimumRevision < this.confirmed.minimumRevision) ||
       next.serverTime <= this.confirmed.serverTime
     )
       return;

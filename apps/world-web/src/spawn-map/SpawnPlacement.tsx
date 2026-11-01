@@ -17,7 +17,8 @@ import type { Cell } from '../scene/construction-selection';
 import { preparationState } from './preparation-state';
 import { villageRoute } from './starter-route';
 import { addressedWorld, worldPage } from '../api/world-address';
-import { SYNC_V2_VILLAGE, readSyncV2VillageOnce } from '../api/sync-v2-initial';
+import { readSyncV2VillageOnce } from '../api/sync-v2-initial';
+import { SyncV2SessionExpired } from '../api/sync-v2-session';
 import './placement.css';
 async function read<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(
@@ -46,10 +47,7 @@ export function SpawnPlacement() {
     slug = addressedWorld ?? '',
     base = `/api/worlds/${encodeURIComponent(slug)}`;
   // The V2 bootstrap resolves the player's village in this world: the one being installed.
-  const readVillage = async (villageId: string) =>
-    SYNC_V2_VILLAGE
-      ? (await readSyncV2VillageOnce(slug)).state
-      : read<VillageState>(base + '/village?villageId=' + villageId);
+  const readVillage = async () => (await readSyncV2VillageOnce(slug)).state;
   const initial = useRef<SpawnPoint>({
     x: Math.max(0, Math.min(511, Number(params.get('x')) || 0)),
     y: Math.max(0, Math.min(255, Number(params.get('y')) || 0)),
@@ -136,7 +134,7 @@ export function SpawnPlacement() {
         for (let x = 0; x < 2; x++) chunks.push(((x0 + x + 16) % 16) + ',' + ((y0 + y + 8) % 8));
       const [ground, state] = await Promise.all([
         read<TerrainResponse>(base + '/starter/terrain?chunks=' + encodeURIComponent(chunks.join(';'))),
-        start.installation ? readVillage(start.installation.villageId) : Promise.resolve(null),
+        start.installation ? readVillage() : Promise.resolve(null),
       ]);
       if (live) {
         setTerrain(ground);
@@ -145,8 +143,8 @@ export function SpawnPlacement() {
       }
     })().catch((e) => {
       if (live) {
-        setError((e as Error).message);
-        if ((e as { status?: number }).status === 401) setNeedsLogin(true);
+        setError(e instanceof SyncV2SessionExpired ? 'Votre session a expiré.' : (e as Error).message);
+        if (e instanceof SyncV2SessionExpired || (e as { status?: number }).status === 401) setNeedsLogin(true);
       }
     });
     return () => {
@@ -242,7 +240,7 @@ export function SpawnPlacement() {
     try {
       const result = await read<StarterInstallation>(request.current.url, request.current.body);
       showVillageRoute(result);
-      const state = await readVillage(result.villageId);
+      const state = await readVillage();
       setVillage((previous) => latestVillageSnapshot(previous, state));
       request.current = null;
       setInstallation(result);

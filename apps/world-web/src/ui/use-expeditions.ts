@@ -5,7 +5,7 @@ import {
   type ExpeditionReceipt,
   type ScienceCommand,
 } from '@arbestra/contracts';
-import { sendExpedition, readExpeditionReceipts, ApiError } from '../api/client';
+import { sendExpedition, ApiError } from '../api/client';
 import { randomUUID } from '../random-uuid';
 type Entry = { intent?: ExpeditionIntent; receipt?: ExpeditionReceipt; uncertain?: boolean; message?: string };
 
@@ -24,20 +24,17 @@ export function unsentIntents(
 }
 
 /**
- * `receipts` selects where the receipts come from. Undefined: the historical
- * transport (a read every 3 s while something is pending, and the V1 stream's
- * push), kept for `arbestra:sync-v2=0` until the V1 removal. Null or a list:
- * the V2 stream, which delivers each receipt when the worker writes it (null
- * while its first snapshot is not loaded).
+ * `receipts` comes from the V2 stream, which delivers each receipt when the
+ * worker writes it: null while its first snapshot is not loaded. Nothing is
+ * polled.
  */
 export function useExpeditions(
   slug: string,
   worldId: string | undefined,
   villageId: string | undefined,
-  enabled = true,
-  receipts?: ReadonlyArray<ExpeditionReceipt> | null,
+  enabled: boolean,
+  receipts: ReadonlyArray<ExpeditionReceipt> | null,
 ) {
-  const viaStream = receipts !== undefined;
   const scope = worldId && villageId ? worldId + ':' + villageId : '';
   const currentScope = useRef(scope);
   currentScope.current = scope;
@@ -149,64 +146,28 @@ export function useExpeditions(
       /* corrupt local recovery does not change authoritative data */
     }
     publish();
-    // The V2 stream delivers the receipts: no read.
-    if (viaStream) return;
-    let cancelled = false,
-      reading = false,
-      initial = true;
-    const recover = async () => {
-      if (cancelled || reading || !villageId) return;
-      if (!initial && ![...records.current.values()].some((e) => e.uncertain || e.receipt?.status === 'pending'))
-        return;
-      initial = false;
-      reading = true;
-      try {
-        const ids = [...records.current.keys()],
-          history = await readExpeditionReceipts(slug, villageId),
-          specific = ids.length ? await readExpeditionReceipts(slug, villageId, ids.slice(0, 64)) : [];
-        if (cancelled) return;
-        for (const receipt of [...history, ...specific]) receive(receipt);
-        const known = new Set(specific.map((r) => r.commandId));
-        for (const [id, item] of records.current)
-          if (item.uncertain && item.intent && !known.has(id)) await send(item.intent);
-      } catch (error) {
-        if (!cancelled && error instanceof ApiError && error.status === 401) {
-          records.current.clear();
-          publish();
-        }
-      } finally {
-        reading = false;
-      }
-    };
-    void recover();
-    const timer = setInterval(() => void recover(), 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [scope, enabled, key, slug, villageId, publish, receive, send, viaStream]);
+  }, [scope, enabled, key, publish]);
   // From the V2 stream: each receipt as the worker writes it.
   useEffect(() => {
-    if (!viaStream || !enabled || !scope || !receipts) return;
+    if (!enabled || !scope || !receipts) return;
     for (const receipt of receipts) receive(receipt);
     if (checked.current === scope) return;
     checked.current = scope;
     for (const intent of unsentIntents(records.current, receipts)) void send(intent);
-  }, [receipts, viaStream, enabled, scope, receive, send]);
+  }, [receipts, enabled, scope, receive, send]);
   // A send that failed is sent again (idempotent): the stream cannot tell the
   // server never received it. Nothing is read.
   useEffect(() => {
-    if (!viaStream || !enabled || !receipts) return;
+    if (!enabled || !receipts) return;
     const retry = entries.flatMap((entry) => (entry.uncertain && entry.intent ? [entry.intent] : []));
     if (!retry.length) return;
     const timer = setTimeout(() => {
       for (const intent of retry) void send(intent);
     }, 3000);
     return () => clearTimeout(timer);
-  }, [entries, viaStream, enabled, receipts, send]);
+  }, [entries, enabled, receipts, send]);
   return {
     entries,
-    receive,
     submit: (command: Extract<ScienceCommand, { action: 'survey' | 'explore' }>) => {
       if (
         !active.current ||

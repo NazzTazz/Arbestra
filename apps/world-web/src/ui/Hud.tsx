@@ -11,7 +11,6 @@ export function Hud({
   readOnly = false,
   beforeTownHall = false,
   state,
-  resourceServerTime = state.serverTime,
   displayedWood,
   serverOffsetMs,
   notifications,
@@ -26,7 +25,6 @@ export function Hud({
   readOnly?: boolean;
   beforeTownHall?: boolean;
   state: VillageState;
-  resourceServerTime?: string;
   displayedWood: number;
   serverOffsetMs?: number;
   notifications: GameNotification[];
@@ -43,7 +41,7 @@ export function Hud({
   );
   const wood =
     !readOnly && serverOffsetMs !== undefined
-      ? projectedWood(state.village, resourceServerTime, now + serverOffsetMs)
+      ? projectedWood(state.village, state.serverTime, now + serverOffsetMs)
       : displayedWood;
   const amounts = { ...hudResourceAmounts(state.village), wood };
   const population = state.village.population;

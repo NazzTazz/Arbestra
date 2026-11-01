@@ -28,7 +28,7 @@ const state = (sites = 1, time = 0): HudWorkforceState => ({
   villageId: 'village',
   serverTime: new Date(time).toISOString(),
   carrots: 100,
-  minimumRevision: time,
+  minimumRevision: 0,
   population: { available: 30, resting: 0, working: 0, pendingRelease: { idle: 0, resting: 0 } },
   extractionPools: (['wood', 'stone'] as const).map((resource) => ({
     resource,
@@ -87,8 +87,6 @@ it('retains the requested count through navigation/reload and an SSE snapshot ar
     releases.shift()!(reply('third', 4));
     await tick();
     expect(q.items).toEqual([]);
-    expect(q.confirmed.extractionPools[0]?.siteCount).toBe(4);
-    q.synchronize({ ...state(1, 10), minimumRevision: 0 }); // Newer clock, but captured before COMMIT.
     expect(q.confirmed.extractionPools[0]?.siteCount).toBe(4);
     q.synchronize(state(1, 0));
     expect(q.confirmed.extractionPools[0]?.siteCount).toBe(4);
@@ -176,7 +174,7 @@ it('bounds the next gesture against all requested settings while leaving real mi
   expect(canAdjustPool(full, full.extractionPools, 'wood', 'sites-down')).toBe(true);
 });
 
-it('follows a later V2 village state after a gesture, although it carries no V1 revision', () => {
+it('follows a later village state after a gesture, ordered by its instant alone', () => {
   const q = new HudIntentQueue(state(1, 30), [], {
     send: async () => reply('unused', 1),
     save: () => {},
@@ -187,15 +185,11 @@ it('follows a later V2 village state after a gesture, although it carries no V1 
   try {
     const v2 = (time: number, working: number): HudWorkforceState => ({
       ...state(1, time),
-      minimumRevision: 0,
       population: { ...state().population, working },
     });
-    // A V1 snapshot keeps its revision guard against the confirmation's revision 30.
-    q.synchronize(v2(40, 2));
-    expect(q.confirmed.population.working).toBe(0);
-    q.synchronize(v2(40, 1), false);
+    q.synchronize(v2(40, 1));
     expect(q.confirmed.population.working).toBe(1);
-    q.synchronize(v2(35, 0), false);
+    q.synchronize(v2(35, 0));
     expect(q.confirmed.population.working).toBe(1);
   } finally {
     q.stop();
@@ -345,19 +339,19 @@ it('orders V2 gestures by the session: a lost response replayed after its effect
     expect(q.retrying).toBe(true);
     expect(poolsOf(q)).toBe(4);
     // The state the stream produced meanwhile is refused while gestures are pending.
-    q.synchronize(basisOf(session, 3), false);
+    q.synchronize(basisOf(session, 3));
     expect(poolsOf(q)).toBe(4);
     await vi.advanceTimersByTimeAsync(1000);
     expect(sent).toEqual(['first', 'first', 'second', 'third']);
     expect(q.items).toEqual([]);
     expect(q.confirmed.extractionPools[0]?.siteCount).toBe(4);
     // States the session observed before the last confirmation never replace its basis...
-    q.synchronize(basisOf(session, 5), false);
-    q.synchronize(basisOf(session, 6), false);
+    q.synchronize(basisOf(session, 5));
+    q.synchronize(basisOf(session, 6));
     expect(q.confirmed.extractionPools[0]?.siteCount).toBe(4);
     // ...and a later one does, whatever it carries and with no COUNT revision involved.
     session = receive(session, effects(8, 9, 4, 7));
-    q.synchronize(basisOf(session, 9), false);
+    q.synchronize(basisOf(session, 9));
     expect(q.confirmed.population.resting).toBe(7);
     expect(q.confirmed.minimumRevision).toBe(0);
   } finally {
@@ -380,7 +374,7 @@ it('keeps the previous basis when the session cannot yet project the confirmed s
     await tick();
     expect(q.items).toEqual([]);
     expect(q.confirmed.extractionPools[0]?.siteCount).toBe(1);
-    q.synchronize(basisOf(receive(session, effects(5, 4, 2)), 4), false);
+    q.synchronize(basisOf(receive(session, effects(5, 4, 2)), 4));
     expect(q.confirmed.extractionPools[0]?.siteCount).toBe(2);
   } finally {
     q.stop();

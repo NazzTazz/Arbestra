@@ -1,7 +1,9 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { VillageState } from '@arbestra/contracts';
 import { createDatabase } from '../../apps/api/src/database/connection';
 import { DEVELOPMENT_IDS } from '../../apps/api/src/database/seed';
 import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
+import { getVillageState } from '../../apps/api/src/modules/villages/service';
 
 // The dev client reveals a village only after its modules, terrain, routes and
 // first frame: 20 to 40 s, more on a busy machine. Each load gets this budget
@@ -15,6 +17,18 @@ export async function waitForVillage(target: Page | Locator) {
   info.setTimeout(info.timeout + VILLAGE_LOAD_MS);
   await expect(canvas).toBeVisible({ timeout: VILLAGE_LOAD_MS });
   return canvas;
+}
+
+/** The seeded village's full state, read from the database: the client no longer
+ * reads `GET /village` (the page itself synchronizes through V2), and these
+ * scenarios only need the anchor, the world size and the buildings' types. */
+export async function seededVillageState(): Promise<VillageState> {
+  const db = createDatabase(testDatabaseUrl());
+  try {
+    return await getVillageState(db, DEVELOPMENT_IDS.account, 'aube', DEVELOPMENT_IDS.village);
+  } finally {
+    await db.destroy();
+  }
 }
 
 /** The mode bar shows only the active mode until that mode is pressed again. */

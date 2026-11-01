@@ -7,7 +7,7 @@ import { testDatabaseUrl } from '../../apps/api/src/database/test-environment';
 import { constructBuilding, getVillageState } from '../../apps/api/src/modules/villages/service';
 import { waitForVillage } from './world-interactions';
 
-// Same workshop journey with the whole village synchronized by V2 (opt-in),
+// The workshop journey with the whole village synchronized by V2,
 // plus a construction made elsewhere during the session.
 test('le village suit les flux V2 : atelier, fin de lot et construction extérieure sans SSE historique', async ({
   page,
@@ -17,7 +17,6 @@ test('le village suit les flux V2 : atelier, fin de lot et construction extérie
   // Cold scene loading plus fixture setup can exceed 150 s on the development
   // laptop. Individual action/visibility deadlines below remain unchanged.
   test.setTimeout(300_000);
-  await page.addInitScript(() => localStorage.setItem('arbestra:sync-v2', '1'));
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   // The hint can appear between a visibility check and the next click. Handle

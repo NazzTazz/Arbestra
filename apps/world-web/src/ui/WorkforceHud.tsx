@@ -124,11 +124,11 @@ export function WorkforceHud({
         else setNotice('Consigne confirmée · prochain départ.');
         if (!q.items.length) {
           const current = latest.current.state;
-          q.synchronize(hudFromVillage(current), current.syncRevision !== undefined);
+          q.synchronize(hudFromVillage(current));
         }
       },
       failed: (error) => {
-        // A refusal by the server: through the historical route or the V2 stream's.
+        // A refusal by the server.
         const refusal = error instanceof ApiError || error instanceof SyncV2HttpError ? error : null;
         if (live) setNotice(refusal ? refusal.message : 'Connexion interrompue. Vos gestes sont conservés.');
         return (
@@ -154,7 +154,7 @@ export function WorkforceHud({
     };
   }, [state.world.id, state.world.slug, state.village.id]);
   useEffect(() => {
-    queue.current?.synchronize(hudFromVillage(state), state.syncRevision !== undefined);
+    queue.current?.synchronize(hudFromVillage(state));
   }, [state]);
   // The synchronization became ready: send what was waiting for it.
   useEffect(() => {

@@ -165,8 +165,6 @@ type Options = {
   worldId: string | undefined;
   villageId: string | undefined;
   enabled: boolean;
-  /** Whole village from V2 (streams + presentation), not only the workshop. */
-  village: boolean;
   onState: (update: TimedVillageState) => void;
   onExpired: () => void;
   /** Sober, non-blocking message (e.g. village too large to synchronize). */
@@ -184,16 +182,7 @@ export function scopeTooLargeMessage(retryInMs: number): string {
  * it tries again at a spaced cadence, and `retry` tries at once: the caller
  * shows the player a connection screen meanwhile, the game falls back on
  * nothing else. */
-export function useVillageSyncV2({
-  worldSlug,
-  worldId,
-  villageId,
-  enabled,
-  village,
-  onState,
-  onExpired,
-  onNotice,
-}: Options) {
+export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onState, onExpired, onNotice }: Options) {
   const [status, setStatus] = useState<ProcessingV2Status>('off');
   const [villageReady, setVillageReady] = useState(false);
   const [orders, setOrders] = useState<ProcessingOrder[]>([]);
@@ -246,7 +235,7 @@ export function useVillageSyncV2({
       const projected = villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
       if (!projected) return;
       projection = { source: latest, state: projected };
-      accept.current({ state: projected, serverOffsetMs: Date.parse(latest.observedAt) - Date.now(), source: 'v2' });
+      accept.current({ state: projected, serverOffsetMs: Date.parse(latest.observedAt) - Date.now() });
       setVillageReady(true);
     };
     const fullPresentation = async (): Promise<ResolvedVillagePresentation> => {
@@ -316,7 +305,6 @@ export function useVillageSyncV2({
       publish: (state: SyncV2State, observedAt: string, batch: SyncV2Batch) => {
         setOrders(processingOrdersV2(state));
         publishReceipts(state);
-        if (!village) return;
         // An ACK carries its command time, possibly before the last delta.
         latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
         const read = presentationReadNeeded(batch, covered);
@@ -343,15 +331,12 @@ export function useVillageSyncV2({
         } else emit();
       },
     };
-    // The first village state may already come from V2: adopt that session.
-    const adopted = village ? adoptInitialSyncV2(worldId, villageId) : null;
+    // The first village state already came from V2: adopt that session.
+    const adopted = adoptInitialSyncV2(worldId, villageId);
     // Convoys are public world entities: the traffic stream shows them all.
     const current =
       adopted?.transport ??
-      new SyncV2Transport(worldSlug, worldId, villageId, {
-        ...(village ? { include: SYNC_V2_VILLAGE_INCLUDE } : {}),
-        ...handlers,
-      });
+      new SyncV2Transport(worldSlug, worldId, villageId, { include: SYNC_V2_VILLAGE_INCLUDE, ...handlers });
     transport.current = current;
     setVillageReady(false);
     const recover = async () => {
@@ -407,7 +392,7 @@ export function useVillageSyncV2({
       setUnresolved([]);
       setVillageReady(false);
     };
-  }, [enabled, village, worldSlug, worldId, villageId, attempt]);
+  }, [enabled, worldSlug, worldId, villageId, attempt]);
   const command = useCallback(async (command: ProcessingCommand) => {
     const current = transport.current;
     if (!current) throw Error('Synchronisation indisponible.');

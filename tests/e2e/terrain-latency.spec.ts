@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
-import type { TerrainResponse, VillageState } from '@arbestra/contracts';
+import type { TerrainResponse } from '@arbestra/contracts';
 import { writeFile } from 'node:fs/promises';
-import { waitForVillage } from './world-interactions';
+import { seededVillageState, waitForVillage } from './world-interactions';
 
 test.setTimeout(90000);
 
@@ -40,7 +40,7 @@ test('les arbres proches apparaissent rapidement après zoom, déplacement, rota
   await page.goto('http://localhost:5274/?world=aube&terrainPerf=1');
   const canvas = page.getByTestId('village-canvas');
   await waitForVillage(canvas);
-  const state = (await (await page.request.get('/api/worlds/aube/village')).json()) as VillageState;
+  const state = await seededVillageState();
   const cx = Math.floor((state.village.anchorCellX + 96) / state.world.chunkSize),
     cy = Math.floor((state.village.anchorCellY + 96) / state.world.chunkSize);
   const terrain = (await (
