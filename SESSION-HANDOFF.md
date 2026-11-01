@@ -11,7 +11,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 ## Backlog (après l'alpha du 31 octobre)
 
 - **Voirie** : S5 (factory : buissons, tonneau, modèles de placette 2 × 2 et de place 3 × 3 avec leurs ancrages ; Tristan modélise les éléments dans Blender), S6 (achat des places dans le HUD), un accessoire manuel peut remplacer un brasero automatique (souhait validé), raccord des routes de terre en pente ([dette](docs/DETTE-TECHNIQUE.md)).
-- **Synchro V2** ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) : installation en V2 faite le 1er novembre (à valider par Tristan), NOC sur les lecteurs V2, lot I (retrait de la V1, 426, migration de nettoyage ; ancienne voirie, nivellement et terraformation différés retirés le 1er novembre, composante `levelingJobs` retirée ; table `leveling_jobs` et type `leveling-site` à la migration de nettoyage), pagination des snapshots de trafic et spatial, couverture de connaissance (1 024 ancres). Proposé, non tranché : tri des autres appels à `state()` (construction, marché, présentation).
+- **Synchro V2** ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) : installation en V2 faite et validée le 1er novembre, NOC sur les lecteurs V2, lot I (retrait de la V1, 426, migration de nettoyage ; ancienne voirie, nivellement et terraformation différés retirés le 1er novembre, composante `levelingJobs` retirée ; table `leveling_jobs` et type `leveling-site` à la migration de nettoyage), pagination des snapshots de trafic et spatial, couverture de connaissance (1 024 ancres). Proposé, non tranché : tri des autres appels à `state()` (construction, marché, présentation).
 - **Trajets : diagnostic d'architecture rendu** ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md), [invariants](docs/DECISIONS-NAVIGATION-2026-10-31.md)) : décisions de game design ouvertes au §7, directions au §8 ; aucun code de navigation modifié.
 - **Économie / trajets / responsabilités — étude rendue, propositions en cadrage, mesures à valider** : [complément du 1er novembre](docs/ETUDE-COHERENCE-ECONOMIE-TRAJETS-RESPONSABILITES-2026-11-01.md).
 - **Sortir le worker du processus de l'API** (décision du 29 octobre) : service à part, sans pool. Idée : jauge de retard par village façon RCI.
@@ -23,7 +23,9 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
-- **Installation plus rapide** (1er novembre) : plan de l'hôtel de ville hors du verrou mondial et échantillonnage allégé ; reste des poses du kit dans la [dette technique](docs/DETTE-TECHNIQUE.md).
+Aucune tranche en attente.
+
+Validés le 1er novembre sur dev : installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).
 
 Validés le 30 octobre sur staging : pagination du snapshot privé, énergie et repos par le worker. Validés le 30 octobre sur dev : routes à la case S1, S2a-d, ancrages S4a-b, conversion des routes S3 (076), exploitation des jardins sans `state()` (5a), image longue après publication V2 et réconciliation paresseuse, journal des parcours et page « Parcours » du NOC (A, C).
 
