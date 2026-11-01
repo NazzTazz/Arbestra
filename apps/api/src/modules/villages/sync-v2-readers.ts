@@ -25,7 +25,7 @@ export interface SyncEntityReference {
 /** Withdrawn components the retained journal may still name (deferred
  * leveling, until 30 October 2026 on alpha). They carry no state any more:
  * skipped rather than refused. Drop with the lot I cleanup migration. */
-const retiredPrivateComponents = new Set(['levelingJobs']);
+export const retiredPrivateComponents = new Set(['levelingJobs']);
 export const privateReaderComponents = new Set<SyncV2Change['component']>([
   'resources',
   'processingOrders',

@@ -12,7 +12,7 @@ import {
 } from '../../database/migrations/053_game_sync_private_writers.js';
 import { roadCellSyncSource, installRoadCellSync } from '../../database/migrations/073_road_cells.js';
 import { roadAnchorSyncSource, installRoadAnchorSync } from '../../database/migrations/074_road_anchors.js';
-import { privateReaderComponents } from './sync-v2-readers.js';
+import { privateReaderComponents, retiredPrivateComponents } from './sync-v2-readers.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -30,7 +30,11 @@ const world = randomUUID();
 // Later migrations add sources through the same writer (073: road cells, 074: road anchors).
 const sources = [...privateSyncSources, roadCellSyncSource, roadAnchorSyncSource] as const;
 beforeAll(async () => {
-  expect(new Set(sources.map(([, component]) => component))).toEqual(privateReaderComponents);
+  // leveling_jobs keeps its 053 trigger until the lot I cleanup drops the table;
+  // the reader skips that withdrawn component.
+  expect(new Set(sources.map(([, component]) => component).filter((c) => !retiredPrivateComponents.has(c)))).toEqual(
+    privateReaderComponents,
+  );
   await admin.query(`create schema ${schema}`);
   await foundation(db);
   // Real column definitions, isolated rows and no foreign keys to production
