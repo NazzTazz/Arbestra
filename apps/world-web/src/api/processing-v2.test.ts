@@ -2,7 +2,10 @@ import { expect, it } from 'vitest';
 import {
   applySyncV2Batch,
   SYNC_V2_PRIVATE_COMPONENTS,
+  type ExpeditionReceipt,
+  type HarvestReceipt,
   type ProcessingOrder,
+  type SyncV2Batch,
   type SyncV2State,
 } from '@arbestra/contracts';
 import {
@@ -11,6 +14,7 @@ import {
   presentationWithPlacement,
   processingCommandBuilding,
   processingOrdersV2,
+  receiptsV2,
 } from './processing-v2';
 import type { ResolvedVillagePresentation } from '@arbestra/contracts';
 
@@ -246,4 +250,97 @@ it('shows a state at once only when every building already has its footprint', (
   expect(footprintsKnown(state([known]), village, presentation)).toBe(true);
   // A new building without its footprint yet: wait for the presentation.
   expect(footprintsKnown(state([known, fresh]), village, presentation)).toBe(false);
+});
+
+const receiptEpoch = '77777777-7777-4777-8777-777777777777';
+const expeditionReceipt = (commandId: string, receivedAt: string, status: 'pending' | 'failed'): ExpeditionReceipt => ({
+  kind: 'expedition-receipt',
+  commandId,
+  worldId,
+  villageId,
+  version: status === 'pending' ? 1 : 2,
+  receivedAt,
+  requestedTarget: { cellX: 4, cellY: 9 },
+  ...(status === 'pending' ? { status } : { status, code: 'EXPEDITION_EXPIRED', message: 'Délai dépassé.' }),
+});
+const privateBatch = (
+  coverage: 'scope-snapshot' | 'delta',
+  from: string,
+  to: string,
+  upserts: Record<string, unknown[]>,
+): SyncV2Batch =>
+  ({
+    protocol: 2,
+    worldId,
+    villageId,
+    generation: 1,
+    observedAt: '2026-11-01T10:00:00.000Z',
+    coverage,
+    groups: [
+      {
+        stream: { kind: 'village', key: villageId, epoch: receiptEpoch },
+        fromRevision: from,
+        toRevision: to,
+        changes:
+          coverage === 'scope-snapshot'
+            ? SYNC_V2_PRIVATE_COMPONENTS.map((component) => ({
+                component,
+                upsert: upserts[component] ?? [],
+                remove: [],
+              }))
+            : Object.entries(upserts).map(([component, upsert]) => ({ component, upsert, remove: [] })),
+      },
+    ],
+  }) as unknown as SyncV2Batch;
+
+it('projects the receipts of the private stream, expeditions oldest first, and keeps what a batch did not touch', () => {
+  const first = '81111111-1111-4111-8111-111111111111',
+    second = '82222222-2222-4222-8222-222222222222',
+    gesture = '83333333-3333-4333-8333-333333333333';
+  const early = expeditionReceipt(second, '2026-11-01T09:00:00.000Z', 'failed'),
+    late = expeditionReceipt(first, '2026-11-01T09:30:00.000Z', 'pending');
+  const waiting: HarvestReceipt = { commandId: gesture, pending: true, accepted: [], refused: [] };
+  const empty: SyncV2State = {
+    worldId,
+    villageId,
+    generation: 1,
+    scopes: new Map(),
+    subscribedScopes: new Set([`village:${villageId}`]),
+  };
+  // No private stream yet: nothing to settle, which is not the same as no receipt.
+  expect(receiptsV2(empty)).toBeNull();
+  const snapshot = applySyncV2Batch(
+    empty,
+    privateBatch('scope-snapshot', '0', '5', {
+      expeditionReceipts: [
+        { id: first, receipt: late },
+        { id: second, receipt: early },
+      ],
+      harvestReceipts: [{ id: gesture, receipt: waiting }],
+    }),
+  );
+  if (snapshot.kind !== 'applied') throw Error('The snapshot was not applied');
+  const loaded = receiptsV2(snapshot.state)!;
+  expect(loaded.expeditions).toEqual([early, late]);
+  expect(loaded.harvests).toEqual([waiting]);
+  // The worker writes the outcomes: the next delta replaces the pending receipts.
+  const failed = expeditionReceipt(first, '2026-11-01T09:30:00.000Z', 'failed');
+  const done: HarvestReceipt = {
+    commandId: gesture,
+    accepted: [{ key: 'garden:3:4', cellX: 3, cellY: 4, resource: 'carrot', amount: 12 }],
+    refused: [],
+  };
+  const delta = applySyncV2Batch(
+    snapshot.state,
+    privateBatch('delta', '5', '6', {
+      expeditionReceipts: [{ id: first, receipt: failed }],
+      harvestReceipts: [{ id: gesture, receipt: done }],
+    }),
+  );
+  if (delta.kind !== 'applied') throw Error('The delta was not applied');
+  const next = receiptsV2(delta.state)!;
+  expect(next.expeditions).toEqual([early, failed]);
+  expect(next.harvests).toEqual([done]);
+  // An entity the delta did not touch is the very object the client already holds.
+  expect(next.expeditions[0]).toBe(loaded.expeditions[0]);
 });

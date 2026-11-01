@@ -215,7 +215,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   const sceneKey = state ? `${state.world.id}:${state.world.generationVersion}:${state.village.id}` : '';
   const initialReady = initialProgress?.key === sceneKey && initialProgress.progress.phase === 'ready';
   const [needsLogin, setNeedsLogin] = useState(false);
-  const expeditions = useExpeditions(worldSlug, state?.world.id, state?.village.id, !needsLogin && initialReady);
   const expireSession = useCallback(() => setNeedsLogin(true), []);
   // Set after the V2 hook below: once V2 owns the village, V1 responses only
   // trigger an immediate V2 delta read instead of replacing the state.
@@ -434,6 +433,16 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onExpired: expireSession,
     onNotice: pushNotification,
   });
+  // Receipts of expeditions and harvest gestures: the V2 stream delivers them as the
+  // worker writes them; the historical reads remain only without V2 (arbestra:sync-v2=0).
+  const receiptsFromStream = villageV2Mode && villageV2.status !== 'unavailable';
+  const expeditions = useExpeditions(
+    worldSlug,
+    state?.world.id,
+    state?.village.id,
+    !needsLogin && initialReady,
+    receiptsFromStream ? villageV2.expeditionReceipts : undefined,
+  );
   // Road cells are V2-native: the tool waits for the V2 village session.
   const roadCellsApi = useMemo(
     () =>
@@ -584,6 +593,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     scene: terrainRef,
     slug: worldSlug,
     woodMode: exploitationSettings.woodMode,
+    receipts: receiptsFromStream ? villageV2.harvestReceipts : undefined,
     enabled:
       worldMode === 'exploitation' &&
       exploitationCategory === 'exploit' &&

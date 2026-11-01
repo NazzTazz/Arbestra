@@ -17,6 +17,11 @@ import { readExtractions } from '../deposits/stone-extractions.js';
 import { readWorksites } from '../deposits/worksites.js';
 import { readExploitationOrders } from './exploitation-budget.js';
 import { ownTradeOffers, readPrivateTradeJourneys } from './trade-economy.js';
+import {
+  readExpeditionReceiptChange,
+  readHarvestReceiptChange,
+  receiptReferenceQueries,
+} from './sync-v2-receipt-readers.js';
 
 export interface SyncEntityReference {
   component: string;
@@ -51,6 +56,8 @@ export const privateReaderComponents = new Set<SyncV2Change['component']>([
   'installation',
   'roadCells',
   'roadAnchors',
+  'expeditionReceipts',
+  'harvestReceipts',
 ]);
 
 /** Enumeration is reserved for an explicit scope snapshot. Ordinary deltas
@@ -120,6 +127,7 @@ function privateReferenceQueries(context: VillageEconomy): RawBuilder<SyncEntity
     from road_cells where world_id=${worldId} and village_id=${villageId}`);
   queries.push(sql<SyncEntityReference>`select 'roadAnchors'::text as component,anchor_key as key
     from road_anchors where world_id=${worldId} and village_id=${villageId}`);
+  queries.push(...receiptReferenceQueries(context));
   queries.push(sql<SyncEntityReference>`select 'tradeJourneys'::text as component,id::text as key from trade_journeys
     where world_id=${worldId} and (village_id=${villageId} or destination_village_id=${villageId})
     and returns_at > ${context.through}`);
@@ -138,7 +146,9 @@ const singletonReferences = (villageId: string): SyncEntityReference[] => [
  * after that replacement. */
 function completeRegistry(changes: SyncV2Change[]): SyncV2Change[] {
   for (const component of SYNC_V2_PRIVATE_COMPONENTS) {
-    if (!changes.some((change) => change.component === component)) changes.push({ component, upsert: [], remove: [] });
+    if (changes.some((change) => change.component === component)) continue;
+    // Beyond 25 components TypeScript no longer checks the literal against each branch.
+    changes.push({ component, upsert: [], remove: [] } as SyncV2Change);
   }
   return changes.map((change) => ({ ...change, remove: [] }));
 }
@@ -555,6 +565,10 @@ export async function readRegisteredPrivateChanges(
         .execute();
       const upsert = rows.map((row) => ({ id: `${row.vertexX},${row.vertexY}`, ...row }));
       changes.push({ component, upsert, remove: ids.filter((id) => !upsert.some((row) => row.id === id)) });
+    } else if (component === 'expeditionReceipts') {
+      changes.push(await readExpeditionReceiptChange(tx, context, ids));
+    } else if (component === 'harvestReceipts') {
+      changes.push(await readHarvestReceiptChange(tx, context, ids));
     } else if (component === 'gardenHarvests') {
       if (ids.length > 4096) throw new RangeError('Too many harvest ids');
       const rows = await tx

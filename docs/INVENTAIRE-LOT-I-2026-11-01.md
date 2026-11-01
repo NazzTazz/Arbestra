@@ -67,7 +67,7 @@ Prévu par l'inventaire V2 (point 7) et la spec §10 (« réponse explicite de m
 
 1. **Ancien client** : 426 avec « Une nouvelle version d'Arbestra est disponible. Rechargez la page. » ; les intentions en attente sont rejouées après rechargement.
 2. **V2 qui ne démarre pas** : écran « Connexion au village impossible » avec « Réessayer » et reprises automatiques espacées ; plus de repli invisible sur la V1.
-3. **Reçus** : pas de sondage. Tranche préalable à I.2 : reçus d'expédition et de récolte en composantes privées V2, publiées par déclencheurs sur `expedition_submissions` et `harvest_submissions`, livrées par le SSE V2 ; suppression du sondage de 3 s (`use-expeditions.ts`) et de la relève de `readHarvestReceipts`.
+3. **Reçus** : pas de sondage. Tranche préalable à I.2 : reçus d'expédition et de récolte en composantes privées V2, publiées par déclencheurs sur `expedition_submissions` et `harvest_submissions`, livrées par le SSE V2 ; suppression du sondage de 3 s (`use-expeditions.ts`) et de la relève de `readHarvestReceipts`. **Faite le 1er novembre, à valider** : migration 079, [inventaire de la synchro V2](INVENTAIRE-SYNC-V2-2026-10-29.md).
 4. **Réveil par lecture** : supprimé ; risque accepté (notifications durables), balayage de réparation plus tard si une perte est observée.
 5. **Historique `leveling_jobs`** : archivé dans une table d'archive, puis la table est supprimée (I.5).
 6. **HUD** : ses deux routes passent au contrat V2 avec `effects` (I.1).

@@ -12,7 +12,8 @@ import {
   ExtractionWorksiteSchema,
 } from './villages.js';
 import { ExtractionPoolSchema } from './hud-workforce.js';
-import { ExploitationOrderSchema } from './exploitation.js';
+import { ExploitationOrderSchema, HarvestReceiptSchema } from './exploitation.js';
+import { ExpeditionReceiptSchema } from './expeditions.js';
 import { MarketExchangeSchema, TradeOfferSchema, MarketJourneySchema } from './market.js';
 import { ScienceStateSchema } from './science.js';
 import { InfrastructurePlanSchema } from './infrastructure.js';
@@ -89,11 +90,27 @@ export const SYNC_V2_PRIVATE_COMPONENTS = [
   'installation',
   'roadCells',
   'roadAnchors',
+  'expeditionReceipts',
+  'harvestReceipts',
 ] as const;
 export const SyncV2IdentitySchema = Type.Object(
   { id, name: Type.String(), anchorCellX: Type.Integer(), anchorCellY: Type.Integer() },
   { additionalProperties: false },
 );
+/** Receipts of the intent workflows (expedition preparation, harvest gestures),
+ * keyed by the command: the server's answer to a command the player sent, and
+ * its status while the worker has not written the outcome yet. A snapshot
+ * lists the pending receipts and the recent ones only. */
+export const SyncV2ExpeditionReceiptSchema = Type.Object(
+  { id, receipt: ExpeditionReceiptSchema },
+  { additionalProperties: false },
+);
+export const SyncV2HarvestReceiptSchema = Type.Object(
+  { id, receipt: HarvestReceiptSchema },
+  { additionalProperties: false },
+);
+export type SyncV2ExpeditionReceipt = Static<typeof SyncV2ExpeditionReceiptSchema>;
+export type SyncV2HarvestReceipt = Static<typeof SyncV2HarvestReceiptSchema>;
 /** One entity per building (the journal key): a building contributes to
  * several programs, each its own row server-side. */
 export const SyncV2ContributionSchema = Type.Object(
@@ -364,6 +381,22 @@ export const SyncV2ChangeSchema = Type.Union([
       component: Type.Literal('roadAnchors'),
       upsert: Type.Array(RoadAnchorSchema, { maxItems: LIVE_ENTITIES }),
       remove: Type.Array(Type.String({ pattern: '^[0-9]+,[0-9]+$' }), { maxItems: LIVE_ENTITIES }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      component: Type.Literal('expeditionReceipts'),
+      upsert: Type.Array(SyncV2ExpeditionReceiptSchema, { maxItems: 1024 }),
+      remove: Type.Array(id, { maxItems: 1024 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      component: Type.Literal('harvestReceipts'),
+      upsert: Type.Array(SyncV2HarvestReceiptSchema, { maxItems: 1024 }),
+      remove: Type.Array(id, { maxItems: 1024 }),
     },
     { additionalProperties: false },
   ),

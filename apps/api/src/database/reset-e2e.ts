@@ -33,6 +33,9 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await transaction.deleteFrom('sessions').execute();
       await transaction.deleteFrom('scheduledTasks').execute();
       await transaction.deleteFrom('villageEconomyCatchups').execute();
+      // Receipts of the intent workflows reach every snapshot of the village (079).
+      await transaction.deleteFrom('harvestSubmissions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('expeditionSubmissions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('infrastructureReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('villageInfrastructure').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('roadCellReceipts').where('worldId', '=', DEVELOPMENT_IDS.world).execute();

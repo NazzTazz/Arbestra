@@ -50,7 +50,8 @@ function bootstrap(generation: number): SyncV2Batch {
         stream: { kind: 'village', key: villageId, epoch },
         fromRevision: '0',
         toRevision: '4',
-        changes: SYNC_V2_PRIVATE_COMPONENTS.map((component) => ({ component, upsert: [], remove: [] })),
+        // Beyond 25 components TypeScript no longer checks the literal against each branch.
+        changes: SYNC_V2_PRIVATE_COMPONENTS.map((component) => ({ component, upsert: [], remove: [] })) as never,
       },
       {
         stream: { kind: 'knowledge', key: owner, epoch },

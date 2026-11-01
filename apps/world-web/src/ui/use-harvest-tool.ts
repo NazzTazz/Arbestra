@@ -65,6 +65,28 @@ const reasons: Record<string, string> = {
   cancelled: 'Annulé',
   'building-incomplete': 'En construction',
 };
+/** The queued gestures whose receipt is final: those a batch of receipts settles. */
+export function settledGestures<T extends { intent: { commandId: string } }>(
+  queue: readonly T[],
+  receipts: readonly HarvestReceipt[],
+): Array<{ item: T; receipt: HarvestReceipt }> {
+  return receipts.flatMap((receipt) => {
+    const item = receipt.pending ? undefined : queue.find((d) => d.intent.commandId === receipt.commandId);
+    return item ? [{ item, receipt }] : [];
+  });
+}
+/**
+ * The gestures sent whose receipt the stream's snapshot does not list: a
+ * gesture older than the snapshot's window (a page left asleep), which the
+ * server answers again from its stored receipt, command by command.
+ */
+export function lostGestures<T extends { intent: { commandId: string }; submitted?: boolean }>(
+  queue: readonly T[],
+  receipts: readonly HarvestReceipt[],
+): T[] {
+  const known = new Set(receipts.map((receipt) => receipt.commandId));
+  return queue.filter((d) => d.submitted && !known.has(d.intent.commandId));
+}
 /** Accepted trees stay pending this long, until the village's queue shows them. */
 const ACCEPTED_HOLD_MS = 6000;
 export function useHarvestTool({
@@ -73,6 +95,7 @@ export function useHarvestTool({
   enabled,
   slug,
   woodMode = 'cut',
+  receipts,
   onAccepted,
 }: {
   state: VillageState | null;
@@ -81,6 +104,13 @@ export function useHarvestTool({
   slug: string;
   /** What a wood gesture queues its trees for (cut, or clear: wood then stump). */
   woodMode?: 'cut' | 'clear';
+  /**
+   * Where the receipts of the gestures come from. Undefined: the historical
+   * read every second (`arbestra:sync-v2=0`, until the V1 removal). Null or a
+   * list: the V2 stream, which delivers each receipt when the worker writes
+   * it (null while its first snapshot is not loaded).
+   */
+  receipts?: ReadonlyArray<HarvestReceipt> | null | undefined;
   onAccepted: () => void;
 }) {
   const [filter, setFilter] = useState<HarvestFilter>('gardens');
@@ -99,6 +129,7 @@ export function useHarvestTool({
     flying = useRef<string | null>(null),
     cancelAfterSend = useRef<string | null>(null),
     last = useRef<LastGesture | null>(null),
+    checked = useRef<string | null>(null),
     accepted = useRef<Array<{ until: number; trees: DesignatedTree[] }>>([]),
     holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const current = useRef({ state, scene, enabled, filter, woodMode, onAccepted });
@@ -231,9 +262,13 @@ export function useHarvestTool({
       if (!alive.current || key !== context.current) return;
       if (receipt.pending) item.submitted = true;
       else {
+        // The stream may have settled it already (a gesture sent again).
+        const queued = queue.current.includes(item);
         queue.current = queue.current.filter((d) => d.intent.commandId !== item.intent.commandId);
-        flash(receipt, item);
-        current.current.onAccepted();
+        if (queued) {
+          flash(receipt, item);
+          current.current.onAccepted();
+        }
       }
       persist();
       setNetworkError(false);
@@ -266,6 +301,7 @@ export function useHarvestTool({
   }
   useEffect(() => {
     alive.current = true;
+    checked.current = null;
     queue.current = [];
     draft.current = null;
     last.current = null;
@@ -289,7 +325,10 @@ export function useHarvestTool({
       holdTimer.current = null;
     };
   }, [storageKey]);
+  const viaStream = receipts !== undefined;
   useEffect(() => {
+    // The V2 stream delivers the receipts: no read.
+    if (viaStream) return;
     let cancelled = false,
       busy = false;
     const poll = async () => {
@@ -324,7 +363,27 @@ export function useHarvestTool({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [storageKey]);
+  }, [storageKey, viaStream]);
+  // From the V2 stream: each gesture settles when the worker writes its receipt.
+  useEffect(() => {
+    if (!receipts || !storageKey) return;
+    let changed = false;
+    for (const { item, receipt } of settledGestures(queue.current, receipts)) {
+      queue.current = queue.current.filter((d) => d !== item);
+      flash(receipt, item);
+      current.current.onAccepted();
+      changed = true;
+    }
+    // Once per page: what the first snapshot does not list is asked again.
+    let lost: Draft[] = [];
+    if (checked.current !== storageKey) {
+      checked.current = storageKey;
+      lost = lostGestures(queue.current, receipts);
+      for (const item of lost) item.submitted = false;
+    }
+    if (changed || lost.length) persist();
+    if (lost.length) void drain();
+  }, [receipts, storageKey]);
   function cancel() {
     draft.current = null;
     publish();

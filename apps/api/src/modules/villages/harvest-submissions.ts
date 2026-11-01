@@ -1,7 +1,7 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
-import type { HarvestIntent, HarvestReceipt } from '@arbestra/contracts';
+import { pendingHarvestReceipt, type HarvestIntent, type HarvestReceipt } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
 import { HttpError } from '../../errors.js';
@@ -10,7 +10,6 @@ import { acceptHarvestIntent } from './harvest-intents.js';
 import { woodDesignations } from '../deposits/woodland.js';
 export const HARVEST_SUBMISSION_TASK = 'harvest.intent';
 const MAX_ATTEMPTS = 8;
-const pending = (commandId: string): HarvestReceipt => ({ commandId, pending: true, accepted: [], refused: [] });
 export async function receiveHarvestIntent(
   db: Kysely<Database>,
   accountId: string,
@@ -47,7 +46,7 @@ export async function receiveHarvestIntent(
         .executeTakeFirstOrThrow();
       if (!isDeepStrictEqual(previous.request, request))
         throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'Cette intention a déjà été utilisée différemment.');
-      return previous.receipt ?? pending(request.commandId);
+      return previous.receipt ?? pendingHarvestReceipt(request.commandId);
     }
     await tx
       .insertInto('scheduledTasks')
@@ -62,7 +61,7 @@ export async function receiveHarvestIntent(
         lastError: null,
       })
       .execute();
-    return pending(request.commandId);
+    return pendingHarvestReceipt(request.commandId);
   });
 }
 export async function readHarvestReceipts(
@@ -84,7 +83,7 @@ export async function readHarvestReceipts(
       .where('accountId', '=', accountId)
       .where('commandId', 'in', ids)
       .execute();
-    return rows.map((r) => r.receipt ?? pending(r.commandId));
+    return rows.map((r) => r.receipt ?? pendingHarvestReceipt(r.commandId));
   });
 }
 export async function processHarvestSubmission(tx: Transaction<Database>, task: ScheduledTask): Promise<void> {

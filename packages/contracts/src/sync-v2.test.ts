@@ -62,6 +62,8 @@ function batch(coverage: SyncV2Batch['coverage'], from: string, to: string, amou
                 { component: 'installation' as const, upsert: [], remove: [] },
                 { component: 'roadCells' as const, upsert: [], remove: [] },
                 { component: 'roadAnchors' as const, upsert: [], remove: [] },
+                { component: 'expeditionReceipts' as const, upsert: [], remove: [] },
+                { component: 'harvestReceipts' as const, upsert: [], remove: [] },
               ]
             : []),
         ],
@@ -306,4 +308,54 @@ it('replaces the session state like a snapshot: same epoch only, newer confirmat
     groups: [{ ...catchUp().groups[0]!, stream: { kind: 'village', key: villageId, epoch: otherEpoch } }],
   });
   expect(replaced.kind).toBe('resync');
+});
+
+it('carries the receipts of the player commands keyed by command, and refuses a malformed receipt', () => {
+  const command = '91111111-1111-4111-8111-111111111111',
+    gesture = '92222222-2222-4222-8222-222222222222';
+  const receipt = {
+    kind: 'expedition-receipt' as const,
+    commandId: command,
+    worldId,
+    villageId,
+    version: 2,
+    receivedAt: '2026-11-01T10:00:00.000Z',
+    requestedTarget: { cellX: 3, cellY: 4 },
+    status: 'failed' as const,
+    code: 'EXPEDITION_EXPIRED',
+    message: 'La préparation a dépassé son délai.',
+  };
+  const harvest = { commandId: gesture, pending: true, accepted: [], refused: [] };
+  const delta = (changes: unknown[]) =>
+    ({
+      protocol: 2,
+      worldId,
+      villageId,
+      generation: 1,
+      observedAt: '2026-11-01T10:00:00.000Z',
+      coverage: 'delta',
+      groups: [{ stream: { kind: 'village', key: villageId, epoch }, fromRevision: '1', toRevision: '2', changes }],
+    }) as unknown as SyncV2Batch;
+  const based = applySyncV2Batch(empty(), batch('scope-snapshot', '0', '1'));
+  if (based.kind !== 'applied') throw Error('The snapshot was not applied');
+  const applied = applySyncV2Batch(
+    based.state,
+    delta([
+      { component: 'expeditionReceipts', upsert: [{ id: command, receipt }], remove: [] },
+      { component: 'harvestReceipts', upsert: [{ id: gesture, receipt: harvest }], remove: [] },
+    ]),
+  );
+  expect(applied.kind).toBe('applied');
+  const visible = visibleSyncV2Scope(applied.state.scopes.get(key)!);
+  expect(visible.get(`expeditionReceipts:${command}`)).toEqual({ id: command, receipt });
+  expect(visible.get(`harvestReceipts:${gesture}`)).toEqual({ id: gesture, receipt: harvest });
+  // A receipt without its kind, or an entity without its command key, is not a receipt.
+  for (const upsert of [
+    [{ id: command, receipt: { ...receipt, kind: 'other' } }],
+    [{ id: 'not-a-command', receipt }],
+    [{ receipt }],
+  ])
+    expect(applySyncV2Batch(based.state, delta([{ component: 'expeditionReceipts', upsert, remove: [] }])).kind).toBe(
+      'resync',
+    );
 });

@@ -12,6 +12,11 @@ import {
 } from '../../database/migrations/053_game_sync_private_writers.js';
 import { roadCellSyncSource, installRoadCellSync } from '../../database/migrations/073_road_cells.js';
 import { roadAnchorSyncSource, installRoadAnchorSync } from '../../database/migrations/074_road_anchors.js';
+import {
+  expeditionReceiptSyncSource,
+  harvestReceiptSyncSource,
+  installReceiptSync,
+} from '../../database/migrations/079_receipt_sync_v2.js';
 import { privateReaderComponents, retiredPrivateComponents } from './sync-v2-readers.js';
 
 const url = testDatabaseUrl(),
@@ -27,8 +32,15 @@ const pool = new pg.Pool({
 });
 const db = new Kysely<unknown>({ dialect: new PostgresDialect({ pool }) });
 const world = randomUUID();
-// Later migrations add sources through the same writer (073: road cells, 074: road anchors).
-const sources = [...privateSyncSources, roadCellSyncSource, roadAnchorSyncSource] as const;
+// Later migrations add sources through the same writer (073: road cells, 074: road anchors,
+// 079: expedition and harvest receipts).
+const sources = [
+  ...privateSyncSources,
+  roadCellSyncSource,
+  roadAnchorSyncSource,
+  expeditionReceiptSyncSource,
+  harvestReceiptSyncSource,
+] as const;
 beforeAll(async () => {
   // leveling_jobs keeps its 053 trigger until the lot I cleanup drops the table;
   // the reader skips that withdrawn component.
@@ -62,6 +74,7 @@ beforeAll(async () => {
   await writers(db);
   await installRoadCellSync(db);
   await installRoadAnchorSync(db);
+  await installReceiptSync(db);
 }, 60000);
 afterAll(async () => {
   await db.destroy();
@@ -206,4 +219,66 @@ it('publishes both sides of an ownership move in the same atomic batch', async (
   expect(left.batch_id).toBe(right.batch_id);
   expect(left.dependencies).toEqual(right.dependencies);
   expect(left.dependencies).toHaveLength(2);
+});
+it('publishes a receipt when it is written and when the worker changes it, not when it renews a lease', async () => {
+  const village = randomUUID(),
+    account = randomUUID(),
+    expedition = randomUUID(),
+    harvest = randomUUID();
+  const receipt = (status: string) => JSON.stringify({ kind: 'expedition-receipt', status });
+  await pool.query(
+    `insert into expedition_submissions(world_id,village_id,account_id,command_id,request,receipt)
+    values($1,$2,$3,$4,'{}',$5)`,
+    [world, village, account, expedition, receipt('pending')],
+  );
+  await pool.query(
+    `insert into harvest_submissions(world_id,village_id,account_id,command_id,request,receipt)
+    values($1,$2,$3,$4,'{}',null)`,
+    [world, village, account, harvest],
+  );
+  expect((await changes(village)).map((row) => row.changes)).toEqual([
+    [{ component: 'expeditionReceipts', key: expedition }],
+    [{ component: 'harvestReceipts', key: harvest }],
+  ]);
+  // The acquisition and the lease renewals of the worker leave the receipt as it is.
+  await pool.query(
+    `update expedition_submissions set attempt=attempt+1,attempt_token=gen_random_uuid(),
+    lease_until=statement_timestamp()+interval '10 seconds' where command_id=$1`,
+    [expedition],
+  );
+  await pool.query(
+    `update expedition_submissions set lease_until=lease_until+interval '3 seconds' where command_id=$1`,
+    [expedition],
+  );
+  expect(await changes(village)).toHaveLength(2);
+  await pool.query(`update expedition_submissions set receipt=$2 where command_id=$1`, [
+    expedition,
+    receipt('admitted'),
+  ]);
+  await pool.query(`update harvest_submissions set receipt=$2 where command_id=$1`, [
+    harvest,
+    JSON.stringify({ commandId: harvest, accepted: [], refused: [] }),
+  ]);
+  expect((await changes(village)).slice(2).map((row) => row.changes)).toEqual([
+    [{ component: 'expeditionReceipts', key: expedition }],
+    [{ component: 'harvestReceipts', key: harvest }],
+  ]);
+  // The receipt and the business write of one transaction publish together.
+  const second = randomUUID();
+  await transact(async (client) => {
+    await client.query(
+      `insert into expedition_submissions(world_id,village_id,account_id,command_id,request,receipt)
+      values($1,$2,$3,$4,'{}',$5)`,
+      [world, village, account, second, receipt('pending')],
+    );
+    await client.query('insert into village_resources(world_id,village_id,resource_code,amount) values($1,$2,$3,5)', [
+      world,
+      village,
+      'wood',
+    ]);
+  });
+  expect((await changes(village)).at(-1)!.changes).toEqual([
+    { component: 'expeditionReceipts', key: second },
+    { component: 'resources', key: 'wood' },
+  ]);
 });

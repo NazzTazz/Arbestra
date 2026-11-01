@@ -4,10 +4,14 @@ import {
   visibleSyncV2Scope,
   villageStateFromSyncV2,
   VILLAGE_PRESENTATION_COMPONENTS,
+  type ExpeditionReceipt,
+  type HarvestReceipt,
   type ProcessingCommand,
   type ProcessingOrder,
   type ResolvedVillagePresentation,
   type SyncV2Batch,
+  type SyncV2ExpeditionReceipt,
+  type SyncV2HarvestReceipt,
   type SyncV2State,
 } from '@arbestra/contracts';
 import type { TimedVillageState } from './client';
@@ -24,6 +28,28 @@ export function processingOrdersV2(state: SyncV2State): ProcessingOrder[] {
   for (const [key, value] of visibleSyncV2Scope(scope))
     if (key.startsWith('processingOrders:')) orders.push(value as ProcessingOrder);
   return orders.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id));
+}
+
+/** Receipts of the intent workflows the private stream carries (migration 079):
+ * expeditions oldest first, harvest gestures in no particular order. Null while
+ * the village's private stream is not loaded. */
+export function receiptsV2(
+  state: SyncV2State,
+): { expeditions: ExpeditionReceipt[]; harvests: HarvestReceipt[] } | null {
+  const scope = state.scopes.get(`village:${state.villageId}`);
+  if (!scope) return null;
+  const expeditions: ExpeditionReceipt[] = [],
+    harvests: HarvestReceipt[] = [];
+  for (const [key, value] of visibleSyncV2Scope(scope))
+    if (key.startsWith('expeditionReceipts:')) expeditions.push((value as SyncV2ExpeditionReceipt).receipt);
+    else if (key.startsWith('harvestReceipts:')) harvests.push((value as SyncV2HarvestReceipt).receipt);
+  expeditions.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.commandId.localeCompare(b.commandId));
+  return { expeditions, harvests };
+}
+/** The previous list when nothing changed, so that a batch which carries no
+ * receipt does not render the village again. */
+function sameList<T>(previous: T[] | null, next: T[]): T[] {
+  return previous && previous.length === next.length && previous.every((item, i) => item === next[i]) ? previous : next;
 }
 
 export function processingCommandBuilding(
@@ -165,6 +191,9 @@ export function useVillageSyncV2({
   const [status, setStatus] = useState<ProcessingV2Status>('off');
   const [villageReady, setVillageReady] = useState(false);
   const [orders, setOrders] = useState<ProcessingOrder[]>([]);
+  // Null until the private stream is loaded: the receipts of the player's commands.
+  const [expeditionReceipts, setExpeditionReceipts] = useState<ExpeditionReceipt[] | null>(null);
+  const [harvestReceipts, setHarvestReceipts] = useState<HarvestReceipt[] | null>(null);
   const [unresolved, setUnresolved] = useState<ProcessingCommand[]>([]);
   const transport = useRef<SyncV2Transport | null>(null);
   const expired = useRef(onExpired);
@@ -190,6 +219,12 @@ export function useVillageSyncV2({
       // A provisional placement footprint: its real read never waits.
       placing = false,
       deferred: ReturnType<typeof setTimeout> | null = null;
+    const publishReceipts = (state: SyncV2State) => {
+      const receipts = receiptsV2(state);
+      if (!receipts) return;
+      setExpeditionReceipts((previous) => sameList(previous, receipts.expeditions));
+      setHarvestReceipts((previous) => sameList(previous, receipts.harvests));
+    };
     const emit = () => {
       if (!presentation || !latest || transport.current !== current) return;
       const projected = villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
@@ -252,6 +287,7 @@ export function useVillageSyncV2({
       },
       publish: (state: SyncV2State, observedAt: string, batch: SyncV2Batch) => {
         setOrders(processingOrdersV2(state));
+        publishReceipts(state);
         if (!village) return;
         // An ACK carries its command time, possibly before the last delta.
         latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
@@ -300,6 +336,7 @@ export function useVillageSyncV2({
       const last = adopted.latest();
       latest = { state: last.state, observedAt: last.observedAt };
       setOrders(processingOrdersV2(last.state));
+      publishReceipts(last.state);
       setStatus('ready');
       emit();
       void recover();
@@ -328,6 +365,8 @@ export function useVillageSyncV2({
       current.close();
       if (transport.current === current) transport.current = null;
       setOrders([]);
+      setExpeditionReceipts(null);
+      setHarvestReceipts(null);
       setUnresolved([]);
       setVillageReady(false);
     };
@@ -439,6 +478,8 @@ export function useVillageSyncV2({
     status,
     villageReady,
     orders,
+    expeditionReceipts,
+    harvestReceipts,
     unresolved,
     command,
     discard,
