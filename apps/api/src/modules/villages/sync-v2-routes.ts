@@ -64,11 +64,26 @@ async function bounded<T>(read: Promise<T>, reply?: FastifyReply): Promise<T> {
   }
 }
 
+/** One reader per process: player presentations and NOC observations share
+ * its captures. */
+export function createVillagePresentationReader(
+  app: FastifyInstance,
+  db: Kysely<Database>,
+  navigation: TravelNetworkExecutor,
+) {
+  return new VillagePresentationReader(db, navigation, {
+    store: databaseTravelNetworkStore(db, () =>
+      app.log.warn({ code: 'TRAVEL_NETWORK_STORE_FAILED' }, 'Travel network cache unavailable'),
+    ),
+  });
+}
+
 export async function registerSyncV2Routes(
   app: FastifyInstance,
   db: Kysely<Database>,
   config: Pick<AppConfig, 'cookieName'>,
   navigation: TravelNetworkExecutor,
+  presentations = createVillagePresentationReader(app, db, navigation),
 ) {
   const streams = new Set<() => void>();
   app.addHook('preClose', async () => {
@@ -77,11 +92,6 @@ export async function registerSyncV2Routes(
   // A pure read-only projection, refreshed by the client on invalidation. The
   // reader keeps one capture per village while the journal streams covering
   // its inputs stand still; the ETag then spares the transfer as well.
-  const presentations = new VillagePresentationReader(db, navigation, {
-    store: databaseTravelNetworkStore(db, () =>
-      app.log.warn({ code: 'TRAVEL_NETWORK_STORE_FAILED' }, 'Travel network cache unavailable'),
-    ),
-  });
   app.get(
     `${prefix}/presentation`,
     {

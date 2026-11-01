@@ -1,17 +1,16 @@
 import type { Kysely } from 'kysely';
 import type { ObservationLease, ObservationAction, VillageState } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
-import { readVillageObservation } from '../villages/service.js';
-import { villageSyncRevision } from '../villages/sync-revision.js';
 import { HttpError } from '../../errors.js';
 import type { ObservationHub } from './observation-hub.js';
-import type { VillageSyncProjections } from '../villages/sync-projections.js';
+import { ObservedVillage, type ObservationSource } from './observation-village.js';
 
 export class ObservationReads {
   private cache = new Map<
     string,
     {
       state?: VillageState;
+      village?: ObservedVillage;
       flight?: Promise<VillageState> | undefined;
       checked: number;
       receiptAt: number;
@@ -21,7 +20,7 @@ export class ObservationReads {
   constructor(
     private db: Kysely<Database>,
     private hub: ObservationHub,
-    private projections?: VillageSyncProjections,
+    private source: ObservationSource,
   ) {
     hub.onClose((l) => {
       if (!hub.active(l.worldId, l.villageId, l.accountId))
@@ -63,16 +62,10 @@ export class ObservationReads {
     const flight = (async () => {
       try {
         await this.validate(l);
-        const revision = (await villageSyncRevision(this.db, l.worldId)).revision;
-        if (e.state?.syncRevision === revision) {
-          e.checked = Date.now();
-          this.hub.degrade(l, false);
-          return e.state;
-        }
-        // Reuse only a completed fresh projection; a player's pending navigation
-        // must never prevent an operator from opening the persisted village.
-        const candidate = this.projections?.observedBase(l.accountId, l.worldId, l.villageId, revision);
-        const state = candidate ?? (await readVillageObservation(this.db, l.accountId, l.worldSlug, l.villageId));
+        // V2 readers only: journal deltas of this village, the presentation
+        // after a structural change. Another village's commit costs nothing.
+        e.village ??= new ObservedVillage(this.source, l.accountId, l.worldSlug, l.villageId);
+        const state = await e.village.current();
         e.state = state;
         e.checked = Date.now();
         this.hub.degrade(l, false);

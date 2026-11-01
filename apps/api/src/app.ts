@@ -23,7 +23,7 @@ import { registerVillageRoutes } from './modules/villages/routes.js';
 import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
 import { registerFactorySettings } from './modules/villages/factory-settings.js';
 import { registerVillageSync } from './modules/villages/sync.js';
-import { registerSyncV2Routes } from './modules/villages/sync-v2-routes.js';
+import { createVillagePresentationReader, registerSyncV2Routes } from './modules/villages/sync-v2-routes.js';
 import { registerAdminAuthRoutes } from './modules/admin/auth.js';
 import { registerAdminRoutes } from './modules/admin/routes.js';
 import { OperationsTelemetry, instrumentHttp, annotateHttpRequest } from './modules/operations/telemetry.js';
@@ -212,7 +212,8 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   });
   const villageProjections = await registerVillageSync(app, db, config, navigation, wakeups);
   const observations = new ObservationHub();
-  await registerObservationRoutes(app, db, config, observations, villageProjections);
+  const presentations = createVillagePresentationReader(app, db, navigation);
+  await registerObservationRoutes(app, db, config, observations, presentations);
   // Player journey journal: buffered, flushed every 5 s and at close, never
   // inside a business transaction. Disabled unless JOURNEY_ENABLED=1.
   const journey = new JourneyJournal(db, config.journeyEnabled === true);
@@ -228,7 +229,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
   await registerVillageRoutes(app, db, config, villageProjections, navigation);
-  await registerSyncV2Routes(app, db, config, navigation);
+  await registerSyncV2Routes(app, db, config, navigation, presentations);
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app, db, config);
   return app;

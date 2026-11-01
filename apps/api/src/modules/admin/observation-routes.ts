@@ -28,24 +28,38 @@ import {
 import { getTerrainVillages } from '../worlds/terrain-villages.js';
 import { ObservationReads } from './observation-reads.js';
 import { ObservationHub } from './observation-hub.js';
-import type { VillageSyncProjections } from '../villages/sync-projections.js';
+import type { VillagePresentationReader } from '../villages/presentation.js';
+import { captureSyncV2 } from '../villages/sync-v2-capture.js';
+import type { ObservationSource } from './observation-village.js';
 import { markHttpStream } from '../operations/telemetry.js';
 
 const uuid = Type.String({ format: 'uuid' }),
   params = Type.Object({ id: uuid }, { additionalProperties: false });
+/** Journal captures on the read-only observation connection; presentations
+ * from the process's shared reader (its route store writes). */
+export function observationSource(
+  readsDb: Kysely<Database>,
+  presentations: Pick<VillagePresentationReader, 'read'>,
+): ObservationSource {
+  return {
+    capture: (accountId, worldSlug, villageId, request, options) =>
+      captureSyncV2(readsDb, accountId, worldSlug, villageId, request, { ...options, pages: options.pages ?? false }),
+    presentation: (accountId, worldSlug, villageId) => presentations.read(accountId, worldSlug, villageId),
+  };
+}
 export async function registerObservationRoutes(
   app: FastifyInstance,
   db: Kysely<Database>,
   config: AppConfig,
   hub: ObservationHub,
-  projections: VillageSyncProjections,
+  presentations: VillagePresentationReader,
 ) {
   const readsDb = createDatabase(
     config.databaseUrl,
     () => app.log.warn({ code: 'OBSERVATION_DB_INTERRUPTED' }, 'Observation DB interrupted'),
     { observation: true },
   );
-  const reads = new ObservationReads(readsDb, hub, projections),
+  const reads = new ObservationReads(readsDb, hub, observationSource(readsDb, presentations)),
     access = new ObservationAccess(hub);
   const buffers = new Map<string, { bytes: () => number; close: () => void }>();
   const terrain = new Map<string, { active: number; tokens: number; at: number }>();

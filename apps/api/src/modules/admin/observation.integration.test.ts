@@ -11,7 +11,8 @@ import { hashAdminSessionToken } from './auth.js';
 import { HttpError } from '../../errors.js';
 import { ObservationHub } from './observation-hub.js';
 import { ObservationReads } from './observation-reads.js';
-import { registerObservationRoutes } from './observation-routes.js';
+import { observationSource, registerObservationRoutes } from './observation-routes.js';
+import { VillagePresentationReader } from '../villages/presentation.js';
 import { instrumentObservationActions, observationCommitted } from './observation-actions.js';
 import { NavigationCompute } from '../navigation/compute.js';
 import { registerVillageSync } from '../villages/sync.js';
@@ -57,7 +58,8 @@ const config: AppConfig = {
 };
 Object.assign(config, { worldOrigin: 'http://game.localhost' });
 const readsDb = createDatabase(url, () => {}, { observation: true });
-const reads = new ObservationReads(readsDb, hub);
+const presentations = new VillagePresentationReader(db, navigation);
+const reads = new ObservationReads(readsDb, hub, observationSource(readsDb, presentations));
 let lease: ObservationLease;
 let base: string;
 beforeAll(async () => {
@@ -180,8 +182,8 @@ beforeAll(async () => {
       ])
       .execute();
   });
-  const projections = await registerVillageSync(app, db, config, navigation);
-  await registerObservationRoutes(app, db, config, hub, projections);
+  await registerVillageSync(app, db, config, navigation);
+  await registerObservationRoutes(app, db, config, hub, presentations);
   instrumentObservationActions(app, hub);
   app.post('/api/worlds/:worldSlug/villages/:villageId/harvest-intents', async (request) => {
     await authenticate(db, request.cookies.arbestra_session);
@@ -351,7 +353,7 @@ it('opens and refreshes an observation when predictive navigation is unavailable
   const diagnostic = vi
     .spyOn(navigation, 'observationNetwork')
     .mockRejectedValue(new HttpError(503, 'OBSERVATION_BUSY', 'Cold navigation cache'));
-  const reader = new ObservationReads(readsDb, hub),
+  const reader = new ObservationReads(readsDb, hub, observationSource(readsDb, presentations)),
     cold = hub.create(admin, await reads.target(world, village));
   const before = await db.selectFrom('buildings').selectAll().where('worldId', '=', world).execute();
   try {
@@ -386,6 +388,75 @@ it('opens and refreshes an observation when predictive navigation is unavailable
       .where('worldId', '=', world)
       .where('id', '=', village)
       .execute();
+  }
+});
+it('ignores another village of the world and follows the observed village through its own journal', async () => {
+  const neighbour = randomUUID(),
+    other = randomUUID();
+  await db
+    .insertInto('accounts')
+    .values({ id: neighbour, email: neighbour + '@observation.test', passwordHash: 'fixture' })
+    .execute();
+  await db
+    .insertInto('worldMemberships')
+    .values({ worldId: world, accountId: neighbour, playerName: 'Voisin' })
+    .execute();
+  await db
+    .insertInto('villages')
+    .values({ id: other, worldId: world, ownerAccountId: neighbour, name: 'Voisin', anchorCellX: 40, anchorCellY: 40 })
+    .execute();
+  const presentation = vi.spyOn(presentations, 'read'),
+    reader = new ObservationReads(readsDb, hub, observationSource(readsDb, presentations)),
+    observed = hub.create(admin, await reads.target(world, village));
+  let now = Date.now();
+  const time = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const initial = await reader.snapshot(observed);
+    const reads0 = presentation.mock.calls.length;
+    const revision = async () =>
+      Number(
+        (
+          await sql<{ n: string }>`select count(*) n from village_sync_changes where world_id=${world}::uuid`.execute(
+            db,
+          )
+        ).rows[0]!.n,
+      );
+    const count = await revision();
+    // A commit in the neighbouring village moves the world-wide V1 counter.
+    await db
+      .updateTable('villages')
+      .set({ name: 'Voisin renommé' })
+      .where('worldId', '=', world)
+      .where('id', '=', other)
+      .execute();
+    expect(await revision()).toBeGreaterThan(count);
+    now += 2100;
+    expect(await reader.snapshot(observed), 'unchanged observed village: same state').toBe(initial);
+    expect(presentation.mock.calls.length, 'no presentation reread').toBe(reads0);
+    // A change of the observed village arrives through its own journal.
+    await db
+      .updateTable('villages')
+      .set({ name: 'Observé renommé' })
+      .where('worldId', '=', world)
+      .where('id', '=', village)
+      .execute();
+    now += 2100;
+    const changed = await reader.snapshot(observed);
+    expect(changed.village.name).toBe('Observé renommé');
+    expect(changed.syncRevision!).toBe(initial.syncRevision! + 1);
+  } finally {
+    time.mockRestore();
+    presentation.mockRestore();
+    hub.close(observed.id);
+    await db
+      .updateTable('villages')
+      .set({ name: 'Observed village' })
+      .where('worldId', '=', world)
+      .where('id', '=', village)
+      .execute();
+    await db.deleteFrom('villages').where('worldId', '=', world).where('id', '=', other).execute();
+    await db.deleteFrom('worldMemberships').where('worldId', '=', world).where('accountId', '=', neighbour).execute();
+    await db.deleteFrom('accounts').where('id', '=', neighbour).execute();
   }
 });
 it('keeps the persisted mixed harvest receipt separate from its successful HTTP submission', async () => {
