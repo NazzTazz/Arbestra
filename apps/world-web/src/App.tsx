@@ -422,7 +422,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     [pushNotification, showResourceChanges],
   );
 
-  const villageV2Mode = SYNC_V2_VILLAGE && !starterActive;
+  // The starter kit too: before the town hall, the V2 hook is not enabled at all.
+  const villageV2Mode = SYNC_V2_VILLAGE;
   const villageV2 = useVillageSyncV2({
     worldSlug,
     worldId: state?.world.id,

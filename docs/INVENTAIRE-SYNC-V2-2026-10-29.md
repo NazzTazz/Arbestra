@@ -4,7 +4,7 @@ Lecture du code sur `e8ee981` (aucun test lancé) ; comptage des références su
 
 ## Schéma commun
 
-Chaque route mutante a deux branches : V2 si l'en-tête `x-arbestra-protocol: 2` est présent (`routes.ts:186-200`, `command-v2.ts:10-31`), V1 sinon. Le client prend la V1 quand la V2 n'est pas prête, quand `arbestra:sync-v2=0`, et pendant toute l'installation (`villageV2Mode = SYNC_V2_VILLAGE && !starterActive`, `App.tsx:426`).
+Chaque route mutante a deux branches : V2 si l'en-tête `x-arbestra-protocol: 2` est présent (`routes.ts:186-200`, `command-v2.ts:10-31`), V1 sinon. Le client prend la V1 quand la V2 n'est pas prête ou quand `arbestra:sync-v2=0`. Depuis le 1er novembre, l'installation (kit de départ) est aussi en V2 : flux V2 de `App` après l'hôtel de ville, relectures de `SpawnPlacement` par une lecture V2 ponctuelle sans flux (`readSyncV2VillageOnce`).
 
 ## État par lot
 
@@ -15,7 +15,7 @@ Chaque route mutante a deux branches : V2 si l'en-tête `x-arbestra-protocol: 2`
 - **I (retrait V1)** : branches V1 serveur et replis client partout ; projections V1 et `preSerialization` actifs ; révision COUNT mondiale encore utilisée (HUD, `state()`, NOC) ; pas de réponse 426.
 - **Hors lots, bloquant pour I** : HUD ordonné par la révision COUNT. Le 1er novembre, les routes que le client n'appelait plus ont été retirées au lieu d'être portées en V2 : ancienne voirie (`/infrastructure`, équipement, déplacement, suppression), nivellement différé (`/leveling`) et terraformation différée (`/terraform`), remplacés par les cases de route, les ancrages et la terraformation instantanée. La composante V2 `levelingJobs` et l'affichage client des terrassiers sont retirés à leur tour (aucun nivellement actif sur alpha, staging et dev). La migration de nettoyage du lot I retirera la table `leveling_jobs`, la colonne `population_cohorts.leveling_job_id`, le type d'élément `leveling-site` (et ses clés de terrain composées), les schémas de contrat de nivellement restants et le filtre du journal V2 qui ignore les anciennes entrées `levelingJobs` (22 sur alpha, du 25 au 30 octobre).
 
-Appelants restants de `GET /village` : repli du chargement initial (404 ou session expirée, V2 désactivée), rafraîchissement sans V2, refus de voirie, `setFactoryEnabled`.
+Appelants restants de `GET /village` : repli du chargement initial (404 ou session expirée, V2 désactivée), rafraîchissement et installation sans V2 (`arbestra:sync-v2=0`), `setFactoryEnabled`, découverte de réserves déjà faite (`client.ts`).
 
 ## Autonomie des workers (préalable du lot H)
 
@@ -78,7 +78,7 @@ Les bâtiments comptent deux fois (`buildings` et `restHousing`). Arkham illustr
 3. Références : ~~`restHousing` limité aux logements~~ fait (`ce7a646`) ; ~~pagination du snapshot privé~~ faite le 29 octobre, validée sur staging par Tristan le 30 octobre (village Test forgé à 4 509 cohortes, environ 4 655 références : chargé aussi vite que d'habitude).
 4. ~~Autonomie de l'énergie et du repos (M), puis lectures pures : bootstraps et flux sans réveil (S à M).~~ Faits le 30 octobre, validés sur staging par Tristan (`4c8cf03`, `fdc2f50`, section « Autonomie des workers ») ; `GET /village` et `/events` V1 gardent leur réveil jusqu'au lot I.
 5. Commandes V2 sans `state()` : ~~exploitation avec jardins (5a)~~ faite le 30 octobre, à valider (section « Étape 5 ») ; ~~nivellement, voirie hors routes~~ retirés le 1er novembre (routes mortes côté client).
-6. Installation en V2 (M), observation NOC sur les lecteurs V2 (M à L).
+6. ~~Installation en V2 (M)~~ faite le 1er novembre (parcours navigateur sur rc1-dev : reprise, quatre poses, sortie du kit, aucune requête `GET /village` ni `/events`) ; reste l'observation NOC sur les lecteurs V2 (M à L).
 7. Lot I : retrait des branches et replis V1, `/events`, `GET /village`, projections ; réponse 426 ; migration de nettoyage après la fenêtre de rollback.
 
 Étude séparée : fusion des cohortes identiques (population).

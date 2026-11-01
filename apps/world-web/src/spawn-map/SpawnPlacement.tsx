@@ -17,6 +17,7 @@ import type { Cell } from '../scene/construction-selection';
 import { preparationState } from './preparation-state';
 import { villageRoute } from './starter-route';
 import { addressedWorld, worldPage } from '../api/world-address';
+import { SYNC_V2_VILLAGE, readSyncV2VillageOnce } from '../api/sync-v2-initial';
 import './placement.css';
 async function read<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(
@@ -44,6 +45,11 @@ export function SpawnPlacement() {
   const params = new URLSearchParams(location.search),
     slug = addressedWorld ?? '',
     base = `/api/worlds/${encodeURIComponent(slug)}`;
+  // The V2 bootstrap resolves the player's village in this world: the one being installed.
+  const readVillage = async (villageId: string) =>
+    SYNC_V2_VILLAGE
+      ? (await readSyncV2VillageOnce(slug)).state
+      : read<VillageState>(base + '/village?villageId=' + villageId);
   const initial = useRef<SpawnPoint>({
     x: Math.max(0, Math.min(511, Number(params.get('x')) || 0)),
     y: Math.max(0, Math.min(255, Number(params.get('y')) || 0)),
@@ -130,9 +136,7 @@ export function SpawnPlacement() {
         for (let x = 0; x < 2; x++) chunks.push(((x0 + x + 16) % 16) + ',' + ((y0 + y + 8) % 8));
       const [ground, state] = await Promise.all([
         read<TerrainResponse>(base + '/starter/terrain?chunks=' + encodeURIComponent(chunks.join(';'))),
-        start.installation
-          ? read<VillageState>(base + '/village?villageId=' + start.installation.villageId)
-          : Promise.resolve(null),
+        start.installation ? readVillage(start.installation.villageId) : Promise.resolve(null),
       ]);
       if (live) {
         setTerrain(ground);
@@ -238,7 +242,7 @@ export function SpawnPlacement() {
     try {
       const result = await read<StarterInstallation>(request.current.url, request.current.body);
       showVillageRoute(result);
-      const state = await read<VillageState>(base + '/village?villageId=' + result.villageId);
+      const state = await readVillage(result.villageId);
       setVillage((previous) => latestVillageSnapshot(previous, state));
       request.current = null;
       setInstallation(result);

@@ -32,10 +32,19 @@ let handoff: InitialSyncV2 | null = null;
 /** First village state from V2 (bootstrap + presentation), without the
  * historical village read. The open session is kept for the mounted village,
  * which adopts it instead of bootstrapping a second time. */
-export async function initialSyncV2Read(worldSlug: string): Promise<TimedVillageState> {
+export function initialSyncV2Read(worldSlug: string): Promise<TimedVillageState> {
+  return readSyncV2Village(worldSlug, true);
+}
+/** One village state from V2 whose session closes at once: the starter kit
+ * rereads its village after each pose while the mounted village streams. */
+export function readSyncV2VillageOnce(worldSlug: string): Promise<TimedVillageState> {
+  return readSyncV2Village(worldSlug, false);
+}
+async function readSyncV2Village(worldSlug: string, keep: boolean): Promise<TimedVillageState> {
   let latest: Latest | null = null;
   const transport = await SyncV2Transport.bootstrapWorld(worldSlug, {
     include: SYNC_V2_VILLAGE_INCLUDE,
+    listen: keep,
     // Until adoption, keep the newest applied state; nothing is rendered yet.
     publish: (state, observedAt, batch) => {
       latest = { state, observedAt, batch };
@@ -49,7 +58,8 @@ export async function initialSyncV2Read(worldSlug: string): Promise<TimedVillage
     const state =
       presentation && current ? villageStateFromSyncV2(current.state, presentation, current.observedAt) : null;
     if (!presentation || !current || !state) throw Error('Projection V2 incomplète.');
-    handoff = { transport, presentation, latest: () => latest ?? current };
+    if (keep) handoff = { transport, presentation, latest: () => latest ?? current };
+    else transport.close();
     return { state, serverOffsetMs: Date.parse(current.observedAt) - Date.now(), source: 'v2' };
   } catch (error) {
     transport.close();

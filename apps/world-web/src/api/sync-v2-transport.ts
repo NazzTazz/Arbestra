@@ -67,6 +67,8 @@ type Options = {
    * this receives the delay before the next attempt, then null once a read
    * succeeds again. */
   onScopeTooLarge?: (retryInMs: number | null) => void;
+  /** False for a one-shot read: no stream is opened (one per session). */
+  listen?: boolean;
 };
 
 const SCOPE_TOO_LARGE = 'SYNC_SCOPE_TOO_LARGE';
@@ -259,7 +261,7 @@ export class SyncV2Transport {
       }
       throw error;
     }
-    if (!this.closed && this.session === session) void this.listen();
+    if (!this.closed && this.session === session && this.options.listen !== false) void this.listen();
   }
   /** Applies a snapshot read's answer to `session`. A paged snapshot is read
    * to its last page, caught up by one delta from its first page's cursors,
