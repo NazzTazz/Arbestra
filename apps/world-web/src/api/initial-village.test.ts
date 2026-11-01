@@ -106,12 +106,12 @@ it('keeps retrying a saturated V2 server with a capped back-off, behind the load
     .mockRejectedValueOnce(busy())
     .mockRejectedValueOnce(busy())
     .mockRejectedValueOnce(busy())
-    .mockRejectedValueOnce(busy())
     .mockResolvedValueOnce(snapshot);
   let settled: unknown;
   const read = initialVillageRead().then((value) => (settled = value));
-  // Each failure waits its step before the next attempt: 1, 2, 5, 10, 20, 30, 30 s.
-  const steps = [...RECONNECT_BACKOFF_MS, RECONNECT_BACKOFF_MS.at(-1)!];
+  // Each failure waits its step before the next attempt: 1, 2, 5, 10, 20, 30 s;
+  // the seventh and last attempt succeeds.
+  const steps = [...RECONNECT_BACKOFF_MS];
   for (const [index, step] of steps.entries()) {
     await vi.advanceTimersByTimeAsync(step - 1);
     expect(v2.read, `attempt ${index + 1}`).toHaveBeenCalledTimes(index + 1);

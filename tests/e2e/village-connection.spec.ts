@@ -84,28 +84,28 @@ test('un serveur indisponible finit sur l’écran de connexion, qui réessaie s
       json: { code: 'INTERNAL_ERROR', message: 'Indisponible.' },
     });
   });
-  // The back-off (1, 2, 5, 10, 20 then 30 s, 30 attempts) runs on the page's own clock.
+  // The back-off (1, 2, 5, 10, 20 then 30 s, 7 attempts) runs on the page's own clock.
   await page.clock.install();
   await page.goto('http://localhost:5274/?world=aube');
   const screen = page.getByText('Connexion au village impossible.');
   await expect.poll(() => attempts, { timeout: 30_000 }).toBe(1);
   // Each failed attempt waits its step: jump over it, then wait for the next attempt.
-  while (attempts < 30) {
+  while (attempts < 7) {
     const before = attempts;
     await page.clock.fastForward(31_000);
     await expect.poll(() => attempts, { timeout: 15_000 }).toBeGreaterThan(before);
   }
   await expect(screen).toBeVisible();
-  expect(attempts).toBe(30);
+  expect(attempts).toBe(7);
   await expect(page.getByText('Nouvelle tentative automatique en cours.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Réessayer' })).toBeVisible();
   // The screen tries again by itself at the capped cadence...
   await page.clock.fastForward(31_000);
-  await expect.poll(() => attempts, { timeout: 15_000 }).toBe(31);
+  await expect.poll(() => attempts, { timeout: 15_000 }).toBe(8);
   await expect(screen).toBeVisible();
   // ...and at once when the player asks.
   await page.getByRole('button', { name: 'Réessayer' }).click();
-  await expect.poll(() => attempts, { timeout: 15_000 }).toBe(32);
+  await expect.poll(() => attempts, { timeout: 15_000 }).toBe(9);
   await expect(screen).toBeVisible();
   // The server is back: the next attempt opens the village.
   await page.unroute(BOOTSTRAP);

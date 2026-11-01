@@ -7,8 +7,9 @@ import { addressedWorld } from './world-address';
 
 export const requestedWorldSlug = addressedWorld ?? import.meta.env.VITE_DEFAULT_WORLD_SLUG ?? 'aube';
 /** Beyond this the loading screen gives way to the "connection impossible"
- * screen, whose own retries then continue at the capped cadence. */
-export const INITIAL_READ_ATTEMPTS = 30;
+ * screen, whose own retries then continue at the capped cadence. Seven
+ * attempts wait 1+2+5+10+20+30 s: about one minute (Tristan, 1 November). */
+export const INITIAL_READ_ATTEMPTS = 7;
 let initial: Promise<TimedVillageState> | undefined;
 // The first state of the village comes from V2 alone. A busy or failing server
 // is retried behind the loading screen with a capped back-off (a presentation
