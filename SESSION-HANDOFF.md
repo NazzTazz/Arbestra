@@ -23,9 +23,9 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
-- **NOC sur les lecteurs V2** (1er novembre) : observation sans révision COUNT ni `state()` par commit ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) ; page d'observation à vérifier par Tristan (session administrateur).
+Aucune tranche en attente.
 
-Validés le 1er novembre sur dev : installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).
+Validés le 1er novembre sur dev : NOC sur les lecteurs V2 (récolte en cours et villageois visibles), installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).
 
 Validés le 30 octobre sur staging : pagination du snapshot privé, énergie et repos par le worker. Validés le 30 octobre sur dev : routes à la case S1, S2a-d, ancrages S4a-b, conversion des routes S3 (076), exploitation des jardins sans `state()` (5a), image longue après publication V2 et réconciliation paresseuse, journal des parcours et page « Parcours » du NOC (A, C).
 
