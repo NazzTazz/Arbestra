@@ -94,7 +94,9 @@ export function planInstallation(
     : field;
   const samples = new Map<string, ReturnType<typeof sample>>();
   function sample(x: number, y: number): { elevation: number; dry: boolean; blocked: boolean } {
-    const v = walkingField.sample(x, y),
+    // Elevation and water only: the full sample also evaluates climate and
+    // geology at every substep (95% of a planned installation's time).
+    const v = walkingField.physicalSample(x, y),
       s = { x, y, halfWidth: 0, halfHeight: 0 };
     return {
       elevation: !map.vertices && under(s) ? terrain.referenceHeight : v.elevation,
