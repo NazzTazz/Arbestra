@@ -39,10 +39,12 @@ import {
   ExtractionPoolCommandSchema,
   PopulationGestureSchema,
   HudWorkforceConfirmationSchema,
+  HudWorkforceConfirmationV2Schema,
   type ExtractionPoolCommand,
+  type HudWorkforceIntent,
   type PopulationGesture,
 } from '@arbestra/contracts';
-import { commandHudWorkforce } from './hud-workforce.js';
+import { commandHudWorkforce, commandHudWorkforceV2 } from './hud-workforce.js';
 import { ScienceCommandSchema, type ScienceCommand } from '@arbestra/contracts';
 import { commandVillageScience } from './service.js';
 import { ProcessingCommandSchema, ProcessingPreviewSchema, type ProcessingCommand } from '@arbestra/contracts';
@@ -194,37 +196,42 @@ export async function registerVillageRoutes(
     observationCommitted(request);
     return reply.serializer(JSON.stringify).send(confirmation);
   };
+  // Workforce HUD gestures: the V2 contract (result and private effects) when
+  // the client asks for it; the historical answer only without the header.
+  const hudGesture = async (request: FastifyRequest, reply: FastifyReply, intent: HudWorkforceIntent) => {
+    const account = await authenticate(db, request.cookies[config.cookieName]);
+    const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
+    if (request.headers['x-arbestra-protocol'] === '2') {
+      await assertSyncV2Available(db);
+      const confirmation = await commandHudWorkforceV2(
+        db,
+        account.id,
+        worldSlug,
+        villageId,
+        intent,
+        Number(request.headers['x-arbestra-generation'] ?? '0'),
+      );
+      observationCommitted(request);
+      return reply.serializer(JSON.stringify).send(confirmation);
+    }
+    const result = await commandHudWorkforce(db, account.id, worldSlug, villageId, intent);
+    observationCommitted(request);
+    return result;
+  };
+  const hudSchema = {
+    params: VillageParametersSchema,
+    headers: VillageCommandV2HeadersSchema,
+    response: { 200: Type.Union([hudResponse, HudWorkforceConfirmationV2Schema]) },
+  };
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/extraction-pools',
-    {
-      schema: { params: VillageParametersSchema, body: ExtractionPoolCommandSchema, response: { 200: hudResponse } },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const result = await commandHudWorkforce(db, account.id, worldSlug, villageId, {
-        kind: 'pool',
-        command: request.body as ExtractionPoolCommand,
-      });
-      observationCommitted(request);
-      return result;
-    },
+    { schema: { ...hudSchema, body: ExtractionPoolCommandSchema } },
+    (request, reply) => hudGesture(request, reply, { kind: 'pool', command: request.body as ExtractionPoolCommand }),
   );
   app.post(
     '/api/worlds/:worldSlug/villages/:villageId/population/gestures',
-    {
-      schema: { params: VillageParametersSchema, body: PopulationGestureSchema, response: { 200: hudResponse } },
-    },
-    async (request) => {
-      const account = await authenticate(db, request.cookies[config.cookieName]);
-      const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      const result = await commandHudWorkforce(db, account.id, worldSlug, villageId, {
-        kind: 'population',
-        command: request.body as PopulationGesture,
-      });
-      observationCommitted(request);
-      return result;
-    },
+    { schema: { ...hudSchema, body: PopulationGestureSchema } },
+    (request, reply) => hudGesture(request, reply, { kind: 'population', command: request.body as PopulationGesture }),
   );
   const commandResponse = async (
     reply: FastifyReply,

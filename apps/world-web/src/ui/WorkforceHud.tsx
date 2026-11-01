@@ -9,10 +9,11 @@ import {
   type VillageState,
   type HudWorkforceIntent,
 } from '@arbestra/contracts';
-import { ApiError, commandHudWorkforce } from '../api/client';
+import { ApiError } from '../api/client';
+import { SyncV2HttpError } from '../api/sync-v2-transport';
 import { randomUUID } from '../random-uuid';
 import { BuildingThumbnail } from './BuildingThumbnail';
-import { HudIntentQueue, hudFromVillage, requestedPools, canAdjustPool } from './hud-intents';
+import { HudIntentQueue, hudFromVillage, requestedPools, canAdjustPool, type HudSettlement } from './hud-intents';
 import './workforce-hud.css';
 import { woodQueueCounts } from '../scene/wood-queue';
 import { woodQueueLine } from './PlayerPanels';
@@ -33,10 +34,14 @@ const acceptsDrop = (from: Source, to: Source) =>
 
 export function WorkforceHud({
   state,
+  command,
   view,
   onConfirmed,
 }: {
   state: VillageState;
+  /** Sends one gesture; null while the synchronization is not ready to take it
+   * (saved gestures then wait, nothing is attempted). */
+  command: ((intent: HudWorkforceIntent) => Promise<HudSettlement>) | null;
   view: 'population' | 'wood' | 'stone' | 'pools' | null;
   onConfirmed: () => void;
 }) {
@@ -66,8 +71,8 @@ export function WorkforceHud({
       window.removeEventListener('blur', cancel);
     };
   }, [view, state.world.id, state.village.id]);
-  const latest = useRef({ onConfirmed, state });
-  latest.current = { onConfirmed, state };
+  const latest = useRef({ onConfirmed, state, command });
+  latest.current = { onConfirmed, state, command };
   const queue = useRef<HudIntentQueue | null>(null);
   useEffect(() => {
     let live = true;
@@ -89,7 +94,11 @@ export function WorkforceHud({
       /* Storage is optional; commands remain in memory. */
     }
     const q = new HudIntentQueue(confirmed, initial, {
-      send: (intent) => commandHudWorkforce(state.world.slug, state.village.id, intent),
+      send: (intent) => {
+        const run = latest.current.command;
+        if (!run) throw Error('Synchronisation indisponible.');
+        return run(intent);
+      },
       save: (pending) => {
         try {
           sessionStorage.setItem(key, JSON.stringify(pending));
@@ -113,16 +122,17 @@ export function WorkforceHud({
                 : `Relève demandée pour ${people}`,
           );
         else setNotice('Consigne confirmée · prochain départ.');
-        if (!q.items.length) q.synchronize(hudFromVillage(latest.current.state));
+        if (!q.items.length) {
+          const current = latest.current.state;
+          q.synchronize(hudFromVillage(current), current.syncRevision !== undefined);
+        }
       },
       failed: (error) => {
-        if (live)
-          setNotice(error instanceof ApiError ? error.message : 'Connexion interrompue. Vos gestes sont conservés.');
+        // A refusal by the server: through the historical route or the V2 stream's.
+        const refusal = error instanceof ApiError || error instanceof SyncV2HttpError ? error : null;
+        if (live) setNotice(refusal ? refusal.message : 'Connexion interrompue. Vos gestes sont conservés.');
         return (
-          error instanceof ApiError &&
-          error.status >= 400 &&
-          error.status < 500 &&
-          ![401, 403, 408, 429].includes(error.status)
+          !!refusal && refusal.status >= 400 && refusal.status < 500 && ![401, 403, 408, 429].includes(refusal.status)
         );
       },
     });
@@ -131,7 +141,8 @@ export function WorkforceHud({
     };
     queue.current = q;
     refresh((n) => n + 1);
-    void q.pump();
+    // Gestures saved before a reload wait for the synchronization (the effect below).
+    if (latest.current.command) void q.pump();
     window.addEventListener('online', reconnect);
     window.addEventListener('focus', reconnect);
     return () => {
@@ -145,6 +156,10 @@ export function WorkforceHud({
   useEffect(() => {
     queue.current?.synchronize(hudFromVillage(state), state.syncRevision !== undefined);
   }, [state]);
+  // The synchronization became ready: send what was waiting for it.
+  useEffect(() => {
+    if (command) queue.current?.retry();
+  }, [command]);
   const send = (intent: HudWorkforceIntent) => {
     try {
       queue.current?.add(intent);

@@ -22,6 +22,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
+- **HUD des habitants au contrat V2** (lot I.1, sans migration) : glisser-déposer Population et Chantiers, rechargement avec gestes en attente, deux onglets ([inventaire du lot I](docs/INVENTAIRE-LOT-I-2026-11-01.md)) ; recette navigateur demandée.
 - **Reçus d'expédition et de récolte par le flux V2** (migration 079, dev) : « +500 » et reçus d'expédition dès l'écriture du worker, plus de sondage ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) ; recette navigateur demandée.
 
 Validés le 1er novembre sur dev : NOC sur les lecteurs V2 (récolte en cours et villageois visibles), installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).

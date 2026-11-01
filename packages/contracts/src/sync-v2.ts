@@ -11,7 +11,7 @@ import {
   ExtractionSchema,
   ExtractionWorksiteSchema,
 } from './villages.js';
-import { ExtractionPoolSchema } from './hud-workforce.js';
+import { ExtractionPoolSchema, HudWorkforceResultSchema } from './hud-workforce.js';
 import { ExploitationOrderSchema, HarvestReceiptSchema } from './exploitation.js';
 import { ExpeditionReceiptSchema } from './expeditions.js';
 import { MarketExchangeSchema, TradeOfferSchema, MarketJourneySchema } from './market.js';
@@ -534,6 +534,26 @@ export const RoadAnchorsConfirmationV2Schema = Type.Object(
   { additionalProperties: false },
 );
 export type RoadAnchorsConfirmationV2 = Static<typeof RoadAnchorsConfirmationV2Schema>;
+/** Workforce HUD gesture (extraction pools, population): the result and the
+ * private effects of the commit (cohorts, resources, pools, worksites). A
+ * replay answers from the receipt: same result, no effects, and the instant
+ * of the replay (the receipt keeps no date). */
+export const HudWorkforceConfirmationV2Schema = Type.Object(
+  {
+    protocol: Type.Literal(2),
+    worldId: id,
+    villageId: id,
+    commandId: id,
+    status: Type.Literal('applied'),
+    commandTime: time,
+    result: HudWorkforceResultSchema,
+    effects: Type.Optional(SyncV2BatchSchema),
+  },
+  { additionalProperties: false },
+);
+export type HudWorkforceConfirmationV2 = Static<typeof HudWorkforceConfirmationV2Schema>;
+export const hudWorkforceConfirmationV2IsValid = (value: unknown): value is HudWorkforceConfirmationV2 =>
+  Value.Check(HudWorkforceConfirmationV2Schema, value);
 export const villageCommandConfirmationV2IsValid = (value: unknown): value is VillageCommandConfirmationV2 =>
   Value.Check(VillageCommandConfirmationV2Schema, value);
 export const constructionConfirmationV2IsValid = (value: unknown): value is ConstructionConfirmationV2 =>

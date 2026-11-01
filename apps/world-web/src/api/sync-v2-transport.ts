@@ -10,7 +10,10 @@ import {
   villagePresentationIsValid,
   constructionConfirmationV2IsValid,
   villageCommandConfirmationV2IsValid,
+  hudWorkforceConfirmationV2IsValid,
   type ConstructionConfirmationV2,
+  type HudWorkforceConfirmationV2,
+  type HudWorkforceIntent,
   type ExploitationRequest,
   type ChangeExtractionWorksiteRequest,
   type ScienceCommand,
@@ -45,6 +48,7 @@ import {
 export { SyncV2HttpError };
 
 let nextGeneration = 0;
+const HUD_TIMEOUT_MS = 15_000;
 
 /** Opt-in server phases (Server-Timing) for diagnosing a gesture, production
  * included: localStorage arbestra:timing=1, then the browser's Network tab. */
@@ -161,7 +165,7 @@ export class SyncV2Transport {
       await this.request(this.root + path, {
         credentials: 'same-origin',
         ...init,
-        signal: this.controller.signal,
+        signal: init.signal ? AbortSignal.any([this.controller.signal, init.signal]) : this.controller.signal,
         headers: {
           'content-type': 'application/json',
           'x-arbestra-protocol': '2',
@@ -571,6 +575,27 @@ export class SyncV2Transport {
   /** Player market (publish, cancel, accept, oracle) with its receipt UUID. */
   trade(command: TradeCommand): Promise<VillageCommandConfirmationV2> {
     return this.gesture('/market/trades', command.commandId, command);
+  }
+  /** Workforce HUD gesture (extraction pool or population): the UUID is the
+   * command's own. Its private effects update the session at once, so the
+   * caller reads the confirmed state there; a replay answers without effects.
+   * Bounded, like the historical route: a hung request must not stall the queue. */
+  async hudWorkforce(intent: HudWorkforceIntent): Promise<HudWorkforceConfirmationV2> {
+    if (this.closed || !this.session) throw Error('Synchronisation indisponible.');
+    const input = await this.json(intent.kind === 'pool' ? '/extraction-pools' : '/population/gestures', {
+      method: 'POST',
+      body: JSON.stringify(intent.command),
+      signal: AbortSignal.timeout(HUD_TIMEOUT_MS),
+    });
+    if (
+      !hudWorkforceConfirmationV2IsValid(input) ||
+      input.commandId !== intent.command.commandId ||
+      input.worldId !== this.worldId ||
+      input.villageId !== this.villageId
+    )
+      throw Error('Confirmation de geste invalide.');
+    this.applyEffects(input.effects);
+    return input;
   }
   /** Pause, resume, stop or cap change of an extraction worksite. */
   changeWorksite(worksiteId: string, change: ChangeExtractionWorksiteRequest): Promise<VillageCommandConfirmationV2> {

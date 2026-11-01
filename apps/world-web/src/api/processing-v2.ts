@@ -6,6 +6,8 @@ import {
   VILLAGE_PRESENTATION_COMPONENTS,
   type ExpeditionReceipt,
   type HarvestReceipt,
+  type HudWorkforceIntent,
+  type HudWorkforceState,
   type ProcessingCommand,
   type ProcessingOrder,
   type ResolvedVillagePresentation,
@@ -13,11 +15,13 @@ import {
   type SyncV2ExpeditionReceipt,
   type SyncV2HarvestReceipt,
   type SyncV2State,
+  type VillageState,
 } from '@arbestra/contracts';
 import type { TimedVillageState } from './client';
 import { SyncV2Transport } from './sync-v2-transport';
 import { SyncV2SessionExpired } from './sync-v2-session';
 import { adoptInitialSyncV2, SYNC_V2_VILLAGE_INCLUDE } from './sync-v2-initial';
+import { hudFromVillage, type HudSettlement } from '../ui/hud-intents';
 
 /** Newest first, like the historical snapshot. The private stream keeps
  * terminal orders as values, so the latest outcome stays displayable. */
@@ -203,6 +207,8 @@ export function useVillageSyncV2({
   const accept = useRef(onState);
   accept.current = onState;
   const placed = useRef<(placement: ConfirmedPlacement) => void>(() => undefined);
+  // The workforce HUD's basis after a confirmed gesture, read from the session.
+  const hudBasis = useRef<(owner: SyncV2Transport) => HudWorkforceState | null>(() => null);
   useEffect(() => {
     if (!enabled || !worldId || !villageId) {
       setStatus('off');
@@ -210,6 +216,8 @@ export function useVillageSyncV2({
     }
     let presentation: ResolvedVillagePresentation | null = null,
       latest: { state: SyncV2State; observedAt: string } | null = null;
+    // The village state projected from `latest`, kept for the workforce HUD.
+    let projection: { source: object; state: VillageState } | null = null;
     // Highest private-stream revision a requested presentation read already
     // covers: the stream echo of an acknowledged command needs no second read.
     let covered: bigint | null = null;
@@ -229,6 +237,7 @@ export function useVillageSyncV2({
       if (!presentation || !latest || transport.current !== current) return;
       const projected = villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
       if (!projected) return;
+      projection = { source: latest, state: projected };
       accept.current({ state: projected, serverOffsetMs: Date.parse(latest.observedAt) - Date.now(), source: 'v2' });
       setVillageReady(true);
     };
@@ -270,6 +279,17 @@ export function useVillageSyncV2({
         loading = false;
       }
       emit();
+    };
+    // The session already holds a confirmed gesture's effects (applied before
+    // its promise settles): the HUD basis is the state the session has now, at
+    // the session's latest instant, whether or not it has been displayed yet.
+    hudBasis.current = (owner) => {
+      if (!latest || !presentation || transport.current !== owner) return null;
+      const village =
+        projection?.source === latest
+          ? projection.state
+          : villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
+      return village ? hudFromVillage(village) : null;
     };
     // A confirmed placement shows at once; the pending read replaces it.
     placed.current = (placement) => {
@@ -410,6 +430,18 @@ export function useVillageSyncV2({
     if (!current) throw Error('Synchronisation indisponible.');
     return current.expand(buildingId, body);
   }, []);
+  const hudWorkforce = useCallback(async (intent: HudWorkforceIntent): Promise<HudSettlement> => {
+    const current = transport.current;
+    if (!current) throw Error('Synchronisation indisponible.');
+    const confirmation = await current.hudWorkforce(intent);
+    const hud = hudBasis.current(current);
+    return {
+      commandId: confirmation.commandId,
+      affected: confirmation.result.affected,
+      carrots: confirmation.result.carrots,
+      ...(hud ? { hud } : {}),
+    };
+  }, []);
   const science = useCallback((command: Parameters<SyncV2Transport['science']>[0]) => {
     const current = transport.current;
     if (!current) throw Error('Synchronisation indisponible.');
@@ -492,6 +524,7 @@ export function useVillageSyncV2({
     discoverCatEyes,
     exploit,
     trade,
+    hudWorkforce,
     changeWorksite,
     roadCells,
     demolish,

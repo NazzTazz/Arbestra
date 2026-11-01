@@ -78,6 +78,15 @@ export const hudWorkforceIntentIsValid = (value: unknown): value is HudWorkforce
     ? Value.Check(ExtractionPoolCommandSchema, value.command)
     : value.kind === 'population' && Value.Check(PopulationGestureSchema, value.command);
 };
+/** What a gesture changed: inhabitants affected and carrots eaten. */
+export const HudWorkforceResultSchema = Type.Object(
+  { affected: Count, carrots: Count },
+  { additionalProperties: false },
+);
+export type HudWorkforceResult = Static<typeof HudWorkforceResultSchema>;
+/** Historical answer (no V2 protocol header): the result with a scoped state
+ * fenced by the world's COUNT revision. The V2 answer is
+ * `HudWorkforceConfirmationV2Schema` (sync-v2.ts): the result and the private effects. */
 export const HudWorkforceConfirmationSchema = Type.Object({
   commandId: CommandId,
   affected: Count,

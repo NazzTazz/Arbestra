@@ -8,6 +8,15 @@ import {
   type VillageState,
 } from '@arbestra/contracts';
 
+/**
+ * What a settled gesture gives back. `hud` is the authoritative state right
+ * after it: the historical route sends it fenced by `minimumRevision`; on V2 it
+ * is read from the stream session once the confirmation's effects are applied,
+ * ordered by the session's own instants. Absent when that state cannot be
+ * projected yet: the previous basis stays until a newer village state replaces it.
+ */
+export type HudSettlement = Omit<HudWorkforceConfirmation, 'hud'> & { hud?: HudWorkforceState };
+
 export interface SavedHudIntents {
   confirmed: HudWorkforceState;
   items: HudWorkforceIntent[];
@@ -92,10 +101,10 @@ export function canAdjustPool(
 }
 
 interface QueueIO {
-  send: (intent: HudWorkforceIntent) => Promise<HudWorkforceConfirmation>;
+  send: (intent: HudWorkforceIntent) => Promise<HudSettlement>;
   save: (pending: SavedHudIntents) => void;
   changed: () => void;
-  settled: (intent: HudWorkforceIntent, result: HudWorkforceConfirmation) => void;
+  settled: (intent: HudWorkforceIntent, result: HudSettlement) => void;
   failed: (error: unknown) => boolean;
 }
 
@@ -119,9 +128,12 @@ export class HudIntentQueue {
     this.io.save({ confirmed: this.confirmed, items: this.items });
   }
   /**
-   * `revisioned` is false for a V2 village state: it has no V1 revision to
-   * compare with a confirmation's, so only its server time orders it. A batch
-   * read just before a gesture's commit may then hide it until the next batch.
+   * Adopts a newer village state as the basis, only while no gesture is pending.
+   * `revisioned` is false for a V2 village state (the only kind once the
+   * historical stream is gone): it has no COUNT revision and orders itself by
+   * the instant its session observed it. The basis a V2 gesture leaves is
+   * stamped with the session's latest instant, so a state observed before the
+   * confirmation never replaces it.
    */
   synchronize(next: HudWorkforceState, revisioned = true) {
     if (
@@ -165,11 +177,11 @@ export class HudIntentQueue {
           if (this.stopped) return;
           if (
             result.commandId !== intent.command.commandId ||
-            result.hud.worldId !== this.confirmed.worldId ||
-            result.hud.villageId !== this.confirmed.villageId
+            (result.hud &&
+              (result.hud.worldId !== this.confirmed.worldId || result.hud.villageId !== this.confirmed.villageId))
           )
             throw Error('Confirmation de geste incohérente.');
-          this.confirmed = result.hud;
+          if (result.hud) this.confirmed = result.hud;
           this.items.shift();
           this.#attempts = 0;
           this.#save();

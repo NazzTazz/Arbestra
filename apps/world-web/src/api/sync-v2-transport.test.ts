@@ -891,3 +891,133 @@ it('keeps a village within one page on a single complete snapshot, asking for pa
     transport.close();
   }
 });
+
+it('sends workforce HUD gestures on the V2 contract, applies their effects and refuses a foreign or refused one', async () => {
+  const pool = {
+      commandId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      resource: 'wood' as const,
+      action: 'sites-up' as const,
+    },
+    meal = {
+      commandId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      action: 'feed' as const,
+      group: 'idle' as const,
+    };
+  const sent: Array<{ path: string; protocol: string | null; generation: string | null; body: unknown }> = [];
+  const signals: AbortSignal[] = [];
+  let mode: 'effects' | 'replay' | 'foreign' | 'refused' = 'effects';
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream'))
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    const headers = new Headers(init?.headers);
+    const generation = Number(headers.get('x-arbestra-generation'));
+    if (String(url).endsWith('/sync/read')) return json(bootstrap(generation));
+    const body = JSON.parse(String(init?.body)) as { commandId: string };
+    sent.push({
+      path: String(url).replace(/.*villages\/[^/]+/, ''),
+      protocol: headers.get('x-arbestra-protocol'),
+      generation: headers.get('x-arbestra-generation'),
+      body,
+    });
+    signals.push(init!.signal!);
+    if (mode === 'refused') return json({ code: 'CARROTS_INSUFFICIENT', message: '25 carottes nécessaires.' }, 409);
+    return json({
+      protocol: 2,
+      worldId,
+      villageId: mode === 'foreign' ? worldId : villageId,
+      commandId: body.commandId,
+      status: 'applied',
+      commandTime: '2026-11-01T00:00:01.000Z',
+      result: { affected: 25, carrots: 25 },
+      ...(mode === 'replay'
+        ? {}
+        : {
+            effects: {
+              protocol: 2,
+              worldId,
+              villageId,
+              generation,
+              observedAt: '2026-11-01T00:00:01.000Z',
+              coverage: 'effects',
+              groups: [
+                {
+                  stream: { kind: 'village', key: villageId, epoch },
+                  fromRevision: '5',
+                  toRevision: '5',
+                  changes: [
+                    {
+                      component: 'extractionPools',
+                      upsert: [
+                        {
+                          resource: 'wood',
+                          siteCount: 2,
+                          workerCap: 5,
+                          mobilized: 0,
+                          activeSites: 0,
+                          pendingTargets: 0,
+                        },
+                      ],
+                      remove: [],
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+    });
+  };
+  const published: Array<{ batch: SyncV2Batch }> = [];
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    publish: (_state, _at, batch) => published.push({ batch }),
+    expired: () => undefined,
+  });
+  const poolsOf = (state: SyncV2State) =>
+    [...visibleSyncV2Scope(state.scopes.get(`village:${villageId}`)!)]
+      .filter(([key]) => key.startsWith('extractionPools:'))
+      .map(([, value]) => value);
+  try {
+    await transport.start(true);
+    expect(poolsOf(transport.snapshot!)).toEqual([]);
+    // The command's own UUID travels in its body; the protocol and the generation in the headers.
+    const confirmation = await transport.hudWorkforce({ kind: 'pool', command: pool });
+    expect(confirmation).toMatchObject({ commandId: pool.commandId, status: 'applied', result: { carrots: 25 } });
+    expect(sent.at(-1)).toEqual({
+      path: '/extraction-pools',
+      protocol: '2',
+      generation: String(transport.generation),
+      body: pool,
+    });
+    // The effects are in the session when the promise settles, with no second read.
+    expect(published.at(-1)!.batch.coverage).toBe('effects');
+    expect(poolsOf(transport.snapshot!)).toMatchObject([{ resource: 'wood', siteCount: 2 }]);
+    // A population gesture takes the other route; a replay carries no effects and applies nothing.
+    mode = 'replay';
+    const published0 = published.length;
+    await expect(transport.hudWorkforce({ kind: 'population', command: meal })).resolves.toMatchObject({
+      commandId: meal.commandId,
+      result: { affected: 25, carrots: 25 },
+    });
+    expect(sent.at(-1)).toMatchObject({ path: '/population/gestures', body: meal });
+    expect(published).toHaveLength(published0);
+    // The request is bounded and ends with the transport.
+    expect(signals.at(-1)!.aborted).toBe(false);
+    // A confirmation of another village, and a refusal, are never taken for the gesture.
+    mode = 'foreign';
+    await expect(transport.hudWorkforce({ kind: 'population', command: meal })).rejects.toThrow(
+      'Confirmation de geste invalide.',
+    );
+    mode = 'refused';
+    await expect(transport.hudWorkforce({ kind: 'population', command: meal })).rejects.toMatchObject({
+      status: 409,
+      code: 'CARROTS_INSUFFICIENT',
+    });
+  } finally {
+    transport.close();
+  }
+  expect(signals.every((signal) => signal.aborted)).toBe(true);
+  await expect(transport.hudWorkforce({ kind: 'pool', command: pool })).rejects.toThrow(
+    'Synchronisation indisponible.',
+  );
+});

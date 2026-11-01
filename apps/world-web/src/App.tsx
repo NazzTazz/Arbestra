@@ -40,7 +40,14 @@ import type { InhabitantCameraMode } from './scene/inhabitant-camera';
 import { constructionContext, upgradePreview, sameUpgradeQuote, type UpgradePreview } from './ui/construction-intent';
 import { discoverCatEyes } from './api/client';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { BuildingType, ConstructionConfirmation, DepositDetails, Garden, VillageState } from '@arbestra/contracts';
+import type {
+  BuildingType,
+  ConstructionConfirmation,
+  DepositDetails,
+  Garden,
+  HudWorkforceIntent,
+  VillageState,
+} from '@arbestra/contracts';
 import type { TerrainHandle } from './scene/VillageScene';
 import type { TerrainViewMode } from './scene/BabylonVillageScene';
 
@@ -48,6 +55,7 @@ import {
   ApiError,
   buildBuilding,
   changeWorksite,
+  commandHudWorkforce,
   discoverOrRefreshSupplies,
   expandGarden,
   getStoneDepositDetails,
@@ -88,6 +96,7 @@ import type { TerrainEditGesture } from '@arbestra/contracts';
 import { mergeTerraformVisuals } from './ui/terraform-draft';
 import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
+import type { HudSettlement } from './ui/hud-intents';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
 import { commandScience } from './api/client';
@@ -492,6 +501,24 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     trade: villageV2.trade,
     changeWorksite: villageV2.changeWorksite,
   };
+  // Workforce HUD gestures follow the village's synchronization: on V2 they wait
+  // for the stream (a gesture saved before a reload is replayed once it is ready,
+  // never through the historical route), and the historical routes serve only a
+  // client that runs without V2 or whose V2 could not start.
+  const hudSlug = state?.world.slug,
+    hudVillageId = state?.village.id;
+  const hudHistorical = !villageV2Mode || villageV2.status === 'unavailable';
+  const hudCommand = useMemo<((intent: HudWorkforceIntent) => Promise<HudSettlement>) | null>(
+    () =>
+      hudHistorical
+        ? hudSlug && hudVillageId
+          ? (intent) => commandHudWorkforce(hudSlug, hudVillageId, intent)
+          : null
+        : villageV2.villageReady
+          ? villageV2.hudWorkforce
+          : null,
+    [hudHistorical, hudSlug, hudVillageId, villageV2.villageReady, villageV2.hudWorkforce],
+  );
   const discoverEyes = useCallback(async () => {
     const current = stateRef.current;
     if (!current || catRequest.current || current.village.accomplishments.some((item) => item.code === 'cat-eyes'))
@@ -2383,6 +2410,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         <WorkforceHud
           key={`${state.world.id}:${state.village.id}`}
           state={state}
+          command={hudCommand}
           onConfirmed={markOracleProgress}
           view={
             paletteCollapsed || terrainView !== 'village' || arrivalActive || beforeTownHall || showDev
