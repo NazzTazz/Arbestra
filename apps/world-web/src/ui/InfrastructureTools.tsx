@@ -15,7 +15,6 @@ import {
   type RoadCellsResult,
   type VillageState,
 } from '@arbestra/contracts';
-import type { TimedVillageUpdate, TimedInfrastructureConfirmation } from '../api/client';
 import type { TerrainHandle } from '../scene/VillageScene';
 import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { InfrastructureThumbnail } from './InfrastructureThumbnail';
@@ -70,9 +69,6 @@ export function InfrastructureTools({
   active: boolean;
   roadCells: RoadCellsApi | null;
   roadAnchors: RoadAnchorsApi | null;
-  /** Legacy stroke plan answers, unused since the lighting tool moved to anchors (S4b); removed with S3. */
-  onSnapshot?: (s: TimedVillageUpdate) => void;
-  onConfirmation?: (s: TimedInfrastructureConfirmation) => void;
   onWorkshop: () => void;
 }) {
   const [family, setFamily] = useState('Voirie'),

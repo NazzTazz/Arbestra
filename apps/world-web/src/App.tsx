@@ -6,12 +6,6 @@ import { useHarvestTool } from './ui/use-harvest-tool';
 import { applyVillageFrame, latestVillageSnapshot, reconcileVillageSnapshot } from '@arbestra/contracts';
 import { VillageSynchronization, villageRequestGeneration } from './api/village-sync';
 import {
-  acceptInfrastructurePresentation,
-  currentInfrastructurePresentation,
-  infrastructurePresentationState,
-  type InfrastructurePresentation,
-} from './api/infrastructure-presentation';
-import {
   acceptConstructionPresentation,
   currentConstructionPresentation,
   constructionPresentationState,
@@ -62,7 +56,6 @@ import {
   getVillage,
   type TimedVillageState,
   type TimedVillageUpdate,
-  type TimedInfrastructureConfirmation,
   upgradeBuilding,
 } from './api/client';
 import {
@@ -185,36 +178,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   const observationActive = useObservationPublisher(starterActive ? null : canonicalState);
   const stateRef = useRef<VillageState | null>(starter?.state ?? null);
   const synchronization = useRef<VillageSynchronization | null>(null);
-  const [infrastructurePresentation, setInfrastructurePresentation] = useState<InfrastructurePresentation | null>(null);
-  const infrastructurePresentationRef = useRef<InfrastructurePresentation | null>(null);
-  const sceneState = useMemo(
-    () => (state ? infrastructurePresentationState(state, infrastructurePresentation) : null),
-    [state, infrastructurePresentation],
-  );
-  const applyInfrastructureConfirmation = useCallback((update: TimedInfrastructureConfirmation) => {
-    const current = stateRef.current;
-    if (!current) return;
-    // V2 publishes the committed plan itself; no V1-fenced overlay.
-    if (villageV2Ref.current.ready) {
-      villageV2Ref.current.refresh();
-      return;
-    }
-    const result = acceptInfrastructurePresentation(
-      current,
-      infrastructurePresentationRef.current,
-      update.confirmation,
-      update.requestGeneration,
-      villageRequestGeneration(),
-    );
-    if (result.kind === 'resync') {
-      synchronization.current?.reconnect();
-      return;
-    }
-    if (result.kind === 'applied') {
-      infrastructurePresentationRef.current = result.presentation;
-      setInfrastructurePresentation(result.presentation);
-    }
-  }, []);
   const refreshFlight = useRef<Promise<void> | null>(null);
   const initialFlight = useRef<Promise<TimedVillageState> | null>(null);
   const offsetRef = useRef(0);
@@ -410,11 +373,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         // Same pair as the "+N": the column rises with the credited amounts.
         const deliveries = completedMarketTransactions(previous, snapshot.state);
         if (deliveries) terrainRef.current?.marketBeacon(deliveries);
-        const presentation = currentInfrastructurePresentation(snapshot.state, infrastructurePresentationRef.current);
-        if (presentation !== infrastructurePresentationRef.current) {
-          infrastructurePresentationRef.current = presentation;
-          setInfrastructurePresentation(presentation);
-        }
         const confirmed = currentConstructionPresentation(snapshot.state, constructionPresentationRef.current);
         if (confirmed !== constructionPresentationRef.current) {
           constructionPresentationRef.current = confirmed;
@@ -2112,7 +2070,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
             }
             onEyesFound={() => void discoverEyes()}
             onArrivalActive={setArrivalActive}
-            state={sceneState ?? state}
+            state={state}
             serverOffsetMs={serverOffsetMs}
             terrainRef={terrainRef}
             pendingHarvestCells={worldMode === 'exploitation' ? pendingHarvestCells : NO_PENDING_HARVESTS}
@@ -2704,7 +2662,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
               }}
               demolition={(active) => (
                 <DemolitionTool
-                  state={sceneState ?? state}
+                  state={state}
                   scene={terrainRef}
                   ready={Boolean(demolish)}
                   pending={Boolean(pendingDemolition.pending)}
@@ -2714,7 +2672,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
               )}
               infrastructure={
                 <InfrastructureTools
-                  state={sceneState ?? state}
+                  state={state}
                   scene={terrainRef}
                   active={
                     worldMode === 'construction' &&
@@ -2726,8 +2684,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                   }
                   roadCells={roadCellsApi}
                   roadAnchors={roadAnchorsApi}
-                  onSnapshot={applySnapshot}
-                  onConfirmation={applyInfrastructureConfirmation}
                   onWorkshop={() => {
                     clearPreview();
                     cancelWorldGesture();

@@ -89,8 +89,6 @@ import {
   constructionConfirmationIsValid,
   type ConstructionConfirmation,
   villageCommandResponseIsValid,
-  infrastructureConfirmationIsValid,
-  type InfrastructureConfirmation,
   type VillageFrame,
   type VillageSyncBase,
 } from '@arbestra/contracts';
@@ -296,11 +294,6 @@ export interface TimedConstructionConfirmation {
   requestGeneration: number;
 }
 export type TimedConstructionUpdate = TimedVillageUpdate | TimedConstructionConfirmation;
-export interface TimedInfrastructureConfirmation {
-  confirmation: InfrastructureConfirmation;
-  requestGeneration: number;
-}
-export type TimedInfrastructureUpdate = TimedVillageUpdate | TimedInfrastructureConfirmation;
 
 async function villageRequest(request: Promise<Response>, requestedAt: number): Promise<TimedVillageState> {
   const requestGeneration = villageRequestGeneration();
@@ -324,27 +317,20 @@ function requestVillageCommandState(
   path: string,
   init: RequestInit,
   base: VillageSyncBase | undefined,
-  confirmation: true,
-): Promise<TimedInfrastructureUpdate>;
-function requestVillageCommandState(
-  path: string,
-  init: RequestInit,
-  base: VillageSyncBase | undefined,
   confirmation: { commandId: string; villageId: string },
 ): Promise<TimedConstructionUpdate>;
 async function requestVillageCommandState(
   path: string,
   init: RequestInit,
   base?: VillageSyncBase,
-  confirmation: boolean | { commandId: string; villageId: string } = false,
-): Promise<TimedInfrastructureUpdate | TimedConstructionConfirmation> {
+  confirmation: { commandId: string; villageId: string } | false = false,
+): Promise<TimedVillageUpdate | TimedConstructionConfirmation> {
   const requestedAt = Date.now(),
     requestGeneration = villageRequestGeneration();
   const headers = {
     ...init.headers,
     'x-village-sync': '1',
-    ...(confirmation === true ? { 'x-infrastructure-confirmation': '1' } : {}),
-    ...(typeof confirmation === 'object' ? { 'x-construction-confirmation': '1' } : {}),
+    ...(confirmation ? { 'x-construction-confirmation': '1' } : {}),
     ...(base
       ? {
           'x-village-revision': String(base.revision),
@@ -360,9 +346,7 @@ async function requestVillageCommandState(
   });
   const receivedAt = Date.now(),
     data = await parseResponse<unknown>(response);
-  if (confirmation === true && infrastructureConfirmationIsValid(data))
-    return { confirmation: data, requestGeneration };
-  if (typeof confirmation === 'object' && constructionConfirmationIsValid(data)) {
+  if (confirmation && constructionConfirmationIsValid(data)) {
     if (data.commandId !== confirmation.commandId || data.villageId !== confirmation.villageId)
       throw Error('Confirmation de construction incohérente.');
     return { construction: data, requestGeneration };
