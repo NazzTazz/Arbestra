@@ -768,13 +768,11 @@ describe('effective RC1 installation on isolated worlds', () => {
     const observed = {
       run: async (...args: Parameters<SpawnCompute['run']>) => {
         // Another connection tries the world's exclusive spatial lock.
-        const probe = await db
-          .transaction()
-          .execute((tx) =>
-            sql<{
-              free: boolean;
-            }>`select pg_try_advisory_xact_lock(hashtextextended(${'infrastructure:' + f.id},0)) as free`.execute(tx),
-          );
+        const probe = await db.transaction().execute((tx) =>
+          sql<{
+            free: boolean;
+          }>`select pg_try_advisory_xact_lock(hashtextextended(${'infrastructure:' + f.id},0)) as free`.execute(tx),
+        );
         free.push(probe.rows[0]!.free);
         return compute.run(...args);
       },
