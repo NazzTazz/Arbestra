@@ -680,7 +680,9 @@ describe('effective RC1 installation on isolated worlds', () => {
       }),
     ).rejects.toMatchObject({ code: 'SPAWN_BLOCKED' });
     const input = { commandId: randomUUID(), elementKey: garden.key, point: { x: 138, y: 19 }, quarterTurns: 0 };
+    const poseAt = performance.now();
     const posed = await poseRemainingStarter(db, compute, accountId, f.slug, installed.villageId, input);
+    console.info('RC1_KIT_POSE_MS', Math.round(performance.now() - poseAt));
     expect((await getVillageState(db, accountId, f.slug)).village.wood).toBe(1975);
     expect(posed.remaining).not.toContain(garden.key);
     expect(posed.remaining).toHaveLength(3);
@@ -760,12 +762,38 @@ describe('effective RC1 installation on isolated worlds', () => {
         .execute(db);
     }
   }, 120000);
-  it('serializes two accounts targeting the same site and rechecks the committed neighbor', async () => {
+  it('plans before the world spatial lock and reuses that plan on an unchanged snapshot', async () => {
     const f = await fixture(),
-      other = randomUUID();
+      free: boolean[] = [];
+    const observed = {
+      run: async (...args: Parameters<SpawnCompute['run']>) => {
+        // Another connection tries the world's exclusive spatial lock.
+        const probe = await db
+          .transaction()
+          .execute((tx) =>
+            sql<{
+              free: boolean;
+            }>`select pg_try_advisory_xact_lock(hashtextextended(${'infrastructure:' + f.id},0)) as free`.execute(tx),
+          );
+        free.push(probe.rows[0]!.free);
+        return compute.run(...args);
+      },
+    };
+    await installVillage(db, observed, accountId, f.slug, { ...f.input, mode: 'manual' });
+    expect(free, 'one plan, computed while the world lock was free').toEqual([true]);
+    expect(await db.selectFrom('villages').selectAll().where('worldId', '=', f.id).execute()).toHaveLength(1);
+  }, 120000);
+  it('replans under the lock after a neighbor settles, serializes two accounts and rechecks the committed neighbor', async () => {
+    const f = await fixture(),
+      other = randomUUID(),
+      neighbor = randomUUID();
+    extraAccounts.push(neighbor);
     await db
       .insertInto('accounts')
-      .values({ id: other, email: other + '@installation.test', passwordHash: 'fixture' })
+      .values([
+        { id: other, email: other + '@installation.test', passwordHash: 'fixture' },
+        { id: neighbor, email: neighbor + '@installation.test', passwordHash: 'fixture' },
+      ])
       .execute();
     let release!: () => void, arrived!: () => void;
     const gate = new Promise<void>((r) => {
@@ -774,8 +802,22 @@ describe('effective RC1 installation on isolated worlds', () => {
       ready = new Promise<void>((r) => {
         arrived = r;
       });
+    let calls = 0;
     const held = {
       run: async (...args: Parameters<SpawnCompute['run']>) => {
+        if (++calls === 1) {
+          // Planned outside the lock while a distant neighbor settles: the
+          // locked snapshot differs, so the plan is computed again under it.
+          await db
+            .insertInto('worldMemberships')
+            .values({ worldId: f.id, accountId: neighbor, playerName: 'Voisin' })
+            .execute();
+          await db
+            .insertInto('villages')
+            .values({ worldId: f.id, ownerAccountId: neighbor, name: 'Voisin', anchorCellX: 400, anchorCellY: 200 })
+            .execute();
+          return compute.run(...args);
+        }
         const result = await compute.run(...args);
         arrived();
         await gate;
@@ -799,7 +841,8 @@ describe('effective RC1 installation on isolated worlds', () => {
       const competingAt = performance.now();
       second = installVillage(db, compute, other, f.slug, { ...f.input, commandId: randomUUID() });
       void second.catch(() => {});
-      const deadline = Date.now() + 3500;
+      // The competitor plans first (outside the lock), then waits on it.
+      const deadline = Date.now() + 30000;
       let waiting = false;
       while (Date.now() < deadline) {
         const locks = await sql<{
@@ -818,7 +861,19 @@ describe('effective RC1 installation on isolated worlds', () => {
       await first;
       await expect(second).rejects.toMatchObject({ code: 'SPAWN_BLOCKED' });
       console.info('RC1_COMPETING_OPERATION_MS', Math.round(performance.now() - competingAt));
-      expect(await db.selectFrom('villages').selectAll().where('worldId', '=', f.id).execute()).toHaveLength(1);
+      expect(calls, 'the changed snapshot was planned again under the lock').toBe(2);
+      expect(
+        await db
+          .selectFrom('villages')
+          .select('ownerAccountId')
+          .where('worldId', '=', f.id)
+          .orderBy('ownerAccountId')
+          .execute(),
+      ).toEqual(
+        [{ ownerAccountId: accountId }, { ownerAccountId: neighbor }].sort((a, b) =>
+          a.ownerAccountId.localeCompare(b.ownerAccountId),
+        ),
+      );
       expect(
         await db
           .selectFrom('worldMemberships')

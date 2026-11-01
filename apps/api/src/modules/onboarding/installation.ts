@@ -17,14 +17,36 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
 import { STARTER_KIT } from './starter-kit.js';
-import { spawnSnapshot } from './spawn-map.js';
+import { readSpawnSnapshot, spawnSnapshot } from './spawn-map.js';
 import { persistRc1Resources, removeSpawnTrees } from './rc1-resources.js';
 import type { SpawnCompute } from './spawn-compute.js';
+import type { SpawnSnapshot } from './spawn-compute-protocol.js';
 import type { InstallationPlan } from './installation-plan.js';
 import type { ElementPlan } from './element-plan.js';
 import { observationVillage } from '../admin/observation-actions.js';
 function fail(code: string, message: string): never {
   throw new HttpError(409, code, message);
+}
+/** Same spatial state, whatever the row order of the unordered reads. */
+function canonicalSnapshot(snapshot: SpawnSnapshot): string {
+  const sorted = (values: readonly unknown[] | undefined) => values?.map((v) => JSON.stringify(v)).sort();
+  return JSON.stringify({
+    seed: snapshot.seed,
+    map: {
+      ...snapshot.map,
+      vertices: sorted(snapshot.map.vertices),
+      terraces: sorted(snapshot.map.terraces),
+      removedTreeIndices: [...(snapshot.map.removedTreeIndices ?? [])].sort((a, b) => a - b),
+    },
+    resources: sorted(snapshot.resources),
+    spatial: {
+      protectedSurfaces: sorted(snapshot.spatial.protectedSurfaces),
+      walkBlockedSurfaces: sorted(snapshot.spatial.walkBlockedSurfaces),
+    },
+  });
+}
+function sameSnapshot(a: SpawnSnapshot, b: SpawnSnapshot): boolean {
+  return a.artifactJSON === b.artifactJSON && canonicalSnapshot(a) === canonicalSnapshot(b);
 }
 function serialize(row: Database['villageStarterInstallations'] | Record<string, unknown>): StarterInstallation {
   return {
@@ -145,6 +167,21 @@ export async function installVillage(
 ): Promise<StarterInstallation> {
   if (!input.playerName.trim() || !input.villageName.trim())
     throw new HttpError(400, 'INVALID_NAME', 'Choisissez un nom de joueur et de village.');
+  // Plan before taking the world's spatial lock: the CPU search used to hold
+  // every economic transaction of the world (12.8 s on the dev, 1 November
+  // 2026). Under the lock, the plan is reused only on an identical snapshot.
+  let prepared: { snapshot: SpawnSnapshot; plan: InstallationPlan } | undefined;
+  if (input.kitVersion === STARTER_KIT.version && !(await readInstallation(db, accountId, slug)))
+    try {
+      const snapshot = await readSpawnSnapshot(db, slug, true);
+      if (input.artifactChecksum === snapshot.map.artifactChecksum)
+        prepared = {
+          snapshot,
+          plan: (await compute.run({ kind: 'installation', snapshot, input })) as InstallationPlan,
+        };
+    } catch {
+      // Busy or unavailable: the locked path plans and reports as before.
+    }
   return db.transaction().execute(async (tx) => {
     await sql`set local lock_timeout='60s'`.execute(tx);
     await tx.selectFrom('accounts').select('id').where('id', '=', accountId).forUpdate().executeTakeFirstOrThrow();
@@ -194,7 +231,10 @@ export async function installVillage(
     const snapshot = await spawnSnapshot(tx, slug, true);
     snapshot.map.villages = snapshot.map.villages.filter((v) => v.id !== villageId);
     if (input.artifactChecksum !== snapshot.map.artifactChecksum) fail('SPAWN_MAP_STALE', 'La carte a changé.');
-    const plan = (await compute.run({ kind: 'installation', snapshot, input })) as InstallationPlan;
+    const plan =
+      prepared && sameSnapshot(prepared.snapshot, snapshot)
+        ? prepared.plan
+        : ((await compute.run({ kind: 'installation', snapshot, input })) as InstallationPlan);
     if (plan.status !== 'planned')
       fail(
         plan.status === 'terrain-blocked' ? 'SPAWN_BLOCKED' : 'SPAWN_RESOURCE_SPACE',

@@ -23,7 +23,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
-Aucune tranche en attente.
+- **Installation plus rapide** (1er novembre) : plan de l'hôtel de ville hors du verrou mondial et échantillonnage allégé ; reste des poses du kit dans la [dette technique](docs/DETTE-TECHNIQUE.md).
 
 Validés le 30 octobre sur staging : pagination du snapshot privé, énergie et repos par le worker. Validés le 30 octobre sur dev : routes à la case S1, S2a-d, ancrages S4a-b, conversion des routes S3 (076), exploitation des jardins sans `state()` (5a), image longue après publication V2 et réconciliation paresseuse, journal des parcours et page « Parcours » du NOC (A, C).
 

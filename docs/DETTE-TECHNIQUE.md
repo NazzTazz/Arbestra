@@ -11,6 +11,12 @@ Registre des dettes connues et acceptées : ce qui reste à reprendre, pourquoi 
 - **À faire** (recommandé). Rendre les cases de terre et de gravats par le rendu par secteurs des routes automatiques (`InfrastructureRenderer`), la pierre restant en tuiles. Estimation : 2 à 3 h. Une pose reconstruit alors un secteur de 8 × 8 cases au lieu de 5 instances : mesurer le coût d'une pose dans le navigateur (aucune image > 100 ms) et borner le travail par pose dans un test. Autre voie si la pierre en pente pose aussi problème : courber les tuiles dans le shader à partir des 9 hauteurs de la case (une demi-journée à une journée).
 - **Échéance.** Décision de Tristan du 31 octobre : ne bloque pas la prochaine mise à jour alpha (fin de la synchro V2 et de la voirie) ; à faire juste après.
 
+### Installation : poses du kit sous verrou mondial exclusif (1er novembre 2026)
+
+- **Fait le 1er novembre.** Le plan d'installation de l'hôtel de ville se calcule hors du verrou mondial `infrastructure:<monde>`, puis il est réutilisé sous le verrou si l'instantané n'a pas changé (sinon, recalcul sous le verrou). L'échantillonnage du réseau d'accès ne lit plus que l'altitude et l'eau. Sur rc1-dev, pose de bout en bout 6,7 s, contre 12,8 s mesurées pendant la recette de Tristan.
+- **Reste.** Les poses suivantes du kit (`poseRemainingStarter`) prennent toujours le verrou mondial exclusif via `beginVillageEconomy(..., true)` pour relire l'instantané et écrire. Une pose isolée prend 1,2 à 2,8 s, presque entièrement en attente de la base de données ; sur un monde actif (rc1-dev) 4,6 à 11 s, attente probable des détenteurs partagés du verrou (non mesurée). Le calcul de l'élément ne coûte que 60 ms : le levier est la portée du verrou, à traiter avec les autres verrous mondiaux.
+- **Mondes à terrasses.** Sur l'ancien modèle de terrain (aube, recette-nivellement, fixture des tests d'intégration), le plan coûte toujours environ 10 s, l'échantillonnage restant procédural. L'alpha et le staging sont en sommets partagés.
+
 ### Trajets : coût et invalidation à revoir dans leur conception (31 octobre 2026)
 
 - **Décision de Tristan (31 octobre)** : pas de nouveau correctif du pathfinding pour l'instant (six ou sept correctifs successifs à plusieurs échelles) ; il repense la méthode. Les constats ci-dessous servent de matière, pas de plan.
