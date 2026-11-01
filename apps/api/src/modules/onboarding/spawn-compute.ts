@@ -44,6 +44,9 @@ export class SpawnCompute {
       this.worker = worker;
       worker.on('message', (reply: SpawnReply) => {
         if (this.worker !== worker) return;
+        // Not a reply: `node --watch` (dev) forwards the worker's module loads
+        // on the same channel. Taken as a failure, it had no status code (500).
+        if (typeof (reply as { ok?: unknown } | null)?.ok !== 'boolean') return;
         clearTimeout(this.timeout);
         const pending = this.queue.shift();
         if (!pending) {
