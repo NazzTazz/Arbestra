@@ -61,7 +61,18 @@ Prévu par l'inventaire V2 (point 7) et la spec §10 (« réponse explicite de m
 5. **I.4 – Contrats et `state()`.** `VillageCommandResponse`, `VillageSyncBase`, `minimumRevision`, `InfrastructureConfirmation`, COUNT et modes morts de `state()`.
 6. **I.5 – Migration nivellement, puis I.6 – migration COUNT** (deux paliers), après la fenêtre de rollback ; validées sur base de test.
 
-**Décisions produit ouvertes** : texte et comportement du 426 ; ordre du HUD ; écran quand la V2 ne démarre pas (plus de repli invisible) ; perte de la poussée SSE des reçus d'expédition (sondage de 3 s) ; suppression du dernier filet de réveil par lecture (après le lot I, seule une commande réconcilie un village dont une notification se serait perdue) ; archivage ou perte des lignes `leveling_jobs`.
+**Décisions produit** (tranchées, voir plus bas) : texte et comportement du 426 ; ordre du HUD ; écran quand la V2 ne démarre pas (plus de repli invisible) ; perte de la poussée SSE des reçus d'expédition (sondage de 3 s) ; suppression du dernier filet de réveil par lecture (après le lot I, seule une commande réconcilie un village dont une notification se serait perdue) ; archivage ou perte des lignes `leveling_jobs`.
+
+## Décisions de Tristan (1er novembre 2026, validées)
+
+1. **Ancien client** : 426 avec « Une nouvelle version d'Arbestra est disponible. Rechargez la page. » ; les intentions en attente sont rejouées après rechargement.
+2. **V2 qui ne démarre pas** : écran « Connexion au village impossible » avec « Réessayer » et reprises automatiques espacées ; plus de repli invisible sur la V1.
+3. **Reçus** : pas de sondage. Tranche préalable à I.2 : reçus d'expédition et de récolte en composantes privées V2, publiées par déclencheurs sur `expedition_submissions` et `harvest_submissions`, livrées par le SSE V2 ; suppression du sondage de 3 s (`use-expeditions.ts`) et de la relève de `readHarvestReceipts`.
+4. **Réveil par lecture** : supprimé ; risque accepté (notifications durables), balayage de réparation plus tard si une perte est observée.
+5. **Historique `leveling_jobs`** : archivé dans une table d'archive, puis la table est supprimée (I.5).
+6. **HUD** : ses deux routes passent au contrat V2 avec `effects` (I.1).
+
+Ordre retenu : reçus V2, I.1, I.2, I.3 (mesure des accès V1 sur alpha avant le 426), I.4 ; I.5 et I.6 après la fenêtre de rollback.
 
 ## Zones d'incertitude
 
