@@ -7,8 +7,12 @@ import {
   isBuildingFootprintFlat,
   levelingWork,
   spawnDelta,
+  terrainEditCellCount,
   terrainEditCells,
   terrainEditUnit,
+  terrainRestoreCells,
+  terrainRestoreUnit,
+  triangleHeight,
   vertexCells,
   vertexKey,
   vertexLeveling,
@@ -56,18 +60,23 @@ class TerrainEditRefused extends HttpError {
 /** Canonical content of a batch: what one command identifier names. */
 const canonical = (request: TerrainEditsRequest) => ({
   gestures: request.gestures.map((g) =>
-    g.buildingType === 'terrain'
+    g.buildingType === 'terrain-restore'
       ? {
           buildingType: g.buildingType,
-          anchor: { cellX: g.anchor.cellX, cellY: g.anchor.cellY },
-          cells: g.cells.map(({ cellX, cellY }) => ({ cellX, cellY })),
-          height: g.height,
+          cells: g.cells.map(({ cellX, cellY, corners }) => ({ cellX, cellY, corners: [...corners] })),
         }
-      : {
-          buildingType: g.buildingType,
-          anchor: { cellX: g.anchor.cellX, cellY: g.anchor.cellY },
-          quarterTurns: g.quarterTurns,
-        },
+      : g.buildingType === 'terrain'
+        ? {
+            buildingType: g.buildingType,
+            anchor: { cellX: g.anchor.cellX, cellY: g.anchor.cellY },
+            cells: g.cells.map(({ cellX, cellY }) => ({ cellX, cellY })),
+            height: g.height,
+          }
+        : {
+            buildingType: g.buildingType,
+            anchor: { cellX: g.anchor.cellX, cellY: g.anchor.cellY },
+            quarterTurns: g.quarterTurns,
+          },
   ),
 });
 
@@ -92,6 +101,8 @@ interface Unit {
   cells: Cell[];
   free: boolean;
   height: number;
+  /** A restored cell (§7.10): its four corner heights. */
+  corners?: readonly number[];
   refusal?: { code: TerrainEditRefusalCode; message: string };
 }
 /** Rank of a cell refusal: `assertBuildableCells` throws the infrastructure
@@ -127,7 +138,11 @@ async function prepareTerrainEdits(
   if (v.generationVersion !== 3)
     throw new HttpError(409, 'LEVELING_UNAVAILABLE', 'La terraformation est disponible sur les mondes RC1.');
   for (const gesture of gestures)
-    if (gesture.anchor.cellX >= v.widthCells || gesture.anchor.cellY >= v.heightCells)
+    if (
+      (gesture.buildingType === 'terrain-restore' ? gesture.cells : [gesture.anchor]).some(
+        (c) => c.cellX >= v.widthCells || c.cellY >= v.heightCells,
+      )
+    )
       throw new HttpError(400, 'INVALID_COORDINATES', 'Coordonnées non canoniques.');
   const ground = await readRc1Ground(tx, v.worldId);
   const source = await readRc1Source(tx, v.worldId);
@@ -165,6 +180,26 @@ async function prepareTerrainEdits(
   // 1. The units, gesture by gesture; a gesture refused as a whole is one unit.
   const units: Unit[] = [];
   for (const [index, gesture] of gestures.entries()) {
+    if (gesture.buildingType === 'terrain-restore') {
+      // Restoration (§7.10): one unit per cell, in the given order.
+      const anchor = { cellX: gesture.cells[0]!.cellX, cellY: gesture.cells[0]!.cellY };
+      const whole = (code: TerrainEditRefusalCode, message: string) =>
+        units.push({ gesture: index, anchor, cells: [], free: true, height: 0, refusal: { code, message } });
+      let restored: ReturnType<typeof terrainRestoreCells>;
+      try {
+        restored = terrainRestoreCells(gesture, v);
+      } catch {
+        whole('INVALID_TERRAFORM_SELECTION', 'Restauration invalide.');
+        continue;
+      }
+      if (!geometry) whole('LEVELING_UNAVAILABLE', 'Ce monde doit utiliser le terrain à sommets partagés.');
+      else
+        for (const c of restored) {
+          const cell = { cellX: c.cellX, cellY: c.cellY };
+          units.push({ gesture: index, anchor: cell, cells: [cell], free: true, height: 0, corners: c.corners });
+        }
+      continue;
+    }
     const free = gesture.buildingType === 'terrain';
     const whole = (code: TerrainEditRefusalCode, message: string) =>
       units.push({ gesture: index, anchor: gesture.anchor, cells: [], free, height: 0, refusal: { code, message } });
@@ -219,6 +254,20 @@ async function prepareTerrainEdits(
   const written = new Set<number>(),
     refusedGestures = new Set<number>();
   let field = ground.field;
+  // Shared vertices: a sample at a vertex is its height, the water surface
+  // does not depend on the edits, and a foundation's samples (corners, edge
+  // midpoints, centre) move exactly when one of its corners does.
+  const wetCell = (affectedCells: readonly Cell[], after: (x: number, y: number) => number) =>
+    affectedCells.find((c) =>
+      footprintVertices([c], v).some(
+        (p) =>
+          after(p.vertexX, p.vertexY) <= Math.max(0, field.sample(p.vertexX - 0.5, p.vertexY - 0.5).surface) + 1e-6,
+      ),
+    );
+  const movedFoundation = (cells: readonly Cell[], after: (x: number, y: number) => number) =>
+    nearFoundations(cells).find((f) =>
+      cellVertices(f, v).some((p) => after(p.vertexX, p.vertexY) !== heightAt(p.vertexX, p.vertexY)),
+    );
   for (const unit of units) {
     const refuse = (code: string, message: string, at: Cell) => {
       applied.refused.push({
@@ -235,6 +284,45 @@ async function prepareTerrainEdits(
       continue;
     }
     const { cells } = unit;
+    if (unit.corners && geometry) {
+      // A restored cell: no effect is no refusal, checked first (an unchanged
+      // cell beside a road is not refused); then the rules of a painted cell.
+      const plan = terrainRestoreUnit(cells[0]!, v, heightAt, unit.corners);
+      if (plan.volume < 1e-9) continue;
+      const obstacle = firstRefusal(cells, refusals) ?? firstRefusal(plan.affectedCells, refusals);
+      if (obstacle) {
+        refuse(obstacle.error.code, obstacle.error.message, obstacle.cell);
+        continue;
+      }
+      const next = new Map(plan.vertices.map((p) => [vertexKey(p), p.height]));
+      const after = (x: number, y: number) => next.get(`${x}:${y}`) ?? heightAt(x, y);
+      // Water over the whole surface, corners included, at the restored heights.
+      const [h00, h10, h11, h01] = plan.vertices.map((p) => p.height) as [number, number, number, number];
+      const c = cells[0]!;
+      let flooded = false;
+      for (let y = 0; y <= 8 && !flooded; y++)
+        for (let x = 0; x <= 8 && !flooded; x++) {
+          const s = field.sample(c.cellX - 0.5 + x / 8, c.cellY - 0.5 + y / 8);
+          flooded = triangleHeight(h00, h10, h11, h01, x / 8, y / 8) <= Math.max(0, s.surface) + 1e-6;
+        }
+      if (flooded) {
+        refuse('LEVELING_WATER', 'Cette hauteur ferait entrer l’eau dans la sélection.', c);
+        continue;
+      }
+      const wet = wetCell(plan.affectedCells, after);
+      if (wet) {
+        refuse('LEVELING_WATER', 'Le raccord du terrain ferait entrer l’eau.', wet);
+        continue;
+      }
+      const moved = movedFoundation(cells, after);
+      if (moved) {
+        refuse('LEVELING_FOUNDATION', 'Éloignez la retouche de la fondation voisine.', moved);
+        continue;
+      }
+      for (const p of plan.vertices) applied.vertices.set(vertexKey(p), p);
+      written.add(unit.gesture);
+      continue;
+    }
     const blocked = firstRefusal(cells, refusals);
     if (blocked) {
       refuse(blocked.error.code, blocked.error.message, blocked.cell);
@@ -292,24 +380,14 @@ async function prepareTerrainEdits(
       continue;
     }
     if (plan) {
-      // Shared vertices: a sample at a vertex is its height, the water surface
-      // does not depend on the edits, and a foundation's samples (corners,
-      // edge midpoints, centre) move exactly when one of its corners does.
       const next = new Map(plan.vertices.map((p) => [vertexKey(p), p.height]));
       const after = (x: number, y: number) => next.get(`${x}:${y}`) ?? heightAt(x, y);
-      const wet = affectedCells.find((c) =>
-        footprintVertices([c], v).some(
-          (p) =>
-            after(p.vertexX, p.vertexY) <= Math.max(0, field.sample(p.vertexX - 0.5, p.vertexY - 0.5).surface) + 1e-6,
-        ),
-      );
+      const wet = wetCell(affectedCells, after);
       if (wet) {
         refuse('LEVELING_WATER', 'Le raccord du terrain ferait entrer l’eau.', wet);
         continue;
       }
-      const moved = nearFoundations(cells).find((f) =>
-        cellVertices(f, v).some((p) => after(p.vertexX, p.vertexY) !== heightAt(p.vertexX, p.vertexY)),
-      );
+      const moved = movedFoundation(cells, after);
       if (moved) {
         refuse('LEVELING_FOUNDATION', 'Éloignez la retouche de la fondation voisine.', moved);
         continue;
@@ -365,7 +443,7 @@ export async function terrainEditsCommandV2(
 ): Promise<TerrainEditsConfirmationV2> {
   if (!Number.isSafeInteger(generation) || generation < 0) throw Error('Invalid synchronization generation');
   const content = canonical(request);
-  const cellCount = request.gestures.reduce((n, g) => n + (g.buildingType === 'terrain' ? g.cells.length : 9), 0);
+  const cellCount = request.gestures.reduce((n, g) => n + terrainEditCellCount(g), 0);
   if (cellCount > TERRAIN_EDIT_CELLS_PER_COMMAND)
     throw new HttpError(400, 'TERRAIN_EDITS_TOO_LARGE', 'Trop de cases dans ce lot.');
   const replay = async (tx: Kysely<Database>, village: OwnedVillage) => {

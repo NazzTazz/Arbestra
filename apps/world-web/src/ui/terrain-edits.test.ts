@@ -19,7 +19,7 @@ function harness(options: { intervalMs?: number; now?: () => number } = { interv
     edit: (request) => {
       sent.push(request);
       log.push(
-        `send ${request.gestures.map((g) => (g.buildingType === 'terrain' ? g.cells : [g.anchor]).map((c) => c.cellX).join('+')).join(',')}`,
+        `send ${request.gestures.map((g) => ('cells' in g ? g.cells : [g.anchor]).map((c) => c.cellX).join('+')).join(',')}`,
       );
       return new Promise((resolve, reject) => answers.push({ resolve, reject }));
     },
@@ -164,10 +164,35 @@ describe('live terrain edits (docs/SPEC-TERRAFORMATION-OUTIL.md §7.9)', () => {
     expect(h.sent).toHaveLength(1);
   });
 
+  it('sends restored cells as restoration gestures and tells the owner of a frame its refused cells', async () => {
+    const h = harness();
+    const refused: string[] = [];
+    const owner = { refused: (c: { cellX: number; cellY: number }) => refused.push(`${c.cellX}:${c.cellY}`) };
+    h.queue.add(frame(1, 2), vertices(1), owner);
+    h.queue.add([{ cell: at(9, 5), corners: [1, 2, 3, 4] }], vertices(9));
+    h.answers[0]!.resolve({ gestures: 1, unchanged: 0, vertices: 6 });
+    await tick();
+    expect(h.sent[1]!.gestures).toEqual([
+      { buildingType: 'terrain-restore', cells: [{ cellX: 9, cellY: 5, corners: [1, 2, 3, 4] }] },
+    ]);
+    h.answers[1]!.resolve({ gestures: 0, unchanged: 1, vertices: 0 });
+    await tick();
+    // A refused painted cell is forgotten by its stroke's undo record.
+    h.queue.add(frame(3, 4), vertices(3), owner);
+    h.answers[2]!.resolve({
+      gestures: 1,
+      unchanged: 0,
+      vertices: 4,
+      refused: [{ gesture: 0, cell: at(4, 5), code: 'LEVELING_FOUNDATION', at: at(5, 6) }],
+    });
+    await tick();
+    expect(refused).toEqual(['4:5']);
+  });
+
   it('names a server refusal at its obstacle cell, the painted cell otherwise', () => {
     const pages = terrainEditPages(
       [{ gesture: 0, cell: at(4, 4), code: 'LEVELING_FOUNDATION', at: at(5, 5) }],
-      [{ anchor: at(4, 4) }],
+      [{ buildingType: 'terrain', anchor: at(4, 4), cells: [at(4, 4)], height: 1 }],
       null,
     );
     expect(pages).toEqual([expect.objectContaining({ reason: 'foundation', inspect: at(5, 5), obstacle: 'building' })]);

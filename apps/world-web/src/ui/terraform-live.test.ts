@@ -4,6 +4,7 @@ import {
   predictTerrainEdits,
   vertexLeveling,
   type TerrainEditPaint,
+  type TerrainEditStep,
   type TerrainVertex,
   type VillageState,
 } from '@arbestra/contracts';
@@ -30,7 +31,7 @@ const byVertex = (a: { vertexX: number; vertexY: number }, b: { vertexX: number;
 function harness(s = state(), ground: (x: number, y: number) => number = () => 0.25) {
   const shown = new Map<string, number>(),
     frames: Array<() => void> = [],
-    applied: Array<{ paints: TerrainEditPaint[]; vertices: TerrainVertex[]; frame: number }> = [];
+    applied: Array<{ paints: TerrainEditStep[]; vertices: TerrainVertex[]; frame: number }> = [];
   let frame = 0,
     result: LiveStrokeResult | null = null;
   const heightAt = (x: number, y: number) => shown.get(`${x}:${y}`) ?? ground(x, y);

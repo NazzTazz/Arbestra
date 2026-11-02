@@ -105,7 +105,7 @@ export interface TerrainHandle {
   /** Close and low camera over a cell (the Oracle's « Inspecter »). */
   inspectCell: (cell: Cell) => void;
   /** « Inspecter » on a terraforming refusal: the camera, and three red pulses of the obstacle. */
-  inspectObstacle: (cell: Cell, obstacle: 'road' | 'fixture' | 'building' | null) => void;
+  inspectObstacle: (cell: Cell, obstacle: 'road' | 'fixture' | 'building' | 'nature' | null) => void;
   /** A terraforming prediction on the displayed ground; returns the held chunks. */
   predictTerrain: (vertices: readonly { vertexX: number; vertexY: number; height: number }[]) => string[];
   /** The server answered the prediction holding these chunks. */

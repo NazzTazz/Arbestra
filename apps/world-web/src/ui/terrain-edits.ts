@@ -3,8 +3,8 @@ import {
   orderedTerrainEditGestures,
   TERRAIN_EDIT_CELLS_PER_COMMAND,
   TERRAIN_EDIT_GESTURES_PER_COMMAND,
-  type FreeTerrainEditGesture,
-  type TerrainEditPaint,
+  type LiveTerrainEditGesture,
+  type TerrainEditStep,
   type TerrainEditRefusal,
   type TerrainEditsRequest,
   type TerrainEditsResult,
@@ -40,10 +40,20 @@ export interface TerrainEditsDeps {
   onNotice: (message: string, tone?: 'default' | 'warning') => void;
 }
 type Cell = { cellX: number; cellY: number };
-/** One frame of a stroke: its painted cells and the chunks its prediction holds. */
+/** Where a gesture is: its anchor, or the first restored cell. */
+const gestureAnchor = (gesture: LiveTerrainEditGesture): Cell =>
+  gesture.buildingType === 'terrain'
+    ? gesture.anchor
+    : { cellX: gesture.cells[0]!.cellX, cellY: gesture.cells[0]!.cellY };
+/** Who painted a frame (an undo record, ui/terraform-undo.ts): told of its cells the server refused. */
+export interface TerrainEditOwner {
+  refused(cell: Cell): void;
+}
+/** One frame of a stroke: its painted (or restored) cells and the chunks its prediction holds. */
 interface Queued {
-  paints: TerrainEditPaint[];
+  paints: TerrainEditStep[];
   keys: string[];
+  owner?: TerrainEditOwner | undefined;
 }
 export class TerrainEditQueue {
   #queue: Queued[] = [];
@@ -62,9 +72,9 @@ export class TerrainEditQueue {
     return { sending: this.#sending, queued: this.#queue.length };
   }
   /** Painted cells checked locally: predicted now, sent with the next command. */
-  add(paints: TerrainEditPaint[], vertices: readonly TerrainVertex[]): void {
+  add(paints: TerrainEditStep[], vertices: readonly TerrainVertex[], owner?: TerrainEditOwner): void {
     const keys = this.deps().predict(vertices);
-    this.#queue.push({ paints, keys });
+    this.#queue.push({ paints, keys, owner });
     void this.#flush();
   }
   /** A stroke is being drawn: the server's refusals wait for its end, with the local ones. */
@@ -102,7 +112,7 @@ export class TerrainEditQueue {
     const { edit, onNotice } = this.deps();
     // The batch: whole frames in painting order, within the command's limits.
     const batch: Queued[] = [];
-    let gestures: FreeTerrainEditGesture[] = [];
+    let gestures: LiveTerrainEditGesture[] = [];
     while (this.#queue.length) {
       const next = orderedTerrainEditGestures(this.#queue[0]!.paints, structuredClone(gestures));
       if (
@@ -129,7 +139,7 @@ export class TerrainEditQueue {
       else if (error instanceof SyncV2HttpError && error.status === 409 && error.code !== 'COMMAND_REUSED') {
         // A refusal without the list (an older server): the named gesture, at its anchor.
         const index = error.gesture ?? 0,
-          anchor = gestures[index]?.anchor ?? gestures[0]!.anchor;
+          anchor = gestureAnchor(gestures[index] ?? gestures[0]!);
         refused = [{ gesture: index, cell: anchor, code: error.code as TerrainEditRefusal['code'], at: anchor }];
       } else onNotice(error instanceof Error ? error.message : 'Terraformation refusée.', 'warning');
     } finally {
@@ -138,6 +148,16 @@ export class TerrainEditQueue {
       for (const item of batch) this.deps().release(item.keys);
     }
     if (refused.length) {
+      // The undo records forget the refused cells: a refused unit has nothing to undo.
+      const owners = new Map<string, Set<TerrainEditOwner>>();
+      for (const item of batch)
+        if (item.owner)
+          for (const { cell } of item.paints) {
+            const k = `${cell.cellX}:${cell.cellY}`;
+            owners.set(k, (owners.get(k) ?? new Set()).add(item.owner));
+          }
+      for (const r of refused)
+        for (const owner of owners.get(`${r.cell.cellX}:${r.cell.cellY}`) ?? []) owner.refused(r.cell);
       const pages = terrainEditPages(refused, gestures, this.deps().obstacles());
       if (this.#strokes) this.#deferred.push(...pages);
       else this.deps().onRefusals(pages);
@@ -150,11 +170,14 @@ export class TerrainEditQueue {
  * and obstacle cell), a unit without known obstacle falling back on its cell. */
 export function terrainEditPages(
   refused: readonly TerrainEditRefusal[],
-  gestures: readonly { anchor: Cell }[],
+  gestures: readonly LiveTerrainEditGesture[],
   obstacles: TerraformObstacles | null,
 ): OraclePage[] {
   return oraclePages(
-    refused.map((r) => serverRefusal(r.code, r.at ?? r.cell ?? gestures[r.gesture]?.anchor ?? null, obstacles)),
+    refused.map((r) => {
+      const gesture = gestures[r.gesture];
+      return serverRefusal(r.code, r.at ?? r.cell ?? (gesture ? gestureAnchor(gesture) : null), obstacles);
+    }),
   );
 }
 
@@ -166,7 +189,8 @@ export function useTerrainEdits(deps: TerrainEditsDeps & { villageKey: string })
   queue.current ??= new TerrainEditQueue(() => latest.current);
   useEffect(() => () => queue.current?.drop(), [deps.villageKey]);
   const add = useCallback(
-    (paints: TerrainEditPaint[], vertices: readonly TerrainVertex[]) => queue.current!.add(paints, vertices),
+    (paints: TerrainEditStep[], vertices: readonly TerrainVertex[], owner?: TerrainEditOwner) =>
+      queue.current!.add(paints, vertices, owner),
     [],
   );
   const stroke = useCallback((active: boolean) => queue.current!.stroke(active), []);

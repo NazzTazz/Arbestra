@@ -177,6 +177,7 @@ const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
 import { DEMOLITION_PULSE_MS, DemolitionTint } from './demolition-tint';
+import { InspectHalo, natureFoot } from './inspect-halo';
 /** Pulses of an obstacle shown by the Oracle's « Inspecter » (Tristan, 2 November). */
 const INSPECT_PULSES = 3;
 import { flatRoadGeometry } from './infrastructure-surface-geometry';
@@ -4509,6 +4510,7 @@ export class BabylonVillageScene {
     this.#workers.shift(shift.x, shift.z);
     this.#demolitionTint?.shift(shift.x, shift.z);
     this.#inspectTint?.shift(shift.x, shift.z);
+    this.#inspectHalo?.shift(shift.x, shift.z);
     this.#roadCellPreview?.shift(shift.x, shift.z);
     this.#roadAnchorPreview?.shift(shift.x, shift.z);
     this.#roadAnchorMarkers?.shift(shift.x, shift.z);
@@ -5055,23 +5057,34 @@ export class BabylonVillageScene {
       this.#cameraFocus.close = { radius: 14, beta: 1.2, fromBeta: this.#camera.beta };
   }
   #inspectTint: DemolitionTint | null = null;
+  #inspectHalo: InspectHalo | null = null;
   #inspectTimer = 0;
   /**
    * « Inspecter » on a terraforming refusal (docs/SPEC-TERRAFORMATION-OUTIL.md
    * §7): the camera of `inspectCell`, and the obstacle pulses three times in
    * the demolition red (DemolitionTint, the effect of a designated target):
    * the road of the cell, the building standing on it (a foundation's too), a
-   * patch for a fixture. Nothing pulses for a cause without an entity (water,
-   * reach, world, a passing team, the ground) nor for a building this village
+   * patch for a fixture; the ground (a tree, a rock, a clearing: thin
+   * instances) gets a red halo at the foot of the tree or rock in cause
+   * (InspectHalo, same rhythm). Nothing pulses for a cause without an entity
+   * (water, reach, world, a passing team) nor for a building this village
    * does not draw. Its own tint, so that a pending demolition is untouched.
    */
-  public inspectObstacle(cell: Cell, obstacle: 'road' | 'fixture' | 'building' | null): void {
+  public inspectObstacle(cell: Cell, obstacle: 'road' | 'fixture' | 'building' | 'nature' | null): void {
     this.inspectCell(cell);
     window.clearTimeout(this.#inspectTimer);
     this.#inspectTint?.clear();
+    this.#inspectHalo?.clear();
     const state = this.#state,
       space = this.#space;
     if (!obstacle || !state || !space) return;
+    if (obstacle === 'nature') {
+      const store = this.#store;
+      if (!store) return;
+      const halo = (this.#inspectHalo ??= new InspectHalo(this.#scene));
+      halo.show(natureFoot(cell, this.naturalFeatures(), state.world), store, space);
+      return;
+    }
     const tint = (this.#inspectTint ??= new DemolitionTint(this.#scene));
     tint.pulseFrom(performance.now());
     if (obstacle === 'road') {
@@ -5520,6 +5533,7 @@ export class BabylonVillageScene {
     this.#demolitionTint?.dispose();
     window.clearTimeout(this.#inspectTimer);
     this.#inspectTint?.dispose();
+    this.#inspectHalo?.clear();
     cancelAnimationFrame(this.#infrastructureHoverFrame);
     this.#infrastructureHoverFrame = 0;
     this.#infrastructureHoverEvent = null;

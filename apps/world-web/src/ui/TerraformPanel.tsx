@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import type { TerrainEditPaint, TerrainVertex, VillageState, TravelCell } from '@arbestra/contracts';
+import type { TerrainEditStep, TerrainVertex, VillageState, TravelCell } from '@arbestra/contracts';
 import type { TerrainHandle } from '../scene/VillageScene';
 import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { BrushCursor, brushCells, type BrushTone } from '../scene/terraform-brush';
@@ -35,7 +35,7 @@ export function TerraformPanel({
   state: VillageState;
   scene: RefObject<TerrainHandle | null>;
   /** Painted cells of one frame, with their predicted vertex heights: predicted on the ground and sent. */
-  onPaint: (paints: TerrainEditPaint[], vertices: readonly TerrainVertex[]) => void;
+  onPaint: (paints: TerrainEditStep[], vertices: readonly TerrainVertex[]) => void;
   /** A stroke starts or ends (the server's refusals wait for its end). */
   onStroke: (active: boolean) => void;
   /** The refused cells of a stroke, told by the Oracle one error per page. */
@@ -129,7 +129,7 @@ export function TerraformPanel({
   gesture.current = (g) => {
     if (g.kind === 'right') return;
     if (g.kind === 'cancel') {
-      // What is painted stays painted (an undo is still to decide, §7.7).
+      // What is painted stays painted; Ctrl+Z undoes the stroke once released (§7.10).
       finish();
       return;
     }

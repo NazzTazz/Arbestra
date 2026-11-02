@@ -1,4 +1,12 @@
-import { terrainEditUnit, vertexKey, type TerrainEditPaint, type TerrainVertex } from '@arbestra/contracts';
+import {
+  isTerrainEditRestore,
+  terrainEditUnit,
+  terrainRestoreUnit,
+  vertexKey,
+  type TerrainEditRestore,
+  type TerrainEditStep,
+  type TerrainVertex,
+} from '@arbestra/contracts';
 import { unitRefusal, type TerraformObstacles, type TerraformRefusal } from './terraform-refusals';
 
 /**
@@ -18,6 +26,9 @@ import { unitRefusal, type TerraformObstacles, type TerraformRefusal } from './t
  * prediction (one copy of each touched chunk); the rest waits for the next
  * frame, in order. The renderer then rebuilds the touched ground units under
  * its own per-frame budget (TerrainRenderer.queueGroundEdits).
+ *
+ * The undo of a stroke (§7.10, ui/terraform-undo.ts) is a stroke too: its
+ * restored cells go through the same frames, refusals, prediction and queue.
  */
 export const LIVE_CELLS_PER_FRAME = 16;
 type Cell = { cellX: number; cellY: number };
@@ -28,7 +39,7 @@ export interface LiveStrokeDeps {
   /** Displayed vertex height, predictions included. */
   heightAt: (x: number, y: number) => number;
   /** The units of one frame and their predicted vertices: predicted and queued for the server. */
-  apply: (paints: TerrainEditPaint[], vertices: TerrainVertex[]) => void;
+  apply: (steps: TerrainEditStep[], vertices: TerrainVertex[]) => void;
   /** Next display frame (requestAnimationFrame). */
   frame: (callback: () => void) => void;
 }
@@ -42,7 +53,7 @@ export interface LiveStrokeResult {
   unknown: boolean;
 }
 export class LiveStroke {
-  #pending: TerrainEditPaint[] = [];
+  #pending: TerrainEditStep[] = [];
   /** Cells painted since the height last changed: painting them again changes nothing. */
   #run = new Set<string>();
   #runHeight = NaN;
@@ -72,6 +83,12 @@ export class LiveStroke {
       this.#run.add(key);
       this.#pending.push({ cell: c, height });
     }
+    if (this.#pending.length) this.#pump();
+  }
+  /** Restored cells (an undo, §7.10), in order: applied as painted cells are. */
+  restore(steps: readonly TerrainEditRestore[]): void {
+    if (this.#stopped || this.#ending) return;
+    this.#pending.push(...steps);
     if (this.#pending.length) this.#pump();
   }
   /** The pointer is released: the waiting units are applied over the next frames, then `done`. */
@@ -110,10 +127,12 @@ export class LiveStroke {
       obstacles = this.deps.obstacles(),
       written = new Map<string, TerrainVertex>(),
       at = (x: number, y: number) => written.get(`${x}:${y}`)?.height ?? heightAt(x, y),
-      accepted: TerrainEditPaint[] = [];
+      accepted: TerrainEditStep[] = [];
     for (const paint of batch) {
+      const restored = isTerrainEditRestore(paint);
       // At or under the water line: one error for the stroke, as the server's LEVELING_WATER.
-      if (paint.height <= 0) {
+      // A restored cell's water is the server's to tell (its corners differ).
+      if (!restored && paint.height <= 0) {
         if (!this.#water) this.result.refusals.push({ reason: 'water', cell: paint.cell });
         this.#water = true;
         continue;
@@ -123,9 +142,11 @@ export class LiveStroke {
         this.result.refusals.push(refusal);
         continue;
       }
-      let plan: ReturnType<typeof terrainEditUnit>;
+      let plan: { vertices: TerrainVertex[]; volume: number };
       try {
-        plan = terrainEditUnit(paint.cell, world, at, paint.height);
+        plan = restored
+          ? terrainRestoreUnit(paint.cell, world, at, paint.corners)
+          : terrainEditUnit(paint.cell, world, at, paint.height);
       } catch {
         this.result.unknown = true;
         continue;

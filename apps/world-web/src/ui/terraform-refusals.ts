@@ -176,8 +176,10 @@ export function serverRefusal(code: string, at: Cell | null, obstacles: Terrafor
 }
 
 /** The entity « Inspecter » makes pulse for a reason: a foundation is a
- * building's; water, reach, the ground, a passing team have none. */
-export type InspectObstacle = 'road' | 'fixture' | 'building' | null;
+ * building's; the ground (a tree, a rock, a protected clearing) gets a red
+ * halo on the ground (Tristan, 2 November, option B); water, reach, a passing
+ * team have none. */
+export type InspectObstacle = 'road' | 'fixture' | 'building' | 'nature' | null;
 const OBSTACLES: Record<TerraformRefusalReason, InspectObstacle> = {
   road: 'road',
   fixture: 'fixture',
@@ -185,7 +187,7 @@ const OBSTACLES: Record<TerraformRefusalReason, InspectObstacle> = {
   foundation: 'building',
   passage: null,
   water: null,
-  nature: null,
+  nature: 'nature',
   reach: null,
   unavailable: null,
   other: null,
@@ -199,6 +201,8 @@ export interface OraclePage {
   inspect: Cell | null;
   /** What pulses there. */
   obstacle: InspectObstacle;
+  /** A merged page of water (`mergeWaterPages`): every cell of its group. */
+  cells?: Cell[];
 }
 /**
  * The Oracle's pages for refusals (Tristan, 2 November: « un message par
@@ -221,4 +225,80 @@ export function oraclePages(refusals: readonly TerraformRefusal[], anchor: Cell 
       pages.push({ reason, text: SENTENCES[reason], inspect: cell, obstacle: cell ? OBSTACLES[reason] : null });
     }
   return pages;
+}
+
+/**
+ * One page for the water of contiguous cells (Tristan, 2 November: «
+ * Fusionne les erreurs d'eau », docs/SPEC-TERRAFORMATION-OUTIL.md §7.5): a
+ * stroke plunged into a lake gives one wet cell per refused unit, which is
+ * one error for the player. Water pages whose cells touch on the torus,
+ * diagonals included (8-neighbourhood: a diagonal stroke along a shore is one
+ * shore), become one page at the place of the first; the others keep their
+ * order. « Inspecter » visits the group's cell nearest to its centre (on the
+ * torus, from the first cell): an actual wet cell, in the middle of the
+ * water the stroke met, rather than its first or a point of dry land in a
+ * curved group. Indexed by cell: O(cells × 9), once per delivery of pages.
+ */
+export function mergeWaterPages(pages: readonly OraclePage[], world: { widthCells: number; heightCells: number }) {
+  const { widthCells: w, heightCells: h } = world;
+  const members = (p: OraclePage) => p.cells ?? (p.inspect ? [p.inspect] : []);
+  const water = pages.flatMap((p, i) => (p.reason === 'water' && members(p).length ? [i] : []));
+  if (water.length < 2) return [...pages];
+  // Union of the pages whose cells are neighbours.
+  const parent = new Map(water.map((i) => [i, i]));
+  const find = (i: number): number => {
+    let root = i;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    parent.set(i, root);
+    return root;
+  };
+  const owner = new Map<string, number>();
+  for (const i of water) for (const c of members(pages[i]!)) if (!owner.has(key(c))) owner.set(key(c), i);
+  for (const i of water)
+    for (const c of members(pages[i]!))
+      for (let dx = -1; dx <= 1; dx++)
+        for (let dy = -1; dy <= 1; dy++) {
+          const other = owner.get(`${(c.cellX + dx + w) % w}:${(c.cellY + dy + h) % h}`);
+          if (other === undefined) continue;
+          const a = find(i),
+            b = find(other);
+          if (a !== b) parent.set(Math.max(a, b), Math.min(a, b));
+        }
+  const groups = new Map<number, Cell[]>();
+  for (const i of water) {
+    const root = find(i),
+      cells = groups.get(root) ?? [];
+    for (const c of members(pages[i]!))
+      if (!cells.some((d) => d.cellX === c.cellX && d.cellY === c.cellY)) cells.push(c);
+    groups.set(root, cells);
+  }
+  /** Shortest signed offset on a ring of `size` cells. */
+  const delta = (d: number, size: number) => {
+    const m = ((d % size) + size) % size;
+    return m > size / 2 ? m - size : m;
+  };
+  const merged: OraclePage[] = [];
+  for (const [i, page] of pages.entries()) {
+    if (!parent.has(i)) {
+      merged.push(page);
+      continue;
+    }
+    if (find(i) !== i) continue;
+    const cells = groups.get(i)!;
+    if (cells.length === 1) {
+      merged.push(page);
+      continue;
+    }
+    const origin = cells[0]!,
+      offsets = cells.map((c) => ({ x: delta(c.cellX - origin.cellX, w), y: delta(c.cellY - origin.cellY, h) })),
+      cx = offsets.reduce((s, o) => s + o.x, 0) / cells.length,
+      cy = offsets.reduce((s, o) => s + o.y, 0) / cells.length;
+    let best = 0;
+    offsets.forEach((o, k) => {
+      const b = offsets[best]!;
+      if ((o.x - cx) ** 2 + (o.y - cy) ** 2 < (b.x - cx) ** 2 + (b.y - cy) ** 2 - 1e-9) best = k;
+    });
+    merged.push({ ...page, inspect: cells[best]!, cells });
+  }
+  return merged;
 }

@@ -3,6 +3,7 @@ import type { VillageState } from '@arbestra/contracts';
 import {
   cellRefusal,
   cellRefused,
+  mergeWaterPages,
   oraclePages,
   serverRefusal,
   serverRefusalReason,
@@ -117,8 +118,36 @@ describe('the Oracle tells one error per page', () => {
       ['nature', at(9, 12)],
     ]);
     expect(pages.every((p) => !p.text.startsWith('Des '))).toBe(true);
-    // A foundation pulses as a building; nature has no entity to pulse.
-    expect(pages.map((p) => p.obstacle)).toEqual(['road', 'road', 'building', 'building', null]);
+    // A foundation pulses as a building; nature gets the red halo on the ground (option B, 2 November).
+    expect(pages.map((p) => p.obstacle)).toEqual(['road', 'road', 'building', 'building', 'nature']);
+  });
+
+  it('merges the water of contiguous cells into one page, diagonals and the seam of the torus included', () => {
+    // A stroke plunged into a lake: one server refusal per wet cell, a diagonal
+    // step, and a run across the seam x = 63 → 0; a separate pond further away.
+    const wet = [at(62, 5), at(63, 5), at(0, 5), at(1, 6), at(2, 6), at(30, 30)];
+    const pages = oraclePages([
+      { reason: 'road', cell: at(15, 15) },
+      ...wet.map((cell) => ({ reason: 'water' as const, cell })),
+    ]);
+    expect(pages).toHaveLength(7);
+    const merged = mergeWaterPages(pages, world);
+    expect(merged.map((p) => p.reason)).toEqual(['road', 'water', 'water']);
+    expect(merged[1]!.cells).toEqual(wet.slice(0, 5));
+    // « Inspecter »: the group's cell nearest to its centre on the torus (x mean 0, y 5.4).
+    expect(merged[1]!.inspect).toEqual(at(0, 5));
+    expect(merged[2]).toEqual(pages[6]);
+    // A page delivered later (the end of the stroke) joins its group; pages are not mutated.
+    const again = mergeWaterPages([...merged, ...oraclePages([{ reason: 'water', cell: at(3, 7) }])], world);
+    expect(again).toHaveLength(3);
+    expect(again[1]!.cells).toHaveLength(6);
+    expect(pages[1]!.cells).toBeUndefined();
+    // Two cells apart: two pages.
+    const apart = oraclePages([
+      { reason: 'water', cell: at(10, 10) },
+      { reason: 'water', cell: at(12, 10) },
+    ]);
+    expect(mergeWaterPages(apart, world)).toEqual(apart);
   });
 
   it('falls back on the anchor for a refusal without a cell, without pulse for water', () => {

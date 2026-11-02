@@ -59,7 +59,8 @@ import { CountdownCancelButton, usePendingDemolition } from './ui/PendingDemolit
 import { useTerrainEdits } from './ui/terrain-edits';
 import type { TerrainEditGesture } from '@arbestra/contracts';
 import { TerraformRefusalDialog } from './ui/TerraformRefusalDialog';
-import { terraformObstacles, type OraclePage } from './ui/terraform-refusals';
+import { mergeWaterPages, terraformObstacles, type OraclePage } from './ui/terraform-refusals';
+import { useTerraformUndo } from './ui/terraform-undo';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
@@ -354,7 +355,10 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     (pages: OraclePage[]) =>
       setTerrainRefusals((open) => {
         const seen = new Set(open.map((p) => `${p.reason}@${p.inspect?.cellX}:${p.inspect?.cellY}`));
-        return [...open, ...pages.filter((p) => !seen.has(`${p.reason}@${p.inspect?.cellX}:${p.inspect?.cellY}`))];
+        const all = [...open, ...pages.filter((p) => !seen.has(`${p.reason}@${p.inspect?.cellX}:${p.inspect?.cellY}`))];
+        // The water of contiguous cells is one page (Tristan, 2 November).
+        const world = stateRef.current?.world;
+        return world ? mergeWaterPages(all, world) : all;
       }),
     [],
   );
@@ -366,6 +370,18 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     obstacles: () => (stateRef.current ? terraformObstacles(stateRef.current) : null),
     onNotice: pushNotification,
     onRefusals: addTerrainRefusals,
+  });
+  // Ctrl+Z and « Annuler »: the inverse gesture of the last released stroke (§7.10).
+  const terraformUndo = useTerraformUndo({
+    enabled: terrainView === 'village' && !!state,
+    villageKey: terrainVillageKey,
+    world: state?.world ?? null,
+    heightAt: (x, y) => terrainRef.current?.terrainVertexHeight(x, y) ?? NaN,
+    obstacles: () => (stateRef.current ? terraformObstacles(stateRef.current) : null),
+    add: terrainEdits.add,
+    stroke: terrainEdits.stroke,
+    onRefusals: addTerrainRefusals,
+    onNotice: pushNotification,
   });
   const roadAnchorsApi = useMemo(
     () => (villageV2.villageReady ? { command: villageV2.roadAnchors, preview: villageV2.previewRoadAnchors } : null),
@@ -1979,17 +1995,28 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef} />
         {woodToolActive && <WoodModeIndicator mode={exploitationSettings.woodMode} />}
         <WoodModeBubble bubble={woodModeBubble} />
-        {terrainView === 'village' && pendingDemolition.pending && (
-          <div className="harvest-cancel" role="region" aria-label="Ordres en attente">
-            <CountdownCancelButton
-              deadline={!pendingDemolition.pending.sending ? pendingDemolition.pending.deadline : null}
-              label="Annuler la démolition"
-              confirmLabel="Confirmer la démolition"
-              onCancel={pendingDemolition.cancel}
-              onConfirm={pendingDemolition.confirm}
-            />
-          </div>
-        )}
+        {terrainView === 'village' &&
+          (pendingDemolition.pending || (terraformUndo.deadline !== null && worldMode !== 'exploitation')) && (
+            <div className="harvest-cancel" role="region" aria-label="Ordres en attente">
+              {pendingDemolition.pending && (
+                <CountdownCancelButton
+                  deadline={!pendingDemolition.pending.sending ? pendingDemolition.pending.deadline : null}
+                  label="Annuler la démolition"
+                  confirmLabel="Confirmer la démolition"
+                  onCancel={pendingDemolition.cancel}
+                  onConfirm={pendingDemolition.confirm}
+                />
+              )}
+              {/* The harvest's « Annuler » owns this corner in exploitation; Ctrl+Z still works there. */}
+              {worldMode !== 'exploitation' && (
+                <CountdownCancelButton
+                  deadline={terraformUndo.deadline}
+                  label="Annuler le dernier trait de terraformation (Ctrl+Z)"
+                  onCancel={terraformUndo.undo}
+                />
+              )}
+            </div>
+          )}
         {terrainView === 'village' && terrainRefusals.length > 0 && (
           <TerraformRefusalDialog
             pages={terrainRefusals}
@@ -2509,8 +2536,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           <TerraformPanel
             state={state}
             scene={terrainRef}
-            onPaint={terrainEdits.add}
-            onStroke={terrainEdits.stroke}
+            onPaint={terraformUndo.add}
+            onStroke={terraformUndo.stroke}
             onRefusals={addTerrainRefusals}
           />
         )}

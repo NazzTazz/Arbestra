@@ -36,8 +36,9 @@ export const RESOURCE_HALO_COLOURS: Readonly<typeof COLOURS> = COLOURS;
 const resource = (cell: ResourceHaloCell): Resource => cell.resource ?? (cell.garden ? 'carrot' : 'wood');
 const RESTING: MarkerState = { validatedAt: null, mode: 'cut' };
 
-/** A translucent footprint on the actual terrain triangles, rather than a ring at sea level. */
-function footprint(cell: ResourceHaloCell, ground: Pick<TerrainStore, 'ground'>): VertexData | null {
+/** A translucent footprint on the actual terrain triangles, rather than a ring at sea level
+ * (also the « Inspecter » halo, inspect-halo.ts, centred on a tree's foot). */
+export function footprint(cell: ResourceHaloCell, ground: Pick<TerrainStore, 'ground'>): VertexData | null {
   const positions: number[] = [],
     uvs: number[] = [],
     indices: number[] = [];

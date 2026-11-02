@@ -93,7 +93,8 @@ export function usePendingDemolition({
 /** « Annuler N s » and « Confirmer », like the clearing gesture's cancel,
  * while a delayed order waits (Tristan, 2 November: Confirmer brings the
  * remaining delay down to 250 ms). The App stacks these pairs in one top-right
- * region. */
+ * region. Without `onConfirm`, « Annuler N s » alone: the undo of a
+ * terraforming stroke (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10). */
 export function CountdownCancelButton({
   deadline,
   label,
@@ -103,9 +104,9 @@ export function CountdownCancelButton({
 }: {
   deadline: number | null;
   label: string;
-  confirmLabel: string;
+  confirmLabel?: string;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -121,9 +122,16 @@ export function CountdownCancelButton({
       <button type="button" className="harvest-cancel-button" aria-label={label} onClick={onCancel}>
         Annuler <span className="harvest-cancel-count">{seconds} s</span>
       </button>
-      <button type="button" className="harvest-cancel-button is-confirm" aria-label={confirmLabel} onClick={onConfirm}>
-        Confirmer
-      </button>
+      {onConfirm && (
+        <button
+          type="button"
+          className="harvest-cancel-button is-confirm"
+          aria-label={confirmLabel}
+          onClick={onConfirm}
+        >
+          Confirmer
+        </button>
+      )}
     </div>
   );
 }
