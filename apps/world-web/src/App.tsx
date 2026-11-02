@@ -2291,6 +2291,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                 stocks={state.village.resources}
                 serverNow={serverNow}
                 revision={state.serverTime}
+                offersRevision={villageV2.offersRevision}
                 pending={pendingAction}
                 error={error}
                 onCommand={async (command) => {

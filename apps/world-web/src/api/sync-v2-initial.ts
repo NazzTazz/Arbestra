@@ -8,8 +8,10 @@ import type { TimedVillageState } from './client';
 import { SyncV2Transport } from './sync-v2-transport';
 
 // The whole village is synchronized through V2 (streams + presentation); the
-// shared scopes it reads besides its private stream:
-export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic'] as const;
+// shared scopes it reads besides its private stream. `offers` carries no offer,
+// only the revision of the market's offer index: the open market panel rereads
+// its list when that revision moves.
+export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic', 'offers'] as const;
 
 type Latest = { state: SyncV2State; observedAt: string; batch: SyncV2Batch };
 export interface InitialSyncV2 {

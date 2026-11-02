@@ -10,6 +10,8 @@ import {
 } from '@arbestra/contracts';
 import {
   footprintsKnown,
+  offerIndexRevision,
+  offersOnlyBatch,
   presentationReadNeeded,
   presentationWithPlacement,
   processingCommandBuilding,
@@ -343,4 +345,84 @@ it('projects the receipts of the private stream, expeditions oldest first, and k
   expect(next.harvests).toEqual([done]);
   // An entity the delta did not touch is the very object the client already holds.
   expect(next.expeditions[0]).toBe(loaded.expeditions[0]);
+});
+
+// The offer index carries no offer (invalidate: 'offer-pages'): only its revision moves.
+const offersBatch = (
+  coverage: 'scope-snapshot' | 'delta',
+  fromRevision: string,
+  toRevision: string,
+  stream = epoch,
+): SyncV2Batch => ({
+  protocol: 2,
+  worldId,
+  villageId,
+  generation: 1,
+  observedAt: '2026-11-02T10:00:00.000Z',
+  coverage,
+  groups: [
+    {
+      stream: { kind: 'offers', key: 'all', epoch: stream },
+      fromRevision,
+      toRevision,
+      changes: [{ component: 'offerIndex', upsert: [{ id: '*', invalidate: 'offer-pages' }], remove: [] }],
+    },
+  ],
+});
+const subscribed = (): SyncV2State => ({
+  worldId,
+  villageId,
+  generation: 1,
+  scopes: new Map(),
+  subscribedScopes: new Set(['offers:all']),
+});
+
+it('derives the offer index revision from the session state, and from nothing else', () => {
+  expect(offerIndexRevision(subscribed())).toBeNull();
+  const snapshot = applySyncV2Batch(subscribed(), offersBatch('scope-snapshot', '0', '3'));
+  if (snapshot.kind !== 'applied') throw Error('The snapshot was not applied');
+  expect(offerIndexRevision(snapshot.state)).toBe(`${epoch}:3`);
+  // A change of the index moves the signal; the same revision again does not.
+  const delta = applySyncV2Batch(snapshot.state, offersBatch('delta', '3', '4'));
+  if (delta.kind !== 'applied') throw Error('The delta was not applied');
+  expect(offerIndexRevision(delta.state)).toBe(`${epoch}:4`);
+  expect(applySyncV2Batch(delta.state, offersBatch('delta', '3', '4')).kind).toBe('ignored');
+  expect(offerIndexRevision(delta.state)).toBe(`${epoch}:4`);
+  // The private stream moving leaves it alone.
+  const privateSnapshot = applySyncV2Batch(delta.state, privateBatch('scope-snapshot', '0', '5', {}));
+  if (privateSnapshot.kind !== 'applied') throw Error('The private snapshot was not applied');
+  expect(privateSnapshot.state.scopes.has(`village:${villageId}`)).toBe(true);
+  expect(offerIndexRevision(privateSnapshot.state)).toBe(`${epoch}:4`);
+  // A replaced stream epoch is a change even when the revision repeats.
+  const other = '77777777-7777-4777-8777-777777777777';
+  const replaced = applySyncV2Batch(subscribed(), offersBatch('scope-snapshot', '0', '4', other));
+  if (replaced.kind !== 'applied') throw Error('The snapshot was not applied');
+  expect(offerIndexRevision(replaced.state)).toBe(`${other}:4`);
+  expect(offerIndexRevision(replaced.state)).not.toBe(offerIndexRevision(delta.state));
+});
+
+it('recognizes a delta that changes nothing but the offer index, whatever the unchanged streams it lists', () => {
+  expect(offersOnlyBatch(offersBatch('delta', '3', '4'))).toBe(true);
+  // A stream batch lists every subscribed stream, the unchanged ones without change.
+  const listed = offersBatch('delta', '3', '4');
+  listed.groups.unshift({
+    stream: { kind: 'village', key: villageId, epoch },
+    fromRevision: '6',
+    toRevision: '6',
+    changes: [],
+  });
+  expect(offersOnlyBatch(listed)).toBe(true);
+  // The village moving too: the village renders as usual.
+  const mixed = offersBatch('delta', '3', '4');
+  mixed.groups.unshift({
+    stream: { kind: 'village', key: villageId, epoch },
+    fromRevision: '6',
+    toRevision: '7',
+    changes: [{ component: 'resources', upsert: [], remove: ['wood'] }],
+  });
+  expect(offersOnlyBatch(mixed)).toBe(false);
+  // Nothing changed at all is not an offers batch; a snapshot always rereads the presentation.
+  expect(offersOnlyBatch({ ...offersBatch('delta', '3', '4'), groups: [] })).toBe(false);
+  expect(offersOnlyBatch({ ...offersBatch('delta', '3', '4'), coverage: 'scope-snapshot', groups: [] })).toBe(false);
+  expect(offersOnlyBatch(offersBatch('scope-snapshot', '0', '4'))).toBe(false);
 });

@@ -14,6 +14,7 @@ import {
 import { randomUUID } from '../random-uuid';
 import { browseMarket, previewTrade } from '../api/client';
 import { BuildingThumbnail } from './BuildingThumbnail';
+import { watchOfferIndex } from './market-offers';
 
 const number = (n: number) => n.toLocaleString('fr-FR');
 const duration = (ms: number) => (ms < 60000 ? `${Math.ceil(ms / 1000)} s` : `${Math.ceil(ms / 60000)} min`);
@@ -89,6 +90,7 @@ export function MarketPanel({
   stocks,
   serverNow,
   revision,
+  offersRevision,
   pending,
   error,
   onCommand,
@@ -101,6 +103,8 @@ export function MarketPanel({
   stocks: VillageState['village']['resources'];
   serverNow: number;
   revision: string;
+  /** Revision of the shared offer index (V2 stream offers/all); null while not loaded. */
+  offersRevision: string | null;
   pending: boolean;
   error: string | null;
   onCommand: (command: TradeCommand) => Promise<boolean>;
@@ -126,6 +130,10 @@ export function MarketPanel({
     [preview, setPreview] = useState<TradePreview | null>(null);
   const [retry, setRetry] = useState<TradeCommand | null>(null),
     [notice, setNotice] = useState<string | null>(null);
+  // Index revision the displayed list was read at (see watchOfferIndex).
+  const offersRead = useRef<string | null>(null),
+    offersCurrent = useRef(offersRevision);
+  offersCurrent.current = offersRevision;
   const frozen = pending || !!retry,
     stock = (code: string) => stocks.find((r) => r.code === code)?.amount ?? 0;
   const name = (code: string) => market.resources.find((r) => r.code === code)?.displayName ?? code;
@@ -144,6 +152,7 @@ export function MarketPanel({
   useEffect(() => {
     if (!market.unlocked || tab === 'publish') return;
     const controller = new AbortController();
+    offersRead.current = offersCurrent.current;
     setLoading(true);
     setLocalError(null);
     void browseMarket(slug, villageId, tab === 'mine', undefined, controller.signal)
@@ -161,31 +170,24 @@ export function MarketPanel({
       });
     return () => controller.abort();
   }, [slug, villageId, market.unlocked, tab, revision, refresh]);
-  // Another village's offer changes nothing private: under V2 no village state
-  // re-reads an open list (the V1 stream did on every frame, every 2 s).
-  // Quiet: the list stays usable while it is re-read.
+  // Another village's offer changes nothing private and no village state rereads
+  // an open list: the shared offer index (V2) says when to read it again, and the
+  // page becoming visible again does too. Quiet: the list stays usable while it
+  // is re-read.
   useEffect(() => {
     if (!market.unlocked || tab === 'publish') return;
-    let flight: AbortController | null = null;
-    const timer = setInterval(() => {
-      if (document.visibilityState !== 'visible' || flight) return;
-      const controller = (flight = new AbortController());
-      void browseMarket(slug, villageId, tab === 'mine', undefined, controller.signal)
-        .then((page) => {
-          if (controller.signal.aborted) return;
+    return watchOfferIndex({
+      indexRevision: offersRevision,
+      readAt: offersRead,
+      page: document,
+      read: (signal) =>
+        browseMarket(slug, villageId, tab === 'mine', undefined, signal).then((page) => {
+          if (signal.aborted) return;
           setOffers(page.offers);
           setCursor(page.nextCursor);
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          if (flight === controller) flight = null;
-        });
-    }, 5000);
-    return () => {
-      clearInterval(timer);
-      flight?.abort();
-    };
-  }, [slug, villageId, market.unlocked, tab]);
+        }),
+    });
+  }, [slug, villageId, market.unlocked, tab, offersRevision]);
   useEffect(() => {
     setSelected(null);
     setPreview(null);

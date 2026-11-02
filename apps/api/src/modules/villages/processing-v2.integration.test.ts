@@ -335,6 +335,27 @@ it('bootstraps the default village of a world without knowing its id, behind pro
     coverage: 'scope-snapshot',
   });
   expect(batch.groups.map((group) => group.stream.kind).sort()).toEqual(['traffic', 'village']);
+  // The shared offer index is bootstrapped on request (it carries no offer).
+  const indexed = await app.inject({
+    method: 'GET',
+    url: `/api/worlds/${slug}/village/bootstrap?generation=4&include=traffic,offers`,
+    cookies: { session: token },
+    headers: { 'x-arbestra-protocol': '2' },
+  });
+  expect(indexed.statusCode, indexed.body).toBe(200);
+  expect(
+    indexed
+      .json<SyncV2Batch>()
+      .groups.map((group) => group.stream.kind)
+      .sort(),
+  ).toEqual(['offers', 'traffic', 'village']);
+  const unknown = await app.inject({
+    method: 'GET',
+    url: `/api/worlds/${slug}/village/bootstrap?generation=4&include=offers,bogus`,
+    cookies: { session: token },
+    headers: { 'x-arbestra-protocol': '2' },
+  });
+  expect(unknown.statusCode).toBe(400);
   expect((await app.inject({ method: 'GET', url, cookies: { session: token } })).statusCode).toBe(400);
   expect((await app.inject({ method: 'GET', url, headers: { 'x-arbestra-protocol': '2' } })).statusCode).toBe(401);
 }, 60000);

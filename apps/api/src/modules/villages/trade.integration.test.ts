@@ -299,6 +299,29 @@ it('reserves at publication, replays exactly and returns the reserve only once o
   expect(await amount(ids.village, 'wood')).toBe(2000);
   expect((await offer()).status).toBe('cancelled');
 });
+it('moves the shared offer index revision at each offer write, so that an open list rereads', async () => {
+  const revision = async () =>
+    BigInt(
+      (
+        await sql<{ revision: string }>`select revision::text from game_sync_streams
+          where world_id=${ids.world} and stream_kind='offers' and scope_key='all'`.execute(db)
+      ).rows[0]!.revision,
+    );
+  const initial = await revision();
+  const command = publication();
+  await commandPlayerMarket(db, ids.account, slug, ids.village, command);
+  const published = await revision();
+  expect(published).toBeGreaterThan(initial);
+  // A replay writes no offer: the index stays.
+  await commandPlayerMarket(db, ids.account, slug, ids.village, command);
+  expect(await revision()).toBe(published);
+  await commandPlayerMarket(db, ids.account, slug, ids.village, {
+    action: 'cancel',
+    commandId: randomUUID(),
+    offerId: (await offer()).id,
+  });
+  expect(await revision()).toBeGreaterThan(published);
+});
 it('answers a publication on the V2 contract with its effects, then replays without publishing', async () => {
   const command = publication();
   const published: string[] = [];

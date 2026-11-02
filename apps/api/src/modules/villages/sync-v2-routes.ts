@@ -129,7 +129,9 @@ export async function registerSyncV2Routes(
     generation: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     // Optional shared scopes; the private stream is always included.
     include: Type.Optional(
-      Type.String({ pattern: '^(knowledge|manifest|traffic)(,(knowledge|manifest|traffic)){0,2}$' }),
+      Type.String({
+        pattern: '^(knowledge|manifest|traffic|offers)(,(knowledge|manifest|traffic|offers)){0,3}$',
+      }),
     ),
     villageId: Type.Optional(Type.String({ format: 'uuid' })),
   });

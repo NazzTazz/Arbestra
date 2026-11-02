@@ -19,7 +19,7 @@ import { readSpatialChanges, readSpatialScopeSnapshot } from './sync-v2-spatial-
 import { readSharedChanges, readSharedScopeSnapshot } from './sync-v2-shared-readers.js';
 import { readTrafficChanges, readTrafficScopeSnapshot } from './sync-v2-traffic-readers.js';
 
-export type SyncV2SharedInclude = 'knowledge' | 'manifest' | 'traffic';
+export type SyncV2SharedInclude = 'knowledge' | 'manifest' | 'traffic' | 'offers';
 interface CaptureOptions {
   include?: readonly SyncV2SharedInclude[];
   /** The stream only sends deltas: when a snapshot is required it gets a
@@ -123,6 +123,7 @@ export async function captureSyncV2(
         knowledge: { kind: 'knowledge' as const, key: accountId },
         manifest: { kind: 'manifest' as const, key: village.worldId },
         traffic: { kind: 'traffic' as const, key: village.worldId },
+        offers: { kind: 'offers' as const, key: 'all' },
       };
       for (const scope of [
         { kind: 'village' as const, key: villageId },

@@ -66,7 +66,7 @@ type Options = {
   storage?: Storage;
   scopes?: SyncV2ReadRequest['scopes'];
   /** Shared scopes keyed by the server; the private stream is implicit. */
-  include?: readonly ('knowledge' | 'manifest' | 'traffic')[];
+  include?: readonly ('knowledge' | 'manifest' | 'traffic' | 'offers')[];
   /** The private snapshot exceeds the server bound: rereads are spaced and
    * this receives the delay before the next attempt, then null once a read
    * succeeds again. */

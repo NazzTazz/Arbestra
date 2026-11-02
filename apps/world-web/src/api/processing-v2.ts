@@ -51,6 +51,24 @@ export function receiptsV2(
   expeditions.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.commandId.localeCompare(b.commandId));
   return { expeditions, harvests };
 }
+/** Revision of the market's offer index (stream offers/all), its epoch included
+ * so that a replaced stream counts as a change. The index carries no offer: it
+ * only says that the offer pages changed. Null while that stream is not loaded. */
+export function offerIndexRevision(state: SyncV2State): string | null {
+  const scope = state.scopes.get('offers:all');
+  return scope ? `${scope.epoch}:${scope.revision}` : null;
+}
+/** A delta which changes nothing but the offer index: the village shows and
+ * derives nothing from it, so it projects no state and reads no presentation.
+ * A stream batch lists every subscribed stream, the unchanged ones with no
+ * change: only the streams that changed count. */
+export function offersOnlyBatch(batch: SyncV2Batch): boolean {
+  if (batch.coverage === 'scope-snapshot') return false;
+  const changed = batch.groups.filter((group) =>
+    group.changes.some((change) => change.upsert.length > 0 || change.remove.length > 0),
+  );
+  return changed.length > 0 && changed.every((group) => group.stream.kind === 'offers');
+}
 /** The previous list when nothing changed, so that a batch which carries no
  * receipt does not render the village again. */
 function sameList<T>(previous: T[] | null, next: T[]): T[] {
@@ -189,6 +207,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
   // Null until the private stream is loaded: the receipts of the player's commands.
   const [expeditionReceipts, setExpeditionReceipts] = useState<ExpeditionReceipt[] | null>(null);
   const [harvestReceipts, setHarvestReceipts] = useState<HarvestReceipt[] | null>(null);
+  // Revision of the shared offer index; the open market panel rereads its list when it moves.
+  const [offersRevision, setOffersRevision] = useState<string | null>(null);
   const [unresolved, setUnresolved] = useState<ProcessingCommand[]>([]);
   // Each failed start schedules the next one by bumping `attempt`, which runs the effect again.
   const [attempt, setAttempt] = useState(0);
@@ -303,10 +323,13 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
         if (retryInMs !== null) notice.current?.(scopeTooLargeMessage(retryInMs));
       },
       publish: (state: SyncV2State, observedAt: string, batch: SyncV2Batch) => {
-        setOrders(processingOrdersV2(state));
-        publishReceipts(state);
+        setOffersRevision(offerIndexRevision(state));
         // An ACK carries its command time, possibly before the last delta.
         latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
+        // No village render for a market change: the panel rereads its own list.
+        if (presentation && offersOnlyBatch(batch)) return;
+        setOrders(processingOrdersV2(state));
+        publishReceipts(state);
         const read = presentationReadNeeded(batch, covered);
         // Never show a building without its footprint: wait for the new read.
         if (read.needed || !presentation) {
@@ -351,6 +374,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
       latest = { state: last.state, observedAt: last.observedAt };
       setOrders(processingOrdersV2(last.state));
       publishReceipts(last.state);
+      setOffersRevision(offerIndexRevision(last.state));
       setStatus('ready');
       emit();
       void recover();
@@ -389,6 +413,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
       setOrders([]);
       setExpeditionReceipts(null);
       setHarvestReceipts(null);
+      setOffersRevision(null);
       setUnresolved([]);
       setVillageReady(false);
     };
@@ -516,6 +541,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
     orders,
     expeditionReceipts,
     harvestReceipts,
+    offersRevision,
     unresolved,
     command,
     discard,

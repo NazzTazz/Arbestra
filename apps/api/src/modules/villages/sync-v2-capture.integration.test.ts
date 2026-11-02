@@ -115,9 +115,8 @@ it('captures shared scopes with private data and recovers their atomic changes f
 
 it('bootstraps only the private stream unless shared scopes are requested', async () => {
   await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values
-    (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}) on conflict do nothing`.execute(
-    db,
-  );
+    (${ids.world},'knowledge',${ids.account}),(${ids.world},'manifest',${ids.world}),(${ids.world},'offers','all')
+    on conflict do nothing`.execute(db);
   // The historical village read records every visible cell as known.
   await getVillageState(db, ids.account, 'aube', ids.village);
   const request = { protocol: 2 as const, generation: 3, scopes: [], cursors: [] };
@@ -127,6 +126,13 @@ it('bootstraps only the private stream unless shared scopes are requested', asyn
     include: ['knowledge', 'manifest'],
   });
   expect(shared.groups.map((group) => group.stream.kind).sort()).toEqual(['knowledge', 'manifest', 'village']);
+  // The offer index is an opt-in too, and its snapshot carries no offer.
+  const indexed = await captureSyncV2(db, ids.account, 'aube', ids.village, request, { include: ['offers'] });
+  expect(indexed.groups.map((group) => group.stream.kind).sort()).toEqual(['offers', 'village']);
+  expect(indexed.groups.find((group) => group.stream.kind === 'offers')).toMatchObject({
+    stream: { kind: 'offers', key: 'all' },
+    changes: [{ component: 'offerIndex', upsert: [{ id: '*', invalidate: 'offer-pages' }], remove: [] }],
+  });
   // Thousands of known places stay out of the knowledge projection.
   expect(
     Number(

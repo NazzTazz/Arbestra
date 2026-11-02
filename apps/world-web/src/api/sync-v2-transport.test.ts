@@ -9,6 +9,7 @@ import {
   type SyncV2State,
 } from '@arbestra/contracts';
 import { SyncV2Transport } from './sync-v2-transport';
+import { offerIndexRevision, offersOnlyBatch } from './processing-v2';
 import { SyncV2SessionExpired } from './sync-v2-session';
 const worldId = '11111111-1111-4111-8111-111111111111',
   villageId = '22222222-2222-4222-8222-222222222222';
@@ -257,6 +258,58 @@ it('opens a world-level bootstrap with the village of the snapshot and hands the
     await transport.refresh();
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
+  } finally {
+    transport.close();
+  }
+});
+it('follows the shared offer index: bootstrap with offers, then a stream delta moves its revision alone', async () => {
+  const offers = (from: string, to: string): SyncV2Batch['groups'][number] => ({
+    stream: { kind: 'offers', key: 'all', epoch },
+    fromRevision: from,
+    toRevision: to,
+    changes: [{ component: 'offerIndex', upsert: [{ id: '*', invalidate: 'offer-pages' }], remove: [] }],
+  });
+  const urls: string[] = [];
+  const request: typeof fetch = async (url, init) => {
+    urls.push(String(url));
+    if (String(url).endsWith('/sync/stream')) {
+      // The server's wake: an offers-only delta, no offer in it.
+      const delta: SyncV2Batch = {
+        protocol: 2,
+        worldId,
+        villageId,
+        generation: (JSON.parse(String(init?.body)) as SyncV2ReadRequest).generation,
+        observedAt: '2026-11-02T10:00:05Z',
+        coverage: 'delta',
+        // Like the server's: every subscribed stream is listed, the unchanged ones empty.
+        groups: [
+          { stream: { kind: 'village', key: villageId, epoch }, fromRevision: '4', toRevision: '4', changes: [] },
+          offers('2', '3'),
+        ],
+      };
+      return new Response(`event: batch\ndata: ${JSON.stringify(delta)}\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }
+    const first = bootstrap(Number(new Headers(init?.headers).get('x-arbestra-generation')));
+    return json({ ...first, groups: [...first.groups, offers('0', '2')] });
+  };
+  const published: Array<{ revision: string | null; offersOnly: boolean }> = [];
+  const transport = await SyncV2Transport.bootstrapWorld('aube', {
+    storage: memory(),
+    request,
+    include: ['knowledge', 'offers'],
+    publish: (state, _at, batch) =>
+      published.push({ revision: offerIndexRevision(state), offersOnly: offersOnlyBatch(batch) }),
+    expired: () => undefined,
+  });
+  try {
+    expect(urls[0]).toMatch(/\/village\/bootstrap\?generation=\d+&include=knowledge,offers$/);
+    expect(published[0]).toEqual({ revision: `${epoch}:2`, offersOnly: false });
+    await vi.waitFor(() => expect(published).toHaveLength(2));
+    expect(published[1]).toEqual({ revision: `${epoch}:3`, offersOnly: true });
+    // The session took the component as is: no snapshot reread was needed.
+    expect(urls.filter((url) => url.endsWith('/sync/read'))).toHaveLength(0);
   } finally {
     transport.close();
   }

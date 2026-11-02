@@ -9,6 +9,8 @@ Le joueur entre au marché pour chercher une ressource. Le marché propose trois
 
 Les actualisations périodiques gardent la fiche stable : « Préparation du marché… » occupe un emplacement de hauteur fixe sous le titre, annoncé comme statut accessible. Une liste vide conserve la place de « Aucune offre » pendant la requête, en masquant son texte jusqu’à la réponse. L’apparition ou la disparition du chargement ne déplace donc ni les offres ni les convois.
 
+La liste ouverte n’est plus relue toutes les 5 s : elle l’est quand la révision de l’index partagé des offres (flux V2 `offers` / `all`, qui ne porte aucune offre) change, à l’ouverture du panneau et au retour de visibilité de l’onglet, sans bloquer la liste pendant la relecture (voir l’[inventaire de la synchronisation V2](INVENTAIRE-SYNC-V2-2026-10-29.md#marché--relecture-par-lindex-des-offres-2-novembre)).
+
 Le parcours de publication est orienté besoin, avec une ressource recherchée contre une ressource offerte. Pas de paiement composé de plusieurs ressources dans cette première version.
 
 1. Choisir la ressource recherchée parmi les représentations factory : bois brut, bois d’œuvre, pierre brute, pierre taillée et carottes. La sélection est la seule action de cet écran ; toucher une ressource avance.
