@@ -15,11 +15,11 @@ Statut : **à valider** par Tristan en recette sur le dev (§8). Remplace, pour 
 { commandId, gestures: [
     { buildingType: 'terrain', anchor, cells, height }          // terraformation libre
   | { buildingType: <bâtiment>, anchor, quarterTurns }           // nivellement d'emprise
-  | { buildingType: 'terrain-restore', cells: [{ cellX, cellY, corners }] }  // restauration (2 novembre)
+  | { buildingType: 'terrain-restore', cells: [{ cellX, cellY, corners, expected }] }  // restauration (2 novembre)
 ] }
 ```
 
-- Restauration (ajout du 2 novembre, [outil §7.10](SPEC-TERRAFORMATION-OUTIL.md#710-annulation-par-geste-inverse-2-novembre)) : chaque case reprend ses quatre hauteurs de coin ; c'est le geste inverse d'un trait (Ctrl+Z). Une case = une unité, admise aux règles d'une case peinte ; compte une case par case restaurée.
+- Restauration (ajout du 2 novembre, [outil §7.10](SPEC-TERRAFORMATION-OUTIL.md#710-annulation-par-geste-inverse-2-novembre)) : chaque coin de chaque case reprend sa hauteur `corners` **seulement s'il est encore à la hauteur `expected`** (celle que le trait annulé a laissée, au 1e-6 des hauteurs stockées ; sinon il garde sa hauteur actuelle, décision du serveur sous le verrou du village) ; une case sans coin intact est sans effet, pas un refus ; `expected` est obligatoire et fait partie de la forme canonique de l'idempotence ; c'est le geste inverse d'un trait (Ctrl+Z). Une case = une unité, admise aux règles d'une case peinte ; compte une case par case restaurée.
 
 - Au plus 32 gestes et 1 024 cases au total ; au moins un geste.
 - Les gestes s'appliquent **dans l'ordre** : un sommet partagé prend la hauteur du dernier geste qui le touche. Chaque geste est validé contre le terrain laissé par les précédents.

@@ -63,7 +63,12 @@ const canonical = (request: TerrainEditsRequest) => ({
     g.buildingType === 'terrain-restore'
       ? {
           buildingType: g.buildingType,
-          cells: g.cells.map(({ cellX, cellY, corners }) => ({ cellX, cellY, corners: [...corners] })),
+          cells: g.cells.map(({ cellX, cellY, corners, expected }) => ({
+            cellX,
+            cellY,
+            corners: [...corners],
+            expected: [...expected],
+          })),
         }
       : g.buildingType === 'terrain'
         ? {
@@ -101,8 +106,9 @@ interface Unit {
   cells: Cell[];
   free: boolean;
   height: number;
-  /** A restored cell (§7.10): its four corner heights. */
+  /** A restored cell (§7.10): its four corner heights and those the undone stroke left. */
   corners?: readonly number[];
+  expected?: readonly number[];
   refusal?: { code: TerrainEditRefusalCode; message: string };
 }
 /** Rank of a cell refusal: `assertBuildableCells` throws the infrastructure
@@ -196,7 +202,15 @@ async function prepareTerrainEdits(
       else
         for (const c of restored) {
           const cell = { cellX: c.cellX, cellY: c.cellY };
-          units.push({ gesture: index, anchor: cell, cells: [cell], free: true, height: 0, corners: c.corners });
+          units.push({
+            gesture: index,
+            anchor: cell,
+            cells: [cell],
+            free: true,
+            height: 0,
+            corners: c.corners,
+            expected: c.expected,
+          });
         }
       continue;
     }
@@ -284,10 +298,10 @@ async function prepareTerrainEdits(
       continue;
     }
     const { cells } = unit;
-    if (unit.corners && geometry) {
-      // A restored cell: no effect is no refusal, checked first (an unchanged
+    if (unit.corners && unit.expected && geometry) {
+      // A restored cell: no effect (nothing left intact included) is no refusal, checked first (an unchanged
       // cell beside a road is not refused); then the rules of a painted cell.
-      const plan = terrainRestoreUnit(cells[0]!, v, heightAt, unit.corners);
+      const plan = terrainRestoreUnit(cells[0]!, v, heightAt, unit.corners, unit.expected);
       if (plan.volume < 1e-9) continue;
       const obstacle = firstRefusal(cells, refusals) ?? firstRefusal(plan.affectedCells, refusals);
       if (obstacle) {

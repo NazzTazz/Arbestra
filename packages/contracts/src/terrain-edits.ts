@@ -23,15 +23,20 @@ const coordinate = Type.Integer({ minimum: 0, maximum: 1_000_000 });
 const Cell = Type.Object({ cellX: coordinate, cellY: coordinate }, { additionalProperties: false });
 /** Bound of a restored corner height: far beyond any relief, a guard against absurd values. */
 export const TERRAIN_RESTORE_HEIGHT_LIMIT = 1024;
+const restoreHeights = () =>
+  Type.Array(Type.Number({ minimum: -TERRAIN_RESTORE_HEIGHT_LIMIT, maximum: TERRAIN_RESTORE_HEIGHT_LIMIT }), {
+    minItems: 4,
+    maxItems: 4,
+  });
 const RestoreCell = Type.Object(
   {
     cellX: coordinate,
     cellY: coordinate,
     /** Corner heights in `cellVertices` order: (0,0), (1,0), (1,1), (0,1). */
-    corners: Type.Array(
-      Type.Number({ minimum: -TERRAIN_RESTORE_HEIGHT_LIMIT, maximum: TERRAIN_RESTORE_HEIGHT_LIMIT }),
-      { minItems: 4, maxItems: 4 },
-    ),
+    corners: restoreHeights(),
+    /** The heights the undone stroke left at these corners (same order): a
+     * corner is restored only while it is still at that height (§7.10). */
+    expected: restoreHeights(),
   },
   { additionalProperties: false },
 );
@@ -56,7 +61,8 @@ export const TerrainEditGestureSchema = Type.Union([
     { additionalProperties: false },
   ),
   /** Restoration (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10, the undo of a
-   * stroke): the four corners of each cell back to the given heights. Each
+   * stroke): the corners of each cell still at the height the stroke left
+   * (`expected`) back to the given heights, the others untouched. Each
    * cell is one unit, admitted under the rules of a painted cell; the cells
    * are processed in the given order, without duplicates. */
   Type.Object(
@@ -129,7 +135,7 @@ export const TerrainEditsResultSchema = Type.Object(
 export type TerrainEditsResult = Static<typeof TerrainEditsResultSchema>;
 
 type EditCell = { cellX: number; cellY: number };
-type RestoredCell = EditCell & { corners: readonly number[] };
+type RestoredCell = EditCell & { corners: readonly number[]; expected: readonly number[] };
 /** The painted cells of a free gesture, in processing order (the canonical
  * order of `terraformCells`): each one is a unit, accepted or refused alone.
  * Throws on an invalid selection or height, as `terraformCells`. */
@@ -180,24 +186,39 @@ export function terrainRestoreCells(
       c.cellY >= world.heightCells ||
       seen.has(k) ||
       c.corners.length !== 4 ||
-      c.corners.some((h) => !Number.isFinite(h) || Math.abs(h) > TERRAIN_RESTORE_HEIGHT_LIMIT)
+      c.expected.length !== 4 ||
+      [...c.corners, ...c.expected].some((h) => !Number.isFinite(h) || Math.abs(h) > TERRAIN_RESTORE_HEIGHT_LIMIT)
     )
       throw Error('Invalid terrain restoration');
     seen.add(k);
   }
   return [...gesture.cells];
 }
-/** What one restored cell writes: its four corners at the given heights
- * (`cellVertices` order), the 3 × 3 cells it touches and its volume (below
- * 1e-9: no effect), measured as `terrainEditUnit` measures a painted cell.
- * Shared by the server's admission and the client's prediction. */
+/** Whether a corner is still at the height the undone stroke left: equal at
+ * the precision of the stored heights (1e-6). */
+export const terrainCornerIntact = (current: number, expected: number) =>
+  Math.abs(terrainHeightPrecision(current) - terrainHeightPrecision(expected)) < 1e-9;
+/** What one restored cell writes (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10,
+ * « restaure seulement les sommets intacts »): each corner (`cellVertices`
+ * order) still at its `expected` height goes back to its `corners` height; a
+ * corner changed since keeps its current height. Also the 3 × 3 cells it
+ * touches and its volume (below 1e-9: no effect, e.g. no corner intact),
+ * measured as `terrainEditUnit` measures a painted cell. Shared by the
+ * server's admission and the client's prediction. */
 export function terrainRestoreUnit(
   cell: EditCell,
   world: SpatialDimensions,
   heightAt: (x: number, y: number) => number,
   corners: readonly number[],
+  expected: readonly number[],
 ) {
-  const vertices = cellVertices(cell, world).map((v, i) => ({ ...v, height: terrainHeightPrecision(corners[i]!) }));
+  const vertices = cellVertices(cell, world).map((v, i) => {
+    const current = heightAt(v.vertexX, v.vertexY);
+    return {
+      ...v,
+      height: terrainHeightPrecision(terrainCornerIntact(current, expected[i]!) ? corners[i]! : current),
+    };
+  });
   if (vertices.some((v) => !Number.isFinite(v.height))) throw Error('Invalid terrain restoration');
   const next = new Map(vertices.map((v) => [vertexKey(v), v.height])),
     affectedCells = vertexCells(vertices, world);
@@ -223,10 +244,12 @@ export interface TerrainEditPaint {
   cell: EditCell;
   height: number;
 }
-/** One restored cell of an undo: its four corner heights (`cellVertices` order). */
+/** One restored cell of an undo: its four corner heights (`cellVertices` order)
+ * and the heights the stroke left there (restored only while intact). */
 export interface TerrainEditRestore {
   cell: EditCell;
   corners: readonly number[];
+  expected: readonly number[];
 }
 /** One unit of a live stroke: a painted cell, or a restored one. */
 export type TerrainEditStep = TerrainEditPaint | TerrainEditRestore;
@@ -250,17 +273,17 @@ export function orderedTerrainEditGestures(
     const last = gestures.at(-1);
     if (isTerrainEditRestore(step)) {
       // A cell already restored by the gesture starts another one (no duplicates).
-      const { cell, corners } = step;
+      const { cell, corners, expected } = step;
       if (
         last?.buildingType === 'terrain-restore' &&
         last.cells.length < MAX_TERRAFORM_CELLS &&
         !last.cells.some((c) => c.cellX === cell.cellX && c.cellY === cell.cellY)
       )
-        last.cells.push({ cellX: cell.cellX, cellY: cell.cellY, corners: [...corners] });
+        last.cells.push({ cellX: cell.cellX, cellY: cell.cellY, corners: [...corners], expected: [...expected] });
       else
         gestures.push({
           buildingType: 'terrain-restore',
-          cells: [{ cellX: cell.cellX, cellY: cell.cellY, corners: [...corners] }],
+          cells: [{ cellX: cell.cellX, cellY: cell.cellY, corners: [...corners], expected: [...expected] }],
         });
       continue;
     }
@@ -309,6 +332,7 @@ export function predictTerrainEdits(
     if ('height' in gesture)
       for (const cell of terrainEditCells(gesture, world)) write(terrainEditUnit(cell, world, at, gesture.height));
     else
-      for (const cell of terrainRestoreCells(gesture, world)) write(terrainRestoreUnit(cell, world, at, cell.corners));
+      for (const cell of terrainRestoreCells(gesture, world))
+        write(terrainRestoreUnit(cell, world, at, cell.corners, cell.expected));
   return written;
 }

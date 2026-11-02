@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   cellVertices,
+  terrainCornerIntact,
   vertexKey,
   type TerrainEditRestore,
   type TerrainEditStep,
@@ -23,6 +24,13 @@ import type { TerrainEditOwner } from './terrain-edits';
  * gesture, live like a stroke: each recorded cell back to those corner
  * heights (`terrain-restore`), predicted, sent and refused exactly as painted
  * cells are. The stack only holds touched vertices, never a chunk.
+ *
+ * Only intact vertices come back (Tristan, 2 November: « Restaure seulement
+ * les sommets intacts, pas de Ctrl+Y. », §7.10): the record also keeps, for
+ * every vertex, the height the stroke left (its last prediction), and a vertex
+ * that no longer shows that height (another stroke, another player) keeps its
+ * current one. The gesture carries these heights (`expected`) so the server
+ * decides the same against its own terrain. There is no redo.
  */
 export const TERRAFORM_UNDO_LIMIT = 20;
 /** The « Annuler » button stays this long after a released stroke. */
@@ -35,6 +43,8 @@ const key = (c: Cell) => `${c.cellX}:${c.cellY}`;
 export class TerraformUndoRecord implements TerrainEditOwner {
   readonly cells = new Map<string, Cell>();
   readonly before = new Map<string, number>();
+  /** The height the stroke left at each vertex it wrote (its last predicted write). */
+  readonly left = new Map<string, number>();
   /** Painted cells and their predicted vertices; `heightAt` is read before the prediction lands. */
   record(
     steps: readonly TerrainEditStep[],
@@ -44,6 +54,7 @@ export class TerraformUndoRecord implements TerrainEditOwner {
     for (const v of vertices) {
       const k = vertexKey(v);
       if (!this.before.has(k)) this.before.set(k, heightAt(v.vertexX, v.vertexY));
+      this.left.set(k, v.height);
     }
     for (const { cell } of steps) {
       const k = key(cell);
@@ -55,19 +66,21 @@ export class TerraformUndoRecord implements TerrainEditOwner {
   refused(cell: Cell) {
     this.cells.delete(key(cell));
   }
-  /** The inverse gesture: each cell whose corners differ from the heights
-   * before the stroke, back to them; a corner the stroke did not write keeps
-   * its current height. Empty when nothing is left to undo. */
+  /** The inverse gesture: each cell with a corner the stroke wrote that is
+   * still at the height it left, back to the heights before the stroke; the
+   * other corners keep their current height (the server re-checks them with
+   * `expected`). Empty when nothing is left to undo. */
   restoration(world: World, heightAt: (x: number, y: number) => number): TerrainEditRestore[] {
     const steps: TerrainEditRestore[] = [];
     for (const cell of this.cells.values()) {
       const corners = cellVertices(cell, world).map((v) => {
-        const now = heightAt(v.vertexX, v.vertexY);
-        return { now, then: this.before.get(vertexKey(v)) ?? now };
+        const now = heightAt(v.vertexX, v.vertexY),
+          k = vertexKey(v);
+        return { now, then: this.before.get(k) ?? now, left: this.left.get(k) ?? now };
       });
       if (corners.some((c) => !Number.isFinite(c.now) || !Number.isFinite(c.then))) continue;
-      if (corners.every((c) => Math.abs(c.now - c.then) < 1e-9)) continue;
-      steps.push({ cell, corners: corners.map((c) => c.then) });
+      if (corners.every((c) => !terrainCornerIntact(c.now, c.left) || terrainCornerIntact(c.now, c.then))) continue;
+      steps.push({ cell, corners: corners.map((c) => c.then), expected: corners.map((c) => c.left) });
     }
     return steps;
   }

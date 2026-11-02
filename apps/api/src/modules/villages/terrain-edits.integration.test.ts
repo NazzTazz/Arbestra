@@ -524,11 +524,15 @@ it('accepts an edit that cuts a building off: no connectivity guarantee (moats a
   await restore(before, await heights());
 }, 120000);
 
-/** A restoration gesture (§7.10): the corners of each cell, in `cellVertices` order. */
-const restoration = (cells: Array<[number, number, number[]]>): TerrainEditGesture => ({
+/** A restoration gesture (§7.10): the corners of each cell, in `cellVertices` order,
+ * and the heights the undone stroke left there (restored only while intact). */
+const restoration = (cells: Array<[number, number, number[], number[]]>): TerrainEditGesture => ({
   buildingType: 'terrain-restore',
-  cells: cells.map(([cellX, cellY, corners]) => ({ cellX, cellY, corners })),
+  cells: cells.map(([cellX, cellY, corners, expected]) => ({ cellX, cellY, corners, expected })),
 });
+/** A restoration of cells whose stroke left exactly the heights `current` shows. */
+const restoreFrom = (current: Map<string, number>, cells: Array<[number, number, number[]]>): TerrainEditGesture =>
+  restoration(cells.map(([x, y, c]) => [x, y, c, corners(current, x, y)]));
 const corners = (map: Map<string, number>, x: number, y: number) =>
   [
     [x, y],
@@ -553,13 +557,13 @@ it('restores the corners of a stroke to arbitrary heights: undo of a stroke, ide
   // The inverse gesture: the stroke's cells back to the heights before it.
   const command = {
     commandId: randomUUID(),
-    gestures: [restoration([60, 61].map((x) => [x, 190, corners(before, x, 190)]))],
+    gestures: [restoration([60, 61].map((x) => [x, 190, corners(before, x, 190), [0.75, 0.75, 0.75, 0.75]]))],
   };
   const confirmation = await terrainEditsCommandV2(db, accountId, slug, villageId, command, 1);
   expect(confirmation.result).toEqual({ gestures: 1, unchanged: 0, vertices: 6 });
   expect(await heights()).toEqual(before);
   // Corners at four different heights, which no painted cell can write.
-  const sloped = await edit([restoration([[62, 190, [0.3, 0.35, 0.4, 0.45]]])]);
+  const sloped = await edit([restoreFrom(await heights(), [[62, 190, [0.3, 0.35, 0.4, 0.45]]])]);
   expect(sloped.result).toEqual({ gestures: 1, unchanged: 0, vertices: 4 });
   const after = await heights();
   expect(corners(after, 62, 190)).toEqual([0.3, 0.35, 0.4, 0.45]);
@@ -573,7 +577,7 @@ it('restores the corners of a stroke to arbitrary heights: undo of a stroke, ide
       accountId,
       slug,
       villageId,
-      { ...command, gestures: [restoration([[60, 190, [1, 1, 1, 1]]])] },
+      { ...command, gestures: [restoration([[60, 190, [1, 1, 1, 1], [0.75, 0.75, 0.75, 0.75]]])] },
       1,
     ),
   ).rejects.toMatchObject({ code: 'COMMAND_REUSED' });
@@ -590,7 +594,7 @@ it('refuses a restored cell under the rules of a painted one, keeps the others, 
     // (60,189) is free; (65,190)'s ring holds the road (66,191); the road cell itself
     // is restored to its own heights: no effect, no refusal.
     const confirmation = await edit([
-      restoration([
+      restoreFrom(before, [
         [60, 189, [0.5, 0.5, 0.6, 0.6]],
         [65, 190, [0.5, 0.5, 0.5, 0.5]],
         [66, 191, corners(before, 66, 191)],
@@ -609,7 +613,9 @@ it('refuses a restored cell under the rules of a painted one, keeps the others, 
     expect(corners(after, 65, 190)).toEqual(corners(before, 65, 190));
     // Refused alone: 409 with the list, nothing written.
     const state = await rows();
-    const refusal = await edit([restoration([[65, 190, [0.5, 0.5, 0.5, 0.5]]])]).catch((error: unknown) => error);
+    const refusal = await edit([restoreFrom(before, [[65, 190, [0.5, 0.5, 0.5, 0.5]]])]).catch(
+      (error: unknown) => error,
+    );
     expect(httpErrorBody(refusal as HttpError)).toMatchObject({
       code: 'INFRASTRUCTURE_OCCUPIED',
       gesture: 0,
@@ -619,11 +625,13 @@ it('refuses a restored cell under the rules of a painted one, keeps the others, 
     });
     expect(await rows()).toEqual(state);
     // A foundation's corner is never restored: the town hall at (59,195).
-    const foundation = await edit([restoration([[60, 196, [0.5, 0.5, 0.5, 0.5]]])]).catch((error: unknown) => error);
+    const foundation = await edit([restoreFrom(before, [[60, 196, [0.5, 0.5, 0.5, 0.5]]])]).catch(
+      (error: unknown) => error,
+    );
     expect(foundation).toMatchObject({ code: 'CELL_OCCUPIED' });
     // A duplicated cell makes the gesture invalid as a whole.
     const duplicate = await edit([
-      restoration([
+      restoreFrom(before, [
         [60, 189, [1, 1, 1, 1]],
         [60, 189, [1, 1, 1, 1]],
       ]),
@@ -633,4 +641,48 @@ it('refuses a restored cell under the rules of a painted one, keeps the others, 
   } finally {
     await db.deleteFrom('roadCells').where('worldId', '=', worldId).execute();
   }
+}, 120000);
+
+it('restores only the corners still at the height the stroke left; a cell with none intact has no effect, no refusal (§7.10)', async () => {
+  const before = await heights();
+  await edit([
+    free(
+      [
+        [60, 190],
+        [61, 190],
+      ],
+      0.75,
+    ),
+  ]);
+  const painted = await heights();
+  // Another gesture (another stroke, another player) repaints cell (62,190): vertices 62 and 63 leave 0.75.
+  await edit([free([[62, 190]], 1.25)]);
+  const modified = await heights();
+  expect(corners(modified, 61, 190)).toEqual([0.75, 1.25, 1.25, 0.75]);
+  // Undo of the first stroke: its cells back to the heights before it, each corner expected at 0.75.
+  const undo = restoration(
+    [60, 61].map(
+      (x) => [x, 190, corners(before, x, 190), [0.75, 0.75, 0.75, 0.75]] as [number, number, number[], number[]],
+    ),
+  );
+  const command = { commandId: randomUUID(), gestures: [undo] };
+  const confirmation = await terrainEditsCommandV2(db, accountId, slug, villageId, command, 1);
+  expect(confirmation.result.refused).toBeUndefined();
+  const after = await heights();
+  // Intact corners (vertices 60, 61) are back; the shared vertices 62 keep the other gesture's height.
+  expect(corners(after, 60, 190)).toEqual(corners(before, 60, 190));
+  expect(corners(after, 61, 190)).toEqual([before.get('61:190'), 1.25, 1.25, before.get('61:191')]);
+  expect(corners(after, 62, 190)).toEqual(corners(modified, 62, 190));
+  // Replay by commandId: the receipt answers, nothing is written.
+  const state = await rows();
+  expect((await terrainEditsCommandV2(db, accountId, slug, villageId, command, 1)).result).toEqual(confirmation.result);
+  expect(await rows()).toEqual(state);
+  // Cell (62,190) is wholly modified since the stroke (expected 0.75, now 1.25 and the original ground): no effect.
+  const none = await edit([restoration([[62, 190, [0.1, 0.1, 0.1, 0.1], [0.75, 0.75, 0.75, 0.75]]])]);
+  expect(none.result.refused).toBeUndefined();
+  expect(none.result.gestures).toBe(0);
+  expect(none.result.unchanged).toBe(1);
+  expect(await heights()).toEqual(after);
+  await restore(before, painted);
+  await restore(before, modified);
 }, 120000);

@@ -3,6 +3,7 @@ import {
   orderedTerrainEditGestures,
   predictTerrainEdits,
   terrainEditCells,
+  terrainCornerIntact,
   terrainEditUnit,
   terrainRestoreCells,
   terrainRestoreUnit,
@@ -107,7 +108,7 @@ describe('terrain restoration (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10)', () =>
   it('writes each corner at its own height, with the 3 × 3 and the volume of a painted cell', () => {
     const flat = () => 1;
     const corners = [ground(5, 3), ground(6, 3), ground(6, 4), ground(5, 4)];
-    const unit = terrainRestoreUnit(cell(5, 3), world, flat, corners);
+    const unit = terrainRestoreUnit(cell(5, 3), world, flat, corners, [1, 1, 1, 1]);
     expect(unit.vertices).toEqual([
       { vertexX: 5, vertexY: 3, height: corners[0] },
       { vertexX: 6, vertexY: 3, height: corners[1] },
@@ -117,12 +118,38 @@ describe('terrain restoration (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10)', () =>
     expect(unit.affectedCells).toEqual(terrainEditUnit(cell(5, 3), world, flat, 2).affectedCells);
     // Restoring the heights a paint at 2 overwrote: the same volume as that paint.
     const painted = (x: number, y: number) => ([5, 6].includes(x) && [3, 4].includes(y) ? 2 : 1);
-    expect(terrainRestoreUnit(cell(5, 3), world, painted, [1, 1, 1, 1]).volume).toBeCloseTo(
+    expect(terrainRestoreUnit(cell(5, 3), world, painted, [1, 1, 1, 1], [2, 2, 2, 2]).volume).toBeCloseTo(
       terrainEditUnit(cell(5, 3), world, flat, 2).volume,
       12,
     );
     // Already at those heights: no effect.
-    expect(terrainRestoreUnit(cell(5, 3), world, ground, corners).volume).toBeLessThan(1e-9);
+    expect(terrainRestoreUnit(cell(5, 3), world, ground, corners, corners).volume).toBeLessThan(1e-9);
+  });
+
+  it('restores only the intact corners: a corner changed since keeps its current height (§7.10)', () => {
+    // The stroke left 2 on the four corners; the others (another stroke, another player) moved some.
+    const left = [2, 2, 2, 2];
+    const now = (heights: number[]) => (x: number, y: number) =>
+      heights[[`5:3`, `6:3`, `6:4`, `5:4`].indexOf(`${x}:${y}`)] ?? 7;
+    // Intact: all four back.
+    expect(
+      terrainRestoreUnit(cell(5, 3), world, now([2, 2, 2, 2]), [1, 1.25, 1.5, 1.75], left).vertices.map(
+        (v) => v.height,
+      ),
+    ).toEqual([1, 1.25, 1.5, 1.75]);
+    // Partial: (6,3) and (5,4) changed, the other two come back.
+    const partial = terrainRestoreUnit(cell(5, 3), world, now([2, 3, 2, 4]), [1, 1.25, 1.5, 1.75], left);
+    expect(partial.vertices.map((v) => v.height)).toEqual([1, 3, 1.5, 4]);
+    expect(partial.volume).toBeGreaterThan(1e-9);
+    // Every corner changed: no effect at all, heights untouched.
+    const none = terrainRestoreUnit(cell(5, 3), world, now([3, 3, 3, 3]), [1, 1.25, 1.5, 1.75], left);
+    expect(none.vertices.map((v) => v.height)).toEqual([3, 3, 3, 3]);
+    expect(none.volume).toBeLessThan(1e-9);
+    // The comparison is at the precision of the stored heights: 1e-7 apart is intact, 2e-6 is not.
+    expect(terrainCornerIntact(2.0000001, 2)).toBe(true);
+    expect(terrainCornerIntact(2.000002, 2)).toBe(false);
+    const rounded = terrainRestoreUnit(cell(5, 3), world, now([2.0000004, 2.000002, 2, 2]), [1, 1, 1, 1], left);
+    expect(rounded.vertices.map((v) => v.height)).toEqual([1, 2.000002, 1, 1]);
   });
 
   it('undoes a stroke exactly: the restored corners of the painted cells give the ground back', () => {
@@ -140,6 +167,7 @@ describe('terrain restoration (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10)', () =>
           [1, 1],
           [0, 1],
         ].map(([dx, dy]) => ground((c.cellX + dx!) % 64, (c.cellY + dy!) % 32)),
+        expected: [2, 2, 2, 2],
       })),
     );
     expect(restore).toHaveLength(1);
@@ -149,17 +177,19 @@ describe('terrain restoration (docs/SPEC-TERRAFORMATION-OUTIL.md §7.10)', () =>
   });
 
   it('refuses a duplicate cell, a coordinate outside the world or an absurd height', () => {
-    const ok = { cellX: 1, cellY: 1, corners: [1, 1, 1, 1] };
+    const ok = { cellX: 1, cellY: 1, corners: [1, 1, 1, 1], expected: [2, 2, 2, 2] };
     expect(terrainRestoreCells({ cells: [ok] }, world)).toEqual([ok]);
     expect(() => terrainRestoreCells({ cells: [ok, ok] }, world)).toThrow();
     expect(() => terrainRestoreCells({ cells: [{ ...ok, cellX: 64 }] }, world)).toThrow();
     expect(() => terrainRestoreCells({ cells: [{ ...ok, corners: [1, 1, 1, 1e9] }] }, world)).toThrow();
     expect(() => terrainRestoreCells({ cells: [{ ...ok, corners: [1, 1, 1] }] }, world)).toThrow();
+    expect(() => terrainRestoreCells({ cells: [{ ...ok, expected: [2, 2, 2] }] }, world)).toThrow();
+    expect(() => terrainRestoreCells({ cells: [{ ...ok, expected: [2, 2, 2, NaN] }] }, world)).toThrow();
     // A cell restored twice in one stroke starts a second gesture instead.
     expect(
       orderedTerrainEditGestures([
-        { cell: cell(1, 1), corners: [1, 1, 1, 1] },
-        { cell: cell(1, 1), corners: [2, 2, 2, 2] },
+        { cell: cell(1, 1), corners: [1, 1, 1, 1], expected: [2, 2, 2, 2] },
+        { cell: cell(1, 1), corners: [2, 2, 2, 2], expected: [2, 2, 2, 2] },
       ]),
     ).toHaveLength(2);
   });

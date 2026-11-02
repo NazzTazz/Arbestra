@@ -169,11 +169,14 @@ describe('live terrain edits (docs/SPEC-TERRAFORMATION-OUTIL.md §7.9)', () => {
     const refused: string[] = [];
     const owner = { refused: (c: { cellX: number; cellY: number }) => refused.push(`${c.cellX}:${c.cellY}`) };
     h.queue.add(frame(1, 2), vertices(1), owner);
-    h.queue.add([{ cell: at(9, 5), corners: [1, 2, 3, 4] }], vertices(9));
+    h.queue.add([{ cell: at(9, 5), corners: [1, 2, 3, 4], expected: [5, 5, 5, 5] }], vertices(9));
     h.answers[0]!.resolve({ gestures: 1, unchanged: 0, vertices: 6 });
     await tick();
     expect(h.sent[1]!.gestures).toEqual([
-      { buildingType: 'terrain-restore', cells: [{ cellX: 9, cellY: 5, corners: [1, 2, 3, 4] }] },
+      {
+        buildingType: 'terrain-restore',
+        cells: [{ cellX: 9, cellY: 5, corners: [1, 2, 3, 4], expected: [5, 5, 5, 5] }],
+      },
     ]);
     h.answers[1]!.resolve({ gestures: 0, unchanged: 1, vertices: 0 });
     await tick();

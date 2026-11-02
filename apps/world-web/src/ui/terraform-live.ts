@@ -145,7 +145,7 @@ export class LiveStroke {
       let plan: { vertices: TerrainVertex[]; volume: number };
       try {
         plan = restored
-          ? terrainRestoreUnit(paint.cell, world, at, paint.corners)
+          ? terrainRestoreUnit(paint.cell, world, at, paint.corners, paint.expected)
           : terrainEditUnit(paint.cell, world, at, paint.height);
       } catch {
         this.result.unknown = true;

@@ -137,7 +137,9 @@ describe('undo of a terraforming stroke (docs/SPEC-TERRAFORMATION-OUTIL.md §7.1
     heights.set('8:8', 2);
     record.refused(at(8, 8));
     // The refused cell came back to its height (release); only the accepted one is restored.
-    expect(record.restoration(world, heightAt)).toEqual([{ cell: at(1, 1), corners: [1, 1, 1, 1] }]);
+    expect(record.restoration(world, heightAt)).toEqual([
+      { cell: at(1, 1), corners: [1, 1, 1, 1], expected: [2, 1, 1, 1] },
+    ]);
   });
 
   it('skips a cell already back at its heights, and keeps the current height of corners it did not write', () => {
@@ -147,9 +149,30 @@ describe('undo of a terraforming stroke (docs/SPEC-TERRAFORMATION-OUTIL.md §7.1
     record.record([{ cell: at(1, 1), height: 5 }], [{ vertexX: 2, vertexY: 2, height: 5 }], (x, y) =>
       x === 2 && y === 2 ? 1 : heightAt(x, y),
     );
-    expect(record.restoration(world, heightAt)).toEqual([{ cell: at(1, 1), corners: [1, 1, 1, 1] }]);
+    expect(record.restoration(world, heightAt)).toEqual([
+      { cell: at(1, 1), corners: [1, 1, 1, 1], expected: [1, 1, 5, 1] },
+    ]);
     heights.delete('2:2');
     expect(record.restoration(world, heightAt)).toEqual([]);
+  });
+
+  it('restores only the intact vertices: a vertex changed since the stroke keeps its height (§7.10)', () => {
+    const h = harness(),
+      before = snapshot(h.heightAt);
+    h.paint([at(10, 10), at(11, 10)], 2);
+    // Another stroke or player moves vertex (11,10), shared by both cells, and a vertex of cell (12,*) nobody painted.
+    h.shown.set('11:10', 3.5);
+    const undone = h.undo()!;
+    // The steps carry the heights the stroke left, for the server to check against its own terrain.
+    expect(undone.steps.find((s) => s.cell.cellX === 10)!.expected).toEqual([2, 2, 2, 2]);
+    expect(h.heightAt(11, 10)).toBe(3.5);
+    expect(h.heightAt(10, 10)).toBe(natural(10, 10));
+    expect(h.heightAt(12, 10)).toBe(natural(12, 10));
+    expect(snapshot(h.heightAt).filter((v, i) => v !== before[i])).toEqual([3.5]);
+    // Every vertex changed since: nothing is left to undo.
+    h.paint([at(20, 20)], 2);
+    for (const k of ['20:20', '21:20', '21:21', '20:21']) h.shown.set(k, 4);
+    expect(h.undo()!.steps).toEqual([]);
   });
 
   it('keeps at most TERRAFORM_UNDO_LIMIT strokes, the oldest dropped; an empty stroke is not kept', () => {
