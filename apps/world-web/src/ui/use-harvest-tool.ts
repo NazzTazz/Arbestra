@@ -7,38 +7,21 @@ import type { TerrainHandle } from '../scene/VillageScene';
 import { cellKey } from '../scene/construction-selection';
 import { cancelSummary } from './harvest-cancel';
 import { designateTree, type DesignatedTree } from './wood-designation';
+import {
+  GestureForecasts,
+  PlannedTargets,
+  forecastGesture,
+  woodFeedbackAmounts,
+  type FeedbackSpec,
+  type ForecastLookup,
+  type ReceiptContext,
+} from './harvest-forecast';
+import { queuedMode, woodQueue } from '../scene/wood-queue';
 export type HarvestFilter = 'gardens' | 'wood' | 'stone';
 export type { DesignatedTree };
+export { woodFeedbackAmounts };
 type Draft = { intent: HarvestIntent; cells: Cell[]; trees?: DesignatedTree[]; submitted?: boolean };
-export type HarvestFeedback = Cell & {
-  id: string;
-  text: string;
-  resource: 'carrot' | 'wood' | 'stone' | 'error';
-  at: number;
-  /** A wood feedback rises from its own tree, not from the grove's cell. */
-  tree?: { featureId: string; treeIndex: number };
-};
-
-/**
- * The wood a receipt accepted, tree by tree (Tristan, 29 October: one « +500 »
- * per tree, not one per grove): each designated tree takes what it still holds,
- * in the order designated, until the accepted amount is spent; the amounts add
- * up to the receipt's. A tree the scene does not know shares what is left.
- */
-export function woodFeedbackAmounts(
-  amount: number,
-  treeIndices: readonly number[],
-  remainingOf: (treeIndex: number) => number | null,
-): Array<{ treeIndex: number; amount: number }> {
-  let left = amount;
-  return treeIndices.map((treeIndex, i) => {
-    const rest = treeIndices.length - i,
-      share = Math.min(left, remainingOf(treeIndex) ?? Math.ceil(left / rest)),
-      given = i === treeIndices.length - 1 ? left : share;
-    left -= given;
-    return { treeIndex, amount: given };
-  });
-}
+export type HarvestFeedback = FeedbackSpec & { id: string; at: number };
 /** The last gesture, which « Annuler » targets for 15 s (docs/SPEC-GRAMMAIRE-GESTUELLE.md §1). */
 export interface LastGesture {
   commandId: string;
@@ -52,19 +35,6 @@ export interface CancelResult {
   pending?: boolean;
   error?: boolean;
 }
-const reasons: Record<string, string> = {
-  'already-assigned': 'Déjà prévu',
-  'out-of-range': 'Hors de portée',
-  protected: 'Protégé',
-  interior: 'Inaccessible',
-  unreachable: 'Sans chemin',
-  depleted: 'Épuisé',
-  empty: 'Vide',
-  'not-found': 'Indisponible',
-  'tree-not-found': 'Arbre introuvable',
-  cancelled: 'Annulé',
-  'building-incomplete': 'En construction',
-};
 /** The queued gestures whose receipt is final: those a batch of receipts settles. */
 export function settledGestures<T extends { intent: { commandId: string } }>(
   queue: readonly T[],
@@ -128,7 +98,8 @@ export function useHarvestTool({
     cancelAfterSend = useRef<string | null>(null),
     last = useRef<LastGesture | null>(null),
     checked = useRef<string | null>(null),
-    accepted = useRef<Array<{ until: number; trees: DesignatedTree[] }>>([]),
+    accepted = useRef<Array<{ until: number; trees: DesignatedTree[]; targets: HarvestReceipt['accepted'] }>>([]),
+    forecasts = useRef(new GestureForecasts()),
     holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const current = useRef({ state, scene, enabled, filter, woodMode, onAccepted });
   current.current = { state, scene, enabled, filter, woodMode, onAccepted };
@@ -149,24 +120,78 @@ export function useHarvestTool({
     if (context.current) sessionStorage.setItem(context.current, JSON.stringify(queue.current));
     publish();
   }
+  /** Where a refusal shows: its plot, its feature, the tree designated, else the gesture's first cell. */
+  function receiptContext(item: Draft): ReceiptContext {
+    return {
+      remainingOf: (featureId, treeIndex) =>
+        current.current.scene.current?.groveTrees(featureId)?.find((r) => r.treeIndex === treeIndex)?.remaining ?? null,
+      cellOfRefusal: (key) => {
+        if (key.startsWith('garden:')) return { cellX: Number(key.split(':')[1]), cellY: Number(key.split(':')[2]) };
+        const feature = current.current.state?.region.features.find((f) => f.id === key);
+        return feature ?? item.trees?.find((t) => t.featureId === key) ?? item.cells[0];
+      },
+    };
+  }
+  function show(specs: FeedbackSpec[], at = Date.now()) {
+    if (!specs.length) return;
+    const entries = specs.map((spec): HarvestFeedback => ({ ...spec, id: randomUUID(), at }));
+    setFeedback((previous) => [...previous.filter((f) => at - f.at < 3000), ...entries].slice(-32));
+  }
+  /**
+   * The labels of a gesture as it leaves (Tristan, 2 November): what the client
+   * already knows, so the « +500 » answers the click at once. The receipt then
+   * only corrects (`flash`). Computed once, here, never per frame.
+   */
+  function announce(item: Draft) {
+    const village = current.current.state;
+    if (!village) return;
+    const scene = current.current.scene.current,
+      planned = new PlannedTargets();
+    for (const queued of queue.current) planned.addIntent(queued.intent);
+    for (const hold of accepted.current) for (const target of hold.targets) planned.addAccepted(target);
+    const plots = new Map<string, { completed: boolean; stored: number; harvesting: boolean }>();
+    for (const cell of village.cells)
+      if (cell.building?.garden)
+        for (const plot of cell.building.garden.plots)
+          plots.set(cellKey(plot), {
+            completed: cell.building.status === 'completed',
+            stored: plot.storedCarrots,
+            harvesting: Boolean(plot.harvest),
+          });
+    const worksites = village.village.worksites,
+      wood = woodQueue(worksites),
+      stone = new Set<string>(),
+      groves = new Map<string, ReturnType<TerrainHandle['groveTrees']>>();
+    for (const site of worksites ?? [])
+      if (site.resourceCode === 'stone' && (site.poolResource || site.status === 'running' || site.status === 'paused'))
+        for (const target of site.targets) if (target.status === 'pending') stone.add(target.featureId);
+    const lookup: ForecastLookup = {
+      garden: (cell) => plots.get(cellKey(cell)) ?? null,
+      feature: (id) => {
+        const feature = village.region.features.find((f) => f.id === id);
+        return feature?.deposit
+          ? { cellX: feature.cellX, cellY: feature.cellY, remaining: feature.deposit.remainingAmount }
+          : null;
+      },
+      tree: (featureId, treeIndex) => {
+        if (!groves.has(featureId)) groves.set(featureId, scene?.groveTrees(featureId) ?? null);
+        const row = groves.get(featureId)?.find((r) => r.treeIndex === treeIndex);
+        return row ? { remaining: row.remaining, queued: row.queued } : null;
+      },
+      caseQueued: (featureId, mode) => {
+        const queued = queuedMode(wood, featureId, null);
+        return mode === 'clear' ? queued === 'clear' : queued !== null;
+      },
+      stoneQueued: (id) => stone.has(id),
+      planned,
+    };
+    const forecast = forecastGesture(item, lookup);
+    forecasts.current.plan(forecast);
+    show(forecast.labels);
+  }
+  /** The receipt: what the forecast got right shows nothing more, what differs shows a correction above it. */
   function flash(receipt: HarvestReceipt, item: Draft) {
     const at = Date.now();
-    const entries: HarvestFeedback[] = receipt.accepted.flatMap((a): HarvestFeedback[] => {
-      if (a.resource !== 'wood' || !a.treeIndices?.length)
-        return [{ ...a, id: randomUUID(), text: `+${a.amount}`, at }];
-      const rows = current.current.scene.current?.groveTrees(a.key) ?? [];
-      return woodFeedbackAmounts(
-        a.amount,
-        a.treeIndices,
-        (treeIndex) => rows.find((r) => r.treeIndex === treeIndex)?.remaining ?? null,
-      ).map(({ treeIndex, amount }) => ({
-        ...a,
-        id: randomUUID(),
-        text: `+${amount}`,
-        at,
-        tree: { featureId: a.key, treeIndex },
-      }));
-    });
     // The trees accepted stay marked until the village's queue holds them.
     const kept = receipt.accepted.flatMap((a): DesignatedTree[] =>
       a.resource !== 'wood'
@@ -178,30 +203,15 @@ export function useHarvestTool({
             cellY: a.cellY,
           })),
     );
-    if (kept.length) {
-      accepted.current.push({ until: at + ACCEPTED_HOLD_MS, trees: kept });
+    if (receipt.accepted.length) {
+      accepted.current.push({ until: at + ACCEPTED_HOLD_MS, trees: kept, targets: receipt.accepted });
       if (holdTimer.current) clearTimeout(holdTimer.current);
       holdTimer.current = setTimeout(() => {
         holdTimer.current = null;
         if (alive.current) publish();
       }, ACCEPTED_HOLD_MS + 50);
     }
-    for (const rejection of receipt.refused) {
-      const feature = current.current.state?.region.features.find((f) => f.id === rejection.key);
-      const designated = item.trees?.find((t) => t.featureId === rejection.key);
-      const cell = rejection.key.startsWith('garden:')
-        ? { cellX: Number(rejection.key.split(':')[1]), cellY: Number(rejection.key.split(':')[2]) }
-        : (feature ?? designated ?? item.cells[0]);
-      if (cell)
-        entries.push({
-          ...cell,
-          id: randomUUID(),
-          text: reasons[rejection.reason] ?? rejection.reason,
-          resource: 'error',
-          at,
-        });
-    }
-    setFeedback((previous) => [...previous.filter((f) => at - f.at < 3000), ...entries].slice(-32));
+    show(forecasts.current.settle(receipt, receiptContext(item)), at);
   }
   /** Sends the cancellation of a gesture already sent, and shows what it did. */
   async function requestCancel(commandId: string) {
@@ -235,6 +245,7 @@ export function useHarvestTool({
     const item = queue.current.find((d) => d.intent.commandId === target.commandId);
     if (item && !item.submitted && flying.current !== target.commandId) {
       queue.current = queue.current.filter((d) => d !== item);
+      forecasts.current.discard(item.intent.commandId);
       persist();
       setCancelResult({ text: 'Geste annulé avant son envoi.', at: Date.now() });
       return;
@@ -301,6 +312,7 @@ export function useHarvestTool({
     alive.current = true;
     checked.current = null;
     queue.current = [];
+    forecasts.current.reset();
     draft.current = null;
     last.current = null;
     setLastGesture(null);
@@ -360,6 +372,7 @@ export function useHarvestTool({
       const item = draft.current;
       draft.current = null;
       if (item && (item.intent.gardens.length || item.intent.wood.length || item.intent.stone.length)) {
+        announce(item);
         queue.current.push(item);
         // « Annuler » now targets this gesture: a new gesture replaces the previous one.
         last.current = { commandId: item.intent.commandId, at: Date.now(), wood: item.intent.wood.length > 0 };

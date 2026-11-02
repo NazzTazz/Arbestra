@@ -26,7 +26,7 @@ export function HarvestFeedbackLayer({
         el.style.display = anchor ? 'block' : 'none';
         if (anchor) {
           el.style.left = `${anchor.x}px`;
-          el.style.top = `${anchor.y - 35 - Math.min(age / 70, 28)}px`;
+          el.style.top = `${anchor.y - 35 - Math.min(age / 70, 28) - (item.second ? 24 : 0)}px`;
           el.style.opacity = String(Math.min(1, (3000 - age) / 700));
         }
       }
