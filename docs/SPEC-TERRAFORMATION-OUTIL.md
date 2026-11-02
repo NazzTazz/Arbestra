@@ -1,6 +1,6 @@
 # Outil de terraformation — 2 novembre 2026
 
-Statut : **à valider** (recette navigateur de Tristan, §6). Prolonge [SPEC-TERRAFORMATION-INSTANTANEE.md](SPEC-TERRAFORMATION-INSTANTANEE.md). Statuts : **validé** (Tristan), **proposé** (choix de l'implémentation dans le cadre validé), **ouvert**.
+Statut : **à valider** (recette navigateur, §7.8). Le §7 (décisions du 2 novembre au soir) remplace le délai de 10 s, la paire Annuler/Confirmer de la terraformation, le tout-ou-rien, les diagonales du réticule et le message regroupé par geste ; les §2 à §6 restent l'historique de la première version. Prolonge [SPEC-TERRAFORMATION-INSTANTANEE.md](SPEC-TERRAFORMATION-INSTANTANEE.md). Statuts : **validé** (Tristan), **proposé** (choix de l'implémentation dans le cadre validé), **ouvert**.
 
 ## 1. Décisions validées (Tristan, 2 novembre)
 
@@ -9,6 +9,14 @@ Statut : **à valider** (recette navigateur de Tristan, §6). Prolonge [SPEC-TER
 Puis, même jour : « une maison en pierre, mais avec le filtre rouge de suppression. même chose pour ça d'ailleurs : "annuler / confirmer" » — l'icône « Détruire » devient la maison en pierre teintée du rouge de démolition, et la démolition en attente reçoit aussi la paire.
 
 Règle générale des gestes : intention → retour immédiat → nouveau message en cas d'erreur ; le client calcule ce qu'il peut, le serveur décide.
+
+Puis, 2 novembre au soir (validé, mis en œuvre au §7) :
+
+> « Le réticule de terraformation est presque parfait, je ne veux pas des triangulations (diagonales), ni du délai de 10 s pour la terraformation finalement : j'aimerais que l'effet du pinceau soit immédiat (si possible préshot côté client la réponse du serveur). Un refus n'invalide pas le reste du geste. "Inspecter" devrait aussi faire pulser l'équipement qui interdit la terraformation. 3 pulsations rouges comme pour la suppression. »
+
+> « Les textes de l'Oracle sont parfaits, mais je préférerais un message par erreur, avec un simple sélecteur "1/X" et éventuellement gérer le swipe précédent/suivant pour les messages de l'Oracle. »
+
+Règle générale validée le même jour : intention → retour immédiat du jeu → correction ou message si le serveur refuse ; le client prédit, le serveur fait autorité.
 
 ## 2. État constaté avant la tranche (code de `9e695a1`)
 
@@ -60,10 +68,10 @@ Une case / plusieurs cases :
 ## 5. Points ouverts
 
 - Textes du §4 et ordre de priorité du regroupement : à relire par Tristan.
-- Un trait dont une case est refusée est refusé entier (comme le serveur, tout ou rien). Variante possible, non tranchée : ne garder que les cases acceptées.
+- ~~Un trait dont une case est refusée est refusé entier~~ : tranché le 2 novembre, un refus n'invalide plus le reste du geste (§7.3).
 - Le pinceau ne se redessine pas si le sol change sous un pointeur immobile (application d'un lot par le flux) ; il se met à jour au mouvement suivant ou au changement d'état du village.
 
-## 6. Vérification
+## 6. Vérification (première version)
 
 Faits : tests unitaires `terraform-brush`, `terraform-refusals`, `terraform-tool`, `terraform-draft`, `tool-presentation`, `errors` ; intégration `terrain-edits` (6/6 sur la base de test), la régression « gesture dans le corps HTTP » rouge sans le correctif ; `tsc` API et client, ESLint, Prettier. Aucune recette navigateur faite.
 
@@ -76,3 +84,53 @@ Recette navigateur restante (dev local, monde à sommets partagés) :
 6. Refus serveur (ex. route d'un village voisin) : l'Oracle explique, Inspecter vise le geste.
 7. HUD construction > outils : l'icône « Détruire » est une maison en pierre rouge.
 8. **Mesure de performance exigée** (code exécuté par image) : sur le parcours réel, 60 s de survol continu en mode Terraformation sur Bressuire : images > 100 ms une fois le village prêt (budget : aucune), coût du gestionnaire de survol (profil Performance : `TerraformPanel` + `TerraformBrush.show`, attendu bien sous 1 ms), comparé au même survol avant la tranche.
+
+## 7. Effet immédiat, refus partiel et pages de l'Oracle (2 novembre)
+
+Décisions citées au §1 (validé). Conception ci-dessous : **proposé, implémenté** (branche `terraform-immediate`), sauf mention.
+
+### 7.1 Réticule sans diagonales
+Les lignes ne tracent plus que les 4 rangées et 4 colonnes de la grille de 4 × 4 sommets. Le remplissage montrait lui aussi la diagonale : avec deux triangles par case, l'opacité linéaire d'une case de coin faisait un pli le long de la diagonale (min(u, v) d'un côté ; une rampe d'un seul côté pour l'autre orientation). Il devient une grille de 13 × 13 points (chaque case coupée en 4 × 4 carrés dont les diagonales suivent celle du sol) : chaque petit triangle est inclus dans un triangle du sol, le relief reste exact, l'opacité est bilinéaire. Toujours O(1) au survol : les 169 points viennent des mêmes 16 hauteurs, deux maillages réécrits, jamais reconstruits. Tests `terraform-brush` (aucun segment diagonal, fondu bilinéaire et symétrique dans les deux orientations de coin, points sur le relief du sol, au plus 16 lectures).
+
+### 7.2 Envoi immédiat et prédiction
+- **Plus de délai ni de paire Annuler/Confirmer pour la terraformation** (la démolition garde la sienne). Le trait part **au relâchement** : un trait est l'unité de geste du contrat (une commande par trait au plus, pas une par case survolée) et le relâchement est le premier instant où il est connu ; l'effet visible ne dépend pas de l'aller-retour.
+- **Prédiction** : au relâchement, `localStroke` retire les cases refusables, puis `predictTerrainEdits` (contrat partagé, `packages/contracts/src/terrain-edits.ts`) calcule les sommets écrits, unité par unité, avec `terrainEditUnit`, **la fonction même de l'admission serveur** (`vertexLeveling` d'une case). `TerrainStore.predict` copie et corrige les chunks en cache qui portent ces sommets (les deux chunks pour un sommet de bord) et les publie comme un changement de sol : c'est le chemin d'une modification serveur (révision de sol, `changed`, file du rendu). Le pinceau, la pipette et les traits suivants lisent ce relief prédit.
+- **Rendu** : la signature de sol d'une unité de rendu (4 × 4 cases) ne couvre plus que les sommets qu'elle lit (`rc1VertexUnitSignature`) ; une modification reconstruit 1 à 4 unités au lieu des 64 du chunk, pour les réponses serveur aussi.
+- **Réconciliation** : les chunks prédits sont **tenus** jusqu'à la réponse : une réponse déjà en route est écartée (elle précède la prédiction) et aucune n'est demandée, pour que la prédiction ne clignote pas. À la réponse (appliquée, partielle, refusée ou en échec), `release` relit le chunk : le terrain serveur remplace la prédiction, une case refusée revient à sa hauteur réelle, une réponse égale ne redessine rien. Une prise sans réponse expire après 30 s.
+- **Ordre** : une commande à la fois (`TerrainEditQueue`) pour que le serveur applique les traits dans l'ordre où ils sont peints ; les traits relâchés pendant un envoi partent ensemble ensuite (32 gestes, 1 024 cases au plus). Un chunk touché par plusieurs traits reste tenu jusqu'à la dernière réponse.
+- **Coût mesuré** (Node, NullEngine, deux chunks de 32 cases, trait de 30 cases à cheval sur leur bord, 20 essais) : `predict` 1,6 ms en médiane ; remise en file du rendu 12,7 ms en médiane (19,1 avant) ; 8 unités reconstruites (128 avant) ; remise en file et reconstruction 60 ms p95 au total (118 avant), étalées sur le budget d'images du rendu. Une fois par trait, jamais par image. **Mesure navigateur à faire** (§7.8).
+
+### 7.3 Refus partiel côté serveur
+- **Grain** : l'unité est la **case peinte** d'un geste libre, exactement celle dont la zone 3 × 3 est en conflit, ou l'**emprise entière** d'un nivellement (une université ne se nivelle pas à moitié). Un geste refusé en bloc avant toute lecture (sélection invalide, limite d'instances, monde sans sommets partagés) compte pour une unité. Restent globaux : monde non RC1 (409), coordonnées non canoniques (400), lot trop grand (400), identifiant réutilisé.
+- **Ordre** : gestes dans l'ordre du lot, cases peintes dans l'ordre canonique de `terraformCells` (x puis y), chacune sur le terrain laissé par les unités **acceptées** avant elle. Une unité refusée n'écrit rien, même sur un sommet partagé. Les unités acceptées d'un trait aboutissent exactement aux hauteurs de la version tout-ou-rien (toutes à la hauteur du geste ; un sommet partagé entre gestes prend celle du dernier geste accepté). Tests d'intégration : lot partiel, case refusée au milieu d'un trait, unité refusée sur un sommet partagé.
+- **Cause** : le code est celui que `assertBuildableCells` lèverait (infrastructure de n'importe quelle case d'abord, puis passage engagé, puis le sol case par case) ; `at` nomme la case de l'obstacle (la case peinte si elle est elle-même refusée, sinon la case de l'anneau), la case mouillée, ou la fondation qui bougerait. Lecture **unique** des refus par case pour tout le lot (`buildableCellRefusals`, `infrastructureCellRefusals` : formes par case des contrôles existants, sous le même verrou consultatif ; test d'équivalence avec `assertBuildableCells` seul). Sur un monde à sommets partagés, le raccord à l'eau et la fondation se lisent sur les hauteurs des sommets au lieu de reconstruire un champ par unité (même résultat : un échantillon pris à un sommet est sa hauteur, et les échantillons d'une fondation ne bougent que si un de ses coins bouge).
+- **Contrat** (`TerrainEditsResult.refused`, codes `TERRAIN_EDIT_REFUSAL_CODES`) et compatibilité : [SPEC-TERRAFORMATION-INSTANTANEE.md §2](SPEC-TERRAFORMATION-INSTANTANEE.md). Rien d'écrit et un refus : 409 inchangé pour un ancien client, avec la liste en plus. Pas de nouvelle route (`command-inventory.json` inchangé), **pas de migration** (le reçu 078 garde le JSON du résultat), invariants inchangés (village d'abord, `statement_timestamp()` après acquisition, idempotence par `commandId`, `world_id`).
+
+### 7.4 Règles client
+Par case peinte (`unitRefusal`, au plus 9 accès d'ensemble) : la case elle-même, puis son anneau, infrastructure avant le sol. Les cases refusables sont retirées d'emblée et dites par l'Oracle ; le reste part (l'ancre devient la première case acceptée si la sienne est retirée). Hauteur ≤ 0 : le trait entier est refusé, une seule erreur (eau). Une réponse serveur `INFRASTRUCTURE_OCCUPIED` est lue comme un aménagement quand le client ne connaît pas de route à cette case.
+
+### 7.5 Pages de l'Oracle
+Une page par erreur ; une erreur = une raison à une case d'obstacle (deux cases peintes bloquées par la même case de route : une erreur). Ordre : route, aménagement, bâtiment, fondation, équipe, eau, nature, portée, monde, autre, puis ordre d'apparition. Textes du §4 inchangés, au singulier ; la ligne « Ailleurs dans ce geste… » disparaît. Les refus locaux et serveur s'ajoutent aux pages ouvertes. `OraclePager` (`ui/OraclePager.tsx`, réutilisable ; `ReleaseNotesDialog` non migrée dans cette tranche) : « ‹ 1/X › », ← →, glissé horizontal d'au moins 40 px et plus horizontal que vertical, sans boucler aux extrémités. « Inspecter » vise la page courante et laisse la boîte ouverte ; « Compris » (ou Échap) ferme l'ensemble. Tests `OraclePager` (bornes, touches, seuil du glissé, rendu).
+
+Proposé, non tranché : fusionner les erreurs identiques sur des cases contiguës (un trait de 20 cases plongé dans un lac donne 20 pages d'eau côté serveur ; côté client, l'eau est déjà une seule erreur).
+
+### 7.6 Inspecter fait pulser l'obstacle
+La caméra de `inspectCell`, et l'obstacle pulse **trois fois** dans le rouge de démolition : `DemolitionTint`, l'effet même des cibles désignées, dans sa propre instance (une démolition en attente n'est pas touchée), cycle redémarré pour que les trois pulsations (3 × 1,2 s) commencent et finissent éteintes. Route : la peau rouge des pixels de route de la case ; bâtiment ou fondation : copies teintées du bâtiment de la case ; aménagement : une plaque rouge sur la case. Sans entité : eau, portée, monde, sol (arbre ou rocher : non teintés, instances fines), équipe de passage, bâtiment d'un autre village (non dessiné ici) : la caméra seule.
+
+### 7.7 Points ouverts
+- **Annulation** : sans délai, plus d'annulation avant envoi. Aucun mécanisme nouveau créé ; à trancher (par exemple un Ctrl+Z qui repeindrait les hauteurs précédentes, ce qui serait un nouveau geste et non une annulation).
+- Fusion des erreurs identiques contiguës (§7.5).
+- Le trait en cours garde l'aperçu translucide (`TerraformPreview`) ; seul le trait relâché est prédit sur le sol.
+- Arbres et rochers ne pulsent pas (instances fines).
+
+### 7.8 Vérification
+Faits (codes de sortie vérifiés) : intégration `terrain-edits` 10/10 sur la base de test (lot partiel et rejeu du reçu, case refusée dans un trait, unité refusée sur sommet partagé, refus total 409 avec la liste, classification par case égale à `assertBuildableCells` seul, plus les cas existants : ordre, sans effet, emprise, rollback, douves), `client-protocol.integration` 4/4, `command-inventory.integration` 1/1 ; unitaires : contrats `terrain-edits`, `errors`, `terraform-brush`, `terrain-store`, `terrain-renderer`, `terrain-edits` (file d'envoi), `OraclePager`, `terraform-draft`, `terraform-refusals`, `terraform-tool`, `terraform-preview`, `tool-presentation`, tests `api` du client ; `tsc` API et client, ESLint, Prettier. Sérialisation de `refused` par le schéma de réponse Fastify vérifiée par un essai jetable. Aucune recette navigateur faite.
+
+Recette navigateur restante (dev local, monde à sommets partagés) :
+1. Survol : 3 × 3 sans aucune diagonale (lignes et remplissage), centre opaque, fondu jusqu'au bord ; rouge près d'une route ; bleu en pipette.
+2. Trait valide : le sol change au relâchement, sans attente ; aucun Annuler/Confirmer pour la terraformation ; la démolition garde sa paire.
+3. Trait qui touche une route : les cases libres changent, celles dont le 3 × 3 touche la route restent ; l'Oracle montre une page par obstacle, « 1/X », ← →, glissé au doigt ou à la souris.
+4. Refus serveur (route d'un village voisin, fondation) : la case prédite revient à sa hauteur ; la page nomme l'obstacle.
+5. Inspecter : caméra proche et basse ; route, bâtiment ou aménagement : trois pulsations rouges puis retour normal ; eau ou portée : caméra seule.
+6. Traits rapides successifs : appliqués dans l'ordre, sans clignotement du relief.
+7. **Mesures exigées** (AGENTS.md, code exécuté par image et par geste) sur Bressuire : village prêt à froid et à chaud ; 60 s de survol continu en mode Terraformation (aucune image > 100 ms attendue) ; coût d'une prédiction et de la reconstruction qui suit pour un trait de 30 cases (profil Performance : `TerrainStore.predict`, `TerrainRenderer.demand`, `buildRc1TerrainUnit`), comparé au même trait avant la tranche.
