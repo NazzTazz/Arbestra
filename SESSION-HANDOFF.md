@@ -6,7 +6,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 - Branche `wip/v2-commandes-bornees`, poussée, `main` à jour. **Alpha** : `alpha-2026.11.01.1` (1er novembre, `e2eeec4` : route automatique masquée sous les cases de route, plus de périmètre fixe des routes) sur `alpha-2026.10.31.1` (31 octobre : voirie à la case, démolition, terraformation instantanée, migrations 070 à 078 ; conversion 076 : 7 villages, 359 cases de route, 1 case refusée (GemussGarten, terrain), braseros manuels supprimés 100 sur 121 (Catmark 89 sur 90), 21 déplacés ou gardés ; bilan dans `road_conversion_backups`). **Staging** : `staging-2026.10.30.2` ; village Test forgé à 4 509 cohortes, à garder.
 - **Prochaine étape** : refonte des réseaux et du pathfinding ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md)), puis le backlog ci-dessous.
-- **Dev local** : API lancée avec `JOURNEY_ENABLED=1` (journal des parcours actif) ; migrations jusqu'à 079 ; `rc1-dev` converti en sommets partagés le 31 octobre comme l'alpha (sauvegarde préalable dans `../arbestra-backups/`).
+- **Dev local** : API lancée avec `JOURNEY_ENABLED=1` (journal des parcours actif) ; migrations jusqu’à 080 ; `rc1-dev` converti en sommets partagés le 31 octobre comme l'alpha (sauvegarde préalable dans `../arbestra-backups/`).
 
 ## Backlog (après l'alpha du 31 octobre)
 
@@ -15,7 +15,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 - **Trajets : diagnostic d'architecture rendu** ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md), [invariants](docs/DECISIONS-NAVIGATION-2026-10-31.md)) : décisions de game design ouvertes au §7, directions au §8 ; aucun code de navigation modifié.
 - **Économie / trajets / responsabilités — étude rendue, propositions en cadrage, mesures à valider** : [complément du 1er novembre](docs/ETUDE-COHERENCE-ECONOMIE-TRAJETS-RESPONSABILITES-2026-11-01.md).
 - **Sortir le worker du processus de l'API** (décision du 29 octobre) : service à part, sans pool. Idée : jauge de retard par village façon RCI.
-- **Observabilité des parcours** ([conception](docs/DESIGN-OBSERVABILITE-PARCOURS.md)) : A et C validés ; restent B (présence par minute, prochain numéro de migration libre : 080) et D (événements client) ; purge des `sessions` expirées, flux V2 dans la télémétrie du NOC. Activation sur alpha : feu vert de Tristan.
+- **Observabilité des parcours** ([conception](docs/DESIGN-OBSERVABILITE-PARCOURS.md)) : A et C validés ; restent B (présence par minute, prochain numéro de migration libre : 081) et D (événements client) ; purge des `sessions` expirées, flux V2 dans la télémétrie du NOC. Activation sur alpha : feu vert de Tristan.
 - **Défrichage plus rapide** : le plafond de 8 chantiers contraint le défrichage arbre par arbre.
 - **Performance du rendu** : le rendu Babylon de base fait 50 à 80 ms par image sur la machine de Tristan ; principale source des images > 100 ms restantes. [Audit des mécanismes natifs de Babylon](docs/AUDIT-BABYLON-NATIF-2026-10-31.md) : premier prototype proposé, un seul système de particules pour les braseros.
 - **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts au §5.
