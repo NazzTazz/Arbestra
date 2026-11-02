@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 
 import { sql } from 'kysely';
 
+import { latestReleaseId } from '@arbestra/contracts';
+
 import { createDatabase } from './connection.js';
 import { DEVELOPMENT_CELLS, DEVELOPMENT_IDS, seedDevelopmentData } from './seed.js';
 import { testDatabaseUrl } from './test-environment.js';
@@ -10,6 +12,12 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
   testDatabaseUrl({ TEST_DATABASE_URL: databaseUrl });
   const db = createDatabase(databaseUrl);
   try {
+    // The release notes dialog (081) must not cover the e2e pages: the seeded player has seen the latest version.
+    await db
+      .updateTable('accounts')
+      .set({ lastSeenRelease: latestReleaseId() })
+      .where('id', '=', DEVELOPMENT_IDS.account)
+      .execute();
     const generatedWorld = await db
       .selectFrom('worlds')
       .select('id')

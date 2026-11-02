@@ -40,6 +40,8 @@ export type JoinWorldResponse = Static<typeof JoinWorldResponseSchema>;
 export const AccountSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
   email: Type.String({ format: 'email' }),
+  /** Last version of the release notes the player acknowledged (releases.ts); null until known. */
+  lastSeenRelease: Type.Union([Type.String(), Type.Null()]),
 });
 
 export type Account = Static<typeof AccountSchema>;

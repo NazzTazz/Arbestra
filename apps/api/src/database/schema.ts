@@ -23,6 +23,8 @@ export interface AccountsTable {
   email: string;
   passwordHash: string;
   createdAt: Generated<Timestamp>;
+  /** Last release-notes version acknowledged (081); NULL until known. */
+  lastSeenRelease: string | null;
 }
 
 export interface WorldsTable {

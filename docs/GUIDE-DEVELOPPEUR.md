@@ -146,6 +146,7 @@ Option locale utile : `localStorage['arbestra:timing']='1'` (en-têtes `Server-T
 | Le contrat d'une réponse | `packages/contracts/src/<domaine>.ts`, schéma `…Schema` |
 | Pourquoi une requête est lente en prod | activer `arbestra:timing`, lire `arb_*`, `arbsql_n` dans `Server-Timing` ; [operations.md](architecture/operations.md) |
 | Pourquoi le rendu saccade en prod | activer `arbestra:dev`, overlay (temps GPU, phases), section Rendu pour couper une couche et comparer |
+| Les nouveautés racontées au joueur (modale de l'Oracle) | `packages/contracts/src/release-notes.ts` (contenu), `releases.ts` (logique) ; [SPEC-NOUVEAUTES-ORACLE.md](SPEC-NOUVEAUTES-ORACLE.md) |
 | Déployer | tags `staging-*` / `alpha-*` sur `main` : la suite est rejouée et doit passer avant le déploiement ; [DEPLOIEMENT-VPS.md](DEPLOIEMENT-VPS.md) |
 
 ## 8. Pièges connus

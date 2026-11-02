@@ -73,6 +73,8 @@ import {
 } from './ui/exploitation-intent';
 
 import { WorldLoading } from './ui/WorldLoading';
+import { ReleaseNotesDialog } from './ui/ReleaseNotesDialog';
+import { useReleaseNotes } from './ui/use-release-notes';
 import type { InitialLoadProgress } from './scene/initial-village-load';
 import {
   initialVillageRead,
@@ -317,6 +319,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
   // The village's synchronization could not start: nothing else takes over, the
   // game says so over the paused scene while the hook retries at a spaced cadence.
   const villageLost = villageV2.status === 'unavailable';
+  // The Oracle's release notes (docs/SPEC-NOUVEAUTES-ORACLE.md): once the village is ready and nothing
+  // else holds the screen, never over the starter kit or the arrival.
+  const releaseNotes = useReleaseNotes(initialReady && !starter && !needsLogin && !villageLost && !arrivalActive);
   // Receipts of expeditions and harvest gestures: the V2 stream delivers them as the
   // worker writes them (null while its first snapshot is not loaded).
   const expeditions = useExpeditions(
@@ -2064,6 +2069,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
               Fermer
             </button>
           </aside>
+        )}
+        {releaseNotes.releases.length > 0 && (
+          <ReleaseNotesDialog releases={releaseNotes.releases} onClose={releaseNotes.acknowledge} />
         )}
         <Hud
           beforeTownHall={beforeTownHall}

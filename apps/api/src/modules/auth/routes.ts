@@ -3,14 +3,17 @@ import type { FastifyInstance } from 'fastify';
 import {
   LoginRequestSchema,
   RegisterRequestSchema,
+  SeenReleaseRequestSchema,
+  SeenReleaseResponseSchema,
   SessionResponseSchema,
   type RegisterRequest,
+  type SeenReleaseRequest,
 } from '@arbestra/contracts';
 
 import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
 import type { Kysely } from 'kysely';
-import { authenticate, getSessionForAccount, login, logout, register } from './service.js';
+import { authenticate, getSessionForAccount, login, logout, markReleaseSeen, register } from './service.js';
 
 import { AttemptLimiter } from '../../security/attempt-limiter.js';
 
@@ -62,6 +65,19 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Kysely<Databa
     async (request) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       return getSessionForAccount(db, account);
+    },
+  );
+
+  // The "Compris" of the release notes (docs/SPEC-NOUVEAUTES-ORACLE.md): a
+  // per-account acknowledgement, not a village command, so no protocol header.
+  app.post(
+    '/api/account/seen-release',
+    {
+      schema: { body: SeenReleaseRequestSchema, response: { 200: SeenReleaseResponseSchema } },
+    },
+    async (request) => {
+      const account = await authenticate(db, request.cookies[config.cookieName]);
+      return markReleaseSeen(db, account.id, (request.body as SeenReleaseRequest).releaseId);
     },
   );
 

@@ -5,7 +5,14 @@ import { promisify } from 'node:util';
 
 import type { Kysely } from 'kysely';
 
-import type { SessionResponse } from '@arbestra/contracts';
+import {
+  RELEASE_NOTES,
+  latestReleaseId,
+  mostRecentSeenRelease,
+  releaseRank,
+  type SeenReleaseResponse,
+  type SessionResponse,
+} from '@arbestra/contracts';
 
 import type { AppConfig } from '../../config.js';
 import type { Database } from '../../database/schema.js';
@@ -21,9 +28,9 @@ export async function register(db: Kysely<Database>, config: AppConfig, email: s
   return db.transaction().execute(async (tx) => {
     const account = await tx
       .insertInto('accounts')
-      .values({ email: normalizedEmail, passwordHash })
+      .values({ email: normalizedEmail, passwordHash, lastSeenRelease: latestReleaseId() })
       .onConflict((c) => c.column('email').doNothing())
-      .returning(['id', 'email'])
+      .returning(['id', 'email', 'lastSeenRelease'])
       .executeTakeFirst();
     if (!account) throw new HttpError(409, 'EMAIL_ALREADY_USED', 'Cette adresse possède déjà un compte.');
     const token = createSessionToken();
@@ -42,6 +49,7 @@ export async function register(db: Kysely<Database>, config: AppConfig, email: s
 export interface AuthenticatedAccount {
   id: string;
   email: string;
+  lastSeenRelease: string | null;
 }
 
 export async function login(
@@ -53,7 +61,7 @@ export async function login(
   const normalizedEmail = email.trim().toLowerCase();
   const account = await db
     .selectFrom('accounts')
-    .select(['id', 'email', 'passwordHash'])
+    .select(['id', 'email', 'lastSeenRelease', 'passwordHash'])
     .where('email', '=', normalizedEmail)
     .executeTakeFirst();
 
@@ -76,7 +84,14 @@ export async function login(
     })
     .execute();
 
-  return { token, session: await getSessionForAccount(db, account) };
+  return {
+    token,
+    session: await getSessionForAccount(db, {
+      id: account.id,
+      email: account.email,
+      lastSeenRelease: account.lastSeenRelease,
+    }),
+  };
 }
 
 export async function authenticate(db: Kysely<Database>, token: string | undefined): Promise<AuthenticatedAccount> {
@@ -86,7 +101,7 @@ export async function authenticate(db: Kysely<Database>, token: string | undefin
     const account = await db
       .selectFrom('sessions')
       .innerJoin('accounts', 'accounts.id', 'sessions.accountId')
-      .select(['accounts.id', 'accounts.email'])
+      .select(['accounts.id', 'accounts.email', 'accounts.lastSeenRelease'])
       .where('sessions.tokenHash', '=', hashSessionToken(token))
       .where('sessions.expiresAt', '>', new Date())
       .executeTakeFirst();
@@ -115,4 +130,31 @@ export async function getSessionForAccount(
 export async function logout(db: Kysely<Database>, token: string | undefined): Promise<void> {
   if (!token) return;
   await db.deleteFrom('sessions').where('tokenHash', '=', hashSessionToken(token)).execute();
+}
+
+/**
+ * The player acknowledged a version of the release notes ("Compris"). Idempotent
+ * and monotonic: the stored version only moves forward in the list's order, so
+ * a late request from an old tab changes nothing. An identifier the list does
+ * not know is refused: only versions this deployment published can be seen.
+ */
+export async function markReleaseSeen(
+  db: Kysely<Database>,
+  accountId: string,
+  releaseId: string,
+): Promise<SeenReleaseResponse> {
+  if (releaseRank(RELEASE_NOTES, releaseId) === null)
+    throw new HttpError(400, 'UNKNOWN_RELEASE', 'Cette version est inconnue.');
+  return db.transaction().execute(async (tx) => {
+    const current = await tx
+      .selectFrom('accounts')
+      .select('lastSeenRelease')
+      .where('id', '=', accountId)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+    const next = mostRecentSeenRelease(RELEASE_NOTES, current.lastSeenRelease, releaseId);
+    if (next !== current.lastSeenRelease)
+      await tx.updateTable('accounts').set({ lastSeenRelease: next }).where('id', '=', accountId).execute();
+    return { lastSeenRelease: next };
+  });
 }

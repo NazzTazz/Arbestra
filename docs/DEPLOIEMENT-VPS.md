@@ -93,6 +93,8 @@ git tag alpha-2026.10.16.1 <commit>
 git push origin alpha-2026.10.16.1
 ```
 
+Avant un tag `alpha-*` qui change quelque chose pour les joueurs, ajouter en tête de `packages/contracts/src/release-notes.ts` l'entrée « Nouveautés » de la version (identifiant = nom exact du tag, voix de l'Oracle ; [procédure](SPEC-NOUVEAUTES-ORACLE.md#procédure-au-tag)).
+
 Les workflows **Deploy staging** et **Deploy alpha** acceptent aussi `workflow_dispatch` sur `main`. Un tag désigne une version immuable ; ne pas déplacer/réutiliser un tag déjà déployé. La promotion utilise le même commit, avec les URL de l'environnement compilées dans les frontends. Les déploiements d'un environnement sont sérialisés côté GitHub ; un verrou serveur sérialise aussi les migrations/sauvegardes des deux environnements.
 
 GitHub Environments contient `VPS_HOST` (variable), `VPS_HOST_KEY` (entrée known_hosts épinglée) et `VPS_DEPLOY_KEY` (secret différent par environnement). Les clés n'autorisent ni shell, ni forwarding, ni accès à l'autre environnement : uniquement `deploy <SHA> <SHA256>`. Les actions externes sont épinglées par SHA ; les permissions du workflow se limitent à la lecture du dépôt. Restreindre les environnements à `main` et leurs tags respectifs. Un reviewer alpha peut être ajouté si souhaité.

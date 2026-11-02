@@ -786,6 +786,69 @@ button {
   border-radius: 0.35rem;
   cursor: pointer;
 }
+/* The release notes (ui/ReleaseNotesDialog.tsx): the Oracle's box, over a backdrop that blocks the scene. */
+.oracle-news-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  background: #050c0f99;
+}
+.oracle-news {
+  z-index: 91;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  overflow-y: hidden;
+}
+.oracle-news p {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+.oracle-news-list {
+  display: grid;
+  gap: 1.1rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+.oracle-news-list:focus-visible,
+.oracle-news button:focus-visible {
+  outline: 2px solid #efce74;
+  outline-offset: 2px;
+}
+.oracle-news-release time {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: #aeb9a4;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+.oracle-news-release ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.oracle-news-release li {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.8rem;
+  background: rgb(255 255 255 / 5%);
+  border-left: 2px solid #d8b950;
+  border-radius: 0.25rem;
+}
+.oracle-news-release li strong {
+  font-size: 1.02rem;
+}
+.oracle-news-release li span {
+  color: #e5dfcf;
+  line-height: 1.5;
+}
+.oracle-news button {
+  align-self: flex-end;
+}
 .worksite-access {
   position: absolute;
   left: 16px;
