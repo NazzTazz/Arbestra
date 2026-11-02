@@ -8,6 +8,9 @@ import {
 } from '@arbestra/contracts';
 import type { TerraformVisual } from '../scene/terraform-preview';
 import { randomUUID } from '../random-uuid';
+import { confirmedDeadline } from './PendingDemolition';
+import { SyncV2HttpError } from '../api/sync-v2-session';
+import { oracleRefusal, serverRefusalReason, type OracleRefusal } from './terraform-refusals';
 
 /** Each gesture restarts this delay (Tristan, 31 October): the batch leaves
  * 10 s after the last one, unless cancelled. */
@@ -31,16 +34,19 @@ export function usePendingTerrain({
   edit,
   villageKey,
   onNotice,
+  onRefusal,
 }: {
   edit: ((request: TerrainEditsRequest) => Promise<TerrainEditsResult>) | null;
   villageKey: string;
   onNotice: (message: string, tone?: 'default' | 'warning') => void;
+  /** A server refusal the Oracle can explain, pointed at the refused gesture. */
+  onRefusal: (refusal: OracleRefusal) => void;
 }) {
   const [batch, setBatch] = useState<PendingTerrainBatch | null>(null);
   const current = useRef<PendingTerrainBatch | null>(null),
     timer = useRef(0);
-  const latest = useRef({ edit, onNotice });
-  latest.current = { edit, onNotice };
+  const latest = useRef({ edit, onNotice, onRefusal });
+  latest.current = { edit, onNotice, onRefusal };
   const publish = (next: PendingTerrainBatch | null) => {
     current.current = next;
     setBatch(next);
@@ -66,7 +72,12 @@ export function usePendingTerrain({
       const result = await command({ commandId: randomUUID(), gestures: pending.gestures });
       notice(result.gestures ? 'Terrain modifié.' : 'Le terrain était déjà à cette hauteur.');
     } catch (error) {
-      notice(error instanceof Error ? error.message : 'Terraformation refusée.', 'warning');
+      const reason = error instanceof SyncV2HttpError ? serverRefusalReason(error.code) : null;
+      if (reason) {
+        // The server names the refused gesture; the Oracle inspects its anchor.
+        const gesture = pending.gestures[(error as SyncV2HttpError).gesture ?? pending.gestures.length - 1];
+        latest.current.onRefusal(oracleRefusal([{ reason, cell: null }], gesture?.anchor ?? null)!);
+      } else notice(error instanceof Error ? error.message : 'Terraformation refusée.', 'warning');
     }
     // The applied heights now come from the ground stream; the preview leaves.
     if (current.current?.sending) publish(null);
@@ -100,7 +111,16 @@ export function usePendingTerrain({
     },
     [send],
   );
+  /** « Confirmer »: the batch leaves 250 ms from now instead of at its deadline. */
+  const confirm = useCallback(() => {
+    const pending = current.current;
+    if (!pending || pending.sending || !timer.current) return;
+    const deadline = confirmedDeadline(pending.deadline, Date.now());
+    window.clearTimeout(timer.current);
+    publish({ ...pending, deadline });
+    timer.current = window.setTimeout(() => void send(), Math.max(0, deadline - Date.now()));
+  }, [send]);
   // Another village (or world): the waiting batch is dropped, never sent there.
   useEffect(() => drop, [villageKey, drop]);
-  return { batch, add, cancel: drop };
+  return { batch, add, cancel: drop, confirm };
 }

@@ -4,7 +4,7 @@ import { BuildingThumbnailCache } from './building-thumbnail-cache';
 
 // Bump whenever presentation recipes, materials/textures, camera or resolution change.
 // This includes the factories used by buildPresentation and public/tiles/garden-4.png.
-const THUMBNAIL_REVISION = 'factory-9-market-carrots-png-384x240';
+const THUMBNAIL_REVISION = 'factory-10-demolish-house-png-384x240';
 const workerThumbnail = (code: string) =>
   /^workers:[1-3]$/.test(code) ? `/thumbnails/workers-${code.slice(-1)}.png?v=1` : undefined;
 // Captured with the same market recipe, camera and materials. A core HUD

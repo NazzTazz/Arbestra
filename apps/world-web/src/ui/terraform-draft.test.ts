@@ -32,7 +32,8 @@ describe('local terraforming check', () => {
   it('refuses a stroke whose ring touches a road cell, as the server does', () => {
     // The ring of (14,14) includes its eight neighbours; (15,15) carries a road cell.
     const checked = localTerraform(state([{ cellX: 15, cellY: 15 }]), request, flat);
-    expect(checked.error).toMatch(/occupé, protégé/);
+    expect(checked.error).toBe('refused');
+    expect(checked.refusals).toContainEqual({ reason: 'road', cell: { cellX: 15, cellY: 15 } });
     expect(checked.visual.invalidCells).toContainEqual({ cellX: 15, cellY: 15 });
   });
 });

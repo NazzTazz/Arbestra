@@ -38,6 +38,7 @@ import { RoadCellTiles } from './road-cell-tiles';
 import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
 import { RoadAnchorBraziers, RoadAnchorGhost, RoadAnchorMarkers } from './road-anchor-braziers';
 import { TerraformPreview, type TerraformVisual } from './terraform-preview';
+import { TerraformBrush, type BrushTone } from './terraform-brush';
 import { selectEquipment } from './equipment-selection';
 import type { DemolitionTarget } from '../ui/demolition-selection';
 import {
@@ -466,6 +467,17 @@ export class BabylonVillageScene {
           : null,
       );
   }
+  #terraformBrush: TerraformBrush | null = null;
+  /** The 3 × 3 terraforming brush (terraform-brush.ts): buffers rewritten, never rebuilt. */
+  public terraformBrush(brush: { cell: Cell; heights: Float64Array; tone: BrushTone } | null) {
+    if (!brush) {
+      this.#terraformBrush?.hide();
+      return;
+    }
+    if (!this.#space) return;
+    this.#terraformBrush ??= new TerraformBrush(this.#scene);
+    this.#terraformBrush.show(brush.cell, brush.heights, brush.tone, this.#space);
+  }
   #demolitionTint: DemolitionTint | null = null;
   #demolitionIndex: { state: VillageState; roads: Map<string, RoadPixel[]> } | null = null;
   #demolitionBuildings = new Map<string, Mesh>();
@@ -823,7 +835,16 @@ export class BabylonVillageScene {
   // and module loading, so its own reading would lag by that delay.
   #serverOffsetMeasured = false;
   #lastFrameAt = 0;
-  #cameraFocus: { from: Cell; to: Cell; at: number; duration: number; radius: number; height: number } | null = null;
+  #cameraFocus: {
+    from: Cell;
+    to: Cell;
+    at: number;
+    duration: number;
+    radius: number;
+    height: number;
+    /** Close and low view (« Inspecter »): final radius and angle. */
+    close?: { radius: number; beta: number; fromBeta: number };
+  } | null = null;
   #lastCameraRadius: number | null = null;
   #initialCameraFramed = false;
   #e2eCells: Array<{ id: string; x: number; z: number; cellX: number; cellY: number }> = [];
@@ -4498,6 +4519,7 @@ export class BabylonVillageScene {
     const priorVillage = this.#space.project(this.#villageAnchor);
     const shift = this.#space.rebase(target, this.#store.world.chunkSize);
     if (shift) this.#terraformRenderer?.update(this.#terraformVisual, this.#space);
+    if (shift) this.#terraformBrush?.reproject(this.#space);
     if (!shift) return;
     const nextVillage = this.#space.project(this.#villageAnchor);
     const villageShift = { x: priorVillage.x - nextVillage.x, z: priorVillage.z - nextVillage.z };
@@ -5045,6 +5067,13 @@ export class BabylonVillageScene {
   public naturalFeatures() {
     return this.#store?.naturalFeatures() ?? this.#state?.region.features ?? [];
   }
+  /** « Inspecter » (the Oracle's refusal): the camera flies to the cell, close
+   * and low, with the focus glide of `focusCell`. */
+  public inspectCell(cell: Cell): void {
+    this.focusCell(cell);
+    if (this.#cameraFocus?.to === cell)
+      this.#cameraFocus.close = { radius: 14, beta: 1.2, fromBeta: this.#camera.beta };
+  }
   public focusCell(cell: Cell): void {
     const from = this.viewCenter();
     if (!from || this.#mode !== 'village' || this.#arrival || this.#flyover || this.#transition.active) return;
@@ -5073,7 +5102,20 @@ export class BabylonVillageScene {
       p = this.#space.project(target);
     const height = Math.max(0.45, (this.#store?.ground(focus.to.cellX, focus.to.cellY)?.height ?? 0) + 0.35);
     this.#camera.target.set(p.x, focus.height + (height - focus.height) * target.eased, p.z);
-    this.#camera.radius = focus.radius + (42 - focus.radius) * target.eased;
+    const radius = focus.close?.radius ?? 42;
+    this.#camera.radius = focus.radius + (radius - focus.radius) * target.eased;
+    if (focus.close) {
+      // Lower the view within the close-zoom limit of #updateCameraProfile,
+      // which then sees no radius change to correct.
+      const minimum = this.#camera.lowerRadiusLimit ?? 8,
+        limit = 0.95 + 0.4 * Math.max(0, Math.min(1, (42 - this.#camera.radius) / (42 - minimum)));
+      this.#camera.upperBetaLimit = Math.max(this.#camera.upperBetaLimit ?? 0.95, limit);
+      this.#camera.beta = Math.min(
+        limit,
+        focus.close.fromBeta + (focus.close.beta - focus.close.fromBeta) * target.eased,
+      );
+      this.#lastCameraRadius = this.#camera.radius;
+    }
     if (progress >= 1) this.#cameraFocus = null;
   }
   public selectWorldCenter(): void {
@@ -5423,6 +5465,7 @@ export class BabylonVillageScene {
 
   public dispose(): void {
     this.#terraformRenderer?.dispose();
+    this.#terraformBrush?.dispose();
     cancelAnimationFrame(this.#demolitionRoadFrame);
     this.#demolitionTint?.dispose();
     cancelAnimationFrame(this.#infrastructureHoverFrame);

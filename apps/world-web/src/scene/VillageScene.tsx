@@ -79,6 +79,10 @@ interface VillageSceneProps {
 export interface TerrainHandle {
   terrainVertexHeight: (x: number, y: number) => number | null;
   terraformPreview: (value: import('./terraform-preview').TerraformVisual | null) => void;
+  /** The 3 × 3 terraforming brush at its future heights; null hides it. */
+  terraformBrush: (
+    brush: { cell: Cell; heights: Float64Array; tone: import('./terraform-brush').BrushTone } | null,
+  ) => void;
   /** Marks one swept demolition target; cleared all at once. */
   demolitionMark: (kind: DemolitionTarget, id: string) => void;
   demolitionClear: () => void;
@@ -99,6 +103,8 @@ export interface TerrainHandle {
   roadAnchorPreviewTone: (tone: 'place' | 'remove' | 'invalid') => void;
   roadAnchorPreviewClear: () => void;
   focusCell: (cell: Cell) => void;
+  /** Close and low camera over a cell (the Oracle's « Inspecter »). */
+  inspectCell: (cell: Cell) => void;
   viewCenter: () => Cell | null;
   naturalFeatures: () => NaturalFeature[];
   ready: () => boolean;
@@ -300,10 +306,12 @@ export function VillageScene({
       projectCell: (cell) => sceneRef.current?.projectCell(cell) ?? null,
       projectTree: (featureId, treeIndex) => sceneRef.current?.projectTree(featureId, treeIndex) ?? null,
       focusCell: (cell) => sceneRef.current?.focusCell(cell),
+      inspectCell: (cell) => sceneRef.current?.inspectCell(cell),
       viewCenter: () => sceneRef.current?.viewCenter() ?? null,
       naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],
       terrainVertexHeight: (x, y) => sceneRef.current?.terrainVertexHeight(x, y) ?? null,
       terraformPreview: (value) => sceneRef.current?.terraformPreview(value),
+      terraformBrush: (brush) => sceneRef.current?.terraformBrush(brush),
       demolitionMark: (kind, id) => sceneRef.current?.demolitionMark(kind, id),
       demolitionClear: () => sceneRef.current?.demolitionClear(),
       roadCellsPreviewAdd: (cells, refused) => sceneRef.current?.roadCellsPreviewAdd(cells, refused),

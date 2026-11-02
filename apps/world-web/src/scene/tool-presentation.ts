@@ -95,34 +95,11 @@ function hammer(root: Mesh, scene: Scene, x: number, y: number, z: number, lean:
   head.parent = root;
 }
 
-/** Collapsed wall: scattered blocks under a sledgehammer, lit by the demolition red. */
-function rubble(root: Mesh, scene: Scene) {
-  const stone = material(scene, 'rubble', '#9a9285'),
-    marked = material(scene, 'marked', '#c8453b', '#5a1410');
-  const blocks = [
-    [-0.6, 0, -0.2, 0.2],
-    [-0.15, 0, -0.35, -0.4],
-    [0.3, 0, -0.1, 0.6],
-    [-0.35, 0.22, -0.25, 0.1],
-    [0.1, 0.22, -0.2, -0.2],
-    [0.55, 0, 0.35, 0.3],
-    [-0.5, 0, 0.35, -0.6],
-  ] as const;
-  blocks.forEach(([x, y, z, turn], index) => {
-    const block = MeshBuilder.CreateBox('tool-rubble', { width: 0.42, height: 0.22, depth: 0.26 }, scene);
-    block.position.set(x, y + 0.11, z);
-    block.rotation.y = turn;
-    block.material = index % 3 ? stone : marked;
-    block.parent = root;
-  });
-}
-
 export function buildToolPresentation(root: Mesh, scene: Scene, code: ToolPresentation) {
   if (code === 'tool:terraform') {
     terraformCell(root, scene);
   } else if (code === 'tool:demolish') {
-    rubble(root, scene);
-    hammer(root, scene, 0.15, 0.95, 0.1, -0.6);
+    // Built by buildPresentation: the stone house under the demolition red (Tristan, 2 November).
   } else {
     shovel(root, scene, -0.25, 0, 0.45);
     hammer(root, scene, 0.3, 1, 0, -0.45);

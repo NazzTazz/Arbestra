@@ -19,20 +19,14 @@
   padding: 12px 16px;
   max-width: calc(100vw - 140px);
 }
-.terraform-toolbar div {
+.terraform-title {
   display: grid;
   gap: 4px;
+  max-width: 17rem;
 }
 .terraform-toolbar small {
   font-size: 12px;
   color: #b7c6ba;
-}
-.terraform-toolbar output {
-  font-variant-numeric: tabular-nums;
-  min-width: 55px;
-  text-align: center;
-  color: #f5ce55;
-  font-size: 21px;
 }
 .terraform-toolbar button,
 .terraform-panel button {
@@ -45,8 +39,66 @@
   font: inherit;
   cursor: pointer;
 }
-.terraform-toolbar button {
+/* The altitude setting (docs/SPEC-TERRAFORMATION-OUTIL.md §3.1): one
+ * capsule, − and + on its ends, the value engraved in the middle. */
+.terraform-altitude {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #a68e4f;
+  border-radius: 12px;
+  background: linear-gradient(#1b2b25, #24382f);
+  box-shadow:
+    inset 0 1px 0 #ffffff14,
+    0 2px 8px #0004;
+  overflow: hidden;
+}
+.terraform-altitude button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   font-size: 26px;
+  line-height: 1;
+  color: #f2dc9a;
+}
+.terraform-altitude button:hover:not(:disabled) {
+  background: #ffffff12;
+}
+.terraform-altitude button:first-child {
+  border-right: 1px solid #a68e4f66;
+}
+.terraform-altitude button:last-child {
+  border-left: 1px solid #a68e4f66;
+}
+.terraform-altitude output {
+  display: grid;
+  place-content: center;
+  min-width: 78px;
+  padding: 3px 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #f5ce55;
+  font-size: 22px;
+  font-weight: 600;
+}
+.terraform-altitude output span {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #b7c6ba;
+}
+.terraform-pipette {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.terraform-toolbar .terraform-pipette[aria-pressed='true'] {
+  background: #2d4b5c;
+  border-color: #8fd3ff;
+  color: #d8f1ff;
+  box-shadow: inset 0 0 0 1px #8fd3ff;
 }
 .terraform-panel {
   top: 200px;
@@ -165,11 +217,12 @@
     max-width: none;
     padding: 8px;
   }
-  .terraform-toolbar div {
+  .terraform-title {
     flex: 1;
   }
-  .terraform-toolbar div small,
-  .terraform-toolbar > small {
+  .terraform-title small,
+  .terraform-toolbar > small,
+  .terraform-pipette span {
     display: none;
   }
   .terraform-panel {
@@ -184,4 +237,29 @@
   .terraform-panel.is-right {
     right: 8px;
   }
+}
+/* The Oracle's word on a refused stroke (TerraformRefusalDialog.tsx): the
+ * release notes' box, smaller, without a backdrop. */
+.oracle-refusal {
+  z-index: 82;
+  width: min(30rem, calc(100vw - 2rem));
+}
+.oracle-refusal p {
+  margin: 0.8rem 0 1.2rem;
+  font-size: 1.1rem;
+}
+.oracle-refusal p small {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: #e5dfcf;
+}
+.oracle-refusal footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+.oracle-refusal button:focus-visible {
+  outline: 2px solid #efce74;
+  outline-offset: 2px;
 }

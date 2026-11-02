@@ -14,13 +14,15 @@ export class SyncV2HttpError extends Error {
     readonly retryAfterMs = 1000,
     /** Whether the server actually sent a Retry-After header. */
     readonly hasRetryAfter = false,
+    /** The refused gesture of a terrain batch (0-based), when the server names it. */
+    readonly gesture: number | null = null,
   ) {
     super(message);
   }
 }
 /** A refused synchronization request, typed from its JSON body and Retry-After. */
 export function syncV2HttpError(response: Response, data: unknown): SyncV2HttpError {
-  const error = (data ?? {}) as { code?: string; message?: string };
+  const error = (data ?? {}) as { code?: string; message?: string; gesture?: unknown };
   const header = response.headers.get('retry-after');
   const seconds = Number(header ?? '1');
   return new SyncV2HttpError(
@@ -29,6 +31,7 @@ export function syncV2HttpError(response: Response, data: unknown): SyncV2HttpEr
     error.message ?? 'Synchronisation indisponible.',
     Number.isFinite(seconds) ? Math.max(0, Math.min(seconds, 60)) * 1000 : 1000,
     header !== null && Number.isFinite(seconds),
+    Number.isSafeInteger(error.gesture) && (error.gesture as number) >= 0 ? (error.gesture as number) : null,
   );
 }
 

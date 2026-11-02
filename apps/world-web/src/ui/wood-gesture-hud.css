@@ -94,6 +94,19 @@
 .harvest-cancel-button:hover {
   background: rgba(36, 52, 80, 0.95);
 }
+/* « Annuler N s » and « Confirmer » side by side (PendingDemolition.tsx). */
+.countdown-pair {
+  display: flex;
+  gap: 0.35rem;
+}
+.harvest-cancel-button.is-confirm {
+  border-color: #e4ca8b;
+  background: rgba(197, 171, 110, 0.92);
+  color: #142419;
+}
+.harvest-cancel-button.is-confirm:hover {
+  background: rgba(222, 196, 132, 0.98);
+}
 .harvest-cancel-count {
   margin-left: 0.35rem;
   font-weight: 400;

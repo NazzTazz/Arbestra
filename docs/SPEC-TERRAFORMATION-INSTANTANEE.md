@@ -23,6 +23,7 @@ Statut : **à valider** par Tristan en recette sur le dev (§8). Remplace, pour 
 - **Tout ou rien** : un geste refusé refuse le lot entier, sans écriture, avec le code du premier refus et l'index du geste (`gesture`). Le client valide localement avant d'ajouter un geste au lot (cases constructibles, eau, hauteur déjà atteinte), donc un refus serveur reste rare (concurrence, données périmées).
 - Un geste sans effet (terrain déjà à cette hauteur, emprise déjà plane) n'est pas un refus : il est compté `unchanged`.
 - Réponse : `{ protocol: 2, worldId, villageId, commandId, status: 'applied', commandTime, result: { gestures, unchanged, vertices }, effects? }`.
+- Refus (2 novembre, [outil](SPEC-TERRAFORMATION-OUTIL.md)) : le corps 409 porte aussi `gesture`, l'index du geste refusé : `{ code, message, gesture }`.
 
 ## 3. Admission (proposé)
 

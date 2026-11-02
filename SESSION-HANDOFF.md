@@ -22,6 +22,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
+- **Outil de terraformation** (2 novembre, branche `terraform-tool`, [spec](docs/SPEC-TERRAFORMATION-OUTIL.md)) : pinceau 3 × 3 à sommets partagés, pipette, Annuler/Confirmer (terraformation et démolition), refus expliqués par l'Oracle avec Inspecter, icône « Détruire » maison en pierre rouge ; sans migration ; recette navigateur et mesure du survol à faire (§6).
 - **Serveur sans synchronisation V1, 426 pour un ancien onglet** (I.3, 1er novembre, [inventaire](docs/INVENTAIRE-LOT-I-2026-11-01.md)) : un onglet resté ouvert sur l'ancien client doit recevoir « Une nouvelle version d'Arbestra est disponible. Rechargez la page. » sur ses commandes et ses lectures, puis fonctionner après rechargement ; parcours complet en V2 recetté sur dev le 2 novembre (deux expéditions de cartographie, récolte de carottes, constructions) ; reste l'ancien onglet.
 - **Défrichage plus rapide** (1er novembre, recette restante) : retirer une souche prend une minute de travail pour un habitant, plus le trajet (au lieu de 10 minutes).
 - **Flux V2 réveillé par NOTIFY** (2 novembre, migration 080 appliquée sur dev, [inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md#réveil-du-flux-par-notify-2-novembre)) : un changement du worker ou d'une commande arrive au client en quelques dizaines de ms au lieu d'environ 1,5 s ; recette navigateur restante.

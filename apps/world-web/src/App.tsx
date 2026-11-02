@@ -59,6 +59,8 @@ import { CountdownCancelButton, usePendingDemolition } from './ui/PendingDemolit
 import { usePendingTerrain } from './ui/PendingTerrain';
 import type { TerrainEditGesture } from '@arbestra/contracts';
 import { mergeTerraformVisuals } from './ui/terraform-draft';
+import { TerraformRefusalDialog } from './ui/TerraformRefusalDialog';
+import type { OracleRefusal } from './ui/terraform-refusals';
 import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
@@ -124,6 +126,7 @@ const pendingExploitationKey = (villageId: string) => `arbestra:pending-exploita
 const pendingConstructionKey = (villageId: string) => `arbestra:pending-construction:${worldSlug}:${villageId}`;
 const NO_PENDING_HARVESTS: Cell[] = [];
 const NO_PENDING_TREES: Array<{ featureId: string; treeIndex: number | null }> = [];
+const NO_TERRAIN_VISUALS: TerraformVisual[] = [];
 
 function gardenReady(garden: Garden, serverNow: number): number {
   return garden.plots.reduce(
@@ -346,10 +349,15 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onSettled: () => terrainRef.current?.demolitionClear(),
   });
   // Instant terrain edits, batched for 10 s after the last gesture (docs/SPEC-TERRAFORMATION-INSTANTANEE.md).
+  // A refused stroke or batch, told by the Oracle (docs/SPEC-TERRAFORMATION-OUTIL.md §3.5).
+  const [terrainRefusal, setTerrainRefusal] = useState<OracleRefusal | null>(null);
+  const terrainVillageKey = state ? `${state.world.id}:${state.village.id}` : '';
+  useEffect(() => setTerrainRefusal(null), [terrainVillageKey]);
   const pendingTerrain = usePendingTerrain({
     edit: villageV2.villageReady ? villageV2.terrainEdits : null,
-    villageKey: state ? `${state.world.id}:${state.village.id}` : '',
+    villageKey: terrainVillageKey,
     onNotice: pushNotification,
+    onRefusal: setTerrainRefusal,
   });
   const [terrainDraft, setTerrainDraft] = useState<TerraformVisual | null>(null);
   useEffect(() => {
@@ -1978,14 +1986,25 @@ export function App({ starter }: { starter?: StarterController } = {}) {
                   : null
               }
               label="Annuler la démolition"
+              confirmLabel="Confirmer la démolition"
               onCancel={pendingDemolition.cancel}
+              onConfirm={pendingDemolition.confirm}
             />
             <CountdownCancelButton
               deadline={pendingTerrain.batch && !pendingTerrain.batch.sending ? pendingTerrain.batch.deadline : null}
               label="Annuler la terraformation"
+              confirmLabel="Confirmer la terraformation"
               onCancel={pendingTerrain.cancel}
+              onConfirm={pendingTerrain.confirm}
             />
           </div>
+        )}
+        {terrainView === 'village' && terrainRefusal && (
+          <TerraformRefusalDialog
+            refusal={terrainRefusal}
+            onInspect={(cell) => terrainRef.current?.inspectCell(cell)}
+            onClose={() => setTerrainRefusal(null)}
+          />
         )}
         {worldMode === 'exploitation' && terrainView === 'village' && (
           <HarvestCancelButton
@@ -2496,7 +2515,14 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           </div>
         ) : null}
         {worldMode === 'terraform' && terrainView === 'village' && !arrivalActive && !beforeTownHall && !showDev && (
-          <TerraformPanel state={state} scene={terrainRef} onGesture={pendingTerrain.add} onDraft={setTerrainDraft} />
+          <TerraformPanel
+            state={state}
+            scene={terrainRef}
+            pending={pendingTerrain.batch?.visuals ?? NO_TERRAIN_VISUALS}
+            onGesture={pendingTerrain.add}
+            onDraft={setTerrainDraft}
+            onRefusal={setTerrainRefusal}
+          />
         )}
         {workshop && (
           <section className="factory-workshop" aria-label="Atelier">

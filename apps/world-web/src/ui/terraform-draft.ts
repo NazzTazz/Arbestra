@@ -2,8 +2,6 @@ import {
   fixedBuildingFootprint,
   footprintVertices,
   vertexLeveling,
-  infrastructurePlanSurface,
-  infrastructureSidewalkSurface,
   spawnDelta,
   terraformQuote,
   triangleHeight,
@@ -11,24 +9,7 @@ import {
   type VillageState,
 } from '@arbestra/contracts';
 import type { TerraformVisual } from '../scene/terraform-preview';
-const infrastructureObstacles = new WeakMap<NonNullable<VillageState['infrastructure']>, Set<string>>();
-function protectedInfrastructure(state: VillageState) {
-  const plan = state.infrastructure;
-  if (!plan) return new Set<string>();
-  const cached = infrastructureObstacles.get(plan);
-  if (cached) return cached;
-  const blocked = new Set<string>(),
-    world = state.world;
-  const key = (x: number, y: number) =>
-    `${((Math.floor(x + 0.5) % world.widthCells) + world.widthCells) % world.widthCells}:${((Math.floor(y + 0.5) % world.heightCells) + world.heightCells) % world.heightCells}`;
-  for (const e of plan.equipment) blocked.add(key(e.x / 8, e.y / 8));
-  const surface = infrastructurePlanSurface(plan, world);
-  for (const p of surface.values()) if (p.manual) blocked.add(key((p.x + 0.5) / 16, (p.y + 0.5) / 16));
-  for (const p of infrastructureSidewalkSurface(surface, world).values())
-    blocked.add(key((p.x + 0.5) / 16, (p.y + 0.5) / 16));
-  infrastructureObstacles.set(plan, blocked);
-  return blocked;
-}
+import { cellRefusal, terraformObstacles, type TerraformRefusal } from './terraform-refusals';
 export function villageVertexHeight(state: VillageState, x: number, y: number) {
   const r = state.region,
     world = state.world,
@@ -85,7 +66,7 @@ export function localTerraform(
   state: VillageState,
   request: TerraformRequest,
   heightAt = (x: number, y: number) => villageVertexHeight(state, x, y),
-): { visual: TerraformVisual; error: string | null } {
+): { visual: TerraformVisual; error: string | null; refusals: TerraformRefusal[] } {
   const travel = Math.ceil(
     Math.max(
       0,
@@ -100,29 +81,23 @@ export function localTerraform(
     ) * 1000,
   );
   const quote = terraformQuote(request, state.world, heightAt, travel);
-  const free = new Set(state.cells.filter((c) => c.canBuild).map((c) => `${c.cellX}:${c.cellY}`));
-  const protectedCells = protectedInfrastructure(state);
-  // Road cells (S1) are refused by the server like the legacy plan's roads.
-  const roadCells = new Set((state.roadCells ?? []).map((c) => `${c.cellX}:${c.cellY}`));
-  const invalidCells = quote.affectedCells!.filter(
-    (c) =>
-      !free.has(`${c.cellX}:${c.cellY}`) ||
-      protectedCells.has(`${c.cellX}:${c.cellY}`) ||
-      roadCells.has(`${c.cellX}:${c.cellY}`),
-  );
+  // Cells and their ring, as the server checks them (assertBuildableCells on both).
+  const obstacles = terraformObstacles(state),
+    refusals: TerraformRefusal[] = [];
+  for (const c of quote.affectedCells!) {
+    const reason = cellRefusal(obstacles, c, state.world);
+    if (reason) refusals.push({ reason, cell: c });
+  }
+  if (request.height <= 0) refusals.push({ reason: 'water', cell: request.anchor });
+  const invalidCells = refusals.filter((r) => r.reason !== 'water').map((r) => r.cell!);
   const sourceHeights = footprintVertices(quote.affectedCells!, state.world).map((v) => ({
     ...v,
     height: heightAt(v.vertexX, v.vertexY),
   }));
   const noChange = quote.vertices!.every((v) => Math.abs(v.height - heightAt(v.vertexX, v.vertexY)) < 1e-9);
-  const error = invalidCells.length
-    ? 'Une case ou son raccord est occupé, protégé ou hors de portée.'
-    : request.height <= 0
-      ? 'Cette hauteur ferait entrer l’eau.'
-      : noChange
-        ? 'Le terrain est déjà à cette hauteur.'
-        : null;
-  return { visual: { quote, origin: request.anchor, invalidCells, sourceHeights }, error };
+  // A refusal is told by the Oracle; « already there » stays a short hint.
+  const error = refusals.length ? 'refused' : noChange ? 'Le terrain est déjà à cette hauteur.' : null;
+  return { visual: { quote, origin: request.anchor, invalidCells, sourceHeights }, error, refusals };
 }
 /** One preview for a whole waiting batch: cells and rings joined, a shared
  * vertex at the height of the later gesture, source heights from the first. */

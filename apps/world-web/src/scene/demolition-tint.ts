@@ -21,6 +21,16 @@ export interface DemolitionPatch {
 const PULSE_MS = 1200,
   TINT = new Color3(1, 0.36, 0.3),
   GLOW = new Color3(0.7, 0.08, 0.05);
+/** The red of a designated target: a copy of `original`, its colours tinted
+ * (shared by the scene's pulse and the « Détruire » icon, which keeps `glow`). */
+export function demolitionTintedMaterial(original: StandardMaterial, glow = 0): StandardMaterial {
+  const tinted = original.clone(`${original.name}-demolition`);
+  tinted.unfreeze();
+  tinted.diffuseColor = original.diffuseColor.multiply(TINT);
+  tinted.ambientColor = original.ambientColor.multiply(TINT);
+  if (glow) tinted.emissiveColor = GLOW.scale(glow);
+  return tinted;
+}
 
 /**
  * Colours designated targets red, pulsing. Volumes (buildings, braziers) are drawn by
@@ -154,10 +164,7 @@ export class DemolitionTint {
     if (!(original instanceof StandardMaterial)) return this.#red;
     let tinted = this.#materials.get(original);
     if (!tinted) {
-      tinted = original.clone(`${original.name}-demolition`);
-      tinted.unfreeze();
-      tinted.diffuseColor = original.diffuseColor.multiply(TINT);
-      tinted.ambientColor = original.ambientColor.multiply(TINT);
+      tinted = demolitionTintedMaterial(original);
       this.#materials.set(original, tinted);
     }
     return tinted;

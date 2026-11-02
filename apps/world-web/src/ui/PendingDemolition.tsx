@@ -5,6 +5,10 @@ import './wood-gesture-hud.css';
 /** Safety net against a mistaken click (Tristan, 31 October): the command
  * leaves only after this delay, cancellable until then. */
 export const DEMOLITION_DELAY_MS = 10000;
+/** « Confirmer » (Tristan, 2 November): the remaining delay drops to this. */
+export const CONFIRM_DELAY_MS = 250;
+/** The deadline once confirmed: 250 ms from now, never later than it was. */
+export const confirmedDeadline = (deadline: number, now: number) => Math.min(deadline, now + CONFIRM_DELAY_MS);
 
 export interface PendingDemolition {
   deadline: number;
@@ -73,21 +77,35 @@ export function usePendingDemolition({
     if (pending?.sending) return;
     drop();
   }, [drop, pending?.sending]);
+  /** Sends the waiting order 250 ms from now instead of at its deadline. */
+  const confirm = useCallback(() => {
+    if (!order.current || !timer.current || !pending || pending.sending) return;
+    const deadline = confirmedDeadline(pending.deadline, Date.now());
+    window.clearTimeout(timer.current);
+    setPending({ ...pending, deadline });
+    timer.current = window.setTimeout(() => void send(), Math.max(0, deadline - Date.now()));
+  }, [pending, send]);
   // Another village (or world): the waiting order is dropped, never sent there.
   useEffect(() => drop, [villageKey, drop]);
-  return { pending, schedule, cancel };
+  return { pending, schedule, cancel, confirm };
 }
 
-/** « Annuler N s », like the clearing gesture's, while a delayed order waits.
- * The App stacks these buttons in one top-right region. */
+/** « Annuler N s » and « Confirmer », like the clearing gesture's cancel,
+ * while a delayed order waits (Tristan, 2 November: Confirmer brings the
+ * remaining delay down to 250 ms). The App stacks these pairs in one top-right
+ * region. */
 export function CountdownCancelButton({
   deadline,
   label,
+  confirmLabel,
   onCancel,
+  onConfirm,
 }: {
   deadline: number | null;
   label: string;
+  confirmLabel: string;
   onCancel: () => void;
+  onConfirm: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -99,8 +117,13 @@ export function CountdownCancelButton({
   if (deadline === null) return null;
   const seconds = Math.max(1, Math.ceil((deadline - now) / 1000));
   return (
-    <button type="button" className="harvest-cancel-button" aria-label={label} onClick={onCancel}>
-      Annuler <span className="harvest-cancel-count">{seconds} s</span>
-    </button>
+    <div className="countdown-pair">
+      <button type="button" className="harvest-cancel-button" aria-label={label} onClick={onCancel}>
+        Annuler <span className="harvest-cancel-count">{seconds} s</span>
+      </button>
+      <button type="button" className="harvest-cancel-button is-confirm" aria-label={confirmLabel} onClick={onConfirm}>
+        Confirmer
+      </button>
+    </div>
   );
 }

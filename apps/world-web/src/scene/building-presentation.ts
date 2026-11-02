@@ -1,4 +1,5 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
@@ -17,6 +18,7 @@ import { createRockSurface, rockOutcropElevation } from './rock-surface';
 import { buildResourcePresentation, isResourceRecipe } from './resource-factory';
 import { buildWorkerPresentation } from './worker-figure';
 import { buildToolPresentation, isToolPresentation } from './tool-presentation';
+import { demolitionTintedMaterial } from './demolition-tint';
 
 /** Uses the same generators as the village. The result is centred on its footprint. */
 export function buildPresentation(
@@ -39,6 +41,22 @@ export function buildPresentation(
       quarterTurns: 0,
       preview: kind === 'none',
     });
+  }
+  if (code === 'tool:demolish') {
+    // « Détruire » (Tristan, 2 November): the stone house of the catalogue,
+    // under the red that marks a target designated for demolition.
+    const house = buildPresentation(kit, 'dwelling');
+    const tinted = new Map<StandardMaterial, StandardMaterial>();
+    for (const child of [house, ...house.getChildMeshes()]) {
+      // An instance draws with its source's material.
+      const mesh = child instanceof InstancedMesh ? child.sourceMesh : child,
+        material = mesh.material;
+      if (!(material instanceof StandardMaterial) || [...tinted.values()].includes(material)) continue;
+      let red = tinted.get(material);
+      if (!red) tinted.set(material, (red = demolitionTintedMaterial(material, 0.6)));
+      mesh.material = red;
+    }
+    return house;
   }
   const root = new Mesh(`presentation-${code}-${level}`, kit.scene);
   if (isToolPresentation(code)) buildToolPresentation(root, kit.scene, code);
