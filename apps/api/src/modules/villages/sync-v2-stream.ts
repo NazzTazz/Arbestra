@@ -17,7 +17,7 @@ export const SYNC_V2_COALESCE_MS = 50;
 type StreamOptions = {
   /** Periodic read: SYNC_V2_POLL_MS without wakeups, SYNC_V2_BACKSTOP_MS with. */
   pollMs?: number;
-  wakeups?: SyncWakeSource;
+  wakeups?: SyncWakeSource | undefined;
   coalesceMs?: number;
   onError?: (error: unknown) => void;
 };
