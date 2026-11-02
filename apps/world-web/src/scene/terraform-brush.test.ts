@@ -3,11 +3,17 @@ import { Scene } from '@babylonjs/core/scene';
 import { describe, expect, it } from 'vitest';
 import { vertexLeveling } from '@arbestra/contracts';
 import {
+  BRUSH_FILL_SIDE,
+  BRUSH_FILL_VERTICES,
+  BRUSH_SUBDIVISIONS,
   BRUSH_VERTICES,
   BrushCursor,
+  LINE_POINTS,
   TerraformBrush,
   brushCells,
   brushColors,
+  brushFillAlpha,
+  brushFillPositions,
   brushVertexIndex,
   sampleBrushHeights,
 } from './terraform-brush';
@@ -63,6 +69,50 @@ describe('terraforming brush geometry', () => {
     ] as const)
       expect(alpha(dx, dy)).toBe(0);
   });
+
+  it('draws only the edges of the 4 × 4 grid, never a diagonal', () => {
+    // Line points: rows then columns of 4 corners; consecutive points of a line
+    // differ by one step along a single axis.
+    expect(LINE_POINTS).toHaveLength(32);
+    for (let line = 0; line < 8; line++)
+      for (let k = 0; k < 3; k++) {
+        const a = LINE_POINTS[line * 4 + k]!,
+          b = LINE_POINTS[line * 4 + k + 1]!;
+        const dx = Math.abs((a % 4) - (b % 4)),
+          dy = Math.abs(Math.floor(a / 4) - Math.floor(b / 4));
+        expect(dx + dy).toBe(1);
+      }
+  });
+
+  it('fades the fill bilinearly, so that no diagonal shows in the corner cells', () => {
+    const point = (i: number, j: number) => j * BRUSH_FILL_SIDE + i,
+      s = BRUSH_SUBDIVISIONS;
+    // North-west corner cell: only its south-east corner is inner; alpha = u·v.
+    for (let j = 0; j <= s; j++)
+      for (let i = 0; i <= s; i++) expect(brushFillAlpha(point(i, j))).toBeCloseTo((i / s) * (j / s));
+    // Symmetric across the cell's diagonal (u, v) ↔ (v, u): no side of a diagonal differs.
+    for (let j = 0; j < 3 * s; j++)
+      for (let i = 0; i < 3 * s; i++) expect(brushFillAlpha(point(i, j))).toBeCloseTo(brushFillAlpha(point(j, i)));
+    // North-east corner cell, whose inner corner is its south-west one (the
+    // other diagonal): alpha = (1 − u)·v, symmetric across that diagonal too.
+    for (let j = 0; j <= s; j++)
+      for (let i = 0; i <= s; i++) expect(brushFillAlpha(point(2 * s + i, j))).toBeCloseTo((1 - i / s) * (j / s));
+    // The centre cell is opaque, the outer edge transparent.
+    expect(brushFillAlpha(point(s + 2, s + 1))).toBe(1);
+    expect(brushFillAlpha(point(0, 7))).toBe(0);
+  });
+
+  it('lays the fill on the ground relief: every point on the triangle of its cell', () => {
+    const heights = new Float64Array(BRUSH_VERTICES);
+    sampleBrushHeights({ cellX: 10, cellY: 10 }, 3, world, slope, heights);
+    const out = brushFillPositions({ x: 0, z: 0 }, heights, 0, new Float32Array(BRUSH_FILL_VERTICES * 3));
+    // Centre of the centre cell, on its diagonal: the mean of its corners 00 and 11 (both at 3).
+    const centre = 2 * BRUSH_SUBDIVISIONS - BRUSH_SUBDIVISIONS / 2;
+    expect(out[(centre * BRUSH_FILL_SIDE + centre) * 3 + 1]).toBeCloseTo(3 * CELL_UNITS);
+    // Middle of the north-west cell's diagonal: mean of corners (-1,-1) and (0,0).
+    const mid = BRUSH_SUBDIVISIONS / 2;
+    expect(out[(mid * BRUSH_FILL_SIDE + mid) * 3 + 1]).toBeCloseTo(((slope(9, 9) + 3) / 2) * CELL_UNITS, 5);
+  });
 });
 
 describe('terraforming brush hot path', () => {
@@ -110,15 +160,18 @@ describe('terraforming brush hot path', () => {
       expect(brush.writes).toBe(50);
       const fill = scene.meshes.find((m) => m.name === 'terraform-brush')!;
       const positions = fill.getVerticesData('position')!;
-      expect(positions).toHaveLength(48);
+      expect(positions).toHaveLength(BRUSH_FILL_VERTICES * 3);
       const centre = space.project({ cellX: 49, cellY: 3 });
-      const inner = brushVertexIndex(0, 0);
+      // Fill point of the corner (dx, dy) of the 4 × 4 grid.
+      const at = (dx: number, dy: number) => ((dy + 1) * BRUSH_FILL_SIDE + dx + 1) * BRUSH_SUBDIVISIONS;
+      const inner = at(0, 0);
       expect(positions[inner * 3]).toBeCloseTo(centre.x - 0.5 * CELL_UNITS);
       expect(positions[inner * 3 + 1]).toBeCloseTo(2 * CELL_UNITS + 0.04);
       expect(positions[inner * 3 + 2]).toBeCloseTo(centre.z - 0.5 * CELL_UNITS);
-      const outer = brushVertexIndex(2, 2);
-      expect(positions[outer * 3 + 1]).toBeCloseTo(slope(51, 5) * CELL_UNITS + 0.04);
-      expect(fill.getTotalIndices()).toBe(54);
+      expect(positions[at(2, 2) * 3 + 1]).toBeCloseTo(slope(51, 5) * CELL_UNITS + 0.04);
+      expect(fill.getTotalIndices()).toBe((BRUSH_FILL_SIDE - 1) ** 2 * 6);
+      const lines = scene.meshes.find((m) => m.name === 'terraform-brush-grid')!;
+      expect(lines.getVerticesData('position')).toHaveLength(32 * 3);
       expect(fill.isPickable).toBe(false);
       brush.hide();
       expect(fill.isEnabled()).toBe(false);

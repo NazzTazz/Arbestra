@@ -8,6 +8,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { Constants } from '@babylonjs/core/Engines/constants';
 import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh';
 import type { Scene } from '@babylonjs/core/scene';
+import { triangleHeight } from '@arbestra/contracts';
 import { CELL_UNITS, type WorldSpace } from './world-space';
 
 /**
@@ -15,8 +16,9 @@ import { CELL_UNITS, type WorldSpace } from './world-space';
  * cells one painted cell really changes — its four corners move, the eight
  * neighbours slope to them — drawn as one mesh of 4 × 4 shared vertices at
  * the future heights. The centre is opaque, the ring fades to transparent at
- * its outer edge (the outer vertices carry alpha 0, the inner ones 1, and the
- * GPU interpolates the radial fade).
+ * its outer edge (alpha 1 on the inner corners, 0 on the outer ones,
+ * bilinear in between on a finer grid). Only the cell edges are drawn as
+ * lines, never a diagonal (Tristan, 2 November).
  *
  * Hover is a hot path: one mesh and one line system are built once and only
  * their buffers are rewritten; a hover on the same cell does nothing.
@@ -103,29 +105,102 @@ const TONES: Record<BrushTone, string> = { paint: '#f5ce55', refused: '#ee776c',
 /** Fill and line opacity of the centre; the outer edge is fully transparent. */
 const FILL_ALPHA = 0.42,
   LINE_ALPHA = 0.95;
-/** Triangles of each cell, split like the ground (cellVertices: [0,1,2] and [0,2,3]). */
-const INDICES: number[] = [];
-/** Vertices of the line system, in order: 4 rows, 4 columns of 4 points, then one diagonal per cell. */
-const LINE_POINTS: number[] = [];
-for (let j = 0; j < 3; j++)
-  for (let i = 0; i < 3; i++) {
-    const a = j * 4 + i,
+/**
+ * The fill is a finer grid (Tristan, 2 November: no diagonal may show): each
+ * cell is cut in BRUSH_SUBDIVISIONS² squares whose diagonals follow the
+ * ground's (00 → 11), so every small triangle lies in one ground triangle and
+ * the relief stays exact, while the opacity is bilinear over the cell. With
+ * two triangles per cell, a linear opacity creased along the diagonal of the
+ * corner cells (min(u, v) on one side, a ramp on the other).
+ */
+export const BRUSH_SUBDIVISIONS = 4;
+/** Points per side of the fill grid. */
+export const BRUSH_FILL_SIDE = 3 * BRUSH_SUBDIVISIONS + 1;
+export const BRUSH_FILL_VERTICES = BRUSH_FILL_SIDE * BRUSH_FILL_SIDE;
+const FILL_INDICES: number[] = [];
+for (let j = 0; j < BRUSH_FILL_SIDE - 1; j++)
+  for (let i = 0; i < BRUSH_FILL_SIDE - 1; i++) {
+    const a = j * BRUSH_FILL_SIDE + i,
       b = a + 1,
-      c = a + 5,
-      d = a + 4;
-    INDICES.push(a, c, b, a, d, c);
+      c = a + BRUSH_FILL_SIDE + 1,
+      d = a + BRUSH_FILL_SIDE;
+    FILL_INDICES.push(a, c, b, a, d, c);
   }
-for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) LINE_POINTS.push(j * 4 + i);
-for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) LINE_POINTS.push(j * 4 + i);
-for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) LINE_POINTS.push(j * 4 + i, j * 4 + i + 5);
-const LINE_SHAPES = [4, 4, 4, 4, 4, 4, 4, 4, ...Array<number>(9).fill(2)];
+/** Each fill point: its cell (0..2 on each axis, from the north-west) and its place in it. */
+const FILL_POINTS = Array.from({ length: BRUSH_FILL_VERTICES }, (_, n) => {
+  const i = n % BRUSH_FILL_SIDE,
+    j = Math.floor(n / BRUSH_FILL_SIDE),
+    cx = Math.min(2, Math.floor(i / BRUSH_SUBDIVISIONS)),
+    cy = Math.min(2, Math.floor(j / BRUSH_SUBDIVISIONS));
+  return {
+    cx,
+    cy,
+    u: (i - cx * BRUSH_SUBDIVISIONS) / BRUSH_SUBDIVISIONS,
+    v: (j - cy * BRUSH_SUBDIVISIONS) / BRUSH_SUBDIVISIONS,
+  };
+});
+/** The grid lines: 4 rows, then 4 columns of 4 points, along the cell edges
+ * only (an edge is straight on the relief, so 4 points draw it exactly). */
+export const LINE_POINTS: readonly number[] = [
+  ...Array.from({ length: 16 }, (_, n) => n),
+  ...Array.from({ length: 16 }, (_, n) => (n % 4) * 4 + Math.floor(n / 4)),
+];
+const LINE_SHAPES = [4, 4, 4, 4, 4, 4, 4, 4];
+/** Opacity at a corner of the 4 × 4 grid: 1 inside, 0 on the outer edge. */
+const cornerAlpha = (dx: number, dy: number) => (isInnerBrushVertex(brushVertexIndex(dx, dy)) ? 1 : 0);
+/** Bilinear opacity of a fill point between its cell's four corners. */
+export function brushFillAlpha(n: number): number {
+  const { cx, cy, u, v } = FILL_POINTS[n]!,
+    x = cx - 1,
+    y = cy - 1;
+  return (
+    cornerAlpha(x, y) * (1 - u) * (1 - v) +
+    cornerAlpha(x + 1, y) * u * (1 - v) +
+    cornerAlpha(x + 1, y + 1) * u * v +
+    cornerAlpha(x, y + 1) * (1 - u) * v
+  );
+}
 
-/** Vertex colours of one tone: inner corners opaque, outer ones transparent. */
+/** Vertex colours of one tone over the 4 × 4 corners (or `indices` of them):
+ * inner corners opaque, outer ones transparent. */
 export function brushColors(tone: BrushTone, alpha: number, indices: readonly number[] | null = null): Float32Array {
   const c = Color3.FromHexString(TONES[tone]),
     order = indices ?? Array.from({ length: BRUSH_VERTICES }, (_, i) => i),
     out = new Float32Array(order.length * 4);
   order.forEach((v, n) => out.set([c.r, c.g, c.b, isInnerBrushVertex(v) ? alpha : 0], n * 4));
+  return out;
+}
+/** Vertex colours of the fill grid: the bilinear fade of the corners. */
+export function brushFillColors(tone: BrushTone, alpha: number): Float32Array {
+  const c = Color3.FromHexString(TONES[tone]),
+    out = new Float32Array(BRUSH_FILL_VERTICES * 4);
+  for (let n = 0; n < BRUSH_FILL_VERTICES; n++) out.set([c.r, c.g, c.b, brushFillAlpha(n) * alpha], n * 4);
+  return out;
+}
+/** Writes the fill grid on the relief of the 16 heights (the ground's two
+ * triangles per cell, `triangleHeight`). No height read: O(1). */
+export function brushFillPositions(
+  base: { x: number; z: number },
+  heights: Float64Array,
+  lift: number,
+  out: Float32Array,
+): Float32Array {
+  for (let n = 0; n < BRUSH_FILL_VERTICES; n++) {
+    const { cx, cy, u, v } = FILL_POINTS[n]!,
+      x = cx - 1,
+      y = cy - 1;
+    const h = triangleHeight(
+      heights[brushVertexIndex(x, y)]!,
+      heights[brushVertexIndex(x + 1, y)]!,
+      heights[brushVertexIndex(x + 1, y + 1)]!,
+      heights[brushVertexIndex(x, y + 1)]!,
+      u,
+      v,
+    );
+    out[n * 3] = base.x + (x - 0.5 + u) * CELL_UNITS;
+    out[n * 3 + 1] = h * CELL_UNITS + lift;
+    out[n * 3 + 2] = base.z + (y - 0.5 + v) * CELL_UNITS;
+  }
   return out;
 }
 
@@ -150,6 +225,7 @@ export class TerraformBrush {
   readonly #fill: Mesh;
   readonly #lines: LinesMesh;
   readonly #positions = new Float32Array(BRUSH_VERTICES * 3);
+  readonly #fillPositions = new Float32Array(BRUSH_FILL_VERTICES * 3);
   readonly #linePositions = new Float32Array(LINE_POINTS.length * 3);
   readonly #fillColors: Record<BrushTone, Float32Array>;
   readonly #lineColors: Record<BrushTone, Float32Array>;
@@ -160,9 +236,9 @@ export class TerraformBrush {
   writes = 0;
   constructor(scene: Scene) {
     this.#fillColors = {
-      paint: brushColors('paint', 1),
-      refused: brushColors('refused', 1),
-      pipette: brushColors('pipette', 1),
+      paint: brushFillColors('paint', 1),
+      refused: brushFillColors('refused', 1),
+      pipette: brushFillColors('pipette', 1),
     };
     this.#lineColors = {
       paint: brushColors('paint', 1, LINE_POINTS),
@@ -171,8 +247,8 @@ export class TerraformBrush {
     };
     this.#fill = new Mesh('terraform-brush', scene);
     const data = new VertexData();
-    data.positions = new Float32Array(BRUSH_VERTICES * 3);
-    data.indices = INDICES;
+    data.positions = new Float32Array(BRUSH_FILL_VERTICES * 3);
+    data.indices = FILL_INDICES;
     data.colors = this.#fillColors.paint;
     data.applyToMesh(this.#fill, true);
     this.#fill.hasVertexAlpha = true;
@@ -235,13 +311,14 @@ export class TerraformBrush {
   #write(space: WorldSpace) {
     const base = space.project(this.#cell!);
     brushPositions(base, this.#heights, 0.04, this.#positions);
+    brushFillPositions(base, this.#heights, 0.04, this.#fillPositions);
     for (let n = 0; n < LINE_POINTS.length; n++) {
       const v = LINE_POINTS[n]!;
       this.#linePositions[n * 3] = this.#positions[v * 3]!;
       this.#linePositions[n * 3 + 1] = this.#positions[v * 3 + 1]! + 0.01;
       this.#linePositions[n * 3 + 2] = this.#positions[v * 3 + 2]!;
     }
-    this.#fill.updateVerticesData(VertexBuffer.PositionKind, this.#positions);
+    this.#fill.updateVerticesData(VertexBuffer.PositionKind, this.#fillPositions);
     this.#lines.updateVerticesData(VertexBuffer.PositionKind, this.#linePositions);
     this.writes++;
   }
