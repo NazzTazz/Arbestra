@@ -7,7 +7,7 @@ import type {
   TerrainUpdatesResponse,
   VillageState,
 } from '@arbestra/contracts';
-import { TerrainStore, type TerrainFetch } from './terrain-store';
+import { PREDICTION_HOLD_MS, TerrainStore, type TerrainFetch } from './terrain-store';
 import { terrainDemand } from './world-space';
 import { nearestExploitationTarget } from '../ui/exploitation-navigation';
 
@@ -78,6 +78,110 @@ function harness(initial: VillageState = state()) {
   };
   return { store, requests, advance, demand, settle };
 }
+describe('terraforming prediction (docs/SPEC-TERRAFORMATION-OUTIL.md §7)', () => {
+  const vertexWorld = () => {
+    const initial = state();
+    initial.world = { ...initial.world, generationVersion: 3, widthCells: 512, heightCells: 256 };
+    return initial;
+  };
+  const ground = (x: number, heights = Array(33 ** 2).fill(1)): TerrainChunk => ({
+    ...chunk(x),
+    rc1: { model: 'vertices', stride: 33, heights, water: Array(33 ** 2).fill(0), terraces: [] },
+  });
+  it('shows the predicted heights at once in every chunk holding the vertex, and holds them until released', async () => {
+    const h = harness(vertexWorld());
+    h.store.demandChunks([
+      { key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 },
+      { key: '1:0', chunkX: 1, chunkY: 0, visible: true, distance: 0 },
+    ]);
+    h.advance(100);
+    h.requests[0]!.resolve({ world: vertexWorld().world, chunks: [ground(0), ground(1)] });
+    await new Promise((r) => setTimeout(r, 0));
+    h.store.changed.clear();
+    const revision = h.store.groundRevision;
+    // (32,5) is on the border of chunks 0:0 (its last column) and 1:0 (its first).
+    const held = h.store.predict([
+      { vertexX: 32, vertexY: 5, height: 3 },
+      { vertexX: 31, vertexY: 5, height: 3 },
+    ]);
+    expect(held.sort()).toEqual(['0:0', '1:0']);
+    expect(h.store.vertexHeight(32, 5)).toBe(3);
+    expect(h.store.vertexHeight(31, 5)).toBe(3);
+    expect(h.store.chunk('0:0')!.rc1!.heights[5 * 33 + 32]).toBe(3);
+    expect(h.store.chunk('1:0')!.rc1!.heights[5 * 33]).toBe(3);
+    expect([...h.store.changed].sort()).toEqual(['0:0', '1:0']);
+    expect(h.store.groundRevision).toBeGreaterThan(revision);
+    // Held: no fetch, even long after the freshness delay.
+    const requests = h.requests.length;
+    h.store.invalidate('0:0');
+    h.advance(10_000);
+    expect(h.requests).toHaveLength(requests);
+    // A second prediction on 0:0 keeps it held after the first answer.
+    const second = h.store.predict([{ vertexX: 10, vertexY: 10, height: 2 }]);
+    h.store.release(held);
+    expect(h.store.held('0:0')).toBe(true);
+    expect(h.store.held('1:0')).toBe(false);
+    h.store.release(second);
+    expect(h.store.held('0:0')).toBe(false);
+    h.advance(100);
+    expect(h.requests.length).toBeGreaterThan(requests);
+  });
+
+  it('lets the server replace the prediction: a refused vertex comes back, an accepted one causes no redraw', async () => {
+    const h = harness(vertexWorld());
+    h.demand();
+    h.advance(100);
+    await h.settle(0, ground(0));
+    const keys = h.store.predict([
+      { vertexX: 4, vertexY: 4, height: 2 },
+      { vertexX: 20, vertexY: 4, height: 2 },
+    ]);
+    h.store.release(keys);
+    h.advance(100);
+    h.store.changed.clear();
+    // The server accepted (4,4) and refused (20,4).
+    const server = Array(33 ** 2).fill(1);
+    server[4 * 33 + 4] = 2;
+    const index = h.requests.length - 1;
+    h.requests[index]!.resolve({ world: vertexWorld().world, chunks: [ground(0, server)] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.store.vertexHeight(4, 4)).toBe(2);
+    expect(h.store.vertexHeight(20, 4)).toBe(1);
+    expect(h.store.changed.has('0:0')).toBe(true);
+    // Everything accepted: the answer equals the prediction, nothing to redraw.
+    const again = h.store.predict([{ vertexX: 6, vertexY: 6, height: 2 }]);
+    server[6 * 33 + 6] = 2;
+    h.store.release(again);
+    h.advance(100);
+    h.store.changed.clear();
+    h.requests.at(-1)!.resolve({ world: vertexWorld().world, chunks: [ground(0, server)] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.store.vertexHeight(6, 6)).toBe(2);
+    expect(h.store.changed.has('0:0')).toBe(false);
+  });
+
+  it('drops an answer already on its way when a prediction lands, and frees a hold left without answer', async () => {
+    const h = harness(vertexWorld());
+    h.demand();
+    h.advance(100);
+    await h.settle(0, ground(0));
+    h.store.invalidate('0:0');
+    h.advance(100);
+    const inFlight = h.requests.length - 1;
+    h.store.predict([{ vertexX: 4, vertexY: 4, height: 2 }]);
+    // The answer read before the prediction would put (4,4) back to 1.
+    h.requests[inFlight]!.resolve({ world: vertexWorld().world, chunks: [ground(0)] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.store.vertexHeight(4, 4)).toBe(2);
+    // No release ever comes: the hold ends after PREDICTION_HOLD_MS and the chunk is read again.
+    const requests = h.requests.length;
+    h.advance(PREDICTION_HOLD_MS + 1);
+    expect(h.store.held('0:0')).toBe(false);
+    h.advance(100);
+    expect(h.requests.length).toBeGreaterThan(requests);
+  });
+});
+
 describe('terrain cache authority and lifecycle', () => {
   it('starts a terrain brush from visible cached corners outside the village snapshot without another request', async () => {
     const initial = state();

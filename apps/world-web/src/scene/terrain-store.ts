@@ -68,6 +68,16 @@ function sameChunkGround(a: TerrainChunk | undefined, b: TerrainChunk): boolean 
     })
   );
 }
+/** What a refreshed chunk may change besides its immutable ground: a
+ * difference marks the chunk changed for the renderer. */
+/** Longest hold of a chunk by a terraforming prediction without an answer. */
+export const PREDICTION_HOLD_MS = 30_000;
+const mutableSignature = (chunk: TerrainUpdatesChunk) =>
+  JSON.stringify([
+    chunk.features,
+    chunk.occupiedCells,
+    chunk.rc1?.model === 'vertices' ? chunk.rc1 : (chunk.rc1Edits?.terraces ?? chunk.rc1?.terraces),
+  ]);
 export class TerrainStore {
   readonly entries = new Map<string, Entry>();
   readonly revisions = new Map<string, StoneDeposit>();
@@ -79,6 +89,85 @@ export class TerrainStore {
   /** Revision of values returned by ground(), published before terrain-mesh admission. */
   get groundRevision(): number {
     return this.#groundRevision;
+  }
+  /** Chunks a terraforming prediction holds, with the number of predictions on each. */
+  readonly #held = new Map<string, number>();
+  readonly #heldSince = new Map<string, number>();
+  /**
+   * A terraforming prediction (docs/SPEC-TERRAFORMATION-OUTIL.md §7): shows
+   * these vertex heights at once, before the server answers, on the path of a
+   * server edit. The cached shared-vertex chunks holding them (both for a
+   * vertex on their border) are copied, patched and published as a ground
+   * change: the renderer rebuilds only the units whose vertices changed. The
+   * chunks are held until `release`: an answer already on its way is dropped
+   * (it predates the prediction) and none is fetched meanwhile, so the
+   * prediction never flickers back. O(vertices) plus one copy of the heights
+   * of each touched chunk; called once per gesture, never per frame.
+   * Returns the held chunk keys.
+   */
+  predict(vertices: readonly { vertexX: number; vertexY: number; height: number }[]): string[] {
+    const { widthCells: w, heightCells: h, chunkSize: s } = this.world;
+    const copies = new Map<string, TerrainChunk>();
+    for (const v of vertices) {
+      const x = normalize(v.vertexX, w),
+        y = normalize(v.vertexY, h);
+      for (const cy of y % s === 0 ? [y, normalize(y - 1, h)] : [y])
+        for (const cx of x % s === 0 ? [x, normalize(x - 1, w)] : [x]) {
+          const key = this.key(cx, cy),
+            chunk = copies.get(key) ?? this.entries.get(key)?.chunk,
+            patch = chunk?.rc1;
+          if (!chunk || !patch || patch.model !== 'vertices') continue;
+          const dx = normalize(x - chunk.originCellX, w),
+            dy = normalize(y - chunk.originCellY, h);
+          if (dx >= patch.stride || dy >= patch.stride) continue;
+          let copy = copies.get(key);
+          if (!copy) {
+            copy = { ...chunk, rc1: { ...patch, heights: [...patch.heights] } };
+            copies.set(key, copy);
+          }
+          copy.rc1!.heights[dy * patch.stride + dx] = v.height;
+        }
+    }
+    for (const [key, chunk] of copies) {
+      const entry = this.entries.get(key)!;
+      entry.invalidation++;
+      this.#publishGround(entry, chunk);
+      entry.mutableSignature = mutableSignature(chunk);
+      this.changed.add(key);
+      this.#held.set(key, (this.#held.get(key) ?? 0) + 1);
+      this.#heldSince.set(key, this.now());
+    }
+    return [...copies.keys()];
+  }
+  /** The server answered a prediction (or failed): once no prediction holds a
+   * chunk, it is read again and the server's terrain replaces the predicted
+   * one; the units are rebuilt only where they differ (a refused cell). */
+  release(keys: readonly string[]): void {
+    for (const key of keys) {
+      const count = (this.#held.get(key) ?? 0) - 1;
+      if (count > 0) {
+        this.#held.set(key, count);
+        continue;
+      }
+      this.#held.delete(key);
+      this.#heldSince.delete(key);
+      this.invalidate(key);
+      this.#nextDemandAt = Math.min(this.#nextDemandAt, this.now());
+    }
+  }
+  /** Whether a prediction holds this chunk (test probe). */
+  held(key: string): boolean {
+    return this.#held.has(key);
+  }
+  /** A hold never outlives PREDICTION_HOLD_MS: an answer lost by the page
+   * must not freeze a chunk on its prediction. */
+  #isHeld(key: string, now: number): boolean {
+    if (!this.#held.has(key)) return false;
+    if (now - (this.#heldSince.get(key) ?? now) < PREDICTION_HOLD_MS) return true;
+    this.#held.delete(key);
+    this.#heldSince.delete(key);
+    this.invalidate(key);
+    return false;
   }
   #publishGround(entry: Entry, chunk: TerrainChunk) {
     if (!sameChunkGround(entry.chunk, chunk)) entry.groundRevision = ++this.#groundRevision;
@@ -277,7 +366,7 @@ export class TerrainStore {
     while (this.#controllers.size < Math.max(1, Math.min(SETTINGS.concurrentBatches, maxConcurrent))) {
       const eligible = this.#demand.filter((d) => {
         const e = this.#entry(d.key);
-        if (initial && !d.visible) return false;
+        if ((initial && !d.visible) || this.#isHeld(d.key, now)) return false;
         return (
           !e.inFlight &&
           now >= e.retryAt &&
@@ -354,11 +443,7 @@ export class TerrainStore {
                 continue;
               }
               for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
-              const signature = JSON.stringify([
-                chunk.features,
-                chunk.occupiedCells,
-                chunk.rc1?.model === 'vertices' ? chunk.rc1 : (chunk.rc1Edits?.terraces ?? chunk.rc1?.terraces),
-              ]);
+              const signature = mutableSignature(chunk);
               if (!e.chunk || signature !== e.mutableSignature) this.changed.add(ticket.key);
               if (e.chunk) {
                 if (chunk.rc1Edits && !e.chunk.rc1) throw new Error('RC1 edits without substrate');

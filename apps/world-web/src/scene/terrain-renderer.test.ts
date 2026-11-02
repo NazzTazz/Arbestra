@@ -411,6 +411,86 @@ it('keeps RC1 ground after road and revision edits but rebuilds a changed terrac
   }
 });
 
+it('rebuilds only the ground units whose shared vertices changed, never the whole chunk', () => {
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    material = new StandardMaterial('shared', scene);
+  const patch = () => ({
+    model: 'vertices' as const,
+    stride: 33,
+    heights: Array(33 ** 2).fill(1),
+    water: Array(33 ** 2).fill(0),
+    terraces: [],
+  });
+  let chunk: TerrainChunk = {
+    chunkX: 0,
+    chunkY: 0,
+    originCellX: 0,
+    originCellY: 0,
+    terrainCodes: Array(34 ** 2).fill(1),
+    elevations: Array(34 ** 2).fill(0),
+    occupiedCells: [],
+    features: [],
+    rc1: patch(),
+  };
+  const demand = [{ key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 }];
+  const store = {
+    world: { widthCells: 512, heightCells: 256, chunkSize: 32 },
+    changed: new Set<string>(),
+    demand,
+    chunk: () => chunk,
+    key: (x: number, y: number) => `${Math.floor(x / 32)}:${Math.floor(y / 32)}`,
+  };
+  const renderer = new TerrainRenderer(
+    scene,
+    store as unknown as TerrainStore,
+    new WorldSpace(512, 256, { cellX: 0, cellY: 0 }),
+    material,
+    material,
+    () => [],
+    () => [],
+    () => [],
+  );
+  const drain = () => {
+    for (let frame = 0; renderer.queued && frame < 2000; frame++) renderer.tick();
+    expect(renderer.queued).toBe(0);
+  };
+  const edit = (vertices: Array<[number, number]>) => {
+    const rc1 = patch();
+    for (const [x, y] of vertices) rc1.heights[y * 33 + x] = 2;
+    chunk = { ...chunk, rc1 };
+    store.changed.add('0:0');
+    renderer.demand(demand);
+    return renderer.queued;
+  };
+  try {
+    renderer.demand(demand);
+    drain();
+    // 4-cell units: vertex (10,10) is read by the unit 8:8 only.
+    expect(edit([[10, 10]])).toBe(1);
+    drain();
+    // A brush's four corners around the vertex (12,12), on a unit corner: the four units sharing it.
+    expect(
+      edit([
+        [10, 10],
+        [12, 12],
+      ]),
+    ).toBe(4);
+    drain();
+    // The same heights again: nothing.
+    expect(
+      edit([
+        [10, 10],
+        [12, 12],
+      ]),
+    ).toBe(0);
+  } finally {
+    renderer.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
 it('hands each ground unit exactly its road cells, including a partial unit at the chunk edge', () => {
   const engine = new NullEngine(),
     scene = new Scene(engine),

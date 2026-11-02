@@ -6,6 +6,7 @@ import type { NaturalFeature, TerrainChunk, TravelCell, TravelRoute } from '@arb
 import { pavedProfiles } from './road-profile';
 import { infrastructurePlanSurface, type InfrastructurePlan, type RoadPixel } from '@arbestra/contracts';
 import { buildTerrainUnit, RENDER_UNIT_CELLS as UNIT } from './terrain-unit';
+import { rc1VertexUnitSignature } from './rc1-terrain';
 import { type ChunkDemand, WorldSpace, normalize, delta } from './world-space';
 import type { TerrainStore } from './terrain-store';
 import { TERRAIN_STREAMING } from './terrain-settings';
@@ -90,7 +91,7 @@ export class TerrainRenderer {
   /**
    * A grove whose meshes are current (same trees, same places) arrives again,
    * maybe with other tree states: the scene redraws only the trees that
-   * changed (docs/SPEC-BOIS-ARBRE-UNITE.md §2), the unit is not rebuilt.
+   * changed (docs/SPEC-BOIS-ARBRE-UNITE.md Â§2), the unit is not rebuilt.
    */
   onWoodlandUnchanged: ((feature: NaturalFeature) => void) | null = null;
   constructor(
@@ -283,13 +284,14 @@ export class TerrainRenderer {
         const cx = chunk.originCellX + x + (UNIT - 1) / 2,
           cy = chunk.originCellY + y + (UNIT - 1) / 2;
         const roads = unitRoads.get(`${x}:${y}`) ?? new Map<string, number>();
-        // RC1 ground reads its immutable patch and terraces, never road decorations.
+        // RC1 ground reads its immutable patch and terraces, never road decorations;
+        // a shared-vertex unit, only its own vertices (rc1VertexUnitSignature).
         const groundSignature = JSON.stringify(
           chunk.rc1
             ? [
                 chunk.rc1.model,
                 chunk.rc1.terraces,
-                ...(chunk.rc1.model === 'vertices' ? [chunk.rc1.heights, chunk.rc1.water] : []),
+                ...(chunk.rc1.model === 'vertices' ? [rc1VertexUnitSignature(chunk.rc1, x, y, UNIT)] : []),
               ]
             : [null, this.#infrastructureRevision, [...roads].sort(([a], [b]) => a.localeCompare(b))],
         );

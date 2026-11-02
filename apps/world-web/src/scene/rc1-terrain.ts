@@ -48,6 +48,26 @@ export function rc1Height(
   const at = (dx: number, dy: number) => p.heights[(iy + dy) * p.stride + ix + dx]!;
   return triangleHeight(at(0, 0), at(1, 0), at(1, 1), at(0, 1), u, v) * 2.5;
 }
+/**
+ * What one ground unit of a shared-vertex patch reads: the heights and water
+ * of its vertex rows and columns `offset..offset + unit` (a unit never reads
+ * a neighbour's vertex). Its ground signature, so that an edit (a server
+ * answer or a terraforming prediction) rebuilds only the units it touches,
+ * never the whole chunk.
+ */
+export function rc1VertexUnitSignature(
+  patch: NonNullable<TerrainChunk['rc1']>,
+  offsetX: number,
+  offsetY: number,
+  unit = TERRAIN_STREAMING.renderUnitCells,
+): string {
+  const size = patch.stride - 1,
+    values: number[] = [];
+  for (let y = offsetY; y <= Math.min(size, offsetY + unit); y++)
+    for (let x = offsetX; x <= Math.min(size, offsetX + unit); x++)
+      values.push(patch.heights[y * patch.stride + x]!, patch.water[y * patch.stride + x]!);
+  return values.join(',');
+}
 export function buildRc1TerrainUnit(
   scene: Scene,
   chunk: TerrainChunk,
