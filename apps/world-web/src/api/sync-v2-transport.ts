@@ -44,6 +44,7 @@ import {
   SyncV2ResyncRequired,
   SyncV2SessionExpired,
   syncV2HttpError,
+  terrainEditRefusals,
 } from './sync-v2-session';
 export { SyncV2HttpError };
 
@@ -670,7 +671,14 @@ export class SyncV2Transport {
     )
       throw Error('Confirmation de terraformation invalide.');
     this.applyEffects(input.effects);
-    return result as TerrainEditsResult;
+    // The refused units of a partly applied batch (docs/SPEC-TERRAFORMATION-OUTIL.md §7).
+    const refused = terrainEditRefusals(result.refused);
+    return {
+      gestures: result.gestures as number,
+      unchanged: result.unchanged as number,
+      vertices: result.vertices as number,
+      ...(refused.length ? { refused } : {}),
+    };
   }
   /** Demolition (docs/SPEC-DEMOLITION.md §9): one immediate command per
    * designation; its private effects remove the targets. */

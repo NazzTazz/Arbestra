@@ -3,9 +3,11 @@ import type { VillageState } from '@arbestra/contracts';
 import {
   cellRefusal,
   cellRefused,
-  oracleRefusal,
+  oraclePages,
+  serverRefusal,
   serverRefusalReason,
   terraformObstacles,
+  unitRefusal,
   type TerraformRefusal,
 } from './terraform-refusals';
 
@@ -59,44 +61,75 @@ describe('client terraforming rules', () => {
   });
 });
 
-describe('the Oracle tells one refused gesture in one message', () => {
+describe('one painted cell, one unit (§7)', () => {
   const at = (cellX: number, cellY: number) => ({ cellX, cellY });
-  it('uses Tristan’s sentence for one road cell and inspects it', () => {
-    expect(oracleRefusal([{ reason: 'road', cell: at(15, 15) }], at(14, 14), world)).toEqual({
-      text: 'Une route sur ce terrain empêche de démarrer les travaux.',
-      more: null,
-      inspect: at(15, 15),
-    });
+  it('names the painted cell itself first, then its ring, infrastructure before the ground', () => {
+    const o = terraformObstacles(state());
+    expect(unitRefusal(o, at(14, 14), world)).toEqual({ reason: 'road', cell: at(15, 15) });
+    expect(unitRefusal(o, at(12, 12), world)).toEqual({ reason: 'building', cell: at(12, 12) });
+    expect(unitRefusal(o, at(17, 17), world)).toBeNull();
+    expect(unitRefusal(o, at(11, 13), world)).toEqual({ reason: 'building', cell: at(12, 12) });
+    expect(unitRefusal(o, at(13, 14), world)).toBeNull();
+    // A ring with the house (12,12) met first and a road (13,13) after: the road is named.
+    const both = { ...o, roads: new Set(['13:13']) };
+    expect(unitRefusal(both, at(12, 13), world)).toEqual({ reason: 'road', cell: at(13, 13) });
+    expect(unitRefusal(o, at(16, 16), world)).toEqual({ reason: 'road', cell: at(15, 15) });
   });
 
-  it('puts the road first, in the plural, names the others, and inspects the road cell nearest the anchor', () => {
+  it('reads a server refusal at its obstacle: a fixture without a road there, unknown codes as other', () => {
+    const o = terraformObstacles(state());
+    expect(serverRefusal('INFRASTRUCTURE_OCCUPIED', at(15, 15), o)).toEqual({ reason: 'road', cell: at(15, 15) });
+    const withFixture = { ...o, fixtures: new Set(['18:18']) };
+    expect(serverRefusal('INFRASTRUCTURE_OCCUPIED', at(18, 18), withFixture).reason).toBe('fixture');
+    expect(serverRefusal('BUILDING_LIMIT_REACHED', at(3, 3), o)).toEqual({ reason: 'other', cell: at(3, 3) });
+  });
+});
+
+describe('the Oracle tells one error per page', () => {
+  const at = (cellX: number, cellY: number) => ({ cellX, cellY });
+  it('uses Tristan’s sentence, in the singular, and inspects the road cell, which pulses', () => {
+    expect(oraclePages([{ reason: 'road', cell: at(15, 15) }])).toEqual([
+      {
+        reason: 'road',
+        text: 'Une route sur ce terrain empêche de démarrer les travaux.',
+        inspect: at(15, 15),
+        obstacle: 'road',
+      },
+    ]);
+  });
+
+  it('gives each error its own page, actionable ones first, one page per obstacle cell', () => {
     const refusals: TerraformRefusal[] = [
       { reason: 'nature', cell: at(9, 12) },
       { reason: 'road', cell: at(20, 20) },
       { reason: 'building', cell: at(12, 12) },
       { reason: 'road', cell: at(15, 15) },
+      // Two painted cells blocked by the same road cell: one error.
       { reason: 'road', cell: at(15, 15) },
+      { reason: 'foundation', cell: at(30, 30) },
     ];
-    const message = oracleRefusal(refusals, at(14, 14), world)!;
-    expect(message.text).toBe('Des routes sur ce terrain empêchent de démarrer les travaux.');
-    expect(message.more).toBe('Ailleurs dans ce geste, les travaux butent aussi sur un bâtiment et la nature.');
-    expect(message.inspect).toEqual(at(15, 15));
+    const pages = oraclePages(refusals);
+    expect(pages.map((p) => [p.reason, p.inspect])).toEqual([
+      ['road', at(20, 20)],
+      ['road', at(15, 15)],
+      ['building', at(12, 12)],
+      ['foundation', at(30, 30)],
+      ['nature', at(9, 12)],
+    ]);
+    expect(pages.every((p) => !p.text.startsWith('Des '))).toBe(true);
+    // A foundation pulses as a building; nature has no entity to pulse.
+    expect(pages.map((p) => p.obstacle)).toEqual(['road', 'road', 'building', 'building', null]);
   });
 
-  it('measures the distance to the anchor across the seam of the torus', () => {
-    const message = oracleRefusal(
-      [
-        { reason: 'building', cell: at(10, 0) },
-        { reason: 'building', cell: at(63, 0) },
-      ],
-      at(1, 0),
-      world,
-    )!;
-    expect(message.inspect).toEqual(at(63, 0));
-  });
-
-  it('falls back on the anchor when a server refusal names no cell', () => {
-    expect(oracleRefusal([{ reason: 'water', cell: null }], at(3, 4), world)!.inspect).toEqual(at(3, 4));
-    expect(oracleRefusal([], at(3, 4), world)).toBeNull();
+  it('falls back on the anchor for a refusal without a cell, without pulse for water', () => {
+    expect(oraclePages([{ reason: 'water', cell: null }], at(3, 4))).toEqual([
+      {
+        reason: 'water',
+        text: 'À cette hauteur, l’eau s’inviterait sur le terrain. Montez un peu le réglage.',
+        inspect: at(3, 4),
+        obstacle: null,
+      },
+    ]);
+    expect(oraclePages([])).toEqual([]);
   });
 });

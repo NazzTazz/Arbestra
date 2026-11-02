@@ -177,7 +177,9 @@ import type { DoorLane } from './worker-motion';
 const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
-import { DemolitionTint } from './demolition-tint';
+import { DEMOLITION_PULSE_MS, DemolitionTint } from './demolition-tint';
+/** Pulses of an obstacle shown by the Oracle's « Inspecter » (Tristan, 2 November). */
+const INSPECT_PULSES = 3;
 import { flatRoadGeometry } from './infrastructure-surface-geometry';
 export type TerrainStatus = 'loading' | 'retry' | null;
 export type TerrainViewMode = 'village' | 'region' | 'world';
@@ -4529,6 +4531,7 @@ export class BabylonVillageScene {
     this.#camera.position.z -= shift.z;
     this.#workers.shift(shift.x, shift.z);
     this.#demolitionTint?.shift(shift.x, shift.z);
+    this.#inspectTint?.shift(shift.x, shift.z);
     this.#roadCellPreview?.shift(shift.x, shift.z);
     this.#roadAnchorPreview?.shift(shift.x, shift.z);
     this.#roadAnchorMarkers?.shift(shift.x, shift.z);
@@ -5074,6 +5077,75 @@ export class BabylonVillageScene {
     if (this.#cameraFocus?.to === cell)
       this.#cameraFocus.close = { radius: 14, beta: 1.2, fromBeta: this.#camera.beta };
   }
+  #inspectTint: DemolitionTint | null = null;
+  #inspectTimer = 0;
+  /**
+   * « Inspecter » on a terraforming refusal (docs/SPEC-TERRAFORMATION-OUTIL.md
+   * §7): the camera of `inspectCell`, and the obstacle pulses three times in
+   * the demolition red (DemolitionTint, the effect of a designated target):
+   * the road of the cell, the building standing on it (a foundation's too), a
+   * patch for a fixture. Nothing pulses for a cause without an entity (water,
+   * reach, world, a passing team, the ground) nor for a building this village
+   * does not draw. Its own tint, so that a pending demolition is untouched.
+   */
+  public inspectObstacle(cell: Cell, obstacle: 'road' | 'fixture' | 'building' | null): void {
+    this.inspectCell(cell);
+    window.clearTimeout(this.#inspectTimer);
+    this.#inspectTint?.clear();
+    const state = this.#state,
+      space = this.#space;
+    if (!obstacle || !state || !space) return;
+    const tint = (this.#inspectTint ??= new DemolitionTint(this.#scene));
+    tint.pulseFrom(performance.now());
+    if (obstacle === 'road') {
+      const raster = new Map<string, RoadPixel>(),
+        pixels = new Map<string, RoadPixel>();
+      overlayRoadCells(
+        raster,
+        (state.roadCells ?? []).filter((r) => r.cellX === cell.cellX && r.cellY === cell.cellY),
+        state.world,
+      );
+      for (const p of raster.values())
+        if (
+          Math.floor((p.x + 8) / 16) % space.width === cell.cellX &&
+          Math.floor((p.y + 8) / 16) % space.height === cell.cellY
+        )
+          pixels.set(`${p.x}:${p.y}`, p);
+      if (!pixels.size) return;
+      tint.road(
+        flatRoadGeometry(
+          pixels,
+          space,
+          (x, y) => this.#store?.ground(x, y)?.height ?? null,
+          state.world.generationVersion === 3,
+          0.07,
+        ),
+      );
+    } else if (obstacle === 'building') {
+      const site = state.cells.find((c) => c.cellX === cell.cellX && c.cellY === cell.cellY),
+        root = this.#buildingCache.get(site?.building?.id ?? site?.footprint?.buildingId ?? '')?.mesh;
+      if (!root) return;
+      tint.tint('inspect', [root]);
+    } else {
+      const p = space.project(cell);
+      tint.patch('inspect', {
+        x: p.x,
+        y: (this.#store?.ground(cell.cellX, cell.cellY)?.height ?? 0) + 0.19,
+        z: p.z,
+        width: TILE_SIZE * 0.98,
+        depth: TILE_SIZE * 0.98,
+      });
+    }
+    this.#inspectTimer = window.setTimeout(() => this.#inspectTint?.clear(), INSPECT_PULSES * DEMOLITION_PULSE_MS);
+  }
+  /** A terraforming prediction on the displayed ground (TerrainStore.predict). */
+  public predictTerrain(vertices: readonly { vertexX: number; vertexY: number; height: number }[]): string[] {
+    return this.#store?.predict(vertices) ?? [];
+  }
+  /** The server answered the prediction holding these chunks. */
+  public releaseTerrain(keys: readonly string[]): void {
+    this.#store?.release(keys);
+  }
   public focusCell(cell: Cell): void {
     const from = this.viewCenter();
     if (!from || this.#mode !== 'village' || this.#arrival || this.#flyover || this.#transition.active) return;
@@ -5468,6 +5540,8 @@ export class BabylonVillageScene {
     this.#terraformBrush?.dispose();
     cancelAnimationFrame(this.#demolitionRoadFrame);
     this.#demolitionTint?.dispose();
+    window.clearTimeout(this.#inspectTimer);
+    this.#inspectTint?.dispose();
     cancelAnimationFrame(this.#infrastructureHoverFrame);
     this.#infrastructureHoverFrame = 0;
     this.#infrastructureHoverEvent = null;

@@ -7,9 +7,10 @@ import {
 
 /**
  * Why a terraforming cell is refused, and how the Oracle says it
- * (docs/SPEC-TERRAFORMATION-OUTIL.md §3.5). The client classifies what its
- * data proves; the server stays the authority and its codes map to the same
- * reasons.
+ * (docs/SPEC-TERRAFORMATION-OUTIL.md §3.5 and §7). The client classifies what
+ * its data proves, painted cell by painted cell; the server stays the
+ * authority and its codes map to the same reasons. One page of the Oracle per
+ * error.
  */
 export type TerraformRefusalReason =
   | 'road'
@@ -28,8 +29,8 @@ export interface TerraformRefusal {
   cell: Cell | null;
 }
 
-/** Priority of the headline when one gesture meets several obstacles: what
- * the player can act on first (a road, a fixture, a building), then the ground. */
+/** Order of the Oracle's pages: what the player can act on first (a road, a
+ * fixture, a building), then the ground. */
 const PRIORITY: readonly TerraformRefusalReason[] = [
   'road',
   'fixture',
@@ -43,61 +44,19 @@ const PRIORITY: readonly TerraformRefusalReason[] = [
   'other',
 ];
 
-/** The Oracle's sentence per reason, for one cell and for several. */
-const SENTENCES: Record<TerraformRefusalReason, readonly [string, string]> = {
-  road: [
-    'Une route sur ce terrain empêche de démarrer les travaux.',
-    'Des routes sur ce terrain empêchent de démarrer les travaux.',
-  ],
-  fixture: [
-    'Un aménagement de la voirie occupe ce terrain. Les pelles attendront qu’on le déplace.',
-    'Des aménagements de la voirie occupent ce terrain. Les pelles attendront qu’on les déplace.',
-  ],
-  building: [
-    'Un bâtiment se dresse ici. Je doute qu’il apprécie d’être soulevé avec le terrain.',
-    'Des bâtiments se dressent ici. Je doute qu’ils apprécient d’être soulevés avec le terrain.',
-  ],
-  foundation: [
-    'Une fondation voisine bougerait avec ce terrain. Éloignez un peu les travaux.',
-    'Des fondations voisines bougeraient avec ce terrain. Éloignez un peu les travaux.',
-  ],
-  passage: [
-    'Une équipe traverse ce terrain en ce moment. Laissez-la passer, puis recommencez.',
-    'Des équipes traversent ce terrain en ce moment. Laissez-les passer, puis recommencez.',
-  ],
-  water: [
-    'À cette hauteur, l’eau s’inviterait sur le terrain. Montez un peu le réglage.',
-    'À cette hauteur, l’eau s’inviterait sur le terrain. Montez un peu le réglage.',
-  ],
-  nature: [
-    'La nature tient ce terrain : arbre, rocher ou clairière protégée. Elle a parfois le dernier mot.',
-    'La nature tient ce terrain : arbres, rochers ou clairière protégée. Elle a parfois le dernier mot.',
-  ],
-  reach: [
-    'Ce terrain est hors de portée du village. Restez plus près de vos bâtiments.',
-    'Ce terrain est hors de portée du village. Restez plus près de vos bâtiments.',
-  ],
-  unavailable: [
-    'Ce monde ne se laisse pas encore modeler de cette façon.',
-    'Ce monde ne se laisse pas encore modeler de cette façon.',
-  ],
-  other: [
-    'Le terrain a refusé de bouger. Je n’en sais pas davantage, pour une fois.',
-    'Le terrain a refusé de bouger. Je n’en sais pas davantage, pour une fois.',
-  ],
-};
-/** Short names of the other obstacles, quoted after the headline. */
-const NAMES: Record<TerraformRefusalReason, string> = {
-  road: 'une route',
-  fixture: 'un aménagement',
-  building: 'un bâtiment',
-  foundation: 'une fondation',
-  passage: 'une équipe en chemin',
-  water: 'l’eau',
-  nature: 'la nature',
-  reach: 'les limites du village',
-  unavailable: 'ce monde',
-  other: 'un obstacle',
+/** The Oracle's sentence per reason (Tristan, 2 November: « parfaits »), in
+ * the singular: one page tells one error. */
+const SENTENCES: Record<TerraformRefusalReason, string> = {
+  road: 'Une route sur ce terrain empêche de démarrer les travaux.',
+  fixture: 'Un aménagement de la voirie occupe ce terrain. Les pelles attendront qu’on le déplace.',
+  building: 'Un bâtiment se dresse ici. Je doute qu’il apprécie d’être soulevé avec le terrain.',
+  foundation: 'Une fondation voisine bougerait avec ce terrain. Éloignez un peu les travaux.',
+  passage: 'Une équipe traverse ce terrain en ce moment. Laissez-la passer, puis recommencez.',
+  water: 'À cette hauteur, l’eau s’inviterait sur le terrain. Montez un peu le réglage.',
+  nature: 'La nature tient ce terrain : arbre, rocher ou clairière protégée. Elle a parfois le dernier mot.',
+  reach: 'Ce terrain est hors de portée du village. Restez plus près de vos bâtiments.',
+  unavailable: 'Ce monde ne se laisse pas encore modeler de cette façon.',
+  other: 'Le terrain a refusé de bouger. Je n’en sais pas davantage, pour une fois.',
 };
 
 /** Server refusal codes (terrain-edits, assertBuildableCells, assertNoInfrastructure). */
@@ -177,49 +136,89 @@ export function cellRefusal(
   // Not buildable for another reason: out of reach, or the ground itself.
   return withinBuildReach(c, o.sources, world) ? 'nature' : 'reach';
 }
+/** Infrastructure first, as `assertBuildableCells` throws it for any cell of a set. */
+const rank = (reason: TerraformRefusalReason) => (reason === 'road' || reason === 'fixture' ? 0 : 1);
+/**
+ * Why one painted cell (one unit, docs/SPEC-TERRAFORMATION-OUTIL.md §7) is
+ * refused, as the server picks it: the painted cell itself first, then its
+ * ring (the 3 × 3 its corners move), infrastructure before the ground, in the
+ * canonical order. At most 9 set lookups; null when the client sees nothing.
+ */
+export function unitRefusal(
+  o: TerraformObstacles,
+  c: Cell,
+  world: { widthCells: number; heightCells: number },
+): TerraformRefusal | null {
+  const own = cellRefusal(o, c, world);
+  if (own) return { reason: own, cell: c };
+  let found: TerraformRefusal | null = null;
+  for (let dx = -1; dx <= 1; dx++)
+    for (let dy = -1; dy <= 1; dy++) {
+      if (!dx && !dy) continue;
+      const cell = {
+          cellX: (c.cellX + dx + world.widthCells) % world.widthCells,
+          cellY: (c.cellY + dy + world.heightCells) % world.heightCells,
+        },
+        reason = cellRefusal(o, cell, world);
+      if (reason && (!found || rank(reason) < rank(found.reason))) found = { reason, cell };
+    }
+  return found;
+}
 
-export interface OracleRefusal {
-  /** The headline, about the main obstacle. */
+/** Why the server refused a unit, refined by what the client sees at the
+ * obstacle: INFRASTRUCTURE_OCCUPIED is a road, or a fixture (equipment,
+ * lane, sidewalk) when no road is known there. Unknown codes: 'other'. */
+export function serverRefusal(code: string, at: Cell | null, obstacles: TerraformObstacles | null): TerraformRefusal {
+  let reason = serverRefusalReason(code) ?? 'other';
+  if (reason === 'road' && at && obstacles && !obstacles.roads.has(key(at)) && obstacles.fixtures.has(key(at)))
+    reason = 'fixture';
+  return { reason, cell: at };
+}
+
+/** The entity « Inspecter » makes pulse for a reason: a foundation is a
+ * building's; water, reach, the ground, a passing team have none. */
+export type InspectObstacle = 'road' | 'fixture' | 'building' | null;
+const OBSTACLES: Record<TerraformRefusalReason, InspectObstacle> = {
+  road: 'road',
+  fixture: 'fixture',
+  building: 'building',
+  foundation: 'building',
+  passage: null,
+  water: null,
+  nature: null,
+  reach: null,
+  unavailable: null,
+  other: null,
+};
+
+/** One page of the Oracle: one error, its sentence and where to look. */
+export interface OraclePage {
+  reason: TerraformRefusalReason;
   text: string;
-  /** The other obstacles of the same gesture, named briefly; null when alone. */
-  more: string | null;
   /** The cell the camera visits on « Inspecter »; null when none is known. */
   inspect: Cell | null;
+  /** What pulses there. */
+  obstacle: InspectObstacle;
 }
-const joinNames = (names: string[]) =>
-  names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} et ${names.at(-1)}`;
 /**
- * One message for a whole refused gesture (§3.5): the headline names the
- * first obstacle in PRIORITY order, in the plural when it covers several
- * cells; the other reasons follow in one short line; « Inspecter » visits the
- * cell of the headline closest to the gesture's anchor.
+ * The Oracle's pages for refusals (Tristan, 2 November: « un message par
+ * erreur, avec un simple sélecteur 1/X »): one page per error, an error being
+ * one reason at one cell (several refused cells blocked by the same road cell
+ * are one error); in PRIORITY order (what the player can act on first), then
+ * in order of appearance. Sentences in the singular: a page is one error.
+ * A refusal without a cell falls back on `anchor`.
  */
-export function oracleRefusal(
-  refusals: readonly TerraformRefusal[],
-  anchor: Cell | null,
-  world: { widthCells: number; heightCells: number } = { widthCells: Infinity, heightCells: Infinity },
-): OracleRefusal | null {
-  if (!refusals.length) return null;
-  const byReason = new Map<TerraformRefusalReason, TerraformRefusal[]>();
-  for (const r of refusals) byReason.set(r.reason, [...(byReason.get(r.reason) ?? []), r]);
-  const reasons = PRIORITY.filter((r) => byReason.has(r)),
-    main = reasons[0]!,
-    cells = byReason
-      .get(main)!
-      .map((r) => r.cell)
-      .filter((c): c is Cell => c !== null);
-  const distinct = new Set(cells.map(key)).size;
-  const distance = (c: Cell) => {
-    if (!anchor) return 0;
-    const dx = Math.abs(c.cellX - anchor.cellX),
-      dy = Math.abs(c.cellY - anchor.cellY);
-    return Math.max(Math.min(dx, world.widthCells - dx), Math.min(dy, world.heightCells - dy));
-  };
-  const inspect = cells.length ? cells.reduce((a, b) => (distance(b) < distance(a) ? b : a)) : anchor;
-  const others = reasons.slice(1).map((r) => NAMES[r]);
-  return {
-    text: SENTENCES[main][distinct > 1 ? 1 : 0],
-    more: others.length ? `Ailleurs dans ce geste, les travaux butent aussi sur ${joinNames(others)}.` : null,
-    inspect,
-  };
+export function oraclePages(refusals: readonly TerraformRefusal[], anchor: Cell | null = null): OraclePage[] {
+  const seen = new Set<string>(),
+    pages: OraclePage[] = [];
+  for (const reason of PRIORITY)
+    for (const r of refusals) {
+      if (r.reason !== reason) continue;
+      const cell = r.cell ?? anchor,
+        id = `${reason}@${cell ? key(cell) : ''}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      pages.push({ reason, text: SENTENCES[reason], inspect: cell, obstacle: cell ? OBSTACLES[reason] : null });
+    }
+  return pages;
 }

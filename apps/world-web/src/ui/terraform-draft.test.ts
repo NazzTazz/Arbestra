@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { VillageState } from '@arbestra/contracts';
-import { footprintTerraformVisual, localTerraform, mergeTerraformVisuals } from './terraform-draft';
+import { vertexLeveling, type VillageState } from '@arbestra/contracts';
+import { footprintTerraformVisual, localStroke } from './terraform-draft';
 
 const world = { widthCells: 64, heightCells: 64 };
 const state = (roadCells: Array<{ cellX: number; cellY: number }> = []) =>
@@ -14,49 +14,63 @@ const state = (roadCells: Array<{ cellX: number; cellY: number }> = []) =>
     })),
     roadCells: roadCells.map((c) => ({ ...c, id: `${c.cellX},${c.cellY}` })),
   }) as unknown as VillageState;
-const request = {
-  buildingType: 'terrain' as const,
-  anchor: { cellX: 14, cellY: 14 },
-  quarterTurns: 0 as const,
-  cells: [{ cellX: 14, cellY: 14 }],
-  height: 1,
-  workerCount: 1,
-};
+const at = (cellX: number, cellY: number) => ({ cellX, cellY });
 const flat = () => 0.25;
+const byVertex = (a: { vertexX: number; vertexY: number }, b: { vertexX: number; vertexY: number }) =>
+  a.vertexX - b.vertexX || a.vertexY - b.vertexY;
 
-describe('local terraforming check', () => {
-  it('accepts a stroke on free ground', () => {
-    expect(localTerraform(state(), request, flat).error).toBeNull();
+describe('local part of a stroke (docs/SPEC-TERRAFORMATION-OUTIL.md §7)', () => {
+  it('sends a stroke on free ground whole, predicted exactly as the server levels it', () => {
+    const cells = [at(14, 14), at(15, 14), at(15, 15)];
+    const stroke = localStroke(state(), { anchor: at(14, 14), cells, height: 1 }, flat);
+    expect(stroke.refusals).toEqual([]);
+    expect(stroke.gesture).toEqual({ buildingType: 'terrain', anchor: at(14, 14), cells, height: 1 });
+    expect([...stroke.vertices].sort(byVertex)).toEqual(vertexLeveling(cells, world, flat, 1, 1).vertices);
   });
 
-  it('refuses a stroke whose ring touches a road cell, as the server does', () => {
-    // The ring of (14,14) includes its eight neighbours; (15,15) carries a road cell.
-    const checked = localTerraform(state([{ cellX: 15, cellY: 15 }]), request, flat);
-    expect(checked.error).toBe('refused');
-    expect(checked.refusals).toContainEqual({ reason: 'road', cell: { cellX: 15, cellY: 15 } });
-    expect(checked.visual.invalidCells).toContainEqual({ cellX: 15, cellY: 15 });
-  });
-});
-
-describe('batch preview', () => {
-  it('joins gestures, the later one winning a shared vertex', () => {
-    const a = localTerraform(state(), { ...request, height: 1 }, flat).visual;
-    const b = localTerraform(
-      state(),
-      { ...request, anchor: { cellX: 15, cellY: 14 }, cells: [{ cellX: 15, cellY: 14 }], height: 2 },
+  it('withdraws the painted cell whose 3 × 3 holds a road, names the road, and sends the rest', () => {
+    // The ring of (14,14) holds (15,15); (12,12)'s ring does not.
+    const stroke = localStroke(
+      state([at(15, 15)]),
+      { anchor: at(14, 14), cells: [at(14, 14), at(12, 12)], height: 1 },
       flat,
-    ).visual;
-    const merged = mergeTerraformVisuals([a, b])!;
-    const height = (x: number, y: number) =>
-      merged.quote.vertices!.find((v) => v.vertexX === x && v.vertexY === y)?.height;
-    expect(height(14, 14)).toBe(1);
-    expect(height(15, 14)).toBe(2);
-    expect(height(16, 14)).toBe(2);
-    expect(merged.quote.cells).toHaveLength(2);
+    );
+    expect(stroke.refusals).toEqual([{ reason: 'road', cell: at(15, 15) }]);
+    // The anchor was withdrawn: the first accepted cell anchors the gesture.
+    expect(stroke.gesture).toEqual({ buildingType: 'terrain', anchor: at(12, 12), cells: [at(12, 12)], height: 1 });
+    expect(stroke.vertices.map((v) => `${v.vertexX}:${v.vertexY}`).sort()).toEqual([
+      '12:12',
+      '12:13',
+      '13:12',
+      '13:13',
+    ]);
+  });
+
+  it('sends nothing when every painted cell is refused', () => {
+    const stroke = localStroke(state([at(15, 15)]), { anchor: at(15, 15), cells: [at(15, 15)], height: 1 }, flat);
+    expect(stroke.gesture).toBeNull();
+    expect(stroke.vertices).toEqual([]);
+    expect(stroke.refusals).toEqual([{ reason: 'road', cell: at(15, 15) }]);
+  });
+
+  it('refuses a stroke at or under the water line as one error', () => {
+    const stroke = localStroke(state(), { anchor: at(14, 14), cells: [at(14, 14), at(15, 14)], height: 0 }, flat);
+    expect(stroke.gesture).toBeNull();
+    expect(stroke.refusals).toEqual([{ reason: 'water', cell: at(14, 14) }]);
+  });
+
+  it('sends nothing and hints when the ground is already at the height', () => {
+    const stroke = localStroke(state(), { anchor: at(14, 14), cells: [at(14, 14)], height: 0.25 }, flat);
+    expect(stroke.gesture).toBeNull();
+    expect(stroke.hint).toBe('Le terrain est déjà à cette hauteur.');
+  });
+
+  it('throws when the ground is not loaded, rather than predicting from nothing', () => {
+    expect(() => localStroke(state(), { anchor: at(14, 14), cells: [at(14, 14)], height: 1 }, () => NaN)).toThrow();
   });
 
   it('previews a footprint leveled flat', () => {
-    const visual = footprintTerraformVisual('stonemason', { cellX: 14, cellY: 14 }, 0, world, (x) => 0.25 + x * 0.01);
+    const visual = footprintTerraformVisual('stonemason', at(14, 14), 0, world, (x) => 0.25 + x * 0.01);
     const heights = new Set(visual.quote.vertices!.map((v) => v.height));
     expect(heights.size).toBe(1);
   });

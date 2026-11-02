@@ -4,6 +4,7 @@ import {
   readServerEvents,
   type SyncV2State,
   type SyncV2Batch,
+  type TerrainEditRefusal,
 } from '@arbestra/contracts';
 
 export class SyncV2HttpError extends Error {
@@ -16,13 +17,15 @@ export class SyncV2HttpError extends Error {
     readonly hasRetryAfter = false,
     /** The refused gesture of a terrain batch (0-based), when the server names it. */
     readonly gesture: number | null = null,
+    /** The refused units of a terrain batch where none was accepted (well-formed entries only). */
+    readonly refused: readonly TerrainEditRefusal[] = [],
   ) {
     super(message);
   }
 }
 /** A refused synchronization request, typed from its JSON body and Retry-After. */
 export function syncV2HttpError(response: Response, data: unknown): SyncV2HttpError {
-  const error = (data ?? {}) as { code?: string; message?: string; gesture?: unknown };
+  const error = (data ?? {}) as { code?: string; message?: string; gesture?: unknown; refused?: unknown };
   const header = response.headers.get('retry-after');
   const seconds = Number(header ?? '1');
   return new SyncV2HttpError(
@@ -32,7 +35,36 @@ export function syncV2HttpError(response: Response, data: unknown): SyncV2HttpEr
     Number.isFinite(seconds) ? Math.max(0, Math.min(seconds, 60)) * 1000 : 1000,
     header !== null && Number.isFinite(seconds),
     Number.isSafeInteger(error.gesture) && (error.gesture as number) >= 0 ? (error.gesture as number) : null,
+    terrainEditRefusals(error.refused),
   );
+}
+const isCell = (c: unknown): c is { cellX: number; cellY: number } =>
+  typeof c === 'object' &&
+  c !== null &&
+  Number.isSafeInteger((c as { cellX?: unknown }).cellX) &&
+  Number.isSafeInteger((c as { cellY?: unknown }).cellY);
+/** The well-formed refused units of a terrain edits answer (`result.refused`
+ * or the 409 body); anything else is dropped, never trusted blindly. */
+export function terrainEditRefusals(value: unknown): TerrainEditRefusal[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r: unknown) => {
+    const entry = r as Partial<Record<keyof TerrainEditRefusal, unknown>> | null;
+    return entry &&
+      Number.isSafeInteger(entry.gesture) &&
+      (entry.gesture as number) >= 0 &&
+      typeof entry.code === 'string' &&
+      isCell(entry.cell) &&
+      isCell(entry.at)
+      ? [
+          {
+            gesture: entry.gesture as number,
+            code: entry.code as TerrainEditRefusal['code'],
+            cell: { cellX: entry.cell.cellX, cellY: entry.cell.cellY },
+            at: { cellX: entry.at.cellX, cellY: entry.at.cellY },
+          },
+        ]
+      : [];
+  });
 }
 
 export interface AppliedSyncCursor {

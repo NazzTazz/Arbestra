@@ -105,6 +105,12 @@ export interface TerrainHandle {
   focusCell: (cell: Cell) => void;
   /** Close and low camera over a cell (the Oracle's « Inspecter »). */
   inspectCell: (cell: Cell) => void;
+  /** « Inspecter » on a terraforming refusal: the camera, and three red pulses of the obstacle. */
+  inspectObstacle: (cell: Cell, obstacle: 'road' | 'fixture' | 'building' | null) => void;
+  /** A terraforming prediction on the displayed ground; returns the held chunks. */
+  predictTerrain: (vertices: readonly { vertexX: number; vertexY: number; height: number }[]) => string[];
+  /** The server answered the prediction holding these chunks. */
+  releaseTerrain: (keys: readonly string[]) => void;
   viewCenter: () => Cell | null;
   naturalFeatures: () => NaturalFeature[];
   ready: () => boolean;
@@ -307,6 +313,9 @@ export function VillageScene({
       projectTree: (featureId, treeIndex) => sceneRef.current?.projectTree(featureId, treeIndex) ?? null,
       focusCell: (cell) => sceneRef.current?.focusCell(cell),
       inspectCell: (cell) => sceneRef.current?.inspectCell(cell),
+      inspectObstacle: (cell, obstacle) => sceneRef.current?.inspectObstacle(cell, obstacle),
+      predictTerrain: (vertices) => sceneRef.current?.predictTerrain(vertices) ?? [],
+      releaseTerrain: (keys) => sceneRef.current?.releaseTerrain(keys),
       viewCenter: () => sceneRef.current?.viewCenter() ?? null,
       naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],
       terrainVertexHeight: (x, y) => sceneRef.current?.terrainVertexHeight(x, y) ?? null,

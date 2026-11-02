@@ -56,11 +56,10 @@ import { useOracleHint } from './ui/useOracleHint';
 import { BuildingPanel, DepositPanel, WorksitePanel } from './ui/PlayerPanels';
 import { HarvestCancelButton, WoodModeBubble, WoodModeIndicator } from './ui/WoodGestureHud';
 import { CountdownCancelButton, usePendingDemolition } from './ui/PendingDemolition';
-import { usePendingTerrain } from './ui/PendingTerrain';
+import { useTerrainEdits } from './ui/terrain-edits';
 import type { TerrainEditGesture } from '@arbestra/contracts';
-import { mergeTerraformVisuals } from './ui/terraform-draft';
 import { TerraformRefusalDialog } from './ui/TerraformRefusalDialog';
-import type { OracleRefusal } from './ui/terraform-refusals';
+import { terraformObstacles, type OraclePage } from './ui/terraform-refusals';
 import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
@@ -126,7 +125,6 @@ const pendingExploitationKey = (villageId: string) => `arbestra:pending-exploita
 const pendingConstructionKey = (villageId: string) => `arbestra:pending-construction:${worldSlug}:${villageId}`;
 const NO_PENDING_HARVESTS: Cell[] = [];
 const NO_PENDING_TREES: Array<{ featureId: string; treeIndex: number | null }> = [];
-const NO_TERRAIN_VISUALS: TerraformVisual[] = [];
 
 function gardenReady(garden: Garden, serverNow: number): number {
   return garden.plots.reduce(
@@ -348,23 +346,32 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onNotice: pushNotification,
     onSettled: () => terrainRef.current?.demolitionClear(),
   });
-  // Instant terrain edits, batched for 10 s after the last gesture (docs/SPEC-TERRAFORMATION-INSTANTANEE.md).
-  // A refused stroke or batch, told by the Oracle (docs/SPEC-TERRAFORMATION-OUTIL.md §3.5).
-  const [terrainRefusal, setTerrainRefusal] = useState<OracleRefusal | null>(null);
+  // Immediate terrain edits, predicted on the ground and sent at once; each
+  // refusal is one page of the Oracle (docs/SPEC-TERRAFORMATION-OUTIL.md §7).
+  const [terrainRefusals, setTerrainRefusals] = useState<OraclePage[]>([]);
   const terrainVillageKey = state ? `${state.world.id}:${state.village.id}` : '';
-  useEffect(() => setTerrainRefusal(null), [terrainVillageKey]);
-  const pendingTerrain = usePendingTerrain({
+  useEffect(() => setTerrainRefusals([]), [terrainVillageKey]);
+  const addTerrainRefusals = useCallback(
+    (pages: OraclePage[]) =>
+      setTerrainRefusals((open) => {
+        const seen = new Set(open.map((p) => `${p.reason}@${p.inspect?.cellX}:${p.inspect?.cellY}`));
+        return [...open, ...pages.filter((p) => !seen.has(`${p.reason}@${p.inspect?.cellX}:${p.inspect?.cellY}`))];
+      }),
+    [],
+  );
+  const terrainEdits = useTerrainEdits({
     edit: villageV2.villageReady ? villageV2.terrainEdits : null,
     villageKey: terrainVillageKey,
+    predict: (vertices) => terrainRef.current?.predictTerrain(vertices) ?? [],
+    release: (keys) => terrainRef.current?.releaseTerrain(keys),
+    obstacles: () => (stateRef.current ? terraformObstacles(stateRef.current) : null),
     onNotice: pushNotification,
-    onRefusal: setTerrainRefusal,
+    onRefusals: addTerrainRefusals,
   });
   const [terrainDraft, setTerrainDraft] = useState<TerraformVisual | null>(null);
   useEffect(() => {
-    terrainRef.current?.terraformPreview(
-      mergeTerraformVisuals([...(pendingTerrain.batch?.visuals ?? []), ...(terrainDraft ? [terrainDraft] : [])]),
-    );
-  }, [pendingTerrain.batch, terrainDraft]);
+    terrainRef.current?.terraformPreview(terrainDraft);
+  }, [terrainDraft]);
   const roadAnchorsApi = useMemo(
     () => (villageV2.villageReady ? { command: villageV2.roadAnchors, preview: villageV2.previewRoadAnchors } : null),
     [villageV2.villageReady, villageV2.roadAnchors, villageV2.previewRoadAnchors],
@@ -1977,33 +1984,22 @@ export function App({ starter }: { starter?: StarterController } = {}) {
         <HarvestFeedbackLayer items={harvest.feedback} scene={terrainRef} />
         {woodToolActive && <WoodModeIndicator mode={exploitationSettings.woodMode} />}
         <WoodModeBubble bubble={woodModeBubble} />
-        {terrainView === 'village' && (pendingDemolition.pending || pendingTerrain.batch) && (
+        {terrainView === 'village' && pendingDemolition.pending && (
           <div className="harvest-cancel" role="region" aria-label="Ordres en attente">
             <CountdownCancelButton
-              deadline={
-                pendingDemolition.pending && !pendingDemolition.pending.sending
-                  ? pendingDemolition.pending.deadline
-                  : null
-              }
+              deadline={!pendingDemolition.pending.sending ? pendingDemolition.pending.deadline : null}
               label="Annuler la démolition"
               confirmLabel="Confirmer la démolition"
               onCancel={pendingDemolition.cancel}
               onConfirm={pendingDemolition.confirm}
             />
-            <CountdownCancelButton
-              deadline={pendingTerrain.batch && !pendingTerrain.batch.sending ? pendingTerrain.batch.deadline : null}
-              label="Annuler la terraformation"
-              confirmLabel="Confirmer la terraformation"
-              onCancel={pendingTerrain.cancel}
-              onConfirm={pendingTerrain.confirm}
-            />
           </div>
         )}
-        {terrainView === 'village' && terrainRefusal && (
+        {terrainView === 'village' && terrainRefusals.length > 0 && (
           <TerraformRefusalDialog
-            refusal={terrainRefusal}
-            onInspect={(cell) => terrainRef.current?.inspectCell(cell)}
-            onClose={() => setTerrainRefusal(null)}
+            pages={terrainRefusals}
+            onInspect={(page) => page.inspect && terrainRef.current?.inspectObstacle(page.inspect, page.obstacle)}
+            onClose={() => setTerrainRefusals([])}
           />
         )}
         {worldMode === 'exploitation' && terrainView === 'village' && (
@@ -2518,10 +2514,9 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           <TerraformPanel
             state={state}
             scene={terrainRef}
-            pending={pendingTerrain.batch?.visuals ?? NO_TERRAIN_VISUALS}
-            onGesture={pendingTerrain.add}
+            onGesture={terrainEdits.add}
             onDraft={setTerrainDraft}
-            onRefusal={setTerrainRefusal}
+            onRefusals={addTerrainRefusals}
           />
         )}
         {workshop && (

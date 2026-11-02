@@ -248,12 +248,6 @@
   margin: 0.8rem 0 1.2rem;
   font-size: 1.1rem;
 }
-.oracle-refusal p small {
-  display: block;
-  margin-top: 0.5rem;
-  font-size: 0.9rem;
-  color: #e5dfcf;
-}
 .oracle-refusal footer {
   display: flex;
   justify-content: flex-end;
@@ -262,4 +256,28 @@
 .oracle-refusal button:focus-visible {
   outline: 2px solid #efce74;
   outline-offset: 2px;
+}
+/* Pages of the Oracle (OraclePager.tsx): « ‹ 1/X › » at the start of the
+ * footer; the box takes a horizontal swipe, so the page does not scroll with it. */
+.oracle-refusal {
+  touch-action: pan-y;
+}
+.oracle-refusal footer {
+  align-items: center;
+}
+.oracle-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: auto;
+  color: #e5dfcf;
+  font-variant-numeric: tabular-nums;
+}
+.oracle-pager button {
+  min-width: 2rem;
+  padding-inline: 0.4rem;
+}
+.oracle-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

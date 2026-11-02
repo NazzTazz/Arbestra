@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
   MAX_TERRAFORM_CELLS,
-  vertexKey,
   type TerrainEditGesture,
+  type TerrainVertex,
   type TerraformRequest,
   type VillageState,
   type TravelCell,
@@ -12,8 +12,8 @@ import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import type { TerraformVisual } from '../scene/terraform-preview';
 import { BrushCursor, brushCells, type BrushTone } from '../scene/terraform-brush';
 import { cellsAlongSegment, cellKey } from '../scene/construction-selection';
-import { localTerraform, terrainBrushHeight, terraformSelectionVisual } from './terraform-draft';
-import { cellRefused, oracleRefusal, terraformObstacles, type OracleRefusal } from './terraform-refusals';
+import { localStroke, terrainBrushHeight, terraformSelectionVisual } from './terraform-draft';
+import { cellRefused, oraclePages, terraformObstacles, type OraclePage } from './terraform-refusals';
 import './terraform.css';
 
 type Draft = { anchor: TravelCell; cells: TravelCell[]; height: number };
@@ -22,38 +22,30 @@ export const TERRAFORM_STEP = 0.25;
 /** The setting after one step: no bound beyond the server's (none upwards;
  * the water refuses a height at or under the surface), on the quarter grid. */
 export const steppedHeight = (height: number, steps: number) => Math.round((height + steps * TERRAFORM_STEP) * 4) / 4;
-/** Planned heights of the waiting batch: a later gesture wins a shared vertex. */
-export function plannedHeights(visuals: readonly TerraformVisual[]): Map<string, number> {
-  const planned = new Map<string, number>();
-  for (const visual of visuals) for (const v of visual.quote.vertices ?? []) planned.set(vertexKey(v), v.height);
-  return planned;
-}
 
 /**
  * Height brush (docs/SPEC-TERRAFORMATION-OUTIL.md): instant and free. The
  * hovered cell shows the 3 × 3 cells a stroke changes, at their future
- * heights; a released stroke, valid locally, joins the App's waiting batch,
- * otherwise the Oracle says why. The setting: − / + (Shift: a whole cell),
- * the pipette (P) samples a cell's height; Échap forgets it.
+ * heights. A released stroke is sent at once without its cells the client
+ * sees refused, and predicted on the ground (§7); the Oracle tells each
+ * refusal. The setting: − / + (Shift: a whole cell), the pipette (P) samples
+ * a cell's height; Échap forgets it.
  */
 export function TerraformPanel({
   state,
   scene,
-  pending,
   onGesture,
   onDraft,
-  onRefusal,
+  onRefusals,
 }: {
   state: VillageState;
   scene: RefObject<TerrainHandle | null>;
-  /** Previews of the waiting batch: the brush and the pipette read their future heights. */
-  pending: readonly TerraformVisual[];
-  /** Appends a gesture to the waiting batch; false when it could not join. */
-  onGesture: (gesture: TerrainEditGesture, visual: TerraformVisual) => boolean;
-  /** The stroke being painted, shown with the waiting batch. */
+  /** Sends a stroke at once and predicts its vertex heights on the ground. */
+  onGesture: (gesture: TerrainEditGesture, vertices: readonly TerrainVertex[]) => boolean;
+  /** The stroke being painted, shown over the ground. */
   onDraft: (visual: TerraformVisual | null) => void;
-  /** A refused stroke, told by the Oracle. */
-  onRefusal: (refusal: OracleRefusal) => void;
+  /** The refused cells of a stroke, told by the Oracle one error per page. */
+  onRefusals: (pages: OraclePage[]) => void;
 }) {
   const [target, setTarget] = useState<number | null>(null),
     [pipette, setPipette] = useState(false),
@@ -63,12 +55,10 @@ export function TerraformPanel({
     cursor = useRef(new BrushCursor()),
     hovered = useRef<TravelCell | null>(null),
     revision = useRef(0);
-  const planned = useMemo(() => plannedHeights(pending), [pending]);
-  const latest = useRef({ state, target, pipette, planned, onGesture, onDraft, onRefusal });
-  latest.current = { state, target, pipette, planned, onGesture, onDraft, onRefusal };
-  /** Future height of a vertex: the waiting batch, else the ground. */
-  const heightAt = (x: number, y: number) =>
-    latest.current.planned.get(`${x}:${y}`) ?? scene.current?.terrainVertexHeight(x, y) ?? NaN;
+  const latest = useRef({ state, target, pipette, onGesture, onDraft, onRefusals });
+  latest.current = { state, target, pipette, onGesture, onDraft, onRefusals };
+  /** Height of a vertex as shown: the predictions of strokes sent are already on the ground. */
+  const heightAt = (x: number, y: number) => scene.current?.terrainVertexHeight(x, y) ?? NaN;
   const request = (d: Draft): TerraformRequest => ({
     buildingType: 'terrain',
     anchor: d.anchor,
@@ -109,33 +99,27 @@ export function TerraformPanel({
   useEffect(() => {
     revision.current++;
     if (hovered.current) brush(hovered.current);
-  }, [state, planned, target, pipette]);
+  }, [state, target, pipette]);
   const release = () => {
     const d = draft.current;
     stroke.current = null;
     show(null);
     if (!d) return;
-    let checked: ReturnType<typeof localTerraform>;
+    let checked: ReturnType<typeof localStroke>;
     try {
-      checked = localTerraform(latest.current.state, request(d), heightAt);
+      checked = localStroke(latest.current.state, d, heightAt);
     } catch {
       setHint('Les raccords dépassent le terrain visible. Réduisez la sélection.');
       return;
     }
-    if (checked.refusals.length) {
-      setHint(null);
-      latest.current.onRefusal(oracleRefusal(checked.refusals, d.anchor, latest.current.state.world)!);
-      return;
-    }
-    if (checked.error) {
-      setHint(checked.error);
-      return;
-    }
-    setHint(null);
-    latest.current.onGesture(
-      { buildingType: 'terrain', anchor: d.anchor, cells: d.cells, height: d.height },
-      checked.visual,
-    );
+    setHint(checked.hint);
+    // The refused cells are withdrawn and told; the rest leaves now.
+    if (checked.refusals.length) latest.current.onRefusals(oraclePages(checked.refusals, d.anchor));
+    if (!checked.gesture) return;
+    latest.current.onGesture(checked.gesture, checked.vertices);
+    // The ground under the pointer has just changed: the brush follows it.
+    revision.current++;
+    if (hovered.current) brush(hovered.current);
   };
   const gesture = useRef<(g: InfrastructureGesture) => void>(() => {});
   gesture.current = (g) => {

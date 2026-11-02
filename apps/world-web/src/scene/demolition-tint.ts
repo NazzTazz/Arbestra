@@ -18,7 +18,9 @@ export interface DemolitionPatch {
   width: number;
   depth: number;
 }
-const PULSE_MS = 1200,
+/** One pulse of the demolition red; the Oracle's « Inspecter » shows three. */
+export const DEMOLITION_PULSE_MS = 1200;
+const PULSE_MS = DEMOLITION_PULSE_MS,
   TINT = new Color3(1, 0.36, 0.3),
   GLOW = new Color3(0.7, 0.08, 0.05);
 /** The red of a designated target: a copy of `original`, its colours tinted
@@ -31,6 +33,11 @@ export function demolitionTintedMaterial(original: StandardMaterial, glow = 0): 
   if (glow) tinted.emissiveColor = GLOW.scale(glow);
   return tinted;
 }
+
+/** Phase (0..1) of the pulse at `now` for a cycle started at `epoch`; the glow
+ * is 0.5 − 0.5·cos(2π·phase): dim at 0, brightest at ½. */
+export const demolitionPulsePhase = (now: number, epoch = 0) =>
+  ((((now - epoch) % PULSE_MS) + PULSE_MS) % PULSE_MS) / PULSE_MS;
 
 /**
  * Colours designated targets red, pulsing. Volumes (buildings, braziers) are drawn by
@@ -47,6 +54,9 @@ export class DemolitionTint {
   readonly #sources = new Map<Mesh, Mesh>();
   readonly #tinted = new Map<string, Array<{ original: AbstractMesh; copy: AbstractMesh }>>();
   #pulse: Observer<Scene> | null = null;
+  /** Start of the pulse cycle: 0 for designations (the shared clock); a
+   * counted pulse (`pulseFrom`) starts dim and ends dim after whole pulses. */
+  #epoch = 0;
   constructor(private scene: Scene) {
     this.#red = new StandardMaterial('demolition-skin', scene);
     this.#red.diffuseColor = Color3.FromHexString('#d2382c');
@@ -55,6 +65,10 @@ export class DemolitionTint {
     this.#patches.material = this.#red;
     this.#patches.isPickable = false;
     this.#patches.setEnabled(false);
+  }
+  /** Restarts the pulse cycle at `time` (performance.now()). */
+  pulseFrom(time: number) {
+    this.#epoch = time;
   }
   /** Copies made for `key`; zero while its baked model is still loading. */
   count(key: string) {
@@ -171,7 +185,7 @@ export class DemolitionTint {
   }
   #startPulse() {
     this.#pulse ??= this.scene.onBeforeRenderObservable.add(() => {
-      const phase = (performance.now() % PULSE_MS) / PULSE_MS,
+      const phase = demolitionPulsePhase(performance.now(), this.#epoch),
         s = 0.5 - 0.5 * Math.cos(phase * 2 * Math.PI);
       for (const material of this.#materials.values()) GLOW.scaleToRef(0.25 + 0.75 * s, material.emissiveColor);
       GLOW.scaleToRef(0.4 + 0.6 * s, this.#red.emissiveColor);
