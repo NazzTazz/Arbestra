@@ -40,6 +40,7 @@ import {
   readNavigationInfrastructure,
   factoryCapability,
   assertNoInfrastructure,
+  infrastructureCellRefusals,
 } from './infrastructure.js';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -1578,6 +1579,66 @@ export async function assertBuildableCells(
       throw new HttpError(409, 'OUTSIDE_VILLAGE_REACH', 'Cette case est trop éloignée de votre village.');
   }
   return ground;
+}
+/**
+ * Per-cell form of `assertBuildableCells`, read once for many cells (terrain
+ * edits refuse cell by cell, docs/SPEC-TERRAFORMATION-OUTIL.md §7): for each
+ * refused cell, keyed `x:y`, the refusal `assertBuildableCells([cell])` would
+ * throw (infrastructure first, then the ground, in the same order of checks).
+ */
+export async function buildableCellRefusals(
+  tx: Transaction<Database>,
+  village: OwnedVillage,
+  cells: readonly SpatialCell[],
+): Promise<Map<string, HttpError>> {
+  const refusals = await infrastructureCellRefusals(tx, village.worldId, cells, village);
+  if (!cells.length) return refusals;
+  const ground = await snapshot(tx, village),
+    protectedRows = await clearings(tx, village.worldId);
+  const occupied = await tx
+    .selectFrom('worldCellOccupancies')
+    .select(['cellX', 'cellY'])
+    .where('worldId', '=', village.worldId)
+    .where(
+      sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`,
+    )
+    .execute();
+  const occupiedKeys = new Set(occupied.map((c) => worldCellKey(c.cellX, c.cellY)));
+  const footprints = await tx
+    .selectFrom('worldCellOccupancies')
+    .innerJoin('buildings', (j) =>
+      j
+        .onRef('buildings.id', '=', 'worldCellOccupancies.buildingId')
+        .onRef('buildings.worldId', '=', 'worldCellOccupancies.worldId'),
+    )
+    .select(['worldCellOccupancies.cellX', 'worldCellOccupancies.cellY', 'worldCellOccupancies.pendingExpansionId'])
+    .where('worldCellOccupancies.worldId', '=', village.worldId)
+    .where('buildings.villageId', '=', village.villageId)
+    .where((eb) =>
+      eb.or([
+        eb('buildings.status', '=', 'completed'),
+        eb.and([eb('buildings.buildingType', '=', 'town-hall'), eb('buildings.targetLevel', 'is not', null)]),
+      ]),
+    )
+    .execute();
+  const sources = footprints.filter((c) => c.pendingExpansionId === null);
+  for (const { cellX, cellY } of cells) {
+    const key = worldCellKey(cellX, cellY);
+    if (refusals.has(key)) continue;
+    const surface = { x: cellX, y: cellY, halfWidth: 0.5, halfHeight: 0.5 };
+    if (
+      ground.terrainAt(cellX, cellY) !== TERRAIN.grassland ||
+      (ground.rc1 && (ground.rc1.field.surfaceReason(surface, null, 0.125) || ground.rc1.field.intersectsTree(surface)))
+    )
+      refusals.set(key, new HttpError(409, 'TERRAIN_NOT_BUILDABLE', 'Cette emprise rencontre un obstacle naturel.'));
+    else if (occupiedKeys.has(key))
+      refusals.set(key, new HttpError(409, 'CELL_OCCUPIED', 'Cette case est déjà occupée.'));
+    else if (protectedCell(cellX, cellY, protectedRows, village))
+      refusals.set(key, new HttpError(409, 'CLEARING_PROTECTED', 'Cette clairière est protégée.'));
+    else if (!withinBuildReach({ cellX, cellY }, sources, village))
+      refusals.set(key, new HttpError(409, 'OUTSIDE_VILLAGE_REACH', 'Cette case est trop éloignée de votre village.'));
+  }
+  return refusals;
 }
 async function reserve(
   tx: Transaction<Database>,

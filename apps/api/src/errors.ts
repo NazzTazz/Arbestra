@@ -3,8 +3,8 @@ export class HttpError extends Error {
     public readonly statusCode: number,
     public readonly code: string,
     message: string,
-    /** Extra fields of the JSON body (e.g. the refused gesture of a batch). */
-    public readonly details?: Readonly<Record<string, string | number | boolean>>,
+    /** Extra JSON fields of the body (e.g. the refused gesture and units of a batch). */
+    public readonly details?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
   }

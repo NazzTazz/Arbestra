@@ -18,6 +18,7 @@ import { activateTerrainVertices } from '../worlds/terrain-vertices.js';
 import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { terrainEditsCommandV2, terrainEditsTestHooks } from './terrain-edits.js';
 import { httpErrorBody, type HttpError } from '../../errors.js';
+import { assertBuildableCells, buildableCellRefusals, ownedVillage } from './service.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -347,14 +348,118 @@ it('counts a gesture without effect as unchanged, not as a refusal', async () =>
   expect(await heights()).toEqual(before);
 }, 120000);
 
-it('refuses the whole batch, without writing, at the first refused gesture, and names it', async () => {
+it('applies the accepted gesture of a batch and lists the refused one in the answer and the receipt', async () => {
+  const before = await heights();
+  // The second gesture covers the town hall's cell; the first is free.
+  const command = { commandId: randomUUID(), gestures: [free([[60, 189]], 0.5), free([[59, 195]], 0.5)] };
+  const confirmation = await terrainEditsCommandV2(db, accountId, slug, villageId, command, 1);
+  const refused = [
+    { gesture: 1, cell: { cellX: 59, cellY: 195 }, code: 'CELL_OCCUPIED', at: { cellX: 59, cellY: 195 } },
+  ];
+  expect(confirmation.result).toEqual({ gestures: 1, unchanged: 0, vertices: 4, refused });
+  const after = await heights();
+  for (const k of ['60:189', '61:189', '60:190', '61:190']) expect(after.get(k)).toBe(0.5);
+  // The refused unit wrote nothing: the hall's corners keep their heights.
+  for (const k of ['59:195', '60:195', '59:196', '60:196']) expect(after.get(k)).toBe(before.get(k));
+  const receipt = await db
+    .selectFrom('terrainEditReceipts')
+    .select('result')
+    .where('worldId', '=', worldId)
+    .where('commandId', '=', command.commandId)
+    .executeTakeFirstOrThrow();
+  expect(receipt.result).toEqual(confirmation.result);
+  // The replay answers the same partial result from the receipt, without writing.
+  const state = await rows();
+  expect((await terrainEditsCommandV2(db, accountId, slug, villageId, command, 1)).result).toEqual(confirmation.result);
+  expect(await rows()).toEqual(state);
+  await restore(before, after);
+}, 120000);
+
+it('refuses one painted cell whose 3 × 3 meets an obstacle, names the obstacle, and keeps the rest of the stroke', async () => {
+  const before = await heights();
+  // (59,194)'s ring holds the hall (59,195); (62,191) and (63,191) are free.
+  // Processing order is canonical: (59,194), then (62,191), then (63,191).
+  const confirmation = await edit([
+    free(
+      [
+        [62, 191],
+        [59, 194],
+        [63, 191],
+      ],
+      0.75,
+    ),
+  ]);
+  expect(confirmation.result).toEqual({
+    gestures: 1,
+    unchanged: 0,
+    vertices: 6,
+    refused: [{ gesture: 0, cell: { cellX: 59, cellY: 194 }, code: 'CELL_OCCUPIED', at: { cellX: 59, cellY: 195 } }],
+  });
+  const after = await heights();
+  // The accepted cells share two vertices: the same heights as the stroke without its refused cell.
+  for (const x of [62, 63, 64]) for (const y of [191, 192]) expect(after.get(`${x}:${y}`)).toBe(0.75);
+  for (const k of ['59:194', '60:194', '59:195', '60:195']) expect(after.get(k)).toBe(before.get(k));
+  await restore(before, after);
+}, 120000);
+
+it('lets a refused unit write nothing, even on a vertex an accepted unit shares, in batch order', async () => {
+  const before = await heights();
+  // Gesture 0 lifts (60,193) to 0.5; gesture 1 would put (59,194), which shares
+  // the vertex (60,194), at 1, but its ring holds the hall: (60,194) stays at 0.5.
+  const confirmation = await edit([free([[60, 193]], 0.5), free([[59, 194]], 1)]);
+  expect(confirmation.result.refused).toEqual([
+    { gesture: 1, cell: { cellX: 59, cellY: 194 }, code: 'CELL_OCCUPIED', at: { cellX: 59, cellY: 195 } },
+  ]);
+  const after = await heights();
+  expect(after.get('60:194')).toBe(0.5);
+  expect(after.get('59:194')).toBe(before.get('59:194'));
+  await restore(before, after);
+}, 120000);
+
+it('refuses the whole batch, without writing, when no unit is accepted, and names every refused one', async () => {
   const before = await rows();
-  // The second gesture covers the town hall's cell.
-  const refusal = await edit([free([[60, 189]], 0.5), free([[59, 195]], 0.5)]).catch((error: unknown) => error);
-  expect(refusal).toMatchObject({ code: 'CELL_OCCUPIED', gesture: 1 });
-  // The HTTP body names the gesture too: the client points the Oracle at it.
-  expect(httpErrorBody(refusal as HttpError)).toMatchObject({ code: 'CELL_OCCUPIED', gesture: 1 });
+  const refusal = await edit([free([[59, 195]], 0.5), free([[59, 194]], 0.5)]).catch((error: unknown) => error);
+  expect(refusal).toMatchObject({ code: 'CELL_OCCUPIED', gesture: 0 });
+  // The HTTP body names the gesture and the units too: the client points the Oracle at them.
+  expect(httpErrorBody(refusal as HttpError)).toMatchObject({
+    code: 'CELL_OCCUPIED',
+    gesture: 0,
+    refused: [
+      { gesture: 0, cell: { cellX: 59, cellY: 195 }, code: 'CELL_OCCUPIED', at: { cellX: 59, cellY: 195 } },
+      { gesture: 1, cell: { cellX: 59, cellY: 194 }, code: 'CELL_OCCUPIED', at: { cellX: 59, cellY: 195 } },
+    ],
+  });
   expect(await rows()).toEqual(before);
+}, 120000);
+
+it('classifies each cell as assertBuildableCells would refuse it alone', async () => {
+  await db
+    .insertInto('roadCells')
+    .values({ worldId, villageId, cellX: 66, cellY: 191, surface: 'earth', sidewalks: false })
+    .execute();
+  try {
+    const cells = [
+      { cellX: 59, cellY: 195 }, // the hall
+      { cellX: 66, cellY: 191 }, // a road
+      { cellX: 60, cellY: 190 }, // free
+      { cellX: 200, cellY: 40 }, // far away
+    ];
+    await db.transaction().execute(async (tx) => {
+      const village = await ownedVillage(tx, accountId, slug, villageId);
+      const map = await buildableCellRefusals(tx, village, cells);
+      for (const cell of cells) {
+        const alone = await assertBuildableCells(tx, village, [cell]).then(
+          () => null,
+          (error: HttpError) => error.code,
+        );
+        expect(map.get(`${cell.cellX}:${cell.cellY}`)?.code ?? null).toBe(alone);
+      }
+      expect(map.get('66:191')?.code).toBe('INFRASTRUCTURE_OCCUPIED');
+      expect(map.has('60:190')).toBe(false);
+    });
+  } finally {
+    await db.deleteFrom('roadCells').where('worldId', '=', worldId).execute();
+  }
 }, 120000);
 
 it('levels a building footprint instantly for the placement', async () => {

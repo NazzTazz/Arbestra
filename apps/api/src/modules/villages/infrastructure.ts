@@ -233,3 +233,57 @@ export async function assertNoInfrastructure(
   if (all.some((path) => cells.some((c) => pathPassageIntersectsBox(path, c, 0.5, 0.5, world))))
     throw new HttpError(409, 'ENGAGED_PASSAGE', 'Une équipe utilise encore cette emprise.');
 }
+/**
+ * Per-cell form of `assertNoInfrastructure`, read once for many cells (terrain
+ * edits refuse cell by cell, docs/SPEC-TERRAFORMATION-OUTIL.md §7): the refusal
+ * `assertNoInfrastructure([cell])` would throw for each refused cell, keyed
+ * `x:y`, under the same advisory lock and in the same order of checks.
+ */
+export async function infrastructureCellRefusals(
+  tx: Transaction<Database>,
+  worldId: string,
+  cells: readonly { cellX: number; cellY: number }[],
+  world: { widthCells: number; heightCells: number },
+): Promise<Map<string, HttpError>> {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);
+  const refusals = new Map<string, HttpError>();
+  if (!cells.length) return refusals;
+  const wanted = new Set(cells.map((c) => `${c.cellX}:${c.cellY}`));
+  const refuse = (key: string, code: string, message: string) => {
+    if (wanted.has(key) && !refusals.has(key)) refusals.set(key, new HttpError(409, code, message));
+  };
+  for (const road of await tx
+    .selectFrom('roadCells')
+    .select(['cellX', 'cellY'])
+    .where('worldId', '=', worldId)
+    .where(
+      sql<boolean>`(cell_x,cell_y) in (select * from unnest(${cells.map((c) => c.cellX)}::int[],${cells.map((c) => c.cellY)}::int[]))`,
+    )
+    .execute())
+    refuse(
+      `${road.cellX}:${road.cellY}`,
+      'INFRASTRUCTURE_OCCUPIED',
+      'Retirez la route de cette case avant de construire.',
+    );
+  const plans = await tx.selectFrom('villageInfrastructure').select('plan').where('worldId', '=', worldId).execute();
+  const surfaceKey = (p: { x: number; y: number }) =>
+    `${Math.floor((p.x + 8) / 16) % world.widthCells}:${Math.floor((p.y + 8) / 16) % world.heightCells}`;
+  for (const { plan } of plans) {
+    for (const e of plan.equipment)
+      refuse(subCellKey(e, world), 'INFRASTRUCTURE_OCCUPIED', 'Déplacez l’équipement avant de construire.');
+    const surface = infrastructurePlanSurface(plan, world),
+      sidewalk = infrastructureSidewalkSurface(surface, world);
+    for (const p of [...[...surface.values()].filter((p) => p.manual), ...sidewalk.values()])
+      refuse(
+        surfaceKey(p),
+        'INFRASTRUCTURE_OCCUPIED',
+        'Déplacez ou retirez la voie ou le trottoir avant de construire.',
+      );
+  }
+  const paths = await worldActivePaths(tx, worldId);
+  if (paths.length)
+    for (const c of cells)
+      if (paths.some((path) => pathPassageIntersectsBox(path, c, 0.5, 0.5, world)))
+        refuse(`${c.cellX}:${c.cellY}`, 'ENGAGED_PASSAGE', 'Une équipe utilise encore cette emprise.');
+  return refusals;
+}
