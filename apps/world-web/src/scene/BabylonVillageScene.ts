@@ -37,7 +37,6 @@ import { InfrastructureRenderer, type InfrastructureGesture } from './infrastruc
 import { RoadCellTiles } from './road-cell-tiles';
 import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
 import { RoadAnchorBraziers, RoadAnchorGhost, RoadAnchorMarkers } from './road-anchor-braziers';
-import { TerraformPreview, type TerraformVisual } from './terraform-preview';
 import { TerraformBrush, type BrushTone } from './terraform-brush';
 import { selectEquipment } from './equipment-selection';
 import type { DemolitionTarget } from '../ui/demolition-selection';
@@ -448,27 +447,6 @@ export class BabylonVillageScene {
   #renderer: TerrainRenderer | null = null;
   #state: VillageState | null = null;
   #worldMode: 'exploration' | 'exploitation' | 'population' | 'construction' | 'terraform' = 'exploration';
-  #terraformRenderer: TerraformPreview | null = null;
-  #terraformVisual: TerraformVisual | null = null;
-  public terraformPreview(value: TerraformVisual | null) {
-    this.#terraformVisual = value;
-    if (!this.#space) return;
-    this.#terraformRenderer ??= new TerraformPreview(this.#scene);
-    this.#terraformRenderer.update(value, this.#space);
-    if (import.meta.env.MODE === 'e2e')
-      this.#canvas.dataset.terraformSelection = JSON.stringify(
-        value
-          ? {
-              origin: value.origin,
-              cells: value.quote.cells,
-              triangles: this.#scene.meshes
-                .filter((m) => m.name === 'terraform-future-ground')
-                .reduce((n, m) => n + m.getTotalIndices() / 3, 0),
-              at: performance.now(),
-            }
-          : null,
-      );
-  }
   #terraformBrush: TerraformBrush | null = null;
   /** The 3 × 3 terraforming brush (terraform-brush.ts): buffers rewritten, never rebuilt. */
   public terraformBrush(brush: { cell: Cell; heights: Float64Array; tone: BrushTone } | null) {
@@ -4520,7 +4498,6 @@ export class BabylonVillageScene {
     const target = this.#space.inverse(this.#camera.target.x, this.#camera.target.z);
     const priorVillage = this.#space.project(this.#villageAnchor);
     const shift = this.#space.rebase(target, this.#store.world.chunkSize);
-    if (shift) this.#terraformRenderer?.update(this.#terraformVisual, this.#space);
     if (shift) this.#terraformBrush?.reproject(this.#space);
     if (!shift) return;
     const nextVillage = this.#space.project(this.#villageAnchor);
@@ -5365,6 +5342,8 @@ export class BabylonVillageScene {
         !this.#initialLoad.ready,
       );
     frame?.mark('demand');
+    // A live terraforming stroke: its ground units every frame, not every coalesced demand.
+    if (!detailPaused) this.#renderer.queueGroundEdits();
     if (!detailPaused) this.#renderer.tick(this.#initialLoad.ready ? TERRAIN_STREAMING.admissionMs : 8);
     frame?.mark('integration');
     const loading: TerrainStatus =
@@ -5536,7 +5515,6 @@ export class BabylonVillageScene {
   }
 
   public dispose(): void {
-    this.#terraformRenderer?.dispose();
     this.#terraformBrush?.dispose();
     cancelAnimationFrame(this.#demolitionRoadFrame);
     this.#demolitionTint?.dispose();

@@ -1,7 +1,7 @@
 import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 import type { SpatialDimensions } from './building-footprint.js';
-import { terraformCells } from './terraforming.js';
+import { MAX_TERRAFORM_CELLS, terraformCells } from './terraforming.js';
 import { vertexKey, vertexLeveling, type TerrainVertex } from './terrain-vertices.js';
 
 /** Instant terrain edits (docs/SPEC-TERRAFORMATION-INSTANTANEE.md): one batch
@@ -35,6 +35,7 @@ export const TerrainEditGestureSchema = Type.Union([
   ),
 ]);
 export type TerrainEditGesture = Static<typeof TerrainEditGestureSchema>;
+export type FreeTerrainEditGesture = Extract<TerrainEditGesture, { buildingType: 'terrain' }>;
 export const TerrainEditsRequestSchema = Type.Object(
   {
     commandId: Type.String({ format: 'uuid' }),
@@ -119,6 +120,46 @@ export function terrainEditUnit(
   height: number,
 ) {
   return vertexLeveling([cell], world, heightAt, 1, height);
+}
+/** One painted cell of a live stroke, at the height it was painted with. */
+export interface TerrainEditPaint {
+  cell: EditCell;
+  height: number;
+}
+/**
+ * The gestures that make the server apply painted cells in exactly the order
+ * they were painted (docs/SPEC-TERRAFORMATION-OUTIL.md §7.9): the server
+ * applies the gestures in batch order and the cells of one gesture in the
+ * canonical order of `terrainEditCells` (x, then y), so a gesture is a run of
+ * one height whose cells increase strictly in that order, at most
+ * MAX_TERRAFORM_CELLS. Continues `previous` (the gestures already built for
+ * the same command) when its last gesture can take the next cell.
+ */
+export function orderedTerrainEditGestures(
+  paints: readonly TerrainEditPaint[],
+  previous: FreeTerrainEditGesture[] = [],
+): FreeTerrainEditGesture[] {
+  const gestures = previous;
+  for (const { cell, height } of paints) {
+    const last = gestures.at(-1);
+    const tail = last?.cells.at(-1);
+    if (
+      last &&
+      tail &&
+      last.height === height &&
+      last.cells.length < MAX_TERRAFORM_CELLS &&
+      (cell.cellX > tail.cellX || (cell.cellX === tail.cellX && cell.cellY > tail.cellY))
+    )
+      last.cells.push({ cellX: cell.cellX, cellY: cell.cellY });
+    else
+      gestures.push({
+        buildingType: 'terrain',
+        anchor: { cellX: cell.cellX, cellY: cell.cellY },
+        cells: [{ cellX: cell.cellX, cellY: cell.cellY }],
+        height,
+      });
+  }
+  return gestures;
 }
 /**
  * The client's prediction of free gestures (docs/SPEC-TERRAFORMATION-OUTIL.md

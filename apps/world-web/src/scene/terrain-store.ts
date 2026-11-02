@@ -24,7 +24,8 @@ interface Entry {
   retryAt: number;
   failures: number;
   touched: number;
-  mutableSignature: string;
+  /** null: the chunk was patched by a prediction, its signature is computed when an answer is compared. */
+  mutableSignature: string | null;
   /** Changes whenever what chunk() returns for this entry may have changed (featureVersion). */
   featureVersion: number;
 }
@@ -82,6 +83,9 @@ export class TerrainStore {
   readonly entries = new Map<string, Entry>();
   readonly revisions = new Map<string, StoneDeposit>();
   readonly changed = new Set<string>();
+  /** Vertices a terraforming prediction changed, by chunk (index in its
+   * shared-vertex patch): ground only, consumed by the renderer each frame. */
+  readonly groundEdits = new Map<string, Set<number>>();
   readonly world: TerrainResponse['world'];
   #snapshot: VillageState;
   #groundRevision = 0;
@@ -102,12 +106,14 @@ export class TerrainStore {
    * chunks are held until `release`: an answer already on its way is dropped
    * (it predates the prediction) and none is fetched meanwhile, so the
    * prediction never flickers back. O(vertices) plus one copy of the heights
-   * of each touched chunk; called once per gesture, never per frame.
+   * of each touched chunk; a live stroke calls it at most once per frame
+   * (ui/terraform-live.ts).
    * Returns the held chunk keys.
    */
   predict(vertices: readonly { vertexX: number; vertexY: number; height: number }[]): string[] {
     const { widthCells: w, heightCells: h, chunkSize: s } = this.world;
-    const copies = new Map<string, TerrainChunk>();
+    const copies = new Map<string, TerrainChunk>(),
+      edited = new Map<string, number[]>();
     for (const v of vertices) {
       const x = normalize(v.vertexX, w),
         y = normalize(v.vertexY, h);
@@ -126,14 +132,21 @@ export class TerrainStore {
             copies.set(key, copy);
           }
           copy.rc1!.heights[dy * patch.stride + dx] = v.height;
+          let indexes = edited.get(key);
+          if (!indexes) edited.set(key, (indexes = []));
+          indexes.push(dy * patch.stride + dx);
         }
     }
     for (const [key, chunk] of copies) {
       const entry = this.entries.get(key)!;
       entry.invalidation++;
       this.#publishGround(entry, chunk);
-      entry.mutableSignature = mutableSignature(chunk);
-      this.changed.add(key);
+      entry.mutableSignature = null;
+      // Only the ground units reading these vertices are rebuilt
+      // (TerrainRenderer.queueGroundEdits), never the whole chunk.
+      let units = this.groundEdits.get(key);
+      if (!units) this.groundEdits.set(key, (units = new Set()));
+      for (const index of edited.get(key)!) units.add(index);
       this.#held.set(key, (this.#held.get(key) ?? 0) + 1);
       this.#heldSince.set(key, this.now());
     }
@@ -272,6 +285,7 @@ export class TerrainStore {
       controller.abort();
     }
     for (const key of this.entries.keys()) this.changed.add(key);
+    this.groundEdits.clear();
     if (this.entries.size) this.#groundRevision++;
     this.entries.clear();
     this.#nextDemandAt = this.now();
@@ -295,11 +309,15 @@ export class TerrainStore {
       !sameNumbers(before.vertexHeights ?? [], after.vertexHeights ?? [])
     )
       this.#snapshotGroundRevision = ++this.#groundRevision;
-    if (
-      !sameNumbers(before.elevations, after.elevations) ||
-      !sameNumbers(before.vertexHeights ?? [], after.vertexHeights ?? [])
-    ) {
+    if (!sameNumbers(before.elevations, after.elevations)) {
       for (const cell of state.cells) this.invalidate(this.key(cell.cellX, cell.cellY));
+    } else if (!sameNumbers(before.vertexHeights ?? [], after.vertexHeights ?? [])) {
+      // Only the chunks whose vertices moved (an applied terrain edit): a live
+      // stroke confirmed command after command must not requeue the whole
+      // village each time (docs/SPEC-TERRAFORMATION-OUTIL.md §7.9). A chunk a
+      // prediction holds is read again at its release anyway.
+      const now = this.now();
+      for (const key of this.#movedChunks(before, state)) if (!this.#isHeld(key, now)) this.invalidate(key);
     }
     this.#snapshot = state;
     const own = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => `${c.cellX}:${c.cellY}`));
@@ -331,6 +349,37 @@ export class TerrainStore {
       if (missions.has(id) !== this.#missions.has(id)) this.invalidate(key);
     this.#missions = missions;
   }
+  /** The chunks holding a vertex whose height differs between two snapshots
+   * of the same region (both chunks for a vertex on their border); every
+   * chunk of the village's cells when the region itself changed. */
+  #movedChunks(before: VillageState['region'], state: VillageState): Set<string> {
+    const after = state.region;
+    const keys = new Set<string>(),
+      a = before.vertexHeights,
+      b = after.vertexHeights;
+    if (
+      !a ||
+      !b ||
+      a.length !== b.length ||
+      before.originCellX !== after.originCellX ||
+      before.originCellY !== after.originCellY ||
+      before.width !== after.width ||
+      before.height !== after.height
+    ) {
+      for (const cell of state.cells) keys.add(this.key(cell.cellX, cell.cellY));
+      return keys;
+    }
+    const { widthCells: w, heightCells: h, chunkSize: s } = this.world,
+      stride = after.width + 1;
+    for (let i = 0; i < b.length; i++) {
+      if (a[i] === b[i]) continue;
+      const x = normalize(after.originCellX + (i % stride), w),
+        y = normalize(after.originCellY + Math.floor(i / stride), h);
+      for (const cy of y % s === 0 ? [y, normalize(y - 1, h)] : [y])
+        for (const cx of x % s === 0 ? [x, normalize(x - 1, w)] : [x]) keys.add(this.key(cx, cy));
+    }
+    return keys;
+  }
   demandChunks(demand: ChunkDemand[], immediate = false): void {
     if (demand.map((d) => d.key + d.visible).join('|') !== this.#demand.map((d) => d.key + d.visible).join('|'))
       this.#nextDemandAt = this.now() + (immediate ? 0 : SETTINGS.coalesceMs);
@@ -347,6 +396,7 @@ export class TerrainStore {
       if (victim[1].chunk) this.#groundRevision++;
       this.entries.delete(victim[0]);
       this.changed.delete(victim[0]);
+      this.groundEdits.delete(victim[0]);
     }
     const missionChunks = new Set(this.#missions.values());
     for (const [id, deposit] of this.revisions)
@@ -444,7 +494,8 @@ export class TerrainStore {
               }
               for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
               const signature = mutableSignature(chunk);
-              if (!e.chunk || signature !== e.mutableSignature) this.changed.add(ticket.key);
+              if (!e.chunk || signature !== (e.mutableSignature ?? mutableSignature(e.chunk)))
+                this.changed.add(ticket.key);
               if (e.chunk) {
                 if (chunk.rc1Edits && !e.chunk.rc1) throw new Error('RC1 edits without substrate');
                 const rc1 =
@@ -588,5 +639,6 @@ export class TerrainStore {
     this.entries.clear();
     this.revisions.clear();
     this.changed.clear();
+    this.groundEdits.clear();
   }
 }

@@ -109,7 +109,12 @@ describe('terraforming prediction (docs/SPEC-TERRAFORMATION-OUTIL.md §7)', () =
     expect(h.store.vertexHeight(31, 5)).toBe(3);
     expect(h.store.chunk('0:0')!.rc1!.heights[5 * 33 + 32]).toBe(3);
     expect(h.store.chunk('1:0')!.rc1!.heights[5 * 33]).toBe(3);
-    expect([...h.store.changed].sort()).toEqual(['0:0', '1:0']);
+    // Ground only: the renderer rebuilds the units of these vertices, not the chunks (§7.9).
+    expect([...h.store.changed]).toEqual([]);
+    expect([...h.store.groundEdits].map(([k, v]) => [k, [...v].sort((a, b) => a - b)]).sort()).toEqual([
+      ['0:0', [5 * 33 + 31, 5 * 33 + 32]],
+      ['1:0', [5 * 33]],
+    ]);
     expect(h.store.groundRevision).toBeGreaterThan(revision);
     // Held: no fetch, even long after the freshness delay.
     const requests = h.requests.length;
@@ -158,6 +163,51 @@ describe('terraforming prediction (docs/SPEC-TERRAFORMATION-OUTIL.md §7)', () =
     await new Promise((r) => setTimeout(r, 0));
     expect(h.store.vertexHeight(6, 6)).toBe(2);
     expect(h.store.changed.has('0:0')).toBe(false);
+  });
+
+  it('reads again only the chunks whose vertices an applied edit moved, never a held one', async () => {
+    const initial = vertexWorld();
+    // The village region: 40 × 8 cells from (20,0), across chunks 0:0 and 1:0.
+    initial.region = {
+      ...initial.region,
+      originCellX: 20,
+      originCellY: 0,
+      width: 40,
+      height: 8,
+      vertexHeights: Array(41 * 9).fill(1),
+    };
+    const h = harness(initial);
+    h.store.demandChunks([
+      { key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 },
+      { key: '1:0', chunkX: 1, chunkY: 0, visible: true, distance: 0 },
+    ]);
+    h.advance(100);
+    h.requests[0]!.resolve({ world: initial.world, chunks: [ground(0), ground(1)] });
+    await new Promise((r) => setTimeout(r, 0));
+    h.store.changed.clear();
+    let current = initial;
+    const next = (edit: (heights: number[]) => void) => {
+      const vertexHeights = [...current.region.vertexHeights!];
+      edit(vertexHeights);
+      current = { ...current, region: { ...current.region, vertexHeights } };
+      h.store.observe(current);
+    };
+    // (25,3) lies in chunk 0:0 only.
+    next((v) => (v[3 * 41 + 5] = 2));
+    expect([...h.store.changed]).toEqual(['0:0']);
+    h.store.changed.clear();
+    // (32,3): the border of 0:0 and 1:0, both read again.
+    next((v) => (v[3 * 41 + 12] = 2));
+    expect([...h.store.changed].sort()).toEqual(['0:0', '1:0']);
+    h.store.changed.clear();
+    // A chunk a live stroke holds is not read again before its release.
+    const held = h.store.predict([{ vertexX: 45, vertexY: 3, height: 4 }]);
+    expect(held).toEqual(['1:0']);
+    next((v) => (v[3 * 41 + 25] = 4));
+    expect([...h.store.changed]).toEqual([]);
+    // Nothing moved: nothing read again.
+    next(() => {});
+    expect([...h.store.changed]).toEqual([]);
   });
 
   it('drops an answer already on its way when a prediction lands, and frees a hold left without answer', async () => {

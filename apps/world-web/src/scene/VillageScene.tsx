@@ -78,7 +78,6 @@ interface VillageSceneProps {
 }
 export interface TerrainHandle {
   terrainVertexHeight: (x: number, y: number) => number | null;
-  terraformPreview: (value: import('./terraform-preview').TerraformVisual | null) => void;
   /** The 3 × 3 terraforming brush at its future heights; null hides it. */
   terraformBrush: (
     brush: { cell: Cell; heights: Float64Array; tone: import('./terraform-brush').BrushTone } | null,
@@ -319,7 +318,6 @@ export function VillageScene({
       viewCenter: () => sceneRef.current?.viewCenter() ?? null,
       naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],
       terrainVertexHeight: (x, y) => sceneRef.current?.terrainVertexHeight(x, y) ?? null,
-      terraformPreview: (value) => sceneRef.current?.terraformPreview(value),
       terraformBrush: (brush) => sceneRef.current?.terraformBrush(brush),
       demolitionMark: (kind, id) => sceneRef.current?.demolitionMark(kind, id),
       demolitionClear: () => sceneRef.current?.demolitionClear(),

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import {
+  orderedTerrainEditGestures,
   TERRAIN_EDIT_CELLS_PER_COMMAND,
   TERRAIN_EDIT_GESTURES_PER_COMMAND,
-  type TerrainEditGesture,
+  type FreeTerrainEditGesture,
+  type TerrainEditPaint,
   type TerrainEditRefusal,
   type TerrainEditsRequest,
   type TerrainEditsResult,
@@ -13,19 +15,20 @@ import { SyncV2HttpError } from '../api/sync-v2-session';
 import { oraclePages, serverRefusal, type OraclePage, type TerraformObstacles } from './terraform-refusals';
 
 /**
- * Immediate terrain edits (Tristan, 2 November: « l'effet du pinceau
- * immédiat … préshot côté client la réponse du serveur »; the 10 s delay and
- * its Annuler / Confirmer are gone, docs/SPEC-TERRAFORMATION-OUTIL.md §7).
+ * Live terrain edits (Tristan, 2 November: « l'effet du pinceau immédiat »,
+ * then « c'est pendant le geste », docs/SPEC-TERRAFORMATION-OUTIL.md §7).
  *
- * A released stroke is predicted on the displayed ground at once (the scene's
- * TerrainStore.predict, which holds the chunks it patched) and sent. One
- * command at a time, so that the server applies the strokes in the order they
- * were painted: strokes released while one is in flight leave together in the
- * next command (up to the batch limits). When the answer comes (applied,
- * partly refused, refused or failed), the chunks are released: the server's
- * terrain replaces the prediction, a refused cell comes back to its height,
- * and the Oracle tells each refusal.
+ * The painted cells of a stroke arrive frame by frame (ui/terraform-live.ts),
+ * already predicted on the displayed ground (the scene's TerrainStore.predict,
+ * which holds the chunks it patched). They are sent while the stroke goes on,
+ * in small ordered batches: one command at a time, at most one every
+ * SEND_INTERVAL_MS, carrying everything painted meanwhile as gestures the
+ * server applies in painting order. When an answer comes (applied, partly
+ * refused, refused or failed), the chunks of its frames are released: the
+ * server's terrain replaces the prediction, a refused cell comes back to its
+ * height. The Oracle's pages wait for the end of the stroke.
  */
+export const SEND_INTERVAL_MS = 150;
 export interface TerrainEditsDeps {
   /** The V2 command; null while the village session is not ready. */
   edit: ((request: TerrainEditsRequest) => Promise<TerrainEditsResult>) | null;
@@ -37,47 +40,80 @@ export interface TerrainEditsDeps {
   onNotice: (message: string, tone?: 'default' | 'warning') => void;
 }
 type Cell = { cellX: number; cellY: number };
+/** One frame of a stroke: its painted cells and the chunks its prediction holds. */
 interface Queued {
-  gesture: TerrainEditGesture;
+  paints: TerrainEditPaint[];
   keys: string[];
 }
-const gestureCells = (g: TerrainEditGesture) => (g.buildingType === 'terrain' ? g.cells.length : 9);
-
 export class TerrainEditQueue {
   #queue: Queued[] = [];
   #sending = false;
-  constructor(private readonly deps: () => TerrainEditsDeps) {}
-  /** Commands in flight (0 or 1) and strokes waiting for it. */
+  #lastSent = -Infinity;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  /** Strokes being drawn or finishing (a new one may start before the last one is applied). */
+  #strokes = 0;
+  #deferred: OraclePage[] = [];
+  constructor(
+    private readonly deps: () => TerrainEditsDeps,
+    private readonly options: { intervalMs?: number; now?: () => number } = {},
+  ) {}
+  /** Commands in flight (0 or 1) and frames waiting for it. */
   get pending(): { sending: boolean; queued: number } {
     return { sending: this.#sending, queued: this.#queue.length };
   }
-  /** A stroke checked locally: predicted now, sent now or right after the command in flight. */
-  add(gesture: TerrainEditGesture, vertices: readonly TerrainVertex[]): void {
+  /** Painted cells checked locally: predicted now, sent with the next command. */
+  add(paints: TerrainEditPaint[], vertices: readonly TerrainVertex[]): void {
     const keys = this.deps().predict(vertices);
-    this.#queue.push({ gesture, keys });
+    this.#queue.push({ paints, keys });
     void this.#flush();
   }
-  /** Another village: the strokes not sent yet are forgotten, their prediction released. */
+  /** A stroke is being drawn: the server's refusals wait for its end, with the local ones. */
+  stroke(active: boolean): void {
+    this.#strokes = Math.max(0, this.#strokes + (active ? 1 : -1));
+    if (this.#strokes || !this.#deferred.length) return;
+    const pages = this.#deferred;
+    this.#deferred = [];
+    this.deps().onRefusals(pages);
+  }
+  /** Another village: the cells not sent yet are forgotten, their prediction released. */
   drop(): void {
     const dropped = this.#queue;
     this.#queue = [];
+    this.#deferred = [];
+    this.#strokes = 0;
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
     for (const item of dropped) this.deps().release(item.keys);
   }
+  #now() {
+    return (this.options.now ?? (() => performance.now()))();
+  }
   async #flush(): Promise<void> {
-    if (this.#sending || !this.#queue.length) return;
+    if (this.#sending || this.#timer || !this.#queue.length) return;
+    // A bounded cadence: at most one command per interval, whatever the pointer's speed.
+    const wait = this.#lastSent + (this.options.intervalMs ?? SEND_INTERVAL_MS) - this.#now();
+    if (wait > 0) {
+      this.#timer = setTimeout(() => {
+        this.#timer = null;
+        void this.#flush();
+      }, wait);
+      return;
+    }
     const { edit, onNotice } = this.deps();
-    // The batch: strokes in painting order, within the command's limits.
+    // The batch: whole frames in painting order, within the command's limits.
     const batch: Queued[] = [];
-    let cells = 0;
-    while (
-      this.#queue.length &&
-      batch.length < TERRAIN_EDIT_GESTURES_PER_COMMAND &&
-      (!batch.length || cells + gestureCells(this.#queue[0]!.gesture) <= TERRAIN_EDIT_CELLS_PER_COMMAND)
-    ) {
-      cells += gestureCells(this.#queue[0]!.gesture);
+    let gestures: FreeTerrainEditGesture[] = [];
+    while (this.#queue.length) {
+      const next = orderedTerrainEditGestures(this.#queue[0]!.paints, structuredClone(gestures));
+      if (
+        batch.length &&
+        (next.length > TERRAIN_EDIT_GESTURES_PER_COMMAND ||
+          next.reduce((n, g) => n + g.cells.length, 0) > TERRAIN_EDIT_CELLS_PER_COMMAND)
+      )
+        break;
+      gestures = next;
       batch.push(this.#queue.shift()!);
     }
-    const gestures = batch.map((b) => b.gesture);
     let refused: readonly TerrainEditRefusal[] = [];
     if (!edit) {
       onNotice('Terraformation non envoyée : synchronisation du village en cours.', 'warning');
@@ -85,6 +121,7 @@ export class TerrainEditQueue {
       return this.#flush();
     }
     this.#sending = true;
+    this.#lastSent = this.#now();
     try {
       refused = (await edit({ commandId: randomUUID(), gestures })).refused ?? [];
     } catch (error) {
@@ -100,7 +137,11 @@ export class TerrainEditQueue {
       // The server's terrain replaces the prediction: refused cells come back.
       for (const item of batch) this.deps().release(item.keys);
     }
-    if (refused.length) this.deps().onRefusals(terrainEditPages(refused, gestures, this.deps().obstacles()));
+    if (refused.length) {
+      const pages = terrainEditPages(refused, gestures, this.deps().obstacles());
+      if (this.#strokes) this.#deferred.push(...pages);
+      else this.deps().onRefusals(pages);
+    }
     return this.#flush();
   }
 }
@@ -117,16 +158,17 @@ export function terrainEditPages(
   );
 }
 
-/** The App's queue of immediate terrain edits; a new village drops what is not sent. */
+/** The App's queue of live terrain edits; a new village drops what is not sent. */
 export function useTerrainEdits(deps: TerrainEditsDeps & { villageKey: string }) {
   const latest = useRef(deps);
   latest.current = deps;
   const queue = useRef<TerrainEditQueue | null>(null);
   queue.current ??= new TerrainEditQueue(() => latest.current);
   useEffect(() => () => queue.current?.drop(), [deps.villageKey]);
-  const add = useCallback((gesture: TerrainEditGesture, vertices: readonly TerrainVertex[]) => {
-    queue.current!.add(gesture, vertices);
-    return true;
-  }, []);
-  return { add };
+  const add = useCallback(
+    (paints: TerrainEditPaint[], vertices: readonly TerrainVertex[]) => queue.current!.add(paints, vertices),
+    [],
+  );
+  const stroke = useCallback((active: boolean) => queue.current!.stroke(active), []);
+  return { add, stroke };
 }

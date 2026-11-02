@@ -284,17 +284,7 @@ export class TerrainRenderer {
         const cx = chunk.originCellX + x + (UNIT - 1) / 2,
           cy = chunk.originCellY + y + (UNIT - 1) / 2;
         const roads = unitRoads.get(`${x}:${y}`) ?? new Map<string, number>();
-        // RC1 ground reads its immutable patch and terraces, never road decorations;
-        // a shared-vertex unit, only its own vertices (rc1VertexUnitSignature).
-        const groundSignature = JSON.stringify(
-          chunk.rc1
-            ? [
-                chunk.rc1.model,
-                chunk.rc1.terraces,
-                ...(chunk.rc1.model === 'vertices' ? [rc1VertexUnitSignature(chunk.rc1, x, y, UNIT)] : []),
-              ]
-            : [null, this.#infrastructureRevision, [...roads].sort(([a], [b]) => a.localeCompare(b))],
-        );
+        const groundSignature = this.#groundSignature(chunk, x, y, roads);
         add(`ground:${x}:${y}`, groundSignature, true, inside(focus) ? -2 : 0, cx, cy, () =>
           buildTerrainUnit(
             this.scene,
@@ -360,6 +350,81 @@ export class TerrainRenderer {
       }
     for (const [id, j] of this.#jobs) if (j.chunkKey === chunkKey && !keys.has(j.key)) this.#jobs.delete(id);
   }
+  /** RC1 ground reads its immutable patch and terraces, never road decorations;
+   * a shared-vertex unit, only its own vertices (rc1VertexUnitSignature). */
+  #groundSignature(chunk: TerrainChunk, x: number, y: number, roads: ReadonlyMap<string, number>): string {
+    return JSON.stringify(
+      chunk.rc1
+        ? [
+            chunk.rc1.model,
+            chunk.rc1.terraces,
+            ...(chunk.rc1.model === 'vertices' ? [rc1VertexUnitSignature(chunk.rc1, x, y, UNIT)] : []),
+          ]
+        : [null, this.#infrastructureRevision, [...roads].sort(([a], [b]) => a.localeCompare(b))],
+    );
+  }
+  /** Ground units a live terraforming stroke changed, rebuilt before anything else. */
+  static readonly EDIT_PRIORITY = -3;
+  /**
+   * Queues the ground units whose vertices a terraforming prediction changed
+   * (TerrainStore.groundEdits, docs/SPEC-TERRAFORMATION-OUTIL.md §7.9), ahead
+   * of other work. Called every frame: O(1) without edit, otherwise
+   * O(edited vertices) plus one signature per touched unit; it never reads the
+   * chunk's other units, its decor or its features. A chunk the full pass
+   * must see anyway (store.changed) is left to it; one not resident yet falls
+   * back to it.
+   */
+  queueGroundEdits(): void {
+    const edits = this.store.groundEdits;
+    if (!edits.size) return;
+    const focus = this.focus();
+    for (const [chunkKey, vertices] of edits) {
+      if (this.store.changed.has(chunkKey) || !this.#visible.has(chunkKey)) continue;
+      const resident = this.residents.get(chunkKey),
+        mask = this.#masks.get(chunkKey),
+        chunk = this.store.chunk(chunkKey);
+      if (!resident || !mask || chunk?.rc1?.model !== 'vertices') {
+        this.store.changed.add(chunkKey);
+        continue;
+      }
+      const stride = chunk.rc1.stride,
+        size = this.store.world.chunkSize,
+        units = new Set<string>();
+      // A vertex on a unit border is read by the units on both sides.
+      const spans = (d: number) =>
+        [Math.floor(d / UNIT) * UNIT, d % UNIT === 0 && d > 0 ? d - UNIT : -1].filter((u) => u >= 0 && u < size);
+      for (const index of vertices)
+        for (const uy of spans(Math.floor(index / stride)))
+          for (const ux of spans(index % stride)) units.add(`${ux}:${uy}`);
+      for (const unit of units) {
+        if (!mask.has(unit)) continue;
+        const [x, y] = unit.split(':').map(Number) as [number, number];
+        const key = `ground:${unit}`,
+          id = `${chunkKey}/${key}`,
+          signature = this.#groundSignature(chunk, x, y, new Map());
+        if (resident.units.get(key)?.signature === signature) {
+          this.#jobs.delete(id);
+          continue;
+        }
+        const cx = chunk.originCellX + x + (UNIT - 1) / 2,
+          cy = chunk.originCellY + y + (UNIT - 1) / 2;
+        this.#jobs.set(id, {
+          chunkKey,
+          key,
+          signature,
+          ground: true,
+          priority: TerrainRenderer.EDIT_PRIORITY,
+          distance: Math.max(
+            Math.abs(delta(cx, focus.cellX, this.space.width)),
+            Math.abs(delta(cy, focus.cellY, this.space.height)),
+          ),
+          build: () => buildTerrainUnit(this.scene, chunk, x, y, this.space, this.groundMaterial, this.waterMaterial),
+        });
+        this.#orderDirty = true;
+      }
+    }
+    edits.clear();
+  }
   tick(budgetMs: number = TERRAIN_STREAMING.admissionMs): void {
     const started = this.now();
     // One bounded unit at a time. Admission reserves one allocation beyond residents.
@@ -370,6 +435,8 @@ export class TerrainRenderer {
           vb = this.#visible.has(b[1].chunkKey);
         return (
           Number(vb) - Number(va) ||
+          Number(b[1].priority === TerrainRenderer.EDIT_PRIORITY) -
+            Number(a[1].priority === TerrainRenderer.EDIT_PRIORITY) ||
           Number(b[1].priority < 0) - Number(a[1].priority < 0) ||
           Math.floor(a[1].distance / UNIT) - Math.floor(b[1].distance / UNIT) ||
           a[1].priority - b[1].priority ||

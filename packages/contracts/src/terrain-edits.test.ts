@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { predictTerrainEdits, terrainEditCells, terrainEditUnit } from './terrain-edits.js';
+import { orderedTerrainEditGestures, predictTerrainEdits, terrainEditCells, terrainEditUnit } from './terrain-edits.js';
 import { vertexKey, vertexLeveling } from './terrain-vertices.js';
 
 const world = { widthCells: 64, heightCells: 32 };
@@ -40,6 +40,45 @@ describe('terrain edit units (docs/SPEC-TERRAFORMATION-OUTIL.md §7)', () => {
     expect(predicted.get('0:0')!.height).toBe(3);
     expect(predicted.get('0:1')!.height).toBe(3);
     expect(predicted.get('1:0')!.height).toBe(3);
+  });
+
+  it('builds gestures the server applies in the painting order, the same heights as painting cell by cell', () => {
+    // A seeded walk across the torus seam, back and forth, with height changes
+    // mid-stroke and cells painted again at another height.
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+    for (let run = 0; run < 20; run++) {
+      const paints: { cell: { cellX: number; cellY: number }; height: number }[] = [];
+      let x = 60,
+        y = 10,
+        height = 1;
+      for (let i = 0; i < 200; i++) {
+        x = (x + Math.floor(random() * 3) - 1 + world.widthCells) % world.widthCells;
+        y = (y + Math.floor(random() * 3) - 1 + world.heightCells) % world.heightCells;
+        if (random() < 0.05) height += (Math.floor(random() * 5) - 2) * 0.25;
+        paints.push({ cell: cell(x, y), height });
+      }
+      // Painting cell by cell, each on the heights the previous ones left: the live stroke.
+      const live = new Map<string, number>();
+      const at = (vx: number, vy: number) => live.get(`${vx}:${vy}`) ?? ground(vx, vy);
+      for (const p of paints) {
+        const unit = terrainEditUnit(p.cell, world, at, p.height);
+        if (unit.volume >= 1e-9) for (const v of unit.vertices) live.set(vertexKey(v), v.height);
+      }
+      // Sent in commands cut anywhere, each continuing its own gestures.
+      const cut = 1 + Math.floor(random() * 199);
+      const gestures = [
+        ...orderedTerrainEditGestures(paints.slice(0, cut)),
+        ...orderedTerrainEditGestures(paints.slice(cut)),
+      ];
+      // The server's order (terrainEditCells per gesture) is the painting order.
+      expect(gestures.flatMap((g) => terrainEditCells(g, world).map((c) => ({ cell: c, height: g.height })))).toEqual(
+        paints,
+      );
+      for (const g of gestures) expect(g.cells.length).toBeLessThanOrEqual(256);
+      const predicted = predictTerrainEdits(gestures, world, ground);
+      expect(new Map([...predicted].map(([k, v]) => [k, v.height]))).toEqual(live);
+    }
   });
 
   it('writes nothing for a unit already at its height', () => {

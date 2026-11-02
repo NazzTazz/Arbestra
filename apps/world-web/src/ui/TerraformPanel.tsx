@@ -1,22 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import {
-  MAX_TERRAFORM_CELLS,
-  type TerrainEditGesture,
-  type TerrainVertex,
-  type TerraformRequest,
-  type VillageState,
-  type TravelCell,
-} from '@arbestra/contracts';
+import type { TerrainEditPaint, TerrainVertex, VillageState, TravelCell } from '@arbestra/contracts';
 import type { TerrainHandle } from '../scene/VillageScene';
 import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
-import type { TerraformVisual } from '../scene/terraform-preview';
 import { BrushCursor, brushCells, type BrushTone } from '../scene/terraform-brush';
-import { cellsAlongSegment, cellKey } from '../scene/construction-selection';
-import { localStroke, terrainBrushHeight, terraformSelectionVisual } from './terraform-draft';
+import { cellsAlongSegment } from '../scene/construction-selection';
+import { terrainBrushHeight } from './terraform-draft';
+import { LiveStroke, type LiveStrokeResult } from './terraform-live';
 import { cellRefused, oraclePages, terraformObstacles, type OraclePage } from './terraform-refusals';
 import './terraform.css';
 
-type Draft = { anchor: TravelCell; cells: TravelCell[]; height: number };
 /** One step of the height setting: a quarter of a cell; Shift moves a whole one. */
 export const TERRAFORM_STEP = 0.25;
 /** The setting after one step: no bound beyond the server's (none upwards;
@@ -26,51 +18,46 @@ export const steppedHeight = (height: number, steps: number) => Math.round((heig
 /**
  * Height brush (docs/SPEC-TERRAFORMATION-OUTIL.md): instant and free. The
  * hovered cell shows the 3 × 3 cells a stroke changes, at their future
- * heights. A released stroke is sent at once without its cells the client
- * sees refused, and predicted on the ground (§7); the Oracle tells each
- * refusal. The setting: − / + (Shift: a whole cell), the pipette (P) samples
- * a cell's height; Échap forgets it.
+ * heights. While the stroke is drawn, every painted cell changes the ground
+ * at once and leaves for the server in small ordered batches (§7.9,
+ * ui/terraform-live.ts); a change of the setting mid-stroke repaints the cell
+ * under the pointer. The Oracle tells the refusals once the stroke ends. The
+ * setting: − / + (Shift: a whole cell), the pipette (P) samples a cell's
+ * height; Échap forgets it.
  */
 export function TerraformPanel({
   state,
   scene,
-  onGesture,
-  onDraft,
+  onPaint,
+  onStroke,
   onRefusals,
 }: {
   state: VillageState;
   scene: RefObject<TerrainHandle | null>;
-  /** Sends a stroke at once and predicts its vertex heights on the ground. */
-  onGesture: (gesture: TerrainEditGesture, vertices: readonly TerrainVertex[]) => boolean;
-  /** The stroke being painted, shown over the ground. */
-  onDraft: (visual: TerraformVisual | null) => void;
+  /** Painted cells of one frame, with their predicted vertex heights: predicted on the ground and sent. */
+  onPaint: (paints: TerrainEditPaint[], vertices: readonly TerrainVertex[]) => void;
+  /** A stroke starts or ends (the server's refusals wait for its end). */
+  onStroke: (active: boolean) => void;
   /** The refused cells of a stroke, told by the Oracle one error per page. */
   onRefusals: (pages: OraclePage[]) => void;
 }) {
   const [target, setTarget] = useState<number | null>(null),
     [pipette, setPipette] = useState(false),
     [hint, setHint] = useState<string | null>(null);
-  const draft = useRef<Draft | null>(null),
-    stroke = useRef<{ last: TravelCell } | null>(null),
+  const stroke = useRef<{
+      last: TravelCell;
+      cell: TravelCell;
+      anchor: TravelCell;
+      height: number;
+      live: LiveStroke;
+    } | null>(null),
     cursor = useRef(new BrushCursor()),
     hovered = useRef<TravelCell | null>(null),
     revision = useRef(0);
-  const latest = useRef({ state, target, pipette, onGesture, onDraft, onRefusals });
-  latest.current = { state, target, pipette, onGesture, onDraft, onRefusals };
-  /** Height of a vertex as shown: the predictions of strokes sent are already on the ground. */
+  const latest = useRef({ state, target, pipette, onPaint, onStroke, onRefusals });
+  latest.current = { state, target, pipette, onPaint, onStroke, onRefusals };
+  /** Height of a vertex as shown: the predictions of painted cells are already on the ground. */
   const heightAt = (x: number, y: number) => scene.current?.terrainVertexHeight(x, y) ?? NaN;
-  const request = (d: Draft): TerraformRequest => ({
-    buildingType: 'terrain',
-    anchor: d.anchor,
-    quarterTurns: 0,
-    cells: d.cells,
-    height: d.height,
-    workerCount: 1,
-  });
-  const show = (d: Draft | null) => {
-    draft.current = d;
-    latest.current.onDraft(d ? terraformSelectionVisual(request(d), latest.current.state.world, heightAt) : null);
-  };
   /** The brush on `cell`: redrawn only when the cell, the setting or the data change. */
   const brush = (cell: TravelCell | null) => {
     hovered.current = cell;
@@ -95,48 +82,62 @@ export function TerraformPanel({
         : 'paint';
     scene.current?.terraformBrush({ cell, heights: cursor.current.heights, tone });
   };
-  // New data or setting: the brush under the pointer is drawn again.
+  // New data or setting: the brush under the pointer is drawn again; mid-stroke,
+  // a new height repaints the cell under the pointer.
   useEffect(() => {
     revision.current++;
     if (hovered.current) brush(hovered.current);
-  }, [state, target, pipette]);
-  const release = () => {
-    const d = draft.current;
-    stroke.current = null;
-    show(null);
-    if (!d) return;
-    let checked: ReturnType<typeof localStroke>;
-    try {
-      checked = localStroke(latest.current.state, d, heightAt);
-    } catch {
-      setHint('Les raccords dépassent le terrain visible. Réduisez la sélection.');
-      return;
+    if (stroke.current && target !== null && target !== stroke.current.height) {
+      stroke.current.height = target;
+      stroke.current.live.paint([stroke.current.cell], target);
     }
-    setHint(checked.hint);
-    // The refused cells are withdrawn and told; the rest leaves now.
-    if (checked.refusals.length) latest.current.onRefusals(oraclePages(checked.refusals, d.anchor));
-    if (!checked.gesture) return;
-    latest.current.onGesture(checked.gesture, checked.vertices);
-    // The ground under the pointer has just changed: the brush follows it.
-    revision.current++;
-    if (hovered.current) brush(hovered.current);
+  }, [state, target, pipette]);
+  /** The stroke ends: what is still waiting is applied, then the Oracle speaks. */
+  const finish = () => {
+    const current = stroke.current;
+    stroke.current = null;
+    if (!current) return;
+    current.live.end((result: LiveStrokeResult) => {
+      if (result.unknown) setHint('Les raccords dépassent le terrain visible. Réduisez la sélection.');
+      else if (result.sent && !result.changed && !result.refusals.length)
+        setHint('Le terrain est déjà à cette hauteur.');
+      else setHint(null);
+      // Local refusals first, then the server's that waited for the end of the stroke.
+      if (result.refusals.length) latest.current.onRefusals(oraclePages(result.refusals, current.anchor));
+      latest.current.onStroke(false);
+    });
+  };
+  const start = (point: TravelCell, cell: TravelCell, height: number) => {
+    finish();
+    const live = new LiveStroke({
+      world: latest.current.state.world,
+      obstacles: () => terraformObstacles(latest.current.state),
+      heightAt,
+      apply: (paints, vertices) => {
+        latest.current.onPaint(paints, vertices);
+        // The ground under the pointer has just changed: the brush follows it.
+        revision.current++;
+        if (hovered.current) brush(hovered.current);
+      },
+      frame: (callback) => requestAnimationFrame(callback),
+    });
+    stroke.current = { last: point, cell, anchor: cell, height, live };
+    latest.current.onStroke(true);
+    live.paint([cell], height);
   };
   const gesture = useRef<(g: InfrastructureGesture) => void>(() => {});
   gesture.current = (g) => {
     if (g.kind === 'right') return;
     if (g.kind === 'cancel') {
-      stroke.current = null;
-      show(null);
+      // What is painted stays painted (an undo is still to decide, §7.7).
+      finish();
       return;
     }
-    const point = g.point
-      ? { cellX: g.point.x / 8, cellY: g.point.y / 8 }
-      : g.kind === 'up'
-        ? stroke.current?.last
-        : null;
     const s = latest.current.state;
+    const point = g.point ? { cellX: g.point.x / 8, cellY: g.point.y / 8 } : null;
     if (!point) {
       if (g.kind === 'hover') brush(null);
+      if (g.kind === 'up') finish();
       return;
     }
     const cell = {
@@ -144,7 +145,6 @@ export function TerraformPanel({
       cellY: Math.round(point.cellY) % s.world.heightCells,
     };
     if (g.kind === 'hover' || g.kind === 'down') brush(cell);
-    if (g.kind === 'hover' && !stroke.current) return;
     if (g.kind === 'down') {
       // The cell's own height: the pipette's sample, or the first stroke's.
       const sampled = terrainBrushHeight(s, cell.cellX, cell.cellY, heightAt);
@@ -163,25 +163,20 @@ export function TerraformPanel({
         return;
       }
       setTarget(height);
-      stroke.current = { last: point };
-      show({ anchor: cell, cells: [cell], height });
-    }
-    const current = draft.current;
-    if (!current || !stroke.current) return;
-    const cells = new Map(current.cells.map((c) => [cellKey(c), c]));
-    for (const c of [cell, ...cellsAlongSegment(stroke.current.last, point, s.world)]) cells.set(cellKey(c), c);
-    if (cells.size > MAX_TERRAFORM_CELLS) {
-      setHint(`Limite de ${MAX_TERRAFORM_CELLS} cases par trait.`);
-      if (g.kind === 'up') release();
+      start(point, cell, height);
       return;
     }
-    stroke.current.last = point;
-    if (cells.size !== current.cells.length) show({ ...current, cells: [...cells.values()] });
-    if (g.kind === 'up') release();
+    const current = stroke.current;
+    if (!current) return;
+    // Every cell crossed since the last frame, in order: each one is painted now.
+    current.live.paint(cellsAlongSegment(current.last, point, s.world), current.height);
+    current.last = point;
+    current.cell = cell;
+    if (g.kind === 'up') finish();
   };
   const adjust = (steps: number) => setTarget((t) => (t === null ? t : steppedHeight(t, steps)));
-  const actions = useRef({ adjust });
-  actions.current = { adjust };
+  const actions = useRef({ adjust, finish });
+  actions.current = { adjust, finish };
   useEffect(() => {
     let frame = 0,
       stopped = false;
@@ -203,8 +198,7 @@ export function TerraformPanel({
         e.preventDefault();
         e.stopImmediatePropagation();
         if (e.key === 'Escape') {
-          stroke.current = null;
-          show(null);
+          actions.current.finish();
           setTarget(null);
           setPipette(false);
           setHint(null);
@@ -218,7 +212,12 @@ export function TerraformPanel({
       cancelAnimationFrame(frame);
       scene.current?.infrastructureTool(null);
       scene.current?.terraformBrush(null);
-      latest.current.onDraft(null);
+      // Leaving the tool mid-stroke: what is painted stays, nothing more is applied.
+      if (stroke.current) {
+        stroke.current.live.stop();
+        stroke.current = null;
+        latest.current.onStroke(false);
+      }
       window.removeEventListener('keydown', key, true);
     };
   }, [scene]);

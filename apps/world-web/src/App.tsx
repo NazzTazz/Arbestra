@@ -60,7 +60,6 @@ import { useTerrainEdits } from './ui/terrain-edits';
 import type { TerrainEditGesture } from '@arbestra/contracts';
 import { TerraformRefusalDialog } from './ui/TerraformRefusalDialog';
 import { terraformObstacles, type OraclePage } from './ui/terraform-refusals';
-import type { TerraformVisual } from './scene/terraform-preview';
 import { WorkforceHud } from './ui/WorkforceHud';
 import { type ScreenAnchor, WorldContextMenu } from './ui/WorldContextMenu';
 import { SciencePanel } from './ui/SciencePanel';
@@ -346,7 +345,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onNotice: pushNotification,
     onSettled: () => terrainRef.current?.demolitionClear(),
   });
-  // Immediate terrain edits, predicted on the ground and sent at once; each
+  // Live terrain edits, predicted on the ground while the stroke is drawn and sent in ordered batches; each
   // refusal is one page of the Oracle (docs/SPEC-TERRAFORMATION-OUTIL.md §7).
   const [terrainRefusals, setTerrainRefusals] = useState<OraclePage[]>([]);
   const terrainVillageKey = state ? `${state.world.id}:${state.village.id}` : '';
@@ -368,10 +367,6 @@ export function App({ starter }: { starter?: StarterController } = {}) {
     onNotice: pushNotification,
     onRefusals: addTerrainRefusals,
   });
-  const [terrainDraft, setTerrainDraft] = useState<TerraformVisual | null>(null);
-  useEffect(() => {
-    terrainRef.current?.terraformPreview(terrainDraft);
-  }, [terrainDraft]);
   const roadAnchorsApi = useMemo(
     () => (villageV2.villageReady ? { command: villageV2.roadAnchors, preview: villageV2.previewRoadAnchors } : null),
     [villageV2.villageReady, villageV2.roadAnchors, villageV2.previewRoadAnchors],
@@ -2514,8 +2509,8 @@ export function App({ starter }: { starter?: StarterController } = {}) {
           <TerraformPanel
             state={state}
             scene={terrainRef}
-            onGesture={terrainEdits.add}
-            onDraft={setTerrainDraft}
+            onPaint={terrainEdits.add}
+            onStroke={terrainEdits.stroke}
             onRefusals={addTerrainRefusals}
           />
         )}

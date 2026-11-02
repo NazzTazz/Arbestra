@@ -491,6 +491,118 @@ it('rebuilds only the ground units whose shared vertices changed, never the whol
   }
 });
 
+it('bounds a live terraforming stroke to one ground unit per frame, without ever requeuing the chunk', () => {
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    material = new StandardMaterial('shared', scene);
+  const heights = Array(33 ** 2).fill(1);
+  const patch = () => ({
+    model: 'vertices' as const,
+    stride: 33,
+    heights: [...heights],
+    water: Array(33 ** 2).fill(0),
+    terraces: [],
+  });
+  // A forest chunk: the full pass reads its features; the live path must not.
+  let featureReads = 0;
+  const trees = Array.from({ length: 200 }, (_, i) => ({
+    id: `tree-${i}`,
+    type: 'tree' as const,
+    cellX: i % 32,
+    cellY: 20 + Math.floor(i / 32),
+    variantSeed: i,
+  }));
+  const withFeatures = (rc1: ReturnType<typeof patch>): TerrainChunk =>
+    Object.defineProperty(
+      {
+        chunkX: 0,
+        chunkY: 0,
+        originCellX: 0,
+        originCellY: 0,
+        terrainCodes: Array(34 ** 2).fill(1),
+        elevations: Array(34 ** 2).fill(0),
+        occupiedCells: [],
+        rc1,
+      },
+      'features',
+      {
+        get: () => {
+          featureReads++;
+          return trees;
+        },
+        enumerable: true,
+      },
+    ) as unknown as TerrainChunk;
+  let chunk = withFeatures(patch());
+  const demand = [{ key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 }];
+  const store = {
+    world: { widthCells: 512, heightCells: 256, chunkSize: 32 },
+    changed: new Set<string>(),
+    groundEdits: new Map<string, Set<number>>(),
+    demand,
+    chunk: () => chunk,
+    key: (x: number, y: number) => `${Math.floor(x / 32)}:${Math.floor(y / 32)}`,
+  };
+  // Every clock reading advances 0.3 ms: one unit's admission fills the 1 ms budget.
+  let clock = 0;
+  const renderer = new TerrainRenderer(
+    scene,
+    store as unknown as TerrainStore,
+    new WorldSpace(512, 256, { cellX: 0, cellY: 0 }),
+    material,
+    material,
+    () => [],
+    () => [],
+    () => [],
+    undefined,
+    () => (clock += 0.3),
+  );
+  try {
+    renderer.demand(demand);
+    for (let frame = 0; renderer.queued && frame < 2000; frame++) renderer.tick(TERRAIN_STREAMING.admissionMs);
+    // A fast stroke: two cells per frame along a row, 30 frames, as TerrainStore.predict publishes them.
+    featureReads = 0;
+    let maxBuilt = 0;
+    for (let frame = 0; frame < 30; frame++) {
+      const edits = new Set<number>();
+      for (const cellX of [frame, frame + 1])
+        for (const [dx, dy] of [
+          [0, 0],
+          [1, 0],
+          [0, 1],
+          [1, 1],
+        ]) {
+          const index = (5 + dy!) * 33 + cellX + dx!;
+          heights[index] = 2 + frame * 0.25;
+          edits.add(index);
+        }
+      chunk = withFeatures(patch());
+      store.groundEdits.set('0:0', edits);
+      renderer.queueGroundEdits();
+      const before = renderer.groundVersion;
+      renderer.tick(TERRAIN_STREAMING.admissionMs);
+      maxBuilt = Math.max(maxBuilt, renderer.groundVersion - before);
+    }
+    expect(maxBuilt).toBe(1);
+    expect(featureReads).toBe(0);
+    expect(store.changed.size).toBe(0);
+    // After the stroke, the units catch up one per frame; then a full pass finds nothing to rebuild.
+    for (let frame = 0; renderer.queued && frame < 200; frame++) {
+      const before = renderer.groundVersion;
+      renderer.tick(TERRAIN_STREAMING.admissionMs);
+      expect(renderer.groundVersion - before).toBeLessThanOrEqual(1);
+    }
+    store.changed.add('0:0');
+    renderer.demand(demand);
+    expect([...renderer['residents'].get('0:0')!.units.keys()].length).toBeGreaterThan(0);
+    expect(renderer.queued).toBe(0);
+  } finally {
+    renderer.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
 it('hands each ground unit exactly its road cells, including a partial unit at the chunk edge', () => {
   const engine = new NullEngine(),
     scene = new Scene(engine),
