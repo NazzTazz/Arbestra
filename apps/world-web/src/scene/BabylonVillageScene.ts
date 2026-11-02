@@ -83,6 +83,7 @@ import { Mesh as BabylonMesh } from '@babylonjs/core/Meshes/mesh';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import '@babylonjs/core/Rendering/edgesRenderer';
 // Register line shaders with the scene's module graph before any LinesMesh is
 // rendered; a missing registration falls back to fetching a .fx URL from Vite.
@@ -109,6 +110,7 @@ import { WorldSpace, terrainDemand, delta, normalize } from './world-space';
 import { ProjectedCells } from './projected-cells';
 import { TravelDerivationInputs } from './travel-derivation';
 import { TerrainStore } from './terrain-store';
+import { BuildableGridGeometry } from './buildable-grid';
 import { TerrainRenderer } from './terrain-renderer';
 import { CloudTransition } from './cloud-transition';
 import { LodTransition } from './lod-transition';
@@ -423,6 +425,7 @@ export class BabylonVillageScene {
     navigator.webdriver && (import.meta.env.PROD || !new URLSearchParams(location.search).has('terrainPerf'));
   #buildableGrid: Mesh | null = null;
   #buildableArea: Mesh | null = null;
+  #buildableGeometry: BuildableGridGeometry | null = null;
   #travelLines: Mesh | null = null;
   #travelSurface: Mesh | null = null;
   #villageRoads: VillageRoads | null = null;
@@ -1762,6 +1765,8 @@ export class BabylonVillageScene {
           this.#resourceHalos.update(now, this.#space, this.#store, halosEnabled, zoomOpacity);
           this.#treeHalos.update(now, this.#space, this.#store, halosEnabled, zoomOpacity);
         }
+        // Construction mode only (null otherwise): follows a live terraforming stroke.
+        this.#refreshBuildableGrid();
         if (import.meta.env.DEV && now - this.#workerDebugAt > 500) {
           this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);
           this.#workerDebugAt = now;
@@ -3930,75 +3935,37 @@ export class BabylonVillageScene {
     this.#buildableGrid = null;
     this.#buildableArea?.dispose(false, true);
     this.#buildableArea = null;
+    this.#buildableGeometry = null;
     if (!this.#constructionMode) return;
-    const areaPositions: number[] = [];
-    const areaIndices: number[] = [];
-    const segments = new Map<string, [Vector3, Vector3]>();
-    const add = (from: Vector3, to: Vector3): void => {
-      const a = `${from.x}:${from.z}`;
-      const b = `${to.x}:${to.z}`;
-      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-      const previous = segments.get(key);
-      if (previous && !state.region.vertexHeights) from.y = to.y = Math.max(from.y, previous[0].y);
-      segments.set(key, [from, to]);
-    };
-    const half = TILE_SIZE / 2;
-    for (const cell of state.cells) {
-      if (!cell.canBuild) continue;
-      const regionX = (cell.cellX - state.region.originCellX + state.world.widthCells) % state.world.widthCells;
-      const regionY = (cell.cellY - state.region.originCellY + state.world.heightCells) % state.world.heightCells;
-      const elevation =
-        regionX < state.region.width && regionY < state.region.height
-          ? (state.region.elevations[regionY * state.region.width + regionX] ?? 0)
-          : 0;
-      // The textured terrain is elevated per cell; an absolute plane can be
-      // buried below it. Clear the shore lip as well as the grass surface.
-      const y = elevation * 0.025 + 0.06;
-      const northWest = new Vector3(cell.x - half, y, cell.z - half);
-      const northEast = new Vector3(cell.x + half, y, cell.z - half);
-      const southEast = new Vector3(cell.x + half, y, cell.z + half);
-      const southWest = new Vector3(cell.x - half, y, cell.z + half);
-      if (state.region.vertexHeights) {
-        for (const [corner, dx, dy] of [
-          [northWest, 0, 0],
-          [northEast, 1, 0],
-          [southEast, 1, 1],
-          [southWest, 0, 1],
-        ] as const)
-          corner.y =
-            state.region.vertexHeights[(regionY + dy) * (state.region.width + 1) + regionX + dx]! * TILE_SIZE + 0.06;
-      }
-      {
-        const first = areaPositions.length / 3;
-        for (const corner of [northWest, northEast, southEast, southWest]) {
-          areaPositions.push(corner.x, corner.y - 0.01, corner.z);
-        }
-        areaIndices.push(first, first + 2, first + 1, first, first + 3, first + 2);
-      }
-      add(northWest, northEast);
-      add(northEast, southEast);
-      add(southEast, southWest);
-      add(southWest, northWest);
-    }
-    const lines = [...segments.values()];
-    if (areaPositions.length) {
+    // The displayed ground (terrain store, shared RC1 vertices), not the village
+    // snapshot: a live terraforming stroke moves the grid with the ground
+    // (docs/SPEC-TERRAFORMATION-OUTIL.md §7.9, #refreshBuildableGrid).
+    const geometry = BuildableGridGeometry.build(state, this.#store);
+    this.#buildableGeometry = geometry;
+    if (geometry.areaPositions.length) {
       const area = new BabylonMesh('buildable-area', this.#scene);
       const data = new VertexData();
-      data.positions = areaPositions;
-      data.indices = areaIndices;
+      data.positions = geometry.areaPositions;
+      data.indices = geometry.areaIndices;
       data.normals = [];
-      VertexData.ComputeNormals(areaPositions, areaIndices, data.normals);
-      data.applyToMesh(area);
+      VertexData.ComputeNormals(geometry.areaPositions, geometry.areaIndices, data.normals);
+      data.applyToMesh(area, true);
       const material = this.#material('buildable-area', '#b8d8f2', 0.16, '#b8d8f2');
       material.disableLighting = true;
       area.material = material;
       area.isPickable = false;
       area.alphaIndex = 0;
+      // Rewritten in place (no bounding refresh): village-sized, never culled.
+      area.alwaysSelectAsActiveMesh = true;
       this.#buildableArea = area;
     }
+    const lines: Vector3[][] = [];
+    const p = geometry.linePositions;
+    for (let i = 0; i < p.length; i += 6)
+      lines.push([new Vector3(p[i]!, p[i + 1]!, p[i + 2]!), new Vector3(p[i + 3]!, p[i + 4]!, p[i + 5]!)]);
     const grid =
       lines.length > 0
-        ? MeshBuilder.CreateLineSystem('buildable-grid', { lines, useVertexAlpha: true }, this.#scene)
+        ? MeshBuilder.CreateLineSystem('buildable-grid', { lines, useVertexAlpha: true, updatable: true }, this.#scene)
         : null;
     this.#buildableGrid = grid;
     if (!grid) return;
@@ -4009,6 +3976,16 @@ export class BabylonVillageScene {
     // remain hidden, rather than projecting across its visible silhouette.
     grid.renderingGroupId = 0;
     grid.isPickable = false;
+    grid.alwaysSelectAsActiveMesh = true;
+  }
+  /** Each frame in construction mode: O(1) while the ground is unchanged; then
+   * the corners of the chunks whose ground moved are read again and only the
+   * moved ones rewritten in place (one buffer upload per mesh, no rebuild). */
+  #refreshBuildableGrid(): void {
+    const geometry = this.#buildableGeometry;
+    if (!geometry || !geometry.refresh(this.#store)) return;
+    this.#buildableArea?.updateVerticesData(VertexBuffer.PositionKind, geometry.areaPositions);
+    this.#buildableGrid?.updateVerticesData(VertexBuffer.PositionKind, geometry.linePositions);
   }
 
   #sceneryClone(key: string, name: string, create: () => Mesh): Mesh {
