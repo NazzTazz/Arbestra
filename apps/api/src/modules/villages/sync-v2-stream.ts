@@ -1,9 +1,26 @@
 import type { FastifyReply } from 'fastify';
 import type { SyncV2Batch, SyncV2ReadRequest } from '@arbestra/contracts';
 import type { SyncCursor } from './sync-v2-journal.js';
+import type { SyncWakeSource, SyncWakeSubscription } from './sync-v2-wakeups.js';
 import { HttpError } from '../../errors.js';
 
-type StreamOptions = { pollMs?: number; onError?: (error: unknown) => void };
+/** Period of a stream's reads when nothing wakes it. */
+export const SYNC_V2_POLL_MS = 2000;
+/** With wakeups, the periodic read is a backstop: a lost notification, and
+ * what never notifies (expired or revoked session, ownership change, raised
+ * retention floor) are seen at most this late. */
+export const SYNC_V2_BACKSTOP_MS = 30_000;
+/** Spec §8.4, nominal grouping at most 50 ms: a wake reads at once, unless the
+ * previous batch went out less than this long ago. */
+export const SYNC_V2_COALESCE_MS = 50;
+
+type StreamOptions = {
+  /** Periodic read: SYNC_V2_POLL_MS without wakeups, SYNC_V2_BACKSTOP_MS with. */
+  pollMs?: number;
+  wakeups?: SyncWakeSource;
+  coalesceMs?: number;
+  onError?: (error: unknown) => void;
+};
 
 export async function serveSyncV2Stream(
   reply: FastifyReply,
@@ -11,18 +28,26 @@ export async function serveSyncV2Stream(
   read: (request: SyncV2ReadRequest) => Promise<SyncV2Batch>,
   options: StreamOptions = {},
 ): Promise<void> {
-  const first = await read(initial);
-  return serveBatches(
-    reply,
-    first,
-    (batch) =>
-      read({
-        ...initial,
-        scopes: batch.groups.map((group) => ({ kind: group.stream.kind, key: group.stream.key })),
-        cursors: batch.groups.map((group) => ({ ...group.stream, revision: group.toRevision })),
-      }),
-    options,
-  );
+  // Subscribed before the first capture: a publication committed after its
+  // snapshot is seen by the next read instead of waiting for the backstop.
+  const wake = options.wakeups?.subscribe();
+  try {
+    const first = await read(initial);
+    return await serveBatches(
+      reply,
+      first,
+      (batch) =>
+        read({
+          ...initial,
+          scopes: batch.groups.map((group) => ({ kind: group.stream.kind, key: group.stream.key })),
+          cursors: batch.groups.map((group) => ({ ...group.stream, revision: group.toRevision })),
+        }),
+      options,
+      wake,
+    );
+  } finally {
+    wake?.close();
+  }
 }
 
 /** Single-flight private stream transport. The reader must recheck current
@@ -34,13 +59,19 @@ export async function servePrivateSyncStream(
   read: (cursor: SyncCursor) => Promise<SyncV2Batch>,
   options: StreamOptions = {},
 ): Promise<void> {
-  const first = await read(initial);
-  return serveBatches(
-    reply,
-    first,
-    (batch) => read({ epoch: batch.groups[0]!.stream.epoch, revision: batch.groups[0]!.toRevision }),
-    options,
-  );
+  const wake = options.wakeups?.subscribe();
+  try {
+    const first = await read(initial);
+    return await serveBatches(
+      reply,
+      first,
+      (batch) => read({ epoch: batch.groups[0]!.stream.epoch, revision: batch.groups[0]!.toRevision }),
+      options,
+      wake,
+    );
+  } finally {
+    wake?.close();
+  }
 }
 
 async function serveBatches(
@@ -48,10 +79,19 @@ async function serveBatches(
   first: SyncV2Batch,
   readNext: (last: SyncV2Batch) => Promise<SyncV2Batch>,
   options: StreamOptions,
+  wake: SyncWakeSubscription | undefined,
 ): Promise<void> {
   // Authorization and the first coherent capture complete before HTTP 200.
   let batch = first,
     closed = false;
+  // Every read covers the streams of the first capture (the request's scopes
+  // and the implicit private stream), so the wake index is set once.
+  wake?.watch(
+    first.worldId,
+    first.groups.map((group) => group.stream),
+  );
+  const pollMs = options.pollMs ?? (wake ? SYNC_V2_BACKSTOP_MS : SYNC_V2_POLL_MS),
+    coalesceMs = options.coalesceMs ?? SYNC_V2_COALESCE_MS;
   if (reply.raw.destroyed) return;
   const close = () => {
     closed = true;
@@ -86,16 +126,29 @@ async function serveBatches(
       reply.raw.once('error', failed);
     });
   };
+  // Ends at the periodic read, on close, or on a wake (at once if one came
+  // during the previous read or write), never sooner than coalesceMs after
+  // the previous batch went out.
   const pause = () =>
     new Promise<void>((resolve) => {
+      const since = Date.now();
+      let grouped: ReturnType<typeof setTimeout> | undefined;
       const done = () => {
         clearTimeout(timer);
+        clearTimeout(grouped);
+        wake?.listen(undefined);
         reply.raw.off('close', done);
         resolve();
       };
-      const timer = setTimeout(done, options.pollMs ?? 2000);
+      const woken = () => {
+        if (grouped) return;
+        grouped = setTimeout(done, Math.max(0, since + coalesceMs - Date.now()));
+        grouped.unref();
+      };
+      const timer = setTimeout(done, pollMs);
       timer.unref();
       reply.raw.once('close', done);
+      wake?.listen(woken);
     });
   try {
     while (!closed) {
@@ -115,7 +168,10 @@ async function serveBatches(
       // takes the client's applied cursor, never this value or Last-Event-ID.
       if (closed) break;
       await pause();
-      if (!closed) batch = await readNext(batch);
+      if (closed) break;
+      // Cleared before the read's snapshot: a publication it misses wakes again.
+      wake?.clear();
+      batch = await readNext(batch);
     }
   } catch (error) {
     if (!closed && error instanceof HttpError && error.statusCode === 401)

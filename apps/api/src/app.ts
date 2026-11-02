@@ -23,6 +23,7 @@ import { registerVillageRoutes } from './modules/villages/routes.js';
 import { registerTerrainRoutes } from './modules/worlds/terrain-routes.js';
 import { registerFactorySettings } from './modules/villages/factory-settings.js';
 import { createVillagePresentationReader, registerSyncV2Routes } from './modules/villages/sync-v2-routes.js';
+import { SyncV2Wakeups } from './modules/villages/sync-v2-wakeups.js';
 import { registerAdminAuthRoutes } from './modules/admin/auth.js';
 import { registerAdminRoutes } from './modules/admin/routes.js';
 import { OperationsTelemetry, instrumentHttp, annotateHttpRequest } from './modules/operations/telemetry.js';
@@ -186,6 +187,30 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
       note: 'Cycle local de préparation ; les refus métier sont distincts des échecs de calcul.',
     };
   });
+  // One LISTEN connection for every V2 stream of this process (migration 080).
+  const syncWakeups = new SyncV2Wakeups(config.databaseUrl, () => {
+    operations.event(
+      'SYNC_V2_LISTENER_INTERRUPTED',
+      'Le canal de réveil de la synchronisation V2 est interrompu.',
+      'warning',
+    );
+    app.log.warn({ code: 'SYNC_V2_LISTENER_INTERRUPTED' }, 'Synchronization listener interrupted');
+  });
+  await syncWakeups.start();
+  app.addHook('onClose', () => syncWakeups.close());
+  operations.observeWorker('sync-v2-listener', () => {
+    const state = syncWakeups.observation;
+    return {
+      id: 'sync-v2-listener',
+      label: 'Réveil PostgreSQL / flux V2',
+      active: state.watched + state.pending,
+      status: state.closed ? 'unavailable' : state.connected ? 'available' : 'degraded',
+      lastObservedAt: new Date().toISOString(),
+      lastSuccessAt: state.lastSuccessAt,
+      lastErrorAt: state.lastErrorAt,
+      note: `Connexion LISTEN locale, ${state.notifications} notifications reçues ; ne prouve pas la livraison au navigateur. Sans elle, contrôle des flux toutes les 30 s.`,
+    };
+  });
   const observations = new ObservationHub();
   const presentations = createVillagePresentationReader(app, db, navigation);
   await registerObservationRoutes(app, db, config, observations, presentations);
@@ -204,7 +229,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
   await registerOnboardingRoutes(app, db, config);
   await registerWorldGeneratorRoutes(app, db, config);
   await registerVillageRoutes(app, db, config, navigation);
-  await registerSyncV2Routes(app, db, config, navigation, presentations);
+  await registerSyncV2Routes(app, db, config, navigation, { presentations, wakeups: syncWakeups });
   await registerTerrainRoutes(app, db, config);
   await registerFactorySettings(app, db, config);
   return app;

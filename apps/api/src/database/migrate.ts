@@ -29,6 +29,7 @@ import * as legacyRoadConversionMigration from './migrations/076_legacy_road_con
 import * as demolitionReceiptsMigration from './migrations/077_demolition_receipts.js';
 import * as terrainEditReceiptsMigration from './migrations/078_terrain_edit_receipts.js';
 import * as receiptSyncV2Migration from './migrations/079_receipt_sync_v2.js';
+import * as gameSyncNotifyMigration from './migrations/080_game_sync_notify.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -166,6 +167,7 @@ const migrationProvider: MigrationProvider = {
       '077_demolition_receipts': demolitionReceiptsMigration,
       '078_terrain_edit_receipts': terrainEditReceiptsMigration,
       '079_receipt_sync_v2': receiptSyncV2Migration,
+      '080_game_sync_notify': gameSyncNotifyMigration,
     };
   },
 };

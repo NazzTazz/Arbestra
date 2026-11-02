@@ -41,7 +41,7 @@ Les observations portent l’identifiant de l’instance, sa date de démarrage 
 | CPU | Consommation du processus entre deux observations, exprimée en pourcentage d’un cœur ; elle peut dépasser 100 %. Inconnue avant le premier intervalle. |
 | Mémoire | RSS du processus et heap JavaScript courant ; ce ne sont ni la RAM totale de l’hôte ni celle du générateur externe. |
 | Event loop | Percentile de délai mesuré par Node depuis le démarrage de l’observateur, distinct de la fenêtre HTTP de 5 min. |
-| Workers | Cycle scheduler, préparation des expéditions et pool de navigation réellement observés. Une boucle muette ou une erreur récente peut produire un état dégradé. |
+| Workers | Cycle scheduler, préparation des expéditions et pool de navigation réellement observés. Une boucle muette ou une erreur récente peut produire un état dégradé. `sync-v2-listener` (2 novembre 2026, migration 080) : connexion `LISTEN` du processus qui réveille les flux V2 ; dégradé tant qu'elle se reconnecte, les flux retombant alors sur leur contrôle de 30 s ; actifs = flux abonnés au réveil. Une interruption produit l'événement `SYNC_V2_LISTENER_INTERRUPTED`. |
 | Présence | Flux SSE ouverts et comptes distincts sur cette instance. Plusieurs onglets peuvent appartenir au même compte ; ce compteur ne mesure pas les joueurs actifs. |
 | Événements | Tampon de 100 événements d’exploitation au maximum. Textes et codes contrôlés, sans erreurs internes brutes. `ADMIN_ACCESS` est exclu du tampon ; connexions, déconnexions et refus y restent. Ce tampon n’est pas un journal d’audit durable. |
 

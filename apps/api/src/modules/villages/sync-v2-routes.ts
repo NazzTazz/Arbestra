@@ -17,6 +17,7 @@ import { authenticate } from '../auth/service.js';
 import { ownedVillage } from './service.js';
 import { captureSyncV2, type SyncV2SharedInclude } from './sync-v2-capture.js';
 import { serveSyncV2Stream } from './sync-v2-stream.js';
+import type { SyncWakeSource } from './sync-v2-wakeups.js';
 import { VillagePresentationReader } from './presentation.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
 import { devTime } from '../operations/dev-timing.js';
@@ -78,13 +79,21 @@ export function createVillagePresentationReader(
   });
 }
 
+export interface SyncV2RouteOptions {
+  presentations?: VillagePresentationReader;
+  /** The process's LISTEN connection: streams read on a publication instead
+   * of polling, the periodic read becoming a backstop (sync-v2-stream.ts). */
+  wakeups?: SyncWakeSource;
+}
+
 export async function registerSyncV2Routes(
   app: FastifyInstance,
   db: Kysely<Database>,
   config: Pick<AppConfig, 'cookieName'>,
   navigation: TravelNetworkExecutor,
-  presentations = createVillagePresentationReader(app, db, navigation),
+  options: SyncV2RouteOptions = {},
 ) {
+  const presentations = options.presentations ?? createVillagePresentationReader(app, db, navigation);
   const streams = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const close of streams) close();
@@ -231,6 +240,7 @@ export async function registerSyncV2Routes(
               return bounded(captureSyncV2(db, current.id, worldSlug, villageId, next, { deltaOnly: true }), answer);
             },
             {
+              wakeups: options.wakeups,
               onError: () => app.log.warn({ code: 'SYNC_V2_STREAM_INTERRUPTED' }, 'Synchronization stream interrupted'),
             },
           );
