@@ -15,8 +15,11 @@ Statut : **à valider** par Tristan en recette sur le dev (§8). Remplace, pour 
 { commandId, gestures: [
     { buildingType: 'terrain', anchor, cells, height }          // terraformation libre
   | { buildingType: <bâtiment>, anchor, quarterTurns }           // nivellement d'emprise
+  | { buildingType: 'terrain-restore', cells: [{ cellX, cellY, corners }] }  // restauration (2 novembre)
 ] }
 ```
+
+- Restauration (ajout du 2 novembre, [outil §7.10](SPEC-TERRAFORMATION-OUTIL.md#710-annulation-par-geste-inverse-2-novembre)) : chaque case reprend ses quatre hauteurs de coin ; c'est le geste inverse d'un trait (Ctrl+Z). Une case = une unité, admise aux règles d'une case peinte ; compte une case par case restaurée.
 
 - Au plus 32 gestes et 1 024 cases au total ; au moins un geste.
 - Les gestes s'appliquent **dans l'ordre** : un sommet partagé prend la hauteur du dernier geste qui le touche. Chaque geste est validé contre le terrain laissé par les précédents.
