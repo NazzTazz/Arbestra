@@ -22,8 +22,8 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## À valider (recette de Tristan)
 
-- **Serveur sans synchronisation V1, 426 pour un ancien onglet** (I.3, 1er novembre, [inventaire](docs/INVENTAIRE-LOT-I-2026-11-01.md)) : un onglet resté ouvert sur l'ancien client doit recevoir « Une nouvelle version d'Arbestra est disponible. Rechargez la page. » sur ses commandes et ses lectures, puis fonctionner après rechargement ; un parcours complet de jeu en V2 reste à refaire sur dev (le serveur répond 426 à `GET /village` et à `/events`).
-- **Défrichage plus rapide** (1er novembre) : retirer une souche prend une minute de travail pour un habitant, plus le trajet (au lieu de 10 minutes).
+- **Serveur sans synchronisation V1, 426 pour un ancien onglet** (I.3, 1er novembre, [inventaire](docs/INVENTAIRE-LOT-I-2026-11-01.md)) : un onglet resté ouvert sur l'ancien client doit recevoir « Une nouvelle version d'Arbestra est disponible. Rechargez la page. » sur ses commandes et ses lectures, puis fonctionner après rechargement ; parcours complet en V2 recetté sur dev le 2 novembre (deux expéditions de cartographie, récolte de carottes, constructions) ; reste l'ancien onglet.
+- **Défrichage plus rapide** (1er novembre, recette restante) : retirer une souche prend une minute de travail pour un habitant, plus le trajet (au lieu de 10 minutes).
 
 Validés le 1er novembre sur dev : HUD des habitants au contrat V2 (I.1), client sans V1 (I.2, écran de connexion après environ une minute), reçus d'expédition et de récolte par le flux V2 (migration 079), NOC sur les lecteurs V2 (récolte en cours et villageois visibles), installation en V2, installation plus rapide (plan hors du verrou mondial ; le reste des poses du kit est dans la [dette technique](docs/DETTE-TECHNIQUE.md)).
 
