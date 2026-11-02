@@ -17,6 +17,7 @@ import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-map.js';
 import { activateTerrainVertices } from '../worlds/terrain-vertices.js';
 import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { terrainEditsCommandV2, terrainEditsTestHooks } from './terrain-edits.js';
+import { httpErrorBody, type HttpError } from '../../errors.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -351,6 +352,8 @@ it('refuses the whole batch, without writing, at the first refused gesture, and 
   // The second gesture covers the town hall's cell.
   const refusal = await edit([free([[60, 189]], 0.5), free([[59, 195]], 0.5)]).catch((error: unknown) => error);
   expect(refusal).toMatchObject({ code: 'CELL_OCCUPIED', gesture: 1 });
+  // The HTTP body names the gesture too: the client points the Oracle at it.
+  expect(httpErrorBody(refusal as HttpError)).toMatchObject({ code: 'CELL_OCCUPIED', gesture: 1 });
   expect(await rows()).toEqual(before);
 }, 120000);
 

@@ -33,14 +33,15 @@ type Vertex = { vertexX: number; vertexY: number; height: number };
 const key = (c: Cell) => `${c.cellX}:${c.cellY}`;
 const wrap = (n: number, size: number) => ((n % size) + size) % size;
 
-/** A refusal names the gesture that caused it (0-based, in batch order). */
+/** A refusal names the gesture that caused it (0-based, in batch order), in
+ * its JSON body too: the client shows the Oracle's reason on that gesture. */
 class TerrainEditRefused extends HttpError {
   constructor(
     readonly gesture: number,
     code: string,
     message: string,
   ) {
-    super(409, code, message);
+    super(409, code, message, { gesture });
   }
 }
 
