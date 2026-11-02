@@ -1,5 +1,12 @@
 [
   {
+    "method": "POST",
+    "url": "/api/account/seen-release",
+    "actions": [],
+    "lot": "outside",
+    "role": "authentication-health-or-administration"
+  },
+  {
     "method": "GET",
     "url": "/api/admin/accounts",
     "actions": [],
