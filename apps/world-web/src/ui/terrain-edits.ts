@@ -71,6 +71,10 @@ export class TerrainEditQueue {
   get pending(): { sending: boolean; queued: number } {
     return { sending: this.#sending, queued: this.#queue.length };
   }
+  /** Rien en vol, rien en attente, aucun trait en cours (la campagne de mesures, dev/measure-runner.ts). */
+  get idle(): boolean {
+    return !this.#sending && !this.#timer && !this.#queue.length && !this.#strokes;
+  }
   /** Painted cells checked locally: predicted now, sent with the next command. */
   add(paints: TerrainEditStep[], vertices: readonly TerrainVertex[], owner?: TerrainEditOwner): void {
     const keys = this.deps().predict(vertices);
@@ -194,5 +198,6 @@ export function useTerrainEdits(deps: TerrainEditsDeps & { villageKey: string })
     [],
   );
   const stroke = useCallback((active: boolean) => queue.current!.stroke(active), []);
-  return { add, stroke };
+  const idle = useCallback(() => queue.current!.idle, []);
+  return { add, stroke, idle };
 }

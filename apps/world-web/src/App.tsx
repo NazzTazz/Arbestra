@@ -1,6 +1,8 @@
 import { TerraformPanel } from './ui/TerraformPanel';
 import { useObservationPublisher } from './observation';
 import { clientTime, setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from './dev/statistics';
+import { devToolsEnabled } from './dev/dev-tools';
+import { registerMeasureHost } from './dev/measure-runner';
 import { useExpeditions } from './ui/use-expeditions';
 import { useHarvestTool } from './ui/use-harvest-tool';
 import { reconcileVillageSnapshot } from '@arbestra/contracts';
@@ -1813,6 +1815,34 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       await villageV2.changeWorksite(id, change);
     });
   }
+
+  // La campagne de mesures (dev/measure-runner.ts) lit le jeu à la demande, comme le joueur le voit.
+  const measureLatest = useRef({ initialReady, terrainView, arrivalActive, villageLost, chooseMode });
+  measureLatest.current = { initialReady, terrainView, arrivalActive, villageLost, chooseMode };
+  useEffect(() => {
+    if (!devToolsEnabled() || starter) return;
+    return registerMeasureHost({
+      state: () => stateRef.current,
+      scene: () => terrainRef.current,
+      ready: () => {
+        const m = measureLatest.current;
+        return m.initialReady && m.terrainView === 'village' && !m.arrivalActive && !m.villageLost;
+      },
+      mode: () => modeRef.current,
+      setMode: (mode) => {
+        if (mode === modeRef.current) return;
+        measureLatest.current.chooseMode(mode);
+        // Comme Construction > Outils > Terraformation (ConstructionPanel, onTool).
+        if (mode === 'terraform') {
+          setConstructionDomain('tools');
+          setConstruction({ action: 'build', type: null });
+        }
+      },
+      closeDrawer: () => setShowDev(false),
+      editsIdle: terrainEdits.idle,
+      lastStroke: terraformUndo.last,
+    });
+  }, []);
 
   if (loading)
     return <WorldLoading worldName={worldLabel} message="Lecture du village et de ses trajets" lobbyUrl={LOBBY_URL} />;

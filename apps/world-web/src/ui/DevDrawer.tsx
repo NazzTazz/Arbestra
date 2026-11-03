@@ -5,6 +5,7 @@ import { setStatisticsEnabled, statisticsEnabled, subscribeStatistics } from '..
 import { DEFAULT_BUILDING_LOD, getBuildingLodSettings, setBuildingLodSettings } from '../scene/building-lod-settings';
 import { devToolsEnabled } from '../dev/dev-tools';
 import { RENDER_SWITCHES, type MeshFamily, type RenderLab, type RenderSwitch } from '../scene/render-lab';
+import { MeasureCampaignBanner, MeasureCampaignSection } from './MeasureCampaign';
 
 /** Compare the GPU time of the statistics overlay with and without each layer. */
 function RenderLabControls({ lab }: { lab: () => RenderLab | null }) {
@@ -131,6 +132,7 @@ export function DevDrawer({
   if (!devToolsEnabled()) return null;
   return (
     <aside className={`dev-shell${open ? ' is-open' : ''}`} aria-label="Outils développeur">
+      <MeasureCampaignBanner />
       {open && (
         <div className="dev-drawer">
           <header>
@@ -215,6 +217,7 @@ export function DevDrawer({
               laboratoire cosmologique pour l’heure).
             </small>
           </section>
+          <MeasureCampaignSection />
           <RenderLabControls lab={renderLab} />
           <div id="dev-cosmology-slot" />
           <BuildingLodControls />

@@ -4605,6 +4605,10 @@ export class BabylonVillageScene {
       preview: this.#villageSolarPreview !== null,
     };
   }
+  /** Pluie locale et heure du village, pour la campagne de mesures (dev/measure-runner.ts). */
+  public measureEnvironment() {
+    return { rain: Math.round(this.#rainIntensity * 100) / 100, clock: this.getVillageSolarView()?.label ?? null };
+  }
   public setCosmologyPhase(fraction: number | null): void {
     this.#cosmologyPhase = fraction === null ? null : Math.max(0, Math.min(1, fraction)) * TAU;
     this.#cosmologyNextAt = 0;

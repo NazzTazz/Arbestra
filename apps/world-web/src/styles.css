@@ -1870,6 +1870,49 @@ button {
   max-height: calc(100vh - 110px);
   overflow-y: auto;
 }
+.dev-drawer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  color: #eff;
+  background: #0b1a1b;
+  border: 1px solid #679597;
+  font:
+    0.68rem/1.35 ui-monospace,
+    monospace;
+}
+.measure-campaign-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.measure-campaign [role='alert'] {
+  color: #f0c883;
+}
+.measure-campaign-banner {
+  position: fixed;
+  z-index: 70;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: calc(100vw - 32px);
+  padding: 4px 6px 4px 10px;
+  color: #e9f4ef;
+  background: #102224e0;
+  border: 1px solid #639092;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  pointer-events: auto;
+}
+.measure-campaign-banner button {
+  color: #eff;
+  background: #24484a;
+  border: 1px solid #679597;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
 .dev-drawer .cosmology-debug {
   position: static;
   width: auto;

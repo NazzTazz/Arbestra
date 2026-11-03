@@ -110,6 +110,10 @@ export class TerraformUndoStack {
     if (this.#strokes.length > this.limit) this.#strokes.shift();
     return true;
   }
+  /** Le dernier trait relâché, laissé sur la pile. */
+  get last(): TerraformUndoRecord | null {
+    return this.#strokes.at(-1) ?? null;
+  }
   /** The last released stroke, taken off the stack. */
   pop(): TerraformUndoRecord | null {
     return this.#strokes.pop() ?? null;
@@ -225,5 +229,7 @@ export function useTerraformUndo(deps: TerraformUndoDeps) {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [deps.enabled, undo]);
-  return { add, stroke, undo, deadline };
+  // La campagne de mesures (dev/measure-runner.ts) n'annule que les traits qu'elle a tracés.
+  const last = useCallback(() => stack.current.last, []);
+  return { add, stroke, undo, deadline, last };
 }

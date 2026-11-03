@@ -78,6 +78,10 @@ interface VillageSceneProps {
 }
 export interface TerrainHandle {
   terrainVertexHeight: (x: number, y: number) => number | null;
+  /** Pose de la caméra, et sa pose visée (un quart du chemin par appel) : la campagne de mesures. */
+  observationPose: () => ObservationPose | null;
+  applyObservationPose: (pose: ObservationPose) => void;
+  measureEnvironment: () => { rain: number; clock: string | null } | null;
   /** The 3 × 3 terraforming brush at its future heights; null hides it. */
   terraformBrush: (
     brush: { cell: Cell; heights: Float64Array; tone: import('./terraform-brush').BrushTone } | null,
@@ -318,6 +322,9 @@ export function VillageScene({
       viewCenter: () => sceneRef.current?.viewCenter() ?? null,
       naturalFeatures: () => sceneRef.current?.naturalFeatures() ?? [],
       terrainVertexHeight: (x, y) => sceneRef.current?.terrainVertexHeight(x, y) ?? null,
+      observationPose: () => sceneRef.current?.observationPose() ?? null,
+      applyObservationPose: (pose) => sceneRef.current?.applyObservationPose(pose),
+      measureEnvironment: () => sceneRef.current?.measureEnvironment() ?? null,
       terraformBrush: (brush) => sceneRef.current?.terraformBrush(brush),
       demolitionMark: (kind, id) => sceneRef.current?.demolitionMark(kind, id),
       demolitionClear: () => sceneRef.current?.demolitionClear(),
