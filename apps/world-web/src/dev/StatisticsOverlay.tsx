@@ -3,9 +3,12 @@ import { DEV_TIMING_PHASES } from '@arbestra/contracts';
 import {
   CLIENT_COSTS,
   REQUEST_KINDS,
+  resetStatisticsWindow,
   setStatisticsEnabled,
   statisticsEnabled,
+  statisticsReport,
   statisticsSnapshot,
+  statisticsWindowSummary,
   subscribeStatistics,
   type RequestKind,
 } from './statistics';
@@ -19,12 +22,23 @@ export function StatisticsOverlay() {
 }
 function ActiveOverlay() {
   const [data, setData] = useState(statisticsSnapshot),
+    [windowed, setWindowed] = useState(statisticsWindowSummary),
     [kind, setKind] = useState<RequestKind | 'scene'>('village');
   const [sample, setSample] = useState<'first' | 'latest'>('latest');
   useEffect(() => {
-    const timer = window.setInterval(() => setData(statisticsSnapshot()), 500);
+    const timer = window.setInterval(() => {
+      setData(statisticsSnapshot());
+      setWindowed(statisticsWindowSummary());
+    }, 500);
     return () => clearInterval(timer);
   }, []);
+  const copyReport = () => {
+    try {
+      void navigator.clipboard.writeText(JSON.stringify(statisticsReport(), null, 2)).catch(() => undefined);
+    } catch {
+      /* Clipboard is optional. */
+    }
+  };
   const row = kind === 'scene' ? undefined : data.requests.get(kind)?.[sample];
   return (
     <aside className="dev-statistics-overlay" aria-label="Statistiques de performance">
@@ -145,6 +159,24 @@ function ActiveOverlay() {
           );
         })}
       </dl>
+      <p>
+        60 s : p95 {ms(windowed.p95Ms)} ms · &gt; 100 ms : {windowed.over100} · &gt; 200 ms : {windowed.over200} · pire
+        : {ms(windowed.worstMs)} ms
+      </p>
+      <div className="dev-statistics-selectors">
+        <button type="button" onClick={copyReport}>
+          Copier le relevé
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            resetStatisticsWindow();
+            setWindowed(statisticsWindowSummary());
+          }}
+        >
+          Réinitialiser
+        </button>
+      </div>
       <strong>SCÈNE · images achevées sur les 2 dernières secondes</strong>
       <dl>
         <div>

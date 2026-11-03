@@ -28,6 +28,7 @@ export function setStatisticsEnabled(value: boolean) {
   requests.clear();
   clientCosts.clear();
   frames.length = 0;
+  resetStatisticsWindow();
   renderSamples.length = 0;
   gpuSamples.length = 0;
   gpuSupported = null;
@@ -153,9 +154,14 @@ export const CLIENT_COSTS = {
   sse: 'Réception SSE / validation / application',
   scene: 'Mise à jour de la scène',
   terrain: 'Intégration des chunks',
+  hover: 'Survol · recherche de case',
+  terraform: 'Terraformation · prédiction / pinceau',
 } as const;
 type ClientCost = keyof typeof CLIENT_COSTS;
-const clientCosts = new Map<ClientCost, { lastMs: number; maxMs: number; count: number; at: number }>();
+const clientCosts = new Map<
+  ClientCost,
+  { lastMs: number; maxMs: number; totalMs: number; count: number; at: number }
+>();
 export function clientTime<T>(key: ClientCost, run: () => T): T {
   if (!statisticsEnabled()) return run();
   const start = performance.now();
@@ -167,6 +173,7 @@ export function clientTime<T>(key: ClientCost, run: () => T): T {
     clientCosts.set(key, {
       lastMs: ms,
       maxMs: Math.max(ms, previous?.maxMs ?? 0),
+      totalMs: (previous?.totalMs ?? 0) + ms,
       count: (previous?.count ?? 0) + 1,
       at: Date.now(),
     });
@@ -190,6 +197,9 @@ export const FRAME_PHASES = {
   clouds: 'Rendu des nuages CPU',
   diagnostics: 'Diagnostics / fin d’image',
   buildings: 'Construction visuelle progressive',
+  overlayEffects: 'Halos de récolte / surcouches',
+  terraform: 'Terraformation · pinceau / trait',
+  overviewGround: 'Vue régionale · relief',
 } as const;
 type FramePhase = keyof typeof FRAME_PHASES;
 type FrameCosts = Partial<Record<FramePhase, number>>;
@@ -242,6 +252,114 @@ export function recordFrame(start: number, renderMs: number, end: number, phases
     phases,
   });
   if (frames.length > 120) frames.shift();
+  recordWindowFrame(start, end, phases);
+}
+
+/** Sliding window of compact frame records, to check the budgets over a real play session. */
+export const WINDOW_MS = 60_000;
+type WindowFrame = { at: number; ended: number; totalMs: number; phases: FrameCosts };
+let windowFrames: WindowFrame[] = [],
+  windowHead = 0;
+// Counters since the last reset; they outlive the 60 s window.
+let sinceReset = { startedAt: null as number | null, frames: 0, over100: 0, over200: 0, worstMs: 0 };
+export function resetStatisticsWindow() {
+  windowFrames = [];
+  windowHead = 0;
+  sinceReset = { startedAt: null, frames: 0, over100: 0, over200: 0, worstMs: 0 };
+}
+function recordWindowFrame(start: number, end: number, phases: FrameCosts) {
+  const totalMs = end - start;
+  windowFrames.push({ at: start, ended: end, totalMs, phases });
+  while (windowHead < windowFrames.length && end - windowFrames[windowHead]!.ended > WINDOW_MS) windowHead++;
+  // Compact in bulk so the trim stays O(1) amortised.
+  if (windowHead > 1024) {
+    windowFrames = windowFrames.slice(windowHead);
+    windowHead = 0;
+  }
+  sinceReset.startedAt ??= start;
+  sinceReset.frames++;
+  if (totalMs > 100) sinceReset.over100++;
+  if (totalMs > 200) sinceReset.over200++;
+  if (totalMs > sinceReset.worstMs) sinceReset.worstMs = totalMs;
+}
+/** Nearest-rank percentile of an ascending array. */
+export function percentile(sorted: readonly number[], p: number): number | null {
+  if (!sorted.length) return null;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))]!;
+}
+const ascending = (values: number[]) => values.sort((a, b) => a - b);
+/** Cheap summary for the panel: one sort of the totals. */
+export function statisticsWindowSummary() {
+  const totals = ascending(windowFrames.slice(windowHead).map((f) => f.totalMs));
+  return {
+    frames: totals.length,
+    p95Ms: percentile(totals, 95),
+    over100: sinceReset.over100,
+    over200: sinceReset.over200,
+    worstMs: sinceReset.frames ? sinceReset.worstMs : null,
+  };
+}
+function webglRenderer(): string | null {
+  try {
+    const canvas = document.createElement('canvas'),
+      gl = (canvas.getContext('webgl2') ?? canvas.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) return null;
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return renderer;
+  } catch {
+    return null;
+  }
+}
+const rounded = (value: number | null) => (value === null ? null : Math.round(value * 100) / 100);
+/** A plain JSON report of the last 60 s, ready to be pasted into a ticket. */
+export function statisticsReport() {
+  const live = windowFrames.slice(windowHead),
+    first = live[0],
+    last = live.at(-1),
+    totals = ascending(live.map((f) => f.totalMs)),
+    coveredMs = first && last ? last.ended - first.at : 0,
+    elapsed = first && last ? last.at - first.at : 0;
+  return {
+    at: new Date().toISOString(),
+    userAgent: typeof navigator === 'undefined' ? null : navigator.userAgent,
+    webglRenderer: webglRenderer(),
+    window: {
+      coveredSeconds: rounded(coveredMs / 1000),
+      frames: live.length,
+      fps: live.length > 1 && elapsed > 0 ? rounded(((live.length - 1) * 1000) / elapsed) : null,
+      totalMs: {
+        p50: rounded(percentile(totals, 50)),
+        p95: rounded(percentile(totals, 95)),
+        p99: rounded(percentile(totals, 99)),
+        max: rounded(totals.at(-1) ?? null),
+      },
+    },
+    sinceReset: {
+      seconds: rounded(sinceReset.startedAt === null || !last ? 0 : (last.ended - sinceReset.startedAt) / 1000),
+      frames: sinceReset.frames,
+      over100Ms: sinceReset.over100,
+      over200Ms: sinceReset.over200,
+      worstMs: rounded(sinceReset.frames ? sinceReset.worstMs : null),
+    },
+    phases: Object.entries(FRAME_PHASES)
+      .flatMap(([key, label]) => {
+        const phase = key as FramePhase;
+        if (!live.some((f) => f.phases[phase] !== undefined)) return [];
+        const values = ascending(live.map((f) => f.phases[phase] ?? 0));
+        return [{ phase, label, p95Ms: rounded(percentile(values, 95)), maxMs: rounded(values.at(-1) ?? null) }];
+      })
+      .sort((a, b) => (b.p95Ms ?? 0) - (a.p95Ms ?? 0)),
+    clientCosts: [...clientCosts].map(([key, cost]) => ({
+      key,
+      label: CLIENT_COSTS[key],
+      count: cost.count,
+      lastMs: rounded(cost.lastMs),
+      maxMs: rounded(cost.maxMs),
+      totalMs: rounded(cost.totalMs),
+    })),
+  };
 }
 export function statisticsSnapshot() {
   // Keep a long completed frame visible, even when it started over two seconds ago.

@@ -460,7 +460,9 @@ export class BabylonVillageScene {
     }
     if (!this.#space) return;
     this.#terraformBrush ??= new TerraformBrush(this.#scene);
-    this.#terraformBrush.show(brush.cell, brush.heights, brush.tone, this.#space);
+    const shown = this.#terraformBrush,
+      space = this.#space;
+    clientTime('terraform', () => shown.show(brush.cell, brush.heights, brush.tone, space));
   }
   #demolitionTint: DemolitionTint | null = null;
   #demolitionIndex: { state: VillageState; roads: Map<string, RoadPixel[]> } | null = null;
@@ -1713,6 +1715,7 @@ export class BabylonVillageScene {
                 now,
               );
           }
+          frame?.mark('overviewGround');
         }
         if (!this.#initialLoad.ready) {
           this.#advanceBuildings();
@@ -1765,8 +1768,10 @@ export class BabylonVillageScene {
           this.#resourceHalos.update(now, this.#space, this.#store, halosEnabled, zoomOpacity);
           this.#treeHalos.update(now, this.#space, this.#store, halosEnabled, zoomOpacity);
         }
+        frame?.mark('overlayEffects');
         // Construction mode only (null otherwise): follows a live terraforming stroke.
         this.#refreshBuildableGrid();
+        frame?.mark('terraform');
         if (import.meta.env.DEV && now - this.#workerDebugAt > 500) {
           this.#canvas.dataset.workerTraffic = JSON.stringify(this.#workers.metrics);
           this.#workerDebugAt = now;
@@ -1848,8 +1853,10 @@ export class BabylonVillageScene {
           this.#observeInitialLoad(true).phase === 'ready' &&
           this.#initialRoutesStale &&
           this.#state
-        )
-          this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute);
+        ) {
+          this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute, frame);
+          frame?.mark('roadsDebug');
+        }
         if (this.#initialLoad.ready) this.#initialRoutesStale = false;
         const observing =
           this.#mode === 'world' &&
@@ -2416,7 +2423,11 @@ export class BabylonVillageScene {
     };
   }
 
+  /** Timed as « Survol · recherche de case » when the statistics are on; a plain call otherwise. */
   #gridPointAtPointer(event: PointerEvent): Cell | null {
+    return statisticsEnabled() ? clientTime('hover', () => this.#pickGridPoint(event)) : this.#pickGridPoint(event);
+  }
+  #pickGridPoint(event: PointerEvent): Cell | null {
     const bounds = this.#canvas.getBoundingClientRect();
     const ray = this.#scene.createPickingRay(
       event.clientX - bounds.left,
@@ -5107,7 +5118,7 @@ export class BabylonVillageScene {
   }
   /** A terraforming prediction on the displayed ground (TerrainStore.predict). */
   public predictTerrain(vertices: readonly { vertexX: number; vertexY: number; height: number }[]): string[] {
-    return this.#store?.predict(vertices) ?? [];
+    return clientTime('terraform', () => this.#store?.predict(vertices) ?? []);
   }
   /** The server answered the prediction holding these chunks. */
   public releaseTerrain(keys: readonly string[]): void {
@@ -5334,6 +5345,7 @@ export class BabylonVillageScene {
     frame?.mark('demand');
     // A live terraforming stroke: its ground units every frame, not every coalesced demand.
     if (!detailPaused) this.#renderer.queueGroundEdits();
+    frame?.mark('terraform');
     if (!detailPaused) this.#renderer.tick(this.#initialLoad.ready ? TERRAIN_STREAMING.admissionMs : 8);
     frame?.mark('integration');
     const loading: TerrainStatus =

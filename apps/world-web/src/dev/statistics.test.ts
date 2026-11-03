@@ -3,13 +3,17 @@ import { DEV_TIMING_HEADER, parseDevServerTiming } from '@arbestra/contracts';
 import {
   clientTime,
   FrameTimings,
+  percentile,
   recordFrame,
+  resetStatisticsWindow,
   recordRenderMetrics,
   recordGpuTiming,
   requestKind,
   setStatisticsEnabled,
   statisticsEnabled,
+  statisticsReport,
   statisticsSnapshot,
+  statisticsWindowSummary,
   timedFetch,
   timedJson,
 } from './statistics';
@@ -245,5 +249,97 @@ describe('development statistics transport', () => {
     vi.stubGlobal('document', { hidden: true });
     recordFrame(now - 1, 0, now);
     expect(statisticsSnapshot().frame.count).toBe(0);
+  });
+});
+
+describe('sliding statistics window', () => {
+  beforeEach(() => {
+    vi.stubEnv('DEV', true);
+    vi.stubGlobal('document', { hidden: false });
+    setStatisticsEnabled(false);
+  });
+  afterEach(() => {
+    setStatisticsEnabled(false);
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+  /** A frame of the given duration that ends at `end`. */
+  const frame = (end: number, totalMs: number, phases = {}) => recordFrame(end - totalMs, 0, end, phases);
+
+  it('computes nearest-rank percentiles of the total and, per phase, p95 and max sorted by p95', () => {
+    setStatisticsEnabled(true);
+    for (let i = 1; i <= 100; i++) frame(i * 1000, i, { demand: i, render: 1 });
+    // The window keeps the last 60 s, bounds included: frames 40..100.
+    const report = statisticsReport();
+    expect(report.window.frames).toBe(61);
+    expect(report.window.totalMs).toEqual({ p50: 70, p95: 97, p99: 100, max: 100 });
+    expect(report.phases.map((p) => p.phase)).toEqual(['demand', 'render']);
+    expect(report.phases[0]).toMatchObject({ p95Ms: 97, maxMs: 100 });
+    expect(report.phases[1]).toMatchObject({ p95Ms: 1, maxMs: 1 });
+    expect(report.at).toMatch(/^\d{4}-\d\d-\d\dT/);
+    expect(typeof report.userAgent === 'string' || report.userAgent === null).toBe(true);
+    expect(percentile([], 95)).toBeNull();
+  });
+
+  it('counts frames over 100 and 200 ms and the worst one since the reset', () => {
+    setStatisticsEnabled(true);
+    frame(1000, 100);
+    frame(2000, 101);
+    frame(3000, 200);
+    frame(4000, 250);
+    frame(5000, 16);
+    expect(statisticsReport().sinceReset).toMatchObject({ frames: 5, over100Ms: 3, over200Ms: 1, worstMs: 250 });
+    expect(statisticsWindowSummary()).toMatchObject({ over100: 3, over200: 1, worstMs: 250 });
+  });
+
+  it('forgets frames older than 60 s from the percentiles but keeps the counters', () => {
+    setStatisticsEnabled(true);
+    frame(1000, 500);
+    for (let i = 0; i < 10; i++) frame(70_000 + i * 100, 10);
+    const report = statisticsReport();
+    expect(report.window.frames).toBe(10);
+    expect(report.window.totalMs.max).toBe(10);
+    expect(report.sinceReset).toMatchObject({ frames: 11, over200Ms: 1, worstMs: 500 });
+  });
+
+  it('keeps memory bounded over a long session', () => {
+    setStatisticsEnabled(true);
+    for (let i = 0; i < 20_000; i++) frame(i * 16, 5);
+    const report = statisticsReport();
+    // 60 s at 16 ms per frame.
+    expect(report.window.frames).toBeLessThanOrEqual(3751);
+    expect(report.window.frames).toBeGreaterThanOrEqual(3750);
+    expect(report.sinceReset.frames).toBe(20_000);
+  });
+
+  it('resets the window and the counters', () => {
+    setStatisticsEnabled(true);
+    frame(1000, 300);
+    resetStatisticsWindow();
+    expect(statisticsReport().window.frames).toBe(0);
+    expect(statisticsReport().sinceReset).toMatchObject({ frames: 0, over100Ms: 0, over200Ms: 0, worstMs: null });
+    expect(statisticsWindowSummary()).toMatchObject({ frames: 0, p95Ms: null, worstMs: null });
+    frame(2000, 20);
+    expect(statisticsReport().window.frames).toBe(1);
+  });
+
+  it('records nothing when disabled or hidden, and accumulates client costs in the report', () => {
+    frame(1000, 300);
+    expect(statisticsReport().window.frames).toBe(0);
+    expect(statisticsReport().sinceReset.frames).toBe(0);
+    expect(clientTime('hover', () => 1)).toBe(1);
+    expect(statisticsReport().clientCosts).toEqual([]);
+    setStatisticsEnabled(true);
+    vi.stubGlobal('document', { hidden: true });
+    frame(2000, 300);
+    expect(statisticsReport().window.frames).toBe(0);
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (now += 5));
+    clientTime('hover', () => 1);
+    clientTime('hover', () => 2);
+    expect(statisticsReport().clientCosts).toEqual([
+      expect.objectContaining({ key: 'hover', label: 'Survol · recherche de case', count: 2, totalMs: 10 }),
+    ]);
   });
 });
