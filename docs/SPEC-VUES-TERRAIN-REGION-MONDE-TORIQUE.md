@@ -8,7 +8,12 @@ Contexte : un joueur a élevé une « tour » de +200 et ne la voit pas sur le t
 - **Validé** : la vue Régions sert de « grand angle ». La **prochaine tranche visuelle** en fait une vue plus détaillée : terrain plus fidèle, un peu de brume, villageois en transit mondial visibles (même à 2 × 2 px).
 - **Intention de Tristan, à cadrer** : utilité de jeu de cette vue — HUD en mode « monde » (place de marché joueurs, Oracle) ; expéditions envoyées depuis la carte plutôt qu'en saisissant x, y dans un formulaire ; futur brouillard de renseignement.
 - **Proposé** : remplacer la vue torique par une cinématique de 15 s montrant le cycle solaire sur un vrai donut 3D, en récompense d'Astronomie 1 (bouton « Voir la découverte »).
-- **Ouvert** : règles du brouillard de renseignement, contenu exact du HUD monde, geste d'envoi d'une expédition, sort de la transition Région ↔ Monde et des quêtes liées au tore (regard du Chat).
+- **Validé, précisions de Tristan (3 novembre)** :
+  - le regard du Chat s'obtient au **second visionnage** de la cinématique d'Astronomie 1 : les yeux du Chat y apparaissent ;
+  - **HUD monde** : population mondiale, nombre de villages, stock de bois mondial (arbres), stock de pierre mondial (gisements), nombre de joueurs du monde ;
+  - **Science** : envoyer un géographe faire un relevé en deux clics — un clic passe en vue rapprochée « village » sur l'endroit pointé, puis un réticule **violet** à la manière de la terraformation ;
+  - **Marché mondial** : les offres des joueurs, qui remplaceront le marché en carte flottante ; refonte à faire avec Tristan en cycles courts.
+- **Ouvert** : geste d'envoi d'une expédition (plus tard) ; règles du brouillard de renseignement (Tristan y travaille) ; sort de la transition Région ↔ Monde.
 - Ordre : après la fin de la synchro V2 ; pas d'étude ni d'implémentation avant.
 
 ## Décision du 16 octobre 2026 — extérieurs des villages voisins
