@@ -1,5 +1,16 @@
 # Vues Village, Région et Monde torique
 
+## Orientation du 3 novembre 2026 — la vue Régions devient la carte du monde
+
+Contexte : un joueur a élevé une « tour » de +200 et ne la voit pas sur le tore. Le tore est lisse (`CreateTorus`) ; sa texture colore la moyenne d'altitude d'une grille d'au plus 512 × 512, plafonnée à 25, lue dans les altitudes générées (`worldChunks.elevations`) et non dans le terrain RC1 modifié.
+
+- **Validé** : on ne modifie pas le tore (ni relief, ni aperçu des modifications de joueurs).
+- **Validé** : la vue Régions sert de « grand angle ». La **prochaine tranche visuelle** en fait une vue plus détaillée : terrain plus fidèle, un peu de brume, villageois en transit mondial visibles (même à 2 × 2 px).
+- **Intention de Tristan, à cadrer** : utilité de jeu de cette vue — HUD en mode « monde » (place de marché joueurs, Oracle) ; expéditions envoyées depuis la carte plutôt qu'en saisissant x, y dans un formulaire ; futur brouillard de renseignement.
+- **Proposé** : remplacer la vue torique par une cinématique de 15 s montrant le cycle solaire sur un vrai donut 3D, en récompense d'Astronomie 1 (bouton « Voir la découverte »).
+- **Ouvert** : règles du brouillard de renseignement, contenu exact du HUD monde, geste d'envoi d'une expédition, sort de la transition Région ↔ Monde et des quêtes liées au tore (regard du Chat).
+- Ordre : après la fin de la synchro V2 ; pas d'étude ni d'implémentation avant.
+
 ## Décision du 16 octobre 2026 — extérieurs des villages voisins
 
 Tristan valide des bâtiments reconnaissables à leur apparence en vue régionale. Cette décision remplace les restrictions historiques ci-dessous aux seuls pavés anonymes : la projection publique expose désormais le modèle, le niveau visuel, la phase extérieure et le placement nécessaires au rendu, y compris les Jardins. Elle ne révèle ni propriétaire, nom inconnu, identifiant de bâtiment, stock, habitant, mission, production ou échéance. Les bornes restent 32 villages, 64 bâtiments par village et 320 cases par axe.
