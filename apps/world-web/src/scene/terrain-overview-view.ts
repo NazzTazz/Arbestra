@@ -111,6 +111,9 @@ export class RegionalOverview {
   #baseHeights: Float32Array | null = null;
   #groundRevision = NaN;
   #groundAt = -Infinity;
+  /** Lowest detailed sample of each block (NaN: none), and the ground revision at each sheet vertex when read. */
+  #blockLows: Float64Array | null = null;
+  #blockRevisions: Float64Array | null = null;
   /** Detailed-ground samples read by the last refit, for diagnostics and tests. */
   groundSamples = 0;
   constructor(
@@ -190,6 +193,8 @@ export class RegionalOverview {
     this.#vertexCells = new Float64Array(vertexCells);
     this.#baseHeights = new Float32Array(positions.filter((_, i) => i % 3 === 1));
     this.#groundRevision = NaN; // a new sheet is fitted at once, not throttled
+    this.#blockLows = null;
+    this.#blockRevisions = null;
     this.#baseColors = new Float32Array(colors);
     this.#litColors = new Float32Array(colors);
     mesh.material = this.#material;
@@ -238,11 +243,19 @@ export class RegionalOverview {
    * ground exists, each vertex sinks below the lowest sample of the blocks around
    * it, so every triangle stays under the real surface, river beds included:
    * the real bed is what shows through the water. Throttled, never per frame.
+   *
+   * Incremental with `revisionAt` (TerrainStore.groundRevisionAt, a chunk-wide
+   * revision): a block (8 cells, within 2 × 2 chunks) is read again only when
+   * the revision at one of its corners changed. A whole refit read every
+   * streamed block (66 to 140 ms once a second during a terraforming stroke on
+   * staging, 3 November); a stroke now rereads the blocks of its chunks
+   * (docs/SPEC-TERRAFORMATION-OUTIL.md §7.14).
    */
   fitGround(
     ground: (x: number, y: number) => { code: number; height: number } | null,
     revision: number,
     now: number,
+    revisionAt?: (x: number, y: number) => number,
   ): void {
     const mesh = this.#mesh,
       cells = this.#vertexCells,
@@ -262,11 +275,33 @@ export class RegionalOverview {
       return ground(normalize(Math.round(x), w), normalize(Math.round(y), h))?.height ?? null;
     };
     // Lowest detailed sample of each block, NaN where none is streamed.
-    const blocks = new Float64Array(n * n).fill(NaN);
+    const cached = revisionAt !== undefined && this.#blockLows?.length === n * n;
+    const blocks = cached ? this.#blockLows! : new Float64Array(n * n).fill(NaN);
+    // The revision at each sheet vertex: a block is stale when one of its four corners changed.
+    let lattice: Float64Array | null = null,
+      changed: Uint8Array | null = null;
+    if (revisionAt) {
+      const prior = cached ? this.#blockRevisions! : null;
+      lattice = new Float64Array((n + 1) * (n + 1));
+      changed = new Uint8Array((n + 1) * (n + 1));
+      for (let v = 0; v < lattice.length; v++) {
+        lattice[v] = revisionAt(normalize(Math.round(cells[v * 2]!), w), normalize(Math.round(cells[v * 2 + 1]!), h));
+        changed[v] = prior && prior[v] === lattice[v] ? 0 : 1;
+      }
+    }
+    const stale = new Uint8Array(n * n);
+    let staleBlocks = 0;
     for (let j = 0; j < n; j++)
       for (let i = 0; i < n; i++) {
         const x0 = cells[(j * (n + 1) + i) * 2]!,
           y0 = cells[(j * (n + 1) + i) * 2 + 1]!;
+        if (changed) {
+          const v = j * (n + 1) + i;
+          if (!changed[v] && !changed[v + 1] && !changed[v + n + 1] && !changed[v + n + 2]) continue;
+          blocks[j * n + i] = NaN;
+        }
+        stale[j * n + i] = 1;
+        staleBlocks++;
         // Most of the region has no detailed ground: five probes rule a block out.
         const probes = [
           [x0, y0],
@@ -284,10 +319,21 @@ export class RegionalOverview {
           }
         if (low !== Infinity) blocks[j * n + i] = low;
       }
+    this.#blockLows = revisionAt ? blocks : null;
+    this.#blockRevisions = lattice;
+    this.groundSamples = samples;
+    // Nothing stale: the sheet is already fitted.
+    if (!staleBlocks) return;
     const positions = mesh.getVerticesData('position');
     if (!positions) return;
+    const near = (i: number, j: number) =>
+      (i > 0 && j > 0 && stale[(j - 1) * n + i - 1] === 1) ||
+      (i < n && j > 0 && stale[(j - 1) * n + i] === 1) ||
+      (i > 0 && j < n && stale[j * n + i - 1] === 1) ||
+      (i < n && j < n && stale[j * n + i] === 1);
     for (let j = 0; j <= n; j++)
       for (let i = 0; i <= n; i++) {
+        if (!near(i, j)) continue;
         let low = Infinity;
         for (const [bi, bj] of [
           [i - 1, j - 1],
@@ -303,7 +349,6 @@ export class RegionalOverview {
         positions[v * 3 + 1] = Math.min(base[v]!, low - REGIONAL_GROUND_MARGIN);
       }
     mesh.updateVerticesData('position', positions);
-    this.groundSamples = samples;
   }
   shift(x: number, z: number): void {
     for (const mesh of [this.#mesh, this.#masses])

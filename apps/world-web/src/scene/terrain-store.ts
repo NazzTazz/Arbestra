@@ -20,6 +20,10 @@ interface Entry {
   inFlight: boolean;
   chunk?: TerrainChunk;
   groundRevision?: number;
+  /** Revision of the last publication that was not a prediction: the whole chunk may differ. */
+  baseGroundRevision?: number;
+  /** Cells (local index y * chunkSize + x) a prediction changed since, with that revision. */
+  cellRevisions?: Map<number, number>;
   freshAt: number;
   retryAt: number;
   failures: number;
@@ -138,9 +142,18 @@ export class TerrainStore {
         }
     }
     for (const [key, chunk] of copies) {
-      const entry = this.entries.get(key)!;
+      const entry = this.entries.get(key)!,
+        stride = chunk.rc1!.stride,
+        cells = new Set<number>();
+      // A vertex is a corner of the four cells around it (the chunk's own only).
+      for (const index of edited.get(key)!) {
+        const vx = index % stride,
+          vy = Math.floor(index / stride);
+        for (const cy of [vy - 1, vy])
+          for (const cx of [vx - 1, vx]) if (cx >= 0 && cy >= 0 && cx < s && cy < s) cells.add(cy * s + cx);
+      }
       entry.invalidation++;
-      this.#publishGround(entry, chunk);
+      this.#publishGround(entry, chunk, cells);
       entry.mutableSignature = null;
       // Only the ground units reading these vertices are rebuilt
       // (TerrainRenderer.queueGroundEdits), never the whole chunk.
@@ -182,8 +195,18 @@ export class TerrainStore {
     this.invalidate(key);
     return false;
   }
-  #publishGround(entry: Entry, chunk: TerrainChunk) {
-    if (!sameChunkGround(entry.chunk, chunk)) entry.groundRevision = ++this.#groundRevision;
+  /** `predicted`: the only cells a terraforming prediction changed (groundCellRevision). */
+  #publishGround(entry: Entry, chunk: TerrainChunk, predicted?: ReadonlySet<number>) {
+    if (!sameChunkGround(entry.chunk, chunk)) {
+      const revision = (entry.groundRevision = ++this.#groundRevision);
+      if (predicted && entry.chunk) {
+        entry.cellRevisions ??= new Map();
+        for (const cell of predicted) entry.cellRevisions.set(cell, revision);
+      } else {
+        entry.baseGroundRevision = revision;
+        delete entry.cellRevisions;
+      }
+    }
     entry.chunk = chunk;
     entry.featureVersion = ++this.#featureVersions;
   }
@@ -202,6 +225,40 @@ export class TerrainStore {
       this.key(normalize(Math.round(x), this.world.widthCells), normalize(Math.round(y), this.world.heightCells)),
     );
     return entry?.chunk ? entry.groundRevision! : this.#snapshotGroundRevision;
+  }
+  /**
+   * groundRevisionAt, except where ground() can return nothing at all (no
+   * chunk, outside the village snapshot): a constant -1 there, so that a new
+   * snapshot (each applied command of a stroke) does not invalidate the whole
+   * region for a caller that caches by revision (RegionalOverview.fitGround). O(1).
+   */
+  groundSourceRevision(x: number, y: number): number {
+    const { widthCells: w, heightCells: h } = this.world;
+    x = normalize(Math.round(x), w);
+    y = normalize(Math.round(y), h);
+    if (this.entries.get(this.key(x, y))?.chunk) return this.groundRevisionAt(x, y);
+    const r = this.#snapshot.region;
+    return normalize(x - r.originCellX, w) < r.width && normalize(y - r.originCellY, h) < r.height
+      ? this.#snapshotGroundRevision
+      : -1;
+  }
+  /**
+   * The same dependency for one cell: what ground() returns anywhere in the
+   * cell (its four corners) changes only when this changes. A terraforming
+   * prediction moves it for the cells around its vertices only, not for the
+   * rest of the chunk: a road or a path the stroke does not touch keeps its
+   * identity (docs/SPEC-TERRAFORMATION-OUTIL.md §7.14). Any other publication
+   * of the chunk moves every cell of it. O(1).
+   */
+  groundCellRevision(x: number, y: number): number {
+    const { widthCells: w, heightCells: h, chunkSize: s } = this.world;
+    x = normalize(Math.round(x), w);
+    y = normalize(Math.round(y), h);
+    const entry = this.entries.get(this.key(x, y)),
+      chunk = entry?.chunk;
+    if (!chunk) return this.#snapshotGroundRevision;
+    const local = normalize(y - chunk.originCellY, h) * s + normalize(x - chunk.originCellX, w);
+    return entry.cellRevisions?.get(local) ?? entry.baseGroundRevision ?? entry.groundRevision!;
   }
   #own = new Set<string>();
   #features = new Map<string, NaturalFeature>();

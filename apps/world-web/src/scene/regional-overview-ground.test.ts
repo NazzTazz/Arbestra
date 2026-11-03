@@ -98,3 +98,38 @@ it('sinks the sheet under a river bed too, so the real bed shows through the wat
     f.dispose();
   }
 });
+
+it('rereads only the blocks of the chunks a stroke changed, with the same sheet as a full refit (§7.14)', () => {
+  const f = fixture(),
+    full = fixture();
+  try {
+    // Detailed ground around the village, one revision per 32-cell chunk.
+    const heights = new Map<string, number>();
+    const revisions = new Map<string, number>();
+    const height = (x: number, y: number) => heights.get(`${x}:${y}`) ?? (Math.hypot(x - 512, y - 512) < 12 ? 0 : 0.6);
+    const ground = (x: number, y: number) => (x >= 480 && x <= 544 && y >= 480 && y <= 544 ? land(height(x, y)) : null);
+    const revisionAt = (x: number, y: number) => revisions.get(`${Math.floor(x / 32)}:${Math.floor(y / 32)}`) ?? 0;
+    f.overview.fitGround(ground, 1, 0, revisionAt);
+    const first = f.overview.groundSamples;
+    // A stroke lowers 3 cells of chunk 16:16: one refit reads that chunk's blocks only.
+    for (const x of [520, 521, 522]) heights.set(`${x}:520`, -1);
+    revisions.set('16:16', 1);
+    f.overview.groundSamples = 0;
+    f.overview.fitGround(ground, 2, REGIONAL_GROUND_REFIT_MS + 1, revisionAt);
+    // At most the 6 × 6 blocks with a corner in the chunk, 5 probes and 81 samples each.
+    expect(f.overview.groundSamples).toBeGreaterThan(0);
+    expect(f.overview.groundSamples).toBeLessThanOrEqual(36 * 86);
+    expect(f.overview.groundSamples).toBeLessThan(first / 4);
+    // The same sheet as a full refit of the same ground.
+    full.overview.fitGround(ground, 2, 0);
+    expect(f.heights()).toEqual(full.heights());
+    expect(Math.min(...f.heights().map((v) => v.y))).toBeCloseTo(-1 - REGIONAL_GROUND_MARGIN, 5);
+    // Unchanged revisions: nothing read.
+    f.overview.groundSamples = 0;
+    f.overview.fitGround(ground, 3, 2 * REGIONAL_GROUND_REFIT_MS + 2, revisionAt);
+    expect(f.overview.groundSamples).toBe(0);
+  } finally {
+    f.dispose();
+    full.dispose();
+  }
+});

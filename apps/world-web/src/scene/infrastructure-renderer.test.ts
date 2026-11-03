@@ -830,6 +830,156 @@ it('uses the published ground identity before terrace mesh admission and tracks 
   }
 });
 
+it('rebuilds neither roads nor village paths for a terraforming stroke away from them, only for one crossing a path (§7.14)', async () => {
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    material = new StandardMaterial('terrain', scene),
+    roads = new InfrastructureRenderer(scene),
+    automatic = new VillageRoads(scene);
+  const initial = {
+    world: { id: 'stroke-world', generationVersion: 3, widthCells: 512, heightCells: 256, chunkSize: 32 },
+    region: { originCellX: 0, originCellY: 0, width: 1, height: 1, terrainCodes: [1], elevations: [0], features: [] },
+    cells: [],
+    village: { extractions: [] },
+  } as unknown as VillageState;
+  const responses: Array<(response: TerrainResponse | TerrainUpdatesResponse) => void> = [];
+  let now = 0;
+  const store = new TerrainStore(
+      initial,
+      () => new Promise((resolve) => responses.push(resolve)),
+      () => now,
+    ),
+    space = new WorldSpace(512, 256, { cellX: 0, cellY: 0 });
+  const terrain = new TerrainRenderer(
+    scene,
+    store,
+    space,
+    material,
+    material,
+    () => [],
+    () => [],
+    () => [],
+  );
+  const demand = [{ key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 }],
+    plan = emptyInfrastructure();
+  plan.roads = [
+    {
+      id: 'manual-road',
+      operation: 'paint',
+      material: 'earth',
+      width: 4,
+      border: false,
+      points: [
+        { x: 8, y: 8 },
+        { x: 16, y: 8 },
+      ],
+    },
+  ];
+  const route = {
+    id: 'village-path',
+    kind: 'building' as const,
+    destination: { cellX: 6, cellY: 8 },
+    cells: [
+      { cellX: 3, cellY: 8 },
+      { cellX: 6, cellY: 8 },
+    ],
+  };
+  const ground = vi.fn((x: number, y: number) =>
+    terrain.hasGround(x, y) ? (store.ground(x, y)?.height ?? null) : null,
+  );
+  // As BabylonVillageScene.#updateTravelPaths: a global identity and a per-cell one.
+  const cellIdentity = (x: number, y: number) => (terrain.hasGround(x, y) ? store.groundCellRevision(x, y) + 1 : 0);
+  const update = () => {
+    const identity = JSON.stringify([initial.world.id, store.groundRevision, terrain.groundVersion]);
+    roads.update(plan, space, ground, false, terrain.groundVersion, undefined, false, [], {
+      followTerrain: true,
+      groundIdentity: identity,
+      groundCellIdentity: cellIdentity,
+    });
+    automatic.update(
+      'same-routes',
+      [route],
+      space,
+      (cell) => {
+        const height = ground(cell.cellX, cell.cellY);
+        return height === null ? null : { code: 1, height };
+      },
+      true,
+      identity,
+      cellIdentity,
+    );
+  };
+  const paths = () => scene.meshes.filter((m) => m.name.startsWith('village-road-'));
+  try {
+    store.demandChunks(demand);
+    terrain.demand(demand, () => true);
+    now = 100;
+    store.tick();
+    responses[0]!({
+      world: initial.world,
+      chunks: [
+        {
+          chunkX: 0,
+          chunkY: 0,
+          originCellX: 0,
+          originCellY: 0,
+          terrainCodes: Array(34 ** 2).fill(1),
+          elevations: Array(34 ** 2).fill(0),
+          features: [],
+          occupiedCells: [],
+          rc1: {
+            model: 'vertices',
+            stride: 33,
+            heights: Array(33 ** 2).fill(1),
+            water: Array(33 ** 2).fill(0),
+            terraces: [],
+          },
+        },
+      ],
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    terrain.demand(demand, () => true);
+    for (let i = 0; terrain.queued && i < 100; i++) terrain.tick();
+    update();
+    const manual = [...roads.meshes],
+      village = paths();
+    expect(terrain.hasGround(24, 24)).toBe(true);
+    expect(manual.length).toBeGreaterThan(0);
+    expect(village.length).toBeGreaterThan(0);
+    // A 30-frame stroke in the same chunk, far from both: one prediction and its units per frame.
+    for (let frame = 0; frame < 30; frame++) {
+      const x = 20 + (frame % 6),
+        y = 20 + Math.floor(frame / 6);
+      store.predict([
+        { vertexX: x, vertexY: y, height: 2 },
+        { vertexX: x + 1, vertexY: y, height: 2 },
+      ]);
+      terrain.queueGroundEdits();
+      terrain.tick();
+      ground.mockClear();
+      update();
+      // Neither layer read the ground again nor rebuilt a mesh.
+      expect(ground).not.toHaveBeenCalled();
+    }
+    expect(manual.every((m) => !m.isDisposed())).toBe(true);
+    expect(village.every((m) => !m.isDisposed())).toBe(true);
+    // A corner of the village path (cells 3..4 × 7..8) is raised: the path follows, the manual road does not move.
+    store.predict([{ vertexX: 4, vertexY: 8, height: 2 }]);
+    terrain.queueGroundEdits();
+    for (let i = 0; terrain.queued && i < 20; i++) terrain.tick();
+    update();
+    expect(village.some((m) => m.isDisposed())).toBe(true);
+    expect(manual.every((m) => !m.isDisposed())).toBe(true);
+  } finally {
+    automatic.dispose();
+    roads.dispose();
+    terrain.dispose();
+    store.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
 it('retains both road layers when rotation changes the camera mask over already published ground', () => {
   const engine = new NullEngine(),
     scene = new Scene(engine),

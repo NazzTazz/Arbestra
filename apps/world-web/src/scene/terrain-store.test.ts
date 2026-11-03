@@ -132,6 +132,45 @@ describe('terraforming prediction (docs/SPEC-TERRAFORMATION-OUTIL.md §7)', () =
     expect(h.requests.length).toBeGreaterThan(requests);
   });
 
+  it('moves the cell revision of the cells around the predicted vertices only, any other publication moves the chunk (§7.14)', async () => {
+    const h = harness(vertexWorld());
+    h.store.demandChunks([
+      { key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 },
+      { key: '1:0', chunkX: 1, chunkY: 0, visible: true, distance: 0 },
+    ]);
+    h.advance(100);
+    h.requests[0]!.resolve({ world: vertexWorld().world, chunks: [ground(0), ground(1)] });
+    await new Promise((r) => setTimeout(r, 0));
+    const cells: Array<[number, number]> = [];
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 64; x++) cells.push([x, y]);
+    const read = () => new Map(cells.map(([x, y]) => [`${x}:${y}`, h.store.groundCellRevision(x, y)]));
+    const before = read(),
+      chunkBefore = h.store.groundRevisionAt(5, 5);
+    // Where ground() has nothing (no chunk, outside the snapshot): a constant for the regional sheet.
+    expect(h.store.ground(300, 100)).toBeNull();
+    expect(h.store.groundSourceRevision(300, 100)).toBe(-1);
+    expect(h.store.groundSourceRevision(5, 5)).toBe(chunkBefore);
+    // (32,5) is a corner of cells 31..32 × 4..5, across the border of the two chunks.
+    const keys = h.store.predict([{ vertexX: 32, vertexY: 5, height: 3 }]);
+    const after = read();
+    const moved = [...after].filter(([key, value]) => value !== before.get(key)).map(([key]) => key);
+    expect(moved.sort()).toEqual(['31:4', '31:5', '32:4', '32:5']);
+    // The chunk-wide revision moved for the whole chunk, as before.
+    expect(h.store.groundRevisionAt(5, 5)).not.toBe(chunkBefore);
+    // Ground under an unmoved cell is unchanged, under a moved one it is the prediction.
+    expect(h.store.ground(5, 5)!.height).toBe(2.5);
+    expect(h.store.vertexHeight(32, 5)).toBe(3);
+    // The answer differs from the prediction (refused): every cell of chunk 0:0 moves.
+    h.store.release(keys);
+    h.advance(100);
+    h.requests.at(-1)!.resolve({ world: vertexWorld().world, chunks: [ground(0)] });
+    await new Promise((r) => setTimeout(r, 0));
+    const answered = read();
+    for (const [x, y] of cells)
+      if (x < 32) expect(answered.get(`${x}:${y}`)).not.toBe(after.get(`${x}:${y}`));
+      else expect(answered.get(`${x}:${y}`)).toBe(after.get(`${x}:${y}`));
+  });
+
   it('lets the server replace the prediction: a refused vertex comes back, an accepted one causes no redraw', async () => {
     const h = harness(vertexWorld());
     h.demand();

@@ -218,3 +218,11 @@ Recette navigateur restante (dev local, Bressuire) :
 5. Trait plongé dans un lac : une seule page d'eau ; Inspecter vise le milieu de l'eau.
 6. Refus à cause d'un arbre ou d'un rocher : Inspecter pose un anneau rouge à son pied, trois pulsations, puis rien.
 7. **Mesure exigée** (AGENTS.md) : une annulation d'un trait de 60 cases sur Bressuire, profil Performance : aucune image > 100 ms ; coût par image de `LiveStroke` et `TerrainStore.predict` comparable à un trait.
+
+### 7.14 Performance (3 novembre)
+
+**À valider** (branche `perf-terraform-render`). Référence staging (prod, MX230) : Terraformation au repos `render` p95 64–69 ms contre 31 ms en jeu normal ; trait rapide « chemins automatiques » p95 25,8 ms et `fitGround` 66–140 ms chaque seconde ; Ctrl+Z de 60 cases `render` p95 199 ms.
+- **Repos, cause démontrée** (contrôles alternés à caméra fixe) : les plaques de sélection des sites libres, invisibles (alpha 0), étaient dessinées en construction et en terraformation, soit environ 254 appels transparents triés de plus (489 contre 231 en Vue libre) ; sans elles `render` revient au niveau de la Vue libre, la grille ne coûte que 2 à 4 ms. Correctif : plaque à visibilité 0, toujours prélevable (`available-site-plate.ts`) ; elle n'écrit plus de profondeur.
+- **Trait** : identité du sol par case et non plus par chunk (`TerrainStore.groundCellRevision`) : routes, cases de route et braseros d'ancrage ne sont plus reconstruits par un trait, les chemins villageois seulement s'il les traverse ; mises à jour liées au sol et feuille régionale différées jusqu'à 300 ms après la dernière prédiction (`edit-settle.ts`) ; `fitGround` incrémental par bloc (`groundSourceRevision`).
+- **Survol** : déjà une recherche de case par image, constaté ; inchangé. **Ctrl+Z** : en local, ni compilation de shader ni matériau nouveau, appels de dessin constants, coût de rendu égal à celui du repos. L'hypothèse `isReady` n'est pas confirmée ; l'écart staging reste à mesurer.
+- Local, avant → après (même session) : repos 381 → 127 appels de dessin ; trait de 30 cases, images > 100 ms 43 → 5 ; annulation 13,4 → 21,8 images/s. Détail dans le message de commit.

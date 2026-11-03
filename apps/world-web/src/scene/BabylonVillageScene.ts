@@ -180,6 +180,10 @@ const TILE_SIZE = 2.5;
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
 import { DEMOLITION_PULSE_MS, DemolitionTint } from './demolition-tint';
 import { InspectHalo, natureFoot } from './inspect-halo';
+import { EditSettle } from './edit-settle';
+import { createAvailableSitePlate } from './available-site-plate';
+/** Roads, paths and the regional sheet follow the ground this long after the last terraforming prediction (§7.14). */
+const EDIT_SETTLE_MS = 300;
 /** Pulses of an obstacle shown by the Oracle's « Inspecter » (Tristan, 2 November). */
 const INSPECT_PULSES = 3;
 import { flatRoadGeometry } from './infrastructure-surface-geometry';
@@ -762,6 +766,8 @@ export class BabylonVillageScene {
   #projectionVersion = -1;
   #projectionGroundRevision = -1;
   #projectionGroundKey = '';
+  /** Roads, paths, braziers and the regional sheet follow a live terraforming stroke once it settles (edit-settle.ts). */
+  readonly #editSettle = new EditSettle(EDIT_SETTLE_MS);
   #demandAt = 0;
   #metricsAt = 0;
   #frameMs: number[] = [];
@@ -1708,11 +1714,13 @@ export class BabylonVillageScene {
               this.#space,
               this.#space.inverse(this.#camera.target.x, this.#camera.target.z),
             );
-            if (this.#store)
+            // The regional sheet under the streamed ground: after a terraforming stroke, not during it.
+            if (this.#store && this.#editSettle.quiet(now))
               this.#regionalOverview.fitGround(
                 (x, y) => this.#store?.ground(x, y) ?? null,
                 this.#store.groundRevision,
                 now,
+                (x, y) => this.#store?.groundSourceRevision(x, y) ?? 0,
               );
           }
           frame?.mark('overviewGround');
@@ -3706,8 +3714,11 @@ export class BabylonVillageScene {
           this.#renderer?.groundVersion,
         ])
       : undefined;
+    // Per cell, not per chunk: a terraforming stroke changes the identity of the
+    // cells around its vertices only. Roads, road cells, their braziers and the
+    // village paths it does not touch are not rebuilt (§7.14 of the spec).
     const groundCellIdentity = (x: number, y: number) =>
-      `${state.world.id}:${state.world.generationVersion}:${this.#renderer?.hasGround(x, y) ? (this.#store?.groundRevisionAt(x, y) ?? 0) + 1 : 0}`;
+      `${state.world.id}:${state.world.generationVersion}:${this.#renderer?.hasGround(x, y) ? (this.#store?.groundCellRevision(x, y) ?? 0) + 1 : 0}`;
     frame?.mark('roadsPlan');
     if (state.infrastructure) {
       this.#renderer?.setInfrastructure(state.infrastructure);
@@ -4079,25 +4090,21 @@ export class BabylonVillageScene {
 
   #createAvailableSite(site: VillageCell): Mesh {
     const highlighted = this.#highlightedSiteIds.has(site.id);
-    const marker = MeshBuilder.CreateBox(
-      `site-${site.id}`,
-      { height: highlighted ? 0.045 : 0.018, width: highlighted ? 2.3 : 2.15, depth: highlighted ? 2.3 : 2.15 },
+    // Pickable, never drawn (alpha 0): available-site-plate.ts.
+    const marker = createAvailableSitePlate(
       this.#scene,
+      `site-${site.id}`,
+      highlighted,
+      this.#siteMaterial,
+      this.#constructionMode && site.canBuild,
     );
     marker.position.set(site.x, 0.075, site.z);
-    marker.material = this.#siteMaterial;
-    // Picking/preview plates belong only to construction. The LOD fade must
-    // neither reveal them outside that mode nor replace their base opacity.
-    marker.isVisible = this.#constructionMode && site.canBuild;
-    marker.metadata = { baseVisibility: highlighted ? 1 : 0.015 };
     if (highlighted) {
       const border = this.#createConstructionBorder(`site-border-${site.id}`, 2.3);
       border.parent = marker;
       border.isVisible = marker.isVisible;
       border.position.y = 0.03;
       border.material = this.#candidateMaterial;
-    } else {
-      marker.visibility = 0.015;
     }
     return marker;
   }
@@ -5118,6 +5125,7 @@ export class BabylonVillageScene {
   }
   /** A terraforming prediction on the displayed ground (TerrainStore.predict). */
   public predictTerrain(vertices: readonly { vertexX: number; vertexY: number; height: number }[]): string[] {
+    this.#editSettle.edited(performance.now());
     return clientTime('terraform', () => this.#store?.predict(vertices) ?? []);
   }
   /** The server answered the prediction holding these chunks. */
@@ -5284,6 +5292,8 @@ export class BabylonVillageScene {
   #streamTerrain(now: number, frame?: FrameTimings): void {
     if (!this.#space || !this.#store || !this.#renderer || !this.#state) return;
     const started = performance.now();
+    // A held terraforming stroke is an edit in progress, even between two painted cells.
+    if (this.#worldMode === 'terraform' && this.#infrastructureDown) this.#editSettle.edited(now);
     const detailPaused =
       (this.#mode !== 'village' || this.#arrival !== null) && (this.#camera.radius >= 160 || this.#requestedWorld);
     if (this.#store.paused && !detailPaused) {
@@ -5394,6 +5404,12 @@ export class BabylonVillageScene {
         this.updateAreaSelection(...this.#areaRequest);
       }
       frame?.mark('projection');
+      // Not at every frame of a live terraforming stroke: once it settles (§7.14).
+      if (this.#editSettle.request(now)) {
+        this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute, frame);
+        frame?.mark('roadsDebug');
+      }
+    } else if (this.#editSettle.due(now) && this.#initialLoad.ready) {
       this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute, frame);
       frame?.mark('roadsDebug');
     }
