@@ -263,6 +263,8 @@ let windowFrames: WindowFrame[] = [],
 // Counters since the last reset; they outlive the 60 s window.
 let sinceReset = { startedAt: null as number | null, frames: 0, over100: 0, over200: 0, worstMs: 0 };
 export function resetStatisticsWindow() {
+  // « Réinitialiser » repart de zéro pour tout le relevé, coûts client compris.
+  clientCosts.clear();
   windowFrames = [];
   windowHead = 0;
   sinceReset = { startedAt: null, frames: 0, over100: 0, over200: 0, worstMs: 0 };

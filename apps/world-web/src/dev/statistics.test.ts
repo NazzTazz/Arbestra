@@ -316,8 +316,10 @@ describe('sliding statistics window', () => {
   it('resets the window and the counters', () => {
     setStatisticsEnabled(true);
     frame(1000, 300);
+    clientTime('hover', () => 1);
     resetStatisticsWindow();
     expect(statisticsReport().window.frames).toBe(0);
+    expect(statisticsReport().clientCosts).toEqual([]);
     expect(statisticsReport().sinceReset).toMatchObject({ frames: 0, over100Ms: 0, over200Ms: 0, worstMs: null });
     expect(statisticsWindowSummary()).toMatchObject({ frames: 0, p95Ms: null, worstMs: null });
     frame(2000, 20);
