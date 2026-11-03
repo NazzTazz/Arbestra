@@ -115,7 +115,7 @@ import { TerrainRenderer } from './terrain-renderer';
 import { CloudTransition } from './cloud-transition';
 import { LodTransition } from './lod-transition';
 import { RegionalVillages } from './regional-villages';
-import { RegionalOverview, TorusOverview } from './terrain-overview-view';
+import { REGIONAL_GROUND_SAMPLE_BUDGET, RegionalOverview, TorusOverview } from './terrain-overview-view';
 import { RENDER_UNIT_CELLS } from './terrain-unit';
 import { TERRAIN_STREAMING } from './terrain-settings';
 import { bakeScenery, cloneWoodland, type SceneryPart } from './scenery-batch';
@@ -1714,13 +1714,15 @@ export class BabylonVillageScene {
               this.#space,
               this.#space.inverse(this.#camera.target.x, this.#camera.target.z),
             );
-            // The regional sheet under the streamed ground: after a terraforming stroke, not during it.
+            // The regional sheet under the streamed ground: after a terraforming stroke, not during it,
+            // a bounded number of samples per frame.
             if (this.#store && this.#editSettle.quiet(now))
               this.#regionalOverview.fitGround(
                 (x, y) => this.#store?.ground(x, y) ?? null,
                 this.#store.groundRevision,
                 now,
                 (x, y) => this.#store?.groundSourceRevision(x, y) ?? 0,
+                REGIONAL_GROUND_SAMPLE_BUDGET,
               );
           }
           frame?.mark('overviewGround');

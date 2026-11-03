@@ -53,7 +53,10 @@ export class WeatherMap {
       this.#due = serverMs + 2000;
       this.#job = this.#paint(serverMs);
     }
-    const deadline = performance.now() + 2;
+    // The first field is painted at once, during the loading: an empty map meant a dry,
+    // cloudless ground that darkened a few seconds after the village appeared (17 % on
+    // Bressuire at night, 3 November). Later fields keep a 2 ms slice per frame.
+    const deadline = this.paintedAt === null ? Infinity : performance.now() + 2;
     while (this.#job && performance.now() < deadline) {
       if (this.#job.next().done) this.#job = null;
     }
