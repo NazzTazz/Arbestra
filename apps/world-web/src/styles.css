@@ -2524,7 +2524,8 @@ button {
   top: 72px;
   left: 12px;
   z-index: 120;
-  max-height: calc(100dvh - 150px);
+  /* Haut de l’écran seulement : le HUD garde toujours sa place, le reste défile. */
+  max-height: min(40dvh, calc(100dvh - 150px));
   width: min(470px, calc(100vw - 24px));
   box-sizing: border-box;
   overflow: auto;
@@ -2553,6 +2554,12 @@ button {
   margin: 8px 0;
 }
 .dev-statistics-overlay > header {
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  margin: -12px -12px 0;
+  padding: 12px 12px 4px;
+  background: rgba(0, 0, 0, 0.92);
   display: flex;
   align-items: center;
   justify-content: space-between;
