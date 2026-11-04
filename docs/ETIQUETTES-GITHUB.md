@@ -12,6 +12,6 @@ Proposition à créer sur le dépôt (Issues, puis Labels). Les couleurs sont do
 | `docs` | `0075ca` | Documentation, guides, specs. |
 | `bon premier ticket` | `7057ff` | Tâche bornée, bien décrite, adaptée à une première contribution. |
 | `aide bienvenue` | `008672` | Tristan accepte volontiers un coup de main sur ce sujet. |
-| `security` | `b60205` | Sécurité (voir [SECURITY.md](../SECURITY.md)) ; ne pas détailler l'exploitation en public. |
+| `security` | `b60205` | Suivi public d'un correctif de sécurité déjà traité ; les failles se signalent en privé (voir [SECURITY.md](../SECURITY.md)). |
 
-`security` n'est pas dans la liste minimale demandée, mais [SECURITY.md](../SECURITY.md) y renvoie déjà : autant qu'elle existe.
+`security` sert au suivi public, après correctif ; le signalement d'une faille passe par le canal privé de GitHub ([SECURITY.md](../SECURITY.md)).

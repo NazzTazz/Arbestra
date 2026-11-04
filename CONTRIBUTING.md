@@ -157,6 +157,6 @@ N'apporte rien que tu n'aies pas le droit de partager : pas de code copié d'un 
 
 ## Sécurité
 
-Si tu trouves une faille, suis la consigne de [SECURITY.md](SECURITY.md) (une issue avec l'étiquette `security`) et n'y mets pas les détails exploitables : décris le problème sans la recette pour l'utiliser.
+Si tu trouves une faille, **n'ouvre pas d'issue publique** : utilise le signalement privé de GitHub (onglet Security, « Report a vulnerability »), comme l'explique [SECURITY.md](SECURITY.md).
 
 Merci d'être là.
