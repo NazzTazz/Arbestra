@@ -42,7 +42,7 @@ Tristan a d'abord évoqué un délai de 30 s avant suppression, puis la règle d
 
 ## 4. Commande et persistance (proposé)
 
-Modèle : le chantier de nivellement (`admitLeveling` / `completeLevelingAt`, [leveling.ts](../apps/api/src/modules/villages/leveling.ts)).
+Modèle : le chantier de nivellement (`admitLeveling` / `completeLevelingAt`, leveling.ts (retiré)).
 
 - `POST …/demolitions` avec `{ commandId, buildings: [{ id }], roadCells: ["x:y"], equipment: [{ id, version }] }`. La commande est bornée à 64 bâtiments, 1 024 cases de route et 64 braseros. Elle est idempotente par `commandId` ; réutiliser un identifiant avec une autre demande est refusé.
 - Admission :

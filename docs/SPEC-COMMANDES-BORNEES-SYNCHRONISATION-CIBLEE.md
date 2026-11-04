@@ -37,9 +37,9 @@ Références : [audit du 21 octobre](old/AUDIT-COUTS-SERVEUR-2026-10-21.md), [sy
 | [hud-workforce.ts](../apps/api/src/modules/villages/hud-workforce.ts) | Confirmation compacte ; beginVillageEconomy reste large. | Conserver les gestes/reçus ; limiter préparation économique et synthèse. |
 | Oracle, processing, science | Serveur négociant déjà des trames après commit ; projection complète derrière. | Commandes et projections ciblées V2. |
 | [client.ts](../apps/world-web/src/api/client.ts) | Oracle/atelier/science appellent encore requestState sans négociation. | Raccord réel du client dans chaque tranche ; un test de harness seul ne suffit pas. |
-| [sync.ts](../apps/api/src/modules/villages/sync.ts), VillageSyncSession | Nouvelle projection complète quand la révision change ; snapshot à chaque ouverture SSE ; réveil économique depuis la lecture. | Journal ciblé, reprise depuis le curseur appliqué, lectures pures. |
-| [sync-revision.ts](../apps/api/src/modules/villages/sync-revision.ts) | COUNT des marqueurs du monde ; croissance historique et invalidations conservatrices. | Curseurs par périmètre, lectures indexées et rétention bornée. |
-| [sync-projections.ts](../apps/api/src/modules/villages/sync-projections.ts) | Bases exactes en mémoire, partage des lectures en vol. | Réutiliser le partage ; ne plus dépendre d'une ancienne projection complète pour produire un delta. |
+| sync.ts (retiré), VillageSyncSession | Nouvelle projection complète quand la révision change ; snapshot à chaque ouverture SSE ; réveil économique depuis la lecture. | Journal ciblé, reprise depuis le curseur appliqué, lectures pures. |
+| sync-revision.ts (retiré) | COUNT des marqueurs du monde ; croissance historique et invalidations conservatrices. | Curseurs par périmètre, lectures indexées et rétention bornée. |
+| sync-projections.ts (retiré) | Bases exactes en mémoire, partage des lectures en vol. | Réutiliser le partage ; ne plus dépendre d'une ancienne projection complète pour produire un delta. |
 | [harvest-submissions.ts](../apps/api/src/modules/villages/harvest-submissions.ts), [expeditions.ts](../apps/api/src/modules/science/expeditions.ts) | Intentions et reçus durables ; navigation asynchrone. | Conserver leurs règles ; intégrer reçus et effets au protocole commun. |
 | [terrain-routes.ts](../apps/api/src/modules/worlds/terrain-routes.ts) | Terrain déjà chargé séparément, par chunks ; certains aperçus ont un ETag. | Conserver les artefacts ; cibler les modifications et éviter leur duplication dans les réponses de commande. |
 

@@ -132,7 +132,7 @@ C'est déjà l'approche : cellules canoniques et décalages enveloppés autour d
 
 ### Moteur Rust — dépôt voisin Waar-v3, pas encore intégré à Arbestra
 
-Sources principales : [lib.rs](../../../waar-v3/rust/src/lib.rs), [batch.rs](../../../waar-v3/rust/src/batch.rs), [spécification 3.1](../../../waar-v3/docs/combat-engine-v3.1-specification.md).
+Sources principales : lib.rs, batch.rs, spécification 3.1.
 
 **21. Indépendant du framework ? — Oui.**
 Le crate dépend de serde, serde_json et sha2, pas de Symfony/Doctrine/PostgreSQL. Il possède une bibliothèque Rust et une frontière C/JSON. L'indépendance technique est réelle ; l'indépendance du ruleset Waar n'est pas encore complète.

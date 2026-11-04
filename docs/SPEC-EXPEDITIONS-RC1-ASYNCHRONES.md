@@ -74,7 +74,7 @@ Constats de **lecture du code**, sans nouvelle reproduction ni mesure dans cette
 | [scheduled-tasks](../apps/api/src/jobs/scheduled-tasks.ts), [server](../apps/api/src/server.ts) | Scheduler dans le processus API, tâche verrouillée et transaction ouvertes pendant le handler. | Ne pas y attendre le calcul CPU d'une expédition. |
 | [harvest-submissions](../apps/api/src/modules/villages/harvest-submissions.ts) | Soumission et reçu idempotents existent ; traitement via le scheduler économique. | Réutiliser le principe, sans recopier la transaction longue. |
 | [SpawnCompute](../apps/api/src/modules/onboarding/spawn-compute.ts) | Worker CPU persistant et file bornée existent. | Réutiliser les conventions de chargement, messages et arrêt ; adapter au cycle durable propre aux expéditions. |
-| [sync](../apps/api/src/modules/villages/sync.ts) | Contrôle toutes les 2 s, snapshot de jonction, trames, revalidation des droits et buffer borné. | Garder les garanties ; ajouter réveil et reçus sans attendre une projection lourde. |
+| sync (retiré) | Contrôle toutes les 2 s, snapshot de jonction, trames, revalidation des droits et buffer borné. | Garder les garanties ; ajouter réveil et reçus sans attendre une projection lourde. |
 | [use-harvest-tool](../apps/world-web/src/ui/use-harvest-tool.ts) | Reçus de récolte interrogés toutes les secondes. | Leur migration SSE demeure hors scope. |
 
 Références métier : [science](architecture/science.md), [spec Université](SPEC-UNIVERSITE-SCIENCES-DECOUVERTE.md). Références de cohérence : [synchronisation](architecture/village-synchronization.md), [économie](architecture/economy.md), [continuité des représentants](SPEC-DEPLACEMENTS-ET-ANIMATION-CHANTIERS.md).

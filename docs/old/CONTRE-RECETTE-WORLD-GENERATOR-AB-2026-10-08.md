@@ -13,9 +13,9 @@ Inspection navigateur du candidat existant **a6476a95-0a16-402d-8d1b-dde78083d06
 Vite **développement**, checkout courant, Chromium/WebGL2, viewport 1440×1000, canvas 1080×560. Caméra globale initiale alpha −π/2, beta 1,05, rayon 8 ; phase 0, lumière neutre, atmosphère absente. Captures comparables amplification 1 puis 4 ; inspection locale via « Voir un escalier ». Zéro erreur navigateur. Ce parcours n’est pas une nouvelle certification du build production ni un benchmark matériel.
 
 Captures locales ignorées par Git :
-- [Altitude ×1](../../test-results/generator-review-altitude.png).
-- [Altitude ×4](../../test-results/generator-review-altitude-x4.png).
-- [Inspection locale](../../test-results/generator-review-local-altitude.png).
+- Altitude ×1 (retiré).
+- Altitude ×4 (retiré).
+- Inspection locale (retiré).
 - Métadonnées : `test-results/generator-review-browser.json`.
 
 **12 tests existants repassés : 6 purs et 6 API.** La suite API utilise uniquement sa cible gardée `127.0.0.1/arbestra_test`, sans reset ; ses fixtures sont nettoyées. Ces tests verts ne couvrent pas les défauts esthétiques ci-dessous.

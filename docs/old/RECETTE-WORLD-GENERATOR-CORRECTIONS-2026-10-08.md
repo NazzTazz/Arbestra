@@ -74,7 +74,7 @@ Implémentés et vérifiés :
 - apps/world-web/src/world-generator/{PreviewScene,WorldGenerator}.tsx, altitude-color.ts et world-generator.css : rendu, inspection et diagnostics.
 - Tests purs/API, starter-landscape.test.ts et scripts navigateur landscape-{repair,close}.mjs.
 
-Recette rapprochée : quatre poses X/Y montantes/descendantes, rayon passé de23 à7,28 par quatre clics sur +. Changement d'image vérifié, puis conservation exacte du cadrage après aller-retour terrain/altitude. [Marches vues de face](../../test-results/repair-close-1-up.png). Aucun trou observé aux raccords des poses inspectées ; les contremarches deviennent peu visibles lorsqu'on les regarde depuis l'amont. La molette automatisée n'a pas modifié l'image ; sa validation reste distincte de celle des boutons, réussie. Aucun succès de molette n'est revendiqué.
+Recette rapprochée : quatre poses X/Y montantes/descendantes, rayon passé de23 à7,28 par quatre clics sur +. Changement d'image vérifié, puis conservation exacte du cadrage après aller-retour terrain/altitude. Marches vues de face (retiré). Aucun trou observé aux raccords des poses inspectées ; les contremarches deviennent peu visibles lorsqu'on les regarde depuis l'amont. La molette automatisée n'a pas modifié l'image ; sa validation reste distincte de celle des boutons, réussie. Aucun succès de molette n'est revendiqué.
 
 Les dix candidats et le compte QA ont été supprimés, leurs services arrêtés ; les services du jeu et les données utilisateur sont conservés. Le dernier test v2 de copie/ouverture a été rejoué après ce nettoyage : 1 passé, 5 non sélectionnés, sans worker QA concurrent. Builds contracts/API/world-web terminés avec succès ; lint ciblé passé et git diff --check sans erreur.
 
