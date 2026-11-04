@@ -10,6 +10,8 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 
 ## Backlog (après l'alpha du 31 octobre)
 
+Ordre proposé et dépendances : [feuille de route](docs/ROADMAP.md) (4 novembre).
+
 - **Voirie** (S5 et S6 après l'alpha, décision du 3 novembre) : S5 (factory : buissons, tonneau, modèles de placette 2 × 2 et de place 3 × 3 avec leurs ancrages ; Tristan modélise les éléments dans Blender), S6 (achat des places dans le HUD), un accessoire manuel peut remplacer un brasero automatique (souhait validé), raccord des routes de terre en pente ([dette](docs/DETTE-TECHNIQUE.md)).
 - **Synchro V2** ([inventaire](docs/INVENTAIRE-SYNC-V2-2026-10-29.md)) : installation en V2 faite et validée le 1er novembre, lot I ([inventaire du 1er novembre](docs/INVENTAIRE-LOT-I-2026-11-01.md), décisions de Tristan du 1er novembre ; ordre : reçus V2, I.1 et I.2 (validés), I.3 (validée le 3 novembre), I.4 (faite, à valider), migrations ensuite ; retrait de la V1, 426, migrations de nettoyage ; ancienne voirie, nivellement et terraformation différés retirés le 1er novembre, composante `levelingJobs` retirée ; table `leveling_jobs` et type `leveling-site` à la migration de nettoyage), pagination des snapshots de trafic et spatial, couverture de connaissance (1 024 ancres). Proposé, non tranché : tri des autres appels à `state()` (construction, marché, présentation).
 - **Trajets : diagnostic d'architecture rendu** ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md), [invariants](docs/DECISIONS-NAVIGATION-2026-10-31.md)) : décisions de game design ouvertes au §7, directions au §8 ; aucun code de navigation modifié.
