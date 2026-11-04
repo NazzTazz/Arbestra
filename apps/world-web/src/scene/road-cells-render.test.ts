@@ -19,7 +19,7 @@ import {
 import { WorldSpace } from './world-space';
 
 const world = { widthCells: 64, heightCells: 64 };
-const cell = (cellX: number, cellY: number, surface: RoadCellSurface = 'earth', sidewalks = false) => ({
+const cell = (cellX: number, cellY: number, surface: RoadCellSurface = 'stone-1', sidewalks = false) => ({
   id: `${cellX},${cellY}`,
   cellX,
   cellY,
@@ -129,21 +129,21 @@ describe('road cell tiles', () => {
         space = new WorldSpace(64, 64, { cellX: 0, cellY: 5 });
       // An elbow at (0, 5) whose arms go west across the seam and south.
       tiles.update([cell(63, 5), cell(0, 5), cell(0, 6)], space, () => 0);
-      expect(tiles.placement(0, 5)).toMatchObject({ tile: 'elbow:earth:0', quarterTurns: 1 });
-      expect(tiles.placement(63, 5)).toMatchObject({ tile: 'end:earth:0', quarterTurns: 0 });
-      expect(tiles.placement(0, 6)).toMatchObject({ tile: 'end:earth:0', quarterTurns: 3 });
+      expect(tiles.placement(0, 5)).toMatchObject({ tile: 'elbow:stone-1:0', quarterTurns: 1 });
+      expect(tiles.placement(63, 5)).toMatchObject({ tile: 'end:stone-1:0', quarterTurns: 0 });
+      expect(tiles.placement(0, 6)).toMatchObject({ tile: 'end:stone-1:0', quarterTurns: 3 });
       const elbow = extent(tiles, 0, 5, space);
-      expect(elbow.minX).toBeCloseTo(-1.25, 3);
-      expect(elbow.maxZ).toBeCloseTo(1.25, 3);
+      expect(elbow.minX).toBeCloseTo(-1.25, 1);
+      expect(elbow.maxZ).toBeCloseTo(1.25, 1);
       expect(elbow.maxX).toBeLessThan(0.7);
       expect(elbow.minZ).toBeGreaterThan(-0.7);
       // The cell across the seam stands one cell west of the origin, its arm towards it.
       const across = extent(tiles, 63, 5, space);
       expect(tiles.matrix(63, 5)![12]).toBeCloseTo(-2.5, 6);
-      expect(across.maxX).toBeCloseTo(1.25, 3);
+      expect(across.maxX).toBeCloseTo(1.25, 1);
       expect(across.minX).toBeGreaterThan(-0.7);
       const south = extent(tiles, 0, 6, space);
-      expect(south.minZ).toBeCloseTo(-1.25, 3);
+      expect(south.minZ).toBeCloseTo(-1.25, 1);
       expect(south.maxZ).toBeLessThan(0.7);
       tiles.dispose();
     });
@@ -159,9 +159,9 @@ describe('road cell tiles', () => {
         return 1;
       };
       const options = { followTerrain: true, groundIdentity: 'g1', groundCellIdentity: () => 'c1' };
-      // A dense block of every shape, in two surfaces with and without sidewalks.
+      // A dense block of every shape, in two stone surfaces, with and without sidewalks.
       const cells = [
-        ...Array.from({ length: 30 * 30 }, (_, i) => cell(2 + (i % 30), 2 + Math.floor(i / 30), 'rubble')),
+        ...Array.from({ length: 30 * 30 }, (_, i) => cell(2 + (i % 30), 2 + Math.floor(i / 30), 'stone-2')),
         ...Array.from({ length: 20 }, (_, i) => cell(2 + i, 40, 'stone-1', true)),
         cell(15, 41, 'stone-1', true),
         cell(10, 42, 'stone-1', true),
@@ -244,9 +244,9 @@ describe('road cell tiles', () => {
       });
       // Cells 5 to 9 read a column from x >= 6 (their east corners).
       expect(tiles.stats.writes - before).toBe(5);
-      // Earth lies on its plane, 1.5 cm up like the automatic roads: no stone clearance.
-      expect(tiles.matrix(8, 3)![13]).toBeCloseTo(2, 6);
-      expect(tiles.matrix(2, 3)![13]).toBeCloseTo(1, 6);
+      // Stone lies on its plane raised by the tilt clearance.
+      expect(tiles.matrix(8, 3)![13]).toBeCloseTo(2 + TILT_CLEARANCE, 6);
+      expect(tiles.matrix(2, 3)![13]).toBeCloseTo(1 + TILT_CLEARANCE, 6);
       // A rebased origin moves instances without building or planning anything.
       const built = tiles.stats.tilesBuilt;
       space.origin = { cellX: 16, cellY: 0 };

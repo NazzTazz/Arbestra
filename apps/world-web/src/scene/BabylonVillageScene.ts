@@ -35,6 +35,7 @@ import { clonePreviewMaterial, bakedPlanKey, loadBakedBuilding, buildingAssets }
 import { buildInfrastructurePresentation } from './infrastructure-factory';
 import { InfrastructureRenderer, type InfrastructureGesture } from './infrastructure-renderer';
 import { RoadCellTiles } from './road-cell-tiles';
+import { RoadCellSurfaces } from './road-cell-surfaces';
 import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
 import { RoadAnchorBraziers, RoadAnchorGhost, RoadAnchorMarkers } from './road-anchor-braziers';
 import { TerraformBrush, type BrushTone } from './terraform-brush';
@@ -558,6 +559,7 @@ export class BabylonVillageScene {
   #infrastructureRenderer: InfrastructureRenderer | null = null;
   #infrastructurePreview: InfrastructureRenderer | null = null;
   #roadCellTiles: RoadCellTiles | null = null;
+  #roadCellSurfaces: RoadCellSurfaces | null = null;
   #roadCellPreview: RoadCellPreview | null = null;
   #roadAnchorBraziers: RoadAnchorBraziers | null = null;
   #roadAnchorMarkers: RoadAnchorMarkers | null = null;
@@ -3738,9 +3740,30 @@ export class BabylonVillageScene {
       );
       this.#infrastructureRenderer.visible(this.#mode !== 'world');
     }
-    // Road cells are thin instances of prepared tiles (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.6):
-    // a gesture rewrites the instances of its cells and their neighbours, never
-    // geometry, and never the historical stroke plan drawn above until S3.
+    // Earth and rubble road cells follow the ground vertex by vertex, like automatic roads
+    // (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.6): a gesture rebuilds the 8 × 8 cell sector it touches.
+    if (state.roadCells?.length || this.#roadCellSurfaces) {
+      const started = performance.now();
+      this.#roadCellSurfaces ??= new RoadCellSurfaces(this.#scene);
+      this.#roadCellSurfaces.update(
+        state.roadCells,
+        this.#space!,
+        (x, y) => (this.#renderer?.hasGround(x, y) ? (this.#store?.ground(x, y)?.height ?? null) : null),
+        { followTerrain: state.world.generationVersion === 3, groundIdentity, groundCellIdentity },
+      );
+      this.#roadCellSurfaces.visible(this.#mode !== 'world');
+      if (import.meta.env.DEV) {
+        const ended = performance.now();
+        if (ended - started > 0.5) {
+          // Browser checks: when each rebuild ran and its cost (last 20).
+          const log = (this.#canvas.dataset.roadSurfacesUpdates ?? '').split(' ').filter(Boolean).slice(-19);
+          log.push(`${ended.toFixed(0)}:${(ended - started).toFixed(1)}`);
+          this.#canvas.dataset.roadSurfacesUpdates = log.join(' ');
+        }
+      }
+    }
+    // Stone road cells are thin instances of prepared tiles (§4.6):
+    // a gesture rewrites the instances of its cells and their neighbours, never geometry.
     if (state.roadCells?.length || this.#roadCellTiles) {
       const started = performance.now();
       this.#roadCellTiles ??= new RoadCellTiles(this.#scene, { prewarm: true });
@@ -4892,6 +4915,7 @@ export class BabylonVillageScene {
     for (const mesh of this.#previewMeshes) mesh.setEnabled(mode === 'village');
     this.#infrastructureRenderer?.visible(mode !== 'world');
     this.#roadCellTiles?.visible(mode !== 'world');
+    this.#roadCellSurfaces?.visible(mode !== 'world');
     this.#infrastructurePreview?.visible(mode === 'village');
     this.#roadCellPreview?.visible(mode === 'village');
     this.#roadAnchorPreview?.visible(mode === 'village');
@@ -5550,6 +5574,7 @@ export class BabylonVillageScene {
     this.#infrastructureHoverEvent = null;
     this.#infrastructureRenderer?.dispose();
     this.#roadCellTiles?.dispose();
+    this.#roadCellSurfaces?.dispose();
     this.#infrastructurePreview?.dispose();
     this.#roadCellPreview?.dispose();
     this.#roadAnchorPreview?.dispose();

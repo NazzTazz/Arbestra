@@ -15,11 +15,13 @@ import type { Scene } from '@babylonjs/core/scene';
 import { BuildingGeometry } from './building-geometry';
 import { curbStonePiece, masonryPieces } from './infrastructure-renderer';
 import { flatRoadGeometry } from './infrastructure-surface-geometry';
+import { isSectorSurface } from './road-cell-surfaces';
 import { sidewalkPaving } from './sidewalk-paving';
 import { CELL_UNITS, WorldSpace } from './world-space';
 
 /**
- * Road cells drawn as thin instances of prepared tiles
+ * Stone road cells drawn as thin instances of prepared tiles (earth and
+ * rubble cells follow the ground vertex by vertex: road-cell-surfaces.ts)
  * (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.6, S2c): one mesh per
  * shape × surface × sidewalks, built once on first use from the same raster,
  * masonry and curb recipes as the stroke renderer, for one canonical cell.
@@ -432,7 +434,9 @@ export class RoadCellTiles {
     for (const key of touched) {
       const cell = this.#byKey.get(key),
         placed = this.#placed.get(key);
-      if (!cell) {
+      // La terre et les gravats sont dessinés par secteurs (road-cell-surfaces.ts) : ils comptent
+      // comme voisines des tuiles de pierre, mais n'ont pas d'instance.
+      if (!cell || isSectorSurface(cell.surface)) {
         if (placed) this.#remove(key, placed);
         continue;
       }
