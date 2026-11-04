@@ -3,8 +3,8 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { RoadCellSurface } from '@arbestra/contracts';
-import { RoadCellSurfaces } from './road-cell-surfaces';
-import { RoadCellTiles } from './road-cell-tiles';
+import { RoadCellSurfaces, STONE_CLEARANCE } from './road-cell-surfaces';
+import { roadTileGeometry } from './road-cell-tiles';
 import { VillageRoads } from './village-roads';
 import { WorldSpace } from './world-space';
 
@@ -51,6 +51,7 @@ const options = (identity = 'g1') => ({
   groundCellIdentity: () => 'c1',
 });
 const kinds = (meshes: readonly Mesh[]) => new Set(meshes.map((m) => m.name.split(':')[0]));
+const named = (meshes: readonly Mesh[], prefix: string) => meshes.filter((m) => m.name.startsWith(prefix));
 
 describe('earth and rubble road cells follow the ground', () => {
   it('lie on the terrain vertex by vertex, as the automatic roads do, on an uneven slope', () => {
@@ -101,56 +102,137 @@ describe('earth and rubble road cells follow the ground', () => {
       );
       // The surface is there at once; the curbs wait for their slices.
       expect(kinds(surfaces.meshes)).toEqual(new Set(['infrastructure-rubble']));
-      expect(surfaces.pendingCurbs).toBe(4);
+      expect(surfaces.pendingJobs).toBe(4);
       surfaces.settle();
-      expect(surfaces.pendingCurbs).toBe(0);
+      expect(surfaces.pendingJobs).toBe(0);
       expect(kinds(surfaces.meshes)).toEqual(new Set(['infrastructure-rubble', 'infrastructure-border']));
-      const curbs = surfaces.meshes.filter((m) => m.name.startsWith('infrastructure-border'));
       // Every curb vertex is 4 mm (foot) or 6.4 cm (top) above the ground under it.
-      expect(offsets(curbs, space)).toEqual([mm(CURB), mm(CURB + 0.06)]);
+      expect(offsets(named(surfaces.meshes, 'infrastructure-border'), space)).toEqual([mm(CURB), mm(CURB + 0.06)]);
       surfaces.dispose();
     });
   });
+});
 
-  it('are not drawn as tiles, and stone cells are not drawn as sectors', () => {
+describe('stone road cells follow the ground too', () => {
+  it('lie on the terrain vertex by vertex, paving and sidewalks, with the clearance they always had', () => {
     withScene((scene) => {
       const space = new WorldSpace(64, 64, { cellX: 20, cellY: 20 }),
-        surfaces = new RoadCellSurfaces(scene),
-        tiles = new RoadCellTiles(scene);
-      const cells = [
-        cell(20, 20),
-        cell(21, 20, 'stone-1'),
-        cell(22, 20, 'rubble', true),
-        cell(21, 21, 'stone-2', true),
+        surfaces = new RoadCellSurfaces(scene);
+      const line = [
+        ...[20, 21, 22].map((x) => cell(x, 20, 'stone-1', true)),
+        ...[20, 21, 22].map((x) => cell(x, 22, 'stone-2', false)),
+        cell(22, 21, 'stone-2'),
       ];
-      surfaces.update(cells, space, relief, options());
+      surfaces.update(line, space, relief, options());
       surfaces.settle();
-      tiles.update(cells, space, relief, options());
-      expect(tiles.placement(20, 20)).toBeNull();
-      expect(tiles.placement(22, 20)).toBeNull();
-      // The stone neighbours keep their arms towards the earth and rubble cells.
-      expect(tiles.placement(21, 20)).toMatchObject({ tile: 't:stone-1:0' });
-      expect(tiles.placement(21, 21)).toMatchObject({ quarterTurns: 3 });
       expect(kinds(surfaces.meshes)).toEqual(
-        new Set(['infrastructure-earth', 'infrastructure-rubble', 'infrastructure-border']),
+        new Set(['infrastructure-stone-1', 'infrastructure-stone-2', 'infrastructure-border']),
       );
-      // A cell restyled from stone to earth leaves the tiles.
-      tiles.update([cell(20, 20), cell(21, 20, 'earth'), cell(22, 20, 'rubble', true)], space, relief, options());
-      expect(tiles.placement(21, 20)).toBeNull();
-      tiles.dispose();
+      // Pavers are 4 cm thick and top out 3 mm above the ground (+ clearance); curbs 4 mm to 6.4 cm.
+      const top = 0.003 + STONE_CLEARANCE;
+      for (const code of ['infrastructure-stone-1', 'infrastructure-stone-2'])
+        expect(offsets(named(surfaces.meshes, code), space)).toEqual([mm(top - 0.04), mm(top)]);
+      expect(offsets(named(surfaces.meshes, 'infrastructure-border'), space)).toEqual([
+        mm(CURB + STONE_CLEARANCE),
+        mm(CURB + 0.06 + STONE_CLEARANCE),
+      ]);
       surfaces.dispose();
     });
   });
 
-  it('rebuild one sector per pose with bounded ground reads, and nothing for an unrelated terrain stroke', () => {
+  it('is the flat tile, as drawn before, on flat ground, whatever its quarter turns', () => {
+    withScene((scene) => {
+      const space = new WorldSpace(64, 64, { cellX: 20, cellY: 20 }),
+        surfaces = new RoadCellSurfaces(scene);
+      // Two cells in a column: each is a straight tile turned one quarter (north-south), an `end` at the top.
+      surfaces.update([cell(20, 20, 'stone-1', true), cell(20, 21, 'stone-1', true)], space, () => 1, options());
+      surfaces.settle();
+      const end = roadTileGeometry('end', 'stone-1', true),
+        centre = space.project({ cellX: 20, cellY: 20 });
+      const baked = surfaces.meshes.filter((m) => m.name.startsWith('infrastructure-stone-1'));
+      expect(baked).toHaveLength(1);
+      // The end tile (arm east) turned to south: (x, z) -> (-z, x); same heights as the flat tile, 1 m + clearance.
+      const found = new Set<string>();
+      const p = baked[0]!.getVerticesData('position')!;
+      for (let i = 0; i < p.length; i += 3)
+        found.add([p[i], p[i + 1], p[i + 2]].map((v) => Math.round(v! * 1e4)).join());
+      const t = end.pavement!.positions!;
+      let matched = 0;
+      for (let i = 0; i < t.length; i += 3) {
+        const key = [centre.x - t[i + 2]!, t[i + 1]! + 1 + STONE_CLEARANCE, centre.z + t[i]!]
+          .map((v) => Math.round(v * 1e4))
+          .join();
+        if (found.has(key)) matched++;
+      }
+      expect(matched).toBe(t.length / 3);
+      surfaces.dispose();
+    });
+  });
+
+  it('turns its arms towards the neighbouring cells, across the toric seam', () => {
+    withScene((scene) => {
+      const space = new WorldSpace(64, 64, { cellX: 0, cellY: 5 }),
+        surfaces = new RoadCellSurfaces(scene);
+      // An elbow at (0, 5) whose arms go west across the seam and south.
+      surfaces.update(
+        [cell(63, 5, 'stone-1'), cell(0, 5, 'stone-1'), cell(0, 6, 'stone-1')],
+        space,
+        () => 0,
+        options(),
+      );
+      surfaces.settle();
+      const xs: number[] = [],
+        zs: number[] = [];
+      for (const mesh of surfaces.meshes) {
+        const p = mesh.getVerticesData('position')!;
+        for (let i = 0; i < p.length; i += 3) {
+          xs.push(p[i]!);
+          zs.push(p[i + 2]!);
+        }
+      }
+      // The cell across the seam stands one cell west of the origin; the south cell one cell south.
+      expect(Math.min(...xs)).toBeCloseTo(-2.5 - 0.625, 1);
+      expect(Math.max(...xs)).toBeLessThan(0.7);
+      expect(Math.max(...zs)).toBeCloseTo(2.5 + 0.625, 1);
+      expect(Math.min(...zs)).toBeGreaterThan(-0.7);
+      surfaces.dispose();
+    });
+  });
+
+  it('keeps the old surface until the new one is complete, then swaps it', () => {
+    withScene((scene) => {
+      const space = new WorldSpace(64, 64, { cellX: 20, cellY: 20 }),
+        surfaces = new RoadCellSurfaces(scene);
+      const line = [20, 21, 22].map((x) => cell(x, 20, 'stone-1', true));
+      surfaces.update(line, space, relief, options());
+      surfaces.settle();
+      const before = surfaces.meshes;
+      expect(before.length).toBeGreaterThan(0);
+      surfaces.update([...line, cell(23, 20, 'stone-1', true)], space, relief, options());
+      // The new cell and its neighbour are not drawn yet: nothing has been taken away meanwhile.
+      expect(surfaces.pendingJobs).toBe(4);
+      expect(surfaces.meshes).toEqual(before);
+      expect(before.every((m) => !m.isDisposed())).toBe(true);
+      surfaces.settle();
+      expect(surfaces.pendingJobs).toBe(0);
+      expect(before.every((m) => m.isDisposed())).toBe(true);
+      expect(surfaces.meshes.length).toBeGreaterThan(0);
+      surfaces.dispose();
+    });
+  });
+});
+
+describe('road cell sectors', () => {
+  it('redo one sector per pose with bounded ground reads, and nothing for an unrelated terrain stroke', () => {
     withScene((scene) => {
       const space = new WorldSpace(64, 64, { cellX: 20, cellY: 20 }),
         surfaces = new RoadCellSurfaces(scene);
       let bump = 0;
       const ground = (x: number, y: number) => relief(x, y) + (Math.round(x) === 30 && Math.round(y) === 30 ? bump : 0);
-      // A dense village: 3 × 3 sectors of earth (24 × 24 cells) with sidewalks on part of them.
+      // A dense village: 3 × 3 sectors of earth, a sixth of it stone, with sidewalks on part of them.
+      const surface = (i: number): RoadCellSurface => (i % 6 === 0 ? 'stone-1' : 'earth');
       const cells = Array.from({ length: 24 * 24 }, (_, i) =>
-        cell(8 + (i % 24), 8 + Math.floor(i / 24), 'earth', i % 5 === 0),
+        cell(8 + (i % 24), 8 + Math.floor(i / 24), surface(i), i % 5 === 0),
       );
       surfaces.update(cells, space, ground, options('g1'));
       surfaces.settle();
@@ -160,7 +242,7 @@ describe('earth and rubble road cells follow the ground', () => {
         built: surfaces.stats.sectorsBuilt - start.built,
         reads: surfaces.stats.groundReads - start.reads,
       });
-      // The same content in a new array and the same ground: nothing is read, nothing rebuilt.
+      // The same content in a new array and the same ground: nothing is read, nothing is redone.
       let start = mark();
       surfaces.update([...cells], space, ground, options('g1'));
       expect(since(start)).toEqual({ built: 0, reads: 0 });
@@ -180,19 +262,18 @@ describe('earth and rubble road cells follow the ground', () => {
       ]);
       // A sector's surface reads each point once: at most 33 × 33 quarter-cell positions for 8 × 8 cells.
       expect(since(start).reads).toBeLessThanOrEqual(33 * 33);
-      // A cell inside the block restyled: its own sector only, curbs of its sidewalk cells included.
+      // A cell inside the block restyled: its own sector only (a full sector of 64 cells reads about 5 000 points).
       const restyled = placed.map((c) => (c.cellX === 12 && c.cellY === 12 ? { ...c, surface: 'rubble' as const } : c));
       start = mark();
       surfaces.update(restyled, space, ground, options('g2'));
       expect(since(start).built).toBe(1);
-      // A full sector (64 cells, every one connected) reads about 5 000 points, whatever the size of the village.
       expect(since(start).reads).toBeLessThanOrEqual(8 * 33 * 33);
-      // Its curbs follow in slices, for the sidewalk cells of that sector only (13 of its 64).
-      const pending = surfaces.pendingCurbs;
+      // Its curbs and stone follow in slices, for the cells of that sector only.
+      const pending = surfaces.pendingJobs;
       expect(pending).toBeGreaterThan(0);
       expect(pending).toBeLessThanOrEqual(64);
       surfaces.settle();
-      expect(surfaces.pendingCurbs).toBe(0);
+      expect(surfaces.pendingJobs).toBe(0);
       // A ground change under one cell: the sectors that read it, not the others.
       start = mark();
       bump = 0.5;
@@ -234,11 +315,11 @@ describe('earth and rubble road cells follow the ground', () => {
     });
   });
 
-  it('moves with a rebased origin without rebuilding anything', () => {
+  it('moves with a rebased origin without redoing anything', () => {
     withScene((scene) => {
       const space = new WorldSpace(64, 64, { cellX: 20, cellY: 20 }),
         surfaces = new RoadCellSurfaces(scene);
-      const cells = [cell(20, 20), cell(21, 20), cell(22, 20, 'rubble', true)];
+      const cells = [cell(20, 20), cell(21, 20), cell(22, 20, 'rubble', true), cell(23, 20, 'stone-2')];
       surfaces.update(cells, space, relief, options());
       surfaces.settle();
       const meshes = surfaces.meshes,

@@ -34,8 +34,8 @@ import { buildUniversityMonuments } from './university-factory';
 import { clonePreviewMaterial, bakedPlanKey, loadBakedBuilding, buildingAssets } from './building-assets';
 import { buildInfrastructurePresentation } from './infrastructure-factory';
 import { InfrastructureRenderer, type InfrastructureGesture } from './infrastructure-renderer';
-import { RoadCellTiles } from './road-cell-tiles';
 import { RoadCellSurfaces } from './road-cell-surfaces';
+import { roadCellLinks, type RoadCellLinks } from './road-cell-links';
 import { RoadCellPreview, type RoadCellPreviewTone } from './road-cell-preview';
 import { RoadAnchorBraziers, RoadAnchorGhost, RoadAnchorMarkers } from './road-anchor-braziers';
 import { TerraformBrush, type BrushTone } from './terraform-brush';
@@ -558,7 +558,6 @@ export class BabylonVillageScene {
   }
   #infrastructureRenderer: InfrastructureRenderer | null = null;
   #infrastructurePreview: InfrastructureRenderer | null = null;
-  #roadCellTiles: RoadCellTiles | null = null;
   #roadCellSurfaces: RoadCellSurfaces | null = null;
   #roadCellPreview: RoadCellPreview | null = null;
   #roadAnchorBraziers: RoadAnchorBraziers | null = null;
@@ -3662,6 +3661,8 @@ export class BabylonVillageScene {
     accesses: ReturnType<typeof buildingAccesses>;
     occupied: Set<string>;
     displayRoutes: ReturnType<typeof villageRoadDisplayRoutes>;
+    /** Jonctions entre routes automatiques et cases de route : calculées avec l'état dérivé, jamais par image. */
+    links: RoadCellLinks;
     fires: ReturnType<typeof automaticBraziers>;
     /** Legacy fire positions in eighths (`x:y`): an anchor brazier there is not drawn twice. */
     legacyFires: Set<string>;
@@ -3691,6 +3692,7 @@ export class BabylonVillageScene {
       fires,
       legacyFires: new Set(this.#infrastructureEquipment.map((p) => `${p.x}:${p.y}`)),
       displayRoutes: villageRoadDisplayRoutes(state),
+      links: roadCellLinks(state),
     };
   }
   #renderLab: RenderLab | null = null;
@@ -3709,7 +3711,7 @@ export class BabylonVillageScene {
     // derived data by identity instead of serializing the whole village again
     // (~1 s per camera rotation on alpha Catmark, browser profile).
     if (this.#travelDerived?.state !== state) this.#deriveTravel(state);
-    const { accesses, occupied, fires, displayRoutes } = this.#travelDerived!;
+    const { accesses, occupied, fires, displayRoutes, links } = this.#travelDerived!;
     const groundIdentity = this.#store
       ? JSON.stringify([
           state.world.id,
@@ -3740,8 +3742,8 @@ export class BabylonVillageScene {
       );
       this.#infrastructureRenderer.visible(this.#mode !== 'world');
     }
-    // Earth and rubble road cells follow the ground vertex by vertex, like automatic roads
-    // (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.6): a gesture rebuilds the 8 × 8 cell sector it touches.
+    // Road cells follow the ground vertex by vertex, like automatic roads
+    // (docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md §4.6): a gesture redoes the 8 × 8 cell sectors it touches.
     if (state.roadCells?.length || this.#roadCellSurfaces) {
       const started = performance.now();
       this.#roadCellSurfaces ??= new RoadCellSurfaces(this.#scene);
@@ -3749,39 +3751,19 @@ export class BabylonVillageScene {
         state.roadCells,
         this.#space!,
         (x, y) => (this.#renderer?.hasGround(x, y) ? (this.#store?.ground(x, y)?.height ?? null) : null),
-        { followTerrain: state.world.generationVersion === 3, groundIdentity, groundCellIdentity },
+        { followTerrain: state.world.generationVersion === 3, groundIdentity, groundCellIdentity, links: links.masks },
       );
       this.#roadCellSurfaces.visible(this.#mode !== 'world');
       if (import.meta.env.DEV) {
         const ended = performance.now();
         if (ended - started > 0.5) {
-          // Browser checks: when each rebuild ran and its cost (last 20).
+          // Browser checks: when each update ran and its cost (last 20), and the deferred slices (last 60).
           const log = (this.#canvas.dataset.roadSurfacesUpdates ?? '').split(' ').filter(Boolean).slice(-19);
           log.push(`${ended.toFixed(0)}:${(ended - started).toFixed(1)}`);
           this.#canvas.dataset.roadSurfacesUpdates = log.join(' ');
         }
+        this.#canvas.dataset.roadSurfacesSlices = this.#roadCellSurfaces.stats.slices.join(' ');
       }
-    }
-    // Stone road cells are thin instances of prepared tiles (§4.6):
-    // a gesture rewrites the instances of its cells and their neighbours, never geometry.
-    if (state.roadCells?.length || this.#roadCellTiles) {
-      const started = performance.now();
-      this.#roadCellTiles ??= new RoadCellTiles(this.#scene, { prewarm: true });
-      const touched = this.#roadCellTiles.update(
-        state.roadCells,
-        this.#space!,
-        (x, y) => (this.#renderer?.hasGround(x, y) ? (this.#store?.ground(x, y)?.height ?? null) : null),
-        { followTerrain: state.world.generationVersion === 3, groundIdentity, groundCellIdentity },
-      );
-      if (touched && import.meta.env.DEV) {
-        const ended = performance.now();
-        this.#canvas.dataset.roadCellsUpdateMs = (ended - started).toFixed(1);
-        // Browser checks: when each update ran, its cost and the cells it rewrote (last 20).
-        const log = (this.#canvas.dataset.roadCellsUpdates ?? '').split(' ').filter(Boolean).slice(-19);
-        log.push(`${ended.toFixed(0)}:${(ended - started).toFixed(1)}:${touched}`);
-        this.#canvas.dataset.roadCellsUpdates = log.join(' ');
-      }
-      this.#roadCellTiles.visible(this.#mode !== 'world');
     }
     frame?.mark('roadsManual');
     this.#renderer?.setRoads(displayRoutes);
@@ -3861,6 +3843,7 @@ export class BabylonVillageScene {
         state.world.generationVersion === 3,
         groundIdentity,
         groundCellIdentity,
+        links.stubs,
       );
     frame?.mark('roadsAutomatic');
     const routes = selectedRouteId
@@ -4914,7 +4897,6 @@ export class BabylonVillageScene {
     this.#buildableArea?.setEnabled(mode === 'village');
     for (const mesh of this.#previewMeshes) mesh.setEnabled(mode === 'village');
     this.#infrastructureRenderer?.visible(mode !== 'world');
-    this.#roadCellTiles?.visible(mode !== 'world');
     this.#roadCellSurfaces?.visible(mode !== 'world');
     this.#infrastructurePreview?.visible(mode === 'village');
     this.#roadCellPreview?.visible(mode === 'village');
@@ -5573,7 +5555,6 @@ export class BabylonVillageScene {
     this.#infrastructureHoverFrame = 0;
     this.#infrastructureHoverEvent = null;
     this.#infrastructureRenderer?.dispose();
-    this.#roadCellTiles?.dispose();
     this.#roadCellSurfaces?.dispose();
     this.#infrastructurePreview?.dispose();
     this.#roadCellPreview?.dispose();
