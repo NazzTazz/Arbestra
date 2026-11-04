@@ -1,6 +1,6 @@
 # Reprise — état au 31 octobre 2026
 
-Index court : une ligne par chantier, le détail est dans la spec ou l'inventaire liés. Preuves, mesures et incidents des tranches : [archive du 30 octobre](docs/HANDOFF-ARCHIVE-2026-10-30.md) (et [celle du 23](docs/HANDOFF-ARCHIVE-2026-10-23.md)). Changelog des versions alpha : [docs/CHANGELOG-ALPHA.md](docs/CHANGELOG-ALPHA.md).
+Index court : une ligne par chantier, le détail est dans la spec ou l'inventaire liés. Preuves, mesures et incidents des tranches : [archive du 30 octobre](docs/HANDOFF-ARCHIVE-2026-10-30.md) (et [celle du 23](docs/HANDOFF-ARCHIVE-2026-10-23.md)). Changelog des versions alpha : [docs/CHANGELOG-ALPHA.md](docs/CHANGELOG-ALPHA.md). Rapports, incidents et specs clos : [docs/old/](docs/old/README.md).
 
 ## Environnements
 

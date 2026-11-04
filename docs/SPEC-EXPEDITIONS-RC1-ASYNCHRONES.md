@@ -2,7 +2,7 @@
 
 Date : 12 octobre 2026. Base relue : main, be6532d94086112ebe97af6f4127f2ea7fa9f260.
 
-Statut : **implémentée ; réserves fonctionnelles R1–R3 corrigées et vérifiées le 12 octobre ; recette globale encore à valider**. [Corrections et mesures](CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [contre-recette historique](CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) et [campagnes initiales](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Restent les preuves mémoire/endurance, le corpus froid complet et la recette visuelle/réseau. Migration 042 appliquée en test et en développement local (`arbestra`) ; API dev redémarrée sur le code actuel le 12 octobre. Les objectifs ci-dessous restent des critères de recette.
+Statut : **implémentée ; réserves fonctionnelles R1–R3 corrigées et vérifiées le 12 octobre ; recette globale encore à valider**. [Corrections et mesures](old/CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md), [contre-recette historique](old/CONTRE-RECETTE-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) et [campagnes initiales](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md). Restent les preuves mémoire/endurance, le corpus froid complet et la recette visuelle/réseau. Migration 042 appliquée en test et en développement local (`arbestra`) ; API dev redémarrée sur le code actuel le 12 octobre. Les objectifs ci-dessous restent des critères de recette.
 
 ## 1. Décisions et frontière
 

@@ -1,6 +1,6 @@
 # Revue Astra — carte de spawn RC1 et lenteurs
 
-9 octobre 2026. Demande de Tristan : examiner le travail partiel de Sol et ses difficultés. **Revue et mesures, aucune correction du code applicatif dans cette passe.** Base : `main` / `06837b9`, implémentation non committée. Références : [spec](SPEC-CARTE-SPAWN-RC1.md), [état réel](IMPLEMENTATION-CARTE-SPAWN-RC1.md), [handoff de Sol](HANDOFF-ASTRA-2026-10-09-SPAWN-RC1-LENTEURS.md).
+9 octobre 2026. Demande de Tristan : examiner le travail partiel de Sol et ses difficultés. **Revue et mesures, aucune correction du code applicatif dans cette passe.** Base : `main` / `06837b9`, implémentation non committée. Références : [spec](../SPEC-CARTE-SPAWN-RC1.md), [état réel](IMPLEMENTATION-CARTE-SPAWN-RC1.md), [handoff de Sol](HANDOFF-ASTRA-2026-10-09-SPAWN-RC1-LENTEURS.md).
 
 ## Conclusion
 
@@ -12,7 +12,7 @@ Le projet testé `(140,20)`, orientation `0`, est accepté sur les trois appels 
 
 ### P1 — Une qualification bloque les autres tâches du même processus pendant plusieurs secondes
 
-Dans [inspectSpawnResources()](../apps/api/src/modules/onboarding/spawn-resources.ts), la lecture repeatable-read est suivie du calcul synchrone de réseau, de candidats et de dotation. La [route Fastify](../apps/api/src/modules/onboarding/routes.ts) appelle directement cette fonction dans son processus.
+Dans [inspectSpawnResources()](../../apps/api/src/modules/onboarding/spawn-resources.ts), la lecture repeatable-read est suivie du calcul synchrone de réseau, de candidats et de dotation. La [route Fastify](../../apps/api/src/modules/onboarding/routes.ts) appelle directement cette fonction dans son processus.
 
 Reproduction par appel de la vraie fonction métier, sur copie PostgreSQL isolée et sans serveur HTTP : trois contrôles en 8 935, 10 518 et 11 471 ms. Un timer à intervalle de 20 ms subit un écart maximal de 7 923, 8 164 puis 10 413 ms. Ce blocage de la boucle d'événements est mesuré ; son impact sur les autres requêtes HTTP du monolithe découle du chemin d'appel, sans test HTTP concurrent réalisé ici.
 
@@ -22,7 +22,7 @@ La priorité est de réduire les calculs géographiques/spatiaux répétés, pui
 
 ### P1 — Le disque ne suit pas le déplacement continu du pointeur
 
-Lecture de [SpawnMap.tsx](../apps/world-web/src/spawn-map/SpawnMap.tsx), effet dépendant de `cursorX` / `cursorY` : chaque changement incrémente la séquence, exécute `setDisk(null)`, puis arme un timeout de 120 ms annulé au changement suivant. L'overlay reçoit sa position de `disk.point`, donc du résultat terminé, et non directement du pointeur.
+Lecture de [SpawnMap.tsx](../../apps/world-web/src/spawn-map/SpawnMap.tsx), effet dépendant de `cursorX` / `cursorY` : chaque changement incrémente la séquence, exécute `setDisk(null)`, puis arme un timeout de 120 ms annulé au changement suivant. L'overlay reçoit sa position de `disk.point`, donc du résultat terminé, et non directement du pointeur.
 
 Conséquence déduite du code : tant que le joueur traverse des cases à moins de 120 ms d'intervalle, le timeout est repoussé et le disque est retiré. Après arrêt, il faut encore attendre le diagnostic et le rendu. Mesure du diagnostic pur sur quatre inspections successives : 3 287 ms à froid, 1 135 puis 1 150 ms sur les cases voisines, 956 ms au retour au point initial. Ce sont des durées Node de calcul, pas des latences de bout en bout dans le navigateur.
 
@@ -30,7 +30,7 @@ Le correctif à privilégier est de faire suivre immédiatement au pointeur le d
 
 ### P2 — Le chargement recalcule puis copie une géométrie importante à chaque ouverture
 
-[terrain-worker.ts](../apps/world-web/src/spawn-map/terrain-worker.ts) lance `buildWorldGeometry()` à chaque initialisation. [world-geography-mesh.ts](../apps/world-web/src/world-generator/world-geography-mesh.ts) produit des tableaux JavaScript ordinaires, renvoyés au thread principal par `postMessage()` sans transfert de buffers.
+[terrain-worker.ts](../../apps/world-web/src/spawn-map/terrain-worker.ts) lance `buildWorldGeometry()` à chaque initialisation. [world-geography-mesh.ts](../../apps/world-web/src/world-generator/world-geography-mesh.ts) produit des tableaux JavaScript ordinaires, renvoyés au thread principal par `postMessage()` sans transfert de buffers.
 
 Mesure Node séparée, sans DB, navigateur ou GPU : **31 741 ms** pour construire le maillage, **3 312 ms** pour un `structuredClone()` de sa sortie. Sortie exacte : 272 186 triangles de terrain, 89 594 triangles d'eau, **8 954 906 entrées numériques** réparties entre positions, couleurs, indices et cellules. La source JSON fait 8 940 626 octets. Ces volumes sont des constats ; la mesure unique n'est pas une distribution de performance navigateur.
 
@@ -38,9 +38,9 @@ Une géographie approuvée et immuable permet de réutiliser une représentation
 
 ### P2 — La mesure actuelle du diagnostic ne prouve pas la réactivité du disque
 
-Dans le handler du worker de [SpawnMap.tsx](../apps/world-web/src/spawn-map/SpawnMap.tsx), `data-diagnostic-ms` est mis à jour pour les canaux `disk` et `selection`, même si la séquence du résultat est périmée. Il manque le temps de debounce, la file d'attente, le transfert, React et la mise à jour Babylon.
+Dans le handler du worker de [SpawnMap.tsx](../../apps/world-web/src/spawn-map/SpawnMap.tsx), `data-diagnostic-ms` est mis à jour pour les canaux `disk` et `selection`, même si la séquence du résultat est périmée. Il manque le temps de debounce, la file d'attente, le transfert, React et la mise à jour Babylon.
 
-De plus, [PreviewScene.tsx](../apps/world-web/src/world-generator/PreviewScene.tsx), `updateMapOverlay()` / `overlayPosition()`, refait du sampling géographique et reconstruit les meshes de l'overlay sur le thread principal. Son coût n'a pas été mesuré dans cette revue. Les bons chiffres d'une réponse worker ne suffisent donc pas à conclure à un survol fluide. Séparer les canaux et mesurer pointeur → résultat courant → rendu avant de fixer un budget UX.
+De plus, [PreviewScene.tsx](../../apps/world-web/src/world-generator/PreviewScene.tsx), `updateMapOverlay()` / `overlayPosition()`, refait du sampling géographique et reconstruit les meshes de l'overlay sur le thread principal. Son coût n'a pas été mesuré dans cette revue. Les bons chiffres d'une réponse worker ne suffisent donc pas à conclure à un survol fluide. Séparer les canaux et mesurer pointeur → résultat courant → rendu avant de fixer un budget UX.
 
 ## Ce que le profil CPU précise
 

@@ -6,7 +6,7 @@ A/B non clôturés ; routes et atelier V2 désormais raccordés côté serveur, 
 
 # Commandes bornées A/B — travail partiel du 21 octobre 2026
 
-Base : `main`, `4966379`. [Spec conservée](SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md).
+Base : `main`, `4966379`. [Spec conservée](../SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md).
 
 **Statut : en cours, non livré.** La demande autorise A puis B, sans déploiement. Les éléments ci-dessous ne clôturent ni A ni B. Aucun chemin de jeu ne négocie V2 ; aucun changement de gameplay ou de transport applicatif n'est activé.
 

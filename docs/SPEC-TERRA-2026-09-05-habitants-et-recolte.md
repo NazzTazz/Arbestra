@@ -193,7 +193,7 @@ Acceptation : règles section 12 fermées ; parcours visuel complet et persistan
 
 ## 12. Interface hors Babylon réservée au product owner
 
-Le product owner réalise l'UI React/HUD. Ne pas modifier `App.tsx`, les composants React ou les styles hors Babylon dans cette tranche. Fournir à la place [le mock-up et le contrat d'intégration](./UI-MOCKUP-2026-09-05-habitants-et-recolte.md) : états, textes indicatifs, commandes HTTP et transitions de snapshot. Le backend, les contrats et la scène Babylon restent dans le périmètre de l'implémentation.
+Le product owner réalise l'UI React/HUD. Ne pas modifier `App.tsx`, les composants React ou les styles hors Babylon dans cette tranche. Fournir à la place [le mock-up et le contrat d'intégration](old/UI-MOCKUP-2026-09-05-habitants-et-recolte.md) : états, textes indicatifs, commandes HTTP et transitions de snapshot. Le backend, les contrats et la scène Babylon restent dans le périmètre de l'implémentation.
 
 ## 13. Hors scope
 

@@ -2,7 +2,7 @@
 
 Date : 5 septembre 2026. Lecture du worktree courant, pas seulement du dernier commit.
 
-Ce document répond aux 33 questions du [brief de Sol](./ARBESTRA_CONTEXT_FOR_ASTRA.md). C'est une revue et une proposition de priorités, **pas une nouvelle spécification autoritaire**. Aucun changement applicatif, aucune commande de base, aucun test, build ou contrôle navigateur exécuté pour cette revue. Les conclusions de concurrence sont issues du code et restent à reproduire par tests ciblés ; aucune mesure de performance nouvelle n'est revendiquée.
+Ce document répond aux 33 questions du [brief de Sol](ARBESTRA_CONTEXT_FOR_ASTRA.md). C'est une revue et une proposition de priorités, **pas une nouvelle spécification autoritaire**. Aucun changement applicatif, aucune commande de base, aucun test, build ou contrôle navigateur exécuté pour cette revue. Les conclusions de concurrence sont issues du code et restent à reproduire par tests ciblés ; aucune mesure de performance nouvelle n'est revendiquée.
 
 ## Verdict
 
@@ -14,7 +14,7 @@ Le risque principal n'est pas le choix de stack ou la taille des fichiers. C'est
 
 ### À corriger maintenant : ordonner l'économie, pas seulement les tâches
 
-Sources : [complete-construction.ts](../apps/api/src/modules/villages/complete-construction.ts), [economy.ts](../apps/api/src/modules/villages/economy.ts), [service.ts](../apps/api/src/modules/villages/service.ts), [scheduled-tasks.ts](../apps/api/src/jobs/scheduled-tasks.ts).
+Sources : [complete-construction.ts](../../apps/api/src/modules/villages/complete-construction.ts), [economy.ts](../../apps/api/src/modules/villages/economy.ts), [service.ts](../../apps/api/src/modules/villages/service.ts), [scheduled-tasks.ts](../../apps/api/src/jobs/scheduled-tasks.ts).
 
 `settleDueConstructionsForVillage` récupère les échéances sans `orderBy`. Chaque achèvement matérialise tous les flux directs du village jusqu'à sa propre échéance. Les workers verrouillent chacun leur tâche puis leur bâtiment ; ils n'ont pas de sérialisation économique commune par village.
 
@@ -28,7 +28,7 @@ La même convention doit régler les snapshots pris pendant une mutation. Les tr
 
 ### À corriger maintenant : ne pas appeler générique ce qui ne l'est pas encore
 
-Sources : [catalogue](./architecture/building-catalog.md), [service.ts](../apps/api/src/modules/villages/service.ts), [economy.ts](../apps/api/src/modules/villages/economy.ts), [contrats](../packages/contracts/src/villages.ts).
+Sources : [catalogue](../architecture/building-catalog.md), [service.ts](../../apps/api/src/modules/villages/service.ts), [economy.ts](../../apps/api/src/modules/villages/economy.ts), [contrats](../../packages/contracts/src/villages.ts).
 
 La spec définit la superficie par `progressionMode = spatial`. Le serveur autorise plusieurs cellules et multiplie les coûts seulement pour `item.code === 'garden'`. La production surfacique teste également `buildingType === 'garden'`. Ajouter un autre type spatial au catalogue ne donne donc pas le comportement décrit.
 
@@ -38,7 +38,7 @@ Autre piège précis : dans `villageProductionPerHour`, le filtre `productionMod
 
 ### À la prochaine tranche : distinguer monde métier et fenêtre affichée
 
-Source : `snapshot()` et `assertBuildable()` dans [service.ts](../apps/api/src/modules/villages/service.ts).
+Source : `snapshot()` et `assertBuildable()` dans [service.ts](../../apps/api/src/modules/villages/service.ts).
 
 La région est un carré de 64 × 64 centré sur le village. `assertBuildable` consulte cette même fenêtre pour décider du terrain ; hors fenêtre, `terrainAt` retourne `undefined`, donc le terrain est refusé même s'il serait constructible dans le monde. C'est une vraie limite d'expansion, pas seulement une limite de caméra.
 
@@ -48,7 +48,7 @@ Le déplacement de la fenêtre client viendra ensuite. Le monde existe en base �
 
 ### Avec les gisements : invalider le bon état visuel
 
-Source : `#createWorldFeatures` dans [BabylonVillageScene.ts](../apps/world-web/src/scene/BabylonVillageScene.ts).
+Source : `#createWorldFeatures` dans [BabylonVillageScene.ts](../../apps/world-web/src/scene/BabylonVillageScene.ts).
 
 La signature contient seulement la version de génération et l'origine de région. Elle ignore le contenu des features et l'identité du monde. À région identique, retirer un gisement du snapshot ne reconstruit pas son visuel. Le décor est en outre fusionné par matériau pour toute la région et non adressable par gisement.
 
@@ -132,7 +132,7 @@ C'est déjà l'approche : cellules canoniques et décalages enveloppés autour d
 
 ### Moteur Rust — dépôt voisin Waar-v3, pas encore intégré à Arbestra
 
-Sources principales : [lib.rs](../../waar-v3/rust/src/lib.rs), [batch.rs](../../waar-v3/rust/src/batch.rs), [spécification 3.1](../../waar-v3/docs/combat-engine-v3.1-specification.md).
+Sources principales : [lib.rs](../../../waar-v3/rust/src/lib.rs), [batch.rs](../../../waar-v3/rust/src/batch.rs), [spécification 3.1](../../../waar-v3/docs/combat-engine-v3.1-specification.md).
 
 **21. Indépendant du framework ? — Oui.**
 Le crate dépend de serde, serde_json et sha2, pas de Symfony/Doctrine/PostgreSQL. Il possède une bibliothèque Rust et une frontière C/JSON. L'indépendance technique est réelle ; l'indépendance du ruleset Waar n'est pas encore complète.

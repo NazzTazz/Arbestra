@@ -1,6 +1,6 @@
 # Terraformation instantanée — 31 octobre 2026
 
-Statut : **à valider** par Tristan en recette sur le dev (§8). Remplace, pour les nouveaux gestes, le chantier de nivellement de [SPEC-TERRAFORMATION-LIBRE.md](SPEC-TERRAFORMATION-LIBRE.md) et de [SPEC-NIVELLEMENT-PLACEMENT.md](SPEC-NIVELLEMENT-PLACEMENT.md). Décisions : [DECISIONS-TERRAFORMATION-2026-10-31.md](DECISIONS-TERRAFORMATION-2026-10-31.md). Statuts : **validé** (Tristan), **proposé** (recommandation dans le cadre validé), **hors périmètre**.
+Statut : **à valider** par Tristan en recette sur le dev (§8). Remplace, pour les nouveaux gestes, le chantier de nivellement de [SPEC-TERRAFORMATION-LIBRE.md](old/SPEC-TERRAFORMATION-LIBRE.md) et de [SPEC-NIVELLEMENT-PLACEMENT.md](old/SPEC-NIVELLEMENT-PLACEMENT.md). Décisions : [DECISIONS-TERRAFORMATION-2026-10-31.md](DECISIONS-TERRAFORMATION-2026-10-31.md). Statuts : **validé** (Tristan), **proposé** (recommandation dans le cadre validé), **hors périmètre**.
 
 ## 1. Validé
 

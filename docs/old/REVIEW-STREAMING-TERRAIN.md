@@ -1,7 +1,7 @@
 # Revue de la spec streaming terrain
 
 Date : 30 septembre 2026. Base : `main`, `0a0873a`.
-Objet : [SPEC-STREAMING-TERRAIN.md](SPEC-STREAMING-TERRAIN.md), proposition non implémentée.
+Objet : [SPEC-STREAMING-TERRAIN.md](../SPEC-STREAMING-TERRAIN.md), proposition non implémentée.
 Conclusion de la revue initiale : **direction adaptée, spécification à compléter avant implémentation**.
 
 Revue par lecture de la spec et du code. Aucun test applicatif ou navigateur exécuté ; les scénarios ci-dessous sont des risques d'intégration identifiés, pas des défauts reproduits d'un streamer existant. La revue initiale n'a pas réécrit la spec ; la correction documentaire demandée ensuite par Tristan est suivie ci-dessous.
@@ -19,7 +19,7 @@ Retour de recette ultérieur : 60–90 s avant le premier arbre et rechargement 
 | R3 | Tests de transformation/inverse avec ancre non centrale, emprises compactes et trajets continus aux coupures ; navigateur : tour complet sur chaque axe, quatre coins, retour et picking réel du bâtiment avant reconstruction du village. |
 | R4 | Régression rétrospective isolée : ancien défaut = 32 résidents pour plafond 16 ; correction prouvée sur 30 déplacements et libération Babylon. Régressions rouges puis vertes : arbres proches avant sol/cailloux lointains et conservation des tuiles lors des rotations. Mémoire Intel après correction : 26,91 → 27,20 → 27,44 Mio sur 18 déplacements réels, reload 17,56 ; plafonds 64 données / 16 résidents + réserve 17. Mesure finale Intel verte : intégration P95 1,8 / 0,1 / 0,2 ms, actif 3,4 / 0 / 5 ms ; streamer max 22,4 ms ; frame P95 pan 35,3 ms face à 39 ms préchargé. Admission 1 ms, aucune erreur navigateur. |
 
-**À recetter humainement :** raccords/fondu en vue rasante et au dézoom maximal, geste/preview pendant un changement de repère, téléphone physique. Les résultats matériels verts n'effacent pas l'essai logiciel : SwiftShader dépassait le seuil sur les frames actives et sa cadence restait lente, malgré une mémoire bornée. Le percentile par frame inclut désormais toute la période ; la distribution active et tous les maxima sont publiés séparément. Les bâtiments des autres villages restent hors scope. Résultats détaillés, commandes et état Git dans le [handoff](../SESSION-HANDOFF.md).
+**À recetter humainement :** raccords/fondu en vue rasante et au dézoom maximal, geste/preview pendant un changement de repère, téléphone physique. Les résultats matériels verts n'effacent pas l'essai logiciel : SwiftShader dépassait le seuil sur les frames actives et sa cadence restait lente, malgré une mémoire bornée. Le percentile par frame inclut désormais toute la période ; la distribution active et tous les maxima sont publiés séparément. Les bâtiments des autres villages restent hors scope. Résultats détaillés, commandes et état Git dans le [handoff](../../SESSION-HANDOFF.md).
 
 ## Suivi de correction — 30 septembre 2026
 

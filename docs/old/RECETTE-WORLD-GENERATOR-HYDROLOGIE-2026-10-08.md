@@ -31,7 +31,7 @@ Largeurs de lit rencontrées :6–8 cases, dans l'intervalle autorisé5–8. Boi
 
 Navigateur production Chromium/WebGL2, Intel Iris Plus D3D11 : génération UI, inspection de rivière, cascades1/2 larges, phases basse/haute, chenal, soleil, atmosphère, changements de candidat et cycles tore/local. Aucune erreur navigateur/shader ; caméra conservée. Avant/après cycles globaux256 : mêmes2 draws,3 meshes,89 852triangles,0 texture. Temps GPU non mesuré.
 
-[Courbe dans le terrain](../test-results/hydro-meander-river-terrain.png) · [Rivière recentrée](../test-results/hydro-meander-river-complete.png) · [Tête arrondie](../test-results/hydro-meander-spring.png) · [Cascade vue d'aval](../test-results/hydro-meander-fall-2-orbit-terrain.png).
+[Courbe dans le terrain](../../test-results/hydro-meander-river-terrain.png) · [Rivière recentrée](../../test-results/hydro-meander-river-complete.png) · [Tête arrondie](../../test-results/hydro-meander-spring.png) · [Cascade vue d'aval](../../test-results/hydro-meander-fall-2-orbit-terrain.png).
 Données locales ignorées : `hydrology-meander-browser.json`, `hydrology-meander-generated.json`, `hydrology-meander-orbit.json`. Parcours : `tests/browser/hydrology.mjs` et `hydrology-orbit.mjs`.
 
 Dernière recette sur le build final terminée : recentrage avec marge sèche, tête arrondie et cascade vue selon son aval réel, aucune erreur navigateur. Les deux candidats et le compte QA ont été supprimés ; services QA arrêtés et sessions navigateur fermées. Aucun monde du jeu touché.
@@ -73,7 +73,7 @@ Bois : 30 % dans les deux cas. Durée worker observée : 12 267 / 25 530 ms ; JS
 
 Navigateur production Chromium/WebGL2, ANGLE Intel Iris Plus D3D11, viewport1440×1000 : génération UI, fronts larges, chute de8 cases et hauteur2, phases basse/haute, chenal, soleil, atmosphère, changement de candidat et cycles tore/local. Caméra conservée ; aucune erreur navigateur/shader. Global256 avant/après cycles : 2 draws, 3 meshes, 90 604 triangles, 0 texture. Temps GPU non mesuré. FPS observés24–44 pendant cette recette sous charge ; aucune conclusion de gain ou régression GPU n'en est tirée.
 
-[Front de6 cases](../test-results/hydro-wide-fall-1.png) · [Front de8 cases](../test-results/hydro-wide-eight-cell-fall.png) · [Vue terrain oblique](../test-results/hydro-wide-fall-2-orbit-terrain.png) · [Tore](../test-results/hydro-wide-large-water.png).
+[Front de6 cases](../../test-results/hydro-wide-fall-1.png) · [Front de8 cases](../../test-results/hydro-wide-eight-cell-fall.png) · [Vue terrain oblique](../../test-results/hydro-wide-fall-2-orbit-terrain.png) · [Tore](../../test-results/hydro-wide-large-water.png).
 Les captures et métriques sont des artefacts locaux ignorés par Git : `hydrology-wide-browser.json`, `hydrology-wide-generated.json`, `hydrology-wide-orbit.json`. Scripts reproductibles : `tests/browser/hydrology.mjs` et `hydrology-orbit.mjs`.
 
 Recharger **/world-generator**, puis **Générer l’aperçu**. Les aperçus sauvegardés antérieurs gardent leurs anciennes largeurs.
@@ -165,12 +165,12 @@ Navigateur production Chromium/WebGL2, Babylon8.56.2, ANGLE Intel Iris Plus 0x8A
 
 Ces temps JavaScript ne sont ni le temps GPU ni la durée complète d'une frame. Aucune accélération GPU n'est déduite de ces compteurs. Retour après cycles : trois meshes actifs, zéro texture, mêmes triangles/draws ; cela ne constitue pas une mesure exhaustive de mémoire GPU. Les tailles JSON ne sont pas des consommations mémoire résidentes.
 
-Captures r3 conservées : [chute2](../test-results/hydro-r3-fall-2.png). Les autres vues sont remplacées par la recette r4 ci-dessus.
+Captures r3 conservées : [chute2](../../test-results/hydro-r3-fall-2.png). Les autres vues sont remplacées par la recette r4 ci-dessus.
 Scripts : tests/browser/hydrology.mjs et hydrology-orbit.mjs. Données détaillées locales ignorées : test-results/hydrology-browser.json, hydrology-generated.json, hydrology-matrix.log, hydrology-suite.log.
 
 Publication API finale repassée seule : 1 test passé, 5 non sélectionnés. Le premier essai filtré a révélé une dépendance du test à la fixture du cas précédent ; ce cas crée maintenant sa propre fixture si nécessaire. Les deux mondes et le compte QA finaux sont supprimés, les services QA arrêtés, aucun navigateur de recette restant. Worker du jeu conservé.
 
-[Chute2 en vue oblique dans le terrain](../test-results/hydro-r3-fall-2-orbit-terrain.png) : nappe et raccord inspectés, zéro erreur navigateur.
+[Chute2 en vue oblique dans le terrain](../../test-results/hydro-r3-fall-2-orbit-terrain.png) : nappe et raccord inspectés, zéro erreur navigateur.
 
 ## Limites et reprise
 

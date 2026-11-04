@@ -42,7 +42,7 @@ Première série matérielle, baisse de résolution 1 200 × 750 → 720 × 450 
 
 ### 1. Verre dépoli : une capture globale à chaque frame — confirmé par expérience
 
-[`frosted-glass.ts`](../apps/world-web/src/scene/frosted-glass.ts) crée une `RenderTargetTexture` de 512 × 512 partagée entre les vitres. Sa liste contient tous les meshes avec sommets, à l'exception de son propre matériau. La liste finale observée compte **1 199 meshes**, `refreshRate = 1`. Dès qu'au moins une vitre existe, la capture reste dans `scene.customRenderTargets` ; son admission n'est pas conditionnée à la visibilité des vitres à l'écran.
+[`frosted-glass.ts`](../../apps/world-web/src/scene/frosted-glass.ts) crée une `RenderTargetTexture` de 512 × 512 partagée entre les vitres. Sa liste contient tous les meshes avec sommets, à l'exception de son propre matériau. La liste finale observée compte **1 199 meshes**, `refreshRate = 1`. Dès qu'au moins une vitre existe, la capture reste dans `scene.customRenderTargets` ; son admission n'est pas conditionnée à la visibilité des vitres à l'écran.
 
 Le cache de liste évite déjà sa reconstruction systématique : ce coût historique n'est pas réintroduit. Le problème restant est le **rendu supplémentaire** de la scène et ses préparations de matériaux/lumières. Les vitres de l'hôtel et du campus utilisent toujours ce chemin. La vitrine du rez-de-chaussée emploie séparément une cubemap statique ; son remplacement précédent n'a donc pas éliminé la capture du verre dépoli.
 
@@ -63,9 +63,9 @@ Principaux meshes observés :
 | `hall-market-clock-pavilion-hall-cut-stone` | 55 104 |
 | Plusieurs maçonneries de maisons précompilées | 52 192 chacune |
 
-La seule salle haute de l'hôtel représente environ **12.9 %** du compte logique de sommets de la scène. [`town-hall-market-factory.ts`](../apps/world-web/src/scene/town-hall-market-factory.ts) impose des pierres `.14 × .07`, 18 assises et un profil arrondi à trois segments. [`timber-thatch.ts`](../apps/world-web/src/scene/timber-thatch.ts) fabrique les facettes et les extrémités de chaque pierre avant fusion : une pierre arrondie standard de ce profil comporte 224 sommets avant les découpes. La fusion diminue les meshes, mais pas ce volume géométrique.
+La seule salle haute de l'hôtel représente environ **12.9 %** du compte logique de sommets de la scène. [`town-hall-market-factory.ts`](../../apps/world-web/src/scene/town-hall-market-factory.ts) impose des pierres `.14 × .07`, 18 assises et un profil arrondi à trois segments. [`timber-thatch.ts`](../../apps/world-web/src/scene/timber-thatch.ts) fabrique les facettes et les extrémités de chaque pierre avant fusion : une pierre arrondie standard de ce profil comporte 224 sommets avant les découpes. La fusion diminue les meshes, mais pas ce volume géométrique.
 
-Les bâtiments précompilés partagent déjà les géométries en cache de scène. [`building-assets.ts`](../apps/world-web/src/scene/building-assets.ts) demande cependant `doNotInstantiate:true`, donc des clones et des soumissions séparées ; ce cache ne constitue pas un batching des draws. L'hôtel niveau 2 passe par le générateur local pour ses éléments animés. Le LOD des arbres existe ; les chemins de bâtiments étudiés ne proposent pas de variante simplifiée par distance.
+Les bâtiments précompilés partagent déjà les géométries en cache de scène. [`building-assets.ts`](../../apps/world-web/src/scene/building-assets.ts) demande cependant `doNotInstantiate:true`, donc des clones et des soumissions séparées ; ce cache ne constitue pas un batching des draws. L'hôtel niveau 2 passe par le générateur local pour ses éléments animés. Le LOD des arbres existe ; les chemins de bâtiments étudiés ne proposent pas de variante simplifiée par distance.
 
 Recommandation proposée : mesurer séparément hôtel, campus et maisons, puis fournir une représentation plus simple de la maçonnerie aux distances où les petits chanfreins ne sont plus visibles. Tester aussi le regroupement/instanciation des modèles répétés. La simplification de façade doit préserver le dessin validé de près. Aucun de ces gains n'est considéré acquis ici.
 
@@ -92,7 +92,7 @@ Les piles montrent le coût de soumettre et préparer beaucoup de sous-meshes à
 
 Le village ne se rend pas pendant ces échantillons : zéro appel à son `scene.render()`. Sa capture de verre demeure résidente mais ne s'exécute pas. Le tore contient 32 meshes dans sa scène. Le petit callback synchrone et les intervalles plus longs sont compatibles avec un coût GPU/composition/cadence ; ce n'est pas un chronométrage GPU direct.
 
-[`torus-fog.ts`](../apps/world-web/src/scene/torus-fog.ts) ajoute une passe de profondeur, une copie pleine résolution, un volume à demi-résolution et une composition. Le volume autorise 96 pas par pixel ; chaque pas dense peut appeler un calcul d'occultation solaire de 20 itérations. Le groupe est coûteux sur Iris Plus. [`cosmology-world.ts`](../apps/world-web/src/scene/cosmology-world.ts) ajoute aussi une ombre de lumière ponctuelle 512, rafraîchie toutes les quatre frames. Son coût isolé n'a pas été mesuré.
+[`torus-fog.ts`](../../apps/world-web/src/scene/torus-fog.ts) ajoute une passe de profondeur, une copie pleine résolution, un volume à demi-résolution et une composition. Le volume autorise 96 pas par pixel ; chaque pas dense peut appeler un calcul d'occultation solaire de 20 itérations. Le groupe est coûteux sur Iris Plus. [`cosmology-world.ts`](../../apps/world-web/src/scene/cosmology-world.ts) ajoute aussi une ombre de lumière ponctuelle 512, rafraîchie toutes les quatre frames. Son coût isolé n'a pas été mesuré.
 
 Recommandation proposée : profiler le volume seul et ses paramètres de pas/résolution, puis adapter sa qualité. La comparaison désactive tous les postprocess de la scène, y compris les éventuels autres effets : ne pas attribuer l'intégralité du gain au brouillard.
 

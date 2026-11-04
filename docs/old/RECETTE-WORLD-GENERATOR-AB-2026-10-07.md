@@ -8,12 +8,12 @@ Statut : **A et B implémentées et vérifiées techniquement** sur main/f9fc28d
 
 ## Livraison
 
-- [Contrats](../packages/contracts/src/world-generator.ts), [climat](../packages/contracts/src/world-climate.ts), [générateur v3](../packages/contracts/src/world-landscape.ts).
-- [Migration 035](../apps/api/src/database/migrations/035_world_generator.ts) additive : séparation ready/ouvert, tentatives persistantes. Anciens mondes ready conservés ouverts. Appliquée uniquement sur **127.0.0.1/arbestra_test**, sans reset ni seed.
-- [API opérateur](../apps/api/src/modules/world-generator/routes.ts) authentifiée par session et allowlist serveur, disponible en production ; aucun privilège par DEV. Candidats fermés, commande idempotente, identité révision/checksum obligatoire pour conserver/ouvrir.
-- [Worker](../apps/api/src/modules/world-generator/worker.ts) dédié, exclusion PostgreSQL globale, processus enfant isolé, heap Node plafonné et timeout. Tentative/heartbeat visibles hors transaction de publication ; reprise explicite des interruptions, publication atomique vérifiant la tentative courante. Une erreur de heartbeat arrête le child.
-- [Panneau React](../apps/world-web/src/world-generator/WorldGenerator.tsx) sur `/world-generator`, chargé à la demande. Liste, seed, dimensions, paramètres figés, métriques demandées/obtenues, conservation, ouverture v2, reprise et suppression protégée.
-- [Preview Babylon](../apps/world-web/src/world-generator/PreviewScene.tsx) : tore volumique, inspection locale 32×32, couches altitude/exposition/humidité/accessibilité, picking des coordonnées, arbres en thin instances, phase cosmologique réglable, lumière neutre ou ombres solaires. Atmosphère absente par défaut, réellement créée/détruite à l’activation.
+- [Contrats](../../packages/contracts/src/world-generator.ts), [climat](../../packages/contracts/src/world-climate.ts), [générateur v3](../../packages/contracts/src/world-landscape.ts).
+- [Migration 035](../../apps/api/src/database/migrations/035_world_generator.ts) additive : séparation ready/ouvert, tentatives persistantes. Anciens mondes ready conservés ouverts. Appliquée uniquement sur **127.0.0.1/arbestra_test**, sans reset ni seed.
+- [API opérateur](../../apps/api/src/modules/world-generator/routes.ts) authentifiée par session et allowlist serveur, disponible en production ; aucun privilège par DEV. Candidats fermés, commande idempotente, identité révision/checksum obligatoire pour conserver/ouvrir.
+- [Worker](../../apps/api/src/modules/world-generator/worker.ts) dédié, exclusion PostgreSQL globale, processus enfant isolé, heap Node plafonné et timeout. Tentative/heartbeat visibles hors transaction de publication ; reprise explicite des interruptions, publication atomique vérifiant la tentative courante. Une erreur de heartbeat arrête le child.
+- [Panneau React](../../apps/world-web/src/world-generator/WorldGenerator.tsx) sur `/world-generator`, chargé à la demande. Liste, seed, dimensions, paramètres figés, métriques demandées/obtenues, conservation, ouverture v2, reprise et suppression protégée.
+- [Preview Babylon](../../apps/world-web/src/world-generator/PreviewScene.tsx) : tore volumique, inspection locale 32×32, couches altitude/exposition/humidité/accessibilité, picking des coordonnées, arbres en thin instances, phase cosmologique réglable, lumière neutre ou ombres solaires. Atmosphère absente par défaut, réellement créée/détruite à l’activation.
 
 Limites initiales configurables : 6 candidats persistants, 131 072 cellules par candidat par défaut (plafond dur 262 144), axes 64–512 multiples de 32, un calcul à la fois, 180 s de timeout, heap enfant 768 Mio. Ce plafond concerne le heap Node, pas une mesure ni un plafond de RSS totale.
 
@@ -38,7 +38,7 @@ corepack pnpm exec vitest run packages/contracts/src/world-landscape.test.ts app
 
 Déterminisme, bornes et cibles impossibles, climat aux coutures, accessibilité/escaliers/entrées latérales ; droits opérateur en production et monde ready fermé ; suivi lisible pendant le véritable child et exclusion d’un second exécuteur ; interruption simulée par heartbeat périmé et reprise même identité ; **véritable child tué par timeout de 10 ms**, absence de chunks/checksum partiels, puis reprise réussie ; conservation/ouverture v2 idempotentes et révision obsolète refusée.
 
-[Copie de recette v2](../apps/api/src/modules/world-generator/recipe-copy.ts) : résultat persisté recopié dans une base de test, IDs remappés, checksum égal avant un vrai `joinWorld`. Source sans village et checksum initial inchangé après ce spawn. Cet utilitaire est interne aux essais, sans endpoint public. Le checksum couvre l’artefact terrain/climat/bois/graphe du preview ; il ne doit pas être présenté comme une signature des stocks de gisements. Les features et dépôts sont recopiés depuis PostgreSQL. Étendre cette provenance aux couches hydrologiques et ressources pertinentes avant E.
+[Copie de recette v2](../../apps/api/src/modules/world-generator/recipe-copy.ts) : résultat persisté recopié dans une base de test, IDs remappés, checksum égal avant un vrai `joinWorld`. Source sans village et checksum initial inchangé après ce spawn. Cet utilitaire est interne aux essais, sans endpoint public. Le checksum couvre l’artefact terrain/climat/bois/graphe du preview ; il ne doit pas être présenté comme une signature des stocks de gisements. Les features et dépôts sont recopiés depuis PostgreSQL. Étendre cette provenance aux couches hydrologiques et ressources pertinentes avant E.
 
 Builds **contracts, API et world-web** réussis ; lint ciblé des modules et scripts passé. Le build world-web conserve l’avertissement de taille de chunks Babylon. Suite globale du dépôt non exécutée. Les suites DB n’ont pas été lancées en parallèle avec le worker de recette : un premier essai a révélé cette collision, puis un second la capacité occupée par les candidats de recette ; nettoyage scoped et exécution finale verte.
 
@@ -64,11 +64,11 @@ Vérification visuelle : plateaux/marches proches, couches accès/exposition, to
 
 Les triangles viennent de `getActiveIndices()/3` ; c’est un compteur Babylon incluant du travail de passes/instances, distinct des sommets résidents et du temps GPU. Les temps JS viennent de SceneInstrumentation ; **temps GPU absent**. Cette table établit la référence du nouveau preview, pas un gain de performance de la vue Village.
 
-[Script navigateur reproductible](../tests/browser/world-generator.mjs), avec [serveur de recette isolé](../tests/browser/world-generator-server.mjs). Captures et JSON conservés localement dans `test-results/world-generator-*-final.png` et `test-results/world-generator-browser.json`, ignorés par Git. Les services temporaires ont été arrêtés, cinq candidats v3 et leur compte fixture supprimés ; pas de reset de base ni de données de test dans un univers public.
+[Script navigateur reproductible](../../tests/browser/world-generator.mjs), avec [serveur de recette isolé](../../tests/browser/world-generator-server.mjs). Captures et JSON conservés localement dans `test-results/world-generator-*-final.png` et `test-results/world-generator-browser.json`, ignorés par Git. Les services temporaires ont été arrêtés, cinq candidats v3 et leur compte fixture supprimés ; pas de reset de base ni de données de test dans un univers public.
 
 ## Activation et reprise
 
-Voir [README](../README.md#world-generator-alpha--tranches-ab). Développement/production restent à migrer avec `corepack pnpm db:migrate` puis allowlist `WORLD_GENERATOR_OPERATOR_EMAILS` et redémarrage. Aucune configuration privée changée, aucun univers ouvert par cette passe.
+Voir [README](../../README.md#world-generator-alpha--tranches-ab). Développement/production restent à migrer avec `corepack pnpm db:migrate` puis allowlist `WORLD_GENERATOR_OPERATOR_EMAILS` et redémarrage. Aucune configuration privée changée, aucun univers ouvert par cette passe.
 
 Reprise **C par Astra**, avec contre-recette A/B avant hydrologie : surveiller contraintes amplitude/couverture, aspect des plateaux 8×8, détours, définition des plus hautes eaux, provenance complète des ressources et cas extrêmes. D porte le spawn local et les invalidations, E la recette joueur v3 avant ouverture. État Git : main/f9fc28d, changements non commités ; modifications antérieures conservées.
 

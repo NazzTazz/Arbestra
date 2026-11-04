@@ -27,7 +27,7 @@ Une petite réponse n'est pas une preuve de traitement borné. Le budget compren
 
 ## 2. Existant vérifié et écarts
 
-Références : [audit du 21 octobre](AUDIT-COUTS-SERVEUR-2026-10-21.md), [synchronisation actuelle](architecture/village-synchronization.md), [économie](architecture/economy.md), [temps serveur](architecture/server-time.md).
+Références : [audit du 21 octobre](old/AUDIT-COUTS-SERVEUR-2026-10-21.md), [synchronisation actuelle](architecture/village-synchronization.md), [économie](architecture/economy.md), [temps serveur](architecture/server-time.md).
 
 | Chemin réel | Existant | Transition nécessaire |
 |---|---|---|

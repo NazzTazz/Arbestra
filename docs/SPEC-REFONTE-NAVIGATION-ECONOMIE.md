@@ -4,7 +4,7 @@ Date : 23 octobre 2026. Base relue : `main`, `5c1fb33` (code formaté par Pretti
 
 Statut : **spécification proposée, étude seule**. Aucun des changements décrits n'est livré par sa rédaction ; la demande courante autorise l'étude et la spécification, pas l'implémentation ni un déploiement. Elle s'appuie sur la [revue d'architecture du 23 octobre](REVUE-ARCHITECTURE-2026-10-23.md), dont chaque constat utilisé a été revérifié dans le code (section 1).
 
-Documents de référence : [AGENTS.md](../AGENTS.md), [commandes bornées et synchronisation ciblée](SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md) (« spec V2 » ci-dessous), [pathfinding hiérarchique](SPEC-PATHFINDING-HIERARCHIQUE.md), [économie](architecture/economy.md), [temps serveur](architecture/server-time.md), [audit des coûts du 21 octobre](AUDIT-COUTS-SERVEUR-2026-10-21.md), [incident worker du 21 octobre](INCIDENT-ALPHA-WORKER-2026-10-21.md).
+Documents de référence : [AGENTS.md](../AGENTS.md), [commandes bornées et synchronisation ciblée](SPEC-COMMANDES-BORNEES-SYNCHRONISATION-CIBLEE.md) (« spec V2 » ci-dessous), [pathfinding hiérarchique](SPEC-PATHFINDING-HIERARCHIQUE.md), [économie](architecture/economy.md), [temps serveur](architecture/server-time.md), [audit des coûts du 21 octobre](old/AUDIT-COUTS-SERVEUR-2026-10-21.md), [incident worker du 21 octobre](old/INCIDENT-ALPHA-WORKER-2026-10-21.md).
 
 ## 0. Résultat attendu et lecture retenue
 

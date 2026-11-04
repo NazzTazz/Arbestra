@@ -6,7 +6,7 @@ Date : 5 septembre 2026. Implémentation : Terra/Codex ; finition et validation 
 
 Cette tranche implémente la priorité n°1 de la revue : l’état économique d’un village, à une borne H donnée, ne dépend plus de l’ordre dans lequel workers, retries et requêtes découvrent les transitions dues.
 
-La spec complète est [SPEC-TERRA-2026-09-05-village-economic-order.md](./SPEC-TERRA-2026-09-05-village-economic-order.md). Elle était déjà non suivie dans le worktree au début de cette intervention et a été conservée.
+La spec complète est [SPEC-TERRA-2026-09-05-village-economic-order.md](SPEC-TERRA-2026-09-05-village-economic-order.md). Elle était déjà non suivie dans le worktree au début de cette intervention et a été conservée.
 
 ## Décision mise en œuvre
 

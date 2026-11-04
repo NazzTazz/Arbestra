@@ -12,7 +12,7 @@ Le chemin HTTP négocié effectue à chaud **cinq appels SQL**, authentification
 
 L’[extension progressive](../SPEC-EXTENSION-VILLAGE.md) porte la portée à **8 cases** autour des emprises terminées, sur le tore. Le rectangle de terrain suit l’étendue du village avec une marge d’exploitation ; les 64 × 64 cases initiales ne constituent plus une frontière. La connaissance locale suit aussi les emprises terminées, dans le rayon d’exploitation existant de 16 cases.
 
-Le [nivellement préalable](../SPEC-NIVELLEMENT-PLACEMENT.md) corrige l’aperçu des emprises fixes Université/Tailleur et ajoute un chantier distinct sur les sols secs libres RC1. La planéité de l’emprise entière est partagée avec le serveur. Les occupations temporaires protègent le terrain jusqu’à sa fin autoritaire, puis le joueur construit manuellement.
+*Historique : le chantier de nivellement est retiré (terraformation instantanée, [spec](../SPEC-TERRAFORMATION-INSTANTANEE.md)).* Le [nivellement préalable](../old/SPEC-NIVELLEMENT-PLACEMENT.md) corrige l’aperçu des emprises fixes Université/Tailleur et ajoute un chantier distinct sur les sols secs libres RC1. La planéité de l’emprise entière est partagée avec le serveur. Les occupations temporaires protègent le terrain jusqu’à sa fin autoritaire, puis le joueur construit manuellement.
 
 Sur les mondes [à sommets partagés](../SPEC-TERRAIN-SOMMETS-PARTAGES.md), la planéité porte sur tous les coins de l’emprise, y compris intérieurs. Le devis réserve aussi leur couronne incidente, entièrement libre et à portée, et l’affiche avec le raccord compris. La hauteur cible équilibre le volume signé sur cette aire ; le travail intègre exactement la valeur absolue du déplacement sur les triangles, puis applique le barème existant. Les anciens devis restent terminés selon leur modèle ; aucune activation de monde pendant leurs travaux.
 
@@ -196,7 +196,7 @@ Aucune carotte accumulée ni aucun coût déjà payé ne doit être perdu ou rej
 - clic sur toute cellule = même Jardin ;
 - migration fidèle des Jardins à une et deux cellules.
 
-Les défauts de la [recette du 7 septembre](../REVIEW-2026-09-07-JARDINS.md) sont corrigés. Chromium desktop et Pixel 7 couvrent glissé rapide, retour sur ses pas, manque d'habitants, clavier, caméra, extension tolérante, fusion visible et réponse perdue ; les tests SQL couvrent saturation à la migration, échéances, concurrence forcée et rollback. La recette finale ouvre aussi un village après exécution de la vraie migration 015 et vérifie la protection puis la livraison unique de son ancien trajet global. La reprise courante précise les fixtures et les limites de cette validation.
+Les défauts de la [recette du 7 septembre](../old/REVIEW-2026-09-07-JARDINS.md) sont corrigés. Chromium desktop et Pixel 7 couvrent glissé rapide, retour sur ses pas, manque d'habitants, clavier, caméra, extension tolérante, fusion visible et réponse perdue ; les tests SQL couvrent saturation à la migration, échéances, concurrence forcée et rollback. La recette finale ouvre aussi un village après exécution de la vraie migration 015 et vérifie la protection puis la livraison unique de son ancien trajet global. La reprise courante précise les fixtures et les limites de cette validation.
 
 ## Hors scope
 

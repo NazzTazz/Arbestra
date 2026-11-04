@@ -138,7 +138,7 @@ L'existant fournit les commandes HTTP idempotentes, `state()` et les réconcilia
 
 La candidate ajoute la migration additive 041, un lecteur cohérent sans écriture économique, le flux SSE et des trames partagées. App conserve sa copie locale et arrête ce polling. Une lecture initiale et un rafraîchissement de secours ne se chevauchent pas avec eux-mêmes. App et SpawnPlacement utilisent réellement `latestVillageSnapshot()` ; HTTP et SSE partagent les règles de révision et `reconcileVillageSnapshot()`. Le renderer existant conserve ses meshes inchangés et sa caméra.
 
-Le [contrat d'architecture](architecture/village-synchronization.md) détaille les tables couvertes, les consommateurs, la jonction et les limites. Aucune règle de portée, de terrassement, de ressources, de coût ou de délai de construction n'est changée.
+Le [contrat d'architecture](../architecture/village-synchronization.md) détaille les tables couvertes, les consommateurs, la jonction et les limites. Aucune règle de portée, de terrassement, de ressources, de coût ou de délai de construction n'est changée.
 
 ## Garanties retenues
 

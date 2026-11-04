@@ -1,6 +1,6 @@
 # Contre-recette — Expéditions RC1 asynchrones — 12 octobre 2026
 
-Base contrôlée : main, **7fa926fab5a2e69258b0906a9f7d92b37e7513f8**, également présent dans origin/main local. [Spec](SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md), [preuves de l’implémentation](IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md).
+Base contrôlée : main, **7fa926fab5a2e69258b0906a9f7d92b37e7513f8**, également présent dans origin/main local. [Spec](../SPEC-EXPEDITIONS-RC1-ASYNCHRONES.md), [preuves de l’implémentation](../IMPLEMENTATION-EXPEDITIONS-RC1-ASYNCHRONES.md).
 
 **Verdict historique sur 7fa926f : non acceptée en l’état.** Le protocole asynchrone et le solveur passent les suites témoins, mais quatre reproductions adverses confirment trois écarts métier. Revue seule : aucune correction applicative, aucun commit/push dans cette contre-recette. Les travaux ressources IG de Tristan sont préservés.
 
@@ -8,7 +8,7 @@ Base contrôlée : main, **7fa926fab5a2e69258b0906a9f7d92b37e7513f8**, égalemen
 
 ### R1 — P1 — Un retour ultérieur peut effacer l’accès reconnu d’un lieu déjà relevé
 
-Sources : [service.ts](../apps/api/src/modules/science/service.ts), lignes 103–107 et 174 ; [deposit-access.ts](../apps/api/src/modules/science/deposit-access.ts), lignes 28–29.
+Sources : [service.ts](../../apps/api/src/modules/science/service.ts), lignes 103–107 et 174 ; [deposit-access.ts](../../apps/api/src/modules/science/deposit-access.ts), lignes 28–29.
 
 À chaque retour, recordPlaces remplace sourceActivityId par la nouvelle activité, même pour une cellule seulement traversée ; surveyed reste vrai. recognizedDepositRoute exige ensuite que la cible soit un sommet exact du trajet de cette nouvelle activité. Une cellule traversée par un segment comprimé ou décalé dans la cellule n’est pas nécessairement un sommet entier.
 
@@ -22,7 +22,7 @@ Attendu : préserver une preuve de relevé et un accès utilisables lorsqu’un 
 
 ### R2 — P1 — La protection des emprises ignore la largeur du trajet engagé
 
-Sources : [infrastructure.ts](../apps/api/src/modules/villages/infrastructure.ts), ligne 205 ; [spawn-access.ts](../packages/contracts/src/spawn-access.ts), lignes 13–25 ; appel avant réservation dans [service.ts](../apps/api/src/modules/villages/service.ts), ligne 986.
+Sources : [infrastructure.ts](../../apps/api/src/modules/villages/infrastructure.ts), ligne 205 ; [spawn-access.ts](../../packages/contracts/src/spawn-access.ts), lignes 13–25 ; appel avant réservation dans [service.ts](../../apps/api/src/modules/villages/service.ts), ligne 986.
 
 assertNoInfrastructure teste la ligne centrale contre une boîte de demi-largeur 0.499. Le solveur certifie une bande de largeur 1/8, avec échantillons latéraux à ±1/16. Leurs règles divergent à la frontière d’une cellule.
 
@@ -34,7 +34,7 @@ Attendu : protéger le passage balayé avec les mêmes marges et règles de fron
 
 ### R3 — P2 — Un deuxième rappel prolonge un retour déjà commencé
 
-Source : [service.ts](../apps/api/src/modules/science/service.ts), lignes 343–356.
+Source : [service.ts](../../apps/api/src/modules/science/service.ts), lignes 343–356.
 
 Le premier rappel raccourcit pathCells et supprime les surveyCells, mais conserve startedAt. Le garde « déjà au retour » ajoute encore les 60 secondes de relevé au trajet raccourci. Un rappel supplémentaire pendant ce retour recalcule donc une nouvelle échéance.
 
@@ -44,7 +44,7 @@ Attendu : un rappel déjà engagé conserve son échéance et son préfixe parco
 
 ## Exécutions de cette contre-recette
 
-Les quatre tests adverses ont depuis été intégrés et renforcés dans [expeditions.integration.test.ts](../apps/api/src/modules/science/expeditions.integration.test.ts). Le [rapport de correction](CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) donne leur résultat après correction.
+Les quatre tests adverses ont depuis été intégrés et renforcés dans [expeditions.integration.test.ts](../../apps/api/src/modules/science/expeditions.integration.test.ts). Le [rapport de correction](CORRECTIONS-EXPEDITIONS-RC1-ASYNCHRONES-2026-10-12.md) donne leur résultat après correction.
 
 Ils ont été exécutés dans apps/api/src/modules/science/expeditions.counter-review.test.ts : **4 échecs attendus sur les assertions métier, code de sortie 1**. Fichier temporaire retiré après la revue ; cas désormais intégrés à la suite normale. La fixture vérifie explicitement 127.0.0.1/arbestra_test, crée ses UUID et nettoie ses lignes ; aucun reset global ni modification des mondes utilisateur.
 

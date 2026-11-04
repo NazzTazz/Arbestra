@@ -1,16 +1,16 @@
 # Handoff Sol — coffre et journal de l'Oracle
 
-État ultérieur : l'indice a été validé par Tristan, implémenté et testé ; la tranche est clôturée. Voir le [handoff final](./HANDOFF-2026-09-07-INDICE-ORACLE.md). Les statuts ci-dessous décrivent la livraison initiale du socle.
+État ultérieur : l'indice a été validé par Tristan, implémenté et testé ; la tranche est clôturée. Voir le [handoff final](HANDOFF-2026-09-07-INDICE-ORACLE.md). Les statuts ci-dessous décrivent la livraison initiale du socle.
 
 Date / agent : 7 septembre 2026, Sol
 
-Spec : [coffre et journal de l'Oracle](./SPEC-COFFRE-JOURNAL-ORACLE.md), **implémentée / à valider pour l'indice**
+Spec : [coffre et journal de l'Oracle](../SPEC-COFFRE-JOURNAL-ORACLE.md), **implémentée / à valider pour l'indice**
 
 Base relue : `master`, `1da6df0`, avec consolidation documentaire préexistante non commitée
 
 ## Résultat
 
-Reprise après revue : les réserves de preuve sont levées, voir [corrections et résultats finaux](./REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md). Campagne finale : 83 tests, 4 parcours Playwright, lint/typecheck/build verts ; deux mutations temporaires ont fait échouer les tests pour les défauts attendus. Commit/push désormais autorisés par Tristan. Les mentions de non-publication et les campagnes ci-dessous décrivent la livraison initiale de Sol.
+Reprise après revue : les réserves de preuve sont levées, voir [corrections et résultats finaux](REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md). Campagne finale : 83 tests, 4 parcours Playwright, lint/typecheck/build verts ; deux mutations temporaires ont fait échouer les tests pour les défauts attendus. Commit/push désormais autorisés par Tristan. Les mentions de non-publication et les campagnes ci-dessous décrivent la livraison initiale de Sol.
 
 L'ouverture du coffre de l'Hôtel de ville accomplit désormais `town-hall-supplies`, crédite 2 000 carottes dans la même transaction et inscrit une trace datée dans le grimoire de l'Oracle. La commande est idempotente : une répétition ou un second onglet reçoit l'état courant sans second crédit. Le HUD ouvre un journal qui reste vide sans dévoiler le coffre, puis affiche « Les anciennes réserves » après la découverte. Une célébration transitoire de l'Oracle accompagne un nouvel accomplissement observé par le client.
 

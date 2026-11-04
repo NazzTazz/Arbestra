@@ -2,11 +2,11 @@
 
 Date : 6 septembre 2026 ; mise à jour d'implémentation le 7 septembre. Base relue : `master`, `1da6df0`, avec consolidation documentaire non commitée. Implémenteur : **Sol**.
 
-**Statut : clôturée.** Coffre, crédit unique, accomplissement PostgreSQL, journal et célébration sont validés et publiés dans `38b801a` ; voir le [handoff du socle](./HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). L'indice validé est implémenté et testé : [preuves de clôture](./HANDOFF-2026-09-07-INDICE-ORACLE.md). Aucune migration de développement. Référence produit : [direction consolidée](./DIRECTION-PRODUIT.md).
+**Statut : clôturée.** Coffre, crédit unique, accomplissement PostgreSQL, journal et célébration sont validés et publiés dans `38b801a` ; voir le [handoff du socle](old/HANDOFF-SOL-2026-09-07-COFFRE-JOURNAL-ORACLE.md). L'indice validé est implémenté et testé : [preuves de clôture](old/HANDOFF-2026-09-07-INDICE-ORACLE.md). Aucune migration de développement. Référence produit : [direction consolidée](./DIRECTION-PRODUIT.md).
 
 ## Résultat demandé
 
-Validation technique du socle après revue : [réserves levées](./REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md), 83 tests et 4 parcours Playwright verts. Tristan a ensuite autorisé commit/push ; la restriction historique de publication de cette spec est remplacée par cette demande. La base de développement reste non migrée.
+Validation technique du socle après revue : [réserves levées](old/REVIEW-ASTRA-2026-09-07-COFFRE-JOURNAL.md), 83 tests et 4 parcours Playwright verts. Tristan a ensuite autorisé commit/push ; la restriction historique de publication de cette spec est remplacée par cette demande. La base de développement reste non migrée.
 
 Le joueur découvre librement le coffre de l'Hôtel de ville. L'ouverture accomplit la première quête implicite et verse les 2 000 carottes une seule fois. L'Oracle célèbre l'accomplissement ; une trace durable reste consultable dans un journal. Tristan valide le stockage de l'accomplissement dans PostgreSQL : « le maître c'est l'Oracle, et son grimoire c'est Postgres ».
 

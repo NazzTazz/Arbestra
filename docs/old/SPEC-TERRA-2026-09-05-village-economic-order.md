@@ -46,11 +46,11 @@ Une lecture sans transition due continue de projeter la production sans écrire 
 
 ### Fichiers concernés
 
-- [scheduled-tasks.ts](../apps/api/src/jobs/scheduled-tasks.ts)
-- [complete-construction.ts](../apps/api/src/modules/villages/complete-construction.ts)
-- [economy.ts](../apps/api/src/modules/villages/economy.ts)
-- [service.ts](../apps/api/src/modules/villages/service.ts)
-- [server.ts](../apps/api/src/server.ts), qui enregistre les deux handlers.
+- [scheduled-tasks.ts](../../apps/api/src/jobs/scheduled-tasks.ts)
+- [complete-construction.ts](../../apps/api/src/modules/villages/complete-construction.ts)
+- [economy.ts](../../apps/api/src/modules/villages/economy.ts)
+- [service.ts](../../apps/api/src/modules/villages/service.ts)
+- [server.ts](../../apps/api/src/server.ts), qui enregistre les deux handlers.
 
 ### Acquisition et transaction du scheduler
 
@@ -131,7 +131,7 @@ Les `FOR UPDATE` des jointures d’amélioration et de récolte ne ciblent pas u
 
 ### Autre contrainte directement liée
 
-La migration [004_world_economy_foundation.ts](../apps/api/src/database/migrations/004_world_economy_foundation.ts) crée `scheduled_tasks_one_pending_subject`.
+La migration [004_world_economy_foundation.ts](../../apps/api/src/database/migrations/004_world_economy_foundation.ts) crée `scheduled_tasks_one_pending_subject`.
 
 Cet index unique interdit plusieurs tâches pending pour le même `(world_id, task_type, subject_id)`.
 

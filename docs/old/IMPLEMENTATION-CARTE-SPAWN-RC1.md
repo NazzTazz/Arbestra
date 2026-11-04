@@ -1,8 +1,8 @@
 # Carte de spawn RC1 — état d’implémentation
 
-**10 octobre :** la route d'accueil utilise désormais un atlas SVG léger et le cercle libre de 8 cases. Les règles validées passent à ±2 niveaux et ajoutent les territoires bloquants de rayon maximal 30. [État et recette de l'atlas](IMPLEMENTATION-ATLAS-RC1.md). Les sections ci-dessous décrivent le socle précédent et ses limites d'installation ; l'ancien parcours Babylon et son script de recette sont historiques.
+**10 octobre :** la route d'accueil utilise désormais un atlas SVG léger et le cercle libre de 8 cases. Les règles validées passent à ±2 niveaux et ajoutent les territoires bloquants de rayon maximal 30. [État et recette de l'atlas](../IMPLEMENTATION-ATLAS-RC1.md). Les sections ci-dessous décrivent le socle précédent et ses limites d'installation ; l'ancien parcours Babylon et son script de recette sont historiques.
 
-9 octobre 2026. Référence produit : [spec figée](SPEC-CARTE-SPAWN-RC1.md).
+9 octobre 2026. Référence produit : [spec figée](../SPEC-CARTE-SPAWN-RC1.md).
 
 Reprise des lenteurs : [handoff Sol → Astra](HANDOFF-ASTRA-2026-10-09-SPAWN-RC1-LENTEURS.md), avec mesures, profilage, chemins à examiner et hypothèses encore à confirmer.
 

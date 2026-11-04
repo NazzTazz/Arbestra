@@ -22,13 +22,13 @@ La construction et l'extension n'imposent pas de borne liée à la population. L
 
 Conséquence inférée : un Jardin de 16 cellules actives devient impossible à récolter dans le périmètre actuel. Ce scénario n'a pas été reproduit.
 
-Sources : [constructBuildingArea / expandGarden](../apps/api/src/modules/villages/service.ts), [startGardenHarvest, needed = active.count](../apps/api/src/modules/population/garden-harvest.ts), [initialisation](../apps/api/src/database/seed.ts). Le calcul `housingCapacity` est dans `service.ts`.
+Sources : [constructBuildingArea / expandGarden](../../apps/api/src/modules/villages/service.ts), [startGardenHarvest, needed = active.count](../../apps/api/src/modules/population/garden-harvest.ts), [initialisation](../../apps/api/src/database/seed.ts). Le calcul `housingCapacity` est dans `service.ts`.
 
 Recommandation proposée : afficher avant construction/extension le besoin total en habitants, l'effectif actuel et un avertissement explicite. Cela informe mais ne résout pas l'impasse. Interdire le dépassement, permettre une récolte partielle ou ouvrir une croissance démographique sont des choix produit **ouverts**, pas des correctifs techniques déjà approuvés.
 
 ### 2. Récolte différée mal présentée et retour non actualisé automatiquement
 
-Dans [App.tsx](../apps/world-web/src/App.tsx) :
+Dans [App.tsx](../../apps/world-web/src/App.tsx) :
 
 - `onHarvest` annonce immédiatement « +X carottes récoltées », alors que le serveur réserve le lot et le crédite à l'échéance.
 - `BuildingDetails` n'affiche pas le travail `garden.harvest` et ne désactive pas le bouton selon cette affectation ; après la réponse HTTP, une nouvelle tentative peut donc recevoir le refus serveur « récolte déjà en cours ».
@@ -39,21 +39,21 @@ La scène ne fournit pas de callback de fin métier au composant React. Les anim
 
 ### 3. Population et pierre partiellement accessibles
 
-Les routes repas/repos/découverte du coffre existent dans [routes.ts](../apps/api/src/modules/villages/routes.ts), mais leurs adaptateurs manquent dans le [client React](../apps/world-web/src/api/client.ts) et leurs commandes ne sont pas branchées dans l'interface active.
+Les routes repas/repos/découverte du coffre existent dans [routes.ts](../../apps/api/src/modules/villages/routes.ts), mais leurs adaptateurs manquent dans le [client React](../../apps/world-web/src/api/client.ts) et leurs commandes ne sont pas branchées dans l'interface active.
 
 Pour la pierre, `getStoneDepositDetails` et `startStoneExtraction` existent déjà dans ce client, ainsi que le picking et le pont Babylon. Le menu d'App.tsx affiche encore « Les détails d'exploitation arriveront ici ». Le HUD actif ne montre ni pierre ni population.
 
 ### 4. Contrats et intentions à finir
 
-- **Coffre :** `discoverBuildingSupplies` persiste `claimedAt`, mais [VillageState / Building](../packages/contracts/src/villages.ts) n'exposent pas l'état découvert/non découvert. Un menu ne peut donc pas reconstruire cet état après F5 à partir du snapshot. La commande répétée renvoie un conflit, elle ne constitue pas une lecture de détail.
+- **Coffre :** `discoverBuildingSupplies` persiste `claimedAt`, mais [VillageState / Building](../../packages/contracts/src/villages.ts) n'exposent pas l'état découvert/non découvert. Un menu ne peut donc pas reconstruire cet état après F5 à partir du snapshot. La commande répétée renvoie un conflit, elle ne constitue pas une lecture de détail.
 - **Récolte, serveur :** `startGardenHarvest` retrouve le travail par monde/village/commandId et retourne son ID sans vérifier que `buildingId` correspond toujours. Réutiliser l'intention sur un autre Jardin ne déclenche donc pas le conflit de paramètres attendu. Constat de lecture, non reproduit.
 - **Récolte, client :** l'adaptateur accepte un commandId explicite, mais App.tsx ne le conserve pas ; chaque nouvel appel utilise l'UUID par défaut. Après une réponse perdue, une nouvelle tentative ne réutilise pas l'intention initiale. Le test de l'adaptateur avec ID explicite ne prouve pas le comportement du composant.
 
 ### 5. Preuves visuelles et représentation des récoltes en retard
 
-[tests/e2e/vertical.spec.ts](../tests/e2e/vertical.spec.ts) attend encore une construction depuis une case vide et un Jardin passant au niveau 2. Il ne décrit plus le parcours actuel par panneau construire et extension surfacique. Aucun lancement effectué durant l'audit : incompatibilité constatée à la lecture, pas résultat d'exécution.
+[tests/e2e/vertical.spec.ts](../../tests/e2e/vertical.spec.ts) attend encore une construction depuis une case vide et un Jardin passant au niveau 2. Il ne décrit plus le parcours actuel par panneau construire et extension surfacique. Aucun lancement effectué durant l'audit : incompatibilité constatée à la lecture, pas résultat d'exécution.
 
-Dans [BabylonVillageScene.ts](../apps/world-web/src/scene/BabylonVillageScene.ts), `#updateHarvestPeople` sélectionne `gardens[0]`. Plusieurs petits Jardins peuvent se partager les habitants, mais seul le premier travail est représenté par ce chemin. La vérification future doit inclure des récoltes simultanées et le rechargement en cours de trajet.
+Dans [BabylonVillageScene.ts](../../apps/world-web/src/scene/BabylonVillageScene.ts), `#updateHarvestPeople` sélectionne `gardens[0]`. Plusieurs petits Jardins peuvent se partager les habitants, mais seul le premier travail est représenté par ce chemin. La vérification future doit inclure des récoltes simultanées et le rechargement en cours de trajet.
 
 ## Tranches proposées, dans l'ordre
 
@@ -80,7 +80,7 @@ Inscription/spawn, exploration avec déplacement de région, combat, transport g
 
 App conserve la composition de la scène, le mode construction et la sélection courante. Garder une seule gestion cohérente des snapshots. Ne pas créer de store global, moteur de commandes ou refonte générale préventive pour cette extraction.
 
-Un [Hud.tsx](../apps/world-web/src/ui/Hud.tsx) non suivi existe déjà : le préserver et comprendre l'intention de Tristan avant intégration. Il n'est pas importé par App.tsx. Son import `./Hud.css` vise un fichier absent dans `ui`, alors que le style présent est [src/hud.css](../apps/world-web/src/hud.css). Corriger le raccord lors de son intégration ; ne pas présenter ce composant comme déjà actif.
+Un [Hud.tsx](../../apps/world-web/src/ui/Hud.tsx) non suivi existe déjà : le préserver et comprendre l'intention de Tristan avant intégration. Il n'est pas importé par App.tsx. Son import `./Hud.css` vise un fichier absent dans `ui`, alors que le style présent est [src/hud.css](../../apps/world-web/src/hud.css). Corriger le raccord lors de son intégration ; ne pas présenter ce composant comme déjà actif.
 
 Ordre de travail recommandé : petite extraction HUD/panneau construire, puis tranche habitants–récoltes. Ne pas attendre une refonte complète du frontend pour livrer le parcours.
 
@@ -92,7 +92,7 @@ Ordre de travail recommandé : petite extraction HUD/panneau construire, puis tr
 - Pierre : refus lisible, effectif, travail en cours, retour, stock et terrain après épuisement.
 - Choix produit du Jardin surdimensionné à expliciter avant d'en changer la règle serveur.
 
-Appliquer les contrôles proportionnés d'[AGENTS.md](../AGENTS.md) et du [workflow](AGENT-WORKFLOW.md) à la tranche réellement choisie. Aucun de ces contrôles n'a été exécuté pour l'audit.
+Appliquer les contrôles proportionnés d'[AGENTS.md](../../AGENTS.md) et du [workflow](../AGENT-WORKFLOW.md) à la tranche réellement choisie. Aucun de ces contrôles n'a été exécuté pour l'audit.
 
 ## État Git et passation
 

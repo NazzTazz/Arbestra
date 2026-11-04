@@ -10,7 +10,7 @@ L'énergie est calculée sans tick : idle consomme 10 points en 22 h, travail 1/
 
 Une récolte réserve le buffer du Jardin et les habitants requis (une personne par cellule active), puis crée `garden.harvest.complete` à H+60 s. Le worker conserve `SKIP LOCKED`; son handler rejoint la réconciliation du village. À l'échéance, la réservation est créditée une fois, les travailleurs sont libérés et la production du trajet reste dans le buffer. Une seconde récolte concurrente reçoit `GARDEN_HARVEST_IN_PROGRESS`.
 
-L'UI React reste au product owner. [Le mock-up et les contrats HTTP](./UI-MOCKUP-2026-09-05-habitants-et-recolte.md) sont à jour. Babylon affiche un petit cube-figurant par parcelle active pendant la récolte, animé entre le village et la parcelle à partir des dates serveur. Ce sont des figurants, pas des habitants persistants individuels.
+L'UI React reste au product owner. [Le mock-up et les contrats HTTP](UI-MOCKUP-2026-09-05-habitants-et-recolte.md) sont à jour. Babylon affiche un petit cube-figurant par parcelle active pendant la récolte, animé entre le village et la parcelle à partir des dates serveur. Ce sont des figurants, pas des habitants persistants individuels.
 
 ## API livrée
 

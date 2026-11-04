@@ -2,7 +2,7 @@
 
 Date : 5 septembre 2026. Base Git : `4dfd494` + worktree antérieur habitants/Jardins et première implémentation Terra. **Livraison technique hors UI React terminée ; intégration React et acceptation visuelle à Tristan.** Aucun commit/push. La migration de développement a été appliquée ensuite à la demande explicite de Tristan, sans reset ni seed.
 
-Références : [spec approuvée](SPEC-ASTRA-2026-09-05-EXPLOITATION-GISEMENTS.md), [appels et branchement React](API-EXPLOITATION-GISEMENTS.md). Le présent handoff remplace la déclaration de clôture prématurée de Terra. Les modifications antérieures du worktree ne doivent pas toutes être attribuées à cette finition.
+Références : [spec approuvée](../SPEC-ASTRA-2026-09-05-EXPLOITATION-GISEMENTS.md), [appels et branchement React](../API-EXPLOITATION-GISEMENTS.md). Le présent handoff remplace la déclaration de clôture prématurée de Terra. Les modifications antérieures du worktree ne doivent pas toutes être attribuées à cette finition.
 
 ## Ce qui fonctionne dans le code livré
 
@@ -64,4 +64,4 @@ Chaque mutation a été restaurée dans un finally avant la suite complète vert
 
 ## Reprise du Product Owner
 
-Brancher le callback et les appels de la [doc React](API-EXPLOITATION-GISEMENTS.md), puis valider sélection, refus, plusieurs figurants, F5 en cours, crédit et épuisement. L’acceptation du parcours visible dépend de ce branchement et de la validation visuelle, distincts de la clôture technique hors React.
+Brancher le callback et les appels de la [doc React](../API-EXPLOITATION-GISEMENTS.md), puis valider sélection, refus, plusieurs figurants, F5 en cours, crédit et épuisement. L’acceptation du parcours visible dépend de ce branchement et de la validation visuelle, distincts de la clôture technique hors React.

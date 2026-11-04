@@ -77,4 +77,4 @@ Pour un checkout existant, appliquer les migrations additives avec `corepack pnp
 
 `corepack pnpm dev` démarre aussi le worker de génération. En production, démarrer séparément `corepack pnpm --filter @arbestra/api generator:start` après build, avec la même connexion PostgreSQL que l’API. Un verrou PostgreSQL autorise un seul calcul à la fois, exécuté dans un processus enfant borné.
 
-Les candidats v2 peuvent être conservés puis ouverts explicitement. Les candidats v3 permettent d’explorer les plateaux, les marches et le climat ; leur ouverture reste bloquée jusqu’au spawn et au streamer compatibles (D/E). La tirette des canaux est active depuis C. Voir [la recette et les limites A/B](docs/RECETTE-WORLD-GENERATOR-AB-2026-10-07.md).
+Les candidats v2 peuvent être conservés puis ouverts explicitement. Les candidats v3 permettent d’explorer les plateaux, les marches et le climat ; leur ouverture reste bloquée jusqu’au spawn et au streamer compatibles (D/E). La tirette des canaux est active depuis C. Voir [la recette et les limites A/B](docs/old/RECETTE-WORLD-GENERATOR-AB-2026-10-07.md).
