@@ -24,7 +24,7 @@ Le combat arrive en dernier par nature : il repose sur tout le reste.
 
 ## Ordre proposé
 
-1. **Test de charge** (environ une semaine) : bots scriptés sur staging à 10, 30 puis 100 joueurs ; latence des commandes, retard du worker, charge PostgreSQL et CPU. Ensuite, éventuellement, quelques PNJ joués par Claude Haiku 5.5 comme testeurs exploratoires. Puis **décision de Tristan sur la taille du monde** et le nombre de joueurs par monde.
+1. **Test de charge** (environ une semaine) : bots scriptés sur staging à 10, 30 puis 100 joueurs ; latence des commandes, retard du worker, charge PostgreSQL et CPU. Outil livré et validé en local le 4 novembre ([test de charge](TEST-DE-CHARGE.md)) ; passage sur staging à décider. Ensuite, éventuellement, quelques PNJ joués par Claude Haiku 5.5 comme testeurs exploratoires. Puis **décision de Tristan sur la taille du monde** et le nombre de joueurs par monde.
 2. **Refonte des trajets** (méthode de Tristan) : caches locaux par région au lieu de l'invalidation par le sol du monde entier ([dette](DETTE-TECHNIQUE.md), « Trajets »). Peut avancer en parallèle de la carte : le code touché est différent.
 3. **Carte** ([orientation du 3 novembre](SPEC-VUES-TERRAIN-REGION-MONDE-TORIQUE.md), en tête) : vue Régions détaillée, morphing région ↔ carte, atlas en défilement infini, HUD monde (population, villages, bois et pierre mondiaux, joueurs), marché mondial, relevé du géographe au réticule violet. Le tore devient la cinématique d'Astronomie 1.
 4. **Brouillard de renseignement**, sur la carte, quand les règles de Tristan sont prêtes.

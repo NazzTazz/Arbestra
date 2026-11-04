@@ -98,6 +98,19 @@ importers:
         specifier: ^8.15.5
         version: 8.23.1
 
+  apps/load-test:
+    dependencies:
+      '@arbestra/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      kysely:
+        specifier: ^0.28.5
+        version: 0.28.17
+    devDependencies:
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
+
   apps/play-web:
     dependencies:
       '@arbestra/contracts':

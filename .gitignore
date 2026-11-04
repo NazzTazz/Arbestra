@@ -20,3 +20,6 @@ release.tar.gz
 
 # Archive locale de Tristan, retirée du dépôt le 4 novembre 2026
 art-sol/
+
+# Load test: bot credentials (generated passwords, session tokens) and run results
+apps/load-test/out/

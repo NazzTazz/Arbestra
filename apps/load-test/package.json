@@ -1,0 +1,23 @@
+{
+  "name": "@arbestra/load-test",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "description": "Load test: bot provisioning, scripted bots over the real HTTP API, read-only server sampler (docs/TEST-DE-CHARGE.md).",
+  "scripts": {
+    "provision": "tsx src/provision.ts",
+    "bots": "tsx src/run.ts",
+    "sample": "tsx src/sampler.ts",
+    "cleanup": "tsx src/cleanup.ts",
+    "local-api": "tsx src/local-api.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@arbestra/contracts": "workspace:*",
+    "kysely": "^0.28.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0"
+  }
+}
