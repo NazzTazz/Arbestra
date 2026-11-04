@@ -22,11 +22,30 @@ export interface DemolitionPatch {
 export const DEMOLITION_PULSE_MS = 1200;
 const PULSE_MS = DEMOLITION_PULSE_MS,
   TINT = new Color3(1, 0.36, 0.3),
-  GLOW = new Color3(0.7, 0.08, 0.05);
+  GLOW = new Color3(0.7, 0.08, 0.05),
+  TEXTURE_SLOTS = [
+    'diffuseTexture',
+    'ambientTexture',
+    'opacityTexture',
+    'reflectionTexture',
+    'emissiveTexture',
+    'specularTexture',
+    'bumpTexture',
+    'lightmapTexture',
+    'refractionTexture',
+  ] as const;
 /** The red of a designated target: a copy of `original`, its colours tinted
  * (shared by the scene's pulse and the « Détruire » icon, which keeps `glow`). */
 export function demolitionTintedMaterial(original: StandardMaterial, glow = 0): StandardMaterial {
   const tinted = original.clone(`${original.name}-demolition`);
+  // The clone copies the textures too, and a copied DynamicTexture (the kit's grains)
+  // never becomes ready: the « Détruire » icon then waited forever. Share the originals.
+  for (const slot of TEXTURE_SLOTS) {
+    const copy = tinted[slot];
+    if (copy === original[slot]) continue;
+    copy?.dispose();
+    tinted[slot] = original[slot];
+  }
   tinted.unfreeze();
   tinted.diffuseColor = original.diffuseColor.multiply(TINT);
   tinted.ambientColor = original.ambientColor.multiply(TINT);
