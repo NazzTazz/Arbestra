@@ -7,7 +7,7 @@ Méthode : `git ls-files` (1 471 fichiers suivis), lecture des README et manifes
 ## Points bloquants (à régler avant de poser les licences)
 
 1. **`LICENSE` absent** : le texte officiel de l'AGPL-3.0 n'est pas présent dans les paquets installés. Il n'a pas été écrit de mémoire. À récupérer tel quel sur <https://www.gnu.org/licenses/agpl-3.0.txt>.
-2. **Tiers à vérifier** : `apps/world-web/public/decals/perlin-tag.png` (1,8 Mo, « PNG Perlin de Downloads » fourni par Tristan le 11 octobre) et `apps/world-web/public/arbestra-loading.png` (3 Mo, « image de JMP », 16 octobre). L'historique indique un fichier fourni, pas son auteur ni ses droits. Si JMP, Marie ou l'auteur du « Perlin » n'ont pas consenti à CC BY-NC-SA, retirer ou remplacer. Le texte du lore cite aussi la « planche JMP » comme référence graphique ; vérifier qu'aucune reproduction ne figure dans le dépôt.
+2. ~~Tiers à vérifier~~ **Réglé le 4 novembre** : `perlin-tag.png` et `arbestra-loading.png` sont faites pour le projet (imagegen dirigé par GPT-6.1-sol, duo « Jean-Michel Picture », JMP), sous CC BY-NC-SA 4.0.
 3. **Contenus à provenance IA** : voir section 4. Pas bloquant juridiquement, mais la décision d'étiqueter ces fichiers CC BY-NC-SA est à prendre en connaissance de cause.
 4. **Pas de secret ni de journal suivi** (voir section 5), donc aucun blocage de ce côté. Un point de réserve : l'historique git contient 572 commits sous l'adresse personnelle de Tristan, déjà publique si le dépôt l'est.
 
@@ -49,11 +49,11 @@ Aucune police suivie (pas de `.woff`, `.ttf`, `.otf`), aucun son, aucun `.ktx2`,
 | `apps/world-web/public/thumbnails/` | 4 PNG, 53 Ko | Captures du rendu du jeu (README du HUD) | Fait pour le projet (code) |
 | `apps/world-web/public/hud/` | 5 PNG, 797 Ko | Générés avec l'outil imagegen intégré (README du HUD, 20 octobre) ; 3 sur 5 sont « historiques » | Fait pour le projet (IA) |
 | `apps/world-web/public/atlas/rc1.svg` | 1 SVG, 1 Mo | Produit par `scripts/build-spawn-atlas.ts` à partir du JSON géographique | Fait pour le projet (code) |
-| `apps/world-web/public/decals/perlin-tag.png` | 1 PNG, 1,8 Mo | Fichier fourni, « Perlin » (easter egg) | **Tiers inconnu** |
-| `apps/world-web/public/arbestra-loading.png` | 1 PNG, 2,9 Mo | « Image de JMP », copiée sans modification | **Tiers inconnu** |
+| `apps/world-web/public/decals/perlin-tag.png` | 1 PNG, 1,8 Mo | Imagegen dirigé par GPT-6.1-sol (« Jean-Michel Picture », JMP), précisé par Tristan le 4 novembre | Fait pour le projet (IA) |
+| `apps/world-web/public/arbestra-loading.png` | 1 PNG, 2,9 Mo | Imagegen dirigé par GPT-6.1-sol (JMP), précisé par Tristan le 4 novembre ; à terme, fondu de captures du jeu | Fait pour le projet (IA) |
 | `apps/world-web/public/studies/` | JSON de géographie | Données générées par le dépôt | Fait pour le projet (code) |
 | `apps/world-web/bench/assets/` | 3 GLB, 8,2 Mo | Cheval de Quaternius réexporté par Blender, trois niveaux de détail | **Tiers identifié** : CC0 |
-| `art-sol/` | 9 PNG, 2,6 Mo | Captures historiques du rendu procédural (README « journal visuel »). Tristan : produites avec GPT-6-sol | Fait pour le projet (IA / capture) |
+| `art-sol/` | 9 PNG, 2,6 Mo | Captures historiques (GPT-6-sol) | **Retiré du dépôt le 4 novembre** (archive locale de Tristan ; reste dans l'historique git) |
 | `docs/references/atlas-rc1-concept-01.png` | 1 PNG, 3,3 Mo | Concept « imagegen » | Fait pour le projet (IA) |
 | `blender-elements/` (racine, `assets/`, `previews/`, `sources/`) | 2 GLB, 1 BLEND, 3 PNG, environ 7 Mo | Kit jardins V7 (Astra) | Fait pour le projet (IA) |
 | `blender-elements/v8/` | 12 GLB, 13 PNG, 10 textures, 1 BLEND, 4 scripts Python ; environ 15 Mo | Kit V8 (Opus 5.5, d'après la notice) | Fait pour le projet (IA) |
@@ -64,7 +64,7 @@ Aucune police suivie (pas de `.woff`, `.ttf`, `.otf`), aucun son, aucun `.ktx2`,
 | `blender-elements/chevaux/` | 1 BLEND (3 Mo), 1 GLB source, 7 PNG, 1 MP4 | Dérivés du **White Horse de Quaternius**, CC0 (README, crédit donné), source « non modifiée » | **Tiers identifié** : CC0 |
 | `ops/`, `scripts/` | scripts Python, shell, JS, unités systemd | Code | Code (AGPL) |
 
-Note : le README `blender-elements/README.md` cite le kit d'Astra et celui d'Opus 5.5. Tristan indique « Claude et un serveur MCP » ; les notices parlent d'« Astra » et d'« Opus 5.5 ». À rapprocher : un interlocuteur peut être un autre modèle que Claude.
+Note : « Astra » désigne GPT-6-astra (OpenAI), précisé par Tristan le 4 novembre ; les éléments plus récents sont de Claude Opus 5.5 via un serveur MCP Blender.
 
 ## 3. Textes et données
 
@@ -77,8 +77,8 @@ Note : le README `blender-elements/README.md` cite le kit d'Astra et celui d'Opu
 
 | Contenu | Origine déclarée | Source |
 | --- | --- | --- |
-| `art-sol/` (9 PNG) | Captures du rendu du jeu au début du projet, GPT-6-sol selon Tristan | Tristan ; README sans mention de l'outil |
-| `blender-elements/` (modèles, scripts, aperçus) | Agents « Astra » (V7, V8) et « Opus 5.5 » (carré potager, villageois, routes), via Blender (MCP selon Tristan) | READMEs du dossier |
+| `art-sol/` (9 PNG, retiré du dépôt) | Captures du rendu du jeu au début du projet, GPT-6-sol | Tristan |
+| `blender-elements/` (modèles, scripts, aperçus) | GPT-6-astra (OpenAI) pour V7 et V8, Claude Opus 5.5 via MCP Blender (carré potager, villageois, routes) | READMEs du dossier, Tristan |
 | `docs/references/atlas-rc1-concept-01.png` | Outil intégré imagegen | `docs/CADRAGE-CARTE-ATLAS-RC1.md` |
 | `apps/world-web/public/hud/*.png` | Outil imagegen | `apps/world-web/public/hud/README.md` |
 | Code, tests, specs et textes | Rédigés avec des agents IA (569 commits de Tristan, 2 de « Claude ») | Historique git |
@@ -111,8 +111,8 @@ Fichiers suivis recherchés : `.env`, `*.log`, clés (`*.pem`, `*.key`), `test-r
 ### Avant de poser les licences (bloquant)
 
 1. Récupérer `LICENSE` (texte officiel AGPL-3.0, gnu.org), sans modification.
-2. Faire confirmer par leurs auteurs (JMP, Perlin) la licence de `arbestra-loading.png` et `perlin-tag.png`, sinon les retirer ou les remplacer ; sinon exclure explicitement de CC BY-NC-SA dans `LICENSE-CONTENT.md`.
-3. Décider du sort de `art-sol/` (historique, 2,6 Mo, aucune valeur de spec) : le garder avec une mention de provenance IA, ou l'exclure du dépôt public.
+2. ~~Images JMP et Perlin~~ réglé : faites pour le projet (voir §1).
+3. ~~`art-sol/`~~ retiré du dépôt le 4 novembre (archive locale de Tristan).
 4. Relire `docs/DEPLOIEMENT-VPS.md`, `ops/` et `docs/old/` pour l'exposition d'exploitation et les chemins personnels.
 5. Relire les mots de passe de fixtures (`seed.ts`, scripts de navigateur) et confirmer qu'ils sont purement locaux.
 6. Faire valider par un juriste le point CC BY-NC-SA sur contenus IA, la compatibilité du « NC » avec l'objectif de l'alpha payante éventuelle, et le dépôt de la marque « Arbestra ».

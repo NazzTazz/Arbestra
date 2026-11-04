@@ -17,3 +17,6 @@ release.tar.gz
 
 # Copies de secours créées par Blender à chaque réenregistrement
 *.blend1
+
+# Archive locale de Tristan, retirée du dépôt le 4 novembre 2026
+art-sol/
