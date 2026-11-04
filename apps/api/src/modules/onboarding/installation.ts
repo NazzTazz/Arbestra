@@ -16,6 +16,14 @@ import {
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { beginVillageEconomy } from '../villages/reconcile-economy.js';
+import {
+  allZones,
+  assertSpatialCoverage,
+  cellZones,
+  lockSpatial,
+  spatialGrid,
+  INSTALLATION_RADIUS,
+} from '../worlds/spatial-locks.js';
 import { STARTER_KIT } from './starter-kit.js';
 import { readSpawnSnapshot, spawnSnapshot } from './spawn-map.js';
 import { persistRc1Resources, removeSpawnTrees } from './rc1-resources.js';
@@ -227,7 +235,23 @@ export async function installVillage(
         anchorCellY: input.point.y,
       })
       .execute();
-    await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + world.id},0))`.execute(tx);
+    // The world key, exclusive, serializes installations and territories (the
+    // 50-cell distance, territories). Then the zones around the point,
+    // exclusive: the kit, its resources and cleared trees stay inside; distant
+    // villages keep playing. The first installation of a world writes all its
+    // chunks: every zone (docs/VERROUS-2026-11-04.md).
+    const grid = await spatialGrid(tx, world.id);
+    await lockSpatial(tx, grid, { world: 'exclusive' });
+    const projected = await tx
+      .selectFrom('worldChunks')
+      .select('worldId')
+      .where('worldId', '=', world.id)
+      .executeTakeFirst();
+    await lockSpatial(tx, grid, {
+      exclusive: projected
+        ? cellZones(grid, [{ cellX: input.point.x, cellY: input.point.y }], INSTALLATION_RADIUS)
+        : allZones(grid),
+    });
     const snapshot = await spawnSnapshot(tx, slug, true);
     snapshot.map.villages = snapshot.map.villages.filter((v) => v.id !== villageId);
     if (input.artifactChecksum !== snapshot.map.artifactChecksum) fail('SPAWN_MAP_STALE', 'La carte a changé.');
@@ -247,6 +271,7 @@ export async function installVillage(
     const elements = STARTER_KIT.elements.filter((e) => input.mode === 'grouped' || e.type === 'town-hall');
     const placed = elements.map((e) => poseStarterElement(e, input.point, input.quarterTurns));
     const cells = placed.flatMap((e) => e.cells);
+    await assertSpatialCoverage(tx, world.id, cells, 'exclusive', 0, 'installation');
     if (plan.chunks) {
       const existing = await tx
         .selectFrom('worldChunks')
@@ -373,7 +398,25 @@ export async function poseRemainingStarter(
       .executeTakeFirst();
     if (!village) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     observationVillage(accountId, village.worldId, villageId);
-    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], true);
+    // The kit never changes after installation: the element's cells are known
+    // before the locks, its zones are taken exclusive (not the whole world).
+    const kit = await tx
+      .selectFrom('villageStarterInstallations')
+      .select('kit')
+      .where('worldId', '=', village.worldId)
+      .where('villageId', '=', villageId)
+      .executeTakeFirst();
+    const wanted = kit?.kit.elements.find((e) => e.key === input.elementKey);
+    let elementCells: Array<{ cellX: number; cellY: number }> = [];
+    try {
+      if (wanted && wanted.type !== 'town-hall')
+        elementCells = poseStarterElement(wanted as StarterElement, input.point, input.quarterTurns, false).cells;
+    } catch {
+      // Refused below with its usual code, nothing written.
+    }
+    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], {
+      write: elementCells,
+    });
     const row = await tx
       .selectFrom('villageStarterInstallations')
       .selectAll()
@@ -422,6 +465,7 @@ export async function poseRemainingStarter(
       .execute();
     if (!placed.cells.every((c) => withinBuildReach(c, existing, village)))
       fail('OUTSIDE_BUILD_REACH', 'Posez cet élément à proximité du village.');
+    await assertSpatialCoverage(tx, village.worldId, placed.cells, 'exclusive', 0, 'starter pose');
     await removeSpawnTrees(tx, village.worldId, plan.cleaning.removedTreeIndices, placed.cells, economy.through);
     await flatten(tx, village.worldId, villageId, placed.cells, row.referenceHeight);
     const buildingId = await insertElement(tx, village.worldId, villageId, placed, economy.through);

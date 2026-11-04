@@ -12,6 +12,7 @@ import {
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
+import { assertSpatialCoverage } from '../worlds/spatial-locks.js';
 export async function readInfrastructure(
   tx: Kysely<Database>,
   worldId: string,
@@ -187,7 +188,8 @@ export async function assertNoInfrastructure(
   cells: readonly { cellX: number; cellY: number }[],
   world: { widthCells: number; heightCells: number },
 ) {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);
+  // The caller holds the zones of these cells, exclusive (docs/VERROUS-2026-11-04.md).
+  await assertSpatialCoverage(tx, worldId, cells, 'exclusive', 0, 'infrastructure check');
   const wanted = new Set(cells.map((c) => `${c.cellX}:${c.cellY}`));
   // Road cells of any village (073), read under the same lock as their writer.
   if (
@@ -245,7 +247,7 @@ export async function infrastructureCellRefusals(
   cells: readonly { cellX: number; cellY: number }[],
   world: { widthCells: number; heightCells: number },
 ): Promise<Map<string, HttpError>> {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(tx);
+  await assertSpatialCoverage(tx, worldId, cells, 'exclusive', 0, 'infrastructure check');
   const refusals = new Map<string, HttpError>();
   if (!cells.length) return refusals;
   const wanted = new Set(cells.map((c) => `${c.cellX}:${c.cellY}`));

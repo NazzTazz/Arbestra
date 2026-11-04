@@ -15,6 +15,7 @@ import { HOUSING_BUILDING_TYPES } from '../population/housing.js';
 import { materializeCohorts, releaseWorkers } from '../population/work.js';
 import { abandonScienceAt } from '../science/service.js';
 import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
+import { vertexCells } from '../worlds/spatial-locks.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
 import { cleanRoadAnchors, removeRoadAnchors } from './road-anchors.js';
 import { roadCellsToRemove } from './road-cells.js';
@@ -280,7 +281,10 @@ export async function demolitionCommandV2(
       if (c.cellX >= village.widthCells || c.cellY >= village.heightCells)
         throw new HttpError(400, 'INVALID_COORDINATES', 'Coordonnées non canoniques.');
     if (village.generationVersion === 3) await readRc1Source(tx, worldId);
-    const economy = await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], true);
+    const economy = await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], {
+      writeBuildings: content.buildings,
+      write: [...content.gardenCells, ...content.roadCells, ...content.braziers.flatMap(vertexCells)],
+    });
     await demolitionTestHooks.afterLock?.();
     // A concurrent first attempt of the same identifier committed meanwhile.
     const raced = await replay(tx, village);

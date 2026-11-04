@@ -297,7 +297,9 @@ export async function roadCellsCommandV2(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     if (village.generationVersion === 3) await readRc1Source(tx, village.worldId);
-    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], true);
+    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], {
+      write: request.cells,
+    });
     // A concurrent first attempt of the same identifier committed meanwhile.
     const raced = await replay(tx, village);
     if (raced) return raced;

@@ -25,6 +25,7 @@ import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js
 import { projectVillageResource } from './economy.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
 import { worldActivePaths } from './infrastructure.js';
+import { vertexCells } from '../worlds/spatial-locks.js';
 import { debit, ownedVillage, villageCommandResult, withVillageProjection, type OwnedVillage } from './service.js';
 
 type World = { widthCells: number; heightCells: number };
@@ -414,7 +415,9 @@ export async function roadAnchorsCommandV2(
   if (known) return known;
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
-    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], true);
+    const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], {
+      write: request.anchors.flatMap(vertexCells),
+    });
     await roadAnchorsTestHooks.afterLock?.();
     // A concurrent first attempt of the same identifier committed meanwhile.
     const raced = await replay(tx, village);

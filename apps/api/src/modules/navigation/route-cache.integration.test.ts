@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { sql, type Kysely } from 'kysely';
+import { lockSpatial, spatialGrid } from '../worlds/spatial-locks.js';
 import { createDatabase } from '../../database/connection.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { migrateToLatest } from '../../database/migrate.js';
@@ -225,7 +226,8 @@ it('waits for a concurrent spatial writer and refuses to publish its stale resul
     });
   const writer = db.transaction().execute(async (tx) => {
     writerPid = (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(tx)).rows[0]!.pid;
-    await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + world},0))`.execute(tx);
+    // A spatial writer of chunk (0,0), the zone it updates (docs/VERROUS-2026-11-04.md).
+    await lockSpatial(tx, await spatialGrid(tx, world), { exclusive: [0] });
     await tx
       .updateTable('worldChunks')
       .set({ elevations: Array(1024).fill(4) })

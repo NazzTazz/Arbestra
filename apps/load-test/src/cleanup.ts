@@ -21,6 +21,7 @@ import { parseArgs } from 'node:util';
 import { sql, type Kysely } from 'kysely';
 import { createDatabase } from '../../api/src/database/connection.js';
 import type { Database } from '../../api/src/database/schema.js';
+import { lockWholeWorld } from '../../api/src/modules/worlds/spatial-locks.js';
 import { BOT_EMAIL_LIKE, BOT_EMAIL_PATTERN } from './bots.js';
 import { databaseUrl, describeDatabase, guard, main } from './cli.js';
 import { LoadTargetRefused } from './target.js';
@@ -214,8 +215,8 @@ await main(async () => {
         // Rolls the read transaction (and its temporary table) back.
         throw new DryRun();
       }
-      for (const worldId of selection.worlds)
-        await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + worldId}, 0))`.execute(tx);
+      // The world key and every zone, exclusive, as every whole-world writer.
+      for (const worldId of selection.worlds) await lockWholeWorld(tx, worldId);
       await sql`delete from scheduled_tasks where ${botTasks(selection)}`.execute(tx);
       await sql`delete from population_cohorts where village_id = any(${selection.villages}::uuid[])`.execute(tx);
       await sql`delete from deposit_extractions where village_id = any(${selection.villages}::uuid[])`.execute(tx);

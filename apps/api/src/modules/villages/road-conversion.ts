@@ -1,4 +1,5 @@
 import { sql, type Transaction } from 'kysely';
+import { lockWholeWorld } from '../worlds/spatial-locks.js';
 import {
   infrastructurePlanSurface,
   infrastructureSurface,
@@ -479,8 +480,7 @@ export async function convertLegacyRoads(tx: Transaction<Database>, worldId?: st
   await sql`select v.id from villages v
     where (v.world_id,v.id) in (select * from unnest(${first.map((c) => c.village.worldId)}::uuid[],${first.map((c) => c.village.villageId)}::uuid[]))
     order by v.world_id,v.id for update`.execute(tx);
-  for (const id of [...new Set(first.map((c) => c.village.worldId))].sort())
-    await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${id}`},0))`.execute(tx);
+  for (const id of [...new Set(first.map((c) => c.village.worldId))].sort()) await lockWholeWorld(tx, id);
   // Read again under the locks.
   const list = (await candidates(tx, worldId)).filter((c) =>
     first.some((f) => f.village.worldId === c.village.worldId && f.village.villageId === c.village.villageId),
@@ -593,8 +593,7 @@ export async function revertLegacyRoadConversion(tx: Transaction<Database>): Pro
   await sql`select v.id from villages v
     where (v.world_id,v.id) in (select * from unnest(${backups.map((b) => b.worldId)}::uuid[],${backups.map((b) => b.villageId)}::uuid[]))
     order by v.world_id,v.id for update`.execute(tx);
-  for (const id of [...new Set(backups.map((b) => b.worldId))].sort())
-    await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${id}`},0))`.execute(tx);
+  for (const id of [...new Set(backups.map((b) => b.worldId))].sort()) await lockWholeWorld(tx, id);
   for (const b of backups) {
     const world = await tx
       .selectFrom('worlds')

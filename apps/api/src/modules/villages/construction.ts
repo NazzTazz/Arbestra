@@ -29,6 +29,7 @@ import { normalizeCell, wrappedDelta, toroidalChebyshev } from '../worlds/coordi
 import { normalizeSpatialSelection, type SpatialCell } from './spatial-selection.js';
 import { observationVillage } from '../admin/observation-actions.js';
 import { profileParts } from '../operations/dev-timing.js';
+import { cellZones, lockSpatial, SPATIAL_WRITE_HALO } from '../worlds/spatial-locks.js';
 
 type Cost = { resourceCode: string; amount: number };
 export interface BuildingPlacement {
@@ -57,8 +58,9 @@ const json = (value: unknown) => sql`${JSON.stringify(value)}::jsonb`;
 const date = (value: unknown) =>
   value === null ? null : new Date(value instanceof Date ? value.getTime() : String(value)).toISOString();
 
-/** The materialized village CTE takes the row before the world's spatial lock.
- * H and every mutable placement input are read in the NEXT statement, after waits. */
+/** The materialized village CTE takes the row; the footprint's spatial zones
+ * follow in placeBuilding. H and every mutable placement input are read in the
+ * statements after both waits. */
 async function lockPlacement(tx: Transaction<Database>, accountId: string, slug: string, villageId: string) {
   const result = await sql<Village>`with owner as materialized (
     select v.id as village_id,v.world_id,v.name as village_name,v.anchor_cell_x,v.anchor_cell_y,
@@ -66,7 +68,7 @@ async function lockPlacement(tx: Transaction<Database>, accountId: string, slug:
     from villages v join worlds w on w.id=v.world_id
     join world_memberships m on m.world_id=w.id and m.account_id=${accountId}::uuid
     where w.slug=${slug} and v.id=${villageId}::uuid and v.owner_account_id=${accountId}::uuid for update of v
-  ) select owner.*,pg_advisory_xact_lock(hashtextextended('infrastructure:'||owner.world_id::text,0)),
+  ) select owner.*,
     g.checksum,g.xmin::text||':'||g.ctid::text as row_version
     from owner left join world_generation_candidates g on g.world_id=owner.world_id`.execute(tx);
   const village = result.rows[0];
@@ -497,6 +499,10 @@ export async function placeBuilding(
     const v = await lockPlacement(tx, accountId, slug, villageId);
     const selection = normalizeSpatialSelection(p.anchor, p.cells, v.widthCells, v.heightCells),
       cells = selection.cells;
+    // No reconciliation and no trip here: the footprint's zones alone, exclusive
+    // (± SPATIAL_WRITE_HALO), before any spatial input is read.
+    const grid = { worldId: v.worldId, widthCells: v.widthCells, heightCells: v.heightCells, chunkSize: v.chunkSize };
+    await lockSpatial(tx, grid, { exclusive: cellZones(grid, cells, SPATIAL_WRITE_HALO) });
     const request = {
       ...(p.houseVariant !== 'stone' ? { houseVariant: p.houseVariant } : {}),
       quarterTurns: p.quarterTurns,

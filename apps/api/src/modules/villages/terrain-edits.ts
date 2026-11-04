@@ -31,6 +31,7 @@ import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { editedRc1Field } from '../onboarding/rc1-field.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
+import { assertSpatialCoverage, vertexCells as spatialVertexCells } from '../worlds/spatial-locks.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
 import { buildableCellRefusals, ownedVillage, villageCommandResult, type OwnedVillage } from './service.js';
 
@@ -438,6 +439,24 @@ async function prepareTerrainEdits(
 
 /** Test seam: runs after the height writes, before the receipt and the
  * publication (rollback proof); `afterLock` once the village is held. */
+/** The cells a batch may change, read from the request before any lock:
+ * painted cells, footprints, restored cells. Their vertices and the 3 × 3 of a
+ * painted cell stay within the halo of their zones. An invalid gesture is
+ * refused later without writing, so it locks nothing. */
+function terrainEditWriteCells(gestures: readonly TerrainEditGesture[], v: OwnedVillage): Cell[] {
+  return gestures.flatMap((gesture) => {
+    try {
+      if (gesture.buildingType === 'terrain-restore')
+        return gesture.cells.map((c) => ({ cellX: c.cellX, cellY: c.cellY }));
+      return gesture.buildingType === 'terrain'
+        ? terrainEditCells(gesture, v)
+        : fixedBuildingFootprint(gesture.buildingType, gesture.anchor, gesture.quarterTurns, v);
+    } catch {
+      return [];
+    }
+  });
+}
+
 export const terrainEditsTestHooks: {
   afterLock?: () => Promise<void>;
   afterWrites?: (tx: Transaction<Database>) => Promise<void>;
@@ -487,7 +506,9 @@ export async function terrainEditsCommandV2(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     const { worldId } = village;
-    const economy = await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], true);
+    const economy = await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], {
+      write: terrainEditWriteCells(request.gestures, village),
+    });
     await terrainEditsTestHooks.afterLock?.();
     // A concurrent first attempt of the same identifier committed meanwhile.
     const raced = await replay(tx, village);
@@ -498,6 +519,14 @@ export async function terrainEditsCommandV2(
     const first = applied.refused[0];
     if (first && !applied.gestures)
       throw new TerrainEditRefused(first.gesture, first.code, applied.messages[0]!, applied.refused);
+    await assertSpatialCoverage(
+      tx,
+      worldId,
+      [...applied.vertices.values()].flatMap(spatialVertexCells),
+      'exclusive',
+      0,
+      'terrain vertices',
+    );
     if (applied.vertices.size)
       await tx
         .insertInto('worldTerrainVertices')

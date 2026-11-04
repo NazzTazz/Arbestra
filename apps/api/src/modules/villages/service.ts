@@ -1698,7 +1698,18 @@ export async function commandVillageScience(
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
+    // A direct survey, exploration or recall computes or shortens a route to an
+    // arbitrary target under the lock: every zone, shared, as before 4 November.
+    const far = command.action === 'survey' || command.action === 'explore' || command.action === 'recall';
+    const economy = await beginVillageEconomy(
+      tx,
+      village.worldId,
+      village.villageId,
+      undefined,
+      [],
+      [],
+      far ? { readWorld: true } : false,
+    );
     await scienceCommand(tx, economy, command);
     return villageCommandResult(tx, village, economy, undefined, afterWrites);
   });
@@ -1744,7 +1755,8 @@ export async function configureTownHallFactory(
         undefined,
         [{ cellX: x, cellY: y }],
         [],
-        true,
+        // The extension cell; the hall's anchor is its neighbour, within the halo.
+        { write: [{ cellX: x, cellY: y }] },
       );
       await reconcileVillageEconomy(tx, economy);
       const hall = await tx
@@ -1871,7 +1883,7 @@ export async function adaptUniversityCampus(
       cellX: normalizeCell(c.cellX, village.widthCells),
       cellY: normalizeCell(c.cellY, village.heightCells),
     }));
-    await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells, [], true);
+    await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, cells, [], { write: cells });
     await tx
       .selectFrom('buildings')
       .select('id')
@@ -1981,7 +1993,7 @@ export async function expandGarden(
         cellY: normalizeCell(c.cellY, village.heightCells),
       })),
       [],
-      true,
+      { write: rawCells },
     );
     const at = economy.through;
     const canonicalSelection = normalizeSpatialSelection(
@@ -2197,7 +2209,10 @@ export async function upgradeBuilding(
           cellY: normalizeCell(c.cellY, village.heightCells),
         }))
       : undefined;
-    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, campusCells, [], true);
+    const economy = await beginVillageEconomy(tx, village.worldId, village.villageId, undefined, campusCells, [], {
+      write: campusCells ?? [],
+      writeBuildings: [buildingId],
+    });
     const at = economy.through;
     const commandRequest = {
       buildingId,

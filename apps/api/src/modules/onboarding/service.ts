@@ -2,6 +2,7 @@ import { advancePopulationGrowth } from '../population/growth.js';
 import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../population/work.js';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
+import { lockWholeWorld } from '../worlds/spatial-locks.js';
 import type { AvailableWorlds, JoinWorldRequest } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -157,7 +158,7 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
           anchorCellY: clearing.centerCellY,
         })
         .execute();
-      await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + world.id},0))`.execute(tx);
+      await lockWholeWorld(tx, world.id);
       if (!(await fits(tx, world, placement))) {
         await sql`rollback to savepoint spawn_candidate`.execute(tx);
         rejected.push(clearing.id);

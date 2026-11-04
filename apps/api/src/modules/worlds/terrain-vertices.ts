@@ -1,4 +1,5 @@
 import { sql, type Kysely, type Transaction } from 'kysely';
+import { lockWholeWorld } from './spatial-locks.js';
 import {
   preserveTerrainCentres,
   convertTerraces,
@@ -264,7 +265,7 @@ export async function activateTerrainVertices(db: Kysely<Database>, worldId: str
 /** Allows the operator to verify business fingerprints before committing. */
 export async function activateTerrainVerticesInTransaction(tx: Transaction<Database>, worldId: string) {
   await tx.selectFrom('villages').select('id').where('worldId', '=', worldId).orderBy('id').forUpdate().execute();
-  await sql`select pg_advisory_xact_lock(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
+  await lockWholeWorld(tx, worldId);
   await tx.selectFrom('worlds').select('id').where('id', '=', worldId).forNoKeyUpdate().executeTakeFirstOrThrow();
   const audit = await auditTerrainVertices(tx, worldId);
   if (audit.model === 'vertices') return audit;

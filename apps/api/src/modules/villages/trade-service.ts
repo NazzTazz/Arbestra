@@ -13,7 +13,8 @@ import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
 import { ownedVillage, villageCommandResult, withVillageProjection } from './service.js';
 import type { AfterConstructionWrites, ConstructionCommit } from './service.js';
-import { beginVillageEconomy } from './reconcile-economy.js';
+import { beginVillageEconomy, lockVillageSpace } from './reconcile-economy.js';
+import { assertSpatialCoverage, type SpatialCell } from '../worlds/spatial-locks.js';
 import { navigationRevision, loadNavigationContext } from '../navigation/context.js';
 import {
   certificateValid,
@@ -236,7 +237,13 @@ export async function prepareTrade(
 
 /** Both village rows are already owned in canonical order. All shared deposits
  * for the pair are prelocked by the first begin, before either reconciliation. */
-export async function beginTradePair(tx: Transaction<Database>, worldId: string, ids: string[]) {
+export async function beginTradePair(
+  tx: Transaction<Database>,
+  worldId: string,
+  ids: string[],
+  /** Prepared route of an acceptance ([] for none); omitted: every zone, shared. */
+  route?: readonly SpatialCell[],
+) {
   const sorted = [...new Set(ids.map((id) => id.toLowerCase()))].sort();
   for (const id of sorted)
     await tx
@@ -246,7 +253,9 @@ export async function beginTradePair(tx: Transaction<Database>, worldId: string,
       .where('id', '=', id)
       .forUpdate()
       .executeTakeFirstOrThrow();
-  await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + worldId},0))`.execute(tx);
+  // Both regions and the route in one acquisition, before either reconciliation
+  // (docs/VERROUS-2026-11-04.md): the route stays valid until the journey is written.
+  await lockVillageSpace(tx, worldId, sorted, route ? { read: route } : { readWorld: true });
   const through = (await tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow()).at;
   for (const id of sorted) await beginVillageEconomy(tx, worldId, id, undefined, [], [], false, sorted, through);
   return through;
@@ -296,6 +305,7 @@ export async function acceptTrade(
   await tradeDebit(tx, ctx, offer.requestedResource, offer.requestedAmount);
   const arrivesAt = new Date(ctx.through.getTime() + prepared.travelMs),
     returnsAt = new Date(ctx.through.getTime() + prepared.travelMs * 2);
+  await assertSpatialCoverage(tx, ctx.worldId, prepared.path, 'shared', 1, 'trade journey');
   const journey = await tx
     .insertInto('tradeJourneys')
     .values({
@@ -381,10 +391,12 @@ export async function commandPlayerMarket(
   }
   return db.transaction().execute(async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
-    const through = await beginTradePair(tx, village.worldId, [
-      villageId,
-      ...(prepared ? [prepared.destinationVillageId] : []),
-    ]);
+    const through = await beginTradePair(
+      tx,
+      village.worldId,
+      [villageId, ...(prepared ? [prepared.destinationVillageId] : [])],
+      prepared?.path ?? [],
+    );
     const current = await ownedVillage(tx, accountId, slug, villageId);
     if (current.worldId !== village.worldId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const ctx = { worldId: village.worldId, villageId, through };

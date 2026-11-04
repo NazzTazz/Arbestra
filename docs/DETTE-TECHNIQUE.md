@@ -12,10 +12,17 @@ Registre des dettes connues et acceptées : ce qui reste à reprendre, pourquoi 
 - **Sol vrillé, corrigé** (retour de recette du staging) : les faces de la pierre sont découpées le long de la diagonale du terrain, chacune dans un seul triangle du terrain ; plus de trous (voir la spec §4.6).
 - **Reste.** Les bordures et les tuiles d'une grande pose apparaissent sur quelques images, la surface de terre tout de suite. Image longue d'environ 200 ms autour d'une pose, présente avant ce travail et hors des routes (travail de la scène après publication de l'état, à étudier).
 
+### Verrou mondial `infrastructure:<monde>` (4 novembre 2026) — livré, à valider
+
+- **Constat** ([test de charge](TEST-DE-CHARGE.md) §8.3) : chaque commande économique le prenait en partage, chaque écrivain spatial en exclusif ; un seul écrivain arrêtait tout le monde et le pool de 8 connexions s'épuisait derrière lui.
+- **Fait** (branche `world-lock-scope`) : verrous par zone (chunk), partagés sur la région du village, exclusifs sur les cases écrites à ±2 cases ; carte, garanties, preuves et mesures dans [VERROUS-2026-11-04.md](VERROUS-2026-11-04.md).
+- **Reste** : le worker de trajets (invalidation globale, ci-dessous « Trajets ») et le pool partagé entre requêtes et scheduler (worker hors de l'API, autre chantier) ; une transaction tient encore ses zones pendant son calcul de trajets.
+
 ### Installation : poses du kit sous verrou mondial exclusif (1er novembre 2026)
 
 - **Fait le 1er novembre.** Le plan d'installation de l'hôtel de ville se calcule hors du verrou mondial `infrastructure:<monde>`, puis il est réutilisé sous le verrou si l'instantané n'a pas changé (sinon, recalcul sous le verrou). L'échantillonnage du réseau d'accès ne lit plus que l'altitude et l'eau. Sur rc1-dev, pose de bout en bout 6,7 s, contre 12,8 s mesurées pendant la recette de Tristan.
-- **Reste.** Les poses suivantes du kit (`poseRemainingStarter`) prennent toujours le verrou mondial exclusif via `beginVillageEconomy(..., true)` pour relire l'instantané et écrire. Une pose isolée prend 1,2 à 2,8 s, presque entièrement en attente de la base de données ; sur un monde actif (rc1-dev) 4,6 à 11 s, attente probable des détenteurs partagés du verrou (non mesurée). Le calcul de l'élément ne coûte que 60 ms : le levier est la portée du verrou, à traiter avec les autres verrous mondiaux.
+- **Fait le 4 novembre (à valider, branche `world-lock-scope`)** : la pose d'un élément du kit ne prend plus que les zones de l'élément en exclusif, et l'installation la clé du monde (entre installations et territoires) puis les zones à ±64 cases du point ; les villages éloignés ne l'attendent plus ([verrou mondial](VERROUS-2026-11-04.md)).
+- **Reste.** L'instantané de l'installation et de la pose couvre toujours le monde entier : une écriture validée ailleurs entre le plan hors verrou et le verrou force un nouveau calcul (coût, pas correction). Une première installation dans un monde sans chunks reste exclusive sur tout le monde.
 - **Mondes à terrasses.** Sur l'ancien modèle de terrain (aube, recette-nivellement, fixture des tests d'intégration), le plan coûte toujours environ 10 s, l'échantillonnage restant procédural. L'alpha et le staging sont en sommets partagés.
 
 ### Trajets : coût et invalidation à revoir dans leur conception (31 octobre 2026)

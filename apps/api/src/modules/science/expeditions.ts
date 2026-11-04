@@ -245,7 +245,10 @@ export async function finaliseExpedition(
     if (!row || !isPending(row) || row.attemptToken !== claim.attemptToken) return;
     const now = () => tx.selectNoFrom(sql<Date>`statement_timestamp()`.as('at')).executeTakeFirstOrThrow();
     if (row.expiresAt <= (await now()).at || !row.leaseUntil || row.leaseUntil <= (await now()).at) return;
-    const economy = await beginVillageEconomy(tx, row.worldId, row.villageId, undefined, [], [], true);
+    const economy = await beginVillageEconomy(tx, row.worldId, row.villageId, undefined, [], [], {
+      // An admission, not a write: the prepared route's zones, shared (docs/VERROUS-2026-11-04.md).
+      read: prepared.result.kind === 'found' ? prepared.result.path : [],
+    });
     const village = await tx
       .selectFrom('villages')
       .innerJoin('worlds', 'worlds.id', 'villages.worldId')

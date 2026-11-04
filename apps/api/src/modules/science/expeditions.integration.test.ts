@@ -3,6 +3,7 @@ import { assertNoInfrastructure } from '../villages/infrastructure.js';
 import { canWalkSpawnSegment } from '@arbestra/contracts';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
+import { cellZones, lockSpatial, spatialGrid } from '../worlds/spatial-locks.js';
 import { beforeAll, beforeEach, afterAll, describe, it, expect } from 'vitest';
 import { ROUTE_POLICY_VERSION, type ExpeditionIntent, type RouteQuery, type RouteResult } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
@@ -701,7 +702,9 @@ describe.sequential('durable FIFO expedition admission on a private world', () =
     let writerFinished = false;
     const writer = db.transaction().execute(async (tx) => {
       await sql`set local application_name='expedition-writer-proof'`.execute(tx);
-      await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + world},0))`.execute(tx);
+      // A spatial writer of the source village's zone (docs/VERROUS-2026-11-04.md).
+      const grid = await spatialGrid(tx, world);
+      await lockSpatial(tx, grid, { exclusive: cellZones(grid, [{ cellX: 8, cellY: 8 }]) });
       writerFinished = true;
     });
     try {
@@ -995,6 +998,9 @@ describe.sequential('durable FIFO expedition admission on a private world', () =
     expect(canWalkSpawnSegment(field, ...segment)).toBe(false);
     const outcome = await db.transaction().execute(async (tx) => {
       try {
+        // As a spatial writer does: the cell's zones, exclusive (docs/VERROUS-2026-11-04.md).
+        const grid = await spatialGrid(tx, world);
+        await lockSpatial(tx, grid, { exclusive: cellZones(grid, [{ cellX: 10, cellY: 8 }], 2) });
         await assertNoInfrastructure(tx, world, [{ cellX: 10, cellY: 8 }], { widthCells: 128, heightCells: 128 });
         return 'allowed';
       } catch (error) {

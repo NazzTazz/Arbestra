@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { sql, type Transaction } from 'kysely';
+import { lockWholeWorld } from './spatial-locks.js';
 import { generatedTreeCount, WOOD_PER_TREE } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
@@ -144,7 +145,7 @@ function chooseClearings(
  */
 export async function generateWorld(transaction: Transaction<Database>, worldId: string): Promise<void> {
   await sql`select pg_advisory_xact_lock(hashtextextended(${`world-generation:${worldId}`}, 0))`.execute(transaction);
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}`},0))`.execute(transaction);
+  await lockWholeWorld(transaction, worldId);
   const world = await transaction
     .selectFrom('worlds')
     .selectAll()

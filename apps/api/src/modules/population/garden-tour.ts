@@ -1,6 +1,7 @@
 import { sql, type Transaction } from 'kysely';
 import type { GardenHarvestStop, TravelCell } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
+import { assertSpatialCoverage } from '../worlds/spatial-locks.js';
 import { HttpError } from '../../errors.js';
 import { materializeGardenPlot } from '../villages/economy.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts } from './work.js';
@@ -81,6 +82,14 @@ export async function startGardenTour(
   const stops = plan.stops.map((s) => ({ ...s, reservedCarrots: amounts.get(`${s.cellX}:${s.cellY}`)! })),
     first = stops[0]!;
   const buildingId = plots.find((p) => p.cellX === first.cellX && p.cellY === first.cellY)!.buildingId;
+  await assertSpatialCoverage(
+    tx,
+    worldId,
+    [...stops.flatMap((s) => s.path), ...plan.returnPath],
+    'shared',
+    1,
+    'garden tour',
+  );
   const harvest = await tx
     .insertInto('gardenHarvests')
     .values({

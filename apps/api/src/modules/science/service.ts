@@ -6,6 +6,7 @@ import { sql, type Transaction } from 'kysely';
 import type { ScienceCommand, ScienceState, TravelCell } from '@arbestra/contracts';
 import { combinedPeriod, measureRegime, TAU } from '@arbestra/contracts/cosmology';
 import type { Database } from '../../database/schema.js';
+import { assertSpatialCoverage } from '../worlds/spatial-locks.js';
 import { HttpError } from '../../errors.js';
 import {
   assignWorkers,
@@ -513,6 +514,7 @@ async function startActivity(
     );
   if (eligible.reduce((n, c) => n + c.memberCount, 0) < input.workers) return false;
   const completesAt = new Date(economy.through.getTime() + input.durationMs);
+  await assertSpatialCoverage(tx, economy.worldId, input.path ?? [], 'shared', 1, 'science trip');
   const activity = await tx
     .insertInto('scienceActivities')
     .values({

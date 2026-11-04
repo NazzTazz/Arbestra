@@ -9,6 +9,7 @@ import {
   type TravelCell,
 } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
+import { lockSpatial, spatialGrid, zoneColumns } from '../worlds/spatial-locks.js';
 
 export interface NavigationVersions {
   worldId: string;
@@ -214,9 +215,27 @@ export async function publishHallRoute(
 ): Promise<boolean> {
   const limits = cacheLimits();
   return db.transaction().execute(async (tx) => {
-    await sql`select pg_advisory_xact_lock_shared(hashtextextended(${'infrastructure:' + manifest.worldId},0))`.execute(
-      tx,
-    );
+    // The chunks of the certificate (a chunk is a zone), shared: no spatial
+    // writer of those chunks commits between validation and publication.
+    const grid = await spatialGrid(tx, manifest.worldId),
+      zoneGrid = zoneColumns(grid);
+    const zones = new Set<number>();
+    for (const key of [
+      ...Object.keys(route.certificate.dependencies),
+      ...meshes.map((m) => `${m.chunkX}:${m.chunkY}`),
+    ]) {
+      const [cx, cy] = key.split(':').map(Number) as [number, number];
+      if (
+        Number.isInteger(cx) &&
+        Number.isInteger(cy) &&
+        cx >= 0 &&
+        cy >= 0 &&
+        cx < zoneGrid.columns &&
+        cy < zoneGrid.rows
+      )
+        zones.add(cy * zoneGrid.columns + cx);
+    }
+    await lockSpatial(tx, grid, { shared: zones });
     const current = await navigationVersions(tx, manifest.worldId);
     if (!certificateValid(current, route.certificate)) return false;
     const meshRows = meshes

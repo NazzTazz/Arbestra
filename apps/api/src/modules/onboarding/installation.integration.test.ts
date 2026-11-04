@@ -30,6 +30,7 @@ import { STARTER_KIT } from './starter-kit.js';
 import { RC1_CANONICAL_CHECKSUM } from './spawn-map.js';
 import { SpawnCompute } from './spawn-compute.js';
 import { installVillage, poseRemainingStarter, readInstallation } from './installation.js';
+import { placeBuilding } from '../villages/construction.js';
 import type { GeneratedLandscape, SpawnPoseRequest } from '@arbestra/contracts';
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -777,6 +778,131 @@ describe('effective RC1 installation on isolated worlds', () => {
     expect(free, 'one plan, computed while the world lock was free').toEqual([true]);
     expect(await db.selectFrom('villages').selectAll().where('worldId', '=', f.id).execute()).toHaveLength(1);
   }, 120000);
+  it('an installation holds its surroundings only: a nearby construction waits, a distant one does not', async () => {
+    // docs/VERROUS-2026-11-04.md: world key + zones at ±64 cells of the point.
+    const f = await fixture(),
+      other = randomUUID(),
+      far = randomUUID(),
+      farVillage = randomUUID(),
+      farHall = randomUUID();
+    extraAccounts.push(other, far);
+    await db
+      .insertInto('accounts')
+      .values([
+        { id: other, email: other + '@installation.test', passwordHash: 'fixture' },
+        { id: far, email: far + '@installation.test', passwordHash: 'fixture' },
+      ])
+      .execute();
+    await installVillage(db, compute, accountId, f.slug, f.input);
+    const own = await db
+      .selectFrom('villages')
+      .innerJoin('buildings', 'buildings.villageId', 'villages.id')
+      .innerJoin('worldCellOccupancies', 'worldCellOccupancies.buildingId', 'buildings.id')
+      .select(['villages.id', 'worldCellOccupancies.cellX', 'worldCellOccupancies.cellY'])
+      .where('villages.worldId', '=', f.id)
+      .where('buildings.buildingType', '=', 'town-hall')
+      .executeTakeFirstOrThrow();
+    let release!: () => void, arrived!: () => void;
+    const gate = new Promise<void>((r) => (release = r)),
+      ready = new Promise<void>((r) => (arrived = r));
+    let calls = 0;
+    const held = {
+      run: async (...args: Parameters<SpawnCompute['run']>) => {
+        if (++calls === 1) {
+          // Outside the lock: a distant village settles, so the competitor
+          // plans again under its locks, where it is held.
+          await db
+            .insertInto('worldMemberships')
+            .values({ worldId: f.id, accountId: far, playerName: 'Loin' })
+            .execute();
+          await db
+            .insertInto('villages')
+            .values({
+              id: farVillage,
+              worldId: f.id,
+              ownerAccountId: far,
+              name: 'Loin',
+              anchorCellX: 400,
+              anchorCellY: 200,
+            })
+            .execute();
+          await db
+            .insertInto('buildings')
+            .values({
+              id: farHall,
+              worldId: f.id,
+              villageId: farVillage,
+              buildingType: 'town-hall',
+              level: 1,
+              status: 'completed',
+              completedAt: new Date(),
+            })
+            .execute();
+          await db
+            .insertInto('worldCellOccupancies')
+            .values({ worldId: f.id, cellX: 400, cellY: 200, buildingId: farHall, role: 'anchor' })
+            .execute();
+          return compute.run(...args);
+        }
+        const result = await compute.run(...args);
+        arrived();
+        await Promise.race([
+          gate,
+          new Promise((_, reject) => setTimeout(() => reject(Error('barrier timeout')), 30000)),
+        ]);
+        return result;
+      },
+    };
+    const place = (account: string, villageId: string, cell: { cellX: number; cellY: number }) =>
+      placeBuilding(
+        db,
+        account,
+        f.slug,
+        villageId,
+        { buildingType: 'garden', anchor: cell, cells: [cell], commandId: randomUUID() },
+        60000,
+      ).catch((error: { code?: string }) => error.code);
+    // Same point as the installed village: refused under the lock (neighbour).
+    const competing = installVillage(db, held, other, f.slug, { ...f.input, commandId: randomUUID() }).catch(
+      (error: { code?: string }) => error.code,
+    );
+    let near: Promise<unknown> | undefined;
+    try {
+      await Promise.race([
+        ready,
+        new Promise((_, reject) => setTimeout(() => reject(Error('installation did not reach barrier')), 60000)),
+      ]);
+      const distant = await Promise.race([
+        place(far, farVillage, { cellX: 400, cellY: 200 }),
+        new Promise((r) => setTimeout(() => r('blocked'), 10000)),
+      ]);
+      expect(distant, 'a distant construction runs during the installation').toBe('CELL_OCCUPIED');
+      near = place(accountId, own.id, { cellX: own.cellX, cellY: own.cellY });
+      let waiting = false;
+      for (let i = 0; i < 150 && !waiting; i++) {
+        waiting =
+          (
+            await sql<{ n: number }>`select count(*)::int as n from pg_stat_activity
+              where datname=current_database() and wait_event_type='Lock' and wait_event='advisory'`.execute(db)
+          ).rows[0]!.n > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(waiting, 'the nearby construction waits for the installation zones').toBe(true);
+    } finally {
+      release();
+      await competing;
+      await near;
+    }
+    expect(await competing).toBe('SPAWN_BLOCKED');
+    expect(await near).toBe('CELL_OCCUPIED');
+    // Removed here, not in afterAll: the shared cleanup of every RC1 world is
+    // already close to its hook budget on a busy machine.
+    await db.deleteFrom('populationCohorts').where('worldId', '=', f.id).execute();
+    await db.deleteFrom('woodlandDeposits').where('worldId', '=', f.id).execute();
+    await db.deleteFrom('stoneDeposits').where('worldId', '=', f.id).execute();
+    await db.deleteFrom('worlds').where('id', '=', f.id).execute();
+    worlds.splice(worlds.indexOf(f.id), 1);
+  }, 300000);
   it('replans under the lock after a neighbor settles, serializes two accounts and rechecks the committed neighbor', async () => {
     const f = await fixture(),
       other = randomUUID(),

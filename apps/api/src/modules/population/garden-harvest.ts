@@ -2,6 +2,7 @@ import { sql, type Transaction } from 'kysely';
 import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
+import { assertSpatialCoverage } from '../worlds/spatial-locks.js';
 import { HttpError } from '../../errors.js';
 import { materializeGardenPlot } from '../villages/economy.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts, releaseWorkers } from './work.js';
@@ -88,6 +89,7 @@ export async function startGardenHarvest(
   if (buffer.amount === 0)
     throw new HttpError(409, 'GARDEN_EMPTY', 'Cette parcelle ne contient aucune carotte à récolter.');
   const completesAt = new Date(through.getTime() + durationMs);
+  await assertSpatialCoverage(tx, worldId, path, 'shared', 1, 'garden trip');
   const harvest = await tx
     .insertInto('gardenHarvests')
     .values({

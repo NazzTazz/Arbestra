@@ -19,6 +19,7 @@ import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { terrainEditsCommandV2, terrainEditsTestHooks } from './terrain-edits.js';
 import { httpErrorBody, type HttpError } from '../../errors.js';
 import { assertBuildableCells, buildableCellRefusals, ownedVillage } from './service.js';
+import { beginVillageEconomy } from './reconcile-economy.js';
 
 const url = testDatabaseUrl(),
   target = new URL(url);
@@ -446,6 +447,8 @@ it('classifies each cell as assertBuildableCells would refuse it alone', async (
     ];
     await db.transaction().execute(async (tx) => {
       const village = await ownedVillage(tx, accountId, slug, villageId);
+      // As a spatial writer does: the zones of these cells, exclusive (docs/VERROUS-2026-11-04.md).
+      await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], { write: cells });
       const map = await buildableCellRefusals(tx, village, cells);
       for (const cell of cells) {
         const alone = await assertBuildableCells(tx, village, [cell]).then(

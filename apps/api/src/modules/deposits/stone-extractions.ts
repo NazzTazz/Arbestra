@@ -4,6 +4,7 @@ import type { DepositDetails, Extraction, StoneDeposit } from '@arbestra/contrac
 import type { TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
+import { assertSpatialCoverage } from '../worlds/spatial-locks.js';
 import { HttpError } from '../../errors.js';
 import {
   assignWorkers,
@@ -397,6 +398,7 @@ export async function startStoneExtraction(
   );
   if (candidates.reduce((total, cohort) => total + cohort.memberCount, 0) < workerCount)
     throw new HttpError(409, 'WORKERS_UNAVAILABLE', 'Habitants disponibles et reposés insuffisants.');
+  await assertSpatialCoverage(tx, village.worldId, path, 'shared', 1, 'extraction trip');
   const extraction = await tx
     .insertInto('depositExtractions')
     .values({

@@ -14,6 +14,16 @@ import { completeTradeAt } from './trade-economy.js';
 import type { ProcessingCommand } from '@arbestra/contracts';
 import { isDeepStrictEqual } from 'node:util';
 import { HttpError } from '../../errors.js';
+import {
+  allZones,
+  cellZones,
+  heldRegion,
+  lockSpatial,
+  spatialGrid,
+  villageRegionZones,
+  SPATIAL_WRITE_HALO,
+  type SpatialCell,
+} from '../worlds/spatial-locks.js';
 
 export interface VillageEconomy {
   worldId: string;
@@ -141,6 +151,53 @@ export async function readDueVillageTransitions(
   );
 }
 
+/** What a transaction does with the shared space (docs/VERROUS-2026-11-04.md).
+ * Every economic transaction reads its village region (shared zones). */
+export interface SpatialAccess {
+  /** Cells this command may change: footprints, cells around changed vertices, road cells. */
+  write?: readonly SpatialCell[];
+  /** Buildings whose footprint this command changes, read after the village lock. */
+  writeBuildings?: readonly string[];
+  /** Cells of a known route this command admits beyond the village region. */
+  read?: readonly SpatialCell[];
+  /** A trip to an arbitrary target, computed under the lock: every zone, shared. */
+  readWorld?: boolean;
+}
+
+/**
+ * Spatial locks of one or several villages, in one acquisition, after their
+ * rows and before any deposit: shared zones of each region (once per
+ * transaction), exclusive zones of the written cells ± `SPATIAL_WRITE_HALO`.
+ * `true` is the conservative legacy form: every zone, exclusive.
+ */
+export async function lockVillageSpace(
+  tx: Transaction<Database>,
+  worldId: string,
+  villageIds: readonly string[],
+  access: boolean | SpatialAccess = false,
+): Promise<void> {
+  const grid = await spatialGrid(tx, worldId);
+  const spec: SpatialAccess = typeof access === 'object' ? access : {};
+  const shared = new Set<number>(),
+    exclusive = access === true ? allZones(grid) : new Set<number>();
+  const regions = villageIds.filter((id) => !heldRegion(tx, id));
+  for (const id of regions) for (const zone of await villageRegionZones(tx, grid, id)) shared.add(zone);
+  if (spec.readWorld) for (const zone of allZones(grid)) shared.add(zone);
+  if (spec.read) for (const zone of cellZones(grid, spec.read, 1)) shared.add(zone);
+  const cells = [...(spec.write ?? [])];
+  if (spec.writeBuildings?.length)
+    cells.push(
+      ...(await tx
+        .selectFrom('worldCellOccupancies')
+        .select(['cellX', 'cellY'])
+        .where('worldId', '=', worldId)
+        .where('buildingId', 'in', [...spec.writeBuildings])
+        .execute()),
+    );
+  for (const zone of cellZones(grid, cells, SPATIAL_WRITE_HALO)) exclusive.add(zone);
+  await lockSpatial(tx, grid, { shared, exclusive, regionOf: regions });
+}
+
 /** The village row serializes all economic mutations for that village. */
 export async function beginVillageEconomy(
   transaction: Transaction<Database>,
@@ -149,7 +206,7 @@ export async function beginVillageEconomy(
   depositFeatureId?: string,
   woodCells: Array<{ cellX: number; cellY: number }> = [],
   targetFeatureIds: string[] = [],
-  navigationWrite = false,
+  navigationWrite: boolean | SpatialAccess = false,
   lockedPeers: string[] = [villageId],
   sharedThrough?: Date,
   reconciliationBudget?: ReconciliationBudget,
@@ -164,14 +221,10 @@ export async function beginVillageEconomy(
         .forUpdate()
         .executeTakeFirstOrThrow(),
     );
-    // Readers may admit trips, including automatic worksite relaunches. Acquire
-    // before deposits; a spatial writer must never upgrade a shared lock later.
-    const navigationKey = `infrastructure:${worldId}`;
-    await devTime('navigation_lock', async () => {
-      if (navigationWrite)
-        await sql`select pg_advisory_xact_lock(hashtextextended(${navigationKey},0))`.execute(transaction);
-      else await sql`select pg_advisory_xact_lock_shared(hashtextextended(${navigationKey},0))`.execute(transaction);
-    });
+    // Readers may admit trips, including automatic worksite relaunches: their
+    // region's zones, shared. Writers add their cells' zones, exclusive, in the
+    // same acquisition, before deposits; a shared zone is never upgraded later.
+    await lockVillageSpace(transaction, worldId, [villageId], navigationWrite);
     // Read after waiting for the village lock: transaction_timestamp may be stale.
     const through =
       sharedThrough ??
