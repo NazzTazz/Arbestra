@@ -27,7 +27,7 @@ Ordre proposé et dépendances : [feuille de route](docs/ROADMAP.md) (4 novembre
 
 ## À valider (recette de Tristan)
 
-- **Routes manuelles qui suivent le terrain, pierre comprise, et jonction avec les routes automatiques** (4 novembre, branche `roads-follow-slope-2`, [dette](docs/DETTE-TECHNIQUE.md), [spec voirie §4.6](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : à voir en pente (terre, gravats, pierre, trottoirs) et à la jonction avec une route automatique, en ligne droite et en coude.
+- **Routes manuelles qui suivent le terrain, pierre comprise, et jonction avec les routes automatiques** (4 novembre, branche `roads-slope-fix`, [dette](docs/DETTE-TECHNIQUE.md), [spec voirie §4.6](docs/SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)) : à voir en pente (terre, gravats, pierre, trottoirs) et à la jonction avec une route automatique, en ligne droite et en coude.
 - **Campagne de mesures dans le tiroir de dev** (3 novembre, staging et alpha, [guide](docs/GUIDE-DEVELOPPEUR.md) §6) : à lancer par Tristan (MX230) et sur la machine d'un ami ; comparer les JSON.
 
 Validés le 3 novembre sur dev : outil de terraformation (§7 à §7.14, correctifs de rendu et vue régionale compris), serveur sans V1 et 426 (I.3), défrichage à une minute par souche, flux V2 réveillé par NOTIFY (080), nouveautés de l'Oracle (081), marché relu par l'index des offres, retour immédiat des labels de récolte.

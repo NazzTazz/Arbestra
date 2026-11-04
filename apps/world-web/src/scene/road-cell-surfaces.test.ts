@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
-import type { RoadCellSurface } from '@arbestra/contracts';
+import { triangleHeight, type RoadCellSurface } from '@arbestra/contracts';
 import { RoadCellSurfaces, STONE_CLEARANCE } from './road-cell-surfaces';
 import { roadTileGeometry } from './road-cell-tiles';
 import { VillageRoads } from './village-roads';
@@ -27,23 +27,44 @@ function withScene(run: (scene: Scene) => void) {
 }
 /** Un relief continu, ni plan ni régulier : lu à n'importe quelle position fractionnaire de case. */
 const relief = (x: number, y: number) => 0.3 * x + 0.2 * y + 0.2 * Math.sin(x * 2.1) * Math.cos(y * 1.7);
+/**
+ * The rendered terrain: shared vertices, two planar triangles per cell split along the diagonal 00 -> 11
+ * (`triangleHeight`, as `buildRc1TerrainUnit` and `TerrainStore.ground`), with a twist of up to half a unit per cell.
+ */
+const vertexHeight = (i: number, j: number) =>
+  0.5 * Math.sin(i * 2.1 + j * 0.7) + 0.45 * Math.cos(j * 1.9 - i * 0.4) + 0.3 * i;
+const terrain = (x: number, y: number) => {
+  const a = x + 0.5,
+    b = y + 0.5,
+    i = Math.floor(a),
+    j = Math.floor(b);
+  return triangleHeight(
+    vertexHeight(i, j),
+    vertexHeight(i + 1, j),
+    vertexHeight(i + 1, j + 1),
+    vertexHeight(i, j + 1),
+    a - i,
+    b - j,
+  );
+};
 const TOP = 0.015,
   DEPTH = 0.025,
   CURB = 0.004;
 const mm = (value: number) => Math.round(value * 1000) / 1000;
 
-/** Hauteurs des sommets d'un maillage au-dessus du relief qui est dessous, arrondies au millimètre. */
-function offsets(meshes: readonly Mesh[], space: WorldSpace) {
+/** Plus petite et plus grande hauteur des sommets d'un maillage au-dessus du relief qui est dessous, au millimètre. */
+function offsets(meshes: readonly Mesh[], space: WorldSpace, ground = relief) {
   const found = new Set<number>();
   for (const mesh of meshes) {
     const p = mesh.getVerticesData('position')!;
     for (let i = 0; i < p.length; i += 3) {
       const cx = space.origin.cellX + p[i]! / 2.5,
         cy = space.origin.cellY + p[i + 2]! / 2.5;
-      found.add(mm(p[i + 1]! - relief(cx, cy)));
+      found.add(mm(p[i + 1]! - ground(cx, cy)));
     }
   }
-  return [...found].sort((a, b) => a - b);
+  // Diagonal faces of the walls, cut at mid-height, give the values in between: the extremes are what is checked.
+  return [Math.min(...found), Math.max(...found)];
 }
 const options = (identity = 'g1') => ({
   followTerrain: true,
@@ -97,7 +118,7 @@ describe('earth and rubble road cells follow the ground', () => {
       surfaces.update(
         [20, 21, 22, 23].map((x) => cell(x, 20, 'rubble', true)),
         space,
-        relief,
+        terrain,
         options(),
       );
       // The surface is there at once; the curbs wait for their slices.
@@ -107,7 +128,10 @@ describe('earth and rubble road cells follow the ground', () => {
       expect(surfaces.pendingJobs).toBe(0);
       expect(kinds(surfaces.meshes)).toEqual(new Set(['infrastructure-rubble', 'infrastructure-border']));
       // Every curb vertex is 4 mm (foot) or 6.4 cm (top) above the ground under it.
-      expect(offsets(named(surfaces.meshes, 'infrastructure-border'), space)).toEqual([mm(CURB), mm(CURB + 0.06)]);
+      expect(offsets(named(surfaces.meshes, 'infrastructure-border'), space, terrain)).toEqual([
+        mm(CURB),
+        mm(CURB + 0.06),
+      ]);
       surfaces.dispose();
     });
   });
@@ -123,7 +147,7 @@ describe('stone road cells follow the ground too', () => {
         ...[20, 21, 22].map((x) => cell(x, 22, 'stone-2', false)),
         cell(22, 21, 'stone-2'),
       ];
-      surfaces.update(line, space, relief, options());
+      surfaces.update(line, space, terrain, options());
       surfaces.settle();
       expect(kinds(surfaces.meshes)).toEqual(
         new Set(['infrastructure-stone-1', 'infrastructure-stone-2', 'infrastructure-border']),
@@ -131,11 +155,71 @@ describe('stone road cells follow the ground too', () => {
       // Pavers are 4 cm thick and top out 3 mm above the ground (+ clearance); curbs 4 mm to 6.4 cm.
       const top = 0.003 + STONE_CLEARANCE;
       for (const code of ['infrastructure-stone-1', 'infrastructure-stone-2'])
-        expect(offsets(named(surfaces.meshes, code), space)).toEqual([mm(top - 0.04), mm(top)]);
-      expect(offsets(named(surfaces.meshes, 'infrastructure-border'), space)).toEqual([
+        expect(offsets(named(surfaces.meshes, code), space, terrain)).toEqual([mm(top - 0.04), mm(top)]);
+      expect(offsets(named(surfaces.meshes, 'infrastructure-border'), space, terrain)).toEqual([
         mm(CURB + STONE_CLEARANCE),
         mm(CURB + 0.06 + STONE_CLEARANCE),
       ]);
+      surfaces.dispose();
+    });
+  });
+
+  it('is made of faces that each lie in one terrain triangle, so none leaves a gap or lets the ground through', () => {
+    withScene((scene) => {
+      const space = new WorldSpace(64, 64, { cellX: 20, cellY: 20 }),
+        surfaces = new RoadCellSurfaces(scene);
+      // A road down a twisted slope, with sidewalks, turns and a crossing, in both paving.
+      const cells = [
+        ...[20, 21, 22, 23, 24].map((x) => cell(x, 20, 'stone-2', true)),
+        ...[21, 22, 23].map((y) => cell(22, 20 + y - 20, 'stone-2', true)),
+        ...[20, 21, 22, 23, 24].map((x) => cell(x, 25, 'stone-1', true)),
+        cell(22, 24, 'stone-1', true),
+        cell(22, 26, 'stone-1', true),
+      ];
+      surfaces.update(cells, space, terrain, options());
+      surfaces.settle();
+      let tops = 0,
+        worst = Infinity,
+        highest = -Infinity;
+      for (const mesh of surfaces.meshes.filter((m) => !m.name.startsWith('infrastructure-border'))) {
+        const p = mesh.getVerticesData('position')!,
+          ix = mesh.getIndices()!;
+        const world = (v: number) =>
+          [space.origin.cellX + p[v * 3]! / 2.5, p[v * 3 + 1]!, space.origin.cellY + p[v * 3 + 2]! / 2.5] as const;
+        for (let t = 0; t < ix.length; t += 3) {
+          const [a, b, c] = [world(ix[t]!), world(ix[t + 1]!), world(ix[t + 2]!)];
+          // Each face lies in one terrain triangle: all its vertices on one side of the cell diagonal.
+          const sides = [a, b, c].map(([x, , y]) => {
+            const dx = x - Math.round(x),
+              dy = y - Math.round(y);
+            return Math.abs(dx - dy) < 1e-6 ? 0 : Math.sign(dx - dy);
+          });
+          expect(sides.every((v) => v >= 0) || sides.every((v) => v <= 0)).toBe(true);
+          // Faces turned up: the surface is above the terrain at every point of the face, by the paving's own margin.
+          // Faces turned up, by their normal.
+          if (mesh.getVerticesData('normal')![ix[t]! * 3 + 1]! <= 0.5) continue;
+          tops++;
+          for (const [u, v, w] of [
+            [1 / 3, 1 / 3, 1 / 3],
+            [0.6, 0.2, 0.2],
+            [0.2, 0.6, 0.2],
+            [0.2, 0.2, 0.6],
+            [0.5, 0.5, 0],
+            [0, 0.5, 0.5],
+          ] as const) {
+            const x = a[0] * u + b[0] * v + c[0] * w,
+              y = a[2] * u + b[2] * v + c[2] * w,
+              height = a[1] * u + b[1] * v + c[1] * w;
+            worst = Math.min(worst, height - terrain(x, y));
+            highest = Math.max(highest, height - terrain(x, y));
+          }
+        }
+      }
+      expect(tops).toBeGreaterThan(100);
+      // The paving tops lie 3 mm over the ground, plus the 2 cm clearance: never under it, never apart from it.
+      expect(worst).toBeGreaterThanOrEqual(0.003 + STONE_CLEARANCE - 1e-6);
+      // ...and never apart from it: the tops of neighbouring blocks, all at that margin, meet without a step.
+      expect(highest - worst).toBeLessThan(1e-6);
       surfaces.dispose();
     });
   });

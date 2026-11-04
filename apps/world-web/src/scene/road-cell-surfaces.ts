@@ -12,6 +12,7 @@ import {
   roadTileBuilt,
   roadTileFor,
   roadTileGeometryOf,
+  roadTileOnGround,
   type RoadTileShape,
 } from './road-cell-tiles';
 import { freezeStaticHierarchy, refreshStaticHierarchy } from './static-transforms';
@@ -49,8 +50,6 @@ const wrap = (value: number, size: number) => ((value % size) + size) % size;
 /** Position lue, au 1/8192 de case (0,3 mm) : clé entière (colonne × FINE_ROW + ligne). */
 const FINE = 8192,
   FINE_ROW = 1 << 23;
-const COS = [1, 0, -1, 0],
-  SIN = [0, 1, 0, -1];
 
 /** Une case à dessiner plus tard : ses bordures (terre, gravats) ou sa tuile entière (pierre). */
 type Job = { kind: 'curb' | 'stone'; cell: Cell };
@@ -415,35 +414,29 @@ export class RoadCellSurfaces {
       }) | (this.#links.get(cell.cellX + ':' + cell.cellY) ?? 0);
     const { shape, quarterTurns } = roadTileFor(mask);
     if (!roadTileBuilt(shape, cell.surface, cell.sidewalks)) this.stats.tilesBuilt++;
-    const tile = roadTileGeometryOf(shape, cell.surface, cell.sidewalks);
+    const tile = roadTileOnGround(shape, cell.surface, cell.sidewalks, quarterTurns);
     this.#queuePrewarm(cell.surface, cell.sidewalks);
     const read = this.#reader(sector),
       centre = read(cell.cellX, cell.cellY);
     if (centre === null) return;
-    const origin = space.project(cell),
-      c = COS[quarterTurns & 3]!,
-      s = SIN[quarterTurns & 3]!;
+    const origin = space.project(cell);
     // Earth and rubble: the sector draws the surface, the tile only brings the curbs, as low as the automatic roads'.
     const clearance = kind === 'stone' ? STONE_CLEARANCE : 0;
-    for (const [code, data] of [
+    for (const [code, mesh] of [
       [cell.surface, kind === 'stone' ? tile.pavement : null],
       ['border', tile.curb],
     ] as const) {
-      if (!data?.positions || !data.indices) continue;
+      if (!mesh) continue;
       const target = into.get(code) ?? { positions: [], normals: [], uvs: [], indices: [] };
       into.set(code, target);
       const base = target.positions.length / 3,
-        p = data.positions,
-        n = data.normals!,
-        uv = data.uvs;
+        p = mesh.positions;
       for (let i = 0; i < p.length; i += 3) {
-        const xr = c * p[i]! - s * p[i + 2]!,
-          zr = s * p[i]! + c * p[i + 2]!;
         let ground = centre;
         if (followTerrain) {
           // The corners of a box share their (x, z): one read per distinct position, whichever face they belong to.
-          const gx = wrap(cell.cellX + xr / CELL_UNITS, space.width),
-            gy = wrap(cell.cellY + zr / CELL_UNITS, space.height),
+          const gx = wrap(cell.cellX + p[i]! / CELL_UNITS, space.width),
+            gy = wrap(cell.cellY + p[i + 2]! / CELL_UNITS, space.height),
             key = Math.round(gx * FINE) * FINE_ROW + Math.round(gy * FINE);
           let known = sector.vertices.get(key);
           if (known === undefined) {
@@ -452,11 +445,11 @@ export class RoadCellSurfaces {
           }
           ground = known;
         }
-        target.positions.push(origin.x + xr, p[i + 1]! + ground + clearance, origin.z + zr);
-        target.normals.push(c * n[i]! - s * n[i + 2]!, n[i + 1]!, s * n[i]! + c * n[i + 2]!);
+        target.positions.push(origin.x + p[i]!, p[i + 1]! + ground + clearance, origin.z + p[i + 2]!);
       }
-      if (uv) for (let i = 0; i < uv.length; i++) target.uvs.push(uv[i]!);
-      for (const index of data.indices) target.indices.push(index + base);
+      for (const v of mesh.normals) target.normals.push(v);
+      for (const v of mesh.uvs) target.uvs.push(v);
+      for (const index of mesh.indices) target.indices.push(index + base);
     }
   }
   /** Les autres formes du style d'une tuile de pierre sont préparées une par tâche, pour qu'une pose suivante n'en construise aucune. */

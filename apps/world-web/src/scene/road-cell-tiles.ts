@@ -141,4 +141,111 @@ export function roadTileGeometryOf(shape: RoadTileShape, surface: RoadCellSurfac
 export const roadTileBuilt = (shape: RoadTileShape, surface: RoadCellSurface, sidewalks: boolean) =>
   geometries.has(`${shape}:${surface}:${sidewalks ? 1 : 0}`);
 /** Drops the cached tile geometries (tests). */
-export const clearRoadTileGeometries = () => geometries.clear();
+export const clearRoadTileGeometries = () => {
+  geometries.clear();
+  turned.clear();
+};
+
+export interface TileMesh {
+  positions: number[];
+  normals: number[];
+  uvs: number[];
+  indices: number[];
+}
+const COS = [1, 0, -1, 0],
+  SIN = [0, 1, 0, -1];
+/**
+ * A tile turned by `quarterTurns` and cut along the terrain's cell diagonal. The rendered terrain is two planar
+ * triangles per cell, split along the line x = z of the cell (`triangleHeight`, diagonal 00 -> 11). A tile triangle
+ * that lies in only one of them, with each vertex at the terrain height under it, is exactly parallel to the terrain:
+ * no corner of the ground rises through a large flat face, and the faces of two neighbouring blocks cannot part
+ * (what a plain per-vertex height did on a twisted slope). Vertices created by the cut are shared by the triangles of
+ * an edge, so the cut opens no crack. Pure geometry, independent of the ground: cached with the tile.
+ */
+export function turnAndCut(data: VertexData, quarterTurns: number): TileMesh {
+  const c = COS[quarterTurns & 3]!,
+    s = SIN[quarterTurns & 3]!,
+    p = data.positions!,
+    n = data.normals!,
+    uv = data.uvs,
+    source = data.indices!;
+  const positions: number[] = [],
+    normals: number[] = [],
+    uvs: number[] = [],
+    indices: number[] = [];
+  for (let i = 0; i < p.length; i += 3) {
+    positions.push(c * p[i]! - s * p[i + 2]!, p[i + 1]!, s * p[i]! + c * p[i + 2]!);
+    normals.push(c * n[i]! - s * n[i + 2]!, n[i + 1]!, s * n[i]! + c * n[i + 2]!);
+  }
+  if (uv) for (let i = 0; i < uv.length; i++) uvs.push(uv[i]!);
+  const EPS = 1e-9;
+  const side = (i: number) => {
+    const d = positions[i * 3]! - positions[i * 3 + 2]!;
+    return Math.abs(d) < EPS ? 0 : d;
+  };
+  const cuts = new Map<number, number>();
+  const cut = (a: number, b: number) => {
+    // The point depends on the edge, not on the triangle that asks for it: the lower index always comes first.
+    const lo = Math.min(a, b),
+      hi = Math.max(a, b),
+      key = lo * 4194304 + hi;
+    let id = cuts.get(key);
+    if (id !== undefined) return id;
+    const da = side(lo),
+      db = side(hi),
+      t = da / (da - db);
+    id = positions.length / 3;
+    for (let k = 0; k < 3; k++)
+      positions.push(positions[lo * 3 + k]! + (positions[hi * 3 + k]! - positions[lo * 3 + k]!) * t);
+    for (let k = 0; k < 3; k++) normals.push(normals[lo * 3 + k]! + (normals[hi * 3 + k]! - normals[lo * 3 + k]!) * t);
+    if (uv) for (let k = 0; k < 2; k++) uvs.push(uvs[lo * 2 + k]! + (uvs[hi * 2 + k]! - uvs[lo * 2 + k]!) * t);
+    cuts.set(key, id);
+    return id;
+  };
+  for (let t = 0; t < source.length; t += 3) {
+    const tri = [source[t]!, source[t + 1]!, source[t + 2]!],
+      d = tri.map(side);
+    if (d.every((v) => v >= 0) || d.every((v) => v <= 0)) {
+      indices.push(...tri);
+      continue;
+    }
+    const above: number[] = [],
+      below: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      const a = tri[k]!,
+        b = tri[(k + 1) % 3]!,
+        da = d[k]!,
+        db = d[(k + 1) % 3]!;
+      if (da >= 0) above.push(a);
+      if (da <= 0) below.push(a);
+      if ((da > 0 && db < 0) || (da < 0 && db > 0)) {
+        const m = cut(a, b);
+        above.push(m);
+        below.push(m);
+      }
+    }
+    for (const polygon of [above, below])
+      for (let k = 1; k + 1 < polygon.length; k++) indices.push(polygon[0]!, polygon[k]!, polygon[k + 1]!);
+  }
+  return { positions, normals, uvs, indices };
+}
+const turned = new Map<string, { pavement: TileMesh | null; curb: TileMesh | null }>();
+/** The tile of a shape and style, turned and cut (see `turnAndCut`), built once per page on first use. */
+export function roadTileOnGround(
+  shape: RoadTileShape,
+  surface: RoadCellSurface,
+  sidewalks: boolean,
+  quarterTurns: number,
+) {
+  const key = `${shape}:${surface}:${sidewalks ? 1 : 0}:${quarterTurns & 3}`;
+  let mesh = turned.get(key);
+  if (!mesh) {
+    const tile = roadTileGeometryOf(shape, surface, sidewalks);
+    mesh = {
+      pavement: tile.pavement ? turnAndCut(tile.pavement, quarterTurns) : null,
+      curb: tile.curb ? turnAndCut(tile.curb, quarterTurns) : null,
+    };
+    turned.set(key, mesh);
+  }
+  return mesh;
+}
