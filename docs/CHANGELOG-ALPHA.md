@@ -2,7 +2,19 @@
 
 Résumé orienté joueur et testeur de chaque version `alpha-*` déployée, de la plus récente à la plus ancienne. Chaque version couvre les commits depuis le tag alpha précédent ; la première (alpha-2026.10.16.1) regroupe l'historique antérieur, soit le socle de l'alpha.
 
-Généré le 1er novembre 2026.
+Mis à jour le 4 novembre 2026.
+
+## alpha-2026.11.04.1 — 4 novembre 2026
+
+- **Nouveautés de l'Oracle** : à la première connexion après la mise à jour, l'Oracle présente ce qui a changé ; « Compris » ferme la fenêtre pour de bon.
+- **Terraformation au pinceau** : pinceau 3 × 3 et pipette ; le sol se modèle pendant le geste, sans délai de 10 s ; un refus ne bloque que la case concernée et l'Oracle explique pourquoi (une page par refus, « Inspecter » montre l'obstacle) ; Ctrl+Z ou « Annuler » (10 s) remettent les sommets intacts ; la grille de construction suit le relief.
+- **Démolition** : nouvelle icône (maison rouge) et paire « Annuler » / « Confirmer ».
+- **Récolte des jardins** : le « +500 » s'affiche dès le geste ; un correctif (« Hors de portée », « Déjà prévu ») ne vient qu'en cas d'écart.
+- **Défrichage** : une souche se retire en une minute de travail (au lieu de dix), plus le trajet.
+- **Réactivité** : les changements arrivent en quelques dizaines de millisecondes ; la liste du marché se met à jour toute seule.
+- **Fluidité** : moins d'images saccadées en terraformation, en annulation et en jeu (vue régionale recalculée par morceaux) ; le sol apparaît directement avec sa teinte finale au chargement.
+- **Ancien onglet** : une page restée ouverte sur l'ancienne version demande d'être rechargée (« Une nouvelle version d'Arbestra est disponible »).
+- *Technique :* fin de la synchronisation V2 (serveur sans V1, contrats V1 retirés, lots I.3 et I.4) ; migrations 079 à 081 (reçus V2, réveil du flux par NOTIFY, version vue par compte), appliquées pendant la maintenance du déploiement, sauvegarde préalable.
 
 ## alpha-2026.11.01.1 — 1er novembre 2026
 

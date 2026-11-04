@@ -12,24 +12,24 @@ import type { Release } from './releases.js';
  */
 export const RELEASE_NOTES: readonly Release[] = [
   {
-    id: 'alpha-2026.11.02.1',
-    date: '2026-11-02',
+    id: 'alpha-2026.11.04.1',
+    date: '2026-11-04',
     items: [
+      {
+        title: 'Le terrain se modèle sous votre pinceau',
+        text: 'Le sol monte et descend pendant que vous peignez. Ctrl+Z ou « Annuler » le remettent comme avant, et quand je refuse une case, je vous explique pourquoi.',
+      },
       {
         title: 'Le défrichage a pris de la vitesse',
         text: 'Un habitant vient à bout d’une souche en une minute. Les racines ont fini par comprendre qu’il ne lâcherait pas.',
       },
       {
         title: 'Des nouvelles plus vives',
-        text: 'Vos ordres, vos récoltes et vos expéditions se répercutent plus vite : j’ai cessé de faire patienter les messagers dans l’antichambre.',
+        text: 'Vos ordres, vos récoltes et vos expéditions se répercutent plus vite, et le « +500 » d’une récolte s’envole dès votre geste : j’ai cessé de faire patienter les messagers dans l’antichambre.',
       },
       {
         title: 'Un marché qui se tient au courant',
         text: 'La liste des offres se met à jour toute seule. Inutile de rouvrir la fenêtre pour apprendre que quelqu’un a acheté avant vous.',
-      },
-      {
-        title: 'Quand le village ne répond plus',
-        text: 'Si le silence dure environ une minute, je vous le dis et je vous propose de réessayer ; si votre page est trop ancienne, je vous demande de la recharger.',
       },
       {
         title: 'Cette fenêtre',
