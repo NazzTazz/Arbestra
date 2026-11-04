@@ -299,7 +299,6 @@ export async function assertSpatialCoverage(
   // zone at all is a test fixture calling an admission directly (no
   // beginVillageEconomy): its zones are taken here, as in production.
   if (strict() && state?.grid.worldId === worldId && state.zones.size) throw Error(message);
-  if (!strict() || state) console.error(message);
   console.error(message);
   await lockSpatial(tx, grid, mode === 'exclusive' ? { exclusive: missing } : { shared: missing });
 }
