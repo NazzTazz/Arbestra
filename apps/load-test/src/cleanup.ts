@@ -32,6 +32,7 @@ const { values } = parseArgs({
     world: { type: 'string' },
     apply: { type: 'boolean', default: false },
     'confirm-staging': { type: 'boolean', default: false },
+    'confirm-dedicated': { type: 'boolean', default: false },
   },
 });
 

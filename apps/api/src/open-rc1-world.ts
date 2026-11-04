@@ -4,6 +4,7 @@ import type { GeneratedLandscape } from '@arbestra/contracts';
 import { loadConfig } from './config.js';
 import { createDatabase } from './database/connection.js';
 import { openCanonicalRc1World } from './modules/world-generator/open-rc1.js';
+import { activateTerrainVertices } from './modules/worlds/terrain-vertices.js';
 
 const { values } = parseArgs({
   options: {
@@ -11,6 +12,8 @@ const { values } = parseArgs({
     slug: { type: 'string' },
     name: { type: 'string' },
     artifact: { type: 'string' },
+    // Operator choice: share terrain vertices, as on the alpha and staging worlds (idempotent).
+    'shared-vertices': { type: 'boolean', default: false },
   },
 });
 if (!values['owner-account-id'] || !values.slug || !values.name || !values.artifact) {
@@ -19,16 +22,20 @@ if (!values['owner-account-id'] || !values.slug || !values.name || !values.artif
 const artifact = JSON.parse(await readFile(values.artifact, 'utf8')) as GeneratedLandscape;
 const db = createDatabase(loadConfig().databaseUrl);
 try {
-  console.info(
-    JSON.stringify(
-      await openCanonicalRc1World(db, {
-        ownerAccountId: values['owner-account-id'],
-        slug: values.slug,
-        name: values.name,
-        artifact,
-      }),
-    ),
-  );
+  const opened = await openCanonicalRc1World(db, {
+    ownerAccountId: values['owner-account-id'],
+    slug: values.slug,
+    name: values.name,
+    artifact,
+  });
+  console.info(JSON.stringify(opened));
+  if (values['shared-vertices']) {
+    // Same operator code as the 19 October conversions; a world already on vertices is left as is.
+    const audit = await activateTerrainVertices(db, opened.worldId);
+    console.info(
+      JSON.stringify({ terrainModel: 'vertices', previousModel: audit.model, vertices: audit.vertices.length }),
+    );
+  }
 } finally {
   await db.destroy();
 }

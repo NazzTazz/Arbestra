@@ -77,6 +77,7 @@ const { values } = parseArgs({
     grant: { type: 'string' },
     credentials: { type: 'string' },
     'confirm-staging': { type: 'boolean', default: false },
+    'confirm-dedicated': { type: 'boolean', default: false },
   },
 });
 

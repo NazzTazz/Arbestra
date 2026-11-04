@@ -1,22 +1,22 @@
 # Test de charge
 
-4 novembre 2026. Étape 1 de la [feuille de route](ROADMAP.md). Outil livré et validé en local (§8) ; **le passage sur staging attend la décision de Tristan** (§7). Aucun script n'a été lancé sur le VPS, le staging ou l'alpha.
+4 novembre 2026. Étape 1 de la [feuille de route](ROADMAP.md). Outil livré et validé en local (§8) ; mise à niveau opérateur du 4 novembre (livraison sur un serveur déployé, ouverture de monde, cible dédiée). **Le passage sur staging ou sur une machine dédiée attend la décision de Tristan** (§7, §10). Aucun script n'a été lancé sur le VPS, le staging ou l'alpha.
 
 ## 1. À quoi sert l'outil
 
 Mesurer combien de joueurs actifs un serveur unique tient, et **ce qui casse en premier** : pool PostgreSQL de l'API, verrous (village, navigation du monde, verrou mondial des poses), worker de trajets, scheduler économique, CPU de l'API. Le résultat éclaire la taille du monde, le nombre de joueurs par monde et l'ordre des chantiers structurants (trajets, verrous mondiaux, worker hors de l'API).
 
-Le paquet `apps/load-test` (`@arbestra/load-test`) contient quatre scripts et aucune dépendance nouvelle (Node, `fetch`, `kysely` déjà présent dans l'API) :
+Le paquet `apps/load-test` (`@arbestra/load-test`) contient quatre scripts et aucune dépendance nouvelle (Node, `fetch`, `kysely` déjà présent dans l'API). En développement ils tournent par `tsx` ; sur un serveur déployé, par leur version compilée (`corepack pnpm --filter @arbestra/load-test build`, sortie `apps/load-test/dist/`, installée par `ops/deploy/load-test.py`, §7.1) :
 
 | Script | Rôle | Touche la base |
 |---|---|---|
 | `provision.ts` | crée N comptes et villages de bots par le code réel du jeu | oui, comptes et villages des bots |
 | `run.ts` | fait jouer les bots par paliers via l'API HTTP réelle, écrit les résultats | non (passe par l'API) |
-| `sampler.ts` | échantillonne le serveur en lecture seule ; lancé par `run.ts` dans un processus à part | lecture seule |
+| `sampler.ts` | échantillonne le serveur en lecture seule ; lancé par `run.ts` dans un processus à part, ou seul (`nohup` possible : il ne s'arrête que sur SIGINT/SIGTERM, ou sur la fermeture de son stdin si `--stop-on-stdin-close`, que passe `run.ts`) | lecture seule |
 | `cleanup.ts` | supprime les seuls bots ; essai à blanc par défaut | oui, avec `--apply` |
 | `local-api.ts` | lance une API locale dédiée (port libre, base dédiée, worker compris) avec une sonde CPU/mémoire | non |
 
-Les résultats et les identifiants des bots vont dans `apps/load-test/out/`, ignoré par Git.
+Les résultats et les identifiants des bots vont dans `apps/load-test/out/`, ignoré par Git (ou dans le dossier donné par la variable `LOAD_OUT_DIR`, ce que fait `load-test.py` sur un serveur).
 
 ## 2. Les bots
 
@@ -88,7 +88,7 @@ Chaque palier démarre ses nouveaux bots sur `--ramp-seconds` (20 s) ; les bots 
 
 **Mesures côté bots** : latence de chaque requête par type (p50, p95, p99), refus métier (409, 422) comptés à part des erreurs (400, 401, 429, 5xx, délais dépassés), délai entre la confirmation HTTP d'une commande et l'arrivée de son effet par le flux SSE (révision du flux privé portée par la confirmation, ou mention de la commande pour les intentions asynchrones de récolte et d'expédition), ouvertures et reconnexions du flux, phases serveur `Server-Timing` (attente de connexion `pool`, verrous `village_lock` et `navigation_lock`, file et calcul des trajets, réconciliation, SQL), et retard de la boucle d'événements du processus des bots (au-delà de 200 ms, la machine des bots fausse la mesure).
 
-**Mesures côté serveur** (`sampler.ts`, toutes les 2 s, lecture seule : session `default_transaction_read_only`, délais de requête et de verrou du pool d'observation du NOC) : santé `/api/health` ; notifications dues et âge de la plus ancienne (retard du scheduler), intentions de récolte et d'expédition en attente ; connexions PostgreSQL par état, attentes de verrou (`pg_stat_activity`, `pg_locks`, verrous consultatifs à part), plus longues transaction et requête, événements d'attente, validations et annulations par seconde, interblocages ; CPU et mémoire du processus de l'API (sonde de `local-api.ts`, ou `/proc/<pid>` sous Linux avec `--api-pid`) ; charge et mémoire libre de l'hôte.
+**Mesures côté serveur** (`sampler.ts`, toutes les 2 s, lecture seule : session `default_transaction_read_only`, délais de requête et de verrou du pool d'observation du NOC) : santé `/api/health` ; notifications dues et âge de la plus ancienne (retard du scheduler), intentions de récolte et d'expédition en attente ; connexions PostgreSQL par état, attentes de verrou (`pg_stat_activity`, `pg_locks`, verrous consultatifs à part), plus longues transaction et requête, événements d'attente, validations et annulations par seconde, interblocages ; CPU et mémoire du processus de l'API (sonde de `local-api.ts`, ou `/proc/<pid>` sous Linux avec `--api-pid`) ; charge de l'hôte et mémoire disponible (`MemAvailable` de `/proc/meminfo` sous Linux : `os.freemem()` ne donne que `MemFree`, trop bas sur un VPS sain).
 
 **Sortie** : `out/run-<cible>-<date>/result.json` (toutes les requêtes, effets, échantillons, échecs) et `summary.md` : un tableau par palier, les seuils dépassés et **la première ressource saturée** avec sa preuve chiffrée.
 
@@ -102,6 +102,8 @@ Chaque palier démarre ses nouveaux bots sur `--ramp-seconds` (20 s) ; les bots 
 | taux d'erreur des commandes | 5 % | `--max-error-rate` |
 | santé : p95 de `/api/health` | 2 000 ms | `--max-health-ms` |
 | santé : échecs consécutifs | 3 | — |
+| charge de l'hôte (load 1 min) par cœur ; échantillonneur lancé par `run.ts` | 1 (au-delà du nombre de cœurs) ; 0 désactive | `--max-host-load-per-core` |
+| mémoire disponible de l'hôte, en % du total ; échantillonneur lancé par `run.ts` | 15 ; 0 désactive | `--min-free-mem-percent` |
 
 **Ressource saturée** (`report.ts`) : pour chaque palier, chaque ressource est comparée à son seuil ; la première ressource saturée est le plus fort dépassement du premier palier qui en a un.
 
@@ -121,44 +123,99 @@ Chaque palier démarre ses nouveaux bots sur `--ramp-seconds` (20 s) ; les bots 
 
 `target.ts` (pur, testé) refuse de tourner :
 
-- sans `--target local` ou `--target staging` ;
+- sans `--target local`, `--target staging` ou `--target dedicated` ;
 - si la base, l'URL de l'API ou le monde contient `alpha` (même encodé), ou si l'API est sur le port 3100 (API alpha du VPS) ;
 - en local : base hors de 127.0.0.1, ou dont le nom ne finit pas par `_load` (la base de développement `arbestra` et les bases `_test` sont refusées) ; API hors de 127.0.0.1, ou sur 3000 (le `pnpm dev` du PO) ou 3200 (staging) ;
-- en staging : sans le drapeau `--confirm-staging` **et** la variable `ARBESTRA_LOAD_STAGING` égale au slug du monde visé ; base autre que `arbestra_staging` ; API autre que `https://staging.arbestra.fr` ou `http://127.0.0.1:3200`.
+- en staging : sans le drapeau `--confirm-staging` **et** la variable `ARBESTRA_LOAD_STAGING` nommant le monde visé (un slug, ou **plusieurs séparés par des virgules** : `charge-1,charge-2` pour `run.ts --world charge-1,charge-2` ; chaque monde du test doit y figurer) ; base autre que `arbestra_staging` ; API autre que `https://staging.arbestra.fr` ou `http://127.0.0.1:3200` ;
+- en cible dédiée (machine de test louée, §10) : sans le drapeau `--confirm-dedicated` **et** la variable `ARBESTRA_LOAD_DEDICATED_HOST` égale à l'hôte de l'API visée ; si la base, l'API, le monde ou cette variable désigne l'alpha **ou le staging** (nom, domaines publics `arbestra.world` et `arbestra.fr`, ports 3100, 3200 et 3000) ; si la base n'est pas locale à la machine ou ne finit pas par `_load`.
 
-Un monde ne peut être créé par `provision.ts` qu'en local.
+Un monde ne peut être créé par `provision.ts` qu'en local ; sur staging ou une machine dédiée, il est ouvert par l'opérateur (§7, §10).
 
 ## 7. Procédure staging proposée (à valider par Tristan)
 
-Le staging partage le VPS avec l'alpha, qui a de vrais joueurs : la procédure protège d'abord l'alpha. **Rien n'est lancé tant que Tristan ne l'a pas validée et n'a pas fixé le créneau.**
+Le staging partage le VPS (2 cœurs, 3,8 Go) avec l'alpha, qui a de vrais joueurs : la procédure protège d'abord l'alpha. **Rien n'est lancé tant que Tristan ne l'a pas validée et n'a pas fixé le créneau.** Si l'alpha ne doit pas être approchée du tout, préférer la machine dédiée (§10).
 
-**Préparation, avant le jour J**
+Les commandes d'opérateur ci-dessous tournent sur le VPS, en root, depuis les scripts de `ops/deploy/` relus et transférés. Le monde de staging s'appelle `staging` (et non plus `beta-rc1`, depuis le 24 octobre) ; les mondes de test sont `charge-1` et `charge-2` (un monde RC1 tient environ 21 villages).
 
-1. Un **monde dédié** sur la base staging, par exemple `charge-1` et `charge-2` (un monde RC1 tient environ 21 villages), ouvert par l'opérateur avec la commande existante (`ops/deploy/open-rc1-world.py`, qui sauvegarde la base d'abord) puis converti en sommets partagés. Le monde `beta-rc1` et le village Test ne sont pas touchés ; les traces des bots sur le terrain restent dans le monde dédié.
-2. Une release staging qui contient `apps/load-test` (le paquet n'est pas servi : rien de public ne change).
-3. Lecture à blanc : `cleanup.ts --target staging --world charge-1` doit répondre « aucun compte ne correspond » avant le provisionnement.
+### 7.1 Préparation, avant le jour J
 
-**Qui lance quoi**
+1. **Release staging contenant l'outil.** Déployer sur staging, par le workflow habituel, le commit qui contient l'outil et `--shared-vertices`. La release elle-même ne livre que `api/` et `web/` ; l'outil vient d'une archive séparée, **optionnelle**, jamais installée par un déploiement : `bash ops/deploy/build.sh staging` (sur Linux : poste Linux, WSL ou exécuteur CI, **au même commit** que la release déployée) produit `release.tar.gz` et `load-test.tar.gz`. L'archive de l'outil ne contient que le JavaScript compilé par `tsc` (`apps/load-test/tsconfig.build.json`) : pas de `tsx`, pas de dépendance ajoutée, elle utilise `kysely`, `pg` et `@arbestra/contracts` de la release.
+2. **Transférer** `load-test.tar.gz` sur le VPS par un canal chiffré (`scp`), en vérifiant sa somme `sha256sum`.
+3. **Installer l'outil** (le script refuse l'alpha, ne s'accepte que pour `staging` ou `load`, vérifie que l'archive a la même révision que `current`, extrait sous l'UID `arbestra-staging`, relie `node_modules` à celui de la release et n'écrit rien dans `current`) :
 
-- **Provisionnement et nettoyage** (écrivent dans `arbestra_staging`) : sur le VPS, par l'opérateur (Tristan, ou l'agent sur sa consigne explicite), sous l'utilisateur système et le **rôle PostgreSQL applicatif du staging** (droits DML, sans DDL, sans accès à `arbestra_alpha`), avec `LOAD_DATABASE_URL` lu depuis l'environnement du service staging, jamais copié dans un fichier ni affiché. Une sauvegarde de la base staging précède le provisionnement, comme pour une migration.
-- **Échantillonneur** : sur le VPS, même rôle, session en lecture seule ; `--api-pid` = PID de `arbestra-api@staging` pour le CPU et la mémoire.
-- **Bots** (`run.ts`) : **depuis une autre machine** que le VPS (le PC de Tristan), contre `https://staging.arbestra.fr`, pour que leur CPU ne s'ajoute pas à celui de l'alpha. Le fichier d'identifiants est copié du VPS vers cette machine par un canal chiffré, puis effacé après le test.
+   ```sh
+   sudo python3 ops/deploy/load-test.py install staging load-test.tar.gz
+   ```
 
-**Créneau et paliers**
+   L'outil est dans `/srv/arbestra/staging/load-test/<révision>/` (lien `current`), ses résultats et identifiants de bots dans `/srv/arbestra/staging/load-test/out/` (propriété du service, mode 700). Il doit être réinstallé après chaque déploiement de staging.
+4. **Ouvrir les mondes de test**, avec les sommets partagés comme l'alpha et staging (conversion du 19 octobre). `open-rc1-world.py` sauvegarde d'abord la base (`/var/backups/arbestra/staging-open-rc1-<slug>-<date>.dump`, vérifiée par `pg_restore --list`), puis exécute le code applicatif (`activateTerrainVertices`) sous le même UID et le même rôle PostgreSQL que l'ouverture habituelle. Un monde `charge-*` est **refusé sur l'alpha** par le script lui-même.
 
-- Créneau creux de l'alpha, choisi d'après le journal des parcours et les sessions du NOC (fréquentation par heure), annoncé à l'avance.
-- Paliers limités au premier passage : **10, 20, 30**, 3 minutes chacun, arrêt automatique par défaut (p95 5 s, 5 % d'erreurs, santé). Un deuxième passage à 60 puis 100 seulement si l'alpha est restée intacte au premier.
+   ```sh
+   sudo python3 ops/deploy/open-rc1-world.py staging --owner-account-id UUID --slug charge-1 --name "Charge 1" --shared-vertices
+   sudo python3 ops/deploy/open-rc1-world.py staging --owner-account-id UUID --slug charge-2 --name "Charge 2" --shared-vertices
+   ```
 
-**Surveillance de l'alpha pendant le test**
+   `--slug` et `--name` valent par défaut `staging` et « Arbestra Bêta », `alpha` et « Arbestra Alpha » pour l'alpha ; `--shared-vertices` est facultatif et sans effet sur un monde déjà converti. L'UUID est celui d'un compte existant du staging (compte auteur, sans droit particulier). Le monde `staging` et le village Test ne sont pas touchés.
+5. **Lecture à blanc** : `cleanup` doit répondre « aucun compte ne correspond » avant le provisionnement (voir 7.3).
+
+### 7.2 Qui lance quoi
+
+Une commande de l'outil sur le VPS s'écrit toujours sous la même forme. `--staging-worlds` donne la valeur de `ARBESTRA_LOAD_STAGING` (les mondes du test) ; l'outil tourne sous l'UID `arbestra-staging`, avec l'environnement du service (`/etc/arbestra/staging.env`) : sa base lui arrive dans `LOAD_DATABASE_URL`, renommée depuis `DATABASE_URL`, jamais en argument ni affichée.
+
+```sh
+sudo python3 ops/deploy/load-test.py run staging --staging-worlds charge-1,charge-2 SCRIPT -- ARGUMENTS DU SCRIPT
+```
+
+`SCRIPT` vaut `provision`, `run`, `sampler` ou `cleanup`. Les arguments du script sont ceux du §3 et du §4, avec `--target staging --confirm-staging`.
+
+- **Provisionnement et nettoyage** (écrivent dans `arbestra_staging`, rôle applicatif du staging : DML, sans DDL, sans accès à `arbestra_alpha`).
+- **Échantillonneur** : sur le VPS, même rôle, session en lecture seule ; `--api-pid` = PID de `arbestra-api@staging`.
+- **Bots** (`run.ts`) : **depuis une autre machine** (le PC de Tristan), contre `https://staging.arbestra.fr`, pour que leur CPU ne s'ajoute pas à celui de l'alpha. Les identifiants sont copiés du VPS vers cette machine par un canal chiffré, puis effacés après le test. Les bots présentent un jeton de session : le nom du cookie de staging doit être donné, `--cookie-name __Secure-arbestra_staging`.
+
+### 7.3 Déroulé
+
+```sh
+# a. À blanc (doit répondre qu'aucun compte ne correspond) :
+sudo python3 ops/deploy/load-test.py run staging --staging-worlds charge-1 cleanup -- --target staging --confirm-staging --world charge-1
+# b. Bots : 10 par monde, villages répartis (un monde RC1 tient environ 21 villages).
+sudo python3 ops/deploy/load-test.py run staging --staging-worlds charge-1,charge-2 provision -- --target staging --confirm-staging --world charge-1 --count 10 --layout spread
+sudo python3 ops/deploy/load-test.py run staging --staging-worlds charge-1,charge-2 provision -- --target staging --confirm-staging --world charge-2 --count 10 --start 11 --layout spread
+# c. Échantillonneur (arrière-plan, il ne s'arrête plus sur la fermeture de son stdin ; arrêt : SIGINT/SIGTERM).
+nohup sudo python3 ops/deploy/load-test.py run staging --staging-worlds charge-1 sampler -- --target staging --confirm-staging --base-url http://127.0.0.1:3200 --world charge-1 --out samples-j.jsonl --api-pid "$(systemctl show -p MainPID --value arbestra-api@staging)" > /dev/null 2>&1 &
+# d. Copier les identifiants vers la machine des bots (canal chiffré), puis, sur cette machine, dans apps/load-test :
+ARBESTRA_LOAD_STAGING=charge-1,charge-2 npx tsx src/run.ts --target staging --confirm-staging --base-url https://staging.arbestra.fr \
+  --world charge-1,charge-2 --credentials bots-staging-charge-1.json,bots-staging-charge-2.json --cookie-name __Secure-arbestra_staging \
+  --stages 2,5,10 --stage-seconds 180
+```
+
+La tâche provisionnement écrit d'abord les chunks du monde : la première installation d'un monde neuf peut durer plusieurs minutes (§8.1) et pèse sur le CPU du VPS : la lancer hors de l'heure de pointe de l'alpha, et surveiller la charge.
+
+**Paliers.** Le VPS est petit : **2, puis 5, puis 10 bots**, 3 minutes chacun, arrêt automatique par défaut. On ne monte (20, 30) qu'après relecture des résultats et de l'alpha, dans une nouvelle exécution. Au-delà de 30, la machine dédiée (§10) est le bon endroit.
+
+### 7.4 Seuils d'arrêt
+
+Les seuils du §5 s'appliquent (p95, erreurs, santé de l'API). S'y ajoutent deux seuils **de l'hôte**, explicites et réglables, pensés pour un VPS partagé :
+
+| Seuil | Défaut | Option |
+|---|---|---|
+| charge de l'hôte (load 1 min) par cœur | 1 (soit 2 sur 2 cœurs) ; `0` désactive | `--max-host-load-per-core` |
+| mémoire **disponible** (MemAvailable) sous X % du total | 15 ; `0` désactive | `--min-free-mem-percent` |
+
+La mémoire est celle de `MemAvailable` (`/proc/meminfo`) : `os.freemem()` ne donne que `MemFree`, que le cache de pages maintient à 4–10 % sur un VPS sain, ce qui arrêterait tout dès le départ. Hors Linux, repli sur `os.freemem()`.
+
+`run.ts` applique ces deux seuils à chaque vérification (5 s) **lorsqu'il lance lui-même l'échantillonneur**, donc quand il tourne sur le serveur testé (§10). Avec des bots sur une autre machine (le cas staging), l'échantillonneur du VPS ne peut pas arrêter les bots : il écrit une `ALERTE HÔTE` sur sa sortie d'erreur (visible si lancé sans `nohup`, ou en redirigeant sa sortie d'erreur vers un fichier surveillé), et l'opérateur arrête les bots (Ctrl+C). Les options des mêmes noms existent sur `sampler.ts`.
+
+### 7.5 Surveillance de l'alpha pendant le test
 
 - Avant : relevé de référence de l'alpha (santé `/api/health` publique, latence d'une page, charge de l'hôte, `journalctl -u arbestra-api@alpha`).
-- Pendant : santé de l'alpha toutes les 10 s depuis la machine des bots (un simple `curl`, hors de l'outil de charge qui refuse toute URL alpha), charge de l'hôte et mémoire libre dans l'échantillonneur, console NOC de l'alpha ouverte.
-- **Arrêt immédiat** (Ctrl+C sur `run.ts` ; les bots ferment leurs flux) si la santé de l'alpha dépasse 1 s, si la charge de l'hôte dépasse le nombre de cœurs, si la mémoire libre passe sous 15 %, ou sur une plainte d'un joueur. L'arrêt automatique de l'outil ne surveille que le staging.
+- Pendant : santé de l'alpha toutes les 10 s depuis la machine des bots (un simple `curl`, hors de l'outil de charge qui refuse toute URL alpha), charge de l'hôte et mémoire disponible dans l'échantillonneur, console NOC de l'alpha ouverte.
+- **Arrêt immédiat** (Ctrl+C sur `run.ts` ; les bots ferment leurs flux) si la santé de l'alpha dépasse 1 s, si la charge de l'hôte dépasse le nombre de cœurs, si la mémoire disponible passe sous 15 %, ou sur une plainte d'un joueur.
 
-**Après**
+### 7.6 Après
 
-- `cleanup.ts --target staging --world charge-1` à blanc, relu, puis `--apply`.
-- Résultats (`summary.md`) relus avec Tristan ; aucun identifiant de bot conservé.
+- `cleanup` à blanc, relu, puis `--apply` (même forme de commande que 7.3 a, avec `--world charge-1` puis `--world charge-2`).
+- Résultats (`summary.md`) relus avec Tristan ; **aucun identifiant de bot conservé** : effacer `/srv/arbestra/staging/load-test/out/` et la copie sur la machine des bots.
+- Les mondes `charge-*` restent en base (traces de terrain) : ils sont sans villages et peuvent être laissés ou supprimés par une opération d'opérateur séparée, sur décision de Tristan.
 
 ## 8. Validation locale du 4 novembre 2026
 
@@ -214,7 +271,103 @@ Ordre suggéré, à confirmer sur staging : portée du verrou mondial et invalid
 ## 9. Points à décider par Tristan
 
 - Valider la procédure staging (§7), le créneau et les paliers du premier passage.
-- Mondes dédiés au test sur staging (`charge-1`, `charge-2`) : ouverture par l'opérateur (`open-rc1-world.py` puis activation des sommets partagés), ou autoriser `provision.ts --create-world` en staging.
+- Mondes dédiés au test sur staging (`charge-1`, `charge-2`) : ouverture par l'opérateur (`open-rc1-world.py --slug ... --shared-vertices`, §7.1) ; `provision.ts --create-world` reste refusé hors local.
+- VPS partagé de 2 cœurs ou machine dédiée louée (§10) ? Paliers de départ proposés en staging : 2, 5, 10.
 - `--grant` (stocks relevés pour atteindre le marché) : acceptable en staging, ou mélange sans marché.
 - Mélange par défaut des actions et rythme (8 s) : représentatifs de l'alpha ? Le journal des parcours pourrait les calibrer.
 - Seuils d'arrêt par défaut (5 s, 5 %) : ils arrêtent l'essai local dès 10 bots.
+
+## 10. Machine de test dédiée
+
+Un serveur cloud **temporaire**, loué pour l'essai, évite de toucher l'alpha et son VPS. Il est générique : tout hébergeur Linux convient. La cible `--target dedicated` y applique ses propres garde-fous (§6) : refus de l'alpha et du staging (noms, domaines publics, ports), drapeau `--confirm-dedicated`, variable `ARBESTRA_LOAD_DEDICATED_HOST` égale à l'hôte de l'API, base locale suffixée `_load`.
+
+**Dimensionnement.** Pour que la mesure soit utile, la machine doit ressembler au serveur de production visé, pas à celui de l'alpha : indiquer dans les résultats ses cœurs et sa mémoire. Point de départ : 4 vCPU, 8 Go, 40 Go de disque, Debian 13 (PostgreSQL 17 dans le dépôt) ou Ubuntu 24.04 (PostgreSQL 17 par le dépôt PGDG), x86-64. Les bots tournent **sur une autre machine** (le PC de Tristan) ; sinon leur CPU fausse la mesure (voir la boucle d'événements dans `summary.md`).
+
+### 10.1 Installer une release sur une machine neuve
+
+`bootstrap.py` est propre au VPS audité (passerelle Caddy dans Docker, domaines, deux environnements) : il n'est pas utilisé. On réutilise le reste de `ops/deploy/` : le gabarit de service `arbestra-api@.service` (instance `load`), `open-rc1-world.py` et `load-test.py` (environnement `load`) et la fonction `application` du contrôleur `deploy.py`, installé tel quel.
+
+Sur un poste **Linux** (WSL, exécuteur CI), au commit à tester :
+
+```sh
+bash ops/deploy/build.sh load        # release.tar.gz et load-test.tar.gz ; aucun domaine, les pages web ne sont pas servies
+sha256sum release.tar.gz load-test.tar.gz
+scp release.tar.gz load-test.tar.gz ops/deploy/{arbestra-api@.service,deploy.py,open-rc1-world.py,load-test.py} root@HÔTE:/root/
+```
+
+Sur la machine, en root :
+
+```sh
+# 1. Paquets et Node 24 (version épinglée du bootstrap, vérifiée par SHASUMS256.txt de nodejs.org).
+apt-get update && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 ca-certificates curl xz-utils
+NODE=24.22.0; cd /tmp
+curl -fsSLO https://nodejs.org/dist/v$NODE/node-v$NODE-linux-x64.tar.xz
+curl -fsSL https://nodejs.org/dist/v$NODE/SHASUMS256.txt | grep " node-v$NODE-linux-x64.tar.xz" | sha256sum -c -
+tar -xJf node-v$NODE-linux-x64.tar.xz -C /opt && ln -s /opt/node-v$NODE-linux-x64/bin/node /usr/local/bin/node && cd /root
+
+# 2. Compte de service, dossiers.
+useradd --system --create-home --home-dir /var/lib/arbestra-load --shell /usr/sbin/nologin arbestra-load
+mkdir -p /srv/arbestra/load/releases /etc/arbestra /var/backups/arbestra /usr/local/lib/arbestra
+chmod 700 /var/backups/arbestra
+install -m 755 deploy.py /usr/local/sbin/arbestra-deploy
+install -m 644 'arbestra-api@.service' /etc/systemd/system/
+
+# 3. Base : un seul rôle (machine jetable, sans donnée réelle) ; mot de passe tiré au hasard, jamais affiché.
+PW=$(openssl rand -hex 32)
+runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE ROLE arbestra_load LOGIN PASSWORD '$PW'" -c "CREATE DATABASE arbestra_load OWNER arbestra_load"
+install -m 600 /dev/null /etc/arbestra/load.env
+printf 'DATABASE_URL=postgresql://arbestra_load:%s@127.0.0.1:5432/arbestra_load\nNODE_ENV=production\nHOST=127.0.0.1\nPORT=3400\nCOOKIE_NAME=arbestra_session\nTRUSTED_PROXY_CIDRS=127.0.0.1\nEXPEDITION_WORKERS=1\nSCHEDULED_TASK_POLL_INTERVAL_MS=1000\n' "$PW" > /etc/arbestra/load.env
+unset PW
+
+# 4. Release : extraction sous l'UID du service, lien courant, migrations.
+REV=$(tar -xzOf release.tar.gz revision)
+install -d -o arbestra-load -g arbestra-load -m 755 /srv/arbestra/load/releases/$REV
+cp release.tar.gz /tmp/release.tar.gz && chmod 644 /tmp/release.tar.gz
+runuser -u arbestra-load -- tar -xzf /tmp/release.tar.gz --no-same-owner -C /srv/arbestra/load/releases/$REV && rm /tmp/release.tar.gz
+ln -sfn /srv/arbestra/load/releases/$REV /srv/arbestra/load/current
+systemd-run --wait --collect --pipe -p User=arbestra-load -p EnvironmentFile=/etc/arbestra/load.env \
+  -p WorkingDirectory=/srv/arbestra/load/current/api /usr/local/bin/node dist/database/migrate.js
+
+# 5. Service API (gabarit de ops/deploy, instance « load »). Sur une machine plus grande, relever les limites mémoire :
+#    systemctl edit arbestra-api@load  ->  [Service] MemoryHigh=3G, MemoryMax=4G
+systemctl daemon-reload && systemctl enable --now arbestra-api@load
+curl -fsS http://127.0.0.1:3400/api/health
+```
+
+Les migrations créent le schéma seulement ; **jamais `db:seed`** ici non plus. Le compte auteur du monde s'inscrit par l'API (`POST /api/auth/register`, corps `{"email":"...","password":"..."}` ; non rejoué depuis cette procédure, à vérifier au premier passage), puis son identifiant est lu : `runuser -u postgres -- psql arbestra_load -Atc "select id from accounts where email = '...'"`.
+
+Ouvrir un monde, convertir en sommets partagés, installer l'outil (même commandes que sur staging, environnement `load`, monde `charge-1` par défaut) :
+
+```sh
+python3 open-rc1-world.py load --owner-account-id UUID --shared-vertices
+python3 load-test.py install load load-test.tar.gz
+```
+
+### 10.2 Exécuter l'outil en cible dédiée
+
+L'API écoute sur `127.0.0.1:3400` : aucun port public. Les bots l'atteignent par un **tunnel SSH** depuis leur machine (`ssh -N -L 3400:127.0.0.1:3400 root@HÔTE`), donc `--base-url http://127.0.0.1:3400` et `ARBESTRA_LOAD_DEDICATED_HOST=127.0.0.1` ; le tunnel ajoute un peu de latence, à signaler dans les résultats. Autre option : ouvrir le port 3400 au seul pare-feu de l'hébergeur pour l'adresse de la machine des bots, `HOST=0.0.0.0`, `--base-url http://ADRESSE:3400` et `ARBESTRA_LOAD_DEDICATED_HOST=ADRESSE` ; le trafic est alors en clair, ce qui reste acceptable pour des comptes de bots jetables, jamais pour de vrais comptes.
+
+Sur la machine de test, mêmes formes de commande que sur staging (§7.2), avec `--dedicated-host` au lieu de `--staging-worlds` et `--target dedicated --confirm-dedicated` au lieu de `--target staging --confirm-staging` :
+
+```sh
+python3 load-test.py run load --dedicated-host 127.0.0.1 provision -- --target dedicated --confirm-dedicated --world charge-1 --count 20 --layout spread
+nohup python3 load-test.py run load --dedicated-host 127.0.0.1 sampler -- --target dedicated --confirm-dedicated --base-url http://127.0.0.1:3400 --world charge-1 --out samples.jsonl --api-pid "$(systemctl show -p MainPID --value arbestra-api@load)" > /dev/null 2>&1 &
+```
+
+Sur la machine des bots (tunnel ouvert) :
+
+```sh
+ARBESTRA_LOAD_DEDICATED_HOST=127.0.0.1 npx tsx src/run.ts --target dedicated --confirm-dedicated --base-url http://127.0.0.1:3400 \
+  --world charge-1 --credentials bots-dedicated-charge-1.json --stages 10,30,60 --stage-seconds 180
+```
+
+Un monde RC1 tient environ 21 villages : pour plus de bots, ouvrir `charge-2`, `charge-3` (`open-rc1-world.py load --slug charge-2 --name "Charge 2" --shared-vertices`) et donner la liste à `--world`.
+
+Les seuils d'hôte du §7.4 s'appliquent ; leur valeur par défaut (charge égale au nombre de cœurs) est faite pour le VPS partagé : sur une machine dédiée, le but est de **trouver** la saturation, relever `--max-host-load-per-core` (par exemple 2) est légitime, à écrire dans le compte rendu.
+
+### 10.3 Détruire la machine
+
+1. Rapatrier les résultats utiles (`/srv/arbestra/load/load-test/out/run-*/summary.md` et `result.json`) ; **ne pas** rapatrier `bots-*.json` (identifiants jetables).
+2. Fermer le tunnel SSH, effacer les identifiants sur la machine des bots (`apps/load-test/out/bots-dedicated-*.json`).
+3. **Détruire l'instance** chez l'hébergeur (suppression, pas arrêt : un serveur arrêté est encore facturé, ainsi que son disque, ses instantanés et son adresse IP fixe) ; supprimer aussi volumes, instantanés et adresses réservées.
+4. Vérifier dans la console de l'hébergeur que plus aucune ressource ne court, et révoquer la clé SSH ou l'accès créés pour l'occasion.

@@ -7,7 +7,10 @@
  *   query, wait events, commits/rollbacks/deadlocks since the last sample;
  * - the API process CPU and memory: from the local probe file (local-api.ts)
  *   or /proc/<pid> on Linux (--api-pid);
- * - the host load average and free memory (a VPS shared with the alpha).
+ * - the host load average and available memory (MemAvailable on Linux): a
+ *   VPS shared with the alpha. Past --max-host-load-per-core (load per core,
+ *   default 1) or under --min-free-mem-percent (default 15) the sampler prints
+ *   an alert; run.ts, when it launches the sampler, stops the run on it.
  * Its database session is read-only (default_transaction_read_only, statement
  * and lock timeouts of the NOC's observation pool) and never takes a lock a
  * game transaction waits for.
@@ -15,12 +18,14 @@
  *   tsx src/sampler.ts --target local --base-url http://127.0.0.1:3300 --out out/run/samples.jsonl
  *     [--api-probe-file out/api-probe-3300.json | --api-pid 1234] [--interval 2] */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { cpus, freemem, loadavg, totalmem } from 'node:os';
+import { cpus, loadavg } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { sql } from 'kysely';
 import { createDatabase } from '../../api/src/database/connection.js';
 import { databaseUrl, guard, main } from './cli.js';
+import { hostMemory } from './host.js';
+import { DEFAULT_THRESHOLDS, hostStopReason } from './stop.js';
 import { LoadTargetRefused } from './target.js';
 
 const { values } = parseArgs({
@@ -33,8 +38,12 @@ const { values } = parseArgs({
     interval: { type: 'string', default: '2' },
     'api-probe-file': { type: 'string' },
     'api-pid': { type: 'string' },
+    'max-host-load-per-core': { type: 'string', default: String(DEFAULT_THRESHOLDS.maxHostLoadPerCore) },
+    'min-free-mem-percent': { type: 'string', default: String(DEFAULT_THRESHOLDS.minFreeMemPercent) },
+    'stop-on-stdin-close': { type: 'boolean', default: false },
     'clock-ticks': { type: 'string', default: '100' },
     'confirm-staging': { type: 'boolean', default: false },
+    'confirm-dedicated': { type: 'boolean', default: false },
   },
 });
 
@@ -64,6 +73,7 @@ export interface Sample {
   };
   dbError?: string;
   api?: { cpuPercent: number | null; rssMb: number; heapMb?: number; eventLoopP99Ms?: number; eventLoopMaxMs?: number };
+  /** freeMemMb is MemAvailable on Linux (os.freemem elsewhere): see host.ts. */
   host: { load1: number; cpus: number; freeMemMb: number; totalMemMb: number };
 }
 
@@ -84,14 +94,23 @@ await main(async () => {
   const ticks = Number(values['clock-ticks']);
   let previousDb: { at: number; commits: number; rollbacks: number; deadlocks: number } | null = null;
   let previousCpu: { at: number; us: number } | null = null;
+  const hostThresholds = {
+    maxHostLoadPerCore: Number(values['max-host-load-per-core']),
+    minFreeMemPercent: Number(values['min-free-mem-percent']),
+  };
+  let lastWarning = 0;
   let stopped = false;
   const stop = () => (stopped = true);
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
-  // The parent (run.ts) closes our stdin to stop us, the portable signal on Windows.
-  process.stdin.on('end', stop);
-  process.stdin.on('close', stop);
-  process.stdin.resume();
+  // Launched by run.ts (--stop-on-stdin-close): the parent closes our stdin to stop us, the
+  // portable signal on Windows. Launched by hand (nohup, a service), stdin is /dev/null or
+  // closed from the start and must not stop us: only SIGINT/SIGTERM do.
+  if (values['stop-on-stdin-close']) {
+    process.stdin.on('end', stop);
+    process.stdin.on('close', stop);
+    process.stdin.resume();
+  }
 
   const health = async (): Promise<Sample['health']> => {
     const started = performance.now();
@@ -237,16 +256,23 @@ await main(async () => {
   try {
     while (!stopped) {
       const started = Date.now();
+      const memory = hostMemory();
       const sample: Sample = {
         at: started,
         health: await health(),
         host: {
           load1: Math.round(loadavg()[0]! * 100) / 100,
           cpus: cpus().length,
-          freeMemMb: Math.round(freemem() / 1048576),
-          totalMemMb: Math.round(totalmem() / 1048576),
+          freeMemMb: memory.freeMb,
+          totalMemMb: memory.totalMb,
         },
       };
+      // Warns, never stops by itself: the bots may run on another machine (Ctrl+C there).
+      const hostReason = hostStopReason(sample.host, hostThresholds);
+      if (hostReason && started - lastWarning > 10_000) {
+        lastWarning = started;
+        console.warn(`ALERTE HOTE (${new Date(started).toISOString()}) : ${hostReason} : arreter les bots.`);
+      }
       try {
         sample.db = await database();
       } catch (error) {

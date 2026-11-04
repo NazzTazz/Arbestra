@@ -4,8 +4,11 @@ import {
   type SyncV2Batch,
   type SyncV2State,
 } from '@arbestra/contracts';
-import type { TimedVillageState } from './client';
-import { SyncV2Transport } from './sync-v2-transport';
+import { SyncV2Transport } from './sync-v2-transport.js';
+
+// Same shape as `TimedVillageState` (client.ts), declared here so that the compiled load-test
+// tool (Node ESM) does not drag the whole client module and its extensionless imports.
+type TimedVillageState = { state: NonNullable<ReturnType<typeof villageStateFromSyncV2>>; serverOffsetMs: number };
 
 // The whole village is synchronized through V2 (streams + presentation); the
 // shared scopes it reads besides its private stream. `offers` carries no offer,

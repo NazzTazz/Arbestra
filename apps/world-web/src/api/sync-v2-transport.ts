@@ -45,7 +45,7 @@ import {
   SyncV2SessionExpired,
   syncV2HttpError,
   terrainEditRefusals,
-} from './sync-v2-session';
+} from './sync-v2-session.js';
 export { SyncV2HttpError };
 
 let nextGeneration = 0;

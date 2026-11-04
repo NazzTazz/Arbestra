@@ -4,7 +4,9 @@ case "${1:-}" in
   # Each world is served on its own subdomain (ops/deploy/sites.py).
   alpha) domain=arbestra.world ;;
   staging) domain=arbestra.fr ;;
-  *) echo 'Expected alpha or staging' >&2; exit 2 ;;
+  # A dedicated load-test machine (docs/TEST-DE-CHARGE.md): the web bundles are built but never served.
+  load) domain=load.invalid ;;
+  *) echo 'Expected alpha, staging or load' >&2; exit 2 ;;
 esac
 export VITE_LOBBY_URL="https://play.$domain"
 export VITE_WORLD_CLIENT_URL="https://{world}.$domain/village"
@@ -35,3 +37,11 @@ done
 printf '%s\n' "${GITHUB_SHA:-$(git rev-parse HEAD)}" > "$bundle/revision"
 printf '%s\n' "$1" > "$bundle/environment"
 tar --hard-dereference -czf release.tar.gz -C "$bundle" api web revision environment
+# Optional load-test tool (docs/TEST-DE-CHARGE.md): compiled, no dependency of its own (it runs on the
+# production tree of api/). Never part of release.tar.gz and never installed into `current` by a deploy.
+pnpm --filter @arbestra/load-test build
+mkdir -p "$bundle/load-test"
+cp -a apps/load-test/dist "$bundle/load-test/dist"
+printf '{"type":"module"}\n' > "$bundle/load-test/package.json"
+cp "$bundle/revision" "$bundle/environment" "$bundle/load-test/"
+tar -czf load-test.tar.gz -C "$bundle/load-test" dist package.json revision environment

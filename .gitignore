@@ -13,6 +13,7 @@ test-results/
 *.tsbuildinfo
 __pycache__/
 release.tar.gz
+load-test.tar.gz
 .idea/
 
 # Copies de secours créées par Blender à chaque réenregistrement

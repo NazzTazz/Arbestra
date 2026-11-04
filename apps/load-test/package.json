@@ -11,6 +11,7 @@
     "sample": "tsx src/sampler.ts",
     "cleanup": "tsx src/cleanup.ts",
     "local-api": "tsx src/local-api.ts",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

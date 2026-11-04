@@ -9,16 +9,25 @@
  *
  * Several worlds: --world a,b (one credentials file each, bots interleaved). */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { parseArgs } from 'node:util';
 import { parseMix } from './actions.js';
 import { Bot, type BotObserver } from './bot.js';
-import { credentialsPath, guard, main, OUT_DIR, PACKAGE_ROOT, readCredentials, timestamp } from './cli.js';
+import {
+  credentialsPath,
+  guard,
+  main,
+  OUT_DIR,
+  PACKAGE_ROOT,
+  readCredentials,
+  runtimeScript,
+  timestamp,
+} from './cli.js';
 import { renderMarkdown, summarizeSamples, firstSaturation, type SamplerLine, type StageResult } from './report.js';
 import { distribution, summarizeWindow, type EffectEvent, type RequestEvent } from './stats.js';
-import { DEFAULT_THRESHOLDS, stopReason } from './stop.js';
+import { DEFAULT_THRESHOLDS, hostReasonFromSamples, stopReason } from './stop.js';
 import { LoadTargetRefused } from './target.js';
 
 const { values } = parseArgs({
@@ -36,6 +45,8 @@ const { values } = parseArgs({
     'max-p95-ms': { type: 'string', default: String(DEFAULT_THRESHOLDS.maxP95Ms) },
     'max-error-rate': { type: 'string', default: String(DEFAULT_THRESHOLDS.maxErrorRate) },
     'max-health-ms': { type: 'string', default: String(DEFAULT_THRESHOLDS.maxHealthMs) },
+    'max-host-load-per-core': { type: 'string', default: String(DEFAULT_THRESHOLDS.maxHostLoadPerCore) },
+    'min-free-mem-percent': { type: 'string', default: String(DEFAULT_THRESHOLDS.minFreeMemPercent) },
     'no-server-timing': { type: 'boolean', default: false },
     'no-sampler': { type: 'boolean', default: false },
     'database-url': { type: 'string' },
@@ -44,8 +55,25 @@ const { values } = parseArgs({
     'sample-seconds': { type: 'string', default: '2' },
     caveat: { type: 'string' },
     'confirm-staging': { type: 'boolean', default: false },
+    'confirm-dedicated': { type: 'boolean', default: false },
   },
 });
+
+/** The host stop reason from the last sample of our own sampler (last 8 KiB of its file). */
+function latestHostReason(path: string, now: number, thresholds: typeof DEFAULT_THRESHOLDS): string | null {
+  if (!existsSync(path)) return null;
+  const fd = openSync(path, 'r');
+  try {
+    const size = fstatSync(fd).size,
+      length = Math.min(size, 8192),
+      buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    // The first line of a partial window may be cut: only the last one is read.
+    return hostReasonFromSamples(buffer.toString('utf8'), now, thresholds);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 await main(async () => {
   const base = values['base-url'],
@@ -70,7 +98,14 @@ await main(async () => {
     maxP95Ms: Number(values['max-p95-ms']),
     maxErrorRate: Number(values['max-error-rate']),
     maxHealthMs: Number(values['max-health-ms']),
+    maxHostLoadPerCore: Number(values['max-host-load-per-core']),
+    minFreeMemPercent: Number(values['min-free-mem-percent']),
   };
+  for (const [name, value] of [
+    ['--max-host-load-per-core', thresholds.maxHostLoadPerCore],
+    ['--min-free-mem-percent', thresholds.minFreeMemPercent],
+  ] as const)
+    if (!Number.isFinite(value) || value < 0) throw new LoadTargetRefused(`${name} : un nombre positif (0 désactive).`);
   const mix = parseMix(values.mix);
   const files = (values.credentials ?? '').split(',').filter(Boolean);
   const pools = worlds.map((world, i) =>
@@ -115,9 +150,7 @@ await main(async () => {
   const samplesPath = resolve(runDir, 'samples.jsonl');
   if (!values['no-sampler'] && databaseUrl) {
     const args = [
-      '--import',
-      'tsx',
-      resolve(PACKAGE_ROOT, 'src', 'sampler.ts'),
+      ...runtimeScript('sampler'),
       '--target',
       checked.target,
       '--base-url',
@@ -130,7 +163,9 @@ await main(async () => {
       values['sample-seconds']!,
       ...(values['api-probe-file'] ? ['--api-probe-file', resolve(values['api-probe-file'])] : []),
       ...(values['api-pid'] ? ['--api-pid', values['api-pid']] : []),
+      '--stop-on-stdin-close',
       ...(values['confirm-staging'] ? ['--confirm-staging'] : []),
+      ...(values['confirm-dedicated'] ? ['--confirm-dedicated'] : []),
     ];
     sampler = spawn(process.execPath, args, {
       cwd: PACKAGE_ROOT,
@@ -203,12 +238,13 @@ await main(async () => {
           { p95Ms: distribution(recent)?.p95 ?? null, consecutiveFailures: healthFailures },
           thresholds,
         );
+        const hostReason = reason ?? latestHostReason(samplesPath, now, thresholds);
         const c = window.commands;
         console.info(
           `[${target} bots] ${Math.round((now - stageStart) / 1000)} s : ${c.count} commandes/30 s, p95 ${c.latencyMs?.p95 ?? '—'} ms, erreurs ${c.errorRate} %, refus ${c.refused}`,
         );
-        if (reason) {
-          stageStop = stop = reason;
+        if (hostReason) {
+          stageStop = stop = hostReason;
           break;
         }
       }

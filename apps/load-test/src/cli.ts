@@ -4,10 +4,26 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkTarget, LoadTargetRefused, STAGING_CONFIRM_FLAG, type CheckedTarget } from './target.js';
+import {
+  checkTarget,
+  DEDICATED_CONFIRM_FLAG,
+  LoadTargetRefused,
+  STAGING_CONFIRM_FLAG,
+  type CheckedTarget,
+} from './target.js';
 
 export const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const OUT_DIR = resolve(PACKAGE_ROOT, 'out');
+/** Results and credentials. LOAD_OUT_DIR relocates them (a deployed server: a
+ * folder of the service user, outside the release). */
+export const OUT_DIR = process.env.LOAD_OUT_DIR ? resolve(process.env.LOAD_OUT_DIR) : resolve(PACKAGE_ROOT, 'out');
+
+/** True when this script runs from the compiled build (dist/) rather than from tsx. */
+const COMPILED = fileURLToPath(import.meta.url).endsWith('.js');
+/** Node arguments to run a sibling script (a child process) in the same mode. */
+export const runtimeScript = (name: string): string[] =>
+  COMPILED
+    ? [resolve(dirname(fileURLToPath(import.meta.url)), name + '.js')]
+    : ['--import', 'tsx', resolve(PACKAGE_ROOT, 'src', name + '.ts')];
 
 export interface BotCredential {
   index: number;
@@ -62,6 +78,7 @@ export function guard(input: {
   return checkTarget({
     ...input,
     confirmStaging: process.argv.includes(STAGING_CONFIRM_FLAG),
+    confirmDedicated: process.argv.includes(DEDICATED_CONFIRM_FLAG),
     env: process.env,
   });
 }
