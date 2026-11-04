@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { extractionPoolCaps, hudWorkforceConfirmationIsValid } from './hud-workforce.js';
+import { extractionPoolCaps } from './hud-workforce.js';
 import { hudWorkforceConfirmationV2IsValid } from './sync-v2.js';
 it('balances a global workforce into real teams without exceeding ten people each', () => {
   expect(extractionPoolCaps(3, 25)).toEqual([9, 8, 8]);
@@ -31,5 +31,4 @@ it('confirms a HUD gesture on V2 with its result alone: no scoped state, no COUN
   expect(hudWorkforceConfirmationV2IsValid({ ...ack, hud: {} })).toBe(false);
   expect(hudWorkforceConfirmationV2IsValid({ ...ack, result: { affected: -1, carrots: 0 } })).toBe(false);
   expect(hudWorkforceConfirmationV2IsValid({ ...ack, result: undefined })).toBe(false);
-  expect(hudWorkforceConfirmationIsValid(ack)).toBe(false);
 });

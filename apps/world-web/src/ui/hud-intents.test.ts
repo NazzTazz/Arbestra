@@ -12,7 +12,6 @@ import {
   villageStateFromSyncV2,
   type HudWorkforceIntent,
   type HudWorkforceState,
-  type HudWorkforceConfirmation,
   type ResolvedVillagePresentation,
   type SyncV2Batch,
   type SyncV2Scope,
@@ -28,7 +27,6 @@ const state = (sites = 1, time = 0): HudWorkforceState => ({
   villageId: 'village',
   serverTime: new Date(time).toISOString(),
   carrots: 100,
-  minimumRevision: 0,
   population: { available: 30, resting: 0, working: 0, pendingRelease: { idle: 0, resting: 0 } },
   extractionPools: (['wood', 'stone'] as const).map((resource) => ({
     resource,
@@ -40,7 +38,7 @@ const state = (sites = 1, time = 0): HudWorkforceState => ({
   })),
   openWorksites: { wood: sites, stone: 1, other: 0 },
 });
-const reply = (commandId: string, sites: number): HudWorkforceConfirmation => ({
+const reply = (commandId: string, sites: number): HudSettlement => ({
   commandId,
   affected: 0,
   carrots: 0,
@@ -50,7 +48,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 it('retains the requested count through navigation/reload and an SSE snapshot arriving before the HTTP acknowledgement', async () => {
   let saved: SavedHudIntents = { confirmed: state(), items: [] };
-  const releases: Array<(r: HudWorkforceConfirmation) => void> = [];
+  const releases: Array<(r: HudSettlement) => void> = [];
   const q = new HudIntentQueue(state(), [], {
     send: () => new Promise((r) => releases.push(r)),
     save: (s) => {
@@ -353,7 +351,6 @@ it('orders V2 gestures by the session: a lost response replayed after its effect
     session = receive(session, effects(8, 9, 4, 7));
     q.synchronize(basisOf(session, 9));
     expect(q.confirmed.population.resting).toBe(7);
-    expect(q.confirmed.minimumRevision).toBe(0);
   } finally {
     q.stop();
     vi.useRealTimers();

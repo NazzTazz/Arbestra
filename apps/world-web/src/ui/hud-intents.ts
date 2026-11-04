@@ -2,7 +2,6 @@ import {
   extractionPoolSettings,
   type ExtractionPool,
   type ExtractionPoolCommand,
-  type HudWorkforceConfirmation,
   type HudWorkforceIntent,
   type HudWorkforceState,
   type VillageState,
@@ -14,7 +13,12 @@ import {
  * applied, ordered by the session's own instants. Absent when that state cannot
  * be projected yet: the previous basis stays until a newer village state replaces it.
  */
-export type HudSettlement = Omit<HudWorkforceConfirmation, 'hud'> & { hud?: HudWorkforceState };
+export interface HudSettlement {
+  commandId: string;
+  affected: number;
+  carrots: number;
+  hud?: HudWorkforceState;
+}
 
 export interface SavedHudIntents {
   confirmed: HudWorkforceState;
@@ -31,8 +35,6 @@ export function hudFromVillage(state: VillageState): HudWorkforceState {
     worldId: state.world.id,
     villageId: state.village.id,
     serverTime: state.serverTime,
-    // No COUNT revision any more; the contract field goes in lot I.4.
-    minimumRevision: 0,
     population: {
       available: population.available,
       resting: population.resting,

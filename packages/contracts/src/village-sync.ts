@@ -28,40 +28,6 @@ export const VillageFrameSchema = Type.Object({
   changes: SynchronizationChangesSchema,
 });
 export type VillageFrame = Static<typeof VillageFrameSchema>;
-export const VillageSyncBaseSchema = Type.Object({
-  revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-  serverTime: Type.String({ format: 'date-time' }),
-});
-export type VillageSyncBase = Static<typeof VillageSyncBaseSchema>;
-const commandMetadata = {
-  commandId: Type.Optional(Type.String({ format: 'uuid' })),
-  commandTime: Type.String({ format: 'date-time' }),
-  serverTime: Type.String({ format: 'date-time' }),
-};
-export const VillageCommandResponseSchema = Type.Union([
-  Type.Object({ ...commandMetadata, kind: Type.Literal('frame'), frame: VillageFrameSchema }),
-  Type.Object({ ...commandMetadata, kind: Type.Literal('snapshot'), state: VillageStateSchema }),
-]);
-export type VillageCommandResponse = Static<typeof VillageCommandResponseSchema>;
-export const villageCommandResponseIsValid = (value: unknown): value is VillageCommandResponse =>
-  Value.Check(VillageCommandResponseSchema, value);
-
-/** Confirmed construction presentation; never a new canonical village revision. */
-export const ConstructionConfirmationSchema = Type.Object({
-  kind: Type.Literal('construction'),
-  commandId: Type.String({ format: 'uuid' }),
-  worldId: Type.String({ format: 'uuid' }),
-  villageId: Type.String({ format: 'uuid' }),
-  commandTime: Type.String({ format: 'date-time' }),
-  serverTime: Type.String({ format: 'date-time' }),
-  minimumRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-  cellsMode: Type.Optional(Type.Literal('patch')),
-  cells: VillageStateSchema.properties.cells,
-  resources: VillageStateSchema.properties.village.properties.resources,
-});
-export type ConstructionConfirmation = Static<typeof ConstructionConfirmationSchema>;
-export const constructionConfirmationIsValid = (value: unknown): value is ConstructionConfirmation =>
-  Value.Check(ConstructionConfirmationSchema, value);
 type Change = SynchronizationChange;
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 /** JSON-data equality, stopping at the first difference instead of serializing both sides. */

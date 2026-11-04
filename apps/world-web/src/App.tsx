@@ -1006,12 +1006,7 @@ export function App({ starter }: { starter?: StarterController } = {}) {
       setConstructionIntentState('idle');
       pushNotification(command.success);
     } catch (reason) {
-      const message =
-        reason instanceof Error && reason.name === 'TimeoutError'
-          ? 'Réponse trop longue. Vérifiez la même commande.'
-          : reason instanceof Error
-            ? reason.message
-            : 'Commande de construction impossible.';
+      const message = reason instanceof Error ? reason.message : 'Commande de construction impossible.';
       setError(message);
       pushNotification(message, 'warning');
       if ((reason instanceof ApiError || reason instanceof SyncV2HttpError) && reason.status < 500) {

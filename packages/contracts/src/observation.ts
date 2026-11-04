@@ -95,7 +95,6 @@ export const ObservationActionSchema = Type.Object(
     code: Type.Optional(Type.String({ maxLength: 64 })),
     activityId: Type.Optional(id),
     activityStatus: Type.Optional(Type.String({ maxLength: 32 })),
-    minimumRevision: Type.Optional(sequence),
     accepted: Type.Optional(Type.Array(key, { maxItems: 228 })),
     refused: Type.Optional(
       Type.Array(Type.Object({ key, reason: Type.String({ maxLength: 256 }) }, { additionalProperties: false }), {

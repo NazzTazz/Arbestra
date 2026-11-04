@@ -18,7 +18,6 @@ import {
   type ExploitationRequest,
   type ExtractionResponse,
   type HarvestReceipt,
-  type HudWorkforceConfirmation,
   type HudWorkforceIntent,
   type HudWorkforceState,
   type ProcessingCommand,
@@ -760,8 +759,6 @@ async function hudState(tx: Transaction<Database>, ctx: VillageEconomy): Promise
     worldId: ctx.worldId,
     villageId: ctx.villageId,
     serverTime: ctx.through.toISOString(),
-    // The contract still carries the V1 fence (a world count); V2 has none (removed in lot I.4).
-    minimumRevision: 0,
     population,
     carrots: resources.find((r) => r.code === 'carrot')?.amount ?? 0,
     extractionPools,
@@ -776,7 +773,7 @@ export async function commandHudWorkforce(
   slug: string,
   villageId: string,
   request: HudWorkforceIntent,
-): Promise<HudWorkforceConfirmation> {
+): Promise<{ commandId: string; affected: number; carrots: number; hud: HudWorkforceState }> {
   const owner = await ownedVillage(db, accountId, slug, villageId);
   const known = await findReceipt(db, owner.worldId, villageId, request.command.commandId);
   if (known) {

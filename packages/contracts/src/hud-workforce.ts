@@ -57,8 +57,6 @@ export const HudWorkforceStateSchema = Type.Object({
   worldId: Type.String({ format: 'uuid' }),
   villageId: Type.String({ format: 'uuid' }),
   serverTime: Type.String({ format: 'date-time' }),
-  // Fence for accepting a later full snapshot; this does not advance the client's world revision.
-  minimumRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
   population: Type.Object({
     available: Count,
     working: Count,
@@ -84,19 +82,6 @@ export const HudWorkforceResultSchema = Type.Object(
   { additionalProperties: false },
 );
 export type HudWorkforceResult = Static<typeof HudWorkforceResultSchema>;
-/** Historical answer (no V2 protocol header): the result with a scoped state
- * fenced by the world's COUNT revision. The V2 answer is
- * `HudWorkforceConfirmationV2Schema` (sync-v2.ts): the result and the private effects. */
-export const HudWorkforceConfirmationSchema = Type.Object({
-  commandId: CommandId,
-  affected: Count,
-  carrots: Count,
-  hud: HudWorkforceStateSchema,
-});
-export type HudWorkforceConfirmation = Static<typeof HudWorkforceConfirmationSchema>;
-export const hudWorkforceConfirmationIsValid = (value: unknown): value is HudWorkforceConfirmation =>
-  Value.Check(HudWorkforceConfirmationSchema, value);
-
 /** The requested settings only; actual missions and population are never projected optimistically. */
 export function extractionPoolSettings(
   pool: Pick<ExtractionPool, 'siteCount' | 'workerCap'>,

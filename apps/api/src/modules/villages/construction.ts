@@ -14,7 +14,7 @@ import {
   pathPassageIntersectsBox,
   SPAWN_PEDESTRIAN_HALF_WIDTH,
   type BuildingType,
-  type ConstructionConfirmation,
+  type VillageState,
   type GeneratedLandscape,
   type InfrastructurePlan,
   type TravelCell,
@@ -462,6 +462,19 @@ function validatePlan(plan: InfrastructurePlan, wanted: Set<string>, v: Village)
     fail('INFRASTRUCTURE_OCCUPIED', 'Déplacez la voie ou l’équipement avant de construire.');
 }
 
+/** What a placement confirms: the command's identity and the cells and stocks it touched. */
+export interface PlacementConfirmation {
+  kind: 'construction';
+  commandId: string;
+  worldId: string;
+  villageId: string;
+  commandTime: string;
+  serverTime: string;
+  cellsMode?: 'patch';
+  cells: VillageState['cells'];
+  resources: VillageState['village']['resources'];
+}
+
 /** A placement only debits, reserves and schedules its own construction. */
 /** `afterWrites` runs in the transaction after a new placement (never on a
  * replay): the V2 path publishes its journal and reads its effects there. */
@@ -473,7 +486,7 @@ export async function placeBuilding(
   input: BuildingPlacement,
   durationOverride: number | null,
   afterWrites?: (tx: Transaction<Database>, economy: VillageEconomy) => Promise<void>,
-): Promise<ConstructionConfirmation> {
+): Promise<PlacementConfirmation> {
   const p = {
     ...input,
     commandId: input.commandId ?? randomUUID(),
@@ -664,7 +677,5 @@ export async function placeBuilding(
       })),
     };
   });
-  // The contract still names the V1 fence (a world count); V2 orders by its journal, so it is 0.
-  // It leaves with the contract (lot I.4).
-  return { ...confirmed, minimumRevision: 0 };
+  return confirmed;
 }
