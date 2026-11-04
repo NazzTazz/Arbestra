@@ -8,6 +8,7 @@ export const commandScopeInventory = {
     'buildingHiddenSupplies',
     'buildingResourceBuffers',
     'buildings',
+    'demolitionReceipts',
     'depositExtractions',
     'expeditionSubmissions',
     'exploitationOrders',
@@ -17,6 +18,7 @@ export const commandScopeInventory = {
     'extractionWorksites',
     'gardenHarvests',
     'gardenPlots',
+    'harvestIntentCancellations',
     'harvestIntents',
     'harvestSubmissions',
     'hudWorkforceReceipts',
@@ -28,9 +30,14 @@ export const commandScopeInventory = {
     'processingCommandReceipts',
     'processingLots',
     'processingOrders',
+    'roadAnchorReceipts',
+    'roadAnchors',
+    'roadCellReceipts',
+    'roadCells',
     'scienceActivities',
     'scienceContributions',
     'starterPoseReceipts',
+    'terrainEditReceipts',
     'tradeDeliveries',
     'tradeJourneys',
     'tradeOffers',
@@ -55,6 +62,7 @@ export const commandScopeInventory = {
     'worldSpawnTerraces',
     'worldTerrainVertices',
     'villageSpawnTerritories',
+    'woodlandTrees',
   ],
   manifest: [
     'worldAtlasPresentations',
@@ -74,6 +82,13 @@ export const commandScopeInventory = {
   ],
   authorization: ['accounts', 'sessions', 'worldMemberships'],
   scheduler: ['scheduledTasks', 'villageEconomyCatchups'],
+  // Derived and rebuildable: the travel-network cache is filled from a read
+  // path (V2 bootstrap/presentation), keyed by a fingerprint of its inputs. It
+  // is never a source of truth and carries no command.
+  cache: ['villageTravelNetworks'],
+  // Written only by the legacy road conversion that migration 076 runs (and
+  // reverts); no route or command reaches it.
+  migration: ['roadConversionBackups'],
 };
 
 // Secondary projections are explicit; these are not independent copies of a
