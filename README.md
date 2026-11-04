@@ -78,3 +78,10 @@ Pour un checkout existant, appliquer les migrations additives avec `corepack pnp
 `corepack pnpm dev` démarre aussi le worker de génération. En production, démarrer séparément `corepack pnpm --filter @arbestra/api generator:start` après build, avec la même connexion PostgreSQL que l’API. Un verrou PostgreSQL autorise un seul calcul à la fois, exécuté dans un processus enfant borné.
 
 Les candidats v2 peuvent être conservés puis ouverts explicitement. Les candidats v3 permettent d’explorer les plateaux, les marches et le climat ; leur ouverture reste bloquée jusqu’au spawn et au streamer compatibles (D/E). La tirette des canaux est active depuis C. Voir [la recette et les limites A/B](docs/old/RECETTE-WORLD-GENERATOR-AB-2026-10-07.md).
+
+## Licence
+
+- **Code** : GNU Affero General Public License v3.0 ou ultérieure (`AGPL-3.0-or-later`). Le texte intégral de la licence est à ajouter dans `LICENSE` (voir [l’inventaire](docs/INVENTAIRE-LICENCES-2026-11-04.md)).
+- **Contenus non logiciels** (graphismes, textures, modèles 3D, sons, lore, textes de l’Oracle et du jeu) : Creative Commons BY-NC-SA 4.0, sauf exceptions tierces listées dans [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
+- Le nom et le logo « Arbestra » ne sont concédés par aucune de ces licences.
+- Statut : brouillon en attente de validation du PO.

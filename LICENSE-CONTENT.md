@@ -1,0 +1,45 @@
+# Licence des contenus / Content licence
+
+> Brouillon du 4 novembre 2026, à valider par le PO (Tristan) avant publication. Voir [l’inventaire](docs/INVENTAIRE-LICENCES-2026-11-04.md).
+
+## Français
+
+Le **code** d'Arbestra est sous licence AGPL-3.0-or-later (fichier `LICENSE`). Les **contenus non logiciels** sont placés sous licence **Creative Commons Attribution - Pas d'Utilisation Commerciale - Partage dans les Mêmes Conditions 4.0 International (CC BY-NC-SA 4.0)** : <https://creativecommons.org/licenses/by-nc-sa/4.0/>.
+
+Contenus concernés :
+
+- graphismes et textures : `apps/world-web/public/` (tuiles, HUD, vignettes, décalque, image de chargement, carte d'atlas, bâtiments précalculés), `art-sol/`, `docs/references/` ;
+- modèles 3D et leurs sources : `blender-elements/` (fichiers `.blend`, `.glb`, aperçus `.png` et `.mp4`), sauf exception ci-dessous ;
+- lore et textes du jeu : `docs-lore/`, textes de l'Oracle et notes de version (`packages/contracts/src/release-notes.ts`, `docs/CHANGELOG-ALPHA.md`), textes joueurs du dépôt ;
+- sons : aucun son n'est suivi par git à ce jour.
+
+Les sources Python/JavaScript qui génèrent ces contenus (par exemple `blender-elements/**/sources/*.py`, `scripts/`) sont du code, sous AGPL-3.0-or-later.
+
+**Le nom et le logo « Arbestra » ne sont pas concédés** par ces licences. Aucun droit de marque n'est accordé.
+
+Exceptions et réserves repérées :
+
+- `blender-elements/chevaux/source/quaternius-white-horse.glb` et les modèles dérivés (`blender-elements/chevaux/`, `apps/world-web/bench/assets/`, cheval du rendu) : modèle « White Horse » de **Quaternius**, licence **CC0**, avec un crédit volontaire. Les dérivés ne sont pas soumis à NC-SA pour la part issue de Quaternius. À confirmer par le PO.
+- `apps/world-web/public/decals/perlin-tag.png` et `apps/world-web/public/arbestra-loading.png` : fichiers fournis par des tiers selon l'historique du dépôt (« image de JMP », « PNG Perlin »). Auteur et droits **à confirmer** avant toute publication.
+- Dépendances logicielles : elles restent sous leurs licences propres (MIT, Apache-2.0, ISC, BSD, etc.).
+
+## English
+
+The **source code** of Arbestra is licensed under AGPL-3.0-or-later (see `LICENSE`). **Non-software content** is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**: <https://creativecommons.org/licenses/by-nc-sa/4.0/>.
+
+Covered content:
+
+- graphics and textures: `apps/world-web/public/` (tiles, HUD, thumbnails, decal, loading image, atlas map, baked buildings), `art-sol/`, `docs/references/`;
+- 3D models and their sources: `blender-elements/` (`.blend`, `.glb`, `.png` and `.mp4` previews), except as noted below;
+- lore and game text: `docs-lore/`, Oracle texts and release notes (`packages/contracts/src/release-notes.ts`, `docs/CHANGELOG-ALPHA.md`), player-facing text in the repository;
+- sounds: no sound file is tracked by git at this time.
+
+The Python/JavaScript sources that generate this content (for example `blender-elements/**/sources/*.py`, `scripts/`) are code, under AGPL-3.0-or-later.
+
+**The name and logo "Arbestra" are not licensed** by either licence. No trademark rights are granted.
+
+Third-party exceptions and reservations identified:
+
+- `blender-elements/chevaux/source/quaternius-white-horse.glb` and derived models (`blender-elements/chevaux/`, `apps/world-web/bench/assets/`, the in-game horse): the "White Horse" model by **Quaternius**, licensed **CC0**, credited voluntarily. The Quaternius-derived part is not subject to NC-SA. To be confirmed by the owner.
+- `apps/world-web/public/decals/perlin-tag.png` and `apps/world-web/public/arbestra-loading.png`: supplied by third parties according to the repository history ("JMP's image", "Perlin PNG"). Authorship and rights **to be confirmed** before publication.
+- Software dependencies keep their own licences (MIT, Apache-2.0, ISC, BSD, etc.).
