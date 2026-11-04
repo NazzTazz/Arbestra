@@ -1,4 +1,4 @@
-import { sql, type Kysely, type Transaction } from 'kysely';
+import { type Kysely, type Transaction } from 'kysely';
 import { lockWholeWorld } from './spatial-locks.js';
 import {
   preserveTerrainCentres,
