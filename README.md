@@ -1,6 +1,22 @@
 # Arbestra
 
-Jeu de stratégie web persistant : trois frontends React (lobby, monde et NOC), une scène Babylon.js, un monolithe Fastify et PostgreSQL comme source de vérité.
+![Un village d'Arbestra au lever du jour : maisons de bois et de pierre, un pont, des cascades et un château au loin](apps/world-web/public/arbestra-loading.png)
+
+*Image d'accueil du jeu (contenu sous licence [CC BY-NC-SA 4.0](LICENSE-CONTENT.md)). Ce n'est pas une capture du jeu en cours d'exécution.*
+
+**Arbestra** est un jeu de stratégie en ligne, persistant, qui se joue dans le navigateur. Chaque joueur fonde un village sur un monde partagé et le fait grandir : il construit des bâtiments, des routes et des jardins, récolte du bois et de la pierre, loge et fait travailler ses habitants, étend son territoire, remodèle le terrain, et commerce avec les autres joueurs. Le monde continue de vivre pendant que tu n'es pas là : les chantiers avancent, les habitants travaillent, les récoltes mûrissent.
+
+L'ambition est un jeu qu'on peut jouer cinq minutes pour améliorer sa scierie, ou des heures pour bâtir un royaume, sans fausse urgence. Les intentions sont détaillées dans la [direction produit](docs/DIRECTION-PRODUIT.md) ; ce sont des intentions, pas une liste de fonctionnalités déjà livrées. Pour ce qui se joue aujourd'hui, voir le [changelog de l'alpha](docs/CHANGELOG-ALPHA.md) ; pour la suite, la [feuille de route](docs/ROADMAP.md).
+
+Techniquement : trois interfaces React (lobby, monde, console d'exploitation), une scène 3D Babylon.js, un monolithe Fastify et PostgreSQL comme source de vérité. Le projet est aussi pensé comme un terrain d'apprentissage : le [parcours de lecture](docs/APPRENDRE.md) explique, avec des liens vers le vrai code, comment on construit un jeu comme celui-ci.
+
+## Comment jouer
+
+L'**alpha est ouverte au public**. Crée ton compte sur le lobby : <https://play.arbestra.world> (bouton « S'inscrire »), choisis un monde ouvert, nomme ton personnage et ton village, et tu arrives dans ton village. Le monde de l'alpha est hébergé sur <https://alpha.arbestra.world>. C'est une version de test : le jeu évolue vite et les nouveautés sont racontées dans le [changelog de l'alpha](docs/CHANGELOG-ALPHA.md). Si tu préfères lancer le jeu chez toi, voir « Développement local » ci-dessous.
+
+## Contribuer
+
+De l'aide humaine est la bienvenue, y compris celle des débutants. Tout est dans le [guide de contribution](CONTRIBUTING.md) : installation en local, où regarder, comment proposer un changement (une issue d'abord pour tout ce qui touche au gameplay, car Tristan tranche), conventions. Pour apprendre le code, commence par le [parcours de lecture](docs/APPRENDRE.md) et les [bons premiers tickets](docs/BONS-PREMIERS-TICKETS.md).
 
 ## Développement local
 
@@ -13,20 +29,14 @@ corepack pnpm db:setup
 corepack pnpm dev
 ```
 
+Équivalent Linux / macOS pour les deux premières lignes : `cp .env.example .env.dev` puis `ln -s .env.dev .env`. Un PostgreSQL local est fourni par `corepack pnpm db:up` (Docker, voir `compose.yaml`), à lancer avant `db:setup`. Le pas-à-pas complet est dans le [guide de contribution](CONTRIBUTING.md#installer-le-projet-en-local).
+
 - Lobby : <http://localhost:5173>
 - Monde : <http://localhost:5174/village> (monde par défaut local) ; pour le monde historique : <http://localhost:5174/village?world=aube>
 - Console NOC : <http://localhost:5175> (accès privilégié explicite, voir ci-dessous).
 - Compte de développement : `player@arbestra.local` / `arbestra`
 
-Sur une base déjà initialisée, lancer seulement `corepack pnpm dev` : `db:setup` migre puis réensemence. La copie RC1 du PC de Tristan est accessible sur <http://localhost:5174/village?world=rc1-dev> ; `apps/world-web/.env.local` y définit `VITE_DEFAULT_WORLD_SLUG=rc1-dev`. Cette configuration et les données locales ne sont pas versionnées. La base de tests reste séparée.
-
-### Tester sur le réseau local
-
-`corepack pnpm dev` écoute aussi en IPv4 sur le réseau local pour les deux interfaces web (5173/5174). Depuis un appareil connecté au même réseau, ouvrir `http://<IPv4-du-PC>:5173`, puis choisir le monde. Les liens entre lobby et monde conservent automatiquement cet hôte ; les variables `VITE_WORLD_CLIENT_URL` et `VITE_LOBBY_URL`, si définies, restent prioritaires. L'API reste sur `127.0.0.1:3000`, accessible aux clients par les proxys web. Le mode e2e reste limité à localhost.
-
-Sur le PC de Tristan, adresse Wi-Fi constatée le 7 octobre 2026 : **http://192.168.1.4:5173** (monde : **http://192.168.1.4:5174/village**). Cette adresse peut changer avec le DHCP. Garder le serveur lancé et le PC éveillé. Utiliser le réseau principal, sans isolation des clients Wi-Fi. Les réglages DEV/LOD sont locaux à chaque navigateur et à chaque origine : ceux de localhost ne sont pas repris automatiquement sur l'adresse IP.
-
-Le pare-feu doit autoriser Node.js en entrée pour ces ports depuis le réseau local ; aucune redirection de port sur la box n'est nécessaire. Une règle Node.js existante autorise déjà le PC de Tristan. Ce serveur HTTP de développement est destiné au réseau de confiance, pas à une exposition Internet. Les UUID de commandes utilisent `getRandomValues` lorsque le navigateur réserve `randomUUID` aux contextes HTTPS/localhost.
+Sur une base déjà initialisée, lancer seulement `corepack pnpm dev` : `db:setup` migre puis réensemence. La base de tests reste séparée. Pour tester sur un téléphone ou une autre machine du réseau, et pour les réglages propres au poste de Tristan (copie RC1 locale, `.env.local`), voir le [guide développeur](docs/GUIDE-DEVELOPPEUR.md#9-poste-de-développement-réseau-local-et-poste-de-tristan).
 
 ## Inscription et premier village
 
@@ -81,7 +91,7 @@ Les candidats v2 peuvent être conservés puis ouverts explicitement. Les candid
 
 ## Licence
 
-- **Code** : GNU Affero General Public License v3.0 ou ultérieure (`AGPL-3.0-or-later`). Le texte intégral de la licence est à ajouter dans `LICENSE` (voir [l’inventaire](docs/INVENTAIRE-LICENCES-2026-11-04.md)).
-- **Contenus non logiciels** (graphismes, textures, modèles 3D, sons, lore, textes de l’Oracle et du jeu) : Creative Commons BY-NC-SA 4.0, sauf exceptions tierces listées dans [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
+- **Code** : GNU Affero General Public License v3.0 ou ultérieure (`AGPL-3.0-or-later`), texte intégral dans [LICENSE](LICENSE).
+- **Contenus non logiciels** (graphismes, textures, modèles 3D, sons, lore, textes de l'Oracle et du jeu) : Creative Commons BY-NC-SA 4.0, sauf exceptions tierces listées dans [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
 - Le nom et le logo « Arbestra » ne sont concédés par aucune de ces licences.
-- Statut : brouillon en attente de validation du PO.
+- Les contributions sont acceptées sous la licence correspondante : voir [CONTRIBUTING.md](CONTRIBUTING.md#licences-et-contributions). Détails et points en suspens : [inventaire des licences](docs/INVENTAIRE-LICENCES-2026-11-04.md).

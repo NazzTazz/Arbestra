@@ -2,6 +2,8 @@
 
 Présentation courte du code : qui gère quoi, où trouver une fonction, comment une commande circule. Les règles métier détaillées vivent dans [docs/architecture](architecture/README.md) ; les règles de travail dans [AGENTS.md](../AGENTS.md) ; l'état courant dans [SESSION-HANDOFF.md](../SESSION-HANDOFF.md).
 
+Nouveau venu : le [guide de contribution](../CONTRIBUTING.md) explique l'installation et la façon de proposer un changement, et le [parcours de lecture](APPRENDRE.md) raconte l'architecture pas à pas.
+
 État au 24 octobre 2026. Les numéros de ligne bougent vite : chercher les noms de fonctions.
 
 ## 1. Vue d'ensemble
@@ -166,3 +168,27 @@ Pour faire mesurer le jeu par un tiers sur sa machine, sans extension ni script 
 - Les migrations déployées ne se modifient pas ; une correction est une nouvelle migration.
 - Un test qui partage une transaction de fixture ne peut pas publier puis écrire : la publication V2 est terminale.
 - Le rôle applicatif de production n'a pas accès à `kysely_migration` : tester une disponibilité par le catalogue (`to_regclass`), pas par la table des migrations.
+
+## 9. Poste de développement : réseau local et poste de Tristan
+
+Cette section regroupe ce qui sortait du README parce que cela dépend de la machine. Les deux premières sous-sections servent à tout le monde ; la troisième décrit le poste de Tristan et ne s'applique pas à ta machine.
+
+### Tester sur le réseau local (téléphone, autre PC)
+
+`corepack pnpm dev` écoute aussi en IPv4 sur le réseau local pour les deux interfaces web (5173/5174). Depuis un appareil connecté au même réseau, ouvrir `http://<IPv4-du-PC>:5173`, puis choisir le monde. Les liens entre lobby et monde conservent automatiquement cet hôte ; les variables `VITE_WORLD_CLIENT_URL` et `VITE_LOBBY_URL`, si définies, restent prioritaires. L'API reste sur `127.0.0.1:3000`, accessible aux clients par les proxys web. Le mode e2e reste limité à localhost.
+
+L'adresse du PC peut changer avec le DHCP. Garder le serveur lancé et le PC éveillé. Utiliser le réseau principal, sans isolation des clients Wi-Fi. Les réglages DEV/LOD sont locaux à chaque navigateur et à chaque origine : ceux de `localhost` ne sont pas repris automatiquement sur l'adresse IP.
+
+Le pare-feu doit autoriser Node.js en entrée pour ces ports depuis le réseau local ; aucune redirection de port sur la box n'est nécessaire. Ce serveur HTTP de développement est destiné au réseau de confiance, pas à une exposition Internet. Les UUID de commandes utilisent `getRandomValues` lorsque le navigateur réserve `randomUUID` aux contextes HTTPS/localhost.
+
+### Monde de développement par défaut
+
+Sans paramètre, `http://localhost:5174/village` ouvre le monde par défaut local ; `http://localhost:5174/village?world=aube` ouvre le monde historique. Pour viser un autre monde par défaut sur ta machine, `apps/world-web/.env.local` peut définir `VITE_DEFAULT_WORLD_SLUG`. Ce fichier n'est pas versionné.
+
+### Poste de Tristan
+
+Ces points décrivent la machine de Tristan (Windows) ; ils sont consignés ici pour ne pas les perdre, pas pour être reproduits.
+
+- **Copie RC1 locale.** Une copie du monde RC1 vit dans la base de développement de Tristan, sous le slug `rc1-dev` : <http://localhost:5174/village?world=rc1-dev>. `apps/world-web/.env.local` y définit `VITE_DEFAULT_WORLD_SLUG=rc1-dev`. Cette configuration et ces données locales ne sont pas versionnées. Les sauvegardes avant conversion vont dans `../arbestra-backups/`, hors du dépôt.
+- **Test sur téléphone.** Le PC est joignable en Wi-Fi à son adresse IPv4 locale (lobby sur le port 5173, monde sur le 5174, chemin `/village`). Une règle de pare-feu Node.js existe déjà sur ce PC pour autoriser les ports du réseau local. L'adresse change avec le DHCP : la relever avec `ipconfig` au moment du test, elle n'est pas consignée ici.
+- **La base de tests** reste séparée (`arbestra_test`) de la base de développement.

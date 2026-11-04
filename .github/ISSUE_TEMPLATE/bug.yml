@@ -1,0 +1,53 @@
+name: Bug
+description: Quelque chose ne marche pas comme prévu
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de prendre le temps de signaler un bug ! Quelques lignes suffisent. Le français ou l'anglais sont acceptés.
+        Pour une faille de sécurité, ne détaille pas la méthode d'exploitation ici (voir SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: Que s'est-il passé ?
+      description: Ce que tu as vu, et ce que tu attendais à la place.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Comment le reproduire ?
+      description: Les étapes, dans l'ordre. Un monde, un bâtiment ou une action précis aident beaucoup.
+      placeholder: |
+        1. Je me connecte
+        2. Je pose...
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Où l'as-tu vu ?
+      options:
+        - Alpha publique
+        - Mon installation locale
+        - Autre
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Appareil et navigateur
+      description: Par exemple « Pixel 8, Chrome 130 » ou « PC portable, Firefox 132 ».
+  - type: textarea
+    id: extra
+    attributes:
+      label: Captures, messages d'erreur
+      description: Une capture d'écran ou le message de la console du navigateur (touche F12) aide beaucoup.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Veux-tu essayer de le corriger ?
+      options:
+        - label: Oui, j'aimerais m'en occuper (je lirai CONTRIBUTING.md)

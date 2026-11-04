@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Lire le guide de contribution
+    url: https://github.com/NazzTazz/Arbestra/blob/main/CONTRIBUTING.md
+    about: Installation, conventions et façon de proposer un changement.
+  - name: Parcours de lecture pour débutants
+    url: https://github.com/NazzTazz/Arbestra/blob/main/docs/APPRENDRE.md
+    about: Comment le jeu est construit, avec des liens vers le code.

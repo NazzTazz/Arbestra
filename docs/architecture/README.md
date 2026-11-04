@@ -1,6 +1,6 @@
 # Architecture autoritaire
 
-Nouveau venu dans le code : commencer par le [guide développeur](../GUIDE-DEVELOPPEUR.md) (carte des modules, cycle d'une commande, « où trouver… »).
+Nouveau venu dans le code : commencer par le [guide développeur](../GUIDE-DEVELOPPEUR.md) (carte des modules, cycle d'une commande, « où trouver… »). Pour une lecture guidée avec des liens vers le code, voir le [parcours de lecture pour débutants](../APPRENDRE.md).
 
 **Mise à jour du 4 novembre 2026.** Les paragraphes datés ci-dessous (octobre) décrivent l'état à leur date. État courant : versions alpha/staging dans la [reprise](../../SESSION-HANDOFF.md) et le [changelog](../CHANGELOG-ALPHA.md). Depuis le 31 octobre, la voirie se pose à la case ([cases, ancrages et places](../SPEC-INFRASTRUCTURE-CASES-ET-PLACES.md)), la terraformation est instantanée ([spec](../SPEC-TERRAFORMATION-INSTANTANEE.md), [outil](../SPEC-TERRAFORMATION-OUTIL.md)) et le chantier de nivellement est retiré ; le protocole V1 est retiré. Les rapports, contre-recettes, incidents, anciens handoffs et specs remplacées sont archivés dans [old/](../old/README.md).
 

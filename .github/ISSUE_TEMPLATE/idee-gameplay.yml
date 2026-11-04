@@ -1,0 +1,32 @@
+name: Idée de gameplay
+description: Proposer une règle, une mécanique ou un changement de ce que vit le joueur
+labels: ['gameplay', 'à trancher par Tristan']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Rappel : c'est Tristan, le product owner, qui tranche le gameplay.** Une idée ici est une proposition à discuter, pas une promesse ; elle peut être acceptée, adaptée, repoussée ou gardée pour plus tard. Merci de ne pas ouvrir de pull request qui change une règle de jeu avant son accord.
+        Avant d'écrire, un coup d'œil à la [direction produit](https://github.com/NazzTazz/Arbestra/blob/main/docs/DIRECTION-PRODUIT.md) et à la [feuille de route](https://github.com/NazzTazz/Arbestra/blob/main/docs/ROADMAP.md) évite les doublons.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Quel problème ou quelle envie du joueur ?
+      description: Pars de ce que vit le joueur, pas de la solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Ton idée
+      description: Ce que le joueur ferait et verrait. Des exemples chiffrés sont les bienvenus (en précisant que ce sont des exemples).
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Autres pistes envisagées
+  - type: textarea
+    id: risks
+    attributes:
+      label: Ce que cela pourrait gêner
+      description: Équilibre, joueurs qui jouent peu ou beaucoup, triche, pression pour se connecter sans arrêt...
