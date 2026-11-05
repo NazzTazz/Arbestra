@@ -4,7 +4,7 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import { pendingHarvestReceipt, type HarvestIntent, type HarvestReceipt } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
-import { HttpError } from '../../errors.js';
+import { HttpError, isLockTimeout } from '../../errors.js';
 import { ownedVillage } from './service.js';
 import { acceptHarvestIntent } from './harvest-intents.js';
 import { woodDesignations } from '../deposits/woodland.js';
@@ -89,7 +89,13 @@ export async function processHarvestSubmission(tx: Transaction<Database>, task: 
     // A server failure is retried with backoff, but not forever: a route that
     // never finishes held the navigation lane and the scheduler every five
     // minutes (alpha, 24 October). After ~4 min of tries the player is told.
-    if (!(error instanceof HttpError) || (error.statusCode >= 500 && task.attempts < MAX_ATTEMPTS)) throw error;
+    // A busy village is never a refusal: the gesture waits for its turn.
+    if (
+      !(error instanceof HttpError) ||
+      isLockTimeout(error) ||
+      (error.statusCode >= 500 && task.attempts < MAX_ATTEMPTS)
+    )
+      throw error;
     receipt = {
       commandId: row.commandId,
       accepted: [],

@@ -25,7 +25,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
-import { HttpError } from '../../errors.js';
+import { economyBusy, HttpError, isLockTimeout } from '../../errors.js';
 import { normalizeCell } from './coordinates.js';
 import { devTime } from '../operations/dev-timing.js';
 
@@ -220,9 +220,37 @@ export async function withSpatialRetry<T>(attempt: () => Promise<T>): Promise<T>
   return attempts.run({ learned, last: true }, attempt);
 }
 
-/** Transaction replayed once if a trip leaves its zones (`withSpatialRetry`). */
-export function spatialTransaction<T>(db: Kysely<Database>, run: (tx: Transaction<Database>) => Promise<T>) {
-  return withSpatialRetry(() => db.transaction().execute(run));
+/**
+ * Lock wait bound of a command transaction (R3, docs/VERROUS-2026-11-04.md
+ * §11). PostgreSQL applies it to each wait (village row, zones, deposits),
+ * not to the whole transaction: two waits stay under the client's 15 s.
+ */
+export const COMMAND_LOCK_TIMEOUT_MS = 4_000;
+
+/**
+ * Command transaction: replayed once if a trip leaves its zones
+ * (`withSpatialRetry`); its lock waits are bounded by `COMMAND_LOCK_TIMEOUT_MS`
+ * unless the caller already set a delay (a scheduler task running a command
+ * inside its own transaction, a test connection); a command may still set its
+ * own afterwards (installation 60 s, workshop 2 s). A wait beyond it rolls the
+ * transaction back and answers `503 ECONOMY_BUSY`: nothing was written.
+ */
+export async function spatialTransaction<T>(
+  db: Kysely<Database>,
+  run: (tx: Transaction<Database>) => Promise<T>,
+): Promise<T> {
+  try {
+    return await withSpatialRetry(() =>
+      db.transaction().execute(async (tx) => {
+        await sql`select set_config('lock_timeout', ${`${COMMAND_LOCK_TIMEOUT_MS}ms`}, true)
+          where current_setting('lock_timeout') = '0'`.execute(tx);
+        return run(tx);
+      }),
+    );
+  } catch (error) {
+    if (isLockTimeout(error) && !(error instanceof HttpError)) throw economyBusy();
+    throw error;
+  }
 }
 export function heldRegion(tx: object, villageId: string): boolean {
   return held.get(tx)?.regions.has(villageId) ?? false;

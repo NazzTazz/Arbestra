@@ -16,7 +16,7 @@ import type { Kysely } from 'kysely';
 
 import type { AppConfig } from './config.js';
 import type { Database } from './database/schema.js';
-import { HttpError, httpErrorBody } from './errors.js';
+import { ECONOMY_BUSY_RETRY_AFTER_S, HttpError, httpErrorBody } from './errors.js';
 import { CLIENT_UPGRADE_PROTOCOL } from './modules/villages/client-protocol.js';
 import { registerAuthRoutes } from './modules/auth/routes.js';
 import { registerVillageRoutes } from './modules/villages/routes.js';
@@ -90,6 +90,7 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
       annotateHttpRequest(request, error.code);
       if (error.statusCode === 429) reply.header('Retry-After', '2');
       if (error.code === 'SCOPE_CATCHING_UP') reply.header('Retry-After', '1');
+      if (error.code === 'ECONOMY_BUSY') reply.header('Retry-After', String(ECONOMY_BUSY_RETRY_AFTER_S));
       // RFC 9110 §15.5.22: a 426 must name the protocol to move to.
       if (error.statusCode === 426) reply.header('Upgrade', CLIENT_UPGRADE_PROTOCOL);
       return reply.status(error.statusCode).send(httpErrorBody(error));

@@ -259,8 +259,9 @@ it('creates only the requested building and debit, without reconciling unrelated
   // The V2 answer: the availability probe, the command's own statements (owner, bound,
   // debit, reservation) and the private effects read at H (buildings, stock, rest housing).
   // The former historical confirmation took five. Since 4 November, one more:
-  // the footprint's spatial zones (docs/VERROUS-2026-11-04.md).
-  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(15);
+  // the footprint's spatial zones (docs/VERROUS-2026-11-04.md); since 5 November,
+  // one more: the command's lock delay (R3, same document §11).
+  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(16);
   expect(statements.join('\n')).not.toMatch(/reconcile|science_programs|processing_orders|exploitation_orders/i);
 });
 
@@ -444,7 +445,8 @@ it('reserves a 25-cell garden in the same SQL budget and debits only its area', 
   expect(
     await db.selectFrom('buildingResourceBuffers').select('buildingId').where('worldId', '=', worldId).execute(),
   ).toHaveLength(1);
-  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(10);
+  // Lock delay of the command (R3): one statement.
+  expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(11);
   await db
     .updateTable('buildings')
     .set({ status: 'completed', completedAt: new Date() })
@@ -623,7 +625,8 @@ it('validates only the selected RC1 vertices, rejects slopes, then creates with 
     capture = false;
     expect(response.statusCode, errors.at(-1)?.stack ?? response.body).toBe(201);
     expect((await created(response)).building.buildingType).toBe('dwelling');
-    expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(15);
+    // Lock delay of the command (R3): one statement.
+    expect(statements.filter((q) => !/^\s*(begin|commit|start transaction|set transaction)/i.test(q))).toHaveLength(16);
     samples.push({
       ms: Math.round(performance.now() - started),
       sqlCalls: statements.length,
