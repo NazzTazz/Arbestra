@@ -12,6 +12,20 @@ import type { Release } from './releases.js';
  */
 export const RELEASE_NOTES: readonly Release[] = [
   {
+    id: 'alpha-2026.11.05.1',
+    date: '2026-11-05',
+    items: [
+      {
+        title: 'Des routes qui épousent le relief',
+        text: 'Terre, gravats et pavés suivent maintenant vos collines, trottoirs compris. Vos chemins rejoignent aussi les routes du village sans laisser de trou.',
+      },
+      {
+        title: 'Chacun chez soi',
+        text: 'Quand un voisin terrasse ou construit, votre village ne l’attend plus. Et si je suis vraiment débordé, je vous le dis au lieu de bouder.',
+      },
+    ],
+  },
+  {
     id: 'alpha-2026.11.04.1',
     date: '2026-11-04',
     items: [

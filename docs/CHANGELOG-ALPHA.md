@@ -2,7 +2,14 @@
 
 Résumé orienté joueur et testeur de chaque version `alpha-*` déployée, de la plus récente à la plus ancienne. Chaque version couvre les commits depuis le tag alpha précédent ; la première (alpha-2026.10.16.1) regroupe l'historique antérieur, soit le socle de l'alpha.
 
-Mis à jour le 4 novembre 2026.
+Mis à jour le 5 novembre 2026.
+
+## alpha-2026.11.05.1 — 5 novembre 2026
+
+- **Routes en pente** : les routes posées (terre, gravats, petite pierre, grands pavés, trottoirs) suivent le relief, y compris sur un sol vrillé par la terraformation, sans fissure entre les pavés ; une route posée rejoint une route automatique sans trou à la jonction.
+- **Fluidité entre voisins** : terraformer, construire ou poser une route ne bloque plus que les villages proches, et plus le monde entier ; les tâches de fond du village (chantiers, récoltes, livraisons) ne s'attendent plus les unes les autres.
+- **Village occupé** : une commande qui attend trop longtemps répond « Village occupé. Réessayez dans un instant. » au lieu d'une erreur ; le jeu la renvoie seul.
+- *Technique :* verrou mondial remplacé par des verrous par zone (rejeu d'une transaction dont un trajet sort de ses zones), délai de verrou de 4 s sur les commandes (`503 ECONOMY_BUSY`), scheduler à trois passes sur son propre pool ; relu deux fois en contre-revue externe ([carte des verrous](VERROUS-2026-11-04.md) §10 et §11). Sans migration.
 
 ## alpha-2026.11.04.1 — 4 novembre 2026
 
