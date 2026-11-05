@@ -12,8 +12,11 @@ const config = loadConfig();
 const db = createDatabase(config.databaseUrl);
 // The scheduler's own connections (R1, docs/VERROUS-2026-11-04.md §11.2): one
 // per pass, so that requests waiting for a village never starve it, nor it
-// them. Per environment on the VPS: 8 + 3 + 2 (observation) for the API, 8
-// for the generator, under max_connections = 60 for alpha and staging.
+// them. Per environment on the VPS (caps, opened on demand): the API 8 +
+// scheduler 3 + observation 2 + NOC probe 1 + V2 LISTEN 1 = 15, the generator
+// worker 8, i.e. 23; plus 8 while a generation child runs. Alpha and staging:
+// 46 under max_connections = 60, 54 with one generation, 62 if both generate
+// at once (docs/VERROUS-2026-11-04.md §11.6).
 const schedulerDb = createDatabase(config.databaseUrl, undefined, { max: SCHEDULER_PASSES });
 const app = await buildApp(config, db, { schedulerDb });
 const operations = operationsFor(app);

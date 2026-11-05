@@ -25,6 +25,8 @@ const categories: Record<string, HttpRequestObservation['errorCategory']> = {
   OBSERVATION_RATE: 'application',
   OBSERVATION_LIMIT: 'application',
   TRADE_PREPARATION_BUSY: 'application',
+  // A command whose village or zone stayed held beyond its lock delay (R3).
+  ECONOMY_BUSY: 'application',
   VALIDATION_ERROR: 'application',
   HTTP_SERVER_RESPONSE: 'unknown',
   CONNECTION_INTERRUPTED: 'transport',

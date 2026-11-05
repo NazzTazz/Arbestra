@@ -8,6 +8,7 @@ import { migrateToLatest } from '../../database/migrate.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
 import { hashSessionToken } from '../../security/sessions.js';
 import { buildApp } from '../../app.js';
+import { operationsFor } from '../operations/telemetry.js';
 
 // R3 (docs/VERROUS-2026-11-04.md §11): an HTTP command that waits for a
 // village or a zone held beyond its lock delay answers 503 ECONOMY_BUSY with
@@ -40,6 +41,7 @@ async function stored() {
     'scheduledTasks',
     'populationCohorts',
     'harvestIntentCancellations',
+    'harvestSubmissions',
     'playerScience',
   ] as const)
     result[table] = (await db.selectFrom(table).selectAll().where('worldId', '=', worldId).execute())
@@ -62,14 +64,19 @@ async function waitingOn(holder: number) {
   throw Error('the command never waited on the holder');
 }
 
-const cancel = () =>
+const post = (path: string, payload?: Record<string, unknown>) =>
   app.inject({
     method: 'POST',
-    url: `/api/worlds/${slug}/villages/${villageId}/harvest-intents/${randomUUID()}/cancel`,
+    url: `/api/worlds/${slug}/villages/${villageId}/${path}`,
     cookies: { arbestra_session: token },
+    headers: { 'x-request-id': randomUUID() },
+    ...(payload ? { payload } : {}),
   });
+type Send = () => ReturnType<typeof post>;
 
-async function busyCase(hold: (tx: Transaction<Database>) => Promise<void>, expectedWait: RegExp) {
+/** Holds a lock beyond the delay, sends the command once, then returns the
+ * replay of the same command (same UUID) once the lock is free. */
+async function busyCase(hold: (tx: Transaction<Database>) => Promise<void>, expectedWait: RegExp, send: Send) {
   const before = await stored();
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -88,7 +95,7 @@ async function busyCase(hold: (tx: Transaction<Database>) => Promise<void>, expe
   try {
     await bounded(holding);
     const started = Date.now();
-    const command = cancel();
+    const command = send();
     const waiting = await waitingOn(holderPid);
     expect(waiting.waitType).toBe('Lock');
     expect(waiting.waitEvent).toMatch(expectedWait);
@@ -100,6 +107,14 @@ async function busyCase(hold: (tx: Transaction<Database>) => Promise<void>, expe
     expect(response.headers['retry-after']).toBe('2');
     expect(elapsed).toBeGreaterThanOrEqual(3_500);
     expect(elapsed).toBeLessThan(15_000);
+    // The NOC sees an application refusal, not an internal error.
+    const telemetry = operationsFor(app)!,
+      requestId = response.headers['x-request-id'] as string;
+    expect(telemetry.httpRequestDetail(requestId, telemetry.instanceId).observation).toMatchObject({
+      statusCode: 503,
+      safeCode: 'ECONOMY_BUSY',
+      errorCategory: 'application',
+    });
     release();
     await bounded(holder);
   } finally {
@@ -110,24 +125,60 @@ async function busyCase(hold: (tx: Transaction<Database>) => Promise<void>, expe
     'Tenu',
   );
   expect(await stored()).toEqual(before);
-  // Control: once the lock is free, the same command passes its locks and
-  // reaches its business answer (an unknown gesture).
-  const after = await cancel();
+  // The client replays the same UUID once the lock is free.
+  return send();
+}
+
+// Gesture cancellation: the replay of the same UUID passes its locks and
+// reaches its business answer (an unknown gesture), nothing applied twice.
+async function cancelCase(hold: (tx: Transaction<Database>) => Promise<void>, expectedWait: RegExp) {
+  const commandId = randomUUID();
+  const after = await busyCase(hold, expectedWait, () => post(`harvest-intents/${commandId}/cancel`));
   expect(after.statusCode, after.body).toBe(404);
   expect(after.json()).toMatchObject({ code: 'HARVEST_INTENT_NOT_FOUND' });
 }
 
 it('answers 503 ECONOMY_BUSY when the village row stays held beyond the lock delay', async () => {
-  await busyCase(async (tx) => {
+  await cancelCase(async (tx) => {
     await tx.selectFrom('villages').select('id').where('id', '=', villageId).forUpdate().execute();
   }, /^(transactionid|tuple)$/);
 }, 60_000);
 
 it('answers 503 ECONOMY_BUSY when a zone of the village region stays held beyond the lock delay', async () => {
   // Anchor (64, 64), chunks of 32 cells: zone (2, 2), shared by the region.
-  await busyCase(async (tx) => {
+  await cancelCase(async (tx) => {
     await sql`select pg_advisory_xact_lock(hashtextextended(${`infrastructure:${worldId}:2:2`}, 0))`.execute(tx);
   }, /^advisory$/);
+}, 60_000);
+
+it('answers 503 ECONOMY_BUSY when a harvest intent waits at COMMIT for a held V2 stream, then records its replay once', async () => {
+  // The submission's V2 publication (deferred trigger, 053) updates the
+  // village's stream rows at COMMIT: held here, as the retention may.
+  const commandId = randomUUID(),
+    intent = { commandId, gardens: [{ cellX: 64, cellY: 66 }], wood: [], stone: [] };
+  const after = await busyCase(
+    async (tx) => {
+      await sql`select 1 from game_sync_streams where world_id = ${worldId} for update`.execute(tx);
+    },
+    /^(transactionid|tuple)$/,
+    () => post('harvest-intents', intent),
+  );
+  expect(after.statusCode, after.body).toBe(200);
+  expect(after.json()).toMatchObject({ commandId, pending: true });
+  const again = await post('harvest-intents', intent);
+  expect(again.statusCode, again.body).toBe(200);
+  expect(again.json()).toEqual(after.json());
+  expect(
+    await db.selectFrom('harvestSubmissions').select('commandId').where('worldId', '=', worldId).execute(),
+  ).toEqual([{ commandId }]);
+  expect(
+    await db
+      .selectFrom('scheduledTasks')
+      .select('id')
+      .where('worldId', '=', worldId)
+      .where('taskType', '=', 'harvest.intent')
+      .execute(),
+  ).toHaveLength(1);
 }, 60_000);
 
 beforeAll(async () => {

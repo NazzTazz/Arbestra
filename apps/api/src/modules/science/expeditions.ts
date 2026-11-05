@@ -80,7 +80,9 @@ export async function receiveExpedition(
       throw new HttpError(400, 'INVALID_SURVEY_TARGET', 'Objectif hors des coordonnées canoniques.');
     return duplicate(prior);
   }
-  return db.transaction().execute(async (tx) => {
+  // A player command: the queue lock and the V2 publication at COMMIT are
+  // waits bounded like any command (503 ECONOMY_BUSY, R3).
+  return spatialTransaction(db, async (tx) => {
     const v = await ownedVillage(tx, accountId, slug, villageId);
     if (request.target.cellX >= v.widthCells || request.target.cellY >= v.heightCells)
       throw new HttpError(400, 'INVALID_SURVEY_TARGET', 'Objectif hors des coordonnées canoniques.');

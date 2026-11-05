@@ -8,6 +8,7 @@ import { HttpError, isLockTimeout } from '../../errors.js';
 import { ownedVillage } from './service.js';
 import { acceptHarvestIntent } from './harvest-intents.js';
 import { woodDesignations } from '../deposits/woodland.js';
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 export const HARVEST_SUBMISSION_TASK = 'harvest.intent';
 const MAX_ATTEMPTS = 8;
 export async function receiveHarvestIntent(
@@ -17,7 +18,9 @@ export async function receiveHarvestIntent(
   villageId: string,
   request: HarvestIntent,
 ): Promise<HarvestReceipt> {
-  return db.transaction().execute(async (tx) => {
+  // A player command: its V2 publication at COMMIT waits for the village's
+  // stream rows, bounded like any command (503 ECONOMY_BUSY, R3).
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     if (!request.gardens.length && !request.wood.length && !request.stone.length)
       throw new HttpError(400, 'HARVEST_EMPTY', 'Aucune ressource désignée.');

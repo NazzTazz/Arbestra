@@ -48,6 +48,47 @@ export async function processNextScheduledTask(
   handlers: ScheduledTaskHandlers,
   retryDelayMs = 1_000,
 ): Promise<ProcessScheduledTaskResult | null> {
+  let taken: string | undefined;
+  try {
+    return await processInTransaction(db, handlers, retryDelayMs, (id) => (taken = id));
+  } catch (error) {
+    // A lock wait can also time out at COMMIT: the deferred V2 publication
+    // (game_sync_assert_published, 053) updates the stream rows there, after
+    // the handler's savepoint. The whole transaction rolled back; a task was
+    // taken, so it gives way like a handler that met a held village.
+    if (!taken || !isLockTimeout(error)) throw error;
+    await rescheduleBusy(db, taken);
+    return { taskId: taken, outcome: 'busy-rescheduled' };
+  }
+}
+
+/** Short and separate: the task row only, skipped if another pass took it
+ * meanwhile or it was completed. Never an attempt nor an error. */
+async function rescheduleBusy(db: Kysely<Database>, taskId: string): Promise<void> {
+  await db.transaction().execute(async (tx) => {
+    await sql`select set_config('lock_timeout', ${`${TASK_LOCK_TIMEOUT_MS}ms`}, true)`.execute(tx);
+    await tx
+      .updateTable('scheduledTasks')
+      .set({ availableAt: sql`statement_timestamp() + (${TASK_BUSY_RETRY_MS} * interval '1 millisecond')` })
+      .where('id', '=', (eb) =>
+        eb
+          .selectFrom('scheduledTasks')
+          .select('id')
+          .where('id', '=', taskId)
+          .where('completedAt', 'is', null)
+          .forUpdate()
+          .skipLocked(),
+      )
+      .execute();
+  });
+}
+
+function processInTransaction(
+  db: Kysely<Database>,
+  handlers: ScheduledTaskHandlers,
+  retryDelayMs: number,
+  took: (taskId: string) => void,
+): Promise<ProcessScheduledTaskResult | null> {
   return db.transaction().execute(async (transaction) => {
     const task = await transaction
       .selectFrom('scheduledTasks')
@@ -63,6 +104,7 @@ export async function processNextScheduledTask(
       .executeTakeFirst();
 
     if (!task) return null;
+    took(task.id);
     await sql`select set_config('lock_timeout', ${`${TASK_LOCK_TIMEOUT_MS}ms`}, true)`.execute(transaction);
 
     const handler = handlers[task.taskType];

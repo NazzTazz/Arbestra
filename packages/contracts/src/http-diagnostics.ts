@@ -30,6 +30,7 @@ export const HttpDiagnosticCodeSchema = Type.Union(
       'OBSERVATION_RATE',
       'OBSERVATION_LIMIT',
       'TRADE_PREPARATION_BUSY',
+      'ECONOMY_BUSY',
       'VALIDATION_ERROR',
       'HTTP_SERVER_RESPONSE',
       'CONNECTION_INTERRUPTED',
