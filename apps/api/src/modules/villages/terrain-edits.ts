@@ -31,7 +31,11 @@ import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { editedRc1Field } from '../onboarding/rc1-field.js';
 import { beginVillageEconomy } from './reconcile-economy.js';
-import { assertSpatialCoverage, vertexCells as spatialVertexCells } from '../worlds/spatial-locks.js';
+import {
+  spatialTransaction,
+  assertSpatialCoverage,
+  vertexCells as spatialVertexCells,
+} from '../worlds/spatial-locks.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
 import { buildableCellRefusals, ownedVillage, villageCommandResult, type OwnedVillage } from './service.js';
 
@@ -503,7 +507,7 @@ export async function terrainEditsCommandV2(
   // An exact replay answers from its receipt, without lock or reconciliation.
   const known = await replay(db, await ownedVillage(db, accountId, slug, villageId));
   if (known) return known;
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     const { worldId } = village;
     const economy = await beginVillageEconomy(tx, worldId, villageId, undefined, [], [], {

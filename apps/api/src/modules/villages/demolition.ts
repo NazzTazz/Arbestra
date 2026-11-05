@@ -15,7 +15,7 @@ import { HOUSING_BUILDING_TYPES } from '../population/housing.js';
 import { materializeCohorts, releaseWorkers } from '../population/work.js';
 import { abandonScienceAt } from '../science/service.js';
 import { beginVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
-import { vertexCells } from '../worlds/spatial-locks.js';
+import { spatialTransaction, vertexCells } from '../worlds/spatial-locks.js';
 import { publishPrivateEffects } from './sync-v2-effects.js';
 import { cleanRoadAnchors, removeRoadAnchors } from './road-anchors.js';
 import { roadCellsToRemove } from './road-cells.js';
@@ -274,7 +274,7 @@ export async function demolitionCommandV2(
   // An exact replay answers from its receipt, without lock or reconciliation.
   const known = await replay(db, await ownedVillage(db, accountId, slug, villageId));
   if (known) return known;
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     const { worldId } = village;
     for (const c of [...content.gardenCells, ...content.roadCells])

@@ -29,7 +29,7 @@ import { normalizeCell, wrappedDelta, toroidalChebyshev } from '../worlds/coordi
 import { normalizeSpatialSelection, type SpatialCell } from './spatial-selection.js';
 import { observationVillage } from '../admin/observation-actions.js';
 import { profileParts } from '../operations/dev-timing.js';
-import { cellZones, lockSpatial, SPATIAL_WRITE_HALO } from '../worlds/spatial-locks.js';
+import { spatialTransaction, cellZones, lockSpatial, SPATIAL_WRITE_HALO } from '../worlds/spatial-locks.js';
 
 type Cost = { resourceCode: string; amount: number };
 export interface BuildingPlacement {
@@ -495,7 +495,7 @@ export async function placeBuilding(
     quarterTurns: input.quarterTurns ?? 0,
     houseVariant: input.houseVariant ?? 'stone',
   };
-  const confirmed = await db.transaction().execute(async (tx) => {
+  const confirmed = await spatialTransaction(db, async (tx) => {
     const v = await lockPlacement(tx, accountId, slug, villageId);
     const selection = normalizeSpatialSelection(p.anchor, p.cells, v.widthCells, v.heightCells),
       cells = selection.cells;

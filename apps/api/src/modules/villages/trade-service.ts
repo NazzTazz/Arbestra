@@ -14,7 +14,7 @@ import { HttpError } from '../../errors.js';
 import { ownedVillage, villageCommandResult, withVillageProjection } from './service.js';
 import type { AfterConstructionWrites, ConstructionCommit } from './service.js';
 import { beginVillageEconomy, lockVillageSpace } from './reconcile-economy.js';
-import { assertSpatialCoverage, type SpatialCell } from '../worlds/spatial-locks.js';
+import { spatialTransaction, assertSpatialCoverage, type SpatialCell } from '../worlds/spatial-locks.js';
 import { navigationRevision, loadNavigationContext } from '../navigation/context.js';
 import {
   certificateValid,
@@ -389,7 +389,7 @@ export async function commandPlayerMarket(
     if (!compute) throw new HttpError(503, 'NAVIGATION_UNAVAILABLE', 'Calcul du trajet indisponible.');
     prepared = await prepareTrade(db, accountId, slug, villageId, command.offerId, compute);
   }
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     const through = await beginTradePair(
       tx,

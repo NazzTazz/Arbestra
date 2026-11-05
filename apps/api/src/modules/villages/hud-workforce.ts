@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { HudWorkforceIntent, HudWorkforceConfirmationV2, HudWorkforceResult } from '@arbestra/contracts';
@@ -95,7 +96,7 @@ export async function commandHudWorkforceV2(
       result: { affected: known.affected, carrots: known.carrots },
     };
   }
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     const ctx = await beginVillageEconomy(tx, village.worldId, villageId);
     const result = await applyIntent(tx, ctx, request);

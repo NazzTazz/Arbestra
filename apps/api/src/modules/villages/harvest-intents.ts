@@ -1,4 +1,5 @@
 ﻿import { randomUUID } from 'node:crypto';
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { isDeepStrictEqual } from 'node:util';
 import { type Kysely } from 'kysely';
 import { canonicalWoodTrees } from '@arbestra/contracts';
@@ -53,7 +54,7 @@ export async function acceptHarvestIntent(
   villageId: string,
   raw: HarvestIntent,
 ): Promise<HarvestReceipt> {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const request = canonicalHarvestIntent(raw, village);
     const economy = await beginVillageEconomy(

@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import type { Kysely, Transaction } from 'kysely';
 import {
   canonicalWoodTrees,
@@ -33,7 +34,7 @@ export async function cancelHarvestIntent(
   villageId: string,
   commandId: string,
 ): Promise<HarvestCancelReceipt> {
-  return db.transaction().execute((tx) => cancelHarvestIntentIn(tx, accountId, worldSlug, villageId, commandId));
+  return spatialTransaction(db, (tx) => cancelHarvestIntentIn(tx, accountId, worldSlug, villageId, commandId));
 }
 
 /** Locks: the village, then the cases of its queue by UUID (beginVillageEconomy),

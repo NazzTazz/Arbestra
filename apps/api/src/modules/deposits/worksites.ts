@@ -24,6 +24,7 @@ import {
   STUMP_REMOVAL_WORKERS,
 } from './stone-extractions.js';
 import { wrappedDelta } from '../worlds/coordinates.js';
+import { spatialSavepoint } from '../worlds/spatial-locks.js';
 import { poolAdmissionCap } from './extraction-pools.js';
 
 export const WAKE_EXTRACTION_WORKSITE_TASK = 'deposit.worksite.wake';
@@ -783,6 +784,7 @@ export async function admitWorksites(
     }
     // A departure refused now (stock, access, workers) must not fail the read,
     // command or worker that admits it: the site waits and wakes up later.
+    const restoreSpatial = spatialSavepoint(tx);
     await sql`savepoint worksite_departure`.execute(tx);
     let refused: HttpError | undefined;
     try {
@@ -811,6 +813,7 @@ export async function admitWorksites(
       if (!(error instanceof HttpError && error.statusCode === 409)) throw error;
       refused = error;
       await sql`rollback to savepoint worksite_departure`.execute(tx);
+      restoreSpatial();
     }
     await sql`release savepoint worksite_departure`.execute(tx);
     if (refused) {

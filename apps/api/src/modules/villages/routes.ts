@@ -65,6 +65,7 @@ import type { NavigationExecutor } from '../navigation/compute.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AfterConstructionWrites, ConstructionCommit } from './service.js';
 import { discoverBuildingSuppliesInTransaction } from './service.js';
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { ConstructionConfirmationV2Schema, VillageCommandConfirmationV2Schema } from '@arbestra/contracts';
 import { villageCommandV2 } from './command-v2.js';
 import type { TravelNetworkExecutor } from '../navigation/network-job.js';
@@ -772,11 +773,9 @@ export async function registerVillageRoutes(
         buildingId: string;
       };
       return villageV2(request, reply, (afterWrites) =>
-        db
-          .transaction()
-          .execute((tx) =>
-            discoverBuildingSuppliesInTransaction(tx, account.id, worldSlug, villageId, buildingId, afterWrites),
-          ),
+        spatialTransaction(db, (tx) =>
+          discoverBuildingSuppliesInTransaction(tx, account.id, worldSlug, villageId, buildingId, afterWrites),
+        ),
       );
     },
   );

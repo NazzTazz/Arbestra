@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { villageTerrainRegion } from './terrain-region.js';
 import { footprintVertices, isBuildingFootprintFlat } from '@arbestra/contracts';
 import { observationVillage } from '../admin/observation-actions.js';
@@ -1695,7 +1696,7 @@ export async function commandVillageScience(
   command: ScienceCommand,
   afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionCommit> {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     // A direct survey, exploration or recall computes or shortens a route to an
@@ -1743,7 +1744,7 @@ export async function configureTownHallFactory(
   let preview: unknown;
   const previewRollback = new Error('FACTORY_PREVIEW_ROLLBACK');
   try {
-    return await db.transaction().execute(async (tx) => {
+    return await spatialTransaction(db, async (tx) => {
       const village = await ownedVillage(tx, accountId, worldSlug);
       if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
       const x = normalizeCell(cellX, village.widthCells),
@@ -1866,7 +1867,7 @@ export async function adaptUniversityCampus(
   villageId: string,
   buildingId: string,
 ): Promise<void> {
-  await db.transaction().execute(async (tx) => {
+  await spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const anchor = await tx
       .selectFrom('worldCellOccupancies')
@@ -1980,7 +1981,7 @@ export async function expandGarden(
   expectedCosts?: ExpectedCost[],
   afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionCommit> {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(
@@ -2186,7 +2187,7 @@ export async function upgradeBuilding(
       expectedCosts,
       afterWrites,
     );
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const campusAnchor = await tx
@@ -2633,7 +2634,7 @@ export async function startVillageExploitation(
   rawRequest: ExploitationRequest,
   afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionCommit> {
-  return db.transaction().execute(async (tx): Promise<ConstructionCommit> => {
+  return spatialTransaction(db, async (tx): Promise<ConstructionCommit> => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     const request = canonicalExploitation(rawRequest, village);
     const economy = await beginVillageEconomy(
@@ -2910,7 +2911,7 @@ export async function changeVillageWorksite(
   request: ChangeExtractionWorksiteRequest,
   afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionCommit> {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);
@@ -2986,7 +2987,7 @@ export async function discoverCatEyes(
   villageId: string,
   afterWrites?: AfterConstructionWrites,
 ): Promise<ConstructionCommit> {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);
     if (village.villageId !== villageId) throw new HttpError(404, 'VILLAGE_NOT_FOUND', 'Village introuvable.');
     const economy = await beginVillageEconomy(tx, village.worldId, village.villageId);

@@ -2,7 +2,7 @@ import { advancePopulationGrowth } from '../population/growth.js';
 import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../population/work.js';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
-import { lockWholeWorld } from '../worlds/spatial-locks.js';
+import { lockWholeWorld, spatialSavepoint } from '../worlds/spatial-locks.js';
 import type { AvailableWorlds, JoinWorldRequest } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { HttpError } from '../../errors.js';
@@ -141,6 +141,7 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
       );
       // Spatial validation is under the same navigation lock used by construction.
       // A savepoint removes an unsuitable temporary village without touching any player data.
+      const restoreSpatial = spatialSavepoint(tx);
       await sql`savepoint spawn_candidate`.execute(tx);
       await tx
         .insertInto('worldMemberships')
@@ -161,6 +162,7 @@ export async function joinWorld(db: Kysely<Database>, accountId: string, slug: s
       await lockWholeWorld(tx, world.id);
       if (!(await fits(tx, world, placement))) {
         await sql`rollback to savepoint spawn_candidate`.execute(tx);
+        restoreSpatial();
         rejected.push(clearing.id);
         continue;
       }

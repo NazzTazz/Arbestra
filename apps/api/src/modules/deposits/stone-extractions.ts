@@ -315,6 +315,11 @@ export async function stoneDepositDetails(
   };
 }
 
+/** Test seam: runs once the trip is computed, just before its zones are checked. */
+export const stoneExtractionTestHooks: {
+  beforeCoverage?: (tx: Transaction<Database>, path: TravelCell[]) => Promise<void>;
+} = {};
+
 export async function startStoneExtraction(
   tx: Transaction<Database>,
   village: ExtractionVillage,
@@ -398,6 +403,7 @@ export async function startStoneExtraction(
   );
   if (candidates.reduce((total, cohort) => total + cohort.memberCount, 0) < workerCount)
     throw new HttpError(409, 'WORKERS_UNAVAILABLE', 'Habitants disponibles et reposés insuffisants.');
+  await stoneExtractionTestHooks.beforeCoverage?.(tx, path);
   await assertSpatialCoverage(tx, village.worldId, path, 'shared', 1, 'extraction trip');
   const extraction = await tx
     .insertInto('depositExtractions')

@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { flattenVertexTerrain } from '../worlds/terrain-vertices.js';
 import { advancePopulationGrowth } from '../population/growth.js';
 import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../population/work.js';
@@ -190,7 +191,7 @@ export async function installVillage(
     } catch {
       // Busy or unavailable: the locked path plans and reports as before.
     }
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     await sql`set local lock_timeout='60s'`.execute(tx);
     await tx.selectFrom('accounts').select('id').where('id', '=', accountId).forUpdate().executeTakeFirstOrThrow();
     const world = await tx.selectFrom('worlds').selectAll().where('slug', '=', slug).executeTakeFirst();
@@ -386,7 +387,7 @@ export async function poseRemainingStarter(
   villageId: string,
   input: StarterPoseRequest,
 ): Promise<StarterInstallation> {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     await sql`set local lock_timeout='5s'`.execute(tx);
     const village = await tx
       .selectFrom('villages')

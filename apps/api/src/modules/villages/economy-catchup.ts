@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { randomUUID } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
@@ -38,7 +39,7 @@ export async function requestEconomyCatchup(
   worldSlug: string,
   villageId: string,
 ): Promise<void> {
-  await db.transaction().execute(async (tx) => {
+  await spatialTransaction(db, async (tx) => {
     await sql`set local lock_timeout='2s'`.execute(tx);
     await sql`set local statement_timeout='5s'`.execute(tx);
     const village = await ownedVillage(tx, accountId, worldSlug, villageId);

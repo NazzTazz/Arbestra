@@ -21,8 +21,10 @@ import {
   lockSpatial,
   spatialGrid,
   villageRegionZones,
+  zoneOf,
   SPATIAL_WRITE_HALO,
   type SpatialCell,
+  type SpatialGrid,
 } from '../worlds/spatial-locks.js';
 
 export interface VillageEconomy {
@@ -175,6 +177,7 @@ export async function lockVillageSpace(
   worldId: string,
   villageIds: readonly string[],
   access: boolean | SpatialAccess = false,
+  deposits: readonly string[] = [],
 ): Promise<void> {
   const grid = await spatialGrid(tx, worldId);
   const spec: SpatialAccess = typeof access === 'object' ? access : {};
@@ -182,6 +185,13 @@ export async function lockVillageSpace(
     exclusive = access === true ? allZones(grid) : new Set<number>();
   const regions = villageIds.filter((id) => !heldRegion(tx, id));
   for (const id of regions) for (const zone of await villageRegionZones(tx, grid, id)) shared.add(zone);
+  // Known remote accesses (deposits recognized by science, beyond the region):
+  // the zones of the last trip recorded to each deposit this transaction may
+  // admit, so a relaunched remote worksite needs no replay. Only with the
+  // region itself, which is the first acquisition of the village.
+  if (deposits.length && regions.length === villageIds.length)
+    for (const zone of cellZones(grid, await remoteTrips(tx, grid, villageIds[0]!, deposits, shared), 1))
+      shared.add(zone);
   if (spec.readWorld) for (const zone of allZones(grid)) shared.add(zone);
   if (spec.read) for (const zone of cellZones(grid, spec.read, 1)) shared.add(zone);
   const cells = [...(spec.write ?? [])];
@@ -196,6 +206,29 @@ export async function lockVillageSpace(
     );
   for (const zone of cellZones(grid, cells, SPATIAL_WRITE_HALO)) exclusive.add(zone);
   await lockSpatial(tx, grid, { shared, exclusive, regionOf: regions });
+}
+
+/** Cells of the last trip of the village to each deposit outside `region`
+ * (its zones): at most one row per remote deposit, none for a local one. */
+async function remoteTrips(
+  tx: Transaction<Database>,
+  grid: SpatialGrid,
+  villageId: string,
+  deposits: readonly string[],
+  region: ReadonlySet<number>,
+): Promise<SpatialCell[]> {
+  const cells = await sql<{ id: string; x: number; y: number }>`
+    select feature_id as id, cell_x as x, cell_y as y from stone_deposits
+      where world_id=${grid.worldId}::uuid and feature_id = any(${deposits}::uuid[])
+    union all select feature_id, cell_x, cell_y from woodland_deposits
+      where world_id=${grid.worldId}::uuid and feature_id = any(${deposits}::uuid[])`.execute(tx);
+  const remote = cells.rows.filter((d) => !region.has(zoneOf(grid, d.x, d.y))).map((d) => d.id);
+  if (!remote.length) return [];
+  const trips = await sql<{ path: SpatialCell[] }>`select t.path from unnest(${remote}::uuid[]) as f(id)
+    cross join lateral (select e.path_cells as path from deposit_extractions e
+      where e.world_id=${grid.worldId}::uuid and e.village_id=${villageId}::uuid and e.feature_id=f.id
+      order by e.started_at desc limit 1) t`.execute(tx);
+  return trips.rows.flatMap((t) => t.path);
 }
 
 /** The village row serializes all economic mutations for that village. */
@@ -221,26 +254,8 @@ export async function beginVillageEconomy(
         .forUpdate()
         .executeTakeFirstOrThrow(),
     );
-    // Readers may admit trips, including automatic worksite relaunches: their
-    // region's zones, shared. Writers add their cells' zones, exclusive, in the
-    // same acquisition, before deposits; a shared zone is never upgraded later.
-    await lockVillageSpace(transaction, worldId, [villageId], navigationWrite);
-    // Read after waiting for the village lock: transaction_timestamp may be stale.
-    const through =
-      sharedThrough ??
-      (await transaction.selectNoFrom(sql<Date>`statement_timestamp()`.as('through')).executeTakeFirstOrThrow())
-        .through;
-    const economy = { worldId, villageId, through };
-    // Project every resource read in the command/snapshot at the same post-lock H.
-    await sql`select set_config('arbestra.economy_through',${through.toISOString()},true)`.execute(transaction);
-    const dueDeposits = await transaction
-      .selectFrom('depositExtractions')
-      .select('featureId')
-      .where('worldId', '=', worldId)
-      .where('villageId', 'in', lockedPeers)
-      .where('status', '=', 'in-progress')
-      .where('completesAt', '<=', through)
-      .execute();
+    // Targets that a worksite of these villages may admit in this transaction:
+    // read under the village rows, before the zones that their trips need.
     const worksiteTargets = await transaction
       .selectFrom('extractionWorksiteTargets')
       .innerJoin('extractionWorksites', 'extractionWorksites.id', 'extractionWorksiteTargets.worksiteId')
@@ -256,6 +271,33 @@ export async function beginVillageEconomy(
           eb('extractionWorksites.poolResource', 'is not', null),
         ]),
       )
+      .execute();
+    // Readers may admit trips, including automatic worksite relaunches: their
+    // region's zones, shared, and the known trips to the remote deposits they
+    // may admit. Writers add their cells' zones, exclusive, in the same
+    // acquisition, before deposits; a shared zone is never upgraded later.
+    await lockVillageSpace(transaction, worldId, [villageId], navigationWrite, [
+      ...new Set([
+        ...worksiteTargets.map((row) => row.featureId),
+        ...targetFeatureIds.map((id) => id.toLowerCase()),
+        ...(depositFeatureId ? [depositFeatureId.toLowerCase()] : []),
+      ]),
+    ]);
+    // Read after waiting for the village lock: transaction_timestamp may be stale.
+    const through =
+      sharedThrough ??
+      (await transaction.selectNoFrom(sql<Date>`statement_timestamp()`.as('through')).executeTakeFirstOrThrow())
+        .through;
+    const economy = { worldId, villageId, through };
+    // Project every resource read in the command/snapshot at the same post-lock H.
+    await sql`select set_config('arbestra.economy_through',${through.toISOString()},true)`.execute(transaction);
+    const dueDeposits = await transaction
+      .selectFrom('depositExtractions')
+      .select('featureId')
+      .where('worldId', '=', worldId)
+      .where('villageId', 'in', lockedPeers)
+      .where('status', '=', 'in-progress')
+      .where('completesAt', '<=', through)
       .execute();
     const depositIds = [
       ...new Set([

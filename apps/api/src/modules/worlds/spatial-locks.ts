@@ -17,10 +17,15 @@
  * with every zone, for the rare whole-world writers (generation, conversions).
  *
  * Order: village rows → world key → zones → deposits → local rows. Nothing
- * takes the world key after a zone, nor a village after either.
+ * takes the world key after a zone, nor a village after either, nor a zone
+ * after a deposit: a trip found outside the zones held is never locked late,
+ * its transaction is replayed once with those zones declared from the start
+ * (`withSpatialRetry`), then refused.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { Database } from '../../database/schema.js';
+import { HttpError } from '../../errors.js';
 import { normalizeCell } from './coordinates.js';
 import { devTime } from '../operations/dev-timing.js';
 
@@ -123,6 +128,8 @@ interface Held {
   grid: SpatialGrid;
   zones: Map<number, Mode>;
   world: Mode | null;
+  /** Every zone, exclusive (`lockWholeWorld`): the only state that covers all. */
+  whole: boolean;
   /** The village regions already covered (a later begin adds nothing). */
   regions: Set<string>;
 }
@@ -149,10 +156,73 @@ function entry(tx: object, grid: SpatialGrid): Held {
   let value = held.get(tx);
   if (!value || value.grid.worldId !== grid.worldId) {
     if (value) throw Error('One transaction locks the space of a single world');
-    value = { grid, zones: new Map(), world: null, regions: new Set() };
+    value = { grid, zones: new Map(), world: null, whole: false, regions: new Set() };
     held.set(tx, value);
   }
   return value;
+}
+
+/**
+ * Before `savepoint`: returns the restoration to call right after `rollback
+ * to savepoint`. PostgreSQL releases there the advisory locks taken after the
+ * savepoint; the cache must forget them too, or a later acquisition would be
+ * skipped and a coverage check would pass on locks no longer held.
+ */
+export function spatialSavepoint(tx: object): () => void {
+  const state = held.get(tx);
+  const copy = state && {
+    ...state,
+    zones: new Map(state.zones),
+    regions: new Set(state.regions),
+  };
+  return () => {
+    if (copy) held.set(tx, { ...copy, zones: new Map(copy.zones), regions: new Set(copy.regions) });
+    else held.delete(tx);
+  };
+}
+
+/** A trip or write found outside the zones its transaction holds. Internal:
+ * never sent to a client, it aborts the attempt so that it can be replayed. */
+export class SpatialZonesMissing extends Error {
+  constructor(
+    readonly worldId: string,
+    readonly zones: ReadonlyMap<number, Mode>,
+    what: string,
+  ) {
+    super(`${what}: ${zones.size} zone(s) to declare in world ${worldId}`);
+  }
+}
+interface Attempt {
+  /** Zones learned by the failed attempt, declared from the first acquisition. */
+  learned: Map<string, Map<number, Mode>>;
+  /** Last attempt: a new miss is a refusal. */
+  last: boolean;
+}
+const attempts = new AsyncLocalStorage<Attempt>();
+
+/**
+ * Runs `attempt` (a whole transaction, or a savepoint of the scheduler) and,
+ * if it found a trip or write outside its zones, runs it once more with those
+ * zones taken in its first acquisition, before deposits and before any path
+ * is computed. A second miss is refused (409), never locked late.
+ */
+export async function withSpatialRetry<T>(attempt: () => Promise<T>): Promise<T> {
+  const learned = new Map<string, Map<number, Mode>>();
+  try {
+    return await attempts.run({ learned, last: false }, attempt);
+  } catch (error) {
+    if (!(error instanceof SpatialZonesMissing)) throw error;
+    const zones = new Map(learned.get(error.worldId));
+    for (const [zone, mode] of error.zones) if (zones.get(zone) !== 'exclusive') zones.set(zone, mode);
+    learned.set(error.worldId, zones);
+    console.warn(`spatial replay: ${error.message}`);
+  }
+  return attempts.run({ learned, last: true }, attempt);
+}
+
+/** Transaction replayed once if a trip leaves its zones (`withSpatialRetry`). */
+export function spatialTransaction<T>(db: Kysely<Database>, run: (tx: Transaction<Database>) => Promise<T>) {
+  return withSpatialRetry(() => db.transaction().execute(run));
 }
 export function heldRegion(tx: object, villageId: string): boolean {
   return held.get(tx)?.regions.has(villageId) ?? false;
@@ -173,6 +243,11 @@ export async function lockSpatial(
   const wanted = new Map<number, Mode>();
   for (const zone of request.shared ?? []) wanted.set(zone, 'shared');
   for (const zone of request.exclusive ?? []) wanted.set(zone, 'exclusive');
+  // A replay declares what its first attempt found, in its first zone
+  // acquisition: before every deposit and every path computation.
+  const learned = attempts.getStore()?.learned.get(grid.worldId);
+  if (learned && wanted.size && !state.zones.size)
+    for (const [zone, mode] of learned) if (wanted.get(zone) !== 'exclusive') wanted.set(zone, mode);
   const keys: string[] = [],
     modes: boolean[] = [];
   for (const [zone, mode] of wanted) {
@@ -218,6 +293,7 @@ export async function lockWholeWorld(tx: Transaction<Database>, worldId: string)
   // savepoint (which releases these locks) and take them again.
   held.delete(tx);
   await lockSpatial(tx, grid, { world: 'exclusive', exclusive: allZones(grid) });
+  entry(tx, grid).whole = true;
 }
 
 /**
@@ -255,14 +331,13 @@ export const vertexCells = (v: { vertexX: number; vertexY: number }): SpatialCel
   { cellX: v.vertexX, cellY: v.vertexY },
 ];
 
-const strict = () => Boolean(process.env.VITEST) || process.env.ARBESTRA_SPATIAL_GUARD === 'strict';
-
 /**
  * Checks that this transaction holds the zones of `cells` (± halo): shared or
- * exclusive for a trip it admits, exclusive for a spatial write. A miss is a
- * programming error: thrown under tests, logged and locked late otherwise
- * (correct for the write itself, with a residual window documented in
- * docs/VERROUS-2026-11-04.md).
+ * exclusive for a trip it admits, exclusive for a spatial write. A miss means
+ * the trip or write was computed without its zones: they are never locked
+ * here (a zone after a deposit, a path already read without them). Under
+ * `withSpatialRetry` the attempt is aborted and replayed with these zones
+ * declared; on the replay, or without it, the command is refused (409).
  */
 export async function assertSpatialCoverage(
   tx: Transaction<Database>,
@@ -276,7 +351,8 @@ export async function assertSpatialCoverage(
   const zones = cellZones(grid, cells, halo);
   if (!zones.size) return;
   const state = held.get(tx);
-  if (state?.world === 'exclusive') return;
+  // Only the whole world covers every zone; the world key alone covers none.
+  if (state?.whole && state.grid.worldId === worldId) return;
   let missing = [...zones].filter((z) => {
     const m = state?.grid.worldId === worldId ? state.zones.get(z) : undefined;
     return !(m === 'exclusive' || (m === mode && mode === 'shared'));
@@ -294,11 +370,15 @@ export async function assertSpatialCoverage(
   missing = missing.filter((z) => absent.has(zoneKey(worldId, z % columns, Math.floor(z / columns))));
   if (!missing.length) return;
   const message = `${what}: ${missing.length} zone(s) not held ${mode} in world ${worldId}`;
-  // Under tests, a transaction that took zones and still misses some reveals
-  // an underestimated region or write set: thrown. A transaction that took no
-  // zone at all is a test fixture calling an admission directly (no
-  // beginVillageEconomy): its zones are taken here, as in production.
-  if (strict() && state?.grid.worldId === worldId && state.zones.size) throw Error(message);
+  // Test fixtures call an admission directly, without beginVillageEconomy, and
+  // hold no spatial lock at all: their zones are taken here. Never outside tests.
+  if (process.env.VITEST && !state?.zones.size && !state?.world) {
+    await lockSpatial(tx, grid, mode === 'exclusive' ? { exclusive: missing } : { shared: missing });
+    return;
+  }
+  const attempt = attempts.getStore();
+  if (attempt && !attempt.last)
+    throw new SpatialZonesMissing(worldId, new Map([...zones].map((z) => [z, mode] as const)), what);
   console.error(message);
-  await lockSpatial(tx, grid, mode === 'exclusive' ? { exclusive: missing } : { shared: missing });
+  throw new HttpError(409, 'SPATIAL_ACCESS_CHANGED', 'Les lieux ont changé pendant la préparation. Réessayez.');
 }

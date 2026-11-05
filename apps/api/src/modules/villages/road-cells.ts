@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import {
@@ -294,7 +295,7 @@ export async function roadCellsCommandV2(
   // An exact replay answers from its receipt, without lock or reconciliation.
   const known = await replay(db, await ownedVillage(db, accountId, slug, villageId));
   if (known) return known;
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     const village = await ownedVillage(tx, accountId, slug, villageId);
     if (village.generationVersion === 3) await readRc1Source(tx, village.worldId);
     const economy = await beginVillageEconomy(tx, village.worldId, villageId, undefined, [], [], {

@@ -1,3 +1,4 @@
+import { spatialTransaction } from '../worlds/spatial-locks.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { sql, type Kysely, type Transaction, type Selectable } from 'kysely';
@@ -229,7 +230,7 @@ export async function finaliseExpedition(
   prepared: { query: RouteQuery; revision: string; result: RouteResult },
   afterAdmission?: (tx: Transaction<Database>, activityId: string) => Promise<void>,
 ) {
-  return db.transaction().execute(async (tx) => {
+  return spatialTransaction(db, async (tx) => {
     await sql`set local lock_timeout='500ms'`.execute(tx);
     await sql`set local statement_timeout='2s'`.execute(tx);
     // PostgreSQL 17 bounds the whole transaction, including successive statements.

@@ -1,6 +1,7 @@
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 
 import type { Database, ScheduledTasksTable } from '../database/schema.js';
+import { spatialSavepoint, withSpatialRetry } from '../modules/worlds/spatial-locks.js';
 
 export type ScheduledTask = Selectable<ScheduledTasksTable>;
 export type ScheduledTaskHandler = (transaction: Transaction<Database>, task: ScheduledTask) => Promise<void>;
@@ -50,14 +51,26 @@ export async function processNextScheduledTask(
     if (!task) return null;
 
     const handler = handlers[task.taskType];
-    await sql`savepoint scheduled_task_handler`.execute(transaction);
+    // A handler that finds a trip outside its zones is rolled back to the
+    // savepoint and replayed once with them, still under the task row; a
+    // second miss is an ordinary failure, rescheduled below.
+    const restoreSpatial = spatialSavepoint(transaction);
     try {
-      if (!handler) throw new Error(`No handler registered for scheduled task type: ${task.taskType}`);
-      await handler(transaction, task);
-      await sql`release savepoint scheduled_task_handler`.execute(transaction);
+      await withSpatialRetry(async () => {
+        await sql`savepoint scheduled_task_handler`.execute(transaction);
+        try {
+          if (!handler) throw new Error(`No handler registered for scheduled task type: ${task.taskType}`);
+          await handler(transaction, task);
+          await sql`release savepoint scheduled_task_handler`.execute(transaction);
+        } catch (error) {
+          await sql`rollback to savepoint scheduled_task_handler`.execute(transaction);
+          // PostgreSQL released the zones taken by the handler: so does the cache.
+          restoreSpatial();
+          await sql`release savepoint scheduled_task_handler`.execute(transaction);
+          throw error;
+        }
+      });
     } catch (error) {
-      await sql`rollback to savepoint scheduled_task_handler`.execute(transaction);
-      await sql`release savepoint scheduled_task_handler`.execute(transaction);
       // An expensive failure must leave a real cooldown after it finishes.
       // Persistent failures back off up to five minutes; their intentions and
       // original deadlines stay intact, and healthy tasks remain eligible.
