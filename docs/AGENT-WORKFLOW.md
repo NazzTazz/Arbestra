@@ -45,6 +45,8 @@ L'agent examine son propre diff : règles oubliées, cas limites, migration, err
 
 Une revue supplémentaire est indiquée si elle apporte une lecture indépendante sur un risque concret ; pas de chaîne Astra → Terra → Sol → Astra obligatoire. Respecter les règles de délégation de la session. En cas de reprise d'une revue, traiter les réserves précises puis les vérifier ; ne pas relancer une nouvelle architecture générale.
 
+Modèle de brief pour une contre-revue externe (périmètre et SHA, contexte, documents à lire, ce qu'on cherche, hors sujet, format attendu, second passage sur le correctif) : [contre-revue des verrous](modeles/CONTRE-REVUE-VERROUS-2026-11-04.md). Le brief pointe les risques, pas les conclusions de l'auteur.
+
 ### 5. Livrer
 
 Statuts : **en cadrage**, **prête à implémenter**, **en cours**, **implémentée / à valider**, **clôturée**. Le statut Git est distinct : non commité, commité, poussé. La migration peut être validée sur test sans être appliquée au développement.
