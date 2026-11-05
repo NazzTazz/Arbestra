@@ -7,7 +7,9 @@ import { generateWorld } from '../worlds/generation.js';
 import { artifactChecksum, readV2Artifact, writeV3Chunks } from './artifact.js';
 const id = process.argv[2]!,
   attempt = Number(process.argv[3]);
-const db = createDatabase(loadConfig().databaseUrl),
+// One statement or transaction at a time: two connections keep alpha and
+// staging under max_connections even when both generate (docs/VERROUS-2026-11-04.md §11.6).
+const db = createDatabase(loadConfig().databaseUrl, undefined, { max: 2 }),
   start = performance.now();
 try {
   const row = await db
