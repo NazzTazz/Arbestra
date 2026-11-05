@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDatabase } from './database/connection.js';
-import { startScheduledTaskWorker } from './jobs/scheduled-tasks.js';
+import { SCHEDULER_PASSES, startScheduledTaskWorker } from './jobs/scheduled-tasks.js';
 import { scheduledTaskHandlers } from './jobs/task-handlers.js';
 import { startSyncJournalRetention } from './modules/villages/sync-v2-retention.js';
 import { startJourneyRetention } from './modules/admin/journey-journal.js';
@@ -10,10 +10,15 @@ import { observeScheduler } from './modules/operations/scheduler-observer.js';
 
 const config = loadConfig();
 const db = createDatabase(config.databaseUrl);
-const app = await buildApp(config, db);
+// The scheduler's own connections (R1, docs/VERROUS-2026-11-04.md §11.2): one
+// per pass, so that requests waiting for a village never starve it, nor it
+// them. Per environment on the VPS: 8 + 3 + 2 (observation) for the API, 8
+// for the generator, under max_connections = 60 for alpha and staging.
+const schedulerDb = createDatabase(config.databaseUrl, undefined, { max: SCHEDULER_PASSES });
+const app = await buildApp(config, db, { schedulerDb });
 const operations = operationsFor(app);
 const stopWorker = startScheduledTaskWorker(
-  db,
+  schedulerDb,
   scheduledTaskHandlers,
   config.scheduledTaskPollIntervalMs,
   () => app.log.error({ code: 'SCHEDULER_FAILED' }, 'Scheduled task worker failed'),
@@ -36,6 +41,7 @@ const shutdown = async () => {
   await stopRetention();
   await stopWorker();
   await app.close();
+  await schedulerDb.destroy();
   await db.destroy();
 };
 

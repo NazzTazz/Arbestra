@@ -1,15 +1,29 @@
 import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 
 import type { Database, ScheduledTasksTable } from '../database/schema.js';
+import { isLockTimeout } from '../errors.js';
 import { spatialSavepoint, withSpatialRetry } from '../modules/worlds/spatial-locks.js';
 
 export type ScheduledTask = Selectable<ScheduledTasksTable>;
 export type ScheduledTaskHandler = (transaction: Transaction<Database>, task: ScheduledTask) => Promise<void>;
 export type ScheduledTaskHandlers = Readonly<Record<string, ScheduledTaskHandler>>;
 
+/**
+ * Lock wait bound of a task (R1, docs/VERROUS-2026-11-04.md §11.2): a task
+ * that meets a village or a zone held by a command gives way instead of
+ * holding its pass and its connection. A handler may set its own afterwards.
+ */
+export const TASK_LOCK_TIMEOUT_MS = 1_500;
+/** Retry of a task that gave way: fixed and short, neither an attempt nor an
+ * error. Its state decides what is due, and the command holding the village
+ * reconciles that village meanwhile. */
+export const TASK_BUSY_RETRY_MS = 1_000;
+/** Concurrent passes of the worker; `SKIP LOCKED` gives each its own task. */
+export const SCHEDULER_PASSES = 3;
+
 export interface ProcessScheduledTaskResult {
   taskId: string;
-  outcome: 'completed' | 'retry-scheduled';
+  outcome: 'completed' | 'retry-scheduled' | 'busy-rescheduled';
 }
 
 export type ScheduledWorkerObservation =
@@ -49,6 +63,7 @@ export async function processNextScheduledTask(
       .executeTakeFirst();
 
     if (!task) return null;
+    await sql`select set_config('lock_timeout', ${`${TASK_LOCK_TIMEOUT_MS}ms`}, true)`.execute(transaction);
 
     const handler = handlers[task.taskType];
     // A handler that finds a trip outside its zones is rolled back to the
@@ -71,6 +86,16 @@ export async function processNextScheduledTask(
         }
       });
     } catch (error) {
+      // A held lock is not a failure: no attempt, no error, no backoff (the
+      // savepoint released whatever the handler had taken).
+      if (isLockTimeout(error)) {
+        await transaction
+          .updateTable('scheduledTasks')
+          .set({ availableAt: sql`statement_timestamp() + (${TASK_BUSY_RETRY_MS} * interval '1 millisecond')` })
+          .where('id', '=', task.id)
+          .executeTakeFirstOrThrow();
+        return { taskId: task.id, outcome: 'busy-rescheduled' };
+      }
       // An expensive failure must leave a real cooldown after it finishes.
       // Persistent failures back off up to five minutes; their intentions and
       // original deadlines stay intact, and healthy tasks remain eligible.
@@ -115,12 +140,19 @@ export async function drainScheduledTasks(
   return processed;
 }
 
+/**
+ * Polls with `passes` concurrent drains. Each takes its own task (`SKIP
+ * LOCKED`) and finalises only that one; two tasks of one village meet on the
+ * village row as two commands would. A round ends when every pass is idle.
+ * `db` should own at least `passes` connections.
+ */
 export function startScheduledTaskWorker(
   db: Kysely<Database>,
   handlers: ScheduledTaskHandlers,
   pollIntervalMs: number,
   onError: (error: unknown) => void,
   observer?: Observer,
+  { passes = SCHEDULER_PASSES }: { passes?: number } = {},
 ): () => Promise<void> {
   let stopped = false;
   let currentRun: Promise<void> | null = null;
@@ -128,8 +160,13 @@ export function startScheduledTaskWorker(
   const poll = () => {
     if (stopped || currentRun) return;
     observe(observer, { kind: 'poll' });
-    currentRun = drainScheduledTasks(db, handlers, 50, observer)
-      .then(() => {
+    // allSettled: a failed pass never ends the round while others still run.
+    currentRun = Promise.allSettled(
+      Array.from({ length: passes }, () => drainScheduledTasks(db, handlers, 50, observer)),
+    )
+      .then((results) => {
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed) throw failed.reason;
         observe(observer, { kind: 'idle' });
       })
       .catch((error) => {

@@ -15,12 +15,13 @@ export function createDatabase(
   databaseUrl: string,
   onConnectionError: (error: Error) => void = () =>
     console.error('POSTGRES_CONNECTION_INTERRUPTED: PostgreSQL connection interrupted'),
-  options?: { observation?: boolean },
+  options?: { observation?: boolean; max?: number },
 ): Kysely<Database> {
-  // Reserve two of the previous ten application connections for observation.
+  // Reserve two of the previous ten application connections for observation;
+  // the scheduler has its own pool (SCHEDULER_POOL_SIZE, server.ts).
   const pool = new Pool({
     connectionString: databaseUrl,
-    max: options?.observation ? 2 : 8,
+    max: options?.max ?? (options?.observation ? 2 : 8),
     // Game statements are short but composite: their estimated cost can cross
     // the JIT threshold, and compiling them (LLVM, production Linux builds) costs
     // far more than it saves. Seen on a staging placement: 1.7 s of work, 4.2 s.

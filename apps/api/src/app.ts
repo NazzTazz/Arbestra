@@ -32,7 +32,12 @@ import { createHttpLogging } from './modules/operations/http-logging.js';
 
 export { journeyJournalFor } from './modules/admin/journey-journal.js';
 
-export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise<FastifyInstance> {
+export async function buildApp(
+  config: AppConfig,
+  db: Kysely<Database>,
+  /** The scheduler's pool: its transactions route on the same command lane. */
+  { schedulerDb }: { schedulerDb?: Kysely<Database> } = {},
+): Promise<FastifyInstance> {
   const httpLogging = createHttpLogging(config.nocHttpLogMode);
   const app = Fastify({
     logger: httpLogging.loggerOptions,
@@ -132,12 +137,15 @@ export async function buildApp(config: AppConfig, db: Kysely<Database>): Promise
     await navigation.close();
     throw error;
   }
-  const unbindRefiner = bindTransactionRefiner(db, {
-    refine: (load) => commandNavigation.network(load),
-    network: (load) => commandNavigation.network(load),
-  });
+  const refiner = {
+    refine: (load: Parameters<typeof commandNavigation.network>[0]) => commandNavigation.network(load),
+    network: (load: Parameters<typeof commandNavigation.network>[0]) => commandNavigation.network(load),
+  };
+  const unbindRefiner = bindTransactionRefiner(db, refiner),
+    unbindSchedulerRefiner = schedulerDb ? bindTransactionRefiner(schedulerDb, refiner) : () => undefined;
   app.addHook('onClose', async () => {
     unbindRefiner();
+    unbindSchedulerRefiner();
     await commandNavigation.close();
   });
   let expeditionErrorAt: string | null = null;
