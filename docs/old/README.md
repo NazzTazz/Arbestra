@@ -26,6 +26,7 @@ Documents clos, conservés pour l'historique (rapports d'incident, contre-recett
 - [REVIEW-INFRASTRUCTURE-2026-10-05](REVIEW-INFRASTRUCTURE-2026-10-05.md) : revue de l'ancienne voirie, système remplacé par les cases de route.
 - [REVIEW-NOC-OBSERVATION-VILLAGE-2026-10-17](REVIEW-NOC-OBSERVATION-VILLAGE-2026-10-17.md) : revue de l'observation NOC, traitée.
 - [REVIEW-STREAMING-TERRAIN](REVIEW-STREAMING-TERRAIN.md) : revue du streaming du terrain, traitée.
+- [BRIEF-CONTRE-REVUE-R3-R1](BRIEF-CONTRE-REVUE-R3-R1.md) : brief de la contre-revue de R3 et R1, traitée dans `c862044`, livrée dans `alpha-2026.11.05.1`.
 
 ## Contre-recettes, corrections et recettes
 

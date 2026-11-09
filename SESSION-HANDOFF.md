@@ -1,4 +1,4 @@
-# Reprise — état au 31 octobre 2026
+# Reprise — état au 9 novembre 2026
 
 Index court : une ligne par chantier, le détail est dans la spec ou l'inventaire liés. Preuves, mesures et incidents des tranches : [archive du 30 octobre](docs/HANDOFF-ARCHIVE-2026-10-30.md) (et [celle du 23](docs/HANDOFF-ARCHIVE-2026-10-23.md)). Changelog des versions alpha : [docs/CHANGELOG-ALPHA.md](docs/CHANGELOG-ALPHA.md). Rapports, incidents et specs clos : [docs/old/](docs/old/README.md).
 
@@ -7,6 +7,7 @@ Index court : une ligne par chantier, le détail est dans la spec ou l'inventair
 - Branche `wip/v2-commandes-bornees`, poussée, `main` à jour. **Alpha** : `alpha-2026.11.05.1` (5 novembre : routes en pente, verrous par zone, R3 et R1, sans migration) sur `alpha-2026.11.04.1` (4 novembre, `5dbfeee` : fin de la synchro V2, I.3 et I.4, terraformation au pinceau, nouveautés de l'Oracle, migrations 079 à 081, [changelog](docs/CHANGELOG-ALPHA.md)) sur `alpha-2026.11.01.1` (1er novembre, `e2eeec4` : route automatique masquée sous les cases de route, plus de périmètre fixe des routes) sur `alpha-2026.10.31.1` (31 octobre : voirie à la case, démolition, terraformation instantanée, migrations 070 à 078 ; conversion 076 : 7 villages, 359 cases de route, 1 case refusée (GemussGarten, terrain), braseros manuels supprimés 100 sur 121 (Catmark 89 sur 90), 21 déplacés ou gardés ; bilan dans `road_conversion_backups`). **Staging** : `staging-2026.11.05.2` (`688c420` : verrous de zone, R3 et R1, routes qui suivent le terrain pierre comprise, outil de test de charge ; depuis le 3 novembre, correctifs de rendu terraformation et vue régionale, campagne de mesures dans le tiroir de dev, [guide](docs/GUIDE-DEVELOPPEUR.md) §6) ; village Test forgé à 4 509 cohortes, à garder.
 - **Prochaine étape** : refonte des réseaux et du pathfinding ([diagnostic](docs/DIAGNOSTIC-NAVIGATION-2026-10-31.md)), puis le backlog ci-dessous.
 - **Dev local** : API lancée avec `JOURNEY_ENABLED=1` (journal des parcours actif) ; migrations jusqu’à 081 ; `rc1-dev` converti en sommets partagés le 31 octobre comme l'alpha (sauvegarde préalable dans `../arbestra-backups/`).
+- **Poste de secours (PC de Marie, à partir du 9 novembre)** : installation par `scripts/dev-setup-windows.ps1` ([guide](docs/GUIDE-DEVELOPPEUR.md) §9) ; base dev du 9 novembre dans `../arbestra-backups/dev-2026-11-09-pc-marie.dump` (39 Mo, hors dépôt, à copier à la main ; option `-Dump`) ; études herbe et scierie poussées sur `etude/tuiles-herbe` et `etude/scierie-factory`.
 
 ## Backlog (après l'alpha du 31 octobre)
 

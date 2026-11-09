@@ -171,7 +171,7 @@ Pour faire mesurer le jeu par un tiers sur sa machine, sans extension ni script 
 
 ## 9. Poste de développement : réseau local et poste de Tristan
 
-Cette section regroupe ce qui sortait du README parce que cela dépend de la machine. Les deux premières sous-sections servent à tout le monde ; la troisième décrit le poste de Tristan et ne s'applique pas à ta machine.
+Cette section regroupe ce qui sortait du README parce que cela dépend de la machine. Les trois premières sous-sections servent à tout le monde ; la dernière décrit le poste de Tristan et ne s'applique pas à ta machine.
 
 ### Tester sur le réseau local (téléphone, autre PC)
 
@@ -180,6 +180,14 @@ Cette section regroupe ce qui sortait du README parce que cela dépend de la mac
 L'adresse du PC peut changer avec le DHCP. Garder le serveur lancé et le PC éveillé. Utiliser le réseau principal, sans isolation des clients Wi-Fi. Les réglages DEV/LOD sont locaux à chaque navigateur et à chaque origine : ceux de `localhost` ne sont pas repris automatiquement sur l'adresse IP.
 
 Le pare-feu doit autoriser Node.js en entrée pour ces ports depuis le réseau local ; aucune redirection de port sur la box n'est nécessaire. Ce serveur HTTP de développement est destiné au réseau de confiance, pas à une exposition Internet. Les UUID de commandes utilisent `getRandomValues` lorsque le navigateur réserve `randomUUID` aux contextes HTTPS/localhost.
+
+### Installation rapide sur un autre PC Windows
+
+`scripts/dev-setup-windows.ps1` enchaîne les étapes du [guide de contribution](../CONTRIBUTING.md#installer-le-projet-en-local) : vérification de Node 24 et de PostgreSQL 17 (natif, ou `-Docker`), `pnpm install`, copie des `.env`, création du rôle `arbestra` et des bases `arbestra` et `arbestra_test`, puis migrations et seed. `-Dump <fichier>` restaure une sauvegarde `pg_dump -Fc` à la place du seed, puis applique les migrations manquantes ; `-Start` lance `corepack pnpm dev`. Le script est réexécutable et ne vide jamais une base déjà remplie.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scriptsdev-setup-windows.ps1 -Dump D:dev-2026-11-09-pc-marie.dump -Start
+```
 
 ### Monde de développement par défaut
 
