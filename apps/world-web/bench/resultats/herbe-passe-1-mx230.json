@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-26",
+  "carte": "ANGLE (NVIDIA, NVIDIA GeForce MX230 (0x00001D11) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "navigateur": "Chrome (Claude in Chrome), onglet au premier plan, préférence high-performance",
+  "parametres": {
+    "mesure_s": 4,
+    "chauffe_s": 2,
+    "chemins": "une ligne et une colonne de terre toutes les 6 cases"
+  },
+  "colonnes": [
+    "mode",
+    "n",
+    "vue",
+    "cpu_ms",
+    "image_ms",
+    "gpu_ms",
+    "complet_ms",
+    "appels",
+    "triangles",
+    "preparation_ms"
+  ],
+  "note": "Passe 1, touffes en petits brins (150 à 225 triangles par tuile). Les thin instances d'une pièce forment un seul maillage pour tout le terrain : au zoom moyen, toutes les cases sont dessinées, même hors champ. La première ligne (plat 20 moyen) est perturbée par la chauffe.",
+  "lignes": [
+    ["plat", 20, "moyen", 5.72, 123.53, 2.39, 10.9, 3, 2544, 56.5],
+    ["plat", 20, "tout", 1.24, 16.7, 1.3, 5.6, 4, 2576, 56.5],
+    ["herbe", 20, "moyen", 1.82, 16.64, 2.53, 9.8, 10, 75612, 72.3],
+    ["herbe", 20, "tout", 1.53, 16.85, 1.12, 7, 11, 75644, 72.3],
+    ["plat", 40, "moyen", 1.25, 16.94, 0.52, 6.3, 6, 8688, 102.1],
+    ["plat", 40, "tout", 1.79, 17.91, 4.97, 7, 9, 11376, 102.1],
+    ["herbe", 40, "moyen", 1.75, 18.03, 2.69, 9.6, 14, 301834, 113.6],
+    ["herbe", 40, "tout", 1.81, 17.65, 5.75, 8.6, 18, 302646, 113.6],
+    ["plat", 80, "moyen", 1.14, 16.62, 1.58, 6.3, 7, 12480, 365.4],
+    ["plat", 80, "tout", 2.19, 19.66, 7.59, 8.9, 25, 43376, 365.4],
+    ["herbe", 80, "moyen", 1.91, 18.66, 7.17, 13, 14, 1203887, 336.3],
+    ["herbe", 80, "tout", 2.63, 19.28, 11.82, 14.8, 32, 1213103, 336.3]
+  ]
+}
