@@ -75,7 +75,7 @@ export async function worldActivePaths(tx: Transaction<Database>, worldId: strin
  * Linear in the cells and rows; ids `anchor:x:y` keep the order stable. */
 type AnchorCell = { villageId: string; cellX: number; cellY: number };
 type AnchorRow = { villageId: string; vertexX: number; vertexY: number; accessory: RoadAnchorAccessory };
-function roadAnchorEquipment(
+export function roadAnchorEquipment(
   cells: readonly AnchorCell[],
   rows: readonly AnchorRow[],
   world: { widthCells: number; heightCells: number },

@@ -1,6 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import {
   buildingAccesses,
+  emptyInfrastructure,
   type BuildingAccessState,
   type InfrastructurePlan,
   type GeneratedLandscape,
@@ -11,6 +12,7 @@ import { HttpError } from '../../errors.js';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-compute-protocol.js';
 import { navigationVersions } from './route-cache.js';
 import { rc1AbsentTrees, removedStumpsSql } from '../deposits/woodland.js';
+import { roadAnchorEquipment } from '../villages/infrastructure.js';
 export interface NavigationData {
   vertices?: import('@arbestra/contracts').TerrainVertex[];
   worldId: string;
@@ -139,6 +141,30 @@ export async function loadNavigationContext(
       const plans = (
         await tx.selectFrom('villageInfrastructure').select('plan').where('worldId', '=', worldId).execute()
       ).map((r) => r.plan);
+      // Road cells and their accessories, as in a village (navigation T1): a
+      // road shortens a trade or an expedition (decision 8), an accessory
+      // blocks it. Migration 082 versions them with the rest of the ground.
+      const roadCells = await tx
+        .selectFrom('roadCells')
+        .select(['villageId', 'cellX', 'cellY', 'surface', 'sidewalks'])
+        .where('worldId', '=', worldId)
+        .orderBy('cellX')
+        .orderBy('cellY')
+        .execute();
+      if (roadCells.length) {
+        const anchors = await tx
+          .selectFrom('roadAnchors')
+          .select(['villageId', 'vertexX', 'vertexY', 'accessory'])
+          .where('worldId', '=', worldId)
+          .orderBy('vertexX')
+          .orderBy('vertexY')
+          .execute();
+        plans.push({
+          ...emptyInfrastructure(),
+          roadCells: roadCells.map(({ cellX, cellY, surface, sidewalks }) => ({ cellX, cellY, surface, sidewalks })),
+          equipment: roadAnchorEquipment(roadCells, anchors, world),
+        });
+      }
       const accesses = buildings.flatMap((b) =>
         buildingAccesses(state, b.id).map((a) => ({
           id: b.id + ':' + a.id,

@@ -3,7 +3,6 @@ import { sql, type Kysely, type Transaction } from 'kysely';
 import {
   ROUTE_POLICY_VERSION,
   marketWorkers,
-  travelDuration,
   type TradeCommand,
   type TradePreview,
   type TravelCell,
@@ -31,6 +30,7 @@ import {
 } from '../navigation/route-cache.js';
 import type { NavigationExecutor } from '../navigation/compute.js';
 import { SharedCalculation } from '../navigation/shared-calculation.js';
+import { pathTravelDuration } from '../navigation/road-cost.js';
 import { assignWorkers, eligibleWorkers, materializeCohorts, projectCohorts } from '../population/work.js';
 import {
   assertMarket,
@@ -114,7 +114,7 @@ export async function prepareTrade(
       });
     if (cached) {
       await touchHallRoute(db, village.worldId, key);
-      const travelMs = Math.max(1, travelDuration(cached.path, village));
+      const travelMs = Math.max(1, await pathTravelDuration(db, village, cached.path));
       if (valid && travelMs <= offer.maxTravelSeconds * 1000)
         return {
           worldId: village.worldId,
@@ -198,7 +198,7 @@ export async function prepareTrade(
         throw new HttpError(503, 'TRADE_PREPARATION_BUSY', 'La préparation du trajet est occupée. Réessayez.');
       });
   let { result, revision, certificate } = await calculate();
-  if (result.kind === 'found' && travelDuration(result.path, village) > offer.maxTravelSeconds * 1000) {
+  if (result.kind === 'found' && (await pathTravelDuration(db, village, result.path)) > offer.maxTravelSeconds * 1000) {
     const remaining = 30000 - (performance.now() - began);
     if (remaining <= 0)
       throw new HttpError(
@@ -209,7 +209,8 @@ export async function prepareTrade(
     const improved = await calculate(true, remaining);
     if (
       improved.result.kind !== 'found' ||
-      travelDuration(improved.result.path, village) < travelDuration(result.path, village)
+      (await pathTravelDuration(db, village, improved.result.path)) <
+        (await pathTravelDuration(db, village, result.path))
     )
       ({ result, revision, certificate } = improved);
   }
@@ -221,7 +222,7 @@ export async function prepareTrade(
     );
   if (result.kind !== 'found' || !result.path.length)
     throw new HttpError(409, 'TRADE_ROUTE', 'Aucun trajet commercial praticable trouvé.');
-  const travelMs = Math.max(1, travelDuration(result.path, village));
+  const travelMs = Math.max(1, await pathTravelDuration(db, village, result.path));
   if (travelMs > offer.maxTravelSeconds * 1000)
     throw new HttpError(409, 'TRADE_DISTANCE', 'Le trajet dépasse le maximum fixé par cette annonce.');
   return {

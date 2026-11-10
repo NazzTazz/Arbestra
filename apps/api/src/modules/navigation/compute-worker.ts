@@ -9,6 +9,7 @@ import {
   planHierarchicalRoute,
   ChunkNavigationCache,
   routeLength,
+  ROAD_STEP_COST,
   spawnDelta,
   buildTravelNetwork,
   refineTravelRoute,
@@ -99,8 +100,20 @@ function build(data: NavigationData, stage: (name: string) => void): NavigationF
     };
   }
   const occupancy = new Map(data.occupancies.map((c) => [c.cellX + ':' + c.cellY, c.buildingId]));
-  const equipment = data.plans.flatMap((p) => p.equipment),
-    surface = new Map(data.plans.flatMap((p) => [...infrastructurePlanSurface(p, world)]));
+  const surface = new Map(data.plans.flatMap((p) => [...infrastructurePlanSurface(p, world)]));
+  // Equipment by cell (±1/8 footprint): a sample checks only its own bin, now
+  // that every accessory of the world is in the plans (navigation T1).
+  const equipmentBins = new Map<string, Array<{ x: number; y: number }>>();
+  for (const e of data.plans.flatMap((p) => p.equipment)) {
+    const point = { x: e.x / 8, y: e.y / 8 };
+    for (let y = Math.floor(point.y - 0.125); y <= Math.floor(point.y + 0.125); y++)
+      for (let x = Math.floor(point.x - 0.125); x <= Math.floor(point.x + 0.125); x++) {
+        const k = wrap(x, data.width) + ':' + wrap(y, data.height),
+          bin = equipmentBins.get(k) ?? [];
+        bin.push(point);
+        equipmentBins.set(k, bin);
+      }
+  }
   const sampleCache = new Map<string, { elevation: number; dry: boolean; blocked: boolean }>();
   const sample = (x: number, y: number, exempt?: string, goals?: ReadonlySet<string>) => {
     const cx = wrap(Math.floor(x + 0.5), data.width),
@@ -112,10 +125,8 @@ function build(data: NavigationData, stage: (name: string) => void): NavigationF
       blocked:
         s.blocked ||
         Boolean(owner && owner !== exempt && !goals?.has(cx + ':' + cy)) ||
-        equipment.some(
-          (e) =>
-            Math.abs(spawnDelta(e.x / 8, x, data.width)) < 0.125 &&
-            Math.abs(spawnDelta(e.y / 8, y, data.height)) < 0.125,
+        (equipmentBins.get(wrap(Math.floor(x), data.width) + ':' + wrap(Math.floor(y), data.height)) ?? []).some(
+          (e) => Math.abs(spawnDelta(e.x, x, data.width)) < 0.125 && Math.abs(spawnDelta(e.y, y, data.height)) < 0.125,
         ),
     };
   };
@@ -155,12 +166,20 @@ function build(data: NavigationData, stage: (name: string) => void): NavigationF
           return false;
       return true;
     },
+    // The travelDuration rule (decision 8): each eighth step costs 0.7 when it
+    // arrives on a road pixel, 1 otherwise.
     cost(a, b) {
-      const x = wrap(Math.floor((a.cellX + spawnDelta(b.cellX, a.cellX, data.width) / 2) * 16), data.width * 16),
-        y = wrap(Math.floor((a.cellY + spawnDelta(b.cellY, a.cellY, data.height) / 2) * 16), data.height * 16);
-      return (
-        routeLength([a, b], { width: data.width, height: data.height }) * (surface.get(x + ':' + y)?.manual ? 0.7 : 1)
-      );
+      const dx = spawnDelta(b.cellX, a.cellX, data.width),
+        dy = spawnDelta(b.cellY, a.cellY, data.height),
+        length = routeLength([a, b], { width: data.width, height: data.height }),
+        n = Math.max(1, Math.ceil(length * 8 - 1e-9));
+      let factor = 0;
+      for (let i = 1; i <= n; i++) {
+        const x = wrap(Math.round((a.cellX + (dx * i) / n) * 16), data.width * 16),
+          y = wrap(Math.round((a.cellY + (dy * i) / n) * 16), data.height * 16);
+        factor += surface.get(x + ':' + y)?.manual ? ROAD_STEP_COST : 1;
+      }
+      return (length * factor) / n;
     },
   };
   // Historical science allowed its occupied target cell; preserve that ground
