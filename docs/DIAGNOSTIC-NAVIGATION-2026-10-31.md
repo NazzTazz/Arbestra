@@ -87,7 +87,7 @@ La construction ne cherche aucun chemin : elle refuse seulement une emprise pos�
 - Contraintes techniques réelles : tore ; déterminisme ; pas de SQL dans les workers ; ordre des verrous ; chemins persistés ; budgets d'image client.
 - Doublons : deux compositions du sol ; trois invalidations ; trois planificateurs plus l'onboarding ; A* client et serveur.
 - Problèmes démontrés : invalidation mondiale ; calcul lourd sous verrou exclusif mondial et sur le fil principal ; « inaccessible » = « hors budget » ; cache coupé silencieusement ; couplage entre routes ; boucle réseau → routes automatiques → `inheritedRoads` → coût.
-- **Décisions de game design ouvertes** : sort d'un trajet engagé devenu impraticable (continuer, se re-router, s'arrêter, échouer) ; les routes accélèrent-elles ou attirent-elles seulement ; lignes de désir observées ou calculées ; effet économique d'un bâtiment inaccessible ; profils par entité (piéton, charrette, convoi, armée).
+- **Décisions de game design** (tranchées le 10 novembre, [décisions 7 à 11](DECISIONS-NAVIGATION-2026-10-31.md#décisions-de-game-design-du-10-novembre-2026)) : sort d'un trajet engagé devenu impraticable (continuer, se re-router, s'arrêter, échouer) ; les routes accélèrent-elles ou attirent-elles seulement ; lignes de désir observées ou calculées ; effet économique d'un bâtiment inaccessible ; profils par entité (piéton, charrette, convoi, armée).
 
 ## 8. Directions possibles (sans préjuger de la structure)
 

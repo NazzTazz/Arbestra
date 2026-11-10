@@ -43,5 +43,5 @@ Le combat arrive en dernier par nature : il repose sur tout le reste.
 
 - **Taille du monde et nombre de joueurs par monde.** Avec les règles actuelles (une habitation loge 25 habitants au niveau 2), cent joueurs à 300 000 habitants demandent environ 9 fois le monde RC1 actuel (512 × 256 cases), en logement seul. Leviers : monde plus grand, logement plus dense, moins de joueurs par monde.
 - **Règles du brouillard de renseignement** (en cours chez Tristan), et si le HUD monde montre tout le monde ou seulement ce qui a été relevé.
-- **Méthode de la refonte des trajets.**
+- **Méthode de la refonte des trajets.** Décisions de game design tranchées le 10 novembre ([décisions 7 à 11](DECISIONS-NAVIGATION-2026-10-31.md#décisions-de-game-design-du-10-novembre-2026)) ; reste la méthode technique.
 - **Règles mobiles pour les nouveaux outils** (pas d'action au seul survol ou au seul clavier, vérification en paysage mobile, cibles de 44 px) : à décider plus tard.
