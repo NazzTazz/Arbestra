@@ -53,6 +53,66 @@ export function pathLength(path: readonly WorkerPoint[]) {
   return length;
 }
 
+/** Walking factor at a scene point: ROAD_STEP_COST on a road laid by a player,
+ * 1 elsewhere (decision 8, 10 November). A walker covers `speed / factor` per
+ * second: it goes faster on a road, at the server's own cost rule. */
+export type WalkFactor = (point: WorkerPoint) => number;
+export const flatWalk: WalkFactor = () => 1;
+/** Cumulative length and walking cost of a path, sampled every eighth of a cell. */
+export interface CostProfile {
+  readonly distances: Float64Array;
+  readonly costs: Float64Array;
+}
+/** An eighth of a cell, in scene units (world-space.ts, CELL_UNITS = 2.5). */
+const COST_STEP = 2.5 / 8;
+const profiles = new WeakMap<readonly WorkerPoint[], { factor: WalkFactor; profile: CostProfile }>();
+/**
+ * Built once per path and walk factor (a new factor when the roads change),
+ * then read by binary search: never per frame. The visual counterpart of the
+ * server's travelDuration, on the walked (visual) path.
+ */
+export function costProfile(path: readonly WorkerPoint[], factor: WalkFactor): CostProfile {
+  const cached = profiles.get(path);
+  if (cached?.factor === factor) return cached.profile;
+  const distances = [0],
+    costs = [0];
+  let distance = 0,
+    cost = 0;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1]!,
+      b = path[i]!,
+      length = Math.hypot(b.x - a.x, b.z - a.z),
+      n = Math.max(1, Math.ceil(length / COST_STEP)),
+      step = length / n;
+    for (let j = 1; j <= n; j++) {
+      distance += step;
+      cost += step * factor({ x: a.x + ((b.x - a.x) * j) / n, z: a.z + ((b.z - a.z) * j) / n });
+      distances.push(distance);
+      costs.push(cost);
+    }
+  }
+  const profile = { distances: Float64Array.from(distances), costs: Float64Array.from(costs) };
+  profiles.set(path, { factor, profile });
+  return profile;
+}
+export const profileCost = (profile: CostProfile) => profile.costs[profile.costs.length - 1]!;
+export const profileLength = (profile: CostProfile) => profile.distances[profile.distances.length - 1]!;
+/** Distance along the path once `cost` has been walked. O(log n). */
+export function distanceAtCost(profile: CostProfile, cost: number): number {
+  const { costs, distances } = profile;
+  if (cost <= 0) return 0;
+  if (cost >= costs[costs.length - 1]!) return distances[distances.length - 1]!;
+  let lo = 0,
+    hi = costs.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (costs[mid]! < cost) lo = mid;
+    else hi = mid;
+  }
+  const span = costs[hi]! - costs[lo]!;
+  return distances[lo]! + (span > 0 ? ((cost - costs[lo]!) / span) * (distances[hi]! - distances[lo]!) : 0);
+}
+
 /** Access searches can revisit a waypoint before continuing to the worksite.
  * Remove those closed detours for presentation: a following pair cannot pass
  * its leader on a narrow out-and-back spur. Every retained leg already exists
@@ -219,6 +279,8 @@ interface Passage {
 export class WorkerTraffic {
   readonly passages = new Map<string, Passage>();
   blocked = 0;
+  /** Walking factor of the ground (roads), set by the owner before each step. */
+  factor: WalkFactor = flatWalk;
   #waitOrder = new Map<string, number>();
   rebuild(paths: readonly WorkerPoint[][]) {
     const nodes = new Map<string, { point: WorkerPoint; links: Set<string>; turn: boolean }>();
@@ -395,7 +457,10 @@ export class WorkerTraffic {
         // Formation changes must not pull a follower backwards along its route.
         let distance = holdDistance
           ? a.distance
-          : Math.min(length + (a.member ?? 0) * 0.5, a.distance + a.speed * dt + Math.max(0, offset - priorOffset));
+          : Math.min(
+              length + (a.member ?? 0) * 0.5,
+              a.distance + (a.speed * dt) / this.factor(a.position) + Math.max(0, offset - priorOffset),
+            );
         const leader = actors.find(
           (v) => v.mission === a.mission && v.rank === a.rank && v.member === 0 && !v.done && v.path === a.path,
         );

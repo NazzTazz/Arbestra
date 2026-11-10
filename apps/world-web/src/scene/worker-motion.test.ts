@@ -8,7 +8,11 @@ import {
   WORKER_CLEARANCE,
   gardenHarvestPoint,
   workerPassagePath,
+  costProfile,
+  distanceAtCost,
+  profileCost,
   type TrafficActor,
+  type WalkFactor,
   type WorkerPoint,
 } from './worker-motion';
 import { worksiteLayout, worksiteConnector } from './worksite-layout';
@@ -477,4 +481,51 @@ it('crosses two opposing pairs after changing to files without permanent waits',
   );
   expect(simulate(t, people, 40)).toBeGreaterThanOrEqual(WORKER_CLEARANCE - 0.006);
   expect(people.every((p) => p.done)).toBe(true);
+});
+
+describe('walking at the cost of roads (navigation T1, decision 8)', () => {
+  // A straight 25-unit path (10 cells); its middle 10 units (4 cells) are a road.
+  const path: WorkerPoint[] = [
+    { x: 0, z: 0 },
+    { x: 25, z: 0 },
+  ];
+  const road: WalkFactor = (p) => (p.x > 7.5 && p.x <= 17.5 ? 0.7 : 1);
+
+  it('measures the walking cost once per path and factor, then reads it in O(log n)', () => {
+    let calls = 0;
+    const counted: WalkFactor = (p) => (calls++, road(p));
+    const profile = costProfile(path, counted);
+    // One sample per eighth of a cell: 10 cells, 80 samples.
+    expect(calls).toBe(80);
+    expect(profileCost(profile)).toBeCloseTo(15 + 10 * 0.7, 9);
+    expect(costProfile(path, counted)).toBe(profile);
+    expect(calls, 'cached: no factor call on reuse').toBe(80);
+    expect(distanceAtCost(profile, 7.5)).toBeCloseTo(7.5, 9);
+    expect(distanceAtCost(profile, 7.5 + 7)).toBeCloseTo(17.5, 9);
+    expect(distanceAtCost(profile, 1e9)).toBe(25);
+  });
+
+  it('arrives at the deadline and crosses the road faster, with one factor call per walker and step', () => {
+    const traffic = new WorkerTraffic(),
+      profile = costProfile(path, road),
+      seconds = 10,
+      walker = actor('w', path, { speed: profileCost(profile) / seconds, visible: true });
+    let calls = 0;
+    traffic.factor = (p) => (calls++, road(p));
+    traffic.rebuild([path]);
+    const crossed: number[] = [];
+    let steps = 0;
+    for (; steps < (seconds * 1.1) / WORKER_STEP && !walker.done; steps++) {
+      traffic.step([walker], steps * WORKER_STEP * 1000);
+      if (walker.distance > 7.5 && !crossed.length) crossed.push(steps);
+      if (walker.distance > 17.5 && crossed.length === 1) crossed.push(steps);
+    }
+    expect(calls).toBeLessThanOrEqual(steps);
+    // Arrival within two steps of the deadline.
+    expect(Math.abs(steps * WORKER_STEP - seconds)).toBeLessThan(2 * WORKER_STEP + 1e-9);
+    // 10 road units take 7/22 of the time instead of 10/25.
+    const share = ((crossed[1]! - crossed[0]!) * WORKER_STEP) / seconds;
+    expect(share).toBeGreaterThan(0.3);
+    expect(share).toBeLessThan(0.34);
+  });
 });

@@ -14,6 +14,11 @@ import {
   WORKER_CLEARANCE,
   pathLength,
   sampleWorkerPath,
+  costProfile,
+  distanceAtCost,
+  flatWalk,
+  profileCost,
+  type WalkFactor,
   workerAppearance,
   gardenHarvestPoint,
   workerPassagePath,
@@ -70,6 +75,13 @@ interface Materials {
 }
 /** A presentation path point; door lanes carry their tag and file width. */
 export type PathPoint = Vector3 & { lane?: DoorLane; width?: number };
+/** A route walked back, built once per route: its cost profile is then cached too. */
+const reversals = new WeakMap<readonly WorkerPoint[], WorkerPoint[]>();
+function reversedRoute(route: readonly WorkerPoint[]): WorkerPoint[] {
+  let back = reversals.get(route);
+  if (!back) reversals.set(route, (back = [...route].reverse()));
+  return back;
+}
 export interface WorkerHooks {
   /** Hall journey outward; `lane` picks the door lane walked in that direction ('out' by default). */
   path: (path: TravelCell[], lane?: DoorLane) => PathPoint[];
@@ -95,6 +107,8 @@ export interface WorkerHooks {
    * grove. Falls back to `free` when absent.
    */
   stageFree?: (point: WorkerPoint, radius: number) => boolean;
+  /** Current walking factor of the ground (roads); a new function when the roads change. */
+  walkFactor?: () => WalkFactor;
 }
 /** A real grove tree, in scene units: kit variant, scales and its own turn. */
 export interface FelledTree extends WorkerPoint {
@@ -760,7 +774,7 @@ export class VillageWorkers {
         direction: 1,
         path: group.route,
         distance: 0,
-        speed: Math.max(0.8, pathLength(group.route) / Math.max(0.5, m.transportMs / 1000)),
+        speed: Math.max(0.8, this.#walkCost(group.route) / Math.max(0.5, m.transportMs / 1000)),
         position: { ...group.route[0]! },
         visible: false,
         waitingSince: null,
@@ -819,15 +833,17 @@ export class VillageWorkers {
       backStart = m.completesAt - m.transportMs;
     if (m.resource === 'trade') {
       const returning = now >= outEnd,
-        path = returning ? [...g.route].reverse() : g.route;
+        path = returning ? reversedRoute(g.route) : g.route,
+        profile = costProfile(path, this.#walk());
       const progress = Math.max(0, Math.min(1, (now - (returning ? outEnd : m.startedAt)) / m.transportMs));
       p.phase = now >= m.completesAt ? 'done' : returning ? 'inbound' : 'outbound';
       p.actor.path = path;
       p.actor.direction = returning ? -1 : 1;
       p.actor.visible = now >= m.startedAt && now < m.completesAt;
-      p.actor.distance = Math.max(0, pathLength(path) * progress - p.index * 0.35);
+      // At the walking cost: faster on roads, still arriving at the server's deadline.
+      p.actor.distance = Math.max(0, distanceAtCost(profile, profileCost(profile) * progress) - p.index * 0.35);
       p.actor.position = sampleWorkerPath(path, p.actor.distance);
-      p.actor.speed = pathLength(path) / (m.transportMs / 1000);
+      p.actor.speed = profileCost(profile) / (m.transportMs / 1000);
       p.actor.startAt = now;
       p.actor.done = p.phase === 'done';
       p.working = false;
@@ -876,9 +892,9 @@ export class VillageWorkers {
         p.actor.direction = -1;
         p.actor.path = this.#backRoute(g);
         const duration = Math.max(1, m.completesAt - m.startedAt - last.workEndsAfterMs);
-        p.actor.speed = pathLength(p.actor.path) / (duration / 1000);
-        p.actor.distance = Math.min(
-          pathLength(p.actor.path),
+        p.actor.speed = this.#walkCost(p.actor.path) / (duration / 1000);
+        p.actor.distance = distanceAtCost(
+          costProfile(p.actor.path, this.#walk()),
           (p.actor.speed * (now - m.startedAt - last.workEndsAfterMs)) / 1000,
         );
         p.actor.startAt = now;
@@ -897,8 +913,11 @@ export class VillageWorkers {
         if (now < m.startedAt + stop.arrivesAfterMs) {
           p.phase = 'outbound';
           p.actor.path = g.route;
-          p.actor.speed = pathLength(g.route) / (legMs / 1000);
-          p.actor.distance = Math.max(0, (p.actor.speed * (now - m.startedAt - legStart)) / 1000);
+          p.actor.speed = this.#walkCost(g.route) / (legMs / 1000);
+          p.actor.distance = distanceAtCost(
+            costProfile(g.route, this.#walk()),
+            (p.actor.speed * (now - m.startedAt - legStart)) / 1000,
+          );
         } else {
           p.phase = 'work';
           p.actor.position = { ...this.#post(p, g, now, true) };
@@ -918,7 +937,8 @@ export class VillageWorkers {
       p.actor.path = this.#backRoute(g);
       p.actor.distance = Math.max(
         0,
-        Math.min(pathLength(g.route), (p.actor.speed * (now - backStart)) / 1000 - Math.floor(p.index / 2) * 0.52),
+        distanceAtCost(costProfile(p.actor.path, this.#walk()), (p.actor.speed * (now - backStart)) / 1000) -
+          Math.floor(p.index / 2) * 0.52,
       );
       p.actor.startAt = now;
     } else if (now >= outEnd) {
@@ -933,13 +953,24 @@ export class VillageWorkers {
       p.phase = 'outbound';
       p.actor.path = g.route;
       p.actor.direction = 1;
-      p.actor.distance = Math.max(0, (p.actor.speed * (now - m.startedAt)) / 1000 - Math.floor(p.index / 2) * 0.52);
+      p.actor.distance = Math.max(
+        0,
+        distanceAtCost(costProfile(g.route, this.#walk()), (p.actor.speed * (now - m.startedAt)) / 1000) -
+          Math.floor(p.index / 2) * 0.52,
+      );
       p.actor.startAt = Math.max(now, m.startedAt + Math.floor(p.index / 2) * 230);
     }
     if (p.phase === 'outbound' || p.phase === 'inbound')
       p.actor.position = sampleWorkerPath(p.actor.path, p.actor.distance);
     p.last = { ...p.actor.position };
     p.previous = { ...p.actor.position };
+  }
+  #walk(): WalkFactor {
+    return this.hooks.walkFactor?.() ?? flatWalk;
+  }
+  /** Walking cost of a route: speeds are cost per second (decision 8). */
+  #walkCost(route: readonly WorkerPoint[]): number {
+    return profileCost(costProfile(route, this.#walk()));
   }
   /** Homeward route: the same road, entering the hall by its entry lane. */
   #backRoute(g: Group): WorkerPoint[] {
@@ -1888,7 +1919,7 @@ export class VillageWorkers {
       p.actor.done = false;
       p.actor.startAt = now;
       p.actor.member = 0;
-      p.actor.speed = pathLength(g.route) / Math.max(0.5, legMs / 1000);
+      p.actor.speed = this.#walkCost(g.route) / Math.max(0.5, legMs / 1000);
       p.actor.direction = 1;
       p.actor.rank = 0;
       return;
@@ -2037,6 +2068,7 @@ export class VillageWorkers {
       const tradeIds = new Set(
         [...this.#groups.values()].filter((g) => g.mission.resource === 'trade').map((g) => g.mission.id),
       );
+      this.#traffic.factor = this.#walk();
       this.#traffic.step(
         actors.filter((a) => !tradeIds.has(a.mission)),
         now,

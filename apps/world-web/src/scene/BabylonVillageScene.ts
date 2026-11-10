@@ -45,6 +45,8 @@ import {
   infrastructureSurface,
   infrastructurePlanSurface,
   overlayRoadCells,
+  pixelKey,
+  ROAD_STEP_COST,
   wrapCoordinate,
   type InfrastructureOperation,
   type RoadPixel,
@@ -175,7 +177,7 @@ import {
   transformPoint,
   type BuildingPlan,
 } from './building-plan';
-import type { DoorLane } from './worker-motion';
+import { flatWalk, type DoorLane, type WalkFactor } from './worker-motion';
 const TILE_SIZE = 2.5;
 
 import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
@@ -1486,6 +1488,7 @@ export class BabylonVillageScene {
         leisureVersion: () => this.#groundKey(),
         fellTree: (featureId, _near, lotId) => this.#fellTree(featureId, lotId),
         stageFree: (point, radius) => this.#stageFree(point, radius, workerSpatial),
+        walkFactor: () => this.#walkFactor(),
         releaseTree: (lotId) => this.#releaseTree(lotId),
         key: (point) => {
           const cell = this.#space!.inverse(point.x, point.z);
@@ -3375,6 +3378,32 @@ export class BabylonVillageScene {
    * barriers and equipment. Paths are allowed and the worked grove has no
    * exclusion around its centre: standing among its trees is the point.
    */
+  #walk: { cells: VillageState['roadCells']; space: WorldSpace; version: number; factor: WalkFactor } | null = null;
+  /** Walking factor of villagers at a scene point: ROAD_STEP_COST on a road cell's
+   * pixels, 1 elsewhere, the server's cost rule (decision 8). One map lookup;
+   * rebuilt only when the road cells or the projection change. */
+  #walkFactor(): WalkFactor {
+    const state = this.#state,
+      space = this.#space;
+    if (!state || !space || !state.roadCells?.length) return flatWalk;
+    const cached = this.#walk;
+    if (cached?.cells === state.roadCells && cached.space === space && cached.version === space.version)
+      return cached.factor;
+    const surface = new Map<string, RoadPixel>(),
+      w = state.world.widthCells * 16,
+      h = state.world.heightCells * 16;
+    overlayRoadCells(surface, state.roadCells, state.world);
+    const factor: WalkFactor = (p) => {
+      const cell = space.inverse(p.x, p.z);
+      return surface.get(
+        pixelKey(wrapCoordinate(Math.round(cell.cellX * 16), w), wrapCoordinate(Math.round(cell.cellY * 16), h)),
+      )?.manual
+        ? ROAD_STEP_COST
+        : 1;
+    };
+    this.#walk = { cells: state.roadCells, space, version: space.version, factor };
+    return factor;
+  }
   #stageFree(point: { x: number; z: number }, radius: number, spatial: WorkerObstacles): boolean {
     if (!this.#space || !this.#store || !this.#state) return false;
     spatial.update(this.#state);
