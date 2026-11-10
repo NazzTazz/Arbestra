@@ -12,6 +12,7 @@ import {
   infrastructurePlanSurface,
   infrastructureBlockedPixels,
   infrastructureBarrierAt,
+  overlayRoadCells,
   pixelKey,
   type RoadPixel,
 } from './infrastructure.js';
@@ -51,6 +52,9 @@ export interface TravelNetworkState extends Omit<BuildingAccessState, 'cells'> {
     }
   >;
   infrastructure?: VillageState['infrastructure'];
+  /** Road cells for the coarse costs of a network without `infrastructure` (no
+   * refinement): its witnesses follow roads as the refined searches do. */
+  roadCells?: NonNullable<NonNullable<VillageState['infrastructure']>['roadCells']>;
 }
 export interface TravelRoute {
   version?: 2;
@@ -86,7 +90,8 @@ export const GARDEN_CROSSING_COST = 30;
  * inherited strokes of the plan (Tristan, 30 October: roads draw villagers off
  * their desire lines). Before, the coarse search ignored roads, so a road only
  * mattered when the fine search left the coarse corridor. Same factor as a road
- * or guide step of the fine search and as a shared coarse track. Tunable in
+ * step of the fine search and of travelDuration (since 10 November roads also
+ * shorten travel, decision 8), and as a shared coarse track. Tunable in
  * [0.7, 1]: below 0.7 every A* lower bound of this file (0.7 per step) would
  * have to follow. A road k cells aside costs 2k extra steps and saves 0.3 per
  * step along it: it draws a route that can follow it for more than about 7k
@@ -94,6 +99,16 @@ export const GARDEN_CROSSING_COST = 30;
  * exceed the coarse detour allowance (+8 steps) and never draw it.
  */
 export const ROAD_STEP_COST = 0.7;
+/**
+ * Whether the 1/16-cell pixel (wrapped world coordinates) lies on a road laid
+ * by a player. The single road rule of travel costs and durations (Tristan,
+ * 10 November, decision 8): an eighth-cell step costs ROAD_STEP_COST when the
+ * pixel of the point it arrives at is a road, 1 otherwise.
+ */
+export type RoadLookup = (pixelX: number, pixelY: number) => boolean;
+export function roadLookup(surface: ReadonlyMap<string, RoadPixel>): RoadLookup {
+  return (x, y) => surface.get(pixelKey(x, y))?.manual === true;
+}
 /** Active garden plots, by cell, with the garden (building) they belong to. */
 function gardenOwners(state: Pick<TravelNetworkState, 'cells'>): Map<string, string> {
   const owners = new Map<string, string>();
@@ -401,6 +416,7 @@ export function buildTravelNetwork(
       [...state.infrastructure.equipment].sort((a, b) => a.id.localeCompare(b.id)).map((e) => [e.id, e.x, e.y]),
       state.infrastructure.roadCells,
     ],
+    !state.infrastructure && state.roadCells,
   ]);
   const alias = networkAliases.get(input),
     aliased = alias === undefined ? undefined : networkCache.get(alias);
@@ -412,8 +428,18 @@ export function buildTravelNetwork(
   }
   if (alias !== undefined) removeNetworkAlias(input);
   const geometry = state.infrastructure ? navigationGeometry(state) : undefined;
+  const coarseSurface =
+    geometry?.surface ??
+    (state.roadCells?.length
+      ? (() => {
+          const surface = new Map<string, RoadPixel>();
+          overlayRoadCells(surface, state.roadCells, world);
+          return surface;
+        })()
+      : undefined);
   const signature = JSON.stringify([
     spatial,
+    !geometry && state.roadCells,
     geometry && [
       [...geometry.surface.values()]
         .filter((p) => p.manual)
@@ -431,7 +457,7 @@ export function buildTravelNetwork(
     return copyNetwork(cached);
   }
   const walk = passageInspector(ground, world);
-  const roads = geometry ? coarseRoadEdges(geometry.surface, world) : new Set<string>();
+  const roads = coarseSurface ? coarseRoadEdges(coarseSurface, world) : new Set<string>();
   const hall = state.cells.find(
     (c) =>
       c.building &&
@@ -560,6 +586,9 @@ export function buildTravelNetwork(
   }
   // Keep the common network as the guide for local access/obstacle refinement.
   // Previously every destination started a fresh, unrelated shortest-path search.
+  // Display only: mission paths are refined without a guide (refineVillagePath),
+  // so their search cost is exactly travelDuration's (decision 8). The guide
+  // keeps this all-goals network bounded until it is removed (navigation T4).
   const guide = new Set<string>();
   for (const route of routes) if (!seeded.has(route.id)) for (const p of route.cells) guide.add(key(p));
   const refinement = state.infrastructure ? prepareRefinement(state, ground, geometry, walk) : undefined;
@@ -583,10 +612,39 @@ export function buildTravelNetwork(
   return copyNetwork(result);
 }
 
+/**
+ * Duration of a path, in ms: its cost at one second per cell. With `roads`,
+ * every segment is walked in eighth-cell steps and a step costs ROAD_STEP_COST
+ * when it arrives on a road pixel: the exact cost the fine search minimises,
+ * so roads shorten travel (decision 8). Without, the historical length.
+ */
 export function travelDuration(
   path: readonly TravelCell[],
   world?: { widthCells: number; heightCells: number },
+  roads?: RoadLookup,
 ): number {
+  if (world && roads) {
+    const w = world.widthCells * 16,
+      h = world.heightCells * 16;
+    let cost = 0;
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1]!,
+        b = path[i]!,
+        dx = delta(b.cellX, a.cellX, world.widthCells),
+        dy = delta(b.cellY, a.cellY, world.heightCells),
+        length = Math.abs(dx) + Math.abs(dy);
+      if (!length) continue;
+      const n = Math.max(1, Math.ceil(length * 8 - 1e-9)),
+        step = length / n;
+      for (let j = 1; j <= n; j++)
+        cost +=
+          step *
+          (roads(wrap(Math.round((a.cellX + (dx * j) / n) * 16), w), wrap(Math.round((a.cellY + (dy * j) / n) * 16), h))
+            ? ROAD_STEP_COST
+            : 1);
+    }
+    return Math.round(cost * 1000);
+  }
   let length = 0;
   const fine = path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY));
   for (let i = 1; i < path.length; i++) {
@@ -768,6 +826,8 @@ export function refineTravelRoute(
   if (!destination) return route;
   const context = prepared ?? cache?.prepared ?? prepareRefinement(state, ground);
   const { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells, gardens } = context;
+  const roads = roadLookup(surface),
+    pathCost = (cells: readonly TravelCell[]) => travelDuration(cells, world, roads);
   const gardenAt = (x: number, y: number) =>
     gardens.get(
       wrap(Math.floor(y + 0.5), world.heightCells) * world.widthCells + wrap(Math.floor(x + 0.5), world.widthCells),
@@ -951,12 +1011,11 @@ export function refineTravelRoute(
       );
       if (connector) {
         const cells = [...connector.cells, ...tail.slice(1)];
-        const length = travelDuration(cells, world) / 1000,
-          start = cells[0]!;
+        const start = cells[0]!;
         const direct =
           Math.abs(delta(route.destination.cellX, start.cellX, world.widthCells)) +
           Math.abs(delta(route.destination.cellY, start.cellY, world.heightCells));
-        if (length <= direct + 16) return result(cells);
+        if (pathCost(cells) / 1000 <= direct + 16) return result(cells);
       }
     }
   }
@@ -985,17 +1044,23 @@ export function refineTravelRoute(
         connector: (a) => accessClear(starts[Number(a.id)]!, hall.building!.id),
         walk: segmentClear,
         // Lattice edges are cardinal, of one eighth or one cell: each eighth
-        // step pays its cell's garden factor, as in the fine search below.
-        ...(crossesGardens
+        // step pays its road and garden factors, as in the fine search below.
+        ...(crossesGardens || roadNodes.length
           ? {
-              minimumCost: 1,
+              minimumCost: roadNodes.length ? ROAD_STEP_COST : 1,
               cost: (a: TravelCell, b: TravelCell) => {
                 const dx = delta(b.cellX, a.cellX, world.widthCells),
                   dy = delta(b.cellY, a.cellY, world.heightCells),
                   length = Math.abs(dx) + Math.abs(dy),
                   n = Math.max(1, Math.round(length * 8));
                 let factor = 0;
-                for (let i = 1; i <= n; i++) factor += crossing(a.cellX + (dx * i) / n, a.cellY + (dy * i) / n);
+                for (let i = 1; i <= n; i++) {
+                  const x = a.cellX + (dx * i) / n,
+                    y = a.cellY + (dy * i) / n;
+                  factor +=
+                    (roads(wrap(Math.round(x * 16), w * 2), wrap(Math.round(y * 16), h * 2)) ? ROAD_STEP_COST : 1) *
+                    (crossesGardens ? crossing(x, y) : 1);
+                }
                 return (length * factor) / n;
               },
             }
@@ -1013,7 +1078,7 @@ export function refineTravelRoute(
         limits: { maxNodes: Math.min(8192, search?.maxVisited ?? 8192), maxDurationMs: 1000 },
       },
     );
-    if (witness.kind === 'found' && witness.length <= direct + 16) return result(witness.path);
+    if (witness.kind === 'found' && pathCost(witness.path) / 1000 <= direct + 16) return result(witness.path);
   }
   for (const start of starts)
     for (const end of ends.length ? ends : [null]) {
@@ -1152,11 +1217,17 @@ export function refineTravelRoute(
               const manual = surface.get(
                 pixelKey(wrap(node.cellX * 2, world.widthCells * 16), wrap(node.cellY * 2, world.heightCells * 16)),
               )?.manual;
-              const guided = guide.has(
-                `${wrap(Math.round(p.cellX), world.widthCells)}:${wrap(Math.round(p.cellY), world.heightCells)}`,
-              );
-              // A factor >= 1 only: estimate() and the 0.7 minimum stay lower bounds.
-              cost += (manual || guided ? 0.7 : 1) * (crossesGardens ? crossing(p.cellX, p.cellY) : 1);
+              // Without a guide (every mission path), exactly the travelDuration
+              // rule: 0.7 on a road pixel, 1 elsewhere. The guide of the display
+              // network discounts like a road. The garden factor is >= 1 only:
+              // estimate() and the 0.7 minimum stay lower bounds, and it never
+              // enters a duration.
+              const guided =
+                guide.size > 0 &&
+                guide.has(
+                  `${wrap(Math.round(p.cellX), world.widthCells)}:${wrap(Math.round(p.cellY), world.heightCells)}`,
+                );
+              cost += (manual || guided ? ROAD_STEP_COST : 1) * (crossesGardens ? crossing(p.cellX, p.cellY) : 1);
               steps++;
             }
             if (!valid) break;
@@ -1197,7 +1268,7 @@ export function refineTravelRoute(
         ...(end ? [end.position] : []),
         ...(!local(route.destination) ? route.cells.slice(lastLocal + 1) : []),
       ];
-      if (!best || travelDuration(path, world) < travelDuration(best, world)) best = path;
+      if (!best || pathCost(path) < pathCost(best)) best = path;
     }
   if (!best && limited) search?.onLimit?.();
   return result(best);

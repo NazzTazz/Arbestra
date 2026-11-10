@@ -68,6 +68,7 @@ export function networkState(s: TravelNetworkState): TravelNetworkState {
         : null,
     })),
     ...(s.infrastructure ? { infrastructure: s.infrastructure } : {}),
+    ...(s.roadCells?.length ? { roadCells: s.roadCells } : {}),
   };
 }
 

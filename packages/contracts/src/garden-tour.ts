@@ -1,4 +1,10 @@
-import { GARDEN_CROSSING_COST, travelDuration, type TravelCell, type TravelRoute } from './travel-paths.js';
+import {
+  GARDEN_CROSSING_COST,
+  travelDuration,
+  type RoadLookup,
+  type TravelCell,
+  type TravelRoute,
+} from './travel-paths.js';
 const key = (p: TravelCell) => `${p.cellX}:${p.cellY}`;
 
 /** Reuses the already-authorized cardinal road graph, without new world navigation. */
@@ -7,11 +13,13 @@ export function planGardenTour(
   home: TravelCell,
   cells: readonly TravelCell[],
   world?: { widthCells: number; heightCells: number },
+  /** Roads laid by players: legs are chosen and timed at their cost (decision 8). */
+  roads?: RoadLookup,
 ) {
   const duration = (path: readonly TravelCell[]) =>
     !world && path.every((p) => Number.isInteger(p.cellX) && Number.isInteger(p.cellY))
       ? Math.max(0, path.length - 1) * 1000
-      : travelDuration(path, world);
+      : travelDuration(path, world, roads);
   // The network names each plot route `${gardenId}:${x}:${y}`. A leg chooses its
   // way as the network does: plots of other gardens than the leg's own ends cost
   // GARDEN_CROSSING_COST per step. Durations stay physical.

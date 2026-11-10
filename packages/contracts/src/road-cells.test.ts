@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { emptyInfrastructure, infrastructurePlanSurface } from './infrastructure.js';
 import { roadCellStoneCost, uniqueRoadCells } from './road-cells.js';
-import { buildTravelNetwork, travelDuration, type TravelRoute } from './travel-paths.js';
+import { buildTravelNetwork, refineTravelRoute, roadLookup, travelDuration, type TravelRoute } from './travel-paths.js';
 import type { VillageState } from './villages.js';
 
 const world = { id: 'w', widthCells: 64, heightCells: 64 };
@@ -57,6 +57,34 @@ describe('road cell gestures', () => {
       b = { cellX: 4, cellY: 3 };
     expect(uniqueRoadCells([a, b, { ...a }, b, a])).toEqual([a, b]);
     expect(uniqueRoadCells([b])).toEqual([b]);
+  });
+});
+
+describe('travel duration follows the path cost (decision 8, 10 November)', () => {
+  const along = Array.from({ length: 11 }, (_, i) => ({ cellX: 5 + i, cellY: 5 }));
+  const lookup = (roads: ReturnType<typeof cell>[]) =>
+    roadLookup(infrastructurePlanSurface({ ...emptyInfrastructure(), roadCells: roads }, world));
+
+  it('counts 0.7 s per road cell and 1 s elsewhere, by eighth-cell steps', () => {
+    const line = Array.from({ length: 11 }, (_, i) => cell(5 + i, 5));
+    expect(travelDuration(along, world)).toBe(10_000);
+    expect(travelDuration(along, world, lookup([]))).toBe(10_000);
+    expect(travelDuration(along, world, lookup(line))).toBe(7_000);
+    // Half the line paved: five cells at 0.7, five at 1; the eighth arriving
+    // at the centre of the last road cell is on the road, the next one is not.
+    const half = travelDuration(along, world, lookup(line.slice(0, 6)));
+    expect(half).toBeGreaterThan(8_400);
+    expect(half).toBeLessThan(8_600);
+  });
+
+  it('wraps on the torus and ignores roads beside the path', () => {
+    const seam = [
+      { cellX: 62, cellY: 5 },
+      { cellX: 1, cellY: 5 },
+    ];
+    const roads = [cell(62, 5), cell(63, 5), cell(0, 5), cell(1, 5)];
+    expect(travelDuration(seam, world, lookup(roads))).toBe(2_100);
+    expect(travelDuration(along, world, lookup(along.map((p) => cell(p.cellX, 7))))).toBe(10_000);
   });
 });
 
@@ -197,6 +225,42 @@ describe('roads attract routes in open terrain (S2a)', () => {
     }
   });
 
+  it('roads shorten the travel of a mission path they draw (decision 8, 10 November)', () => {
+    // A mission path: refined on its own, without the display network's guide
+    // (refineVillagePath), so its search cost is the travelDuration rule.
+    const mission = (s: VillageState) =>
+      refineTravelRoute(s, {
+        id: 'rock',
+        kind: 'stone',
+        destination: { cellX: 32, cellY: 20 },
+        cells: [
+          { cellX: 32, cellY: 50 },
+          { cellX: 32, cellY: 20 },
+        ],
+      })!;
+    const plain = mission(scene('rock'));
+    for (const x of [34, 35, 30]) {
+      const roads = column(x),
+        paved = mission(scene('rock', roads)),
+        lookup = roadLookup(infrastructurePlanSurface({ ...emptyInfrastructure(), roadCells: roads }, world));
+      // Longer on the ground, shorter in time: 0.7 per road step.
+      expect(onRoad(paved, roads), `road x=${x}`).toBeGreaterThan(0.75);
+      expect(travelDuration(paved.cells, world, lookup), `road x=${x}`).toBeLessThan(
+        travelDuration(plain.cells, world, lookup),
+      );
+    }
+  });
+
+  it('a witness network without refinement follows roads too (stone paths beyond 16 cells)', () => {
+    // stoneTravelPath's mini-network: no `infrastructure`, road cells for the coarse costs only.
+    for (const x of [34, 35, 30]) {
+      const roads = column(x),
+        s = scene('rock', roads, false);
+      (s as unknown as { roadCells: typeof roads }).roadCells = roads;
+      expect(onRoad(route(s, 'rock'), roads), `road x=${x}`).toBeGreaterThan(0.75);
+    }
+  });
+
   it.each([
     ['house', 'house'],
     ['rock', 'rock'],
@@ -285,7 +349,8 @@ describe('road attraction: parity without roads and bounded searches (S2a)', () 
     // Road cells on every third row and column, outside footprints: every
     // route has roads within reach. Checkpoints count the visited nodes of all
     // searches (coarse and refinement). Measured (30 October): 6 416 without
-    // roads (as before S2a), 22 170 on the grid, against 25 060 when the coarse
+    // roads (as before S2a),
+    // 22 170 on the grid, against 25 060 when the coarse
     // search ignored roads (S1): drawn routes stay in their coarse corridor.
     const occupied = new Set(
       (parityScene(true, 'grid-cells').cells as Array<{ cellX: number; cellY: number }>).map(

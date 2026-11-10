@@ -8,6 +8,7 @@ import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { networkJob, networkState, type NetworkJob } from '../navigation/network-job.js';
 import { commandTravelNetwork, transactionRefiner } from '../navigation/transaction-refinement.js';
+import { pathRoadLookup, pathTravelDuration } from '../navigation/road-cost.js';
 import { naturalFeaturesQuery } from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -31,7 +32,6 @@ import {
   designatedTrees,
   queueContribution,
   exploitationAdmissionCap,
-  travelDuration,
   refineTravelRoute,
   infrastructureSurface,
   subCellKey,
@@ -468,6 +468,18 @@ export async function stoneTravelPath(
       return chunk.terrainCodes[(y % village.chunkSize) * village.chunkSize + (x % village.chunkSize)]!;
     }),
   );
+  // The witness follows roads as the refined search will: without them, its
+  // tail is certified as is and a long stone or wood path never takes a road
+  // (navigation redesign T1, audit B1). Whoever laid them, they count.
+  const windowRoads = await tx
+    .selectFrom('roadCells')
+    .select(['cellX', 'cellY', 'surface', 'sidewalks'])
+    .where('worldId', '=', village.worldId)
+    .where('cellX', 'in', xs)
+    .where('cellY', 'in', ys)
+    .orderBy('cellX')
+    .orderBy('cellY')
+    .execute();
   // Typed, not cast: the command lane rejects a ground whose world differs.
   const routeState: TravelNetworkState = {
     world: { id: village.worldId, widthCells: village.widthCells, heightCells: village.heightCells },
@@ -490,6 +502,7 @@ export async function stoneTravelPath(
     },
     // An anonymous footprint only blocks the cell.
     cells: occupied.map((cell) => ({ ...cell, footprint: { buildingId: '' }, building: null })),
+    ...(windowRoads.length ? { roadCells: windowRoads } : {}),
   };
   const path = (await commandTravelNetwork(tx, routeState, rc1, [featureId])).find(
     (route) => route.id === featureId,
@@ -2355,7 +2368,14 @@ export async function readVillageDepositDetails(
   ]);
   if (!knowledge.known(position)) throw new HttpError(404, 'DEPOSIT_NOT_FOUND', 'Gisement inconnu.');
   const path = await stoneTravelPath(tx, village, featureId);
-  return stoneDepositDetails(tx, village, economy, featureId, path ? travelDuration(path, village) : 0, Boolean(path));
+  return stoneDepositDetails(
+    tx,
+    village,
+    economy,
+    featureId,
+    path ? await pathTravelDuration(tx, village, path) : 0,
+    Boolean(path),
+  );
 }
 
 function canonicalExploitation(request: ExploitationRequest, village: OwnedVillage): ExploitationRequest {
@@ -2451,12 +2471,19 @@ export async function prepareExploitation(
       preview.estimates.carrot += p!.storedCarrots;
     }
   }
+  const tourRoutes = gardenContext?.[0].snapshot.travelRoutes ?? [];
   const plan = preview.gardens.length
     ? planGardenTour(
-        gardenContext![0].snapshot.travelRoutes,
+        tourRoutes,
         { cellX: village.anchorCellX, cellY: village.anchorCellY },
         preview.gardens,
         village,
+        // Legs follow these routes: their roads are those under the routes.
+        await pathRoadLookup(
+          tx,
+          village,
+          tourRoutes.map((r) => r.cells),
+        ),
       )
     : null;
   if (preview.gardens.length && !plan) {
@@ -2550,7 +2577,7 @@ export async function prepareExploitation(
       if (amount < 1) continue;
       const path = await pathFor(id);
       if (path) {
-        lots[family] = { id, amount, transportMs: travelDuration(path, village) };
+        lots[family] = { id, amount, transportMs: await pathTravelDuration(tx, village, path) };
         break;
       }
     }

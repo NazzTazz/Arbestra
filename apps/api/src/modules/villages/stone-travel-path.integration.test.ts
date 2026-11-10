@@ -8,6 +8,8 @@ import { ownedVillage, stoneTravelPath, refineVillagePath } from './service.js';
 import { NavigationCompute } from '../navigation/compute.js';
 import { bindTransactionRefiner } from '../navigation/transaction-refinement.js';
 import { HttpError } from '../../errors.js';
+import { pathTravelDuration } from '../navigation/road-cost.js';
+import { travelDuration } from '@arbestra/contracts';
 
 const url = testDatabaseUrl();
 const target = new URL(url);
@@ -154,6 +156,143 @@ it('reaches a woodland from the real door when the coarse hall anchor is enclose
         unbind();
         refinement.mockRestore();
       }
+      throw rollback;
+    }),
+  ).rejects.toBe(rollback);
+}, 30000);
+
+it('takes a parallel road to a wood beyond 16 cells and travels faster on it (navigation T1)', async () => {
+  // Roads enter the witness of the mini network (audit B1, read in the code;
+  // this scene is not a reproduction: here the fine search already took the
+  // road before T1) and the duration (decision 8).
+  const rollback = new Error('road fixture rollback');
+  await expect(
+    db.transaction().execute(async (tx) => {
+      const account = randomUUID(),
+        world = randomUUID(),
+        village = randomUUID(),
+        hall = randomUUID(),
+        feature = randomUUID();
+      await tx
+        .insertInto('accounts')
+        .values({ id: account, email: account + '@road.test', passwordHash: 'fixture' })
+        .execute();
+      await tx
+        .insertInto('worlds')
+        .values({
+          id: world,
+          slug: world,
+          name: 'Road regression',
+          topology: 'torus',
+          widthCells: 64,
+          heightCells: 64,
+          chunkSize: 32,
+          seed: 1,
+          generationVersion: 1,
+          generationStatus: 'ready',
+          generatedAt: new Date(),
+        })
+        .execute();
+      await tx
+        .insertInto('worldMemberships')
+        .values({ worldId: world, accountId: account, playerName: 'Road' })
+        .execute();
+      await tx
+        .insertInto('villages')
+        .values({
+          id: village,
+          worldId: world,
+          ownerAccountId: account,
+          name: 'Road',
+          anchorCellX: 10,
+          anchorCellY: 10,
+        })
+        .execute();
+      await tx
+        .insertInto('buildings')
+        .values({
+          id: hall,
+          worldId: world,
+          villageId: village,
+          buildingType: 'town-hall',
+          level: 1,
+          targetLevel: null,
+          status: 'completed',
+          constructionStartedAt: null,
+          constructionCompletesAt: null,
+          completedAt: new Date(),
+        })
+        .execute();
+      await tx
+        .insertInto('worldCellOccupancies')
+        .values(
+          Array.from({ length: 9 }, (_, i) => ({
+            worldId: world,
+            buildingId: hall,
+            featureId: null,
+            cellX: 9 + (i % 3),
+            cellY: 9 + Math.floor(i / 3),
+            role: i === 4 ? 'anchor' : 'body',
+          })),
+        )
+        .execute();
+      await tx
+        .insertInto('worldChunks')
+        .values(
+          [0, 1, 2, 3].map((i) => ({
+            worldId: world,
+            chunkX: i % 2,
+            chunkY: Math.floor(i / 2),
+            generationVersion: 1,
+            terrainCodes: Array(1024).fill(1),
+            elevations: Array(1024).fill(0),
+          })),
+        )
+        .execute();
+      await tx
+        .insertInto('worldFeatures')
+        .values({ id: feature, worldId: world, featureTypeCode: 'woodland', state: 'available', variantSeed: 1 })
+        .execute();
+      await tx
+        .insertInto('woodlandDeposits')
+        .values({
+          worldId: world,
+          featureId: feature,
+          cellX: 10,
+          cellY: 40,
+          initialAmount: 1000,
+          remainingAmount: 1000,
+          reservedAmount: 0,
+          revision: 1,
+          updatedAt: new Date(),
+          regrowthUpdatedAt: new Date(),
+        })
+        .execute();
+      const owner = await ownedVillage(tx, account, world, village);
+      const plain = (await stoneTravelPath(tx, owner, feature))!;
+      const plainMs = await pathTravelDuration(tx, owner, plain);
+      // A column of road cells two cells east of the direct line, hall to wood.
+      const column = Array.from({ length: 29 }, (_, i) => ({ cellX: 12, cellY: 12 + i }));
+      await tx
+        .insertInto('roadCells')
+        .values(column.map((c) => ({ worldId: world, villageId: village, ...c, surface: 'earth', sidewalks: false })))
+        .execute();
+      const paved = (await stoneTravelPath(tx, owner, feature))!;
+      const keys = new Set(column.map((c) => `${c.cellX}:${c.cellY}`));
+      const onRoad =
+        paved.filter((p) => keys.has(`${Math.round(p.cellX)}:${Math.round(p.cellY)}`)).length / paved.length;
+      expect(onRoad, 'the path follows the road').toBeGreaterThan(0.6);
+      // Beyond the village region (y > 25), the path is the witness's tail: on the road too.
+      const tail = paved.filter((p) => p.cellY >= 30 && p.cellY <= 38);
+      expect(tail.length).toBeGreaterThan(0);
+      expect(
+        tail.every((p) => Math.round(p.cellX) === 12),
+        'the witness tail follows the road',
+      ).toBe(true);
+      const pavedMs = await pathTravelDuration(tx, owner, paved);
+      expect(pavedMs, 'roads shorten travel (decision 8)').toBeLessThan(plainMs);
+      // The same path is slower when its roads are not counted: the gain is the road's.
+      expect(travelDuration(paved, owner)).toBeGreaterThan(pavedMs);
       throw rollback;
     }),
   ).rejects.toBe(rollback);

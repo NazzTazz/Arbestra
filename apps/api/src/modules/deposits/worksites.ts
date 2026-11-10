@@ -1,4 +1,3 @@
-import { travelDuration } from '@arbestra/contracts';
 import { randomUUID } from 'node:crypto';
 import { sql, type Transaction } from 'kysely';
 import type {
@@ -26,6 +25,7 @@ import {
 import { wrappedDelta } from '../worlds/coordinates.js';
 import { spatialSavepoint } from '../worlds/spatial-locks.js';
 import { poolAdmissionCap } from './extraction-pools.js';
+import { pathTravelDuration } from '../navigation/road-cost.js';
 
 export const WAKE_EXTRACTION_WORKSITE_TASK = 'deposit.worksite.wake';
 const WAIT_MS = 60_000;
@@ -589,7 +589,7 @@ export async function admitWorksites(
       // Keep the contract's integer milliseconds throughout admission. A trip
       // through seconds can turn 4052 into 4051.9999999999995 and abort the
       // village transaction when PostgreSQL stores transport_ms as an integer.
-      const transportMs = travelDuration(path, village);
+      const transportMs = await pathTravelDuration(tx, { ...village, worldId: economy.worldId }, path);
       next = {
         featureId: target.featureId,
         amount: work.amount,
