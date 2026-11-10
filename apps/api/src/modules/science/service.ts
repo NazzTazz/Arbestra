@@ -34,6 +34,7 @@ import {
 import { sciencePath, type ScienceWorld } from './navigation.js';
 import { travelDuration } from '@arbestra/contracts';
 import { refineVillagePath } from '../villages/service.js';
+import { pathRoadLookup } from '../navigation/road-cost.js';
 
 export const SCIENCE_WAKE_TASK = 'science.wake';
 // Short reservations let several centres contribute and staffing changes apply
@@ -503,6 +504,8 @@ async function startActivity(
     workMs: number;
     path?: TravelCell[];
     surveys?: TravelCell[];
+    /** One-way duration of a survey or exploration (083). */
+    transportMs?: number;
   },
 ) {
   const cohorts = await materializeCohorts(tx, economy.worldId, economy.villageId, economy.through);
@@ -532,6 +535,7 @@ async function startActivity(
       status: 'in-progress',
       pathCells: sql`${JSON.stringify(input.path ?? [])}::jsonb`,
       surveyCells: sql`${JSON.stringify(input.surveys ?? [])}::jsonb`,
+      transportMs: input.transportMs ?? null,
     })
     .returning('id')
     .executeTakeFirstOrThrow();
@@ -863,18 +867,22 @@ export async function scienceCommand(
     }
     const maximumSteps = Math.floor((command.budgetSeconds * 1000 - SURVEY_MS) / 2000);
     if (maximumSteps < 0) throw new HttpError(409, 'SURVEY_BUDGET', 'Le budget doit couvrir le relevé et le retour.');
+    // The stop and the duration share the path's cost: roads shorten travel (decision 8).
+    const world = { worldId: economy.worldId, widthCells: village.widthCells, heightCells: village.heightCells },
+      roads = await pathRoadLookup(tx, world, [path]);
     let stop = 0,
-      distance = 0;
+      costMs = 0;
     for (let i = 1; i < path.length; i++) {
-      distance += routeLength([path[i - 1]!, path[i]!], { width: village.widthCells, height: village.heightCells });
-      if (Math.round(distance * 1000) > maximumSteps * 1000) break;
+      costMs += travelDuration([path[i - 1]!, path[i]!], world, roads);
+      if (costMs > maximumSteps * 1000) break;
       if (Number.isInteger(path[i]!.cellX) && Number.isInteger(path[i]!.cellY)) stop = i;
     }
     if (!stop && path.length > 1)
       throw new HttpError(409, 'SURVEY_BUDGET', 'Le budget doit couvrir le trajet jusqu’au premier lieu et le retour.');
     const outward = path.slice(0, stop + 1),
       target = outward.at(-1)!;
-    const durationMs = travelDuration(outward, village) * 2 + SURVEY_MS;
+    const transportMs = travelDuration(outward, world, roads),
+      durationMs = transportMs * 2 + SURVEY_MS;
     const activityId = await startActivity(tx, economy, accountId, {
       kind: command.action === 'survey' ? 'survey' : 'exploration',
       buildingId: null,
@@ -884,6 +892,7 @@ export async function scienceCommand(
       workMs: SURVEY_MS,
       path: [...outward, ...outward.slice(0, -1).reverse()],
       surveys: [target],
+      transportMs,
     });
     if (!activityId)
       throw new HttpError(
@@ -910,14 +919,26 @@ export async function scienceCommand(
     const outwardCount = Math.floor((activity.pathCells.length + 1) / 2),
       outward = activity.pathCells.slice(0, outwardCount);
     const elapsed = economy.through.getTime() - activity.startedAt.getTime();
+    // The engaged one-way duration, never recomputed with today's roads or
+    // rule (083); before 083, read from the dates of the full trip.
+    const engaged =
+      activity.transportMs ??
+      Math.max(
+        0,
+        Math.round((activity.completesAt.getTime() - activity.startedAt.getTime() - Number(activity.workMs)) / 2),
+      );
     // Already returning: retain the original deadline and report.
-    if (elapsed >= travelDuration(outward, village) + SURVEY_MS) return;
+    if (elapsed >= engaged + SURVEY_MS) return;
+    // Walked so far, spread along the path by length; the way back takes as long.
+    const walked = Math.min(Math.max(0, elapsed), engaged),
+      size = { width: village.widthCells, height: village.heightCells },
+      total = routeLength(outward, size);
     const visited: TravelCell[] = [outward[0]!];
-    let remaining = Math.max(0, elapsed);
+    let remaining = engaged ? (walked / engaged) * total : total;
     for (let i = 1; i < outward.length; i++) {
       const a = outward[i - 1]!,
         b = outward[i]!,
-        duration = travelDuration([a, b], village);
+        duration = routeLength([a, b], size);
       if (remaining >= duration) {
         visited.push(b);
         remaining -= duration;
@@ -938,13 +959,15 @@ export async function scienceCommand(
       }
       break;
     }
-    const completesAt = new Date(economy.through.getTime() + travelDuration(visited, village));
+    const completesAt = new Date(economy.through.getTime() + walked);
     await tx
       .updateTable('scienceActivities')
       .set({
         completesAt,
         pathCells: sql`${JSON.stringify([...visited, ...visited.slice(0, -1).reverse()])}::jsonb`,
         surveyCells: sql`'[]'::jsonb`,
+        // The recalled trip: out to the turning point, then back as long.
+        transportMs: walked,
       })
       .where('worldId', '=', economy.worldId)
       .where('id', '=', activity.id)
@@ -1083,6 +1106,7 @@ export async function scienceSnapshot(
         completesAt: a.completesAt.toISOString(),
         path: a.pathCells,
         target: a.surveyCells[0] ?? null,
+        transportMs: a.transportMs,
       })),
       cartographers: cohorts.reduce((n, c) => n + c.memberCount, 0),
       surveyedPlaces: facts.places,

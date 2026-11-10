@@ -825,6 +825,8 @@ export interface Database {
     completedAt: Timestamp | null;
     pathCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]>;
     surveyCells: ColumnType<TravelCell[], TravelCell[], TravelCell[]>;
+    /** One-way duration of a survey or exploration, fixed at its admission (083); null before. */
+    transportMs: ColumnType<number | null, number | null | undefined, number | null>;
   };
   sciencePlaces: {
     worldId: string;

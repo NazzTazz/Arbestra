@@ -71,6 +71,9 @@ export const ScienceStateSchema = Type.Object({
       completesAt: Type.String({ format: 'date-time' }),
       path: Type.Array(Type.Object({ cellX: Type.Number(), cellY: Type.Number() })),
       target: Type.Union([PointSchema, Type.Null()]),
+      /** One-way duration of a survey or exploration, fixed at its admission;
+       * null before 10 November (derive it from the path), absent from older servers. */
+      transportMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
     }),
   ),
   cartographers: Type.Integer({ minimum: 0 }),

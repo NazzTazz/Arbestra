@@ -434,6 +434,7 @@ export async function readRegisteredPrivateChanges(
           completesAt: row.completesAt.toISOString(),
           path: row.pathCells,
           target: row.surveyCells[0] ?? null,
+          transportMs: row.transportMs,
         })),
         remove: ids.filter((id) => !rows.some((row) => row.id === id)),
       });

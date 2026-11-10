@@ -814,6 +814,60 @@ describe.sequential('durable FIFO expedition admission on a private world', () =
     );
     expect(report.every((p) => p.elevation === 100 && !p.surveyed)).toBe(true);
   });
+  it.each([
+    ['its engaged duration', false],
+    ['the dates of a trip admitted before 083', true],
+  ])('recalls on %s, not on roads laid after the admission (navigation T1)', async (_, legacy) => {
+    const path = [
+      { cellX: 8, cellY: 7.584 },
+      { cellX: 8, cellY: 7.125 },
+      { cellX: 9, cellY: 7.125 },
+      { cellX: 9, cellY: 7 },
+      { cellX: 20, cellY: 7 },
+    ];
+    const id = await db
+      .transaction()
+      .execute(async (tx) =>
+        scienceCommand(
+          tx,
+          await beginVillageEconomy(tx, world, village),
+          { action: 'explore', target: { cellX: 20, cellY: 7 }, budgetSeconds: 120 },
+          path,
+        ),
+      );
+    const before = await db.selectFrom('scienceActivities').selectAll().where('id', '=', id!).executeTakeFirstOrThrow();
+    // No road at the admission: the one-way duration is the length, 12.584 cells.
+    expect(before.transportMs).toBe(12_584);
+    if (legacy) await db.updateTable('scienceActivities').set({ transportMs: null }).where('id', '=', id!).execute();
+    const roads = Array.from({ length: 10 }, (_, i) => ({
+      worldId: world,
+      villageId: village,
+      cellX: 10 + i,
+      cellY: 7,
+      surface: 'earth' as const,
+      sidewalks: false,
+    }));
+    await db.insertInto('roadCells').values(roads).execute();
+    try {
+      const recallAt = new Date(before.startedAt.getTime() + 5200);
+      await db.transaction().execute(async (tx) => {
+        const economy = await beginVillageEconomy(tx, world, village);
+        await scienceCommand(tx, { ...economy, through: recallAt }, { action: 'recall', activityId: id! });
+      });
+      const recalled = await db
+        .selectFrom('scienceActivities')
+        .selectAll()
+        .where('id', '=', id!)
+        .executeTakeFirstOrThrow();
+      // The same turning point and return as without roads: the trip was engaged before them.
+      const turn = recalled.pathCells[Math.floor(recalled.pathCells.length / 2)]!;
+      expect(turn.cellX).toBeCloseTo(12.616);
+      expect(recalled.completesAt.getTime() - recallAt.getTime()).toBe(5200);
+      expect(recalled.transportMs).toBe(5200);
+    } finally {
+      await db.deleteFrom('roadCells').where('worldId', '=', world).execute();
+    }
+  });
   it('cuts a certified fractional path by mission budget without claiming the requested destination', async () => {
     const id = await db.transaction().execute(async (tx) =>
       scienceCommand(

@@ -397,7 +397,8 @@ export class VillageWorkers {
         target: path[path.length - 1]!,
         startedAt: Date.parse(activity.startedAt),
         completesAt: Date.parse(activity.completesAt),
-        transportMs: travelDuration(path, state.world),
+        // Fixed at the admission since 10 November (roads shorten travel); older trips derive it.
+        transportMs: activity.transportMs ?? travelDuration(path, state.world),
       });
     }
     for (const journey of state.village.market?.journeys ?? []) {
