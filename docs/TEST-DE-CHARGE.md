@@ -15,6 +15,7 @@ Le paquet `apps/load-test` (`@arbestra/load-test`) contient quatre scripts et au
 | `sampler.ts` | échantillonne le serveur en lecture seule ; lancé par `run.ts` dans un processus à part, ou seul (`nohup` possible : il ne s'arrête que sur SIGINT/SIGTERM, ou sur la fermeture de son stdin si `--stop-on-stdin-close`, que passe `run.ts`) | lecture seule |
 | `cleanup.ts` | supprime les seuls bots ; essai à blanc par défaut | oui, avec `--apply` |
 | `local-api.ts` | lance une API locale dédiée (port libre, base dédiée, worker compris) avec une sonde CPU/mémoire | non |
+| `bench-navigation.ts` | mesures ciblées de la refonte des trajets sur une copie d'un monde : présentation à froid et à chaud, après une retouche distante, aperçu d'exploitation de jardin ([spec](SPEC-REFONTE-TRAJETS-2026-11-10.md) §12) | oui, la copie : une session par propriétaire, un sommet distant relevé puis rétabli |
 
 Les résultats et les identifiants des bots vont dans `apps/load-test/out/`, ignoré par Git (ou dans le dossier donné par la variable `LOAD_OUT_DIR`, ce que fait `load-test.py` sur un serveur).
 

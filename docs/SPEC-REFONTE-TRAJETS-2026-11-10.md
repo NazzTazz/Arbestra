@@ -238,3 +238,32 @@ Audit indépendant en lecture seule sur `6c1c2d8`. Le §1 a été confirmé sur 
 - **Ajouts au §8** : sentiers et bâtiments, confidentialité des sentiers partagés, parcelle inaccessible, attente `budget` répétée.
 
 Non vérifié par l'audit, à faire dans la tranche concernée : atteignabilité de l'aperçu `BabylonVillageScene.ts:683` (T4), couverture des déclencheurs pour l'épuisement de la pierre (sous-spec T5), tolérance du client V2 à un composant inconnu (avant T3).
+
+## 12. Mesures de référence (T0, 10 novembre)
+
+Code mesuré : `e3e6894` (code applicatif identique à `7607008`). PC de Tristan (8 cœurs logiques, MX230), sans serveur de dev pendant les mesures serveur, PostgreSQL 17 natif. Les chiffres absolus valent pour cette machine ; ils servent de point de comparaison pour les tranches, avec le même protocole.
+
+**Charge locale** (`apps/load-test`, base `arbestra_load`, mondes `t0-a` : 15 bots groupés, `t0-b` : 15 bots dispersés avec `--grant wood=5000,timber=700` ; mélange par défaut, un geste toutes les 8 s ; paliers de 120 s, seuils relâchés du 4 novembre ; résumé `out/run-local-2026-11-10T20-16-02-945Z/summary.md`, non versionné) :
+
+| Bots | Commandes p50 / p95 | Présentation p95 (attente de la file de trajets) | `NAVIGATION_BUSY` | Retard du scheduler max | Attente du pool p95 | CPU API p95 | Boucle API p99 |
+|---|---|---|---|---|---|---|---|
+| 10 | 51 ms / 602 ms | 1,7 s (1,2 s) | 0 sur 96 | 6,3 s | < 1 ms | 120 % | 46 ms |
+| 30 | 408 ms / 5,0 s | 8,6 s (6,8 s) | 46 sur 197 | 51,5 s (récoltes en attente jusqu'à 51 s) | 1,1 s | 336 % | 461 ms |
+
+Première ressource saturée à 30 bots : la file du worker de trajets (×13,6 sur son seuil), devant le pool PostgreSQL, le verrou de navigation des terraformations et le scheduler. Erreurs : 2,2 % à 30 bots, toutes `ECONOMY_BUSY` (R3).
+
+**Mesures ciblées** (`apps/load-test/src/bench-navigation.ts`, sur `arbestra_rc1_load`, copie restaurée de la base de dev du 9 novembre ; API dédiée sur 3301 ; dix répétitions ; résultats `out/bench-navigation-2026-11-10T20-24-48-483Z.json`, non versionné) :
+
+| Mesure | Bressuire (70 bâtiments, 40 parcelles) | Test Spawn (6 bâtiments) |
+|---|---|---|
+| Présentation à froid | 1 009 ms, 505 Ko (réseau lu dans `village_travel_networks` ; sol RC1 646 ms) | 447 ms, 168 Ko (réseau 250 ms) |
+| Présentation à chaud, p50 | 17 ms | 15 ms |
+| Présentation après une retouche à l'autre bout du monde (61 s plus tard) | 1 326 ms, dont **870 ms de réseau** | 383 ms, dont 196 ms de réseau |
+| Aperçu d'exploitation, 1 parcelle, premier appel | 989 ms, dont environ **820 ms de réseau** | 336 ms |
+| Aperçu, 1 / 4 / 8 parcelles, appels suivants p50 (p95) | 83 (233) / 83 (92) / 92 (101) ms | 52 (64) / 50 (62) ms |
+
+Lecture : chaque retouche de terrain, n'importe où, fait recalculer le réseau complet de chaque village à sa lecture suivante (870 ms pour Bressuire), et la première tournée de jardin qui suit le paie aussi, sous la ligne du village dans la vraie commande. La présentation de Bressuire pèse 505 Ko, et non environ 200 Ko comme noté jusqu'ici.
+
+**Navigateur** : campagne de mesures (trois chargements, 60 s de jeu) lancée sur Bressuire ; les quatre scénarios sont **invalidés** (onglet passé en arrière-plan, fenêtre redimensionnée, mouvements de souris pendant la mesure). À refaire sur un poste au repos. Valeurs indicatives seulement, non retenues : premier chargement 16,8 s, phases p95 « Personnages / eau » 0,2 ms, « chemins automatiques » 0,9 ms, « braseros » 1,5 ms, rendu principal 39 ms.
+
+**Staging** : en attente des décisions de [TEST-DE-CHARGE.md](TEST-DE-CHARGE.md) §9 (machine, créneau, `--grant`, mélange).
