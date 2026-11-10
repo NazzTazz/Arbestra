@@ -18,3 +18,14 @@ Réponses de Tristan aux questions ouvertes du [diagnostic](DIAGNOSTIC-NAVIGATIO
 9. **Lignes de désir observées** : les routes automatiques naissent des trajets réellement effectués, pas d'un réseau calculé vers tous les buts du village. Sans usure pour l'instant. Les routes automatiques existantes sont conservées comme état de départ. Le réseau « tous buts » n'a plus de responsabilité dans la simulation.
 10. **Lieu inaccessible** : seules les missions qui doivent s'y rendre sont refusées, au moment de la demande (`DESTINATION_UNREACHABLE`). Le bâtiment continue de produire ; aucun contrôle global d'accessibilité.
 11. **Profils de déplacement** (piéton, charrette, convoi, armée) : reportés à l'arrivée des convois. La refonte garde le seul profil piéton cardinal, avec des caches qui pourront être indexés par profil.
+
+Propositions du §8 de la [spec de la refonte](SPEC-REFONTE-TRAJETS-2026-11-10.md), validées telles quelles le 10 novembre :
+
+12. **Seuil d'un sentier** : une arête devient un sentier à 3 passages ; un passage = une mission admise.
+13. **Sentiers et bâtiments** : un bâtiment vers lequel aucune mission ne va n'a pas de sentier ni de promenade de loisir ; les routes automatiques existantes sont gardées ; le joueur pose une route s'il en veut une.
+14. **Aspect** : tous les sentiers sont en terre ; seules les cases de route posées par le joueur sont pavées.
+15. **Sentiers partagés** : une arête appartient au sol ; un village voit les sentiers de ses voisins (ni quantités ni stocks).
+16. **Commerce et expéditions** ne laissent pas de sentier pour l'instant ; à revoir avec les convois.
+17. **Équilibrage** : la baisse des durées sur route (jusqu'à 30 %) est livrée telle quelle, jugée sur le rapport de T1.
+18. **Parcelle inaccessible** : seule la parcelle est écartée de la tournée, les autres partent.
+19. **Chantier en attente `budget` répétée** : abandonné après 3 réveils, motif affiché dans la fiche du chantier.

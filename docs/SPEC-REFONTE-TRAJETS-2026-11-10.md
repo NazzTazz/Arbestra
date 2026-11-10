@@ -1,6 +1,6 @@
 # Refonte des trajets : méthode
 
-10 novembre 2026. Base relue : `7607008`, branche `wip/v2-commandes-bornees`. Statut : **spécification proposée, auditée** (audit d'architecture du 10 novembre intégré, §11), à valider par Tristan. Aucun code modifié.
+10 novembre 2026. Base relue : `7607008`, branche `wip/v2-commandes-bornees`. Statut : **spécification validée par Tristan le 10 novembre** (audit d'architecture intégré, §11 ; points du §8 validés tels que proposés). Aucun code modifié.
 
 Cadre : [invariants et décisions de game design](DECISIONS-NAVIGATION-2026-10-31.md) (1 à 11), [diagnostic du 31 octobre](DIAGNOSTIC-NAVIGATION-2026-10-31.md), [carte des verrous](VERROUS-2026-11-04.md), [dette « Trajets »](DETTE-TECHNIQUE.md). Cette spec **remplace**, pour la navigation, les sections 3 à 5 de la [spec proposée du 23 octobre](SPEC-REFONTE-NAVIGATION-ECONOMIE.md) : son §8.2 (durée égale au plus court chemin) est écarté par la décision 8, et son champ de distance « tous buts » par la décision 9 et l'invariant 6. Le registre `resource_movements` et les `processes` (§6 du 23) sont hors scope.
 
@@ -202,7 +202,9 @@ Critères :
 - T5 : une retouche à plus d'un chunk d'un chemin ne recalcule pas ce chemin (test) ; plus de clé de géométrie sérialisée.
 - T6 : aucune recherche de chemin pendant qu'une ligne de village est tenue (instrumentation) ; rejeu et refus prouvés par barrières, comme en VERROUS §10 ; chantier automatique sans certificat mis en attente puis parti après la préparation.
 
-## 8. À valider par Tristan
+## 8. Points de game design (validés le 10 novembre)
+
+Tristan a validé les huit propositions ci-dessous telles quelles ; elles sont aussi reprises en décisions 12 à 19 dans les [décisions de navigation](DECISIONS-NAVIGATION-2026-10-31.md).
 
 1. **Seuil d'apparition d'un sentier** : N passages, un passage = une mission admise. Proposition : N = 3. Les lots de bois relancés l'atteignent vite, les tournées de jardin plus lentement.
 2. **Sentiers et bâtiments.** Après T3, aucune mission ne va vers une maison, un atelier ou le campus : un bâtiment construit après la conversion n'a pas de sentier ni de promenade de loisir tant qu'aucune mission ne passe devant. Les routes automatiques existantes sont gardées. Proposition : l'accepter (conforme à la décision 9) ; le joueur pose une route s'il en veut une.
