@@ -4,6 +4,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { TimberThatch } from './timber-thatch';
 import { buildUniversity } from './university-factory';
 import { batchDistantBuilding, simplifyMasonry } from './building-lod-geometry';
@@ -179,12 +180,17 @@ it('keeps a live material on a batch whose factory frees its own when its sub-me
     roof.parent = root;
     slats.parent = roof;
     slats.material = owned;
+    // The factory's grain is a canvas texture: a clone of it starts empty (black).
+    const grain = new Texture(null, scene);
+    owned.diffuseTexture = grain;
     roof.onDisposeObservable.addOnce(() => owned.dispose());
     batchDistantBuilding(root);
     const batch = root.getChildMeshes().find((mesh) => mesh.name === 'distant-market-dark-wood-slats')!;
     expect(owned.getScene().materials.includes(owned)).toBe(false); // the factory freed its own
     expect(batch.material?.name).toBe('market-dark-wood-slats');
     expect(scene.materials.includes(batch.material!)).toBe(true);
+    // The batch shares the factory's texture, never an empty clone of it.
+    expect((batch.material as StandardMaterial).diffuseTexture).toBe(grain);
     root.dispose();
     expect(scene.materials.some((m) => m.name === 'market-dark-wood-slats')).toBe(false);
   } finally {

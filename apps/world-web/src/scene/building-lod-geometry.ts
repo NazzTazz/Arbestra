@@ -49,6 +49,32 @@ export function simplifyMasonry(stones: readonly Stone[], joint: number): Stone[
   return merge(merge(stones, false), true);
 }
 
+/** Texture slots of the factory materials (StandardMaterial). */
+const TEXTURE_SLOTS = [
+  'diffuseTexture',
+  'ambientTexture',
+  'opacityTexture',
+  'reflectionTexture',
+  'emissiveTexture',
+  'specularTexture',
+  'bumpTexture',
+  'lightmapTexture',
+  'refractionTexture',
+] as const;
+/** Material.clone also clones its textures, and a cloned DynamicTexture starts
+ * from an empty canvas: the stone and oak grain came out black (11 November).
+ * The copy takes the original textures back, shared. */
+function shareTextures(original: Material, copy: Material): void {
+  const from = original as unknown as Record<string, unknown>,
+    to = copy as unknown as Record<string, { dispose?: () => void } | null | undefined>;
+  for (const slot of TEXTURE_SLOTS) {
+    if (!(slot in from)) continue;
+    const cloned = to[slot];
+    if (cloned && cloned !== from[slot]) cloned.dispose?.();
+    to[slot] = from[slot] as (typeof to)[string];
+  }
+}
+
 /** One static campus batch per material. Transforms become relative to its logical root. */
 export function batchDistantBuilding(root: Mesh): void {
   const children = root.getChildMeshes(),
@@ -80,6 +106,7 @@ export function batchDistantBuilding(root: Mesh): void {
       let copy = copies.get(original);
       if (!copy) {
         copy = original.clone(original.name) ?? original;
+        if (copy !== original) shareTextures(original, copy);
         copies.set(original, copy);
       }
       mesh.material = copy;
