@@ -372,3 +372,36 @@ Les seuils d'hôte du §7.4 s'appliquent ; leur valeur par défaut (charge égal
 2. Fermer le tunnel SSH, effacer les identifiants sur la machine des bots (`apps/load-test/out/bots-dedicated-*.json`).
 3. **Détruire l'instance** chez l'hébergeur (suppression, pas arrêt : un serveur arrêté est encore facturé, ainsi que son disque, ses instantanés et son adresse IP fixe) ; supprimer aussi volumes, instantanés et adresses réservées.
 4. Vérifier dans la console de l'hébergeur que plus aucune ressource ne court, et révoquer la clé SSH ou l'accès créés pour l'occasion.
+
+## 11. Relevé de l'alpha du 11 novembre 2026 (lecture seule)
+
+But : un premier ordre de grandeur, et de quoi caler le mélange des bots avant de louer une machine.
+
+**Machine.** VPS de 2 vCPU et 3,8 Go, partagé par l'alpha, le staging, la passerelle Caddy et la démo Waar. Charge moyenne de 0,3 à 0,5 ; 2,4 Go de mémoire utilisés.
+
+**Consommation.** Moyenne sur la durée de vie des processus :
+
+| Processus | CPU moyen | Mémoire |
+|---|---|---|
+| API de l'alpha (depuis le 5 novembre ; inclut le worker) | 9 573 s en 6,9 jours, soit **1,6 % d'un cœur** | 608 Mo (pic à 672 Mo) |
+| PostgreSQL 17 (depuis le 16 octobre ; alpha, staging et autres bases) | 71 138 s en 26 jours, soit 3,2 % d'un cœur | 584 Mo |
+| API du staging | — | 120 Mo |
+
+**Activité.**
+- 7 villages pour 7 comptes ; 1 à 2 villages actifs par jour sur les 7 derniers jours.
+- 100 à 300 missions lancées par jour et par village actif (récoltes, extractions, constructions).
+- Heure la plus chargée : 107 missions pour un seul village, soit environ 1,8 par minute.
+- Le journal des parcours n'est pas activé sur l'alpha (`player_journey_events` vide). Une mission n'est pas une commande : une commande peut lancer plusieurs missions, et le scheduler en relance.
+
+**Retard du worker (24 dernières heures).** Délai entre la disponibilité d'une tâche et son achèvement :
+- médiane sous 1 s pour tous les types ;
+- p95 de 36 s pour `harvest.intent` et de 12 s pour `deposit.worksite.wake`.
+
+Sur 7 jours, ces retards viennent d'une dizaine d'épisodes, tous des rafales d'un seul joueur. Exemple : le 10 novembre à 21 h 56 UTC, une vingtaine d'intentions de récolte soumises en quelques secondes ont été traitées l'une après l'autre, à raison d'environ 0,5 à 0,7 s chacune. La dernière est passée après 53 s, et les réveils de chantier ont attendu derrière elle. Autres épisodes : 6 novembre à 23 h 56 (60 tâches, 66 s au plus), 9 novembre à 18 h 45 (11 tâches, 45 s au plus).
+
+**Lecture.**
+- Avec un ou deux joueurs, la charge moyenne est négligeable. On ne peut donc pas extrapoler le coût par joueur à partir de l'alpha.
+- La limite visible n'est ni le CPU ni la mémoire : c'est le **worker séquentiel**. Une intention de récolte occupe environ 0,5 s, essentiellement en calcul de trajets sous verrou. Le worker traite donc 1,5 à 2 intentions par seconde pour **tout** le serveur, et une rafale d'un seul joueur retarde déjà tous les autres de dizaines de secondes.
+- C'est exactement ce que visent T2 (tournées de jardin sans réseau complet) et T6 (calcul hors verrou) de la [refonte des trajets](SPEC-REFONTE-TRAJETS-2026-11-10.md), ainsi que la sortie du worker du processus de l'API.
+
+**Pour les bots.** Une action toutes les 8 s par bot, soit 7,5 par minute, dépasse l'heure la plus chargée d'un vrai joueur (environ 1,8 mission par minute). Le mélange par défaut est donc pessimiste, ce qui convient à un premier passage. À mesurer en priorité : le retard du worker (p95 par type de tâche), avant le CPU.
