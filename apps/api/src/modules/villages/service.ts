@@ -6,7 +6,7 @@ import { devTime } from '../operations/dev-timing.js';
 import { fixedBuildingFootprint, withinBuildReach, BUILD_REACH as BUILD_RADIUS } from '@arbestra/contracts';
 import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
-import { networkJob, networkState, type NetworkJob } from '../navigation/network-job.js';
+import { navigationBudgetError, networkJob, networkState, type NetworkJob } from '../navigation/network-job.js';
 import { commandTravelNetwork, commandVillageLegs, transactionRefiner } from '../navigation/transaction-refinement.js';
 import { pathRoadLookup, pathTravelDuration } from '../navigation/road-cost.js';
 import { naturalFeaturesQuery } from '../worlds/natural-features.js';
@@ -59,7 +59,7 @@ import {
 } from './economy.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
-import { gardenTourLegKey, gardenTourLegs, planGardenTourByLegs } from '@arbestra/contracts';
+import { gardenTourLegKey, gardenTourLegs, planGardenTourByLegs, type GardenTourLeg } from '@arbestra/contracts';
 import { projectPopulation } from '../population/projection.js';
 
 import { reconcileRestHousing } from '../population/work.js';
@@ -636,7 +636,7 @@ export async function refineVillagePath(
       )[0]
     : refineTravelRoute(context, input, new Set(), undefined, rc1?.navigation, undefined, {
         onLimit: () => {
-          throw new HttpError(503, 'NAVIGATION_BUSY', 'Calcul du trajet interrompu. Réessayez.');
+          throw navigationBudgetError();
         },
       });
   if (!route) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun accès praticable depuis le village.');
@@ -2379,19 +2379,45 @@ async function planExploitationTour(
   spatial: Awaited<ReturnType<typeof readInfrastructureSpatialState>>,
   cells: readonly TravelCell[],
 ) {
+  const byLeg = new Map<string, TravelCell[] | null>();
+  const search = async (legs: GardenTourLeg[]) => {
+    const missing = legs.filter((leg) => !byLeg.has(gardenTourLegKey(leg)));
+    const found = await commandVillageLegs(tx, spatial.snapshot, spatial.ground, missing);
+    missing.forEach((leg, i) => byLeg.set(gardenTourLegKey(leg), found[i] ?? null));
+  };
+  const hall = (to: TravelCell) => byLeg.get(gardenTourLegKey({ from: null, to }));
   const legs = gardenTourLegs(cells, village);
-  const found = await commandVillageLegs(tx, spatial.snapshot, spatial.ground, legs);
-  const byLeg = new Map(legs.map((leg, i) => [gardenTourLegKey(leg), found[i]]));
-  const roads = await pathRoadLookup(tx, village, [
-    ...found.filter((path): path is TravelCell[] => !!path),
-    ...cells.map((cell) => [cell]),
-  ]);
-  return planGardenTourByLegs(
-    cells,
-    (leg) => byLeg.get(gardenTourLegKey(leg)),
-    (path) => travelDuration(path, village, roads),
-    village,
-  );
+  await search(legs);
+  let reachable = [...cells],
+    unreachable: TravelCell[] = [];
+  if (legs.some((leg) => !byLeg.get(gardenTourLegKey(leg)))) {
+    // A plot without a path from the town hall is set aside alone; the tour
+    // leaves with the others (decision §8.7, 10 November). Searched only when
+    // a leg failed: the usual tour stays at k + 1 searches.
+    await search(cells.map((to) => ({ from: null, to })));
+    unreachable = cells.filter((cell) => !hall(cell));
+    reachable = cells.filter((cell) => hall(cell));
+    await search(gardenTourLegs(reachable, village));
+  }
+  const paths = [...byLeg.values()].filter((path): path is TravelCell[] => !!path);
+  const roads = await pathRoadLookup(tx, village, [...paths, ...cells.map((cell) => [cell])]);
+  const plan = reachable.length
+    ? planGardenTourByLegs(
+        reachable,
+        (leg) => {
+          const path = byLeg.get(gardenTourLegKey(leg));
+          if (path || !leg.from) return path;
+          // Both plots are reachable from the hall but not from one another
+          // (a one-way passage): the leg goes back through the town hall.
+          const back = hall(leg.from),
+            out = hall(leg.to);
+          return back && out ? [...[...back].reverse(), ...out] : null;
+        },
+        (path) => travelDuration(path, village, roads),
+        village,
+      )
+    : null;
+  return { plan, unreachable };
 }
 
 export async function prepareExploitation(
@@ -2466,10 +2492,16 @@ export async function prepareExploitation(
       preview.estimates.carrot += p!.storedCarrots;
     }
   }
-  const plan =
+  const tour =
     preview.gardens.length && gardenContext
       ? await planExploitationTour(tx, village, gardenContext[0], preview.gardens)
       : null;
+  for (const cell of tour?.unreachable ?? []) {
+    preview.excluded.push({ key: `garden:${cell.cellX}:${cell.cellY}`, reason: 'unreachable' });
+    preview.gardens = preview.gardens.filter((g) => g.cellX !== cell.cellX || g.cellY !== cell.cellY);
+    preview.estimates.carrot -= plots.find((p) => p.cellX === cell.cellX && p.cellY === cell.cellY)!.storedCarrots;
+  }
+  const plan = tour?.plan ?? null;
   if (preview.gardens.length && !plan) {
     preview.excluded.push(
       ...preview.gardens.map((p) => ({ key: `garden:${p.cellX}:${p.cellY}`, reason: 'unreachable' })),

@@ -1,5 +1,6 @@
 import type { GardenTourLeg, GeneratedLandscape, TravelNetworkState, TravelRoute } from '@arbestra/contracts';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-compute-protocol.js';
+import { HttpError } from '../../errors.js';
 import type { Rc1NetworkEdits } from './rc1-network-ground.js';
 
 export interface NetworkJob {
@@ -94,4 +95,12 @@ export function networkJob(
     state,
     ground: { sourceId, edits: ground.navigationEdits, ...(artifact === undefined ? {} : { artifact }) },
   };
+}
+
+/** A mission search reached its node bound before its goal (refonte des
+ * trajets §4.2): `budget`, retryable, never `unreachable`. The worker reports
+ * it by this message; the lane turns it into this HTTP error. */
+export const NAVIGATION_BUDGET = 'NAVIGATION_BUDGET';
+export function navigationBudgetError(): HttpError {
+  return new HttpError(503, NAVIGATION_BUDGET, 'Trajet introuvable dans le budget de calcul. Réessayez.');
 }

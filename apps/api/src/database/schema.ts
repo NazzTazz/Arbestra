@@ -384,6 +384,8 @@ export interface ExtractionWorksiteTargetsTable {
   thresholdReachedAt: Timestamp | null;
   completedAt: Timestamp | null;
   reason: string | null;
+  /** Wakes spent on a search that reached its node budget (084, T2b); reset on admission. */
+  budgetWakes: ColumnType<number, number | undefined, number>;
   /** Designated trees of a wood target (064); null = every tree, RC1 order. */
   treeIndices: ColumnType<number[] | null, number[] | null | undefined, number[] | null>;
   /** Trees of a wood target to clear (068); null = none. */

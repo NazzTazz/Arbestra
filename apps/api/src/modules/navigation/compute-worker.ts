@@ -23,7 +23,7 @@ import {
 } from '@arbestra/contracts';
 import { artifactChecksum } from '../world-generator/artifact.js';
 import type { NavigationData } from './context.js';
-import type { NetworkJob } from './network-job.js';
+import { NAVIGATION_BUDGET, type NetworkJob } from './network-job.js';
 import { rc1NetworkGround, standingGroveTrees } from './rc1-network-ground.js';
 const sources = new Map<string, { data: GeneratedLandscape; field: ReturnType<typeof createSpawnTerrainField> }>();
 const networkGrounds = new Map<string, TravelGround>();
@@ -265,7 +265,7 @@ parentPort!.on(
             version: 2 as const,
             cells:
               planVillageLeg(state, leg.from, leg.to, ground, checkpoint, () => {
-                throw Error('Refinement search budget exhausted');
+                throw Error(NAVIGATION_BUDGET);
               }) ?? [],
           }));
           while (sources.size > 2) sources.delete(sources.keys().next().value!);
@@ -281,7 +281,7 @@ parentPort!.on(
         const route = refinement
           ? refineTravelRoute(state, refinement, new Set(), undefined, ground, checkpoint, {
               onLimit: () => {
-                throw Error('Refinement search budget exhausted');
+                throw Error(NAVIGATION_BUDGET);
               },
             })
           : undefined;

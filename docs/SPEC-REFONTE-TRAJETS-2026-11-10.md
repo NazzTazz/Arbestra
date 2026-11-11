@@ -316,3 +316,42 @@ Les tournées raccourcissent, surtout entre parcelles éloignées de l'hôtel de
 Le premier passage après un redémarrage de l'API reste dominé par la construction à froid du sol dans le worker : 1 886 ms avant, 778 ms après. Fichiers : `out/bench-navigation-2026-11-11T16-*.json`, non versionnés.
 
 **Reste à mesurer** : la charge locale (10 et 30 bots) avant et après, sur une base de charge neuve, avec T2b.
+
+## 15. T2b livrée (11 novembre) : issues explicites, décisions §8.7 et §8.8
+
+Statut : **à valider** (recette de Tristan). Migration 084 appliquée sur dev, `arbestra_load` et `arbestra_rc1_load`.
+
+**Issues de recherche** (`refineTravelRoute`, recherche fine) :
+- plus d'élagage par détour (l'ancienne limite était d'environ 16 cases de détour) ;
+- borne publiée : `villageSearchBound(region)` = cases de la région × `SEARCH_NODES_PER_CELL` (64).
+
+| Issue | Condition | Ce qui se passe |
+|---|---|---|
+| `found` | Un chemin est trouvé | Départ |
+| `unreachable` | La file se vide avant la borne. C'est une preuve. | Le chemin rendu est nul, sans signal de budget |
+| `budget` | La borne est atteinte. Vaut aussi pour toute recherche dont la cible est hors région. | `onLimit` est appelé, puis l'erreur HTTP 503 `NAVIGATION_BUDGET`, réessayable, distincte de `NAVIGATION_BUSY` |
+
+Deux départs du même composant épuisé ne refont pas la recherche.
+
+**Décision §8.7.** Si une jambe de la tournée échoue, une seule recherche supplémentaire est lancée, depuis l'hôtel de ville vers chaque parcelle (k recherches en tout) :
+- une parcelle sans chemin depuis l'hôtel de ville est écartée seule, avec le motif `unreachable` ;
+- la tournée part avec les autres, dans le même ordre ;
+- une jambe sans chemin entre deux parcelles atteignables repasse par l'hôtel de ville.
+
+Une tournée sans échec reste à k + 1 recherches.
+
+**Décision §8.8.** Un chantier dont la cible rend `budget` attend une minute, avec le motif `navigation-budget`. La cible est retentée à 3 réveils (`BUDGET_WAKES`) ; si le troisième échoue encore, elle est abandonnée avec le motif `budget`. Le compteur `extraction_worksite_targets.budget_wakes` (migration 084, additive) est remis à zéro dès qu'un chemin est trouvé. La fiche du chantier affiche l'attente (« trajet difficile à calculer, nouvel essai dans une minute ») et les cibles abandonnées par motif (« sans chemin », « trajet introuvable après plusieurs essais »).
+
+**Preuves.**
+- Départ enclos par des douves, depuis l'hôtel de ville et depuis une parcelle : issue `unreachable`, nœuds visités sous la borne publiée.
+- Borne atteinte : issue `budget`, jamais `unreachable`.
+- Régression : une cible joignable seulement par un détour d'environ 60 cases (rivière à un seul gué). L'ancien élagage la déclarait sans chemin ; elle est maintenant trouvée. Test vu en échec avec l'ancien élagage.
+- Intégration §8.7 : `[A, U]` part avec A seule, U écartée (avant T2b, les deux étaient refusées), et le plan est identique à celui de `[A]` ; `[A, U, centre de G]` visite A puis le centre de G.
+- Intégration §8.8 : attente, aucune recherche avant le réveil, 3 réveils, abandon `budget`, puis le pool passe à la cible suivante ; le compteur repart à zéro après un succès. Ces deux tests échouent sans la nouvelle gestion du budget.
+- Rendu de la fiche du chantier (`WorksitePanel.test.ts`).
+
+**Coût de la preuve.** Pire cas de test (chaque bâtiment entouré de jardins, réseau d'affichage) : 19 009 → 21 178 nœuds visités. Le réseau d'affichage sans routes reste identique à l'empreinte près.
+
+**Mesures ciblées** (même protocole qu'au §14 ; deux passages) : Bressuire, aperçu d'exploitation, appels suivants p50 69 à 74, 81 à 89 et 91 à 92 ms (1, 4 et 8 parcelles), contre 69 à 99 ms avec T2a. Pas de régression.
+
+**Test intermittent constaté** : `stone-proofs` « D/K » (reprise des tâches en `SKIP LOCKED`, sans lien avec la navigation) a échoué une fois sous la charge de la machine, puis est passé deux fois.

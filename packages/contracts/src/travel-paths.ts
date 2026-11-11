@@ -780,6 +780,15 @@ function refinementCache(state: TravelNetworkState, ground?: TravelGround): Refi
   while (refinementCaches.size > 4) refinementCaches.delete(refinementCaches.keys().next().value!);
   return entry;
 }
+/** Fine lattice nodes of one cell (eighths in x and y). */
+export const SEARCH_NODES_PER_CELL = 64;
+/** Node bound of a mission search inside a region (refonte des trajets §4.2):
+ * every node of the domain, never more. A search that empties its queue below
+ * this bound proves its goal unreachable; one that reaches it ends in `budget`. */
+export function villageSearchBound(region: { width: number; height: number }): number {
+  return region.width * region.height * SEARCH_NODES_PER_CELL;
+}
+
 export function refineTravelRoute(
   state: TravelNetworkState,
   route: TravelRoute,
@@ -796,6 +805,8 @@ export function refineTravelRoute(
     gardens?: ReadonlySet<string>;
     /** Start point instead of the town hall doors (a tour leg between two plots). */
     from?: TravelCell;
+    /** Nodes visited by the fine searches, added to `visited` (tests, diagnostics). */
+    stats?: { visited: number };
   },
 ): TravelRoute | null {
   checkpoint?.();
@@ -1105,9 +1116,13 @@ export function refineTravelRoute(
     );
     if (witness.kind === 'found' && pathCost(witness.path) / 1000 <= direct + 16) return result(witness.path);
   }
+  const bound = search?.maxVisited ?? villageSearchBound(state.region),
+    exhausted = new Map<string, Set<number>>();
+  let searched = false;
   for (const start of starts)
     for (const end of ends.length ? ends : [null]) {
       if (!accessClear(start, hall.building.id) || (end && !accessClear(end, route.id))) continue;
+      searched = true;
       const from = {
         cellX: wrap(Math.round(start.outside.cellX * 8), w),
         cellY: wrap(Math.round(start.outside.cellY * 8), h),
@@ -1169,12 +1184,18 @@ export function refineTravelRoute(
         return options;
       };
       const nodeKey = (p: TravelCell) => p.cellY * w + p.cellX;
+      // A start inside a component already exhausted toward this goal cannot reach it either.
+      const goalKey = `${nodeKey(to)}:${cellGoal && !end}`;
+      if (exhausted.get(goalKey)?.has(nodeKey(from))) continue;
       const pending = new StepQueue(),
         seen = new Map<number, number>();
       pending.push({ cell: from, cost: 0, score: estimate(from), direction: -1, steps: 0 });
       let found: Step | undefined,
         visited = 0;
-      while (pending.length && visited++ < (search?.maxVisited ?? 65_536)) {
+      // No pruning by detour (§4.2): bounded by the nodes of the domain only, so
+      // an emptied queue proves the goal unreachable from this start.
+      while (pending.length && visited < bound) {
+        visited++;
         checkpoint?.();
         const cur = pending.pop();
         if (cur.cost > (seen.get(nodeKey(cur.cell)) ?? Infinity)) continue;
@@ -1188,7 +1209,6 @@ export function refineTravelRoute(
           found = cur;
           break;
         }
-        if (cur.steps + distance(cur.cell, to) > distance(from, to) + 128) continue;
         for (const via of neighbours(cur.cell)) {
           const cell = via.at(-1)!;
           let cost = cur.cost,
@@ -1258,12 +1278,7 @@ export function refineTravelRoute(
             if (!valid) break;
             previous = end;
           }
-          if (
-            !valid ||
-            steps + distance(cell, to) > distance(from, to) + 128 ||
-            cost >= (seen.get(nodeKey(cell)) ?? Infinity)
-          )
-            continue;
+          if (!valid || cost >= (seen.get(nodeKey(cell)) ?? Infinity)) continue;
           seen.set(nodeKey(cell), cost);
           pending.push({
             cell,
@@ -1276,8 +1291,14 @@ export function refineTravelRoute(
           });
         }
       }
+      if (search?.stats) search.stats.visited += visited;
       if (!found) {
-        limited ||= pending.length > 0;
+        if (pending.length) limited = true;
+        else {
+          const component = exhausted.get(goalKey) ?? new Set<number>();
+          for (const node of seen.keys()) component.add(node);
+          exhausted.set(goalKey, component);
+        }
         continue;
       }
       const legs: TravelCell[][] = [];
@@ -1292,14 +1313,16 @@ export function refineTravelRoute(
         ...cells,
         ...(end ? [end.position] : []),
         ...(!local(route.destination) ? route.cells.slice(lastLocal + 1) : []),
-      ].filter((p, i, list) => !i || key(p) !== key(list[i - 1]!));
+      ].filter((p, i, list) => !from || !i || key(p) !== key(list[i - 1]!));
       const candidate = pathCost(path);
       if (!best || candidate < bestCost) {
         best = path;
         bestCost = candidate;
       }
     }
-  if (!best && limited) search?.onLimit?.();
+  // Outside the region, an exhausted local search proves nothing about the
+  // target: a bounded search there ends in `budget`, never `unreachable` (§4.2).
+  if (!best && (limited || (searched && !local(route.destination)))) search?.onLimit?.();
   return result(best);
 }
 

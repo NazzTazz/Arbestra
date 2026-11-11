@@ -144,14 +144,15 @@ describe('gardens are not roads', () => {
   });
 
   it.each([
-    ['refined', true, 21_000],
+    ['refined', true, 22_000],
     ['coarse', false, 7_000],
   ] as const)('bounds the search when every route must cross a garden (%s)', (_, refined, bound) => {
     // The hall is ringed by a garden and eight houses are each ringed by their
     // own: no ordinary passage exists, so each search spends its whole bounded
     // detour before paying for one plot. Checkpoints count the visited nodes:
     // 19 009 refined and 6 401 coarse, against 8 697 and 2 823 when gardens
-    // were roads. The detour bounds of the searches cap this worst case.
+    // were roads. Since T2b (refonte des trajets §4.2) the fine search has no
+    // detour pruning, only the node bound of its domain: 21 178 refined.
     const ring = (cx: number, cy: number, r: number) =>
       rect(cx - r, cx + r, cy - r, cy + r).filter(
         (p) => Math.max(Math.abs(p.cellX - cx), Math.abs(p.cellY - cy)) === r,

@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto';
 import type { RouteQuery, RouteResult } from '@arbestra/contracts';
 import type { NavigationData } from './context.js';
 import type { TravelRoute } from '@arbestra/contracts';
-import type { NetworkJob, NetworkLoader, TravelNetworkExecutor } from './network-job.js';
+import {
+  NAVIGATION_BUDGET,
+  navigationBudgetError,
+  type NetworkJob,
+  type NetworkLoader,
+  type TravelNetworkExecutor,
+} from './network-job.js';
 import { HttpError } from '../../errors.js';
 import { devTime, devTimeSync } from '../operations/dev-timing.js';
 type Work = {
@@ -294,6 +300,7 @@ export class NavigationCompute implements NavigationExecutor, TravelNetworkExecu
       )) as TravelRoute[];
     } catch (error) {
       if (error instanceof HttpError) throw error;
+      if (error instanceof Error && error.message === NAVIGATION_BUDGET) throw navigationBudgetError();
       throw new HttpError(503, 'NAVIGATION_UNAVAILABLE', 'Calcul des trajets interrompu. Réessayez.');
     } finally {
       lane.busy = false;
@@ -317,6 +324,7 @@ export class NavigationCompute implements NavigationExecutor, TravelNetworkExecu
       return (await this.dispatch(lane, { network }, 'network', this.networkLimits.computeMs)) as TravelRoute[];
     } catch (error) {
       if (error instanceof HttpError) throw error;
+      if (error instanceof Error && error.message === NAVIGATION_BUDGET) throw navigationBudgetError();
       throw new HttpError(503, 'NAVIGATION_UNAVAILABLE', 'Calcul du trajet interrompu. Réessayez.');
     } finally {
       lane.busy = false;

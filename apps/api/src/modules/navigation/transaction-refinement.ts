@@ -7,11 +7,10 @@ import {
   type TravelNetworkState,
   type TravelRoute,
 } from '@arbestra/contracts';
-import { HttpError } from '../../errors.js';
 import type { Database } from '../../database/schema.js';
 import type { readRc1Ground } from '../worlds/rc1-ground.js';
 import { devTime, devTimeSync } from '../operations/dev-timing.js';
-import { networkJob, networkState, type NetworkLoader } from './network-job.js';
+import { navigationBudgetError, networkJob, networkState, type NetworkLoader } from './network-job.js';
 
 export interface TransactionRefiner {
   refine(load: NetworkLoader): Promise<TravelRoute[]>;
@@ -46,7 +45,7 @@ export async function commandVillageLegs(
     return devTimeSync('navigation', () =>
       legs.map((leg) =>
         planVillageLeg(state, leg.from, leg.to, ground?.navigation, undefined, () => {
-          throw new HttpError(503, 'NAVIGATION_BUSY', 'Calcul du trajet interrompu. Réessayez.');
+          throw navigationBudgetError();
         }),
       ),
     );

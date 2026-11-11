@@ -441,7 +441,21 @@ export function WorksitePanel({
     access: 'accès bloqué',
     'workers-resting': 'équipe au repos',
     'route-too-long': 'trajet trop long pour une équipe reposée',
+    'navigation-busy': 'calcul des trajets occupé',
+    'navigation-budget': 'trajet difficile à calculer, nouvel essai dans une minute',
     waiting: 'en attente',
+  };
+  // Targets given up by the worksite, by reason (T2b, decision §8.8).
+  const abandonLabels: Record<string, string> = {
+    unreachable: 'sans chemin',
+    budget: 'trajet introuvable après plusieurs essais',
+  };
+  const abandoned = (site: (typeof worksites)[number]) => {
+    const counts = new Map<string, number>();
+    for (const t of site.targets)
+      if (t.status === 'abandoned' && t.reason && abandonLabels[t.reason])
+        counts.set(t.reason, (counts.get(t.reason) ?? 0) + 1);
+    return [...counts].map(([reason, n]) => `${n} ${abandonLabels[reason]}`).join(' · ');
   };
   return (
     <div className="worksite-panel">
@@ -504,6 +518,7 @@ export function WorksitePanel({
                         ? 'Terminé'
                         : 'Arrêté'}
               </p>
+              {abandoned(site) && <p>Abandonnés : {abandoned(site)}</p>}
               <p>
                 {format(site.deliveredAmount)} {site.resourceCode === 'wood' ? 'bois' : 'pierre'} livrés
                 {site.activeExtraction

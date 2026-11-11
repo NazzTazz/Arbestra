@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { gardenTourLegKey, gardenTourLegs, planGardenTour, planGardenTourByLegs } from './garden-tour.js';
 import { emptyInfrastructure } from './infrastructure.js';
-import { planVillageLeg, travelDuration, type TravelNetworkState } from './travel-paths.js';
+import {
+  planVillageLeg,
+  refineTravelRoute,
+  travelDuration,
+  villageSearchBound,
+  type TravelNetworkState,
+} from './travel-paths.js';
 import type { TravelCell, TravelRoute } from './travel-paths.js';
 const c = (x: number, y = 0): TravelCell => ({ cellX: x, cellY: y });
 const route = (cells: TravelCell[]): TravelRoute => ({
@@ -143,4 +149,109 @@ describe('planVillageLeg', () => {
     };
     expect(planVillageLeg(walled, null, c(10, 2))).toBeNull();
   });
+});
+
+describe('explicit search outcomes (refonte des trajets T2b, §4.2)', () => {
+  // A hall at (10,10) and a plot at (9,8) inside a moat (water at Chebyshev
+  // distance 3), a target outside at (2,2), on a 20 × 20 torus.
+  const size = 20;
+  const moat = (code: number, i: number) =>
+    Math.max(Math.abs((i % size) - 10), Math.abs(Math.floor(i / size) - 10)) === 3 ? 2 : code;
+  const state = (water: boolean): TravelNetworkState => ({
+    world: { id: 'w', widthCells: size, heightCells: size },
+    village: { anchorCellX: 10, anchorCellY: 10, townHallBuildingId: 'hall' },
+    region: {
+      originCellX: 0,
+      originCellY: 0,
+      width: size,
+      height: size,
+      terrainCodes: Array.from({ length: size * size }, (_, i) => (water ? moat(1, i) : 1)),
+      features: [],
+    },
+    infrastructure: emptyInfrastructure(),
+    cells: [
+      {
+        cellX: 10,
+        cellY: 10,
+        footprint: { buildingId: 'hall' },
+        building: { id: 'hall', type: 'town-hall', quarterTurns: 0 },
+      },
+      {
+        cellX: 9,
+        cellY: 8,
+        footprint: { buildingId: 'garden', buildingType: 'garden', state: 'active' },
+        building: null,
+      },
+    ],
+  });
+  const bound = villageSearchBound(state(true).region);
+  it('proves an enclosed start unreachable within the published node bound, from the hall and from a plot', () => {
+    for (const from of [null, c(9, 8)]) {
+      let visited = 0,
+        limited = false;
+      const path = planVillageLeg(
+        state(true),
+        from,
+        c(2, 2),
+        undefined,
+        () => visited++,
+        () => (limited = true),
+      );
+      expect(path).toBeNull();
+      expect(limited).toBe(false);
+      expect(visited).toBeGreaterThan(0);
+      expect(visited).toBeLessThanOrEqual(bound);
+    }
+    // Without the moat, both legs are found.
+    expect(planVillageLeg(state(false), null, c(2, 2))?.at(-1)).toEqual(c(2, 2));
+    expect(planVillageLeg(state(false), c(9, 8), c(2, 2))?.at(-1)).toEqual(c(2, 2));
+  });
+  it('ends in budget, never unreachable, when the node bound is reached first', () => {
+    let limited = false;
+    const route = refineTravelRoute(
+      state(false),
+      { id: 'far', kind: 'garden', destination: c(2, 2), cells: [c(2, 2)] },
+      new Set(),
+      undefined,
+      undefined,
+      undefined,
+      { maxVisited: 4, onLimit: () => (limited = true) },
+    );
+    expect(route).toBeNull();
+    expect(limited).toBe(true);
+  });
+});
+
+it('finds a target reachable only through a long detour, once taken for unreachable (T2b)', () => {
+  // A river at x = 20 with one ford at y = 40; the hall at (10,10), the
+  // target across at (30,10): about 60 cells of detour. The former search
+  // pruned any detour beyond 16 cells and reported no path.
+  const width = 48,
+    height = 64;
+  const state: TravelNetworkState = {
+    world: { id: 'w', widthCells: width, heightCells: height },
+    village: { anchorCellX: 10, anchorCellY: 10, townHallBuildingId: 'hall' },
+    region: {
+      originCellX: 0,
+      originCellY: 0,
+      width,
+      height,
+      terrainCodes: Array.from({ length: width * height }, (_, i) =>
+        (i % width === 20 || i % width === 44) && Math.floor(i / width) !== 40 ? 2 : 1,
+      ),
+      features: [],
+    },
+    infrastructure: emptyInfrastructure(),
+    cells: [
+      {
+        cellX: 10,
+        cellY: 10,
+        footprint: { buildingId: 'hall' },
+        building: { id: 'hall', type: 'town-hall', quarterTurns: 0 },
+      },
+    ],
+  };
+  const path = planVillageLeg(state, null, c(30, 10));
+  expect(path?.at(-1)).toEqual(c(30, 10));
+  expect(path!.some((p) => Math.round(p.cellY) === 40 && Math.round(p.cellX) === 20)).toBe(true);
 });

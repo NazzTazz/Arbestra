@@ -26,9 +26,12 @@ import { wrappedDelta } from '../worlds/coordinates.js';
 import { spatialSavepoint } from '../worlds/spatial-locks.js';
 import { poolAdmissionCap } from './extraction-pools.js';
 import { pathTravelDuration } from '../navigation/road-cost.js';
+import { NAVIGATION_BUDGET } from '../navigation/network-job.js';
 
 export const WAKE_EXTRACTION_WORKSITE_TASK = 'deposit.worksite.wake';
 const WAIT_MS = 60_000;
+/** Wakes a target may spend on a search that reached its budget before it is abandoned (§8.8). */
+export const BUDGET_WAKES = 3;
 const MAX_ACTIVE_WORKSITES = 8;
 
 /** Squared geographic distance, independent of transport cost and toric seams. */
@@ -398,8 +401,7 @@ export async function admitWorksites(
       continue;
     }
     if (
-      site.poolResource &&
-      site.waitReason === 'navigation-busy' &&
+      ((site.poolResource && site.waitReason === 'navigation-busy') || site.waitReason === 'navigation-budget') &&
       site.nextWakeAt &&
       site.nextWakeAt > economy.through
     )
@@ -557,6 +559,36 @@ export async function admitWorksites(
       try {
         path = await pathFor(target.featureId);
       } catch (error) {
+        if (error instanceof HttpError && error.code === NAVIGATION_BUDGET) {
+          // The search reached its node bound (refonte des trajets §4.2): no
+          // proof that the target is unreachable. The site waits and retries;
+          // after BUDGET_WAKES wakes the target is abandoned (decision §8.8).
+          if (target.budgetWakes >= BUDGET_WAKES) {
+            await completeTarget(
+              tx,
+              { id: target.worksiteId },
+              target.featureId,
+              economy.through,
+              'abandoned',
+              'budget',
+            );
+            continue;
+          }
+          await tx
+            .updateTable('extractionWorksiteTargets')
+            .set({ budgetWakes: target.budgetWakes + 1 })
+            .where('worksiteId', '=', target.worksiteId)
+            .where('featureId', '=', target.featureId)
+            .execute();
+          await tx
+            .updateTable('extractionWorksites')
+            .set({ waitReason: 'navigation-budget', updatedAt: economy.through })
+            .where('worldId', '=', economy.worldId)
+            .where('id', '=', site.id)
+            .execute();
+          await scheduleWake(tx, site, new Date(economy.through.getTime() + WAIT_MS));
+          continue sitesLoop;
+        }
         if (
           site.poolResource &&
           error instanceof HttpError &&
@@ -586,6 +618,13 @@ export async function admitWorksites(
         );
         continue;
       }
+      if (target.budgetWakes)
+        await tx
+          .updateTable('extractionWorksiteTargets')
+          .set({ budgetWakes: 0 })
+          .where('worksiteId', '=', target.worksiteId)
+          .where('featureId', '=', target.featureId)
+          .execute();
       // Keep the contract's integer milliseconds throughout admission. A trip
       // through seconds can turn 4052 into 4051.9999999999995 and abort the
       // village transaction when PostgreSQL stores transport_ms as an integer.

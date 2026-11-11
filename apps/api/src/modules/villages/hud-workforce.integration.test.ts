@@ -320,6 +320,79 @@ it.each(['NAVIGATION_BUSY', 'NAVIGATION_UNAVAILABLE'])(
   },
 );
 
+it('waits on a search budget, retries at three wakes, then abandons the target with its reason (T2b, §8.8)', async () => {
+  await db.transaction().execute(async (tx) => {
+    const { ctx, targets } = await seed(tx);
+    await appendPoolTargets(tx, ctx, 'wood', [targets[0]!, targets[1]!]);
+    const site = () =>
+      tx
+        .selectFrom('extractionWorksites')
+        .selectAll()
+        .where('worldId', '=', worldId)
+        .where('villageId', '=', villageId)
+        .where('poolResource', '=', 'wood')
+        .executeTakeFirstOrThrow();
+    const target = (featureId: string) =>
+      tx
+        .selectFrom('extractionWorksiteTargets')
+        .select(['status', 'reason', 'budgetWakes'])
+        .where('worldId', '=', worldId)
+        .where('featureId', '=', featureId)
+        .executeTakeFirstOrThrow();
+    // The first target exhausts its budget every time; the second is found.
+    const search = vi.fn(async (featureId: string) => {
+      if (featureId === targets[0]) throw new HttpError(503, 'NAVIGATION_BUDGET', 'Budget');
+      return route();
+    });
+    // Order of the pool: the nearest first. Make the first target the one tried.
+    let through = ctx.through;
+    for (let wake = 1; wake <= worksiteService.BUDGET_WAKES; wake++) {
+      await admitWorksites(tx, { ...ctx, through }, dimensions, search);
+      expect(await target(targets[0]!)).toEqual({ status: 'pending', reason: null, budgetWakes: wake });
+      const waiting = await site();
+      expect(waiting.waitReason).toBe('navigation-budget');
+      expect(await active(tx)).toHaveLength(0);
+      // Before the wake, no search at all.
+      const calls = search.mock.calls.length;
+      await admitWorksites(tx, { ...ctx, through: new Date(waiting.nextWakeAt!.getTime() - 1) }, dimensions, search);
+      expect(search.mock.calls.length).toBe(calls);
+      through = waiting.nextWakeAt!;
+    }
+    // The third wake fails as well: abandoned with reason `budget`, never
+    // `unreachable`, and the pool moves on to the next target.
+    await admitWorksites(tx, { ...ctx, through }, dimensions, search);
+    expect(await target(targets[0]!)).toEqual({ status: 'abandoned', reason: 'budget', budgetWakes: 3 });
+    expect(await active(tx)).toHaveLength(1);
+    expect((await active(tx))[0]).toMatchObject({ featureId: targets[1] });
+    expect(search.mock.calls.filter(([id]) => id === targets[0])).toHaveLength(worksiteService.BUDGET_WAKES + 1);
+  });
+});
+
+it('resets the budget wakes of a target once its path is found', async () => {
+  await db.transaction().execute(async (tx) => {
+    const { ctx, targets } = await seed(tx);
+    await appendPoolTargets(tx, ctx, 'wood', [targets[0]!]);
+    await admitWorksites(tx, ctx, dimensions, async () => {
+      throw new HttpError(503, 'NAVIGATION_BUDGET', 'Budget');
+    });
+    const { nextWakeAt } = await tx
+      .selectFrom('extractionWorksites')
+      .select('nextWakeAt')
+      .where('worldId', '=', worldId)
+      .where('poolResource', '=', 'wood')
+      .executeTakeFirstOrThrow();
+    await admitWorksites(tx, { ...ctx, through: nextWakeAt! }, dimensions, route);
+    expect(await active(tx)).toHaveLength(1);
+    const row = await tx
+      .selectFrom('extractionWorksiteTargets')
+      .select(['status', 'budgetWakes'])
+      .where('worldId', '=', worldId)
+      .where('featureId', '=', targets[0]!)
+      .executeTakeFirstOrThrow();
+    expect(row).toEqual({ status: 'pending', budgetWakes: 0 });
+  });
+});
+
 it('feeds all active workers without losing assignments, respects quotas and rotates distinct batches of ten', async () => {
   await db.transaction().execute(async (tx) => {
     const { ctx, targets } = await seed(tx, 35);
