@@ -80,3 +80,21 @@ Optionnel, après P1 à P4 et seulement si la sélection reste au-delà de 5 ms 
 - Les 117 lumières de nuit restent un coût par fragment ; réduire les feux proches simultanés est un levier de dernier recours, avec effet visuel.
 
 Vérifications manuelles restantes : GPU à l'arrêt au même point de vue ; A/B par familles dans le laboratoire DEV ; nombre réel de rebasages lors d'un grand déplacement (`canvas.dataset.terrainStreaming.origin`).
+
+## Mesures après P1 et P2 (11 novembre, Tristan, MX230, Bressuire de nuit)
+
+Commits : `2c4e98a` (P1), `704be7b` (P2 : flammes en un seul système de particules, résolution réduite pendant le mouvement), `15f230a` (LOD mesuré à la résolution du repos : la résolution réduite faisait basculer les bâtiments, 14 274 bascules par minute et l'HDV qui clignotait), `5834d00` puis `4408365` (variantes moyenne et lointaine de l'HDV 2 : matériaux du marché perdus à la fusion, puis textures vides des copies ; rebake), `61f14f9` (feux de bâtiment qui suivent leur bâtiment : les « braseros fantômes »).
+
+| Mesure (overlay, 60 s après « Réinitialiser ») | Avant | Après |
+|---|---|---|
+| Cadence en rotation (second passage) | < 20 i/s | ≥ 30 i/s |
+| Images > 100 ms / > 200 ms | 11 / 1 | 14 / 0 |
+| Pire image | 208 ms | 146 ms |
+| Appels de dessin | 317 | 159 |
+| GPU moteur, moyenne | 41,2 ms | 18,2 ms |
+| Rendu principal CPU, moyenne | 47,4 ms | 31,4 ms |
+| Particules CPU | 4,2 ms | 0,3 ms |
+| Visibilité / vue régionale | 4,6 ms | 0,1 ms |
+| Bascules LOD / rebasages | — | 282 / 0 |
+
+Restent : la première rotation (8 i/s pendant que le terrain s'intègre et que les bâtiments rendent leurs variantes pour la première fois), et 282 bascules LOD en une minute sans rebasage (oscillation autour des seuils, hystérésis de P4). Le budget d'AGENTS.md (aucune image au-delà de 100 ms une fois le village prêt) n'est pas encore tenu.
