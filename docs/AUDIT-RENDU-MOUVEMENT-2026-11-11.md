@@ -133,3 +133,17 @@ La première rotation n'a donc pas de coupable unique : un rendu plus chargé, c
 **Bascules LOD.** La profondeur utilisée est celle de l'axe de visée. En rotation, chaque bâtiment change donc de profondeur, et les bascules restantes sont pour l'essentiel de vrais franchissements de seuil, pas des oscillations. La marge de 10 % supprime les allers-retours (test de régression). Pour aller plus loin, il faudrait mesurer la distance à la caméra plutôt que la profondeur, ce qui changerait le choix au repos. À décider si ces bascules restent visibles.
 
 **Braseros fantômes (`61f14f9`) : validé par Tristan le 11 novembre.** Les flammes restent dans les niches du marché et sur le tailleur de pierre après un déplacement de plusieurs chunks.
+
+## Pics de la première rotation : diagnostic (11 novembre, soir)
+
+Mesure par instrumentation temporaire (retirée), Bressuire, dans l'onglet de l'agent :
+- **Sol RC1** : 79 à 86 unités au chargement ou pendant la première rotation ; 0,6 ms en moyenne, 4,8 ms au pire. Hors de cause.
+- **Tri de la file du terrain** : 0,1 ms au plus. Hors de cause.
+- **Bosquets** (unités `woodland`, une par case de forêt) : 22 à 50 ms par bosquet d'environ 10 arbres. Le placement et l'aspect des arbres coûtent moins de 1 ms. Tout le reste vient de la création des meshes : 8 à 10 pièces par bosquet, 2 à 5 ms chacune.
+- **Pendant la première rotation**, les images longues de la phase « Terrain · création des meshes » (11 à 44 ms) sont chacune la publication d'**une seule** unité, un bosquet.
+
+**Cause.** `cloneWoodland` (`scenery-batch.ts`) clone la pièce du kit d'arbres puis appelle `makeGeometryUnique()`. Toute la géométrie de la pièce est recopiée et renvoyée au GPU, pour chaque pièce de chaque bosquet, parce que Babylon range les matrices des instances fines (`world0..3`) sur la géométrie. Le budget par image du terrain (1 ms) n'y peut rien : une unité se construit d'un seul tenant.
+
+**Pistes.**
+1. Des géométries qui partagent les tampons de sommets et d'indices de la pièce source, chacune avec ses propres tampons de matrices. Aucune copie de sommets, aucun envoi au GPU. À vérifier : le comptage des références des tampons partagés à la libération.
+2. Une seule instance par pièce et par chunk, au lieu d'une par bosquet : 10 fois moins de clones, mais un abattage reconstruit tout le chunk.
