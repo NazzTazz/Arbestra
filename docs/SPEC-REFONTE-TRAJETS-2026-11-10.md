@@ -355,3 +355,31 @@ Une tournée sans échec reste à k + 1 recherches.
 **Mesures ciblées** (même protocole qu'au §14 ; deux passages) : Bressuire, aperçu d'exploitation, appels suivants p50 69 à 74, 81 à 89 et 91 à 92 ms (1, 4 et 8 parcelles), contre 69 à 99 ms avec T2a. Pas de régression.
 
 **Test intermittent constaté** : `stone-proofs` « D/K » (reprise des tâches en `SKIP LOCKED`, sans lien avec la navigation) a échoué une fois sous la charge de la machine, puis est passé deux fois.
+
+## 16. Charge locale avant et après T2 (11 novembre)
+
+**Protocole.**
+- Base `arbestra_load` recréée à neuf : migrée jusqu'à 084, puis seed de développement.
+- Quatre passages en alternance : code d'avant T2 (`5ca53c9`, worktree temporaire), code de T2b (`0ead322`), puis de nouveau avant et après.
+- À chaque passage, deux mondes neufs de 15 bots (l'un groupé, l'autre dispersé avec `--grant wood=5000,timber=700`), provisionnés par le même code ; mélange par défaut, un geste toutes les 8 s ; paliers de 10 puis 30 bots de 120 s ; seuils relâchés du §12 ; mondes supprimés après chaque passage.
+- Machine de Tristan, serveur de dev actif : chiffres bruités, d'où l'alternance.
+- Le CPU de l'API n'a pas été relevé pour le code d'avant, dont la sonde écrivait dans le worktree.
+- Résumés : `apps/load-test/out/run-local-2026-11-11T18-*`, non versionnés.
+
+| | Avant T2 (passages 1 et 3) | Après T2 (passages 2 et 4) |
+|---|---|---|
+| **10 bots** : commandes en 120 s | 94 et 97 | 129 et 126 |
+| p50 / p95 des commandes | 184 et 179 ms / 3,7 et 3,9 s | 52 et 51 ms / 0,89 et 0,81 s |
+| Retard du scheduler, au pire | 12 et 22 s | 10 et 9,8 s |
+| **30 bots** : commandes en 120 s | 120 et 129 | 235 et 208 |
+| p50 / p95 des commandes | 3,0 et 3,5 s / 12,3 et 17,4 s | 0,24 et 0,55 s / 4,6 et 5,2 s |
+| Erreurs | 5 % et 7,8 % | 1,3 % et 4,3 % |
+| Retard du scheduler, au pire (tâches dues) | 102 s (114) et 82 s (107) | 29 s (41) et 60 s (92) |
+| Récolte en attente, au pire | 102 et 82 s | 29 et 59 s |
+| Présentation, p95 | 26 et 15 s | 14 et 15 s |
+
+**Lecture.**
+- À 30 bots, le serveur traite environ **deux fois plus de commandes**. Leur médiane est divisée par 6 à 12, leur p95 par 3, et le retard du scheduler par 1,5 à 3.
+- À 10 bots, la commande médiane passe de 180 à 50 ms.
+- La présentation ne bouge pas : elle calcule encore le réseau « tous buts » (T4), et sa file de trajets reste la première ressource saturée, avec 29 à 57 `NAVIGATION_BUSY` à 30 bots.
+- Le retard du scheduler à 30 bots, de 29 à 60 s, reste au-dessus de son seuil : c'est la cible de T6 (calcul hors verrou) et de la sortie du worker du processus de l'API.
