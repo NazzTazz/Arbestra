@@ -12,6 +12,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { ShaderStore } from '@babylonjs/core/Engines/shaderStore';
 import { Particle } from '@babylonjs/core/Particles/particle';
 import type { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
+import type { CustomParticleEmitter } from '@babylonjs/core/Particles/EmitterTypes/customParticleEmitter';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { bindBrazierLights, brazierBlocks, roadCorners, setSceneNight, VillageBraziers } from './village-braziers';
 import { buildStonemasonFire } from './stonemason-factory';
@@ -197,7 +198,6 @@ it.each(['equipment', 'decoration'])(
       particle.position.set(10, 1.4, 20);
       flame.particles.push(particle);
       const centre = masonry.getBoundingInfo().boundingBox.centerWorld.clone(),
-        emitter = (flame.emitter as Vector3).clone(),
         lightPosition = light.position.clone();
       braziers.updatePoints([{ ...point, x: -70, y: 1.5, z: -60 }]);
       const shift = new Vector3(-80, 0.5, -80);
@@ -207,9 +207,14 @@ it.each(['equipment', 'decoration'])(
       expect(masonry.isPickable).toBe(kind === 'equipment');
       expect(masonry.metadata?.equipmentId).toBe(kind === 'equipment' ? 'brazier-1' : undefined);
       expect(masonry.getBoundingInfo().boundingBox.centerWorld.equalsWithEpsilon(centre.add(shift), 1e-5)).toBe(true);
-      expect(scene.particleSystems[0]).toBe(flame);
-      expect((flame.emitter as Vector3).equalsWithEpsilon(emitter.add(shift))).toBe(true);
+      // One shared flame system (rendering P2): its emitter stays at the origin,
+      // the live flames follow the shift and new ones are born at the new point.
+      expect(scene.particleSystems).toEqual([flame]);
+      expect((flame.emitter as Vector3).equalsWithEpsilon(Vector3.Zero())).toBe(true);
       expect(particle.position.equalsWithEpsilon(new Vector3(-70, 1.9, -60))).toBe(true);
+      const born = new Vector3();
+      (flame.particleEmitterType as CustomParticleEmitter).particlePositionGenerator(0, particle, born);
+      expect(Vector3.Distance(born, new Vector3(-70, 1.6, -60))).toBeLessThan(0.02);
       expect(scene.getLightByName('brazier-light-0')).toBe(light);
       expect(light.position.equalsWithEpsilon(lightPosition.add(shift))).toBe(true);
       // A streamed brazier reuses the shared masonry geometry, placed by its own transform.
@@ -448,6 +453,67 @@ it('hands clustered fires to the cluster without registering each one in the sce
   } finally {
     added.mockRestore();
     toggled.mockRestore();
+    braziers.dispose();
+    scene.dispose();
+    engine.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('draws every flame of 117 braziers with one particle system, born at each fire in turn (rendering P2)', () => {
+  vi.stubGlobal(
+    'OffscreenCanvas',
+    class {
+      constructor(
+        public width: number,
+        public height: number,
+      ) {}
+      getContext() {
+        return { putImageData() {} };
+      }
+    },
+  );
+  vi.stubGlobal(
+    'ImageData',
+    class {
+      data: Uint8ClampedArray;
+      constructor(width: number, height: number) {
+        this.data = new Uint8ClampedArray(width * height * 4);
+      }
+    },
+  );
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    braziers = new VillageBraziers(scene);
+  try {
+    const points = Array.from({ length: 117 }, (_, i) => ({ id: `b-${i}`, x: i * 3, y: 1, z: 0, seed: (i % 10) / 10 }));
+    braziers.updatePoints(points);
+    // One draw call and one CPU update for all fires, room for 24 particles each.
+    expect(scene.particleSystems).toHaveLength(1);
+    const flames = scene.particleSystems[0] as ParticleSystem;
+    expect(flames.getCapacity()).toBeGreaterThanOrEqual(117 * 24);
+    const born = new Vector3(),
+      hit = new Set<number>();
+    for (let i = 0; i < 117; i++) {
+      (flames.particleEmitterType as CustomParticleEmitter).particlePositionGenerator(i, null as never, born);
+      hit.add(Math.round(born.x / 3));
+    }
+    expect(hit.size).toBe(117);
+    // At night, the total rate is the sum of the fires' (29 ± 9 each).
+    setSceneNight(scene, true);
+    braziers.animate(1000, true, 1);
+    expect(flames.isStarted()).toBe(true);
+    expect(flames.emitRate).toBeGreaterThan(117 * 20);
+    expect(flames.emitRate).toBeLessThan(117 * 38);
+    const stop = vi.spyOn(flames, 'stop');
+    braziers.animate(2000, false, 1);
+    braziers.animate(3000, false, 1);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(flames.particles).toHaveLength(0);
+    // Fewer fires keep the system; more than it holds rebuild it once.
+    braziers.updatePoints(points.slice(0, 10));
+    expect(scene.particleSystems).toEqual([flames]);
+  } finally {
     braziers.dispose();
     scene.dispose();
     engine.dispose();

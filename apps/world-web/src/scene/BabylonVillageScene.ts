@@ -188,6 +188,11 @@ import { EditSettle } from './edit-settle';
 import { createAvailableSitePlate } from './available-site-plate';
 /** Roads, paths and the regional sheet follow the ground this long after the last terraforming prediction (§7.14). */
 const EDIT_SETTLE_MS = 300;
+/** Rendering P2 (audit of 11 November): render with MOTION_SCALING times fewer
+ * pixels per axis while the camera moved in the last MOTION_SETTLE_MS (1.2 → 1.5,
+ * about a third fewer fragments on a MX230). */
+const MOTION_SCALING = 1.25;
+const MOTION_SETTLE_MS = 300;
 /** Pulses of an obstacle shown by the Oracle's « Inspecter » (Tristan, 2 November). */
 const INSPECT_PULSES = 3;
 import { flatRoadGeometry } from './infrastructure-surface-geometry';
@@ -436,6 +441,10 @@ export class BabylonVillageScene {
   readonly #onViewChanged: (mode: TerrainViewMode) => void;
   readonly #reducedQuality =
     navigator.webdriver && (import.meta.env.PROD || !new URLSearchParams(location.search).has('terrainPerf'));
+  /** Hardware scaling at rest; MOTION_SCALING times it while the camera moves
+   * (rendering P2: the GPU, not the CPU, saturates in motion on a MX230). */
+  readonly #restingScaling: number;
+  #cameraMovedAt = -Infinity;
   #buildableGrid: Mesh | null = null;
   #buildableArea: Mesh | null = null;
   #buildableGeometry: BuildableGridGeometry | null = null;
@@ -1359,7 +1368,8 @@ export class BabylonVillageScene {
     this.#onViewChanged = onViewChanged;
     this.#engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
     this.#engine.maxFPS = this.#reducedQuality ? 5 : 45;
-    this.#engine.setHardwareScalingLevel(Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5));
+    this.#restingScaling = Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5);
+    this.#engine.setHardwareScalingLevel(this.#restingScaling);
     this.#scene = new Scene(this.#engine);
     selectEnabledCandidates(this.#scene);
     this.#sceneStats =
@@ -1390,6 +1400,9 @@ export class BabylonVillageScene {
       new Vector3(0, 0.45, 0),
       this.#scene,
     );
+    this.#camera.onViewMatrixChangedObservable.add(() => {
+      this.#cameraMovedAt = performance.now();
+    });
     this.#camera.fov = 0.55;
     this.#camera.lowerRadiusLimit = 8;
     this.#camera.upperRadiusLimit = 680;
@@ -1666,6 +1679,14 @@ export class BabylonVillageScene {
       if (this.#initialFailure) return;
       try {
         const now = performance.now();
+        // Fewer pixels while the view moves, the full resolution once it rests:
+        // a lower resolution is hardly visible in motion. O(1) per frame; the
+        // engine reallocates its buffers only when the level actually changes.
+        const scaling =
+          !this.#reducedQuality && now - this.#cameraMovedAt < MOTION_SETTLE_MS
+            ? this.#restingScaling * MOTION_SCALING
+            : this.#restingScaling;
+        if (this.#engine.getHardwareScalingLevel() !== scaling) this.#engine.setHardwareScalingLevel(scaling);
         const measureFrame = statisticsEnabled();
         const frame = measureFrame ? new FrameTimings(now) : undefined;
         let renderMs = 0;

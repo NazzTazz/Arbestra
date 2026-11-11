@@ -28,6 +28,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
+import { CustomParticleEmitter } from '@babylonjs/core/Particles/EmitterTypes/customParticleEmitter';
 import '@babylonjs/core/Particles/particleSystemComponent';
 import '@babylonjs/core/Shaders/particles.vertex';
 import '@babylonjs/core/Shaders/particles.fragment';
@@ -295,17 +296,27 @@ export function bindBrazierLights(lights: readonly PointLight[], meshes: readonl
   });
 }
 
+/** Particles per fire, as each fire had its own system before (rendering P2). */
+const FLAME_PARTICLES = 24;
+/** Flame emitter of one fire, relative to its brazier point (unchanged since 30 October). */
+const FLAME_LIFT = 0.1;
+
 export class VillageBraziers {
   #items: Array<{
     key: string;
     point: BrazierPoint;
     meshes: AbstractMesh[];
-    flame: ParticleSystem;
-    burning: boolean;
     light: PointLight;
     phase: number;
     tempo: number;
   }> = [];
+  /** Every flame of these braziers in one particle system, one draw call
+   * (audit of rendering in motion, 11 November: one system per fire cost a
+   * draw call and a CPU update each, 117 at night on Bressuire). Each birth
+   * goes to the next fire in turn; the total rate is the sum of the fires'. */
+  #flames: ParticleSystem | null = null;
+  #burning = false;
+  #turn = 0;
   #signature = '';
   /** Fires created and disposed by `updatePoints` since construction (tests, browser checks). */
   readonly stats = { created: 0, removed: 0 };
@@ -385,6 +396,9 @@ export class VillageBraziers {
     this.#signature = signature;
     this.#nextBind = 0;
     const previous = new Map(this.#items.map((item) => [item.key, item]));
+    // A floating-origin change moves every fire by the same shift: the live
+    // flames follow it; any other move only affects flames of under 0.45 s.
+    let commonShift: Vector3 | null | undefined;
     this.#items = [];
     for (const [index, p] of points.entries()) {
       // A streamed height or floating-origin change moves the same equipment.
@@ -401,10 +415,10 @@ export class VillageBraziers {
             mesh.position.addInPlace(shift);
             refreshStaticHierarchy(mesh);
           }
-          (existing.flame.emitter as Vector3).addInPlace(shift);
-          for (const particle of existing.flame.particles) particle.position.addInPlace(shift);
           existing.light.position.addInPlace(shift);
         }
+        commonShift =
+          commonShift === undefined ? shift : commonShift && commonShift.equalsWithEpsilon(shift) ? commonShift : null;
         existing.point = { ...p };
         this.#items.push(existing);
         previous.delete(key);
@@ -421,35 +435,6 @@ export class VillageBraziers {
       if (parent) masonry.setParent(parent);
       else freezeStaticHierarchy(masonry);
       const meshes: AbstractMesh[] = [masonry];
-      const flame = new ParticleSystem(`brazier-fire-${index}`, 24, this.scene);
-      flame.particleTexture = this.#fire;
-      flame.emitter = new Vector3(p.x, p.y + 0.1, p.z);
-      flame.minEmitBox = new Vector3(-0.006, 0, -0.006);
-      flame.maxEmitBox = new Vector3(0.006, 0.005, 0.006);
-      flame.direction1 = new Vector3(-0.0115, 0.107, -0.0115);
-      flame.direction2 = new Vector3(0.0115, 0.183, 0.0115);
-      flame.minEmitPower = flame.maxEmitPower = 1;
-      flame.emitRate = 35;
-      flame.minLifeTime = 0.22;
-      flame.maxLifeTime = 0.45;
-      flame.updateSpeed = 1 / 60;
-      // Stable per-location timing, including after chunk rebuilds/rebasing.
-      flame.updateSpeed *= 0.85 + p.seed * 0.3;
-      flame.preWarmCycles = 4 + Math.floor(p.seed * 12);
-      flame.preWarmStepOffset = 1;
-      flame.minSize = 0.03;
-      flame.maxSize = 0.053;
-      flame.minScaleX = 0.275;
-      flame.maxScaleX = 0.4;
-      flame.minScaleY = 1.1;
-      flame.maxScaleY = 1.6;
-      flame.addSizeGradient(0, 0.5);
-      flame.addSizeGradient(0.3, 1);
-      flame.addSizeGradient(1, 0);
-      flame.addColorGradient(0, new Color4(1, 0.8, 0.28, 0.65));
-      flame.addColorGradient(0.35, new Color4(1, 0.38, 0.045, 0.5));
-      flame.addColorGradient(1, new Color4(0.6, 0.08, 0.01, 0));
-      flame.blendMode = ParticleSystem.BLENDMODE_ADD;
       // Born outside the scene: registering a light, or toggling it, walks every
       // mesh (≈250 fires × 10 000 meshes). The cluster ignores a light's enabled
       // state, so only the bounded fallback joins the scene and starts disabled.
@@ -480,16 +465,16 @@ export class VillageBraziers {
         key,
         point: { ...p },
         meshes,
-        flame,
-        burning: false,
         light,
         phase: p.seed * Math.PI * 2,
         tempo: 0.8 + p.seed * 0.4,
       });
     }
+    if (commonShift && this.#flames)
+      for (const particle of this.#flames.particles) particle.position.addInPlace(commonShift);
+    this.#sizeFlames();
     for (const item of previous.values()) {
       this.stats.removed++;
-      item.flame.dispose(false);
       if (this.#cluster) detachClusteredLight(this.#cluster.light, item.light);
       item.light.dispose();
       for (const mesh of item.meshes) mesh.dispose(false, false);
@@ -518,12 +503,8 @@ export class VillageBraziers {
       for (const item of this.#items) {
         item.light.intensity = 0;
         for (const mesh of item.meshes) mesh.setEnabled(false);
-        if (item.burning) {
-          item.flame.stop();
-          item.flame.reset();
-          item.burning = false;
-        }
       }
+      this.#burn(false);
       this.#nextBind = 0;
       return;
     }
@@ -541,23 +522,80 @@ export class VillageBraziers {
       this.#meshIndex ??= new BrazierMeshIndex(this.scene);
       bindBrazierLights(lights, this.#meshIndex.nearby(lights));
     }
+    let rate = 0;
     for (const item of this.#items) {
       const t = now * item.tempo,
         phase = item.phase;
       const flicker = 1 + 0.12 * Math.sin(t * 0.011 + phase) + 0.07 * Math.sin(t * 0.027 + phase * 2.3);
       for (const mesh of item.meshes) mesh.setEnabled(alpha > 0);
-      item.flame.emitRate = (29 + 9 * Math.sin(t * 0.0047 + phase)) * alpha;
-      if (night && !item.burning) {
-        item.flame.start();
-        item.burning = true;
-      }
-      if (!night && item.burning) {
-        item.flame.stop();
-        item.flame.reset();
-        item.burning = false;
-      }
+      rate += (29 + 9 * Math.sin(t * 0.0047 + phase)) * alpha;
       item.light.intensity = night ? 0.9 * flicker * alpha : 0;
     }
+    if (this.#flames) this.#flames.emitRate = rate;
+    this.#burn(night && this.#items.length > 0);
+  }
+  /** Starts or stops every flame at once. */
+  #burn(burning: boolean): void {
+    if (burning === this.#burning || !this.#flames) return;
+    this.#burning = burning;
+    if (burning) this.#flames.start();
+    else {
+      this.#flames.stop();
+      this.#flames.reset();
+    }
+  }
+  /** The shared flame system, with room for 24 particles per fire. Rebuilt
+   * only when the number of fires outgrows it, never per frame. */
+  #sizeFlames(): void {
+    if (!this.#items.length) {
+      this.#flames?.dispose(false);
+      this.#flames = null;
+      this.#burning = false;
+      return;
+    }
+    const needed = Math.max(64, Math.ceil((this.#items.length * FLAME_PARTICLES) / 64) * 64);
+    if (this.#flames && this.#flames.getCapacity() >= needed) return;
+    const burning = this.#burning;
+    this.#flames?.dispose(false);
+    this.#burning = false;
+    const flames = new ParticleSystem('brazier-fires', needed, this.scene),
+      emitter = new CustomParticleEmitter();
+    emitter.particlePositionGenerator = (_index, _particle, out) => {
+      const items = this.#items;
+      if (!items.length) return void out.set(0, -1000, 0);
+      const p = items[this.#turn++ % items.length]!.point;
+      out.set(
+        p.x + (Math.random() - 0.5) * 0.012,
+        p.y + FLAME_LIFT + Math.random() * 0.005,
+        p.z + (Math.random() - 0.5) * 0.012,
+      );
+    };
+    emitter.particleDirectionGenerator = (_index, _particle, out) => {
+      out.set((Math.random() - 0.5) * 0.023, 0.107 + Math.random() * 0.076, (Math.random() - 0.5) * 0.023);
+    };
+    flames.particleEmitterType = emitter;
+    flames.emitter = Vector3.Zero();
+    flames.particleTexture = this.#fire;
+    flames.minEmitPower = flames.maxEmitPower = 1;
+    flames.emitRate = 0;
+    flames.minLifeTime = 0.22;
+    flames.maxLifeTime = 0.45;
+    flames.updateSpeed = 1 / 60;
+    flames.minSize = 0.03;
+    flames.maxSize = 0.053;
+    flames.minScaleX = 0.275;
+    flames.maxScaleX = 0.4;
+    flames.minScaleY = 1.1;
+    flames.maxScaleY = 1.6;
+    flames.addSizeGradient(0, 0.5);
+    flames.addSizeGradient(0.3, 1);
+    flames.addSizeGradient(1, 0);
+    flames.addColorGradient(0, new Color4(1, 0.8, 0.28, 0.65));
+    flames.addColorGradient(0.35, new Color4(1, 0.38, 0.045, 0.5));
+    flames.addColorGradient(1, new Color4(0.6, 0.08, 0.01, 0));
+    flames.blendMode = ParticleSystem.BLENDMODE_ADD;
+    this.#flames = flames;
+    this.#burn(burning);
   }
   #masonryTemplate(): Mesh {
     if (this.#masonry) return this.#masonry;
@@ -568,12 +606,14 @@ export class VillageBraziers {
   }
   #clear(): void {
     for (const item of this.#items) {
-      item.flame.dispose(false);
       if (this.#cluster) detachClusteredLight(this.#cluster.light, item.light);
       item.light.dispose();
       for (const mesh of item.meshes) mesh.dispose(false, false);
     }
     this.#items = [];
+    this.#flames?.dispose(false);
+    this.#flames = null;
+    this.#burning = false;
   }
   dispose(): void {
     this.#clear();
