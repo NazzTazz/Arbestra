@@ -7,7 +7,7 @@ export type TravelGround = SpawnAccessField & {
   woodedCells?: readonly TravelCell[];
 };
 import type { VillageState } from './villages.js';
-import { buildingAccesses, type BuildingAccessState } from './building-access.js';
+import { buildingAccesses, type BuildingAccess, type BuildingAccessState } from './building-access.js';
 import {
   infrastructurePlanSurface,
   infrastructureBlockedPixels,
@@ -792,6 +792,10 @@ export function refineTravelRoute(
     onLimit?: () => void;
     /** Garden of the true destination when `route` is only its first leg; null: none. */
     garden?: string | null;
+    /** Gardens crossed at no extra cost (a tour leg: its start and end gardens). Overrides `garden`. */
+    gardens?: ReadonlySet<string>;
+    /** Start point instead of the town hall doors (a tour leg between two plots). */
+    from?: TravelCell;
   },
 ): TravelRoute | null {
   checkpoint?.();
@@ -799,7 +803,15 @@ export function refineTravelRoute(
   // Explicit search budgets are used by diagnostics and must still be honored.
   const cache = prepared || search?.maxVisited !== undefined ? undefined : refinementCache(state, ground);
   const routeKey = cache
-    ? JSON.stringify([route.id, route.kind, route.destination, route.cells, [...guide].sort()])
+    ? JSON.stringify([
+        route.id,
+        route.kind,
+        route.destination,
+        route.cells,
+        [...guide].sort(),
+        search?.from ?? null,
+        search?.gardens ? [...search.gardens].sort() : null,
+      ])
     : '';
   const cached = cache?.routes.get(routeKey);
   if (cached) {
@@ -813,7 +825,10 @@ export function refineTravelRoute(
   const hallId = state.village.townHallBuildingId ?? anchor?.footprint?.buildingId ?? anchor?.building?.id;
   const hall = state.cells.find((c) => c.building?.id === hallId && c.building?.type === 'town-hall');
   if (!hall?.building) return route;
-  const starts = buildingAccesses(state, hall.building.id),
+  const from = search?.from;
+  const starts: Array<Pick<BuildingAccess, 'position' | 'outside'>> = from
+      ? [{ position: from, outside: from }]
+      : buildingAccesses(state, hall.building.id),
     ends = route.kind === 'building' ? buildingAccesses(state, route.id) : [];
   const world = state.world,
     w = world.widthCells * 8,
@@ -837,15 +852,16 @@ export function refineTravelRoute(
   // plot costs GARDEN_CROSSING_COST per step (Tristan, 29 October).
   const ownGarden =
     search?.garden !== undefined ? search.garden : (gardenAt(route.destination.cellX, route.destination.cellY) ?? null);
+  const ownGardens: ReadonlySet<string | null> = search?.gardens ?? new Set([ownGarden]);
   let crossesGardens = false;
   for (const owner of gardens.values())
-    if (owner !== ownGarden) {
+    if (!ownGardens.has(owner)) {
       crossesGardens = true;
       break;
     }
   const crossing = (x: number, y: number) => {
     const owner = gardenAt(x, y);
-    return owner !== undefined && owner !== ownGarden ? GARDEN_CROSSING_COST : 1;
+    return owner !== undefined && !ownGardens.has(owner) ? GARDEN_CROSSING_COST : 1;
   };
   // Shared obstacles and fine cells are immutable; only destination portals vary.
   const destinationFine = new Set<string>();
@@ -1009,7 +1025,11 @@ export function refineTravelRoute(
         context,
         ground,
         checkpoint,
-        { maxVisited: Math.min(2048, search?.maxVisited ?? 2048), garden: ownGarden },
+        {
+          maxVisited: Math.min(2048, search?.maxVisited ?? 2048),
+          garden: ownGarden,
+          ...(search?.gardens ? { gardens: search.gardens } : {}),
+        },
       );
       if (connector) {
         const cells = [...connector.cells, ...tail.slice(1)];
@@ -1027,7 +1047,9 @@ export function refineTravelRoute(
   const direct =
     Math.abs(delta(destination.cellX, hall.cellX, world.widthCells)) +
     Math.abs(delta(destination.cellY, hall.cellY, world.heightCells));
+  // The coarse witness starts at the town hall doors: a leg from a plot uses the fine search only.
   if (
+    !from &&
     ground &&
     route.kind !== 'building' &&
     (!cellGoal || cellGoals.length) &&
@@ -1270,7 +1292,7 @@ export function refineTravelRoute(
         ...cells,
         ...(end ? [end.position] : []),
         ...(!local(route.destination) ? route.cells.slice(lastLocal + 1) : []),
-      ];
+      ].filter((p, i, list) => !i || key(p) !== key(list[i - 1]!));
       const candidate = pathCost(path);
       if (!best || candidate < bestCost) {
         best = path;
@@ -1279,4 +1301,51 @@ export function refineTravelRoute(
     }
   if (!best && limited) search?.onLimit?.();
   return result(best);
+}
+
+/** Garden (logical building) of an active plot cell, if any. */
+export function villageGardenAt(
+  state: Pick<TravelNetworkState, 'cells' | 'world'>,
+  cell: TravelCell,
+): string | undefined {
+  const x = wrap(Math.floor(cell.cellX + 0.5), state.world.widthCells),
+    y = wrap(Math.floor(cell.cellY + 0.5), state.world.heightCells);
+  const plot = state.cells.find(
+    (c) =>
+      wrap(c.cellX, state.world.widthCells) === x &&
+      wrap(c.cellY, state.world.heightCells) === y &&
+      c.footprint &&
+      !blocksTravelFootprint(c.footprint),
+  );
+  return plot?.footprint?.buildingId;
+}
+
+/** One leg of a mission, searched on its own (refonte des trajets §4.1): from
+ * the town hall doors (`from` null) or from a point, to a cell. The gardens of
+ * both ends are crossed at no extra cost, every other plot at
+ * GARDEN_CROSSING_COST per step; the cost of a road step is ROAD_STEP_COST.
+ * Null when the search found no path. */
+export function planVillageLeg(
+  state: TravelNetworkState,
+  from: TravelCell | null,
+  to: TravelCell,
+  ground?: TravelGround,
+  checkpoint?: () => void,
+  onLimit?: () => void,
+): TravelCell[] | null {
+  const gardens = new Set<string>();
+  for (const end of from ? [from, to] : [to]) {
+    const garden = villageGardenAt(state, end);
+    if (garden !== undefined) gardens.add(garden);
+  }
+  const route = refineTravelRoute(
+    state,
+    { id: `leg:${from ? key(from) : 'hall'}:${key(to)}`, kind: 'garden', destination: to, cells: [to] },
+    new Set(),
+    undefined,
+    ground,
+    checkpoint,
+    { gardens, ...(from ? { from } : {}), ...(onLimit ? { onLimit } : {}) },
+  );
+  return route?.version === 2 ? route.cells : null;
 }

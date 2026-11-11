@@ -1,10 +1,12 @@
-import type { GeneratedLandscape, TravelNetworkState, TravelRoute } from '@arbestra/contracts';
+import type { GardenTourLeg, GeneratedLandscape, TravelNetworkState, TravelRoute } from '@arbestra/contracts';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-compute-protocol.js';
 import type { Rc1NetworkEdits } from './rc1-network-ground.js';
 
 export interface NetworkJob {
   state: TravelNetworkState;
   refinement?: TravelRoute;
+  /** Legs of a garden tour, each searched on its own (refonte des trajets T2). */
+  legs?: GardenTourLeg[];
   /** Woodlands to route to besides every building and garden plot. */
   woodlandTargets?: string[];
   ground?: { sourceId: string; artifact?: string; edits: Rc1NetworkEdits };

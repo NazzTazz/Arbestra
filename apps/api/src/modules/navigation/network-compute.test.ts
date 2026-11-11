@@ -3,6 +3,9 @@ import { Worker } from 'node:worker_threads';
 import {
   buildTravelNetwork,
   refineTravelRoute,
+  gardenTourLegKey,
+  gardenTourLegs,
+  planVillageLeg,
   emptyInfrastructure,
   ROUTE_POLICY_VERSION,
   type TravelNetworkState,
@@ -227,6 +230,52 @@ it('keeps completed gardens walkable through the worker projection and invalidat
     for (const c of geometry.cells)
       if (c.footprint?.buildingId === 'garden' && (c.cellX !== 6 || c.cellY !== 3)) c.footprint.state = 'reserved';
     expect(await compute.refine(load)).toEqual([]);
+  } finally {
+    await compute.close();
+  }
+});
+
+it('searches the legs of a garden tour in one worker job, as the inline search does, with no network', async () => {
+  const compute = new NavigationCompute();
+  const plots = Array.from({ length: 9 }, (_, i) => ({ cellX: 5 + (i % 3), cellY: 2 + Math.floor(i / 3) }));
+  const geometry: TravelNetworkState = {
+    ...state,
+    infrastructure: emptyInfrastructure(),
+    cells: [
+      {
+        cellX: 2,
+        cellY: 3,
+        footprint: { buildingId: 'hall' },
+        building: { id: 'hall', type: 'town-hall', quarterTurns: 0 },
+      },
+      ...plots.map((p, i) => ({
+        ...p,
+        footprint: { buildingId: 'garden', buildingType: 'garden' as const, state: 'active' as const },
+        building: i === 0 ? { id: 'garden', type: 'garden' as const, quarterTurns: 0, garden: { plots } } : null,
+      })),
+    ],
+  };
+  const tour = [plots[0]!, plots[8]!],
+    legs = gardenTourLegs(tour, geometry.world);
+  try {
+    const expected = legs.map((leg) => planVillageLeg(geometry, leg.from, leg.to));
+    expect(expected.every((path) => path && path.length > 1)).toBe(true);
+    const routes = await compute.refine(async () => ({ state: networkState(geometry), legs }));
+    expect(routes.map((r) => r.id)).toEqual(legs.map(gardenTourLegKey));
+    expect(routes.map((r) => r.cells)).toEqual(expected);
+    // A cell between two rivers (the world is a torus): the leg comes back empty, not as an error.
+    const flooded = {
+      ...geometry,
+      region: {
+        ...state.region,
+        terrainCodes: state.region.terrainCodes.map((c, i) => (i % 16 === 8 || i % 16 === 10 ? 2 : c)),
+      },
+    };
+    const sealed = await compute.refine(async () => ({
+      state: networkState(flooded),
+      legs: [{ from: null, to: { cellX: 9, cellY: 4 } }],
+    }));
+    expect(sealed.map((r) => r.cells)).toEqual([[]]);
   } finally {
     await compute.close();
   }

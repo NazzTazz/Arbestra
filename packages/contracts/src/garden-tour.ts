@@ -113,3 +113,60 @@ export function planGardenTour(
   if (!returnPath) return null;
   return { stops, returnPath, durationMs: elapsed + duration(returnPath) };
 }
+
+/** A leg a tour must search: from the town hall doors (`from` null) or a plot. */
+export interface GardenTourLeg {
+  from: TravelCell | null;
+  to: TravelCell;
+}
+const sideAdjacent = (a: TravelCell, b: TravelCell, world?: { widthCells: number; heightCells: number }) => {
+  const dx = Math.abs(a.cellX - b.cellX),
+    dy = Math.abs(a.cellY - b.cellY);
+  return (world ? Math.min(dx, world.widthCells - dx) : dx) + (world ? Math.min(dy, world.heightCells - dy) : dy) === 1;
+};
+export const gardenTourLegKey = (leg: GardenTourLeg) => `${leg.from ? key(leg.from) : 'hall'}>${key(leg.to)}`;
+
+/** Legs to search for a tour, in its order (refonte des trajets §4.1): the
+ * town hall to the first plot, each plot to the next unless they share a side
+ * (joined directly, without search), and the town hall to the last plot, walked
+ * back for the return. k + 1 searches at most, never a village network. */
+export function gardenTourLegs(
+  cells: readonly TravelCell[],
+  world?: { widthCells: number; heightCells: number },
+): GardenTourLeg[] {
+  const legs: GardenTourLeg[] = [];
+  cells.forEach((cell, i) => {
+    const previous = i ? cells[i - 1]! : null;
+    if (!previous || !sideAdjacent(previous, cell, world)) legs.push({ from: previous, to: cell });
+  });
+  if (cells.length) legs.push({ from: null, to: cells.at(-1)! });
+  return legs;
+}
+
+/** The tour from searched legs: same order of visit, legs plus 60 s per stop,
+ * and the return along the reversed town-hall leg. Null when a leg has no path. */
+export function planGardenTourByLegs(
+  cells: readonly TravelCell[],
+  leg: (leg: GardenTourLeg) => TravelCell[] | null | undefined,
+  duration: (path: readonly TravelCell[]) => number,
+  world?: { widthCells: number; heightCells: number },
+) {
+  let previous: TravelCell | null = null,
+    elapsed = 0;
+  const stops = [];
+  for (const cell of cells) {
+    const path: TravelCell[] | null | undefined =
+      previous && sideAdjacent(previous, cell, world) ? [previous, cell] : leg({ from: previous, to: cell });
+    if (!path?.length) return null;
+    elapsed += duration(path);
+    const arrivesAfterMs = elapsed;
+    elapsed += 60_000;
+    stops.push({ ...cell, path, arrivesAfterMs, workEndsAfterMs: elapsed });
+    previous = cell;
+  }
+  if (!previous) return null;
+  const outbound = leg({ from: null, to: previous });
+  if (!outbound?.length) return null;
+  const returnPath = [...outbound].reverse();
+  return { stops, returnPath, durationMs: elapsed + duration(returnPath) };
+}

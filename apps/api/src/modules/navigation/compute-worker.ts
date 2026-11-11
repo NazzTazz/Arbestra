@@ -13,6 +13,8 @@ import {
   spawnDelta,
   buildTravelNetwork,
   refineTravelRoute,
+  planVillageLeg,
+  gardenTourLegKey,
   type TravelGround,
   type RouteField,
   type GeneratedLandscape,
@@ -253,6 +255,28 @@ parentPort!.on(
         }
         checkpoint();
         stage('network-search');
+        const legs = job.network.legs;
+        if (legs) {
+          // A tour: k + 1 bounded searches, never the village network.
+          const network = legs.map((leg) => ({
+            id: gardenTourLegKey(leg),
+            kind: 'garden' as const,
+            destination: leg.to,
+            version: 2 as const,
+            cells:
+              planVillageLeg(state, leg.from, leg.to, ground, checkpoint, () => {
+                throw Error('Refinement search budget exhausted');
+              }) ?? [],
+          }));
+          while (sources.size > 2) sources.delete(sources.keys().next().value!);
+          parentPort!.postMessage({
+            id: job.id,
+            network,
+            contexts: [...contexts.keys()],
+            sources: [...sources.keys()],
+          });
+          return;
+        }
         const refinement = job.network.refinement;
         const route = refinement
           ? refineTravelRoute(state, refinement, new Set(), undefined, ground, checkpoint, {

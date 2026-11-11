@@ -281,3 +281,38 @@ Commits `3fbb877` (T1a, durée = coût au huitième, bois et pierre sur routes),
 **Charge locale : l'environnement a dérivé depuis le §12.** Après le correctif, un passage sur 30 villages neufs s'arrête dès 10 bots (commandes p95 12,5 s, présentation p95 4,5 s, dont réseau 1,7 s). Pour départager code et environnement, le code d'avant T1 (`0ad26f8`, worktree temporaire) a été relancé juste après, dans les mêmes conditions : il s'arrête aussi à 10 bots (commandes p95 6,9 s, présentation p95 4,4 s, réseau 1,05 s). La phase `snapshot`, que T1 ne touche pas, passe de 0,25 s (§12) à plus de 2 s dans les deux cas : la base de charge, après plusieurs provisionnements et nettoyages, et la machine ne sont plus dans l'état du §12. Conclusion : **pas de régression visible au niveau des commandes**. Le calcul de réseau reste un peu plus cher qu'avant T1 sur un seul passage bruité (1,7 s contre 1,05 s) : point à remesurer sur une base de charge neuve, avec plusieurs passages.
 
 **Reste** : mesure navigateur sur un poste au repos ; recette de Tristan (villageois plus rapides sur les routes, durées affichées) ; remesure de la charge sur une base neuve.
+
+## 14. T2a livrée (11 novembre) : tournée de jardin par jambes
+
+Statut : **à valider** (recette de Tristan sur le dev local). T2b (issues explicites §4.2, décisions §8.7 et §8.8) suit.
+
+**Code.**
+- `planVillageLeg(state, from, to)` (`contracts/src/travel-paths.ts`) : une recherche fine bornée, depuis les portes de l'hôtel de ville (`from` nul) ou depuis un point. Les jardins de départ et d'arrivée sont traversés sans surcoût ; tout autre jardin coûte `GARDEN_CROSSING_COST` par pas. `refineTravelRoute` reçoit pour cela deux options, `from` et `gardens`.
+- `gardenTourLegs` et `planGardenTourByLegs` (`garden-tour.ts`) : au plus k + 1 recherches. Les parcelles sélectionnées qui partagent un côté sont reliées directement, sans recherche. Le retour reprend, à l'envers, la jambe de l'hôtel de ville vers la dernière parcelle. Ordre de visite et règle « jambes + 60 s par arrêt » inchangés.
+- Les jambes d'une tournée partent en un seul job sur la voie de commande du worker de navigation (`commandVillageLegs`, `legs` dans `NetworkJob`).
+- `readInfrastructureSpatialState` ne construit plus de réseau. Ses paramètres sans appelant (`plan`, `routes`, `stroke`) sont retirés.
+- `planGardenTour` (sur les `travelRoutes`) ne sert plus qu'aux tests, aux fixtures et à `bench-durations.ts`. Il partira avec T4.
+
+**Preuves.**
+- Compteur en test : aucun appel à `buildTravelNetwork` pendant `prepareExploitation`, sur les trois cas de `exploitation-gardens.integration.test.ts`. Même sélection retenue, mêmes refus, même ordre de visite que l'ancienne préparation.
+- Jambes calculées par le worker identiques à la recherche en ligne ; jambe vers une case enclavée rendue vide, sans erreur (`network-compute.test.ts`).
+- Tests purs des jambes, de la couture du tore et de la traversée des jardins (`garden-tour.test.ts`).
+
+**Écarts de durée** (fixture des tests d'intégration, avant → après) :
+- A → centre du jardin G, 5 cases au sud : 11 s → 5 s. La jambe va droit au lieu de suivre les arêtes du réseau.
+- T → A : 35 s → 17 s, puis A → centre de G : 27 s → 5 s. L'ancien graphe repassait par les routes de l'hôtel de ville.
+- Hôtel de ville → centre de G : 19,6 s → 17,6 s. La recherche n'est plus guidée par le témoin grossier du réseau.
+- Tournées entières : 305 → 295 s, 99 → 95 s et 289 → 245 s.
+
+Les tournées raccourcissent, surtout entre parcelles éloignées de l'hôtel de ville. C'est une conséquence directe du §4.1, à juger à la recette.
+
+**Mesures ciblées** (`bench-navigation.ts`, copie de la base de dev `arbestra_rc1_load`, API dédiée sur 3301, serveur de dev actif, donc bruité ; trois passages avant, trois après). Bressuire, aperçu d'exploitation :
+
+| | Avant | Après |
+|---|---|---|
+| Premier appel après une retouche distante, à chaud (passages 2 et 3) | 278 et 2 118 ms, dont navigation 129 et 859 ms | 82 à 109 ms, dont navigation 25 à 80 ms |
+| Appels suivants, p50 (1, 4 et 8 parcelles) | 157 à 161, 160 à 170 et 167 à 174 ms | 69 à 85, 89 à 97 et 92 à 99 ms |
+
+Le premier passage après un redémarrage de l'API reste dominé par la construction à froid du sol dans le worker : 1 886 ms avant, 778 ms après. Fichiers : `out/bench-navigation-2026-11-11T16-*.json`, non versionnés.
+
+**Reste à mesurer** : la charge locale (10 et 30 bots) avant et après, sur une base de charge neuve, avec T2b.

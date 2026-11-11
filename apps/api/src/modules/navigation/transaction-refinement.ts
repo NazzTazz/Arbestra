@@ -1,5 +1,13 @@
 import type { Kysely } from 'kysely';
-import { buildTravelNetwork, type TravelNetworkState, type TravelRoute } from '@arbestra/contracts';
+import {
+  buildTravelNetwork,
+  planVillageLeg,
+  type GardenTourLeg,
+  type TravelCell,
+  type TravelNetworkState,
+  type TravelRoute,
+} from '@arbestra/contracts';
+import { HttpError } from '../../errors.js';
 import type { Database } from '../../database/schema.js';
 import type { readRc1Ground } from '../worlds/rc1-ground.js';
 import { devTime, devTimeSync } from '../operations/dev-timing.js';
@@ -22,6 +30,33 @@ export function bindTransactionRefiner(db: Kysely<Database>, executor: Transacti
 }
 export function transactionRefiner(db: Kysely<Database>) {
   return executors.get(db.getExecutor().adapter);
+}
+
+/** Legs of a garden tour (refonte des trajets T2), in one job on the bound
+ * lane, or inline without one (transactional tests). Null: no path. */
+export async function commandVillageLegs(
+  db: Kysely<Database>,
+  state: TravelNetworkState,
+  ground: Awaited<ReturnType<typeof readRc1Ground>> | null | undefined,
+  legs: readonly GardenTourLeg[],
+): Promise<Array<TravelCell[] | null>> {
+  if (!legs.length) return [];
+  const executor = transactionRefiner(db);
+  if (!executor)
+    return devTimeSync('navigation', () =>
+      legs.map((leg) =>
+        planVillageLeg(state, leg.from, leg.to, ground?.navigation, undefined, () => {
+          throw new HttpError(503, 'NAVIGATION_BUSY', 'Calcul du trajet interrompu. Réessayez.');
+        }),
+      ),
+    );
+  const routes = await devTime('navigation', () =>
+    executor.refine(async (known) => ({
+      ...networkJob(networkState(state), ground ?? undefined, known),
+      legs: [...legs],
+    })),
+  );
+  return routes.map((route) => (route.cells.length ? route.cells : null));
 }
 
 /** A command holds its village lock while it needs the network. A large village

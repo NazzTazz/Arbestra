@@ -7,7 +7,7 @@ import { fixedBuildingFootprint, withinBuildReach, BUILD_REACH as BUILD_RADIUS }
 import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { networkJob, networkState, type NetworkJob } from '../navigation/network-job.js';
-import { commandTravelNetwork, transactionRefiner } from '../navigation/transaction-refinement.js';
+import { commandTravelNetwork, commandVillageLegs, transactionRefiner } from '../navigation/transaction-refinement.js';
 import { pathRoadLookup, pathTravelDuration } from '../navigation/road-cost.js';
 import { naturalFeaturesQuery } from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
@@ -20,9 +20,7 @@ import type {
   VillageState,
   TravelCell,
   TravelNetworkState,
-  TravelRoute,
   InfrastructurePlan,
-  RoadStroke,
   StartExtractionWorksiteRequest,
   ChangeExtractionWorksiteRequest,
   ExtractionWorksiteSelection,
@@ -33,8 +31,7 @@ import {
   queueContribution,
   exploitationAdmissionCap,
   refineTravelRoute,
-  infrastructureSurface,
-  subCellKey,
+  travelDuration,
 } from '@arbestra/contracts';
 import {
   readInfrastructure,
@@ -62,7 +59,7 @@ import {
 } from './economy.js';
 import { beginVillageEconomy, reconcileVillageEconomy, type VillageEconomy } from './reconcile-economy.js';
 import { normalizeSpatialSelection, scaledCosts, type SpatialCell } from './spatial-selection.js';
-import { planGardenTour } from '@arbestra/contracts';
+import { gardenTourLegKey, gardenTourLegs, planGardenTourByLegs } from '@arbestra/contracts';
 import { projectPopulation } from '../population/projection.js';
 
 import { reconcileRestHousing } from '../population/work.js';
@@ -884,47 +881,33 @@ export interface InfrastructureSpatialState extends Omit<TravelNetworkState, 'wo
   };
   cells: ReadonlyArray<TravelNetworkState['cells'][number] & { footprint: VillageState['cells'][number]['footprint'] }>;
   infrastructure: InfrastructurePlan;
-  travelRoutes: TravelRoute[];
 }
+/** Geometry of a garden exploitation: plots, obstacles, roads and accessories.
+ * Since T2 (refonte des trajets §4.1) the tour searches its own legs: no
+ * village network is built here. */
 export async function readInfrastructureSpatialState(
   tx: Transaction<Database>,
   village: OwnedVillage,
   economy: VillageEconomy,
-  plan?: InfrastructurePlan,
-  routes = true,
-  stroke?: RoadStroke,
 ): Promise<{
   snapshot: InfrastructureSpatialState;
   ground: Snapshot['rc1'];
-  /** Rows already read for the geometry; plots are projected only with routes. */
+  /** Rows already read for the geometry. */
   occupancies: VillageOccupancyRows;
   plots: Awaited<ReturnType<typeof projectGardenPlots>>;
 }> {
   if (economy.worldId !== village.worldId || economy.villageId !== village.villageId)
     throw Error('Infrastructure context does not match village economy');
-  const [ground, occupancyRows, infrastructure, wood, stone] = await Promise.all([
+  const [ground, occupancyRows, wood, stone] = await Promise.all([
     snapshot(tx, village),
     readVillageOccupancies(tx, village),
-    plan ?? readInfrastructure(tx, village.worldId, village.villageId),
     projectVillageResource(tx, village.worldId, village.villageId, 'wood', economy.through),
     projectVillageResource(tx, village.worldId, village.villageId, 'stone', economy.through),
   ]);
-  // Automatic paths are needed only for newly captured, unoccupied cells. The
-  // caller validates the stroke before rasterizing it; road undo needs none.
-  const occupied = new Set(occupancyRows.map((row) => worldCellKey(row.cellX, row.cellY)));
-  const captured = new Set(infrastructure.inheritedCells);
-  const needsRoutes =
-    routes &&
-    (!stroke ||
-      [...infrastructureSurface([{ ...stroke, operation: 'paint' }], village).values()].some((pixel) => {
-        const cell = subCellKey({ x: (pixel.x + 0.5) / 2, y: (pixel.y + 0.5) / 2 }, village);
-        return !occupied.has(cell) && !captured.has(cell);
-      }));
-  const [features, projectedPlots, extractionRows, navigation] = await Promise.all([
+  const [features, projectedPlots, navigation] = await Promise.all([
     featuresInSnapshot(tx, village, ground),
-    needsRoutes ? projectGardenPlots(tx, village.worldId, village.villageId, economy.through) : Promise.resolve([]),
-    needsRoutes ? readExtractions(tx, village.worldId, village.villageId) : Promise.resolve([]),
-    needsRoutes ? readNavigationInfrastructure(tx, village, infrastructure) : Promise.resolve(infrastructure),
+    projectGardenPlots(tx, village.worldId, village.villageId, economy.through),
+    readNavigationInfrastructure(tx, village),
   ]);
   const { canonicalByBuilding, componentBuildings } = groupVillageOccupancies(occupancyRows, village);
   const townHallBuildingId = occupancyRows.find((row) => row.buildingType === 'town-hall')?.buildingId;
@@ -1003,20 +986,9 @@ export async function readInfrastructureSpatialState(
             : null,
       };
     }),
-    infrastructure,
-    travelRoutes: [],
+    // Roads and accessories as the searches see them (road cells included).
+    infrastructure: navigation,
   };
-  if (needsRoutes) {
-    context.travelRoutes = await commandTravelNetwork(tx, { ...context, infrastructure: navigation }, ground.rc1);
-    for (const { extraction } of extractionRows)
-      if (extraction.resourceCode === 'wood' && extraction.path.length)
-        context.travelRoutes.push({
-          id: extraction.featureId,
-          kind: 'wood',
-          destination: { cellX: extraction.cellX, cellY: extraction.cellY },
-          cells: extraction.path,
-        });
-  }
   return { snapshot: context, ground: ground.rc1, occupancies: occupancyRows, plots: projectedPlots };
 }
 
@@ -2399,6 +2371,29 @@ function canonicalExploitation(request: ExploitationRequest, village: OwnedVilla
   };
 }
 
+/** The garden tour of a selection, leg by leg (refonte des trajets T2, §4.1):
+ * k + 1 bounded searches in one navigation job, timed at their road cost. */
+async function planExploitationTour(
+  tx: Transaction<Database>,
+  village: OwnedVillage,
+  spatial: Awaited<ReturnType<typeof readInfrastructureSpatialState>>,
+  cells: readonly TravelCell[],
+) {
+  const legs = gardenTourLegs(cells, village);
+  const found = await commandVillageLegs(tx, spatial.snapshot, spatial.ground, legs);
+  const byLeg = new Map(legs.map((leg, i) => [gardenTourLegKey(leg), found[i]]));
+  const roads = await pathRoadLookup(tx, village, [
+    ...found.filter((path): path is TravelCell[] => !!path),
+    ...cells.map((cell) => [cell]),
+  ]);
+  return planGardenTourByLegs(
+    cells,
+    (leg) => byLeg.get(gardenTourLegKey(leg)),
+    (path) => travelDuration(path, village, roads),
+    village,
+  );
+}
+
 export async function prepareExploitation(
   tx: Transaction<Database>,
   village: OwnedVillage,
@@ -2471,21 +2466,10 @@ export async function prepareExploitation(
       preview.estimates.carrot += p!.storedCarrots;
     }
   }
-  const tourRoutes = gardenContext?.[0].snapshot.travelRoutes ?? [];
-  const plan = preview.gardens.length
-    ? planGardenTour(
-        tourRoutes,
-        { cellX: village.anchorCellX, cellY: village.anchorCellY },
-        preview.gardens,
-        village,
-        // Legs follow these routes: their roads are those under the routes.
-        await pathRoadLookup(
-          tx,
-          village,
-          tourRoutes.map((r) => r.cells),
-        ),
-      )
-    : null;
+  const plan =
+    preview.gardens.length && gardenContext
+      ? await planExploitationTour(tx, village, gardenContext[0], preview.gardens)
+      : null;
   if (preview.gardens.length && !plan) {
     preview.excluded.push(
       ...preview.gardens.map((p) => ({ key: `garden:${p.cellX}:${p.cellY}`, reason: 'unreachable' })),
