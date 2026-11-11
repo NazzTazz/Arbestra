@@ -262,12 +262,19 @@ let windowFrames: WindowFrame[] = [],
   windowHead = 0;
 // Counters since the last reset; they outlive the 60 s window.
 let sinceReset = { startedAt: null as number | null, frames: 0, over100: 0, over200: 0, worstMs: 0 };
+/** Events that cause frame spikes while the camera moves (audit of 11 November), since the last reset. */
+let sceneEvents = { lodSwitches: 0, rebases: 0 };
+/** O(1), always on: a building switching its LOD variant, or the scene origin moving to another chunk. */
+export function countSceneEvent(event: 'lodSwitches' | 'rebases') {
+  sceneEvents[event]++;
+}
 export function resetStatisticsWindow() {
   // « Réinitialiser » repart de zéro pour tout le relevé, coûts client compris.
   clientCosts.clear();
   windowFrames = [];
   windowHead = 0;
   sinceReset = { startedAt: null, frames: 0, over100: 0, over200: 0, worstMs: 0 };
+  sceneEvents = { lodSwitches: 0, rebases: 0 };
 }
 function recordWindowFrame(start: number, end: number, phases: FrameCosts) {
   const totalMs = end - start;
@@ -299,6 +306,8 @@ export function statisticsWindowSummary() {
     over100: sinceReset.over100,
     over200: sinceReset.over200,
     worstMs: sinceReset.frames ? sinceReset.worstMs : null,
+    lodSwitches: sceneEvents.lodSwitches,
+    rebases: sceneEvents.rebases,
   };
 }
 function webglRenderer(): string | null {

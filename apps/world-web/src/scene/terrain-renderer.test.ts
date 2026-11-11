@@ -668,3 +668,59 @@ it('hands each ground unit exactly its road cells, including a partial unit at t
     engine.dispose();
   }
 });
+
+it('rebuilds its mesh list only when a unit mesh is added or disposed (audit of 11 November)', () => {
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    material = new StandardMaterial('ground', scene);
+  const chunk: TerrainChunk = {
+    chunkX: 0,
+    chunkY: 0,
+    originCellX: 0,
+    originCellY: 0,
+    terrainCodes: Array(36).fill(1),
+    elevations: Array(36).fill(0),
+    features: [],
+    occupiedCells: [],
+    rc1: { stride: 9, heights: Array(81).fill(1), water: Array(81).fill(0), terraces: [] },
+  };
+  const demand = [{ key: '0:0', chunkX: 0, chunkY: 0, visible: true, distance: 0 }];
+  const store = {
+    world: { widthCells: 128, heightCells: 128, chunkSize: 4 },
+    changed: new Set<string>(['0:0']),
+    demand,
+    chunk: () => chunk,
+  };
+  const renderer = new TerrainRenderer(
+    scene,
+    store as unknown as TerrainStore,
+    new WorldSpace(128, 128, { cellX: 0, cellY: 0 }),
+    material,
+    material,
+    () => [],
+    () => [],
+    () => [],
+  );
+  try {
+    renderer.demand(demand);
+    for (let i = 0; renderer.queued && i < 100; i++) renderer.tick();
+    const first = renderer.meshes();
+    expect(first.length).toBeGreaterThan(0);
+    // Read every frame by the scene: the same list while nothing changed.
+    renderer.demand(demand);
+    expect(renderer.meshes()).toBe(first);
+    const version = renderer.meshVersion;
+    chunk.rc1!.terraces = [{ cellX: 1, cellY: 1, height: 2 }];
+    store.changed.add('0:0');
+    renderer.demand(demand);
+    for (let i = 0; renderer.queued && i < 100; i++) renderer.tick();
+    expect(renderer.meshVersion).toBeGreaterThan(version);
+    const second = renderer.meshes();
+    expect(second).not.toBe(first);
+    expect(second.every((mesh) => !mesh.isDisposed())).toBe(true);
+  } finally {
+    renderer.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});

@@ -3,6 +3,7 @@ import { Camera } from '@babylonjs/core/Cameras/camera';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { Node } from '@babylonjs/core/node';
 import { getBuildingLodSettings } from './building-lod-settings';
+import { countSceneEvent } from '../dev/statistics';
 
 export function projectedDiameter(
   radius: number,
@@ -83,6 +84,7 @@ export function coordinateBuildingLod(
     for (const node of variants[active]) node.setEnabled(false);
     for (const node of variants[next]) node.setEnabled(true);
     state.active = active = next;
+    countSceneEvent('lodSwitches');
   });
   parent.onDisposeObservable.addOnce(() => scene.onBeforeActiveMeshesEvaluationObservable.remove(observer));
 }

@@ -82,6 +82,10 @@ export class TerrainRenderer {
   }
   #cost = new Map<string, number>();
   version = 0;
+  /** Moves whenever a unit mesh is added or disposed: meshes() and per-mesh
+   * settings of the scene are recomputed only then, never per frame. */
+  meshVersion = 0;
+  #meshList: { version: number; meshes: Mesh[] } | null = null;
   // Published ground availability, independent of the camera's demand/culling mask.
   groundVersion = 0;
   peakGraphicChunks = 0;
@@ -130,7 +134,12 @@ export class TerrainRenderer {
     );
   }
   meshes(): Mesh[] {
-    return [...this.residents.values()].flatMap((r) => [...r.units.values()].flatMap((u) => u.meshes));
+    if (this.#meshList?.version !== this.meshVersion)
+      this.#meshList = {
+        version: this.meshVersion,
+        meshes: [...this.residents.values()].flatMap((r) => [...r.units.values()].flatMap((u) => u.meshes)),
+      };
+    return this.#meshList.meshes;
   }
   setVisible(shown: boolean): void {
     if (shown === this.#shown) return;
@@ -145,6 +154,7 @@ export class TerrainRenderer {
     for (const u of r.units.values()) for (const m of u.meshes) m.dispose(false, false);
     r.root.dispose();
     this.residents.delete(key);
+    this.meshVersion++;
     for (const [id, job] of this.#jobs) if (job.chunkKey === key) this.#jobs.delete(id);
     this.version++;
     this.groundVersion++;
@@ -347,6 +357,7 @@ export class TerrainRenderer {
         for (const m of u.meshes) m.dispose(false, false);
         resident.units.delete(key);
         this.version++;
+        this.meshVersion++;
       }
     for (const [id, j] of this.#jobs) if (j.chunkKey === chunkKey && !keys.has(j.key)) this.#jobs.delete(id);
   }
@@ -471,6 +482,7 @@ export class TerrainRenderer {
       }
       for (const m of resident.units.get(job.key)?.meshes ?? []) m.dispose(false, false);
       resident.units.set(job.key, { signature: job.signature, meshes, ground: job.ground });
+      this.meshVersion++;
       const cost = this.now() - buildStarted;
       this.#cost.set(kind, cost);
       published++;

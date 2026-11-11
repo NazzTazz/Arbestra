@@ -161,7 +161,7 @@ function ActiveOverlay() {
       </dl>
       <p>
         60 s : p95 {ms(windowed.p95Ms)} ms · &gt; 100 ms : {windowed.over100} · &gt; 200 ms : {windowed.over200} · pire
-        : {ms(windowed.worstMs)} ms
+        : {ms(windowed.worstMs)} ms · bascules LOD : {windowed.lodSwitches} · rebasages : {windowed.rebases}
       </p>
       <div className="dev-statistics-selectors">
         <button type="button" onClick={copyReport}>

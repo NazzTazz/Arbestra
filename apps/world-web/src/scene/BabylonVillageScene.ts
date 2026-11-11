@@ -3,6 +3,7 @@ import { interpolateObservationPose } from '@arbestra/contracts';
 import { playerSceneTransport, type SceneTransport } from './scene-transport';
 import {
   clientTime,
+  countSceneEvent,
   FrameTimings,
   statisticsEnabled,
   recordFrame,
@@ -213,6 +214,11 @@ export class BabylonVillageScene {
   readonly #camera: ArcRotateCamera;
   readonly #canvas: HTMLCanvasElement;
   readonly #villageMeshes: Mesh[] = [];
+  /** Moves on every change of #villageMeshes; with the mode and the scene's mesh
+   * count, it decides when the village visibilities are walked again. */
+  #villageMeshesVersion = 0;
+  #villageVisibility = { mode: '' as string, version: -1, sceneMeshes: -1 };
+  #terrainVisibility = { value: -1, version: -1 };
   readonly #sceneryGeometry = new Map<string, Mesh>();
   readonly #sceneryData = new Map<string, VertexData>();
   readonly #waterRippleTexture: DynamicTexture;
@@ -1755,19 +1761,40 @@ export class BabylonVillageScene {
           const blend = Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
           this.#villageRoads?.show(this.#mode === 'world' ? 0 : 1);
           this.#regionalOverview.detailBlend(blend);
-          for (const root of this.#villageMeshes)
-            for (const mesh of [root, ...root.getChildMeshes()]) {
-              const visibility = (mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
-              // Native building instances share source visibility; each instance still owns culling/picking.
-              const target =
-                'sourceMesh' in mesh
-                  ? (mesh as import('@babylonjs/core/Meshes/instancedMesh').InstancedMesh).sourceMesh
-                  : mesh;
-              if (target.visibility !== visibility) target.visibility = visibility;
-            }
+          // Only this loop writes these visibilities: walk the meshes again only
+          // when an input changed (mode, village meshes, late LOD children), not
+          // every frame over every building and its variants (audit of 11 November).
+          const villageVisibility = this.#villageVisibility;
+          if (
+            villageVisibility.mode !== this.#mode ||
+            villageVisibility.version !== this.#villageMeshesVersion ||
+            villageVisibility.sceneMeshes !== this.#scene.meshes.length
+          ) {
+            for (const root of this.#villageMeshes)
+              for (const mesh of [root, ...root.getChildMeshes()]) {
+                const visibility = (mesh.metadata?.baseVisibility ?? 1) * (this.#mode === 'world' ? 0 : 1);
+                // Native building instances share source visibility; each instance still owns culling/picking.
+                const target =
+                  'sourceMesh' in mesh
+                    ? (mesh as import('@babylonjs/core/Meshes/instancedMesh').InstancedMesh).sourceMesh
+                    : mesh;
+                if (target.visibility !== visibility) target.visibility = visibility;
+              }
+            this.#villageVisibility = {
+              mode: this.#mode,
+              version: this.#villageMeshesVersion,
+              sceneMeshes: this.#scene.meshes.length,
+            };
+          }
           this.#regionalVillages.update(this.#space, this.#state.village.id, this.#store?.groundRevision ?? 0);
-          for (const mesh of this.#renderer?.meshes() ?? []) {
-            mesh.visibility = this.#overview ? 1 - blend : 1;
+          const terrainVisibility = this.#overview ? 1 - blend : 1,
+            terrainMeshes = this.#renderer?.meshVersion ?? -1;
+          if (
+            this.#terrainVisibility.value !== terrainVisibility ||
+            this.#terrainVisibility.version !== terrainMeshes
+          ) {
+            for (const mesh of this.#renderer?.meshes() ?? []) mesh.visibility = terrainVisibility;
+            this.#terrainVisibility = { value: terrainVisibility, version: terrainMeshes };
           }
           this.#canvas.dataset.regionalVillages = String(this.#regionalVillages.meshes.size);
         }
@@ -2270,6 +2297,7 @@ export class BabylonVillageScene {
       const generationStarted = performance.now();
       this.#lastVisualSignature = visualSignature;
       this.#villageMeshes.splice(0);
+      this.#villageMeshesVersion++;
       this.#selectableMeshes.clear();
       this.#highlightedSiteIds = new Set(highlightedSiteIds);
       this.#constructionMode = constructionMode;
@@ -2347,6 +2375,7 @@ export class BabylonVillageScene {
             selectable.metadata?.buildingAttachment !== 'glass';
         }
         this.#villageMeshes.push(mesh);
+        this.#villageMeshesVersion++;
         freezeStaticHierarchy(mesh);
         this.#selectableMeshes.set(site.id, mesh);
         if (site.building)
@@ -2378,6 +2407,7 @@ export class BabylonVillageScene {
           const centre = this.#space.project({ cellX: placement.cellX + 0.5, cellY: placement.cellY + 2 });
           cached.mesh.position.set(centre.x, placement.base, centre.z);
           this.#villageMeshes.push(cached.mesh);
+          this.#villageMeshesVersion++;
           freezeStaticHierarchy(cached.mesh);
         }
       }
@@ -4533,6 +4563,7 @@ export class BabylonVillageScene {
     const shift = this.#space.rebase(target, this.#store.world.chunkSize);
     if (shift) this.#terraformBrush?.reproject(this.#space);
     if (!shift) return;
+    countSceneEvent('rebases');
     const nextVillage = this.#space.project(this.#villageAnchor);
     const villageShift = { x: priorVillage.x - nextVillage.x, z: priorVillage.z - nextVillage.z };
     this.#camera.target.x -= shift.x;
@@ -5432,8 +5463,9 @@ export class BabylonVillageScene {
       // Buildings and workers follow the published ground and the coordinate
       // origin, not which terrain units are visible: reprojecting them on every
       // visibility change cost ~340 ms per rotation step on alpha Catmark.
-      const groundKey = this.#groundKey();
-      if (groundKey !== this.#projectionGroundKey) {
+      const groundKey = this.#groundKey(),
+        groundChanged = groundKey !== this.#projectionGroundKey;
+      if (groundChanged) {
         this.#projectionGroundKey = groundKey;
         this.#refreshBuildingGround();
         this.#workers.reproject();
@@ -5446,7 +5478,10 @@ export class BabylonVillageScene {
       }
       frame?.mark('projection');
       // Not at every frame of a live terraforming stroke: once it settles (§7.14).
-      if (this.#editSettle.request(now)) {
+      // Roads, braziers and paths read the published ground and the origin
+      // (groundKey), never the camera's visibility mask: a mask change alone,
+      // every 100 ms while the camera moves, no longer rebuilds them.
+      if (groundChanged && this.#editSettle.request(now)) {
         this.#updateTravelPaths(this.#state, this.#showTravel, this.#selectedRoute, frame);
         frame?.mark('roadsDebug');
       }
