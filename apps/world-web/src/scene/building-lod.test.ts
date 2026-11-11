@@ -10,7 +10,7 @@ import { Camera } from '@babylonjs/core/Cameras/camera';
 import { Ray } from '@babylonjs/core/Culling/ray';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { instantiateBakedBuilding } from './building-assets';
-import { coordinateBuildingLod, projectedDiameter } from './building-lod';
+import { coordinateBuildingLod, nextBuildingLod, projectedDiameter } from './building-lod';
 import {
   buildingLodRenderHeight,
   DEFAULT_BUILDING_LOD,
@@ -211,6 +211,79 @@ it.each([false, true])(
     }
   },
 );
+
+it('keeps its variant around a threshold and evaluates every building from one observer', () => {
+  // 282 switches a minute without rebasing (11 November): a building whose
+  // size sat on a threshold switched at every small zoom or turn.
+  const engine = new NullEngine({
+    renderWidth: 1200,
+    renderHeight: 750,
+    textureSize: 512,
+    deterministicLockstep: false,
+    lockstepMaxSteps: 4,
+  });
+  const scene = new Scene(engine),
+    camera = new FreeCamera('camera', new Vector3(0, 0, -10), scene);
+  const baseline = scene.onBeforeActiveMeshesEvaluationObservable.observers.length;
+  const create = (id: string, x: number) => {
+    const root = new Mesh(id, scene);
+    root.position.x = x;
+    buildCachedProceduralBuildingLod(root, 'box-hysteresis', (variant, level) => {
+      MeshBuilder.CreateBox(`quality-${level}`, { size: 2 }, scene).parent = variant;
+    });
+    return root;
+  };
+  try {
+    const buildings = [create('a', 0), create('b', 0.001), create('c', -0.001)];
+    expect(scene.onBeforeActiveMeshesEvaluationObservable.observers.length).toBe(baseline + 1);
+    const at = (z: number) => {
+      camera.position.z = z;
+      scene.render();
+      return buildings[0]!.metadata.buildingLod;
+    };
+    expect(at(-10).active).toBe('detailed');
+    // Just around the near threshold (45 px/m), a 2 % zoom either side.
+    const near = DEFAULT_BUILDING_LOD.near;
+    const depth = (at(-10).pixelsPerMetre * 10) / near;
+    let switches = 0,
+      previous = 'detailed';
+    for (let i = 0; i < 20; i++) {
+      const state = at(-depth * (i % 2 ? 1.02 : 0.98));
+      expect(Math.abs(state.pixelsPerMetre / near - 1)).toBeLessThan(0.03);
+      if (state.active !== previous) switches++;
+      previous = state.active;
+    }
+    expect(switches).toBe(0);
+    // Past the margin it does switch, and back only past the margin above.
+    expect(at(-depth * 1.15).active).toBe('peripheral');
+    expect(at(-depth * 0.98).active).toBe('peripheral');
+    expect(at(-depth * 0.88).active).toBe('detailed');
+    expect(buildings.every((b) => b.metadata.buildingLod.active === 'detailed')).toBe(true);
+    for (const building of buildings) building.dispose(false, false);
+    expect(scene.onBeforeActiveMeshesEvaluationObservable.observers.filter((o) => !o._willBeUnregistered)).toHaveLength(
+      baseline,
+    );
+  } finally {
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
+it('applies the margin in both directions and between every pair of levels', () => {
+  const settings = { near: 45, far: 28 };
+  expect(nextBuildingLod('detailed', 44, settings, true)).toBe('detailed');
+  expect(nextBuildingLod('detailed', 40, settings, true)).toBe('peripheral');
+  expect(nextBuildingLod('detailed', 10, settings, true)).toBe('distant');
+  expect(nextBuildingLod('peripheral', 47, settings, true)).toBe('peripheral');
+  expect(nextBuildingLod('peripheral', 50, settings, true)).toBe('detailed');
+  expect(nextBuildingLod('peripheral', 27, settings, true)).toBe('peripheral');
+  expect(nextBuildingLod('peripheral', 25, settings, true)).toBe('distant');
+  expect(nextBuildingLod('distant', 30, settings, true)).toBe('distant');
+  expect(nextBuildingLod('distant', 31, settings, true)).toBe('peripheral');
+  expect(nextBuildingLod('distant', 47, settings, false)).toBe('distant');
+  expect(nextBuildingLod('distant', 50, settings, false)).toBe('detailed');
+  expect(nextBuildingLod('detailed', 30, settings, false)).toBe('distant');
+});
 
 it('keeps the resting LOD choice while motion lowers the resolution (rendering P2)', () => {
   // Without a reference, the live render height, as before P2.
