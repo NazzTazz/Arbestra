@@ -309,7 +309,16 @@ export class VillageBraziers {
     light: PointLight;
     phase: number;
     tempo: number;
+    /** With a parent: the point in its local frame (see #parent). */
+    local: Vector3 | null;
   }> = [];
+  /** The building that carries these fires (stonemason, market niches), if any.
+   * Its masonry is parented; flames and lights follow its world matrix, which a
+   * floating-origin shift, a raised base or streamed ground move after the
+   * fires were placed (« braseros fantômes », 11 November). */
+  #parent: Mesh | null = null;
+  #parentFlag = -1;
+  readonly #born = new Vector3();
   /** Every flame of these braziers in one particle system, one draw call
    * (audit of rendering in motion, 11 November: one system per fire cost a
    * draw call and a CPU update each, 117 at night on Bressuire). Each birth
@@ -395,6 +404,9 @@ export class VillageBraziers {
     if (signature === this.#signature) return;
     this.#signature = signature;
     this.#nextBind = 0;
+    this.#parent = parent ?? null;
+    this.#parentFlag = -1;
+    const toLocal = parent ? parent.computeWorldMatrix(true).clone().invert() : null;
     const previous = new Map(this.#items.map((item) => [item.key, item]));
     // A floating-origin change moves every fire by the same shift: the live
     // flames follow it; any other move only affects flames of under 0.45 s.
@@ -420,6 +432,7 @@ export class VillageBraziers {
         commonShift =
           commonShift === undefined ? shift : commonShift && commonShift.equalsWithEpsilon(shift) ? commonShift : null;
         existing.point = { ...p };
+        existing.local = toLocal ? Vector3.TransformCoordinates(new Vector3(p.x, p.y, p.z), toLocal) : null;
         this.#items.push(existing);
         previous.delete(key);
         continue;
@@ -468,6 +481,7 @@ export class VillageBraziers {
         light,
         phase: p.seed * Math.PI * 2,
         tempo: 0.8 + p.seed * 0.4,
+        local: toLocal ? Vector3.TransformCoordinates(new Vector3(p.x, p.y, p.z), toLocal) : null,
       });
     }
     if (commonShift && this.#flames)
@@ -522,6 +536,20 @@ export class VillageBraziers {
       this.#meshIndex ??= new BrazierMeshIndex(this.scene);
       bindBrazierLights(lights, this.#meshIndex.nearby(lights));
     }
+    // A building's fires: their lights follow it when its world matrix changed
+    // (O(fires) then, O(1) otherwise); their flames follow it at birth.
+    const parent = this.#parent;
+    if (parent && !parent.isDisposed()) {
+      const world = parent.getWorldMatrix();
+      if (world.updateFlag !== this.#parentFlag) {
+        this.#parentFlag = world.updateFlag;
+        for (const item of this.#items)
+          if (item.local) {
+            Vector3.TransformCoordinatesToRef(item.local, world, item.light.position);
+            item.light.position.y += 0.16;
+          }
+      }
+    }
     let rate = 0;
     for (const item of this.#items) {
       const t = now * item.tempo,
@@ -563,7 +591,13 @@ export class VillageBraziers {
     emitter.particlePositionGenerator = (_index, _particle, out) => {
       const items = this.#items;
       if (!items.length) return void out.set(0, -1000, 0);
-      const p = items[this.#turn++ % items.length]!.point;
+      const item = items[this.#turn++ % items.length]!,
+        parent = this.#parent;
+      // A building's fire is born where its building is now, not where it was built.
+      const p =
+        item.local && parent && !parent.isDisposed()
+          ? Vector3.TransformCoordinatesToRef(item.local, parent.getWorldMatrix(), this.#born)
+          : item.point;
       out.set(
         p.x + (Math.random() - 0.5) * 0.012,
         p.y + FLAME_LIFT + Math.random() * 0.005,

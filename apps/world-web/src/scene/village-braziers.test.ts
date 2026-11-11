@@ -520,3 +520,54 @@ it('draws every flame of 117 braziers with one particle system, born at each fir
     vi.unstubAllGlobals();
   }
 });
+
+it('keeps the flames and light of a building fire on its building when the building moves (braseros fantômes)', () => {
+  vi.stubGlobal(
+    'OffscreenCanvas',
+    class {
+      constructor(
+        public width: number,
+        public height: number,
+      ) {}
+      getContext() {
+        return { putImageData() {} };
+      }
+    },
+  );
+  vi.stubGlobal(
+    'ImageData',
+    class {
+      data: Uint8ClampedArray;
+      constructor(width: number, height: number) {
+        this.data = new Uint8ClampedArray(width * height * 4);
+      }
+    },
+  );
+  const engine = new NullEngine(),
+    scene = new Scene(engine),
+    braziers = new VillageBraziers(scene);
+  try {
+    // A stonemason or market niche: the fire is placed once, in world space,
+    // then its building moves (floating-origin shift, raised base, ground).
+    const building = MeshBuilder.CreateBox('stonemason', { size: 1 }, scene);
+    building.computeWorldMatrix(true);
+    braziers.updatePoints([{ x: 1, y: 0, z: 0, seed: 0.4 }], building);
+    const masonry = scene.getMeshByName('brazier-masonry')!,
+      light = scene.getLightByName('brazier-light-0') as PointLight,
+      flames = scene.particleSystems[0] as ParticleSystem;
+    building.position.set(10, 2, -5);
+    building.computeWorldMatrix(true);
+    masonry.computeWorldMatrix(true);
+    expect(masonry.getAbsolutePosition().equalsWithEpsilon(new Vector3(11, 2, -5), 1e-5)).toBe(true);
+    braziers.animate(1000, true, 1);
+    expect(light.position.equalsWithEpsilon(new Vector3(11, 2.16, -5), 1e-5)).toBe(true);
+    const born = new Vector3();
+    (flames.particleEmitterType as CustomParticleEmitter).particlePositionGenerator(0, null as never, born);
+    expect(Vector3.Distance(born, new Vector3(11, 2.1, -5))).toBeLessThan(0.02);
+  } finally {
+    braziers.dispose();
+    scene.dispose();
+    engine.dispose();
+    vi.unstubAllGlobals();
+  }
+});
