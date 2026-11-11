@@ -1,5 +1,6 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
+import type { Material } from '@babylonjs/core/Materials/material';
 import type { Stone } from './building-plan';
 
 /** Offline only: fill subpixel mortar joints, never an opening or a module join. */
@@ -60,6 +61,12 @@ export function batchDistantBuilding(root: Mesh): void {
     group.push(child);
     groups.set(key, group);
   }
+  // Factories may free the materials they own when one of their sub-meshes is
+  // disposed (market roof, clock, display): disposing the children below would
+  // leave the batches with freed materials, baked and drawn as Babylon's white
+  // default (town hall 2, medium and distant variants, 11 November). Each batch
+  // takes its own copy, owned by this root; textures stay shared.
+  const copies = new Map<Material, Material>();
   for (const group of groups.values()) {
     const first = group[0]!;
     const pieces = group.map((mesh) =>
@@ -68,11 +75,22 @@ export function batchDistantBuilding(root: Mesh): void {
     const mesh = new Mesh(`distant-${first.material?.name ?? 'glass'}`, root.getScene());
     pieces[0]!.merge(pieces.slice(1), true, false, false, true).applyToMesh(mesh);
     mesh.parent = root;
-    mesh.material = first.material;
+    const original = first.material;
+    if (original) {
+      let copy = copies.get(original);
+      if (!copy) {
+        copy = original.clone(original.name) ?? original;
+        copies.set(original, copy);
+      }
+      mesh.material = copy;
+    } else mesh.material = null;
     mesh.metadata = { ...first.metadata };
     mesh.isPickable = first.isPickable;
     mesh.receiveShadows = true;
   }
-  // Do not dispose materials/textures: the new batches still share them.
+  root.onDisposeObservable.addOnce(() => {
+    for (const [original, copy] of copies) if (copy !== original) copy.dispose(false, false);
+  });
+  // Do not dispose textures: the batch materials still share them.
   for (const child of children) if (!child.isDisposed()) child.dispose(false, false);
 }

@@ -2,6 +2,8 @@ import { expect, it, vi } from 'vitest';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TimberThatch } from './timber-thatch';
 import { buildUniversity } from './university-factory';
 import { batchDistantBuilding, simplifyMasonry } from './building-lod-geometry';
@@ -160,5 +162,33 @@ it('reduces every campus recipe while retaining its bounds, glass, material iden
     scene.dispose();
     engine.dispose();
     vi.unstubAllGlobals();
+  }
+});
+
+it('keeps a live material on a batch whose factory frees its own when its sub-mesh is disposed', () => {
+  // The market roof, clock and display free their materials with their
+  // sub-mesh (town-hall-market-roof.ts): batching disposed that sub-mesh and
+  // baked the medium and distant town hall 2 in Babylon's white default.
+  const engine = new NullEngine(),
+    scene = new Scene(engine);
+  try {
+    const root = new Mesh('building', scene),
+      roof = new Mesh('market-roof', scene),
+      slats = MeshBuilder.CreateBox('slats', { size: 1 }, scene),
+      owned = new StandardMaterial('market-dark-wood-slats', scene);
+    roof.parent = root;
+    slats.parent = roof;
+    slats.material = owned;
+    roof.onDisposeObservable.addOnce(() => owned.dispose());
+    batchDistantBuilding(root);
+    const batch = root.getChildMeshes().find((mesh) => mesh.name === 'distant-market-dark-wood-slats')!;
+    expect(owned.getScene().materials.includes(owned)).toBe(false); // the factory freed its own
+    expect(batch.material?.name).toBe('market-dark-wood-slats');
+    expect(scene.materials.includes(batch.material!)).toBe(true);
+    root.dispose();
+    expect(scene.materials.some((m) => m.name === 'market-dark-wood-slats')).toBe(false);
+  } finally {
+    scene.dispose();
+    engine.dispose();
   }
 });
