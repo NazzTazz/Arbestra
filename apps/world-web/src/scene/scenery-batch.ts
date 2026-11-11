@@ -2,6 +2,9 @@ import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { SubMesh } from '@babylonjs/core/Meshes/subMesh';
+import { Geometry } from '@babylonjs/core/Meshes/geometry';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
+import type { IndicesArray } from '@babylonjs/core/types';
 import type { MultiMaterial } from '@babylonjs/core/Materials/multiMaterial';
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { Scene } from '@babylonjs/core/scene';
@@ -15,15 +18,53 @@ export interface SceneryPart {
 }
 /** A grove mesh from its kit piece; `staticBuffer` false keeps its instances writable one by one. */
 export function cloneWoodland(source: Mesh, name: string, transforms: Float32Array, staticBuffer = true): Mesh {
-  const mesh = source.clone(name)!;
-  // Babylon stores world0..world3 on Geometry, not on the mesh. Clones must
-  // own their geometry before installing different thin-instance matrices.
-  mesh.makeGeometryUnique();
-  mesh.setEnabled(true);
+  // A new mesh, not source.clone(): cloning copies every property by
+  // introspection, about 1 ms per piece, 10 pieces per grove (11 November).
+  // The kit source carries only its material.
+  const mesh = new Mesh(name, source.getScene());
+  mesh.material = source.material;
+  // Babylon stores world0..world3 on Geometry, not on the mesh: each grove
+  // needs its own Geometry for its matrices. It shares the kit's vertex and
+  // index buffers instead of copying them (makeGeometryUnique copied and
+  // re-uploaded the whole piece).
+  sharedGeometry(source, name).applyToMesh(mesh);
   mesh.isPickable = false;
   mesh.thinInstanceSetBuffer('matrix', transforms, 16, staticBuffer);
   mesh.thinInstanceRefreshBoundingInfo();
   return mesh;
+}
+/** A Geometry over the source's GPU buffers: vertex buffers that do not own
+ * them, the index buffer with one more reference, and the source's index array
+ * (picking reads it; setIndexBuffer empties it). Disposing it never frees the
+ * source's data. */
+function sharedGeometry(source: Mesh, name: string): Geometry {
+  const scene = source.getScene(),
+    engine = scene.getEngine(),
+    from = source.geometry!;
+  const geometry = new Geometry(`${name}-geometry`, scene, undefined, false);
+  for (const kind of from.getVerticesDataKinds()) {
+    const vb = from.getVertexBuffer(kind)!;
+    geometry.setVerticesBuffer(
+      new VertexBuffer(engine, vb.getWrapperBuffer(), kind, {
+        updatable: false,
+        stride: vb.byteStride,
+        offset: vb.byteOffset,
+        size: vb.getSize(),
+        type: vb.type,
+        normalized: vb.normalized,
+        useBytes: true,
+        takeBufferOwnership: false,
+      }),
+      from.getTotalVertices(),
+    );
+  }
+  const indexBuffer = from.getIndexBuffer();
+  if (indexBuffer) {
+    indexBuffer.references++;
+    geometry.setIndexBuffer(indexBuffer, from.getTotalVertices(), from.getTotalIndices(), indexBuffer.is32Bits);
+    (geometry as unknown as { _indices: IndicesArray })._indices = from.getIndices(false, true)!;
+  }
+  return geometry;
 }
 /** Bake bounded recipes without allocating a Babylon mesh for every branch. */
 export function bakeScenery(scene: Scene, parts: SceneryPart[], shared?: MultiMaterial): Mesh[] {

@@ -147,3 +147,13 @@ Mesure par instrumentation temporaire (retirée), Bressuire, dans l'onglet de l'
 **Pistes.**
 1. Des géométries qui partagent les tampons de sommets et d'indices de la pièce source, chacune avec ses propres tampons de matrices. Aucune copie de sommets, aucun envoi au GPU. À vérifier : le comptage des références des tampons partagés à la libération.
 2. Une seule instance par pièce et par chunk, au lieu d'une par bosquet : 10 fois moins de clones, mais un abattage reconstruit tout le chunk.
+
+**Correctif livré (le même soir), et correction du diagnostic.** Une mesure étape par étape a montré que la copie de géométrie (`makeGeometryUnique`) n'était qu'une part secondaire du coût : sur 51 pièces, **`Mesh.clone` coûtait 53 ms**, contre 6,6 ms pour la géométrie et 6,6 ms pour les matrices. `clone` recopie par introspection toutes les propriétés du mesh, environ 1 ms par pièce. `cloneWoodland` crée maintenant un mesh neuf, qui ne reprend que le matériau de la source, et une géométrie qui partage les tampons de sommets et d'index du kit, avec ses seules matrices en propre. Test : aucun tampon de sommets ni d'index créé, aucun appel à `clone`, arbres indépendants, picking conservé, compteur de références de l'index rétabli après destruction.
+
+Mesure (Bressuire, onglet de l'agent ; ton onglet du jeu, ouvert en même temps, partageait la carte graphique, d'où des images par seconde non significatives) :
+
+| Coût des meshes d'un bosquet | Avant | Après |
+|---|---|---|
+| Chargement (6 bosquets), médiane / pire | environ 35 / 50 à 55 ms | 2,4 à 7,2 / 10 à 16,5 ms |
+| Première rotation (23 bosquets), médiane / pire | — | 3,3 / 9,7 ms |
+| Phase « Terrain · création des meshes » en rotation, maximum par fenêtre de 2 s | 16 à 29 ms | 4,2 à 11 ms |

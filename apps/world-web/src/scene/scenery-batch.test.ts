@@ -6,7 +6,9 @@ import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import '@babylonjs/core/Meshes/Builders/boxBuilder';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import '@babylonjs/core/Meshes/thinInstanceMesh';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import { Ray } from '@babylonjs/core/Culling/ray';
+import '@babylonjs/core/Culling/ray';
 import { bakeScenery, cloneWoodland } from './scenery-batch';
 
 it('keeps woodland GPU positions independent when another grove is created or disposed', () => {
@@ -34,6 +36,61 @@ it('keeps woodland GPU positions independent when another grove is created or di
     expect((first.getVertexBuffer('world3')!.getData() as Float32Array)[12]).toBe(10);
     expect(first.getBoundingInfo().boundingSphere.centerWorld.x).toBe(10);
     expect(source.getVertexBuffer('world3')).toBeFalsy();
+  } finally {
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
+it('shares the kit geometry between groves: no vertex copy, independent trees, safe disposal, picking kept', () => {
+  // A grove copied its whole tree piece and re-uploaded it (makeGeometryUnique):
+  // 22 to 50 ms per grove of about ten trees (Bressuire, 11 November).
+  const engine = new NullEngine(),
+    scene = new Scene(engine);
+  try {
+    const material = new StandardMaterial('bark', scene);
+    const source = bakeScenery(scene, [
+      {
+        geometry: VertexData.CreateBox({ size: 1 }),
+        material,
+        position: Vector3.Zero(),
+        scaling: Vector3.One(),
+        rotation: Vector3.Zero(),
+      },
+    ])[0]!;
+    source.setEnabled(false);
+    const references = source.geometry!.getIndexBuffer()!.references;
+    const cloned = vi.spyOn(source, 'clone');
+    const created = vi.spyOn(engine, 'createVertexBuffer'),
+      indices = vi.spyOn(engine, 'createIndexBuffer');
+    const groves = [10, 30, 50].map((x) =>
+      cloneWoodland(source, `grove-${x}`, new Float32Array(Matrix.Translation(x, 0, 0).toArray()), false),
+    );
+    // Only the matrices are new buffers: four per grove (world0..world3 share one), no vertex data.
+    expect(indices).not.toHaveBeenCalled();
+    // Nor Mesh.clone, which copies every property by introspection (about 1 ms per piece).
+    expect(cloned).not.toHaveBeenCalled();
+    expect(created.mock.calls.every(([data]) => (data as ArrayLike<number>).length === 16)).toBe(true);
+    for (const grove of groves) {
+      for (const kind of ['position', 'normal'])
+        expect(grove.getVertexBuffer(kind)!.getBuffer()).toBe(source.getVertexBuffer(kind)!.getBuffer());
+      expect(grove.geometry!.getIndexBuffer()).toBe(source.geometry!.getIndexBuffer());
+      expect(grove.getIndices()).toHaveLength(source.getIndices()!.length);
+      grove.thinInstanceEnablePicking = true;
+    }
+    expect((groves[1]!.getVertexBuffer('world3')!.getData() as Float32Array)[12]).toBe(30);
+    // Picking finds the grove's own tree.
+    const hit = scene.pickWithRay(new Ray(new Vector3(30, 10, 0), new Vector3(0, -1, 0)), (m) =>
+      groves.includes(m as never),
+    );
+    expect(hit?.pickedMesh?.name).toBe('grove-30');
+    // Disposing groves never frees the kit: the source keeps rendering data.
+    for (const grove of groves) grove.dispose(false, false);
+    expect(source.geometry!.getIndexBuffer()!.references).toBe(references);
+    expect(source.getVertexBuffer('position')!.getData()).toBeTruthy();
+    const again = cloneWoodland(source, 'again', new Float32Array(Matrix.Translation(70, 0, 0).toArray()));
+    expect(again.getTotalVertices()).toBe(source.getTotalVertices());
+    expect(again.getBoundingInfo().boundingSphere.centerWorld.x).toBeCloseTo(70);
   } finally {
     scene.dispose();
     engine.dispose();
