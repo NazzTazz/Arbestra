@@ -98,3 +98,36 @@ Commits : `2c4e98a` (P1), `704be7b` (P2 : flammes en un seul système de particu
 | Bascules LOD / rebasages | — | 282 / 0 |
 
 Restent : la première rotation (8 i/s pendant que le terrain s'intègre et que les bâtiments rendent leurs variantes pour la première fois), et 282 bascules LOD en une minute sans rebasage (oscillation autour des seuils, hystérésis de P4). Le budget d'AGENTS.md (aucune image au-delà de 100 ms une fois le village prêt) n'est pas encore tenu.
+
+## P4, première partie : hystérésis du LOD et observateur unique (`3f42e67`)
+
+Mesure navigateur du 11 novembre, faite par l'agent dans son propre onglet Chrome (fenêtre au premier plan), Bressuire, `rc1-dev`. La rotation est un glisser scripté : événements de pointeur à chaque image, 4 px par image pendant 8 s. Les conditions ne sont pas celles des relevés manuels de Tristan, donc à comparer entre elles seulement.
+
+| Passage (8 s) | i/s | p95 | Pire image | > 100 ms | Bascules LOD |
+|---|---|---|---|---|---|
+| Au repos (5 s) | 60 | 17 ms | 36 ms | 0 | 0 |
+| Première rotation après chargement, essai 1 | 27 | 67 ms | 100 ms | 0 | 87 |
+| Première rotation après chargement, essai 2 | 33 | 50 ms | 68 ms | 0 | 97 |
+| Seconde rotation (après 10 s de pause) | 60 | 17 ms | 33 ms | 0 | — |
+| Troisième rotation | 54 | 33 ms | 50 ms | 0 | 158 |
+| Zoom à la molette, avant puis arrière (6 s) | — | 19 ms | 28 ms | 0 | 55 |
+
+**Première rotation.** Ventilation de l'overlay, moyenne / maximum sur des fenêtres de 2 s :
+
+| Poste | Moyenne | Maximum |
+|---|---|---|
+| Rendu principal CPU | 19 ms | 31 à 36 ms |
+| Sélection des meshes | 8,6 ms | 18 ms |
+| Dessin Babylon | 9,4 ms | 22 ms |
+| Création des meshes de terrain | 3 à 4 ms | 16 à 24 ms |
+| Chemins automatiques de la voirie | 2,6 ms | 11 à 24 ms |
+| Sélection et requêtes du terrain | 1 à 2 ms | 8 à 11 ms |
+| Caméra et transitions | — | 12 ms |
+
+Compilations de shaders : 0. Meshes actifs : 400 à 520, contre 370 au repos. Appels de dessin : 180 à 234.
+
+La première rotation n'a donc pas de coupable unique : un rendu plus chargé, car la caméra découvre des meshes, auquel s'ajoutent les images où le terrain crée des chunks et où la voirie recalcule ses chemins automatiques. Les longues images de plus de 50 ms viennent toutes de la boucle de rendu de Babylon. La première apparition des variantes LOD ne coûte rien de visible : aucune compilation de shader. Pistes pour la suite :
+- étaler la création des meshes de terrain et le calcul des chemins automatiques, avec un budget par image ;
+- réduire les meshes actifs : fusion des bâtiments lointains, P3.
+
+**Bascules LOD.** La profondeur utilisée est celle de l'axe de visée. En rotation, chaque bâtiment change donc de profondeur, et les bascules restantes sont pour l'essentiel de vrais franchissements de seuil, pas des oscillations. La marge de 10 % supprime les allers-retours (test de régression). Pour aller plus loin, il faudrait mesurer la distance à la caméra plutôt que la profondeur, ce qui changerait le choix au repos. À décider si ces bascules restent visibles.
