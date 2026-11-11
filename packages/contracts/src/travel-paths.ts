@@ -826,7 +826,8 @@ export function refineTravelRoute(
   if (!destination) return route;
   const context = prepared ?? cache?.prepared ?? prepareRefinement(state, ground);
   const { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells, gardens } = context;
-  const roads = roadLookup(surface),
+  // Without any road pixel, the cost is the length: skip the per-eighth walk.
+  const roads = roadNodes.length ? roadLookup(surface) : undefined,
     pathCost = (cells: readonly TravelCell[]) => travelDuration(cells, world, roads);
   const gardenAt = (x: number, y: number) =>
     gardens.get(
@@ -925,6 +926,7 @@ export function refineTravelRoute(
         if ((ox || oy) && enters(p)) cellGoals.push(p);
       }
   let best: TravelCell[] | null = null,
+    bestCost = Infinity,
     limited = false;
   // Door connections are part of the physical path too. Do not jump over an
   // obstacle between the threshold and the first fine-grid node.
@@ -1058,8 +1060,9 @@ export function refineTravelRoute(
                   const x = a.cellX + (dx * i) / n,
                     y = a.cellY + (dy * i) / n;
                   factor +=
-                    (roads(wrap(Math.round(x * 16), w * 2), wrap(Math.round(y * 16), h * 2)) ? ROAD_STEP_COST : 1) *
-                    (crossesGardens ? crossing(x, y) : 1);
+                    (roads && roads(wrap(Math.round(x * 16), w * 2), wrap(Math.round(y * 16), h * 2))
+                      ? ROAD_STEP_COST
+                      : 1) * (crossesGardens ? crossing(x, y) : 1);
                 }
                 return (length * factor) / n;
               },
@@ -1268,7 +1271,11 @@ export function refineTravelRoute(
         ...(end ? [end.position] : []),
         ...(!local(route.destination) ? route.cells.slice(lastLocal + 1) : []),
       ];
-      if (!best || pathCost(path) < pathCost(best)) best = path;
+      const candidate = pathCost(path);
+      if (!best || candidate < bestCost) {
+        best = path;
+        bestCost = candidate;
+      }
     }
   if (!best && limited) search?.onLimit?.();
   return result(best);

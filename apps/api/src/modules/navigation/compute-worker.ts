@@ -101,6 +101,11 @@ function build(data: NavigationData, stage: (name: string) => void): NavigationF
   }
   const occupancy = new Map(data.occupancies.map((c) => [c.cellX + ':' + c.cellY, c.buildingId]));
   const surface = new Map(data.plans.flatMap((p) => [...infrastructurePlanSurface(p, world)]));
+  // Cells holding a road pixel: an edge away from them costs its length, unsampled.
+  const roadCells = new Set<string>();
+  for (const p of surface.values())
+    if (p.manual)
+      roadCells.add(wrap(Math.floor((p.x + 8) / 16), data.width) + ':' + wrap(Math.floor((p.y + 8) / 16), data.height));
   // Equipment by cell (±1/8 footprint): a sample checks only its own bin, now
   // that every accessory of the world is in the plans (navigation T1).
   const equipmentBins = new Map<string, Array<{ x: number; y: number }>>();
@@ -171,8 +176,11 @@ function build(data: NavigationData, stage: (name: string) => void): NavigationF
     cost(a, b) {
       const dx = spawnDelta(b.cellX, a.cellX, data.width),
         dy = spawnDelta(b.cellY, a.cellY, data.height),
-        length = routeLength([a, b], { width: data.width, height: data.height }),
-        n = Math.max(1, Math.ceil(length * 8 - 1e-9));
+        length = routeLength([a, b], { width: data.width, height: data.height });
+      const near = (p: { cellX: number; cellY: number }) =>
+        roadCells.has(wrap(Math.round(p.cellX), data.width) + ':' + wrap(Math.round(p.cellY), data.height));
+      if (!roadCells.size || (!near(a) && !near(b) && length <= 1)) return length;
+      const n = Math.max(1, Math.ceil(length * 8 - 1e-9));
       let factor = 0;
       for (let i = 1; i <= n; i++) {
         const x = wrap(Math.round((a.cellX + (dx * i) / n) * 16), data.width * 16),

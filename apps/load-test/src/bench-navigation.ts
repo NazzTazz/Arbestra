@@ -109,7 +109,8 @@ await main(async () => {
           vertex_x, vertex_y
         limit 1`.execute(db);
       let afterEdit: Timed | null = null,
-        afterEditWarm: Timed | null = null;
+        afterEditWarm: Timed | null = null,
+        restored: Timed | null = null;
       const vertex = far.rows[0];
       if (vertex) {
         const move = (height: number) =>
@@ -129,6 +130,10 @@ await main(async () => {
         } finally {
           await move(Number(vertex.height));
         }
+        // Read again once restored: the persisted network (village_travel_networks)
+        // is then the original ground's, so the next run starts from the same cache.
+        await new Promise((done) => setTimeout(done, waitMs));
+        restored = await presentation();
       }
 
       // Garden preview: the only simulation consumer of the all-goals network.
@@ -181,7 +186,7 @@ await main(async () => {
           bytes: cold.bytes,
         },
         distantEdit: vertex
-          ? { vertex: { x: vertex.vertexX, y: vertex.vertexY }, waitMs, afterEdit, afterEditWarm }
+          ? { vertex: { x: vertex.vertexX, y: vertex.vertexY }, waitMs, afterEdit, afterEditWarm, restored }
           : null,
         gardens,
       };
