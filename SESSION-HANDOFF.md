@@ -22,7 +22,7 @@ Ordre proposé et dépendances : [feuille de route](docs/ROADMAP.md) (4 novembre
 - **Sortir le worker du processus de l'API** (décision du 29 octobre) : service à part, sans pool. Idée : jauge de retard par village façon RCI.
 - **Observabilité des parcours** ([conception](docs/DESIGN-OBSERVABILITE-PARCOURS.md)) : A et C validés ; restent B (présence par minute, prochain numéro de migration libre : 082) et D (événements client) ; purge des `sessions` expirées, flux V2 dans la télémétrie du NOC. Activation sur alpha : feu vert de Tristan.
 - **Défrichage plus rapide** : le plafond de 8 chantiers contraint le défrichage arbre par arbre.
-- **Performance du rendu** : le rendu Babylon de base fait 50 à 80 ms par image sur la machine de Tristan ; principale source des images > 100 ms restantes. [Audit des mécanismes natifs de Babylon](docs/AUDIT-BABYLON-NATIF-2026-10-31.md) : premier prototype proposé, un seul système de particules pour les braseros.
+- **Performance du rendu** : 45 i/s à l'arrêt (plafond), moins de 20 i/s en rotation ou grand déplacement sur MX230 ; [audit du rendu en mouvement](docs/AUDIT-RENDU-MOUVEMENT-2026-11-11.md) rendu le 11 novembre, tranches P1 à P4 proposées (complète l'[audit Babylon du 31 octobre](docs/AUDIT-BABYLON-NATIF-2026-10-31.md)).
 - **Vue Régions comme carte du monde** (orientation du 3 novembre, [spec](docs/SPEC-VUES-TERRAIN-REGION-MONDE-TORIQUE.md) en tête) : tore inchangé ; prochaine tranche visuelle après la V2 : Régions détaillée (brume, villageois en transit), HUD monde, expéditions depuis la carte ; cinématique Astronomie 1 proposée.
 - **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts au §5.
 
