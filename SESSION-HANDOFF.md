@@ -22,7 +22,7 @@ Ordre proposé et dépendances : [feuille de route](docs/ROADMAP.md) (4 novembre
 - **Sortir le worker du processus de l'API** (décision du 29 octobre) : service à part, sans pool. Idée : jauge de retard par village façon RCI.
 - **Observabilité des parcours** ([conception](docs/DESIGN-OBSERVABILITE-PARCOURS.md)) : A et C validés ; restent B (présence par minute, prochain numéro de migration libre : 082) et D (événements client) ; purge des `sessions` expirées, flux V2 dans la télémétrie du NOC. Activation sur alpha : feu vert de Tristan.
 - **Défrichage plus rapide** : le plafond de 8 chantiers contraint le défrichage arbre par arbre.
-- **Performance du rendu** ([audit du rendu en mouvement](docs/AUDIT-RENDU-MOUVEMENT-2026-11-11.md)) : **P1 et P2 à valider** (rotation ≥ 30 i/s sur MX230, au lieu de moins de 20 ; corrigés au passage : clignotement LOD, bois blanc puis noir de l'HDV 2, braseros fantômes) ; restent la première rotation et l'oscillation des LOD (P4), puis P3.
+- **Performance du rendu** ([audit du rendu en mouvement](docs/AUDIT-RENDU-MOUVEMENT-2026-11-11.md)) : bosquets sans clone ni copie de géométrie (pics de la première rotation) **validé le 11 novembre** ; braseros validés ; **P1, P2 et hystérésis LOD à valider** ; prochaine tranche : P3 (rebasage), puis LOD lointains décimés.
 - **Vue Régions comme carte du monde** (orientation du 3 novembre, [spec](docs/SPEC-VUES-TERRAIN-REGION-MONDE-TORIQUE.md) en tête) : tore inchangé ; prochaine tranche visuelle après la V2 : Régions détaillée (brume, villageois en transit), HUD monde, expéditions depuis la carte ; cinématique Astronomie 1 proposée.
 - **Étude karma, territoire et combat** : [docs/ETUDE-KARMA-VOISINAGE.md](docs/ETUDE-KARMA-VOISINAGE.md), arbitrages ouverts au §5.
 
