@@ -130,6 +130,7 @@ import { changedCases, queuedMode, woodQueue, type WoodQueue } from './wood-queu
 import { LongPress, treesAlongSegment, type GestureTree } from './wood-gesture';
 import { VillageRoads } from './village-roads';
 import { setSceneNight, VillageBraziers } from './village-braziers';
+import { setBuildingLodReferenceScaling } from './building-lod-settings';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
@@ -1370,6 +1371,8 @@ export class BabylonVillageScene {
     this.#engine.maxFPS = this.#reducedQuality ? 5 : 45;
     this.#restingScaling = Math.max(this.#reducedQuality ? 4 : 1.2, window.devicePixelRatio / 1.5);
     this.#engine.setHardwareScalingLevel(this.#restingScaling);
+    // Building LODs keep their resting choice while motion lowers the resolution.
+    setBuildingLodReferenceScaling(this.#restingScaling);
     this.#scene = new Scene(this.#engine);
     selectEnabledCandidates(this.#scene);
     this.#sceneStats =

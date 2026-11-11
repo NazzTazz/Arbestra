@@ -2,7 +2,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Camera } from '@babylonjs/core/Cameras/camera';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { Node } from '@babylonjs/core/node';
-import { getBuildingLodSettings } from './building-lod-settings';
+import { buildingLodRenderHeight, getBuildingLodSettings } from './building-lod-settings';
 import { countSceneEvent } from '../dev/statistics';
 
 export function projectedDiameter(
@@ -66,7 +66,8 @@ export function coordinateBuildingLod(
       radius * scale,
       scene.useRightHandedSystem ? -viewCentre.z : viewCentre.z,
       camera.getProjectionMatrix().m[5]!,
-      scene.getEngine().getRenderHeight() * camera.viewport.height,
+      buildingLodRenderHeight(scene.getEngine().getRenderHeight(), scene.getEngine().getHardwareScalingLevel()) *
+        camera.viewport.height,
       camera.mode === Camera.ORTHOGRAPHIC_CAMERA,
     );
     // Normalise by the recipe's local size: an enlarged instance retains detail longer.

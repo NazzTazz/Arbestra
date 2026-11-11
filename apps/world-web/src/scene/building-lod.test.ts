@@ -11,7 +11,13 @@ import { Ray } from '@babylonjs/core/Culling/ray';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { instantiateBakedBuilding } from './building-assets';
 import { coordinateBuildingLod, projectedDiameter } from './building-lod';
-import { DEFAULT_BUILDING_LOD, setBuildingLodSettings, validBuildingLod } from './building-lod-settings';
+import {
+  buildingLodRenderHeight,
+  DEFAULT_BUILDING_LOD,
+  setBuildingLodReferenceScaling,
+  setBuildingLodSettings,
+  validBuildingLod,
+} from './building-lod-settings';
 import { buildCachedProceduralBuildingLod } from './building-lod-procedural';
 
 it('uses the projected size: focal length, render resolution, viewport and orthographic zoom', () => {
@@ -205,3 +211,18 @@ it.each([false, true])(
     }
   },
 );
+
+it('keeps the resting LOD choice while motion lowers the resolution (rendering P2)', () => {
+  // Without a reference, the live render height, as before P2.
+  setBuildingLodReferenceScaling(null);
+  expect(buildingLodRenderHeight(750, 1.2)).toBe(750);
+  // Referenced at rest (1.2): at 1.5 in motion the engine renders 600 rows,
+  // the LOD still measures the 750 rows of rest, so no building switches.
+  setBuildingLodReferenceScaling(1.2);
+  try {
+    expect(buildingLodRenderHeight(750, 1.2)).toBeCloseTo(750, 9);
+    expect(buildingLodRenderHeight(600, 1.5)).toBeCloseTo(750, 9);
+  } finally {
+    setBuildingLodReferenceScaling(null);
+  }
+});
