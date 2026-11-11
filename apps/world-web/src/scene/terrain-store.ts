@@ -195,8 +195,10 @@ export class TerrainStore {
     this.invalidate(key);
     return false;
   }
-  /** `predicted`: the only cells a terraforming prediction changed (groundCellRevision). */
-  #publishGround(entry: Entry, chunk: TerrainChunk, predicted?: ReadonlySet<number>) {
+  /** `predicted`: the only cells a terraforming prediction changed (groundCellRevision).
+   * `featuresChanged`: false for a periodic refresh returning the same features,
+   * occupied cells and terraces, which must not wake featureVersion readers. */
+  #publishGround(entry: Entry, chunk: TerrainChunk, predicted?: ReadonlySet<number>, featuresChanged = true) {
     if (!sameChunkGround(entry.chunk, chunk)) {
       const revision = (entry.groundRevision = ++this.#groundRevision);
       if (predicted && entry.chunk) {
@@ -208,7 +210,7 @@ export class TerrainStore {
       }
     }
     entry.chunk = chunk;
-    entry.featureVersion = ++this.#featureVersions;
+    if (featuresChanged) entry.featureVersion = ++this.#featureVersions;
   }
   #featureVersions = 0;
   /**
@@ -550,19 +552,24 @@ export class TerrainStore {
                 continue;
               }
               for (const f of chunk.features) if (f.deposit) this.revisions.set(f.id, f.deposit);
-              const signature = mutableSignature(chunk);
-              if (!e.chunk || signature !== (e.mutableSignature ?? mutableSignature(e.chunk)))
-                this.changed.add(ticket.key);
+              const signature = mutableSignature(chunk),
+                mutated = !e.chunk || signature !== (e.mutableSignature ?? mutableSignature(e.chunk));
+              if (mutated) this.changed.add(ticket.key);
               if (e.chunk) {
                 if (chunk.rc1Edits && !e.chunk.rc1) throw new Error('RC1 edits without substrate');
                 const rc1 =
                   chunk.rc1Edits && e.chunk.rc1 ? { ...e.chunk.rc1, terraces: chunk.rc1Edits.terraces } : chunk.rc1;
-                this.#publishGround(e, {
-                  ...chunk,
-                  ...(rc1 ? { rc1 } : {}),
-                  terrainCodes: e.chunk.terrainCodes,
-                  elevations: e.chunk.elevations,
-                });
+                this.#publishGround(
+                  e,
+                  {
+                    ...chunk,
+                    ...(rc1 ? { rc1 } : {}),
+                    terrainCodes: e.chunk.terrainCodes,
+                    elevations: e.chunk.elevations,
+                  },
+                  undefined,
+                  mutated,
+                );
               } else if (fullChunk) this.#publishGround(e, fullChunk);
               e.mutableSignature = signature;
               e.freshAt = this.now();

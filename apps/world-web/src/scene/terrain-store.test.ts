@@ -735,8 +735,17 @@ describe('terrain cache authority and lifecycle', () => {
     expect(h.requests).toHaveLength(1);
     h.advance(1);
     expect(h.requests).toHaveLength(2);
+    const version = h.store.featureVersion('0:0');
     await h.settle(1);
     expect(h.store.changed.size).toBe(0);
+    // The same features again: their readers (grove trunks) keep their cache.
+    expect(h.store.featureVersion('0:0')).toBe(version);
+    h.advance(5000);
+    const changed = chunk();
+    changed.features = [{ ...feature(deposit(1)), id: 'new-grove', deposit: null }];
+    await h.settle(2, changed);
+    expect(h.store.changed.has('0:0')).toBe(true);
+    expect(h.store.featureVersion('0:0')).not.toBe(version);
     h.store.dispose();
   });
   it('accepts a complete empty feature scope without resurrecting snapshot features or clearing another chunk', async () => {
