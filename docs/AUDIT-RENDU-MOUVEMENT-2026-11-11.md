@@ -131,3 +131,5 @@ La première rotation n'a donc pas de coupable unique : un rendu plus chargé, c
 - réduire les meshes actifs : fusion des bâtiments lointains, P3.
 
 **Bascules LOD.** La profondeur utilisée est celle de l'axe de visée. En rotation, chaque bâtiment change donc de profondeur, et les bascules restantes sont pour l'essentiel de vrais franchissements de seuil, pas des oscillations. La marge de 10 % supprime les allers-retours (test de régression). Pour aller plus loin, il faudrait mesurer la distance à la caméra plutôt que la profondeur, ce qui changerait le choix au repos. À décider si ces bascules restent visibles.
+
+**Braseros fantômes (`61f14f9`) : validé par Tristan le 11 novembre.** Les flammes restent dans les niches du marché et sur le tailleur de pierre après un déplacement de plusieurs chunks.
