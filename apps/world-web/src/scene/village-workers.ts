@@ -2043,8 +2043,13 @@ export class VillageWorkers {
         [...this.#groups.values()].flatMap((g) =>
           g.mission.stops?.length
             ? [...g.mission.stops.map((_, i) => this.#route(g.mission, i)), this.#backRoute(g)]
-            : (g.mission.leisure?.map((l) => l.path) ??
-              (g.mission.resource === 'trade' ? [g.route] : [g.route, this.#backRoute(g)])),
+            : // A leisure walker walks one leg at a time and the graph is rebuilt at each door: its
+              // whole tour (every home of the village) made each rebuild grow with the village.
+              g.mission.leisure
+              ? [g.route]
+              : g.mission.resource === 'trade'
+                ? [g.route]
+                : [g.route, this.#backRoute(g)],
         ),
       );
       this.#graphDirty = false;

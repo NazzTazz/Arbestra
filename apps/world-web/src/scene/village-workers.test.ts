@@ -11,6 +11,7 @@ import {
   type DoorLane,
   type TrafficActor,
   type WorkerPoint,
+  WorkerTraffic,
 } from './worker-motion';
 import { gardenStride } from './worker-gestures';
 import { buildingPlan, doorConnector, HALL_DOUBLE_DOOR_WIDTH, HALL_RECIPE } from './building-plan';
@@ -1123,6 +1124,27 @@ it('walks the leisure of a village over its desire paths, and no hook of the wal
     expect(inside && walking).toBe(true);
     expect(calls).toEqual(afterSync);
   } finally {
+    f.dispose();
+  }
+});
+it('rebuilds the traffic graph of leisure walkers from the leg they walk, not from their whole tour', () => {
+  // Hot path (AGENTS.md): the graph is rebuilt at each door a walker reaches. With every leg of
+  // every tour, a rebuild grew with the number of homes (15 November, desire paths on Bressuire).
+  const rebuild = vi.spyOn(WorkerTraffic.prototype, 'rebuild');
+  const f = fixture(() => true, {
+    leisurePath: (_id, p) => p.map((c) => new Vector3(c.cellX, 0, c.cellY)),
+    leisureVersion: () => 'ground-1',
+  });
+  try {
+    f.view.sync(desireIdleSnapshot(), epoch);
+    for (let t = 0; t < 60_000; t += 33) f.view.animate(epoch + t, true);
+    const walkers = f.view.metrics.layouts.length;
+    expect(walkers).toBeGreaterThan(0);
+    expect(rebuild).toHaveBeenCalled();
+    // One leg per walker; a tour of this village has two.
+    for (const [paths] of rebuild.mock.calls) expect(paths.length).toBeLessThanOrEqual(walkers);
+  } finally {
+    rebuild.mockRestore();
     f.dispose();
   }
 });

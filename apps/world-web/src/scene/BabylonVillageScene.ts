@@ -131,6 +131,7 @@ import { LongPress, treesAlongSegment, type GestureTree } from './wood-gesture';
 import { VillageRoads } from './village-roads';
 import { setSceneNight, VillageBraziers } from './village-braziers';
 import { setBuildingLodReferenceScaling } from './building-lod-settings';
+import { CameraMotion } from './camera-motion';
 import { cellKey, cellsAlongSegment, type AreaPreview, type Cell } from './construction-selection';
 import { gardenTileStage } from './tile-appearance';
 import { GardenPlots } from './garden-plots';
@@ -1403,8 +1404,10 @@ export class BabylonVillageScene {
       new Vector3(0, 0.45, 0),
       this.#scene,
     );
+    // Only a new pose is motion: a resize recomputes the view with the same pose (camera-motion.ts).
+    const motion = new CameraMotion();
     this.#camera.onViewMatrixChangedObservable.add(() => {
-      this.#cameraMovedAt = performance.now();
+      if (motion.moved(this.#camera)) this.#cameraMovedAt = performance.now();
     });
     this.#camera.fov = 0.55;
     this.#camera.lowerRadiusLimit = 8;
@@ -3635,7 +3638,7 @@ export class BabylonVillageScene {
     if (path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY))) return points;
     const hall = this.#state?.cells.find((cell) => cell.building?.type === 'town-hall');
     if (!hall || points.length < 2) return points;
-    const factoryPlan = planForSite(this.#state!, hall, (x, y) => this.#store?.ground(x, y)?.height ?? null);
+    const factoryPlan = this.#sitePlan(hall);
     if (factoryPlan) return this.#factoryDeparture(hall, factoryPlan, points, lane);
     const centre = this.#space!.project(hall);
     centre.x = points[0]!.x + delta(centre.x, points[0]!.x, this.#worldWidthUnits);
@@ -3657,11 +3660,30 @@ export class BabylonVillageScene {
     return [...entrance, ...points.slice(firstOutside)];
   }
 
+  /** `planForSite` of a building for the figures' paths, once per publication and ground version:
+   * the leisure spokes asked it twice per home and per lane, about 240 plans on Bressuire. */
+  #sitePlans: { state: VillageState | null; ground: string; plans: Map<VillageCell, BuildingPlan | null> } = {
+    state: null,
+    ground: '',
+    plans: new Map(),
+  };
+  #sitePlan(site: VillageCell): BuildingPlan | null {
+    const ground = this.#groundKey();
+    if (this.#sitePlans.state !== this.#state || this.#sitePlans.ground !== ground)
+      this.#sitePlans = { state: this.#state, ground, plans: new Map() };
+    let plan = this.#sitePlans.plans.get(site);
+    if (plan === undefined) {
+      plan = planForSite(this.#state!, site, (x, y) => this.#store?.ground(x, y)?.height ?? null);
+      this.#sitePlans.plans.set(site, plan);
+    }
+    return plan;
+  }
+
   #leisurePath(buildingId: string, path: TravelCell[], lane?: DoorLane): Array<Vector3 & { lane?: DoorLane }> {
     const building = this.#state?.cells.find((c) => c.building?.id === buildingId);
     if (!building || !this.#space) return [];
     if (path.some((p) => !Number.isInteger(p.cellX) || !Number.isInteger(p.cellY))) return this.#pathPoints(path);
-    const factoryPlan = planForSite(this.#state!, building, (x, y) => this.#store?.ground(x, y)?.height ?? null);
+    const factoryPlan = this.#sitePlan(building);
     if (factoryPlan) {
       const points = this.#workerPath(path, lane);
       if (building.building!.type === 'town-hall') {

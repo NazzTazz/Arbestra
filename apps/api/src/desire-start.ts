@@ -28,7 +28,7 @@ const { values } = parseArgs({
 });
 if (!values.world) throw Error('--world SLUG is required');
 const db = createDatabase(loadConfig().databaseUrl);
-const navigation = new NavigationCompute(1, { waiting: 4, waitMs: 120_000, computeMs: 120_000 });
+const navigation = new NavigationCompute(1, { waiting: 4, waitMs: 600_000, computeMs: 600_000 });
 try {
   const world = await db
     .selectFrom('worlds')
