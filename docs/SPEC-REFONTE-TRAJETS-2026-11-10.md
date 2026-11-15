@@ -402,7 +402,7 @@ Cartographie du code à `3559ea0`. Elle corrige quatre hypothèses du §4.3 ; ce
 | T3c | rendu derrière le drapeau `TRAVEL_ROUTES_LEGACY` : sentiers en terre, braseros, liens des cases de route, promenades de loisir sur sentiers et routes | **oui** |
 | T3d | script de départ (arêtes de la présentation actuelle à `greatest(passages, 3)`, idempotent), preuve d'égalité des braseros | oui |
 
-**Points proposés à Tristan** (T3a avance avec ces recommandations) :
+**Points tranchés par Tristan le 15 novembre** ([décisions 20 et 21](DECISIONS-NAVIGATION-2026-10-31.md)) :
 - l'exploration compte comme un passage : **oui** (marche locale) ;
 - pas de rattrapage des missions antérieures à T3 : l'état de départ est l'affichage actuel (décision 9), et le comptage commence à la migration.
 
