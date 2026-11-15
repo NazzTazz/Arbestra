@@ -47,9 +47,20 @@ export function workerRoles(resource: 'wood' | 'stone' | 'garden', count: number
   return Array.from({ length: count }, (_, i) => (i < picks ? 'pick' : i < picks + breaks ? 'break' : 'carry'));
 }
 
+/** Strictly closer than `r` on the ground plane; squares, no square root (hot path). */
+function near(a: { x: number; z: number }, b: { x: number; z: number }, r: number) {
+  const dx = a.x - b.x,
+    dz = a.z - b.z;
+  return dx * dx + dz * dz < r * r;
+}
+
 export function pathLength(path: readonly WorkerPoint[]) {
   let length = 0;
-  for (let i = 1; i < path.length; i++) length += Math.hypot(path[i]!.x - path[i - 1]!.x, path[i]!.z - path[i - 1]!.z);
+  for (let i = 1; i < path.length; i++) {
+    const dx = path[i]!.x - path[i - 1]!.x,
+      dz = path[i]!.z - path[i - 1]!.z;
+    length += Math.sqrt(dx * dx + dz * dz);
+  }
   return length;
 }
 
@@ -81,7 +92,7 @@ export function costProfile(path: readonly WorkerPoint[], factor: WalkFactor): C
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]!,
       b = path[i]!,
-      length = Math.hypot(b.x - a.x, b.z - a.z),
+      length = Math.sqrt((b.x - a.x) ** 2 + (b.z - a.z) ** 2),
       n = Math.max(1, Math.ceil(length / COST_STEP)),
       step = length / n;
     for (let j = 1; j <= n; j++) {
@@ -200,7 +211,7 @@ export function sampleWorkerPath(path: readonly WorkerPoint[], distance: number,
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]!,
       b = path[i]!,
-      length = Math.hypot(b.x - a.x, b.z - a.z);
+      length = Math.sqrt((b.x - a.x) ** 2 + (b.z - a.z) ** 2);
     if (length < 0.001) continue;
     if (remaining <= length || i === path.length - 1) {
       const t = Math.min(1, remaining / length),
@@ -240,7 +251,7 @@ export function sweptWorkerDistance(a: WorkerPoint, b: WorkerPoint, nextA: Worke
     dz = nextA.z - a.z - (nextB.z - b.z);
   const d = dx * dx + dz * dz,
     t = d > 1e-12 ? Math.max(0, Math.min(1, -(x * dx + z * dz) / d)) : 0;
-  return Math.hypot(x + dx * t, z + dz * t);
+  return Math.sqrt((x + dx * t) ** 2 + (z + dz * t) ** 2);
 }
 
 export interface TrafficActor {
@@ -370,32 +381,55 @@ export class WorkerTraffic {
   ) {
     this.blocked = 0;
     const live = new Set(actors.filter((a) => !a.done).map((a) => a.id));
+    // Memos of this step (hot path, AGENTS.md): an actor's sample at its current distance, the
+    // length and cycle of a path. Keyed on the path array and the distance, so an actor moved
+    // within the step is sampled again.
+    const samples = new Map<
+      TrafficActor,
+      { path: WorkerPoint[]; distance: number; at: ReturnType<typeof sampleWorkerPath> }
+    >();
+    const heading = (a: TrafficActor) => {
+      const memo = samples.get(a);
+      if (memo && memo.path === a.path && memo.distance === a.distance) return memo.at;
+      const at = sampleWorkerPath(a.path, a.distance);
+      samples.set(a, { path: a.path, distance: a.distance, at });
+      return at;
+    };
+    const lengths = new Map<WorkerPoint[], number>();
+    const lengthOf = (path: WorkerPoint[]) => {
+      let length = lengths.get(path);
+      if (length === undefined) lengths.set(path, (length = pathLength(path)));
+      return length;
+    };
+    const cycles = new Map<WorkerPoint[], string | null>();
+    const cycleOf = (path: WorkerPoint[]) => {
+      let cycle = cycles.get(path);
+      if (cycle === undefined) cycles.set(path, (cycle = cycleKey(path)));
+      return cycle;
+    };
     // A passage is kept to 1.3 m, or until the walker is through it and out of
     // its turn: back on its own side of the road, it no longer bars the
     // opposite file, whose head would otherwise hold the next passage against
     // this walker's own file.
     const through = (a: TrafficActor, p: Passage) => {
-      const heading = sampleWorkerPath(a.path, a.distance);
+      const at = heading(a);
       return p.points.every((q) => {
         const dx = q.x - a.position.x,
           dz = q.z - a.position.z;
-        return dx * heading.dx + dz * heading.dz < 0 && Math.hypot(dx, dz) >= 0.7 + WORKER_RADIUS;
+        return dx * at.dx + dz * at.dz < 0 && dx * dx + dz * dz >= (0.7 + WORKER_RADIUS) ** 2;
       });
     };
     for (const p of this.passages.values())
       for (const id of p.owners) {
         const owner = live.has(id) ? actors.find((a) => a.id === id) : undefined;
-        if (
-          !owner ||
-          !p.points.some((q) => Math.hypot(owner.position.x - q.x, owner.position.z - q.z) < 1.3) ||
-          through(owner, p)
-        )
-          p.owners.delete(id);
+        if (!owner || !p.points.some((q) => near(owner.position, q, 1.3)) || through(owner, p)) p.owners.delete(id);
       }
+    const holders = new Set<string>();
+    for (const p of this.passages.values()) for (const id of p.owners) holders.add(id);
     const ordered = actors
       .filter((a) => !a.done && now >= a.startAt)
       .sort((a, b) => {
-        const engaged = (v: TrafficActor) => ([...this.passages.values()].some((p) => p.owners.has(v.id)) ? 0 : 1);
+        const engaged = (v: TrafficActor) => (holders.has(v.id) ? 0 : 1);
         return (
           engaged(a) - engaged(b) ||
           (a.waitingSince ?? this.#waitOrder.get(a.id) ?? a.startAt) -
@@ -422,29 +456,27 @@ export class WorkerTraffic {
     const processed = new Set<string>();
     for (const actor of ordered) {
       if (processed.has(actor.id)) continue;
-      const length = pathLength(actor.path);
-      const base = sampleWorkerPath(actor.path, actor.distance);
+      const length = lengthOf(actor.path);
+      const base = heading(actor);
       const opposite = actors.some(
         (other) =>
           other.visible &&
           other.mission !== actor.mission &&
-          Math.hypot(other.position.x - actor.position.x, other.position.z - actor.position.z) < 3 &&
+          near(other.position, actor.position, 3) &&
           (() => {
-            const v = sampleWorkerPath(other.path, other.distance);
+            const v = heading(other);
             return v.dx * base.dx + v.dz * base.dz < -0.5;
           })(),
       );
-      const nearPassage = [...this.passages.values()].some((p) =>
-        p.points.some((q) => Math.hypot(q.x - base.x, q.z - base.z) < 1.6),
-      );
+      const nearPassage = [...this.passages.values()].some((p) => p.points.some((q) => near(q, base, 1.6)));
       const partner = ordered.find(
         (a) => a.mission === actor.mission && a.rank === actor.rank && a.id !== actor.id && !processed.has(a.id),
       );
       const together =
         partner &&
         Math.abs(partner.distance - actor.distance) < 0.12 &&
-        Math.abs(pathLength(partner.path) - length) < 0.1 &&
-        Math.hypot(partner.path[0]!.x - actor.path[0]!.x, partner.path[0]!.z - actor.path[0]!.z) < 0.1;
+        Math.abs(lengthOf(partner.path) - length) < 0.1 &&
+        near(partner.path[0]!, actor.path[0]!, 0.1);
       const paired = Boolean(!opposite && !nearPassage && (base.width ?? 0.8) >= 0.8 && together);
       const batch = together ? [actor, partner] : [actor];
       const propose = (a: TrafficActor, holdFormation = false, holdDistance = false) => {
@@ -532,16 +564,16 @@ export class WorkerTraffic {
             break;
           }
           for (const passage of this.passages.values())
-            if (passage.points.some((q) => Math.hypot(p.x - q.x, p.z - q.z) < 1.15) && !through(a, passage)) {
+            if (passage.points.some((q) => near(p, q, 1.15)) && !through(a, passage)) {
               const owners = [...passage.owners].filter((id) => !batch.some((a) => a.id === id));
               const compatible = owners.every((id) => {
                 const owner = actors.find((v) => v.id === id);
                 if (!owner) return true;
                 if (owner.mission === a.mission && (owner.direction === a.direction || owner.local || a.local))
                   return true;
-                const cycle = cycleKey(a.path);
-                if (cycle !== null && cycle === cycleKey(owner.path)) return true;
-                const tangent = sampleWorkerPath(owner.path, owner.distance);
+                const cycle = cycleOf(a.path);
+                if (cycle !== null && cycle === cycleOf(owner.path)) return true;
+                const tangent = heading(owner);
                 return passage.straight && tangent.dx * p.dx + tangent.dz * p.dz > 0.98;
               });
               if (owners.length && !compatible) {
@@ -554,10 +586,7 @@ export class WorkerTraffic {
                 const exit = sampleWorkerPath(a.path, Math.min(length, proposal.distance + 1), proposal.lateral);
                 if (
                   neighbours(exit).some(
-                    (n) =>
-                      n.actor !== a &&
-                      !batch.includes(n.actor!) &&
-                      Math.hypot(exit.x - n.position.x, exit.z - n.position.z) < WORKER_CLEARANCE,
+                    (n) => n.actor !== a && !batch.includes(n.actor!) && near(exit, n.position, WORKER_CLEARANCE),
                   )
                 ) {
                   denied = true;
@@ -568,7 +597,7 @@ export class WorkerTraffic {
                     v.direction !== a.direction &&
                     !v.local &&
                     v.waitingSince !== null &&
-                    passage.points.some((q) => Math.hypot(v.position.x - q.x, v.position.z - q.z) < 1.6),
+                    passage.points.some((q) => near(v.position, q, 1.6)),
                 );
                 if (passage.served >= 2 && passage.lastDirection === a.direction && opposingWait) {
                   denied = true;

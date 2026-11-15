@@ -97,6 +97,16 @@ export interface WorkerHooks {
   /** Changes when projected positions or ground heights used by leisurePath change. */
   leisureVersion?: () => string;
   /**
+   * Simulation time per frame (ms) after which a slow frame stops catching up traffic steps; the
+   * rest of the elapsed time is dropped and the figures walk slower through the hitch. Once the
+   * village shows, frames still came 100 to 300 ms apart for about ten seconds and each one caught
+   * up four steps: 10 to 20 ms a frame with desire paths on (15 November, Bressuire). The first
+   * step of a frame always runs. Unset: no limit (deterministic tests).
+   */
+  stepBudgetMs?: number;
+  /** Clock of that budget; `performance.now` by default. */
+  clock?: () => number;
+  /**
    * The grove tree a wood lot fells, from the scene's grove (grove-trees.ts);
    * the scene hides it in the grove until `releaseTree` and the server's cut.
    */
@@ -2075,7 +2085,14 @@ export class VillageWorkers {
         }
       }
     let steps = 0;
+    const budget = this.hooks.stepBudgetMs,
+      clock = this.hooks.clock ?? (() => performance.now()),
+      stepsFrom = budget === undefined ? 0 : clock();
     while (this.#accumulator >= WORKER_STEP && steps++ < 4) {
+      if (budget !== undefined && steps > 1 && clock() - stepsFrom > budget) {
+        this.#accumulator %= WORKER_STEP;
+        break;
+      }
       const actors: TrafficActor[] = [],
         stationary: WorkerPoint[] = [];
       for (const g of this.#groups.values())

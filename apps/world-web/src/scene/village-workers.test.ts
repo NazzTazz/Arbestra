@@ -1148,6 +1148,53 @@ it('rebuilds the traffic graph of leisure walkers from the leg they walk, not fr
     f.dispose();
   }
 });
+it('steps no traffic while the villagers are not animated (behind the loading cover)', () => {
+  // Hot path (AGENTS.md): about 300 ms between loading frames made every frame catch up four
+  // traffic steps of walkers no one saw (15 November, desire paths on Bressuire).
+  const step = vi.spyOn(WorkerTraffic.prototype, 'step');
+  const f = fixture(() => true, {
+    leisurePath: (_id, p) => p.map((c) => new Vector3(c.cellX, 0, c.cellY)),
+    leisureVersion: () => 'ground-1',
+  });
+  try {
+    f.view.sync(desireIdleSnapshot(), epoch);
+    for (let t = 0; t < 15_000; t += 300) f.view.animate(epoch + t, false);
+    expect(step).not.toHaveBeenCalled();
+    // The first visible frame starts them; then one step per 33 ms frame.
+    for (let t = 15_000; t < 16_000; t += 33) f.view.animate(epoch + t, true);
+    expect(f.view.metrics.layouts.length).toBeGreaterThan(0);
+    expect(step.mock.calls.length).toBeGreaterThan(0);
+    expect(step.mock.calls.length).toBeLessThanOrEqual(31);
+  } finally {
+    step.mockRestore();
+    f.dispose();
+  }
+});
+it('stops catching up traffic steps on a slow frame once its simulation budget is spent', () => {
+  // Hot path (AGENTS.md): frames 300 ms apart caught up four steps each (15 November).
+  const run = (stepBudgetMs?: number) => {
+    const step = vi.spyOn(WorkerTraffic.prototype, 'step');
+    let tick = 0;
+    const f = fixture(() => true, {
+      leisurePath: (_id, p) => p.map((c) => new Vector3(c.cellX, 0, c.cellY)),
+      leisureVersion: () => 'ground-1',
+      // Every step "costs" 2 ms on this clock.
+      clock: () => (tick += 2),
+      ...(stepBudgetMs === undefined ? {} : { stepBudgetMs }),
+    });
+    try {
+      f.view.sync(desireIdleSnapshot(), epoch);
+      for (let t = 0; t <= 3_000; t += 300) f.view.animate(epoch + t, true);
+      return step.mock.calls.length;
+    } finally {
+      step.mockRestore();
+      f.dispose();
+    }
+  };
+  // Ten slow frames after the first one: four steps each without a budget, one with it.
+  expect(run()).toBeGreaterThanOrEqual(36);
+  expect(run(1.5)).toBe(10);
+});
 it('makes no leisure walk to a home no path leads to', () => {
   const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
     void lane;

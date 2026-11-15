@@ -183,7 +183,7 @@ import {
 import { flatWalk, type DoorLane, type WalkFactor } from './worker-motion';
 const TILE_SIZE = 2.5;
 
-import { InitialVillageLoad, type InitialLoadProgress } from './initial-village-load';
+import { InitialVillageLoad, type InitialLoadProgress, villagersAnimated } from './initial-village-load';
 import { DEMOLITION_PULSE_MS, DemolitionTint } from './demolition-tint';
 import { InspectHalo, natureFoot } from './inspect-halo';
 import { EditSettle } from './edit-settle';
@@ -1511,6 +1511,7 @@ export class BabylonVillageScene {
         localPath: (path) => this.#pathPoints(path),
         leisurePath: (buildingId, path, lane) => this.#leisurePath(buildingId, path, lane),
         leisureVersion: () => this.#groundKey(),
+        stepBudgetMs: 1,
         fellTree: (featureId, _near, lotId) => this.#fellTree(featureId, lotId),
         stageFree: (point, radius) => this.#stageFree(point, radius, workerSpatial),
         walkFactor: () => this.#walkFactor(),
@@ -1871,7 +1872,10 @@ export class BabylonVillageScene {
         this.#regionalOverview.setPresentationLight(this.#presentationLight);
         frame?.mark('environment');
         if (this.#mode !== 'world') {
-          this.#workers.animate(workerServerNow, this.#mode === 'village' && this.#camera.radius < 165);
+          this.#workers.animate(
+            workerServerNow,
+            villagersAnimated(this.#initialLoad.ready, this.#mode, this.#camera.radius),
+          );
           const figureBlend = 1 - Math.max(0, Math.min(1, (this.#camera.radius - 110) / 50));
           if (this.#selectedRepresentative && this.#workers.selectedRepresentative === null) {
             this.#selectedRepresentative = null;

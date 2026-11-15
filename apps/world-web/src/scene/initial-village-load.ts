@@ -41,3 +41,14 @@ export class InitialVillageLoad {
     return { phase: phase === 'ready' && error ? 'terrain' : phase, ...e.ground, error };
   }
 }
+
+/**
+ * Whether the villagers walk this frame. Never behind the loading cover (opaque, full screen): the
+ * frames there come about 300 ms apart and each one caught up four traffic steps of walkers no one
+ * saw, 10 to 25 ms a frame with desire paths on (15 November, Bressuire). Figures resume on the
+ * first visible frame, as after a long absence. Then only in the village view, close enough to see
+ * them.
+ */
+export function villagersAnimated(ready: boolean, mode: string, cameraRadius: number): boolean {
+  return ready && mode === 'village' && cameraRadius < 165;
+}

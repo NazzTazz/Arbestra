@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { InitialVillageLoad, type InitialLoadEvidence } from './initial-village-load';
+import { InitialVillageLoad, type InitialLoadEvidence, villagersAnimated } from './initial-village-load';
 
 const complete = (): InitialLoadEvidence => ({
   ground: { completed: 4, total: 4 },
@@ -36,4 +36,10 @@ it('recovers after a failed load and starts closed for a new scene', () => {
   expect(load.observe(complete()).error).toBeNull();
   expect(load.ready).toBe(true);
   expect(new InitialVillageLoad().ready).toBe(false);
+});
+it('walks no villager behind the loading cover', () => {
+  expect(villagersAnimated(false, 'village', 60)).toBe(false);
+  expect(villagersAnimated(true, 'village', 60)).toBe(true);
+  expect(villagersAnimated(true, 'village', 170)).toBe(false);
+  expect(villagersAnimated(true, 'region', 60)).toBe(false);
 });

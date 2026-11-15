@@ -547,4 +547,23 @@ Trouvées au profileur (JS Self-Profiling) et par instrumentation de la caméra 
 | 60 s : villageois p95 | 4,6 ms | 1,0 ms | 0,1 ms |
 | Chargement : villageois p95 | 11 à 33 ms | 9,5 à 12,5 ms | 0,3 ms |
 
-Les temps de chargement varient fortement d'une série à l'autre sur cette machine (mode 1 : 12,5 à 17,6 s plus tôt dans la journée, 15,8 à 30,2 s ici) : ils ne départagent pas les modes. **Reste au-dessus du budget en mode 0 : le coût des villageois pendant le chargement** (p95 environ 10 ms contre 0,3 ms), vraisemblablement les promenades recalculées à chaque nouvelle version du sol pendant l'arrivée du terrain (`leisureVersion`). Le mode 0 reste bloqué jusqu'à sa correction.
+Les temps de chargement varient fortement d'une série à l'autre sur cette machine (mode 1 : 12,5 à 17,6 s plus tôt dans la journée, 15,8 à 30,2 s ici) : ils ne départagent pas les modes. **Reste au-dessus du budget en mode 0 : le coût des villageois pendant le chargement** (p95 environ 10 ms contre 0,3 ms). L'hypothèse des promenades recalculées à chaque version du sol était fausse : voir ci-dessous.
+
+### Coût des villageois au chargement (16 novembre)
+
+Cause, mesurée par instrumentation de la phase « population » dans la page puis rejouée hors navigateur sur l'état réel du trafic : **les pas de trafic de rattrapage**. Le recalcul des promenades (`#idleMissions`) a lieu dans `sync`, hors de cette phase. Pendant le chargement et la dizaine de secondes qui suit, les images arrivent à 100–300 ms d'intervalle ; chaque image rattrapait donc 4 pas de `WorkerTraffic.step`, à environ 0,6 ms (Node) à 1,4 ms (navigateur) par pas pour 5 à 8 promeneurs. Le mode 1 n'a presque pas de promeneurs, d'où ses 0,3 ms. Correctifs :
+1. **Aucun villageois simulé derrière l'écran de chargement**, qui est opaque et couvre tout l'écran (`villagersAnimated`, `initial-village-load.ts`). Les figurants partent à la première image visible.
+2. **Budget de rattrapage** (`stepBudgetMs`, 1 ms dans la scène) : au-delà, une image lente ne rattrape plus de pas. Le reste du temps est abandonné et les figurants ralentissent pendant la saccade. Le premier pas d'une image s'exécute toujours.
+3. **Pas moins cher** : distances comparées au carré (au lieu de `Math.hypot`, lent dans V8), échantillon, longueur et cycle de chaque chemin mémorisés pendant le pas, ensemble des promeneurs engagés calculé une fois avant le tri. Gain d'environ 20 à 30 % hors navigateur, dans le bruit de la machine.
+
+Tests : aucun pas avec `animate` désactivé (15 s d'images à 300 ms) ; dix images lentes donnent un pas chacune avec le budget, contre au moins 36 sans lui.
+
+| Bressuire, dev local, mode 0 | Avant (15 nov.) | Écran de chargement seul | + budget 1,5 ms | + budget 1 ms et pas allégé |
+|---|---|---|---|---|
+| Village prêt (3 chargements) | 17,5 ; 20,4 ; 15,9 s | 21,5 ; 19,5 ; 15,9 s | 17,9 ; 18,1 ; 18,1 s | 26,4 ; 24,3 ; 30,8 s |
+| Fenêtre de chargement : population p95 / max | 9,5 à 12,5 ms | 19 et 9,6 ms / 58 ms | 8 ; 5,2 ; 6,1 / 62 ms | 9 ; 8,8 ; 8,8 / 58 ms |
+| 60 s : images/s | 41,1 | — | 40,3 | 24,7 |
+| 60 s : population p95 / max | 1,0 ms | — | 1,2 / 27 ms | 1,8 / 9 ms |
+| 60 s : images > 100 ms (pire) | 0 (66 ms) | — | 2 (103 ms) | 0 (98 ms) |
+
+La dernière série a tourné sur une machine nettement ralentie (rendu p95 43 ms en jeu contre 31 ms juste avant, chargements de 24 à 31 s) : elle ne se compare pas directement aux autres. **Reste** : la fenêtre de chargement compte environ 65 images, dont le p95 tombe sur les 3 ou 4 pires. Ce sont la toute première exécution du pas (compilation à froid, environ 50 ms, une seule fois) et la première reconstruction du graphe (environ 5 ms) ; ces deux images restent sous le budget « aucune image > 100 ms ». En dehors d'elles, le pas est borné par le budget. Le mode 0 reste soumis à la décision de Tristan sur ce reliquat et à la recette visuelle.
