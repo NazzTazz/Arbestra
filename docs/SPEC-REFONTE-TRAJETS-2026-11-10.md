@@ -488,3 +488,31 @@ Visible, derrière `TRAVEL_ROUTES_LEGACY` : par défaut (`1`) rien ne change. Br
 8. avec `1` (ou la variable absente) : aucun changement visible.
 
 **Reste** (T3d) : script de départ (arêtes de la présentation actuelle à `greatest(passages, N)`, idempotent) et preuve d'égalité des braseros sur une copie de l'alpha ; avant lui, le mode `0` ne montre pas les routes automatiques existantes. T4 : retrait de `travelRoutes` du contrat ; le champ `pathSource` disparaît avec lui.
+
+### T3d livrée (15 novembre) : état **à valider**
+
+**Livré.** Commande opérateur `node dist/desire-start.js --world SLUG [--apply] [--json]` (`apps/api/src/desire-start.ts`, module `modules/worlds/desire-start.ts`). Elle lit la présentation de chaque village du monde (réseau stocké ou recalculé par un worker de trajets dédié, comme l'API), en tire les arêtes affichées (`desireEdges` sur les cases de chaque route, union sur le monde), puis, avec `--apply`, les porte à `world_desire_visible_passages()` en une transaction : une arête absente est créée au seuil, une arête sous le seuil y est relevée, une arête au-dessus est laissée telle quelle ; `last_passage_at` d'une arête existante n'est pas touché. Idempotente : au second passage, aucune ligne n'est modifiée et rien n'est publié (la mise à jour est filtrée par `passages < seuil`). Sans `--apply`, lecture seule. Un village dont la présentation est illisible (données incomplètes) est signalé et n'apporte aucune arête.
+
+**Preuve d'égalité des braseros**, imprimée par la commande pour chaque village, même plan d'infrastructure des deux côtés :
+- avec les **seules arêtes du village**, les braseros automatiques sont identiques à ceux d'aujourd'hui (id et position) ;
+- avec **toutes les arêtes du monde** (ce que montre le mode `0`, sentiers des voisins compris) : aucun brasero perdu ni déplacé ; des braseros **ajoutés** là où un sentier voisin croise ou prolonge le réseau du village.
+
+Sur le dev local (lecture seule, 15 novembre) :
+
+| Monde | Village | Routes | Arêtes | Braseros aujourd'hui → mode 0 | Avec ses seules arêtes |
+|---|---|---|---|---|---|
+| rc1-dev | Mesure V2 | 5 | 67 | 13 → 13 | identiques |
+| rc1-dev | Test Spawn | 12 | 86 | 12 → 12 | identiques |
+| rc1-dev | Test Spawn | 4 | 25 | 8 → 8 | identiques |
+| rc1-dev | Test commerce | 11 | 107 | 22 → 66 (+44) | identiques |
+| rc1-dev | Bressuire | 110 | 293 | 47 → 52 (+5) | identiques |
+| rc1-dev | Essai V2 | 9 | 46 | 15 → 15 | identiques |
+| rc1-dev | Village témoin | présentation illisible (graine de ressources incomplète, donnée de dev) | | | |
+| aube | Clairière | 91 | 247 | 44 → 44 | identiques |
+| aube | Départ | 12 | 122 | 24 → 24 | identiques |
+
+rc1-dev : 624 arêtes distinctes ; aube : 369. Les +44 de Test commerce viennent des sentiers de Bressuire qui traversent sa région : c'est le comportement voulu du mode `0` (les sentiers des voisins sont visibles), mais c'est un changement visible à montrer à Tristan.
+
+**Tests** : `desire-start.integration.test.ts` (création, relèvement, arête plus haute intacte, date de dernier passage conservée, publication au seuil, second passage sans écriture ni publication).
+
+**Reste** : preuve sur une copie de l'alpha (copie de base de joueurs : à demander) ; passage `--apply` sur dev pour la mesure navigateur du mode `0`.
