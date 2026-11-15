@@ -383,3 +383,25 @@ Une tournée sans échec reste à k + 1 recherches.
 - À 10 bots, la commande médiane passe de 180 à 50 ms.
 - La présentation ne bouge pas : elle calcule encore le réseau « tous buts » (T4), et sa file de trajets reste la première ressource saturée, avec 29 à 57 `NAVIGATION_BUSY` à 30 bots.
 - Le retard du scheduler à 30 bots, de 29 à 60 s, reste au-dessus de son seuil : c'est la cible de T6 (calcul hors verrou) et de la sortie du worker du processus de l'API.
+
+## 17. T3 : plan d'implémentation (15 novembre)
+
+Cartographie du code à `3559ea0`. Elle corrige quatre hypothèses du §4.3 ; ces choix sont techniques et ne changent pas la mécanique validée (décisions 9 et 12 à 16).
+
+1. **Flux V2 dédié.** Aucun client ne s'abonne aujourd'hui aux flux `spatial` (le terrain arrive par REST, la région par la présentation), et un instantané de chunk `spatial` embarque tout le sol. Les arêtes passent donc par un **nouveau type de flux `desire`, par chunk de 32 cases**, comme `traffic` (contrainte élargie comme en 057). Une entité par case porte un masque est/sud, publiée seulement quand l'arête franchit N = 3 : les compteurs ne quittent jamais le serveur.
+2. **Braseros.** Les identifiants des braseros automatiques sont déjà attachés à la case du nœud (`auto:X:Y:sx:sy`, `automatic-braziers.ts:113`), pas à la forme de la route. La « correspondance » du script de départ devient une **preuve d'égalité** : mêmes braseros, mêmes identifiants, avant et après, sur une copie de l'alpha. Les extinctions sont des ancrages `none` depuis 076 ; `starter-layout.ts:56` en écrit encore pour les villages neufs.
+3. **Curseur.** `(started_at, id)` n'est pas dans l'ordre des COMMIT : une mission validée après une plus récente serait sautée. La tâche relit une **fenêtre de marge** et tient un registre des missions déjà comptées `(world_id, source, mission_id)`, purgé au-delà de la marge. La marge dépasse la plus longue transaction de commande possible.
+4. **Science.** `exploration` marche aussi sur un chemin fin dans `science_activities`, comme `survey`.
+
+**Sous-tranches.**
+
+| | Contenu | Visible |
+|---|---|---|
+| T3a | `desireEdges` (contracts), migration 085 (table, registre, tâche `world.desire-paths` par monde sur le modèle de 071), agrégation hors verrou de village | non |
+| T3b | flux `desire` : déclencheur au franchissement de N, lecteur, instantané, abonnement du client aux chunks de sa région | non |
+| T3c | rendu derrière le drapeau `TRAVEL_ROUTES_LEGACY` : sentiers en terre, braseros, liens des cases de route, promenades de loisir sur sentiers et routes | **oui** |
+| T3d | script de départ (arêtes de la présentation actuelle à `greatest(passages, 3)`, idempotent), preuve d'égalité des braseros | oui |
+
+**Points proposés à Tristan** (T3a avance avec ces recommandations) :
+- l'exploration compte comme un passage : **oui** (marche locale) ;
+- pas de rattrapage des missions antérieures à T3 : l'état de départ est l'affichage actuel (décision 9), et le comptage commence à la migration.
