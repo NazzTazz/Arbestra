@@ -531,3 +531,20 @@ Campagne DevDrawer (3 chargements puis 60 s de jeu), fenêtre au premier plan, N
 Contre-mesure immédiate (60 s de jeu chacune, l'une après l'autre) : mode 0 à 29,7 images/s, 18 images > 100 ms, rendu p95 43,8 ms, villageois 4,8 ms ; mode 1 à 44,5 images/s, aucune image > 100 ms, rendu p95 18,5 ms, villageois 0,1 ms. Compteurs : 208 appels de dessin et 394 meshes actifs en mode 0, contre 181 et 367 en mode 1.
 
 **Le mode 0 dépasse les budgets d'AGENTS.md** (images > 100 ms, villageois p95 > 2 ms) : il ne peut pas être activé tant que la cause n'est pas trouvée et corrigée. Le mode 1 (défaut) est conforme. Le dev est remis en mode 1.
+
+### Surcoût du mode 0 : causes et correctifs (15 novembre, `2deb74e`)
+
+Trouvées au profileur (JS Self-Profiling) et par instrumentation de la caméra dans la page :
+1. **Boucle de redimensionnement** (touchait aussi le mode 1, déclenchée plus souvent en mode 0) : une notification de vue sans changement de pose comptait comme un mouvement ; la résolution de mouvement redimensionnait le canevas, ce qui renotifiait, puis la résolution de repos faisait de même 300 ms plus tard. 3 à 4 redimensionnements par seconde caméra immobile, `setSize` à 31 % du fil principal, bascules visibles des bâtiments. `CameraMotion` ne retient qu'un vrai changement de pose.
+2. **Graphe de trafic des promeneurs** reconstruit avec toutes les étapes de toutes les tournées (toutes les maisons) à chaque porte atteinte ; il ne prend plus que l'étape marchée. En mode 0 les promenades fonctionnent pour bien plus de maisons qu'en mode 1, d'où l'écart.
+3. **Plans de bâtiment** des trajets de figurants recalculés environ 240 fois par recalcul des promenades ; mis en cache par publication et version du sol.
+
+| Bressuire, dev local | Mode 0 avant | Mode 0 après | Mode 1 après |
+|---|---|---|---|
+| Village prêt (3 chargements) | 21,0 ; 18,9 ; 16,0 s | 17,5 ; 20,4 ; 15,9 s | 26,8 ; 30,2 ; 15,8 s |
+| 60 s de jeu : images/s | 29,3 | 41,1 | 42,0 |
+| 60 s : images > 100 ms (pire) | 15 | 0 (66 ms) | 0 (60 ms) |
+| 60 s : villageois p95 | 4,6 ms | 1,0 ms | 0,1 ms |
+| Chargement : villageois p95 | 11 à 33 ms | 9,5 à 12,5 ms | 0,3 ms |
+
+Les temps de chargement varient fortement d'une série à l'autre sur cette machine (mode 1 : 12,5 à 17,6 s plus tôt dans la journée, 15,8 à 30,2 s ici) : ils ne départagent pas les modes. **Reste au-dessus du budget en mode 0 : le coût des villageois pendant le chargement** (p95 environ 10 ms contre 0,3 ms), vraisemblablement les promenades recalculées à chaque nouvelle version du sol pendant l'arrivée du terrain (`leisureVersion`). Le mode 0 reste bloqué jusqu'à sa correction.
