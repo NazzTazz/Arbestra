@@ -433,3 +433,26 @@ Mémoire disponible au plus bas : 841 Mo (22 %). Aucun refus de verrou, aucune e
 **État laissé.** 20 bots et leurs villages en place dans `charge-1` et `charge-2` (pour un passage après T1 et T2) ; outil installé pour `367c12e` ; échantillonneur arrêté ; copie locale des identifiants effacée ; identifiants et échantillons dans `/srv/arbestra/staging/load-test/out/`. Nettoyage (§7.6) à faire après le passage de comparaison.
 
 **Suite proposée.** Ne pas monter au-delà de 10 bots sur ce VPS. Déployer T1 et T2 sur staging, puis rejouer les mêmes paliers pour l'avant/après T0 → T2 ; les paliers 20 et 30 et la décision sur la taille du monde demandent la machine dédiée (§10).
+
+## 13. Deuxième passage sur staging, après T1 et T2 (15 novembre 2026)
+
+Release `9667c4b` (`staging-2026.11.15.1` : T1, T2a, T2b, migrations 082 à 084), de 12 h 05 à 12 h 15 UTC. Mêmes 20 bots, mêmes paliers, même rythme. **Différences de contexte** : les villages des bots ont trois heures de plus (plus de bâtiments et de chantiers), et c'est la mi-journée sur l'alpha au lieu du matin.
+
+| Palier 10 bots | T0 (§12) | T1 + T2 |
+|---|---|---|
+| Commandes / erreurs | 178 / 0 | 172 / 1 (`NAVIGATION_BUSY` sur une présentation) |
+| p95 des commandes | 735 ms | **570 ms** |
+| p95 `upgrade` / `terraform` | 1 630 / 2 596 ms | **711 / 665 ms** |
+| Attente du verrou de navigation du monde p95 (max par type) | 575 ms (`upgrade`) | 287 ms (`terraform`) |
+| p95 présentation | 5,46 s | 6,78 s |
+| Attente du worker de trajets p95 (présentation) | 3,97 s | 4,17 s |
+| Charge de l'hôte p95 | 4,37 | **2,5** (7 alertes au lieu de 20) |
+| Retard du scheduler max (5 bots / 10 bots) | 7,4 s / 6,5 s | **1,3 s / 2,8 s** |
+| CPU de l'API staging p95 | 132 % | 128 % |
+
+**Lecture.**
+- Ce que T1 et T2 visaient s'améliore : commandes plus rapides, moins d'attente sur le verrou de navigation du monde, scheduler deux à cinq fois moins en retard, hôte nettement moins chargé.
+- **La présentation reste la première ressource saturée**, dès 5 bots, et n'est pas meilleure : elle construit toujours le réseau « tous buts ». C'est l'objet de T3 puis T4 ; la mesure confirme l'ordre de la spec.
+- Alpha : santé publique sous 0,7 s, sauf **une mesure isolée à 2,6 s** à 12 h 10 UTC (palier 5, charge de l'hôte vers 1,4). La garde arrêtait les bots après deux mesures consécutives au-dessus de 1 s : elle ne s'est pas déclenchée. Cause non identifiée.
+
+**État laissé.** Bots et villages en place ; outil installé pour `9667c4b` ; échantillonneur arrêté ; copie locale des identifiants effacée. Nettoyage (§7.6) sur décision de Tristan.
