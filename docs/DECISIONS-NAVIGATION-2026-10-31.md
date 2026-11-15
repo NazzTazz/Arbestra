@@ -29,3 +29,10 @@ Propositions du §8 de la [spec de la refonte](SPEC-REFONTE-TRAJETS-2026-11-10.m
 17. **Équilibrage** : la baisse des durées sur route (jusqu'à 30 %) est livrée telle quelle, jugée sur le rapport de T1.
 18. **Parcelle inaccessible** : seule la parcelle est écartée de la tournée, les autres partent.
 19. **Chantier en attente `budget` répétée** : abandonné après 3 réveils, motif affiché dans la fiche du chantier.
+
+## Décisions de game design du 15 novembre 2026
+
+Tranchées par Tristan pour T3 ([plan](SPEC-REFONTE-TRAJETS-2026-11-10.md) §17).
+
+20. **Exploration** : une exploration compte comme un passage, comme un relevé (marche locale).
+21. **Pas de rattrapage** : les missions antérieures à T3 ne comptent pas ; l'état de départ est l'affichage du jour (décision 9) et le comptage commence à la migration 085.
