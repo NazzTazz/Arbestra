@@ -405,3 +405,31 @@ Sur 7 jours, ces retards viennent d'une dizaine d'épisodes, tous des rafales d'
 - C'est exactement ce que visent T2 (tournées de jardin sans réseau complet) et T6 (calcul hors verrou) de la [refonte des trajets](SPEC-REFONTE-TRAJETS-2026-11-10.md), ainsi que la sortie du worker du processus de l'API.
 
 **Pour les bots.** Une action toutes les 8 s par bot, soit 7,5 par minute, dépasse l'heure la plus chargée d'un vrai joueur (environ 1,8 mission par minute). Le mélange par défaut est donc pessimiste, ce qui convient à un premier passage. À mesurer en priorité : le retard du worker (p95 par type de tâche), avant le CPU.
+
+## 12. Premier passage sur staging, 15 novembre 2026
+
+Lancé sur demande de Tristan (« commence les tests de charge sur staging »), dimanche de 8 h 47 à 9 h 10 UTC, hors pointe. Release staging `367c12e` (`staging-2026.11.05.3`), donc **avant T1 et T2** : c'est la mesure de référence T0 sur staging de la [refonte des trajets](SPEC-REFONTE-TRAJETS-2026-11-10.md). Procédure du §7, paliers par défaut (2, 5, 10 bots, 3 minutes, rythme 8 s), sans `--grant`.
+
+**Préparation.** Mondes `charge-1` et `charge-2` ouverts (sommets partagés, sauvegarde préalable par le script), 10 bots par monde en `spread` (environ 1 min par monde). Deux défauts d'outillage corrigés en chemin (`b69a065`) :
+- `open-rc1-world.py` cherchait `--shared-vertices` dans le JS compilé, qui déclare l'option sans tirets : toute release était refusée.
+- l'archive de l'outil ne contenait pas `spawn-compute-worker.js` (chargé par `new Worker(URL)`, donc ignoré par `tsc`) : chaque installation échouait en `SPAWN_COMPUTE_FAILED`. Le worker de navigation est ajouté pour la même raison.
+
+**Résultats** (`run.ts` depuis le PC de Tristan, échantillonneur sur le VPS) :
+
+| Palier | Commandes | Erreurs | p95 commandes | p95 présentation | Attente worker de trajets p95 | Charge hôte p95 | CPU API staging p95 | Retard scheduler max | Santé alpha (publique) max |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | 47 | 0 | 338 ms | 1,08 s | — | 1,34 | 98 % | 2,0 s | 0,58 s (sur tout le passage) |
+| 5 | 83 | 0 | 398 ms | 4,92 s | 3,28 s | 1,82 | 127 % | 7,4 s | |
+| 10 | 178 | 0 | 735 ms | 5,46 s | 3,97 s | **4,37** | 132 % | 6,5 s | |
+
+Mémoire disponible au plus bas : 841 Mo (22 %). Aucun refus de verrou, aucune erreur ; refus métier ponctuels (`ENGAGED_PASSAGE`, `POPULATION_*`).
+
+**Lecture.**
+- **Première ressource saturée : le worker de trajets de la présentation**, dès 5 bots : file p95 3,3 s puis 4 s, calcul p95 3,7 puis 4,5 s. C'est le réseau « tous buts » que T4 retire ; T2 l'a déjà sorti des tournées de jardin, mais pas de la présentation.
+- À 10 bots, la **charge de l'hôte dépasse le seuil de 2** (alertes de l'échantillonneur de 9 h 05 à la fin) : le VPS de 2 cœurs ne tient pas 10 bots pessimistes à côté de l'alpha. L'alpha est resté sain (santé publique ≤ 0,58 s, contrôlée toutes les 10 s par le PC des bots).
+- Après l'arrêt des bots, la charge est restée vers 3 pendant quelques minutes : les villages des bots continuent de tourner par le scheduler (staging à 15 à 60 % d'un cœur), et l'API de l'alpha consommait au même moment 25 à 95 % d'un cœur, avec 3 connexions établies. Hypothèse : un joueur actif sur l'alpha, sans lien avec le test (les bots ne visent que staging). **Non vérifié** : les sessions de l'alpha n'ont pas été lues.
+- Les colonnes serveur du résumé (`summary.md`) sont vides quand l'échantillonneur tourne sur une autre machine que les bots ; les chiffres serveur ci-dessus viennent de `samples-j.jsonl`, agrégé à la main.
+
+**État laissé.** 20 bots et leurs villages en place dans `charge-1` et `charge-2` (pour un passage après T1 et T2) ; outil installé pour `367c12e` ; échantillonneur arrêté ; copie locale des identifiants effacée ; identifiants et échantillons dans `/srv/arbestra/staging/load-test/out/`. Nettoyage (§7.6) à faire après le passage de comparaison.
+
+**Suite proposée.** Ne pas monter au-delà de 10 bots sur ce VPS. Déployer T1 et T2 sur staging, puis rejouer les mêmes paliers pour l'avant/après T0 → T2 ; les paliers 20 et 30 et la décision sur la taille du monde demandent la machine dédiée (§10).
