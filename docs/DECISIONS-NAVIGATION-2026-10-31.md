@@ -36,3 +36,4 @@ Tranchées par Tristan pour T3 ([plan](SPEC-REFONTE-TRAJETS-2026-11-10.md) §17)
 
 20. **Exploration** : une exploration compte comme un passage, comme un relevé (marche locale).
 21. **Pas de rattrapage** : les missions antérieures à T3 ne comptent pas ; l'état de départ est l'affichage du jour (décision 9) et le comptage commence à la migration 085.
+22. **Promenades** (mode sentiers) : un habitant se promène vers sa maison dès qu'un sentier ou une case de route rejoint sa case ou une case libre voisine ; une maison qu'aucun sentier ne rejoint n'a pas de promenade.
