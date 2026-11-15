@@ -1,6 +1,5 @@
 /** Balancing report of navigation T1 (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §3, §7):
- * for each wood and stone deposit in a village's range, and for its garden
- * tours, the one-way duration at the historical rule (path length, one second
+ * for each wood and stone deposit in a village's range, the one-way duration at the historical rule (path length, one second
  * per cell) against the cost rule of decision 8 (0.7 s per road cell), on the
  * same path. Paths are computed by the current code, in a transaction rolled
  * back at the end: nothing is written, even to the copy.
@@ -9,15 +8,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { planGardenTour, travelDuration, withinDepositRange, type TravelCell } from '@arbestra/contracts';
+import { travelDuration, withinDepositRange, type TravelCell } from '@arbestra/contracts';
 import { createDatabase } from '../../api/src/database/connection.js';
-import { beginVillageEconomy } from '../../api/src/modules/villages/reconcile-economy.js';
-import {
-  ownedVillage,
-  readInfrastructureSpatialState,
-  stoneTravelPath,
-} from '../../api/src/modules/villages/service.js';
-import { pathRoadLookup, pathTravelDuration } from '../../api/src/modules/navigation/road-cost.js';
+import { ownedVillage, stoneTravelPath } from '../../api/src/modules/villages/service.js';
+import { pathTravelDuration } from '../../api/src/modules/navigation/road-cost.js';
 import { databaseUrl, describeDatabase, guard, main, OUT_DIR, timestamp } from './cli.js';
 import { distribution } from './stats.js';
 
@@ -88,32 +82,7 @@ await main(async () => {
             ratio: distribution(list.map((r) => r.after / r.before)),
           };
         };
-        // Garden tours over the network's routes, every plot of the village by size.
-        const economy = await beginVillageEconomy(tx, owner.worldId, villageId);
-        const spatial = await readInfrastructureSpatialState(tx, village, economy);
-        const routes = spatial.snapshot.travelRoutes,
-          roads = await pathRoadLookup(
-            tx,
-            village,
-            routes.map((r) => r.cells),
-          );
-        const plots = await tx
-          .selectFrom('gardenPlots')
-          .select(['cellX', 'cellY'])
-          .where('villageId', '=', villageId)
-          .orderBy('buildingId')
-          .orderBy('cellX')
-          .orderBy('cellY')
-          .execute();
-        const home = { cellX: village.anchorCellX, cellY: village.anchorCellY };
-        const gardens = [1, 4, 8].flatMap((size) => {
-          if (plots.length < size) return [];
-          const selection = plots.slice(0, size),
-            before = planGardenTour(routes, home, selection, village)?.durationMs ?? null,
-            after = planGardenTour(routes, home, selection, village, roads)?.durationMs ?? null;
-          return [{ plots: size, before, after, ratio: before && after ? after / before : null }];
-        });
-        report = { village: village.villageName, wood: summary('wood'), stone: summary('stone'), gardens, rows };
+        report = { village: village.villageName, wood: summary('wood'), stone: summary('stone'), rows };
         throw new Rollback();
       })
       .catch((error) => {
@@ -126,12 +95,10 @@ await main(async () => {
     village: string;
     wood: { paths: number; onRoads: number; ratio: { mean: number; min: number } | null };
     stone: { paths: number; onRoads: number; ratio: { mean: number; min: number } | null };
-    gardens: Array<{ plots: number; before: number | null; after: number | null }>;
   };
   console.info(
     `${r.village} : bois ${r.wood.paths} trajets (${r.wood.onRoads} sur route, rapport moyen ${r.wood.ratio?.mean}, min ${r.wood.ratio?.min}) ; ` +
-      `pierre ${r.stone.paths} (${r.stone.onRoads} sur route, moyen ${r.stone.ratio?.mean}, min ${r.stone.ratio?.min}) ; ` +
-      r.gardens.map((g) => `jardin ${g.plots} : ${g.before} → ${g.after} ms`).join(' ; '),
+      `pierre ${r.stone.paths} (${r.stone.onRoads} sur route, moyen ${r.stone.ratio?.mean}, min ${r.stone.ratio?.min})`,
   );
   mkdirSync(OUT_DIR, { recursive: true });
   const out = resolve(OUT_DIR, `bench-durations-${timestamp()}.json`);

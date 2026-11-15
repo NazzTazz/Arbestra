@@ -8,6 +8,10 @@
     "outDir": "dist",
     "sourceMap": false
   },
-  "include": ["src", "../api/src/modules/onboarding/spawn-compute-worker.ts", "../api/src/modules/navigation/compute-worker.ts"],
+  "include": [
+    "src",
+    "../api/src/modules/onboarding/spawn-compute-worker.ts",
+    "../api/src/modules/navigation/compute-worker.ts"
+  ],
   "exclude": ["src/**/*.test.ts", "src/local-api.ts", "src/api-probe.ts"]
 }
