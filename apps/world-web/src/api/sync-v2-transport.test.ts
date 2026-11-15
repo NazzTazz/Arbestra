@@ -559,6 +559,75 @@ it('reopens a new generation when a stream epoch was replaced, instead of reread
   }
 });
 
+it('resubscribes on demand with one new generation and one stream, however often it is asked meanwhile', async () => {
+  // T3c: the desire chunks are the ones the server resolves at a bootstrap, so a window that grew
+  // needs another. The old session's listener must not outlive it (it would fight the new one for
+  // the stream every 2 s).
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const bootstraps: Array<{ generation: number; include: string | null }> = [];
+  let opened = 0,
+    open = 0;
+  const request: typeof fetch = async (url, init) => {
+    if (String(url).endsWith('/sync/stream')) {
+      opened++;
+      open++;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            init!.signal!.addEventListener('abort', () => {
+              open--;
+              controller.close();
+            });
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }
+    const query = new URL(String(url), 'http://x').searchParams;
+    bootstraps.push({ generation: Number(query.get('generation')), include: query.get('include') });
+    return json(bootstrap(Number(query.get('generation'))));
+  };
+  const transport = new SyncV2Transport('aube', worldId, villageId, {
+    storage: memory(),
+    request,
+    include: SYNC_V2_VILLAGE_INCLUDE,
+    publish: () => undefined,
+    expired: () => {
+      throw Error('Unexpected expiration');
+    },
+  });
+  try {
+    await transport.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened).toBe(1);
+    const first = transport.generation;
+    const asked = transport.resubscribe();
+    // A second request while the first is in flight is the same one.
+    expect(transport.resubscribe()).toBe(asked);
+    await asked;
+    expect(bootstraps).toHaveLength(2);
+    expect(bootstraps[1]!.generation).toBeGreaterThan(first);
+    expect(transport.generation).toBe(bootstraps[1]!.generation);
+    expect(bootstraps[1]!.include?.split(',')).toContain('desire');
+    // Minutes later still one stream per session, the old listener gone: no reconnection storm.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(opened).toBe(2);
+    expect(open).toBe(1);
+    // Asked again once it is over, it reopens again; closed, it asks for nothing.
+    await transport.resubscribe();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(bootstraps).toHaveLength(3);
+    expect(opened).toBe(3);
+    expect(open).toBe(1);
+    transport.close();
+    await transport.resubscribe();
+    expect(bootstraps).toHaveLength(3);
+  } finally {
+    transport.close();
+    vi.useRealTimers();
+  }
+});
+
 it('sends upgrades and expansions on the V2 contract to their building routes', async () => {
   const paths: string[] = [];
   const request: typeof fetch = async (url, init) => {

@@ -221,7 +221,7 @@ export async function buildApp(
     };
   });
   const observations = new ObservationHub();
-  const presentations = createVillagePresentationReader(app, db, navigation);
+  const presentations = createVillagePresentationReader(app, db, navigation, config);
   await registerObservationRoutes(app, db, config, observations, presentations);
   // Player journey journal: buffered, flushed every 5 s and at close, never
   // inside a business transaction. Disabled unless JOURNEY_ENABLED=1.

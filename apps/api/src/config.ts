@@ -18,6 +18,11 @@ export interface AppConfig {
   readonly expeditionWorkerEnabled?: boolean;
   /** Player journey journal (JOURNEY_ENABLED=1); off by default. */
   readonly journeyEnabled?: boolean;
+  /** Which paths the client draws (TRAVEL_ROUTES_LEGACY, 1 or 0; absent or empty means 1). `true`
+   * (default): the all-goals network `travelRoutes`, as before. `false`: the desire lines observed
+   * on the ground; `travelRoutes` is still computed and sent, for a return to 1 without a deploy
+   * (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §5 and §17, slice T3c). */
+  readonly travelRoutesLegacy?: boolean;
   readonly expeditionWorkerCount?: 1 | 2;
   readonly worldGeneratorOperatorEmails?: readonly string[];
   readonly databaseUrl: string;
@@ -114,6 +119,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw Error('EXPEDITION_WORKERS must be 1 or 2');
   if (environment.JOURNEY_ENABLED && !/^[01]$/.test(environment.JOURNEY_ENABLED))
     throw Error('JOURNEY_ENABLED must be 0 or 1');
+  // Strict: a typo must not silently pick the other behaviour. An empty value (`TRAVEL_ROUTES_LEGACY=`
+  // in a .env file) is an absent one.
+  if (environment.TRAVEL_ROUTES_LEGACY && !/^[01]$/.test(environment.TRAVEL_ROUTES_LEGACY))
+    throw Error('TRAVEL_ROUTES_LEGACY must be 0 or 1');
 
   return {
     nocHttpSlowMs: Number(slowText),
@@ -124,6 +133,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     trustedProxyCidrs: trustedProxyCidrs(environment.TRUSTED_PROXY_CIDRS),
     databaseUrl,
     journeyEnabled: environment.JOURNEY_ENABLED === '1',
+    travelRoutesLegacy: environment.TRAVEL_ROUTES_LEGACY !== '0',
     expeditionWorkerCount: environment.EXPEDITION_WORKERS === '2' ? 2 : 1,
     worldGeneratorOperatorEmails: (environment.WORLD_GENERATOR_OPERATOR_EMAILS ?? '')
       .split(',')

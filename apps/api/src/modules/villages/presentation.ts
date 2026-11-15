@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
-import type { ResolvedVillagePresentation, TravelRoute, VillageState } from '@arbestra/contracts';
+import type { PathSource, ResolvedVillagePresentation, TravelRoute, VillageState } from '@arbestra/contracts';
 import type { Database } from '../../database/schema.js';
 import { networkJob, type NetworkJob, type TravelNetworkExecutor } from '../navigation/network-job.js';
 import { TRAVEL_NETWORK_VERSION, type TravelNetworkStore } from '../navigation/network-store.js';
@@ -11,8 +11,15 @@ import type { SyncScope } from './sync-v2-journal.js';
 
 /** Selection of the historical read-only projection: placement and routing
  * rules stay in one place. Collections are ordered canonically because
- * occupancy rows have no SQL order and the version digests the content. */
-export function villagePresentation(state: VillageState): ResolvedVillagePresentation {
+ * occupancy rows have no SQL order and the version digests the content.
+ * `pathSource` (TRAVEL_ROUTES_LEGACY, slice T3c) tells the client which paths to draw: the
+ * all-goals network is always computed and sent, `desire` only changes what the client reads.
+ * The historical value is left out, so a server on the default flag sends, and digests, exactly
+ * the presentation it sent before. */
+export function villagePresentation(
+  state: VillageState,
+  pathSource: PathSource = 'routes',
+): ResolvedVillagePresentation {
   const cells = state.cells
     .map(({ cellX, cellY, canBuild, footprint, building }) => ({
       cellX,
@@ -34,6 +41,7 @@ export function villagePresentation(state: VillageState): ResolvedVillagePresent
   const content = {
     cells,
     travelRoutes,
+    ...(pathSource === 'desire' ? { pathSource } : {}),
     region,
     market: {
       unlocked: market.unlocked,
@@ -73,6 +81,8 @@ export interface PresentationReaderOptions {
   now: () => number;
   /** Networks surviving a restart; without it, each process recomputes them. */
   store?: TravelNetworkStore;
+  /** Which paths the client draws (TRAVEL_ROUTES_LEGACY); `routes` unless the process runs with 0. */
+  pathSource: PathSource;
 }
 
 /** Chunks of one axis crossed by a window, on the torus. A window sampled
@@ -159,7 +169,7 @@ export class VillagePresentationReader {
     private readonly compute: TravelNetworkExecutor,
     options: Partial<PresentationReaderOptions> = {},
   ) {
-    this.options = { freshMs: 60_000, capacity: 64, now: Date.now, ...options };
+    this.options = { freshMs: 60_000, capacity: 64, now: Date.now, pathSource: 'routes', ...options };
   }
   async read(accountId: string, worldSlug: string, villageId: string): Promise<ResolvedVillagePresentation> {
     const village = await ownedVillage(this.db, accountId, worldSlug, villageId);
@@ -232,7 +242,7 @@ export class VillagePresentationReader {
       at,
       scopes,
       revisions,
-      presentation: villagePresentation(projected),
+      presentation: villagePresentation(projected, this.options.pathSource),
       network,
     };
     this.entries.delete(village.villageId);

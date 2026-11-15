@@ -2,7 +2,7 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import type { TravelCell, VillageState } from '@arbestra/contracts';
+import { desireRoutes, type TravelCell, type VillageState } from '@arbestra/contracts';
 import { expect, it, vi } from 'vitest';
 import { VillageWorkers, type PathPoint, type WorkerHooks } from './village-workers';
 import {
@@ -1075,6 +1075,129 @@ it('keeps home itineraries through the scene projection of each published state'
     expect(project(changed, 'frame-2', 8).cells[1]).toBe(rebased.cells[1]);
   } finally {
     f.dispose();
+  }
+});
+
+// Desire paths (T3c, docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §17): the hall at (0, 0), the house at (0, 4),
+// four edges south along column 0 when the house is connected.
+function desireIdleSnapshot(connected = true): VillageState {
+  const state = idleSnapshot();
+  state.world = { id: 'world', widthCells: 64, heightCells: 64 } as VillageState['world'];
+  state.pathSource = 'desire';
+  state.travelRoutes = connected
+    ? desireRoutes(
+        Array.from({ length: 4 }, (_, cellY) => ({ cellX: 0, cellY, east: false, south: true })),
+        state.world,
+      )
+    : [];
+  return state;
+}
+const cellsOf = (path: TravelCell[]) => path.map((c) => `${c.cellX}:${c.cellY}`);
+it('walks the leisure of a village over its desire paths, and no hook of the walk runs again frame after frame', () => {
+  // Hot path (AGENTS.md, Performance): every hook the walk uses is bounded per frame. After the
+  // state is synced, nothing derives a path, a width or a leisure walk again over 60 s of frames.
+  const calls = { leisure: 0, width: 0, path: 0, localPath: 0, free: 0 };
+  const walked: string[][] = [];
+  const f = fixture(() => (calls.free++, true), {
+    leisurePath: (_id, p) => (calls.leisure++, walked.push(cellsOf(p)), p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+    width: () => (calls.width++, 0.8),
+    path: (p) => (calls.path++, p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+    localPath: (p) => (calls.localPath++, p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+    leisureVersion: () => 'ground-1',
+  });
+  try {
+    f.view.sync(desireIdleSnapshot(), epoch);
+    f.view.animate(epoch, true);
+    // Each home costs two spokes: the hall's, and the house's along the four edges.
+    expect(calls.leisure).toBe(4);
+    expect(walked).toContainEqual(['0:0', '0:1', '0:2', '0:3', '0:4']);
+    expect(f.view.figures).toHaveLength(8);
+    const afterSync = { ...calls };
+    let inside = false,
+      walking = false;
+    for (let t = 33; t < 60_000; t += 33) {
+      f.view.animate(epoch + t, true);
+      inside ||= f.view.metrics.layouts.some((g) => g.phases.includes('inside'));
+      walking ||= f.view.figures.some((p) => p.root.isEnabled());
+    }
+    expect(inside && walking).toBe(true);
+    expect(calls).toEqual(afterSync);
+  } finally {
+    f.dispose();
+  }
+});
+it('makes no leisure walk to a home no path leads to', () => {
+  const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
+    void lane;
+    return p.map((c) => new Vector3(c.cellX, 0, c.cellY));
+  });
+  const f = fixture(() => true, { leisurePath, leisureVersion: () => 'ground-1' });
+  try {
+    f.view.sync(desireIdleSnapshot(false), epoch);
+    // The hall's own spokes, and nothing for the house.
+    expect(leisurePath.mock.calls.map((c) => c[0])).toEqual(['hall', 'hall']);
+    // A path laid later reaches it: the next state gives it its walk.
+    f.view.sync(desireIdleSnapshot(), epoch + 1000);
+    expect(leisurePath.mock.calls.map((c) => c[0])).toEqual(['hall', 'hall', 'hall', 'hall', 'house', 'house']);
+  } finally {
+    f.dispose();
+  }
+});
+it('searches its desire paths again only when the paths, the road cells or the layout of the buildings change', () => {
+  const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
+    void lane;
+    return p.map((c) => new Vector3(c.cellX, 0, c.cellY));
+  });
+  const f = fixture(() => true, { leisurePath, leisureVersion: () => 'ground-1' });
+  try {
+    const state = desireIdleSnapshot();
+    f.view.sync(state, epoch);
+    expect(leisurePath).toHaveBeenCalledTimes(4);
+    // A stock or a clock moves: the village object, not what the walks follow.
+    for (let i = 1; i <= 5; i++) f.view.sync({ ...state, village: { ...state.village } }, epoch + i * 1000);
+    expect(leisurePath).toHaveBeenCalledTimes(4);
+    // A road cell laid: the graph changes, every walk is made again.
+    const roadCells = [{ id: '9,9', cellX: 9, cellY: 9 }] as unknown as NonNullable<VillageState['roadCells']>;
+    f.view.sync({ ...state, roadCells }, epoch + 6000);
+    expect(leisurePath).toHaveBeenCalledTimes(8);
+    f.view.sync({ ...state, roadCells }, epoch + 7000);
+    expect(leisurePath).toHaveBeenCalledTimes(8);
+    // A desire delta: another list of segments.
+    const travelRoutes = [...state.travelRoutes];
+    f.view.sync({ ...state, roadCells, travelRoutes }, epoch + 8000);
+    expect(leisurePath).toHaveBeenCalledTimes(12);
+    // The same buildings in the same places (a new copy of a cell): its own spokes only.
+    const copy = { ...state.cells[1]!, building: { ...state.cells[1]!.building! } };
+    f.view.sync({ ...state, roadCells, travelRoutes, cells: [state.cells[0]!, copy] }, epoch + 9000);
+    expect(leisurePath).toHaveBeenCalledTimes(14);
+    expect(leisurePath.mock.calls.slice(12).map((c) => c[0])).toEqual(['house', 'house']);
+    // A house moved: the layout changed, the graph is searched again and every walk made again.
+    const moved = { ...copy, cellY: 5 };
+    f.view.sync({ ...state, roadCells, travelRoutes, cells: [state.cells[0]!, moved] }, epoch + 10_000);
+    expect(leisurePath).toHaveBeenCalledTimes(18);
+  } finally {
+    f.dispose();
+  }
+});
+it('keeps the leisure walks of the network, unchanged, while the paths come from the server', () => {
+  // The default (flag 1): the route of the network to the house is the walk, desire cells or not.
+  const walked: string[][] = [];
+  const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
+    void lane;
+    walked.push(cellsOf(p));
+    return p.map((c) => new Vector3(c.cellX, 0, c.cellY));
+  });
+  for (const source of [undefined, 'routes' as const]) {
+    walked.length = 0;
+    const f = fixture(() => true, { leisurePath, leisureVersion: () => 'ground-1' });
+    try {
+      const state = idleSnapshot();
+      if (source) state.pathSource = source;
+      f.view.sync(state, epoch);
+      expect(walked).toContainEqual(['0:0', '0:1', '0:4']);
+    } finally {
+      f.dispose();
+    }
   }
 });
 /**

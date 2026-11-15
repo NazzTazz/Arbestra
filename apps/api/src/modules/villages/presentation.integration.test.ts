@@ -290,3 +290,44 @@ it('reuses a stored network after a restart and stores a new one for a structura
     ).fingerprint,
   ).toBe(row.fingerprint);
 }, 120000);
+
+// TRAVEL_ROUTES_LEGACY=0 (T3c): the client draws the desire lines, the server still computes and sends the network.
+it('names the desire paths when the process asks for them, still sends the network, and leaves the default as it was', async () => {
+  let networks = 0;
+  const executor: TravelNetworkExecutor = {
+    network: async (load) => {
+      networks++;
+      await load({ sources: new Set() });
+      return [
+        {
+          id: 'probe',
+          kind: 'building',
+          destination: { cellX: 2, cellY: 1 },
+          cells: [
+            { cellX: 1, cellY: 1 },
+            { cellX: 2, cellY: 1 },
+          ],
+        },
+      ];
+    },
+  };
+  const readWith = (pathSource?: 'routes' | 'desire') =>
+    new VillagePresentationReader(db, executor, pathSource ? { pathSource } : {}).read(
+      ids.account,
+      'aube',
+      ids.village,
+    );
+  const legacy = await readWith(),
+    explicit = await readWith('routes'),
+    desire = await readWith('desire');
+  expect(networks).toBe(3);
+  expect('pathSource' in legacy).toBe(false);
+  expect({ ...explicit, observedAt: undefined }).toEqual({ ...legacy, observedAt: undefined });
+  expect(desire.pathSource).toBe('desire');
+  // The network is computed and sent whatever the source: a return to 1 needs no recomputation.
+  expect(desire.travelRoutes.some((route) => route.id === 'probe')).toBe(true);
+  expect(desire.travelRoutes).toEqual(legacy.travelRoutes);
+  expect(desire.version).not.toBe(legacy.version);
+  expect(desire.regionVersion).toBe(legacy.regionVersion);
+  expect(villagePresentationIsValid(desire)).toBe(true);
+}, 120000);

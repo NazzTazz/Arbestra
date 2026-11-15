@@ -1,6 +1,7 @@
 import { randomUUID } from '../random-uuid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  desireChunkDrift,
   desirePathsFromSyncV2,
   NO_DESIRE_PATHS,
   visibleSyncV2Scope,
@@ -11,6 +12,7 @@ import {
   type HarvestReceipt,
   type HudWorkforceIntent,
   type HudWorkforceState,
+  type PathSource,
   type ProcessingCommand,
   type ProcessingOrder,
   type ResolvedVillagePresentation,
@@ -66,10 +68,45 @@ export function offerIndexRevision(state: SyncV2State): string | null {
  * A stream batch lists every subscribed stream, the unchanged ones with no
  * change: only the streams that changed count. */
 export const offersOnlyBatch = (batch: SyncV2Batch): boolean => changesOnly(batch, 'offers');
-/** The same for the desire path chunks (T3b): nothing shows them yet, so a
- * delta of theirs alone renders nothing. `desirePaths()` reads the session's
- * latest state whenever it is asked. */
+/** The same for the desire path chunks: a village that does not draw them
+ * (`pathSource` is not `desire`, the default) renders nothing for a delta of
+ * theirs alone; one that does draws them again (`desireRendersVillage`).
+ * `desirePaths()` reads the session's latest state whenever it is asked. */
 export const desireOnlyBatch = (batch: SyncV2Batch): boolean => changesOnly(batch, 'desire');
+/** Whether a batch that changes nothing but desire chunks renders the village. */
+export const desireRendersVillage = (presentation: Pick<ResolvedVillagePresentation, 'pathSource'>): boolean =>
+  presentation.pathSource === 'desire';
+/**
+ * The desire chunks a session holds against the ones the village's window needs (slice T3c): the
+ * server picks them at a bootstrap, so a window that grew since needs another one. Returns a check
+ * to call with each projected state, true when the session should be reopened. One reopening per
+ * distinct set of wanted chunks: a set that did not change what the session holds (a chunk the
+ * server drops, a window beyond the cap) is not asked for again, so there is no loop; the memory
+ * is cleared once the session holds what the window wants, so a window that comes back to an
+ * earlier set is served again. Nothing happens for a village that does not draw desire paths.
+ */
+export function desireChunkWatch(): (
+  state: Pick<SyncV2State, 'subscribedScopes'>,
+  village: {
+    pathSource?: PathSource | undefined;
+    region: Pick<VillageState['region'], 'originCellX' | 'originCellY' | 'width' | 'height'>;
+    world: Pick<VillageState['world'], 'widthCells' | 'heightCells' | 'chunkSize'>;
+  },
+) => boolean {
+  let requested: string | null = null;
+  return (state, village) => {
+    if (village.pathSource !== 'desire') return false;
+    const wanted = desireChunkDrift(state.subscribedScopes, village.region, village.world);
+    if (!wanted) {
+      requested = null;
+      return false;
+    }
+    const key = wanted.join(' ');
+    if (key === requested) return false;
+    requested = key;
+    return true;
+  };
+}
 function changesOnly(batch: SyncV2Batch, kind: SyncV2Batch['groups'][number]['stream']['kind']): boolean {
   if (batch.coverage === 'scope-snapshot') return false;
   const changed = batch.groups.filter((group) =>
@@ -232,8 +269,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
   const placed = useRef<(placement: ConfirmedPlacement) => void>(() => undefined);
   // The workforce HUD's basis after a confirmed gesture, read from the session.
   const hudBasis = useRef<(owner: SyncV2Transport) => HudWorkforceState | null>(() => null);
-  // The desire paths of the subscribed chunks, read from the session on demand: no state and
-  // no render of their own, nothing displays them yet (T3b).
+  // The desire paths of the subscribed chunks, read from the session on demand (the village
+  // state carries them as its routes when it draws them, `pathSource: 'desire'`).
   const desireOf = useRef<() => DesirePaths>(() => NO_DESIRE_PATHS);
   useEffect(() => {
     const retrying = reconnect.current!;
@@ -261,10 +298,12 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
       setExpeditionReceipts((previous) => sameList(previous, receipts.expeditions));
       setHarvestReceipts((previous) => sameList(previous, receipts.harvests));
     };
+    const watchDesireChunks = desireChunkWatch();
     const emit = () => {
       if (!presentation || !latest || transport.current !== current) return;
       const projected = villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
       if (!projected) return;
+      if (watchDesireChunks(latest.state, projected)) void current.resubscribe();
       projection = { source: latest, state: projected };
       accept.current({ state: projected, serverOffsetMs: Date.parse(latest.observedAt) - Date.now() });
       setVillageReady(true);
@@ -339,8 +378,13 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
         setOffersRevision(offerIndexRevision(state));
         // An ACK carries its command time, possibly before the last delta.
         latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
-        // No village render for a market change (the panel rereads its own list), nor for desire paths.
-        if (presentation && (offersOnlyBatch(batch) || desireOnlyBatch(batch))) return;
+        // No village render for a market change (the panel rereads its own list), nor for desire
+        // paths unless the village draws them (they are then its routes).
+        if (presentation && offersOnlyBatch(batch)) return;
+        if (presentation && desireOnlyBatch(batch)) {
+          if (desireRendersVillage(presentation)) emit();
+          return;
+        }
         setOrders(processingOrdersV2(state));
         publishReceipts(state);
         const read = presentationReadNeeded(batch, covered);

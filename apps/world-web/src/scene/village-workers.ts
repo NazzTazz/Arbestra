@@ -31,6 +31,7 @@ import { worksiteLayout, worksiteConnector, type WorksiteLayout, type WorkStatio
 import { PILE_LOGS, WOOD_SECTIONS, pileSlot, woodFallAt, woodPlannedFall, woodSite } from './worksite-site';
 import { treePieceData, trunkTop, type TreeVariant } from './grove-trees';
 import { idleTour, idleTourPhase, type IdleLeg, type IdleVisit } from './idle-tour';
+import { desireLeisureRoutes, leisureLayout } from './leisure-paths';
 import {
   buildWorkerFigure,
   HAIR_STYLES,
@@ -299,9 +300,12 @@ export class VillageWorkers {
   #leisure: {
     routes: VillageState['travelRoutes'] | null;
     geometry: string;
+    /** Desire paths only: what the walks follow besides the routes (road cells) and the buildings they join. */
+    roadCells: VillageState['roadCells'];
+    layout: string;
     byDestination: Map<string, VillageState['travelRoutes'][number]>;
     visits: Map<string, { cell: VillageState['cells'][number]; visit: IdleVisit | null }>;
-  } = { routes: null, geometry: '', byDestination: new Map(), visits: new Map() };
+  } = { routes: null, geometry: '', roadCells: undefined, layout: '', byDestination: new Map(), visits: new Map() };
   #selectedRepresentative: string | null = null;
   #hiddenRepresentative: string | null = null;
   readonly #installationDistances = new WeakMap<WorksiteLayout, number>();
@@ -519,13 +523,31 @@ export class VillageWorkers {
       (c) => c.building?.status === 'completed' && ['dwelling', 'town-hall'].includes(c.building.type),
     );
     const geometry = this.hooks.leisureVersion?.() ?? '';
-    if (homes.length && (this.#leisure.routes !== state.travelRoutes || this.#leisure.geometry !== geometry)) {
+    // Desire paths (T3c): the walks follow paths and road cells, so they also depend on the road
+    // cells and on where the hall, its footprint and the homes stand, never on a stock or a clock.
+    const desire = state.pathSource === 'desire',
+      layout = desire ? leisureLayout(state) : '';
+    if (
+      homes.length &&
+      (this.#leisure.routes !== state.travelRoutes ||
+        this.#leisure.geometry !== geometry ||
+        (desire && (this.#leisure.roadCells !== state.roadCells || this.#leisure.layout !== layout)))
+    ) {
       const byDestination = new Map<string, VillageState['travelRoutes'][number]>();
-      for (const r of state.travelRoutes) {
-        const key = `${r.destination.cellX}:${r.destination.cellY}`;
-        if (r.kind === 'building' && !byDestination.has(key)) byDestination.set(key, r);
-      }
-      this.#leisure = { routes: state.travelRoutes, geometry, byDestination, visits: new Map() };
+      if (desire) for (const [key, route] of desireLeisureRoutes(state).routes) byDestination.set(key, route);
+      else
+        for (const r of state.travelRoutes) {
+          const key = `${r.destination.cellX}:${r.destination.cellY}`;
+          if (r.kind === 'building' && !byDestination.has(key)) byDestination.set(key, r);
+        }
+      this.#leisure = {
+        routes: state.travelRoutes,
+        geometry,
+        roadCells: state.roadCells,
+        layout,
+        byDestination,
+        visits: new Map(),
+      };
     }
     const previous = this.#leisure.visits,
       cached = new Map<string, { cell: VillageState['cells'][number]; visit: IdleVisit | null }>();

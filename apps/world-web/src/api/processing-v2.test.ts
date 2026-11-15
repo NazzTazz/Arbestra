@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   applySyncV2Batch,
+  desireScopeKeys,
   SYNC_V2_PRIVATE_COMPONENTS,
   type ExpeditionReceipt,
   type HarvestReceipt,
@@ -9,7 +10,9 @@ import {
   type SyncV2State,
 } from '@arbestra/contracts';
 import {
+  desireChunkWatch,
   desireOnlyBatch,
+  desireRendersVillage,
   footprintsKnown,
   offerIndexRevision,
   offersOnlyBatch,
@@ -456,4 +459,47 @@ it('renders nothing for a delta of desire path chunks alone, and renders as usua
   expect(desireOnlyBatch(batch(desire('0,0', [])))).toBe(false);
   expect(desireOnlyBatch({ ...batch(desire('0,0', [cell])), coverage: 'scope-snapshot' })).toBe(false);
   expect(offersOnlyBatch(batch(desire('0,0', [cell])))).toBe(false);
+});
+
+it('reopens the session once per distinct set of desire chunks the window needs, and never loops', () => {
+  const world = { widthCells: 4096, heightCells: 2048, chunkSize: 32 };
+  const region = { originCellX: 4080, originCellY: 2040, width: 64, height: 48 };
+  const grown = { ...region, width: 200 };
+  const village = (r: typeof region, pathSource?: 'desire') => ({
+    ...(pathSource ? { pathSource } : {}),
+    region: r,
+    world,
+  });
+  const session = (...keys: string[]) => ({
+    subscribedScopes: new Set(['village:x', ...keys.map((k) => `desire:${k}`)]),
+  });
+  const held = (r: typeof region) => session(...desireScopeKeys(r, world));
+  const watch = desireChunkWatch();
+  // A village that draws the network, whatever it holds, never reopens for desire chunks.
+  expect(watch(session(), village(region))).toBe(false);
+  // The session holds what the window needs.
+  expect(watch(held(region), village(region, 'desire'))).toBe(false);
+  // The window grew (a building placed beyond its chunks): one reopening, asked once however many states come.
+  expect(watch(held(region), village(grown, 'desire'))).toBe(true);
+  for (let i = 0; i < 20; i++) expect(watch(held(region), village(grown, 'desire'))).toBe(false);
+  // The new session holds them: nothing to do, and the memory is cleared.
+  expect(watch(held(grown), village(grown, 'desire'))).toBe(false);
+  // The server dropped a chunk it has no stream for: the same wish is not asked again, no loop.
+  const dropped = session(...desireScopeKeys(grown, world).slice(1));
+  expect(watch(dropped, village(grown, 'desire'))).toBe(true);
+  for (let i = 0; i < 20; i++) expect(watch(dropped, village(grown, 'desire'))).toBe(false);
+  // A window that shrinks back to an earlier set is served again.
+  expect(watch(held(grown), village(region, 'desire'))).toBe(true);
+  expect(watch(held(grown), village(region, 'desire'))).toBe(false);
+  expect(watch(held(region), village(region, 'desire'))).toBe(false);
+  expect(watch(held(grown), village(region, 'desire'))).toBe(true);
+});
+
+it('renders a delta of desire path chunks alone only for a village that draws them', () => {
+  const presentation = (pathSource?: 'routes' | 'desire') => ({ ...(pathSource ? { pathSource } : {}) });
+  // The default, the all-goals network: nothing shows the desire chunks, nothing renders.
+  expect(desireRendersVillage(presentation())).toBe(false);
+  expect(desireRendersVillage(presentation('routes'))).toBe(false);
+  // TRAVEL_ROUTES_LEGACY=0: they are the village's routes, a new path shows at once.
+  expect(desireRendersVillage(presentation('desire'))).toBe(true);
 });

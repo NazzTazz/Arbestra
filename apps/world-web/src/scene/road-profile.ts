@@ -66,6 +66,8 @@ export function roadInnerCorners(routes: readonly TravelRoute[], width: number, 
     ),
   );
 }
+/** Paved only the `building` routes of the all-goals network; every other route is earth, and so
+ * is every desire path (`desireRoutes` makes `wood` routes): only the player's road cells pave. */
 export function roadEdges(routes: readonly TravelRoute[]) {
   const edges = new Map<string, { from: TravelCell; to: TravelCell; kind: RoadKind }>();
   for (const route of routes)
@@ -78,6 +80,18 @@ export function roadEdges(routes: readonly TravelRoute[]) {
       if (edges.get(id)?.kind !== 'paved') edges.set(id, { from, to, kind });
     }
   return [...edges.values()];
+}
+
+/** Width a figure walks in on each cell an edge touches: the paved width on a paved edge, 0.8
+ * elsewhere (earth, every desire path). Built once per route list by the scene, then looked up per cell. */
+export function roadWidths(routes: readonly TravelRoute[]): Map<string, number> {
+  const widths = new Map<string, number>();
+  for (const edge of roadEdges(routes))
+    for (const cell of [edge.from, edge.to]) {
+      const key = roadKey(cell);
+      widths.set(key, Math.max(widths.get(key) ?? 0, edge.kind === 'paved' ? ROAD_HALF_WIDTH * 2 : 0.8));
+    }
+  return widths;
 }
 
 /** E/W/S/N arms, shared by excavation and its visible pavement. */

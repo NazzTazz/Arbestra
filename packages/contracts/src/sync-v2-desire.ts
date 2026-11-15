@@ -93,3 +93,24 @@ export function desireScopeKeys(
       return ay - by || ax - bx;
     });
 }
+
+/** The chunks a village's session should subscribe to, when they are not the ones it holds. The
+ * server resolves them once, at a bootstrap, from the footprints it knows then (`desireScopeKeys`
+ * over the same window rule); a window that grows later (a building placed beyond the chunks it
+ * covered) needs another bootstrap, because a chunk added to a session has no cursor and would
+ * turn every stream of the capture into a snapshot. `subscribed` is `SyncV2State.subscribedScopes`.
+ * Returns the wanted chunk keys, sorted as strings, or null when the held set is the wanted one.
+ * Pure. */
+export function desireChunkDrift(
+  subscribed: ReadonlySet<string> | undefined,
+  region: { originCellX: number; originCellY: number; width: number; height: number },
+  world: { widthCells: number; heightCells: number; chunkSize: number },
+  limit = SYNC_V2_DESIRE_MAX_SCOPES,
+): string[] | null {
+  const wanted = desireScopeKeys(region, world, limit).sort(),
+    held = [...(subscribed ?? [])]
+      .filter((scope) => scope.startsWith('desire:'))
+      .map((scope) => scope.slice('desire:'.length))
+      .sort();
+  return wanted.length === held.length && wanted.every((key, i) => key === held[i]) ? null : wanted;
+}

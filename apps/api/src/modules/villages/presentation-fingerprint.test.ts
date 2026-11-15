@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
+import { villagePresentationIsValid, type VillageState } from '@arbestra/contracts';
 import type { NetworkJob } from '../navigation/network-job.js';
-import { networkFingerprint } from './presentation.js';
+import { networkFingerprint, villagePresentation } from './presentation.js';
 
 type Ground = Parameters<typeof networkFingerprint>[1];
 const grove = (state: string, blocksCell: boolean, cleared: boolean) => ({
@@ -44,4 +46,60 @@ it('keeps the grove threshold in the fingerprint of a pre-RC1 world, where it bl
   expect(networkFingerprint(input(grove('available', true, false)), undefined)).not.toBe(
     networkFingerprint(input(grove('available', false, false)), undefined),
   );
+});
+
+it('names the desire paths in the presentation only when asked, and otherwise sends and digests what it always did', () => {
+  const state = {
+    world: { id: '11111111-1111-4111-8111-111111111111' },
+    village: {
+      id: '22222222-2222-4222-8222-222222222222',
+      market: { unlocked: false, deliveryMs: 1000, commissionPercent: 30, resources: [] },
+    },
+    serverTime: '2026-11-15T12:00:00.000Z',
+    cells: [],
+    travelRoutes: [
+      {
+        id: 'b',
+        kind: 'building',
+        destination: { cellX: 2, cellY: 1 },
+        cells: [
+          { cellX: 1, cellY: 1 },
+          { cellX: 2, cellY: 1 },
+        ],
+      },
+    ],
+    region: {
+      originCellX: 0,
+      originCellY: 0,
+      width: 2,
+      height: 1,
+      terrainCodes: [1, 1],
+      elevations: [0, 0],
+      features: [],
+    },
+  } as unknown as VillageState;
+  const legacy = villagePresentation(state),
+    explicit = villagePresentation(state, 'routes'),
+    desire = villagePresentation(state, 'desire');
+  // Flag 1 (the default): no new field, and the digest is the one of the presentation before T3c.
+  expect('pathSource' in legacy).toBe(false);
+  expect(explicit).toEqual(legacy);
+  const before = createHash('sha256')
+    .update(
+      JSON.stringify({
+        cells: legacy.cells,
+        travelRoutes: legacy.travelRoutes,
+        region: legacy.region,
+        market: { unlocked: false, deliveryMs: 1000, commissionPercent: 30, resources: [] },
+      }),
+    )
+    .digest('hex');
+  expect(legacy.version).toBe(before);
+  // Flag 0: the same network is still sent (a return to 1 needs no new read of it), now named as not drawn.
+  expect(desire.pathSource).toBe('desire');
+  expect(desire.travelRoutes).toEqual(legacy.travelRoutes);
+  expect(desire.version).not.toBe(legacy.version);
+  expect(desire.regionVersion).toBe(legacy.regionVersion);
+  expect(villagePresentationIsValid(desire)).toBe(true);
+  expect(villagePresentationIsValid(legacy)).toBe(true);
 });

@@ -47,7 +47,7 @@ corepack pnpm dev               # api + clients en parallèle
 |---|---|
 | `server.ts` | Processus de production : construit l'app, démarre le worker (`startScheduledTaskWorker` avec la table `jobs/task-handlers.ts`) et la purge du journal V2. |
 | `app.ts` | `buildApp` : plugins, instrumentation (télémétrie, minutage `dev-timing`, observation NOC), enregistrement de toutes les routes, traduction `HttpError` → réponse. |
-| `config.ts` | `loadConfig` : variables d'environnement. `JOURNEY_ENABLED` (`0` par défaut, `1` pour activer) : journal des parcours joueur ([conception](DESIGN-OBSERVABILITE-PARCOURS.md)). |
+| `config.ts` | `loadConfig` : variables d'environnement. `JOURNEY_ENABLED` (`0` par défaut, `1` pour activer) : journal des parcours joueur ([conception](DESIGN-OBSERVABILITE-PARCOURS.md)). `TRAVEL_ROUTES_LEGACY` (`1` par défaut, `0` pour les sentiers de désir, strict 0 ou 1) : ce que le client dessine, le réseau « tous buts » ou les sentiers observés ([spec](SPEC-REFONTE-TRAJETS-2026-11-10.md) §17, T3c). |
 | `database/` | `connection.ts` (pools, `jit=off`), `migrate.ts` (liste ordonnée des migrations), `migrations/NNN_*.ts` (additives, jamais réécrites après déploiement), `schema.ts` (types Kysely, colonnes en camelCase), `seed.ts`, `reset-e2e.ts`. |
 | `jobs/scheduled-tasks.ts` | Boucle du worker : prend une tâche due en `SKIP LOCKED`, appelle son handler dans une transaction, réessaie avec délai progressif. `jobs/task-handlers.ts` : la table des handlers par type de tâche, que les tests utilisent aussi. |
 | `security/` | Mots de passe, sessions opaques, limitation des tentatives. |

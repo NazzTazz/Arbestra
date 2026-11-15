@@ -2,8 +2,10 @@ import type { VillageState } from './villages.js';
 import type { ProcessingOrder } from './processing.js';
 import type { MarketJourney, TradeOffer } from './market.js';
 import type { ResolvedVillagePresentation } from './village-presentation.js';
-import { visibleSyncV2Scope, type SyncV2Change, type SyncV2State } from './sync-v2.js';
+import { visibleSyncV2Scope, type SyncV2Change, type SyncV2Scope, type SyncV2State } from './sync-v2.js';
 import { emptyInfrastructure } from './infrastructure.js';
+import type { TravelRoute } from './travel-paths.js';
+import { desireRoutes } from './desire-routes.js';
 
 const CELL_SIZE = 2.5;
 type Entity<C extends SyncV2Change['component']> = Extract<SyncV2Change, { component: C }>['upsert'][number];
@@ -216,7 +218,12 @@ export function villageStateFromSyncV2(
   const roadCells = list('roadCells').sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY);
   const roadAnchors = list('roadAnchors').sort((a, b) => a.vertexX - b.vertexX || a.vertexY - b.vertexY);
   // No stored plan means the empty plan, as for the historical reader.
+  // `desire` (T3c): the routes are the observed desire lines of the subscribed chunks, as the same
+  // two-cell segments, kept by identity while no desire chunk moves. A state without the field is
+  // the historical network, byte for byte.
+  const desire = presentation.pathSource === 'desire';
   return {
+    ...(desire ? { pathSource: 'desire' as const } : {}),
     infrastructure: list('infrastructure')[0]?.plan ?? emptyInfrastructure(),
     ...(roadCells.length ? { roadCells } : {}),
     ...(roadAnchors.length ? { roadAnchors } : {}),
@@ -226,7 +233,7 @@ export function villageStateFromSyncV2(
     world,
     village: villageState,
     buildingTypes: game.buildingTypes,
-    travelRoutes: presentation.travelRoutes,
+    travelRoutes: desire ? desireRoutesFromSyncV2(sync, world) : presentation.travelRoutes,
     region: presentation.region,
     cells,
   };
@@ -242,21 +249,62 @@ export interface DesirePathCell {
 }
 /** Visible desire path cells of every subscribed `desire` chunk, by canonical
  * cell "x,y". Derived from the applied streams, read-only, empty while none is
- * subscribed. Nothing consumes it yet: no renderer, brazier or leisure walk
- * (T3c). Chunk scopes are disjoint, so a cell comes from exactly one. */
+ * subscribed. A village whose presentation says `pathSource: 'desire'` draws
+ * from it through `desireRoutesFromSyncV2` (T3c). Chunk scopes are disjoint,
+ * so a cell comes from exactly one. */
 export type DesirePaths = ReadonlyMap<string, DesirePathCell>;
 export const NO_DESIRE_PATHS: DesirePaths = new Map();
-export function desirePathsFromSyncV2(sync: SyncV2State): DesirePaths {
+const NO_DESIRE_ROUTES = Object.freeze([]) as unknown as TravelRoute[];
+
+/** What a session's desire chunks derive to, kept while none of their scope objects is replaced:
+ * `applySyncV2Batch` keeps the object of every scope a batch does not change, so a publication
+ * that carries no desire change costs one pass over the scope list, never over the cells. One
+ * entry per village; the table is small (an observer follows a few villages) and evicts the
+ * oldest. */
+interface DesireMemo {
+  scopes: readonly SyncV2Scope[];
+  paths: DesirePaths;
+  routes: { size: string; routes: TravelRoute[] } | null;
+}
+const desireMemos = new Map<string, DesireMemo>(),
+  DESIRE_MEMO_LIMIT = 16;
+function desireMemoOf(sync: SyncV2State): DesireMemo {
+  const scopes: SyncV2Scope[] = [];
+  for (const [key, scope] of sync.scopes) if (key.startsWith('desire:')) scopes.push(scope);
+  const id = `${sync.worldId}/${sync.villageId}`,
+    known = desireMemos.get(id);
+  if (known && known.scopes.length === scopes.length && known.scopes.every((scope, i) => scope === scopes[i]))
+    return known;
   const paths = new Map<string, DesirePathCell>();
-  for (const [key, scope] of sync.scopes) {
-    if (!key.startsWith('desire:')) continue;
+  for (const scope of scopes)
     for (const [entity, value] of visibleSyncV2Scope(scope)) {
       if (!entity.startsWith('desirePaths:')) continue;
       const cell = value as Entity<'desirePaths'>;
       paths.set(cell.id, { cellX: cell.cellX, cellY: cell.cellY, east: cell.east, south: cell.south });
     }
-  }
-  return paths.size ? paths : NO_DESIRE_PATHS;
+  const memo: DesireMemo = { scopes, paths: paths.size ? paths : NO_DESIRE_PATHS, routes: null };
+  desireMemos.delete(id);
+  desireMemos.set(id, memo);
+  while (desireMemos.size > DESIRE_MEMO_LIMIT) desireMemos.delete(desireMemos.keys().next().value!);
+  return memo;
+}
+export function desirePathsFromSyncV2(sync: SyncV2State): DesirePaths {
+  return desireMemoOf(sync).paths;
+}
+/** The desire paths of a session as the segments the village's consumers read (`desireRoutes`):
+ * the same array, by identity, until a desire chunk of the session changes. */
+export function desireRoutesFromSyncV2(
+  sync: SyncV2State,
+  world: { widthCells: number; heightCells: number },
+): TravelRoute[] {
+  const memo = desireMemoOf(sync),
+    size = `${world.widthCells}x${world.heightCells}`;
+  if (memo.routes?.size !== size)
+    memo.routes = {
+      size,
+      routes: memo.paths.size ? desireRoutes(memo.paths.values(), world) : NO_DESIRE_ROUTES,
+    };
+  return memo.routes.routes;
 }
 
 /** Wire-only fields absent from the historical shapes (entity key, clock). */

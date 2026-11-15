@@ -180,16 +180,20 @@ export function DevDrawer({
               />{' '}
               Chemins et transports
             </label>
-            {showTravelPaths && (
-              <select value={selectedRouteId ?? ''} onChange={(event) => onRoute(event.target.value || null)}>
-                <option value="">Tous les itinéraires ({state.travelRoutes.length})</option>
-                {state.travelRoutes.map((route) => (
-                  <option key={route.id} value={route.id}>
-                    {route.kind} · {route.destination.cellX}, {route.destination.cellY}
-                  </option>
-                ))}
-              </select>
-            )}
+            {showTravelPaths &&
+              (state.pathSource === 'desire' ? (
+                // Sentiers de désir : un tronçon par arête observée, des milliers ; pas de liste à choisir.
+                <small>Sentiers observés : {state.travelRoutes.length} arêtes</small>
+              ) : (
+                <select value={selectedRouteId ?? ''} onChange={(event) => onRoute(event.target.value || null)}>
+                  <option value="">Tous les itinéraires ({state.travelRoutes.length})</option>
+                  {state.travelRoutes.map((route) => (
+                    <option key={route.id} value={route.id}>
+                      {route.kind} · {route.destination.cellX}, {route.destination.cellY}
+                    </option>
+                  ))}
+                </select>
+              ))}
             {import.meta.env.DEV && (
               <label>
                 <input type="checkbox" checked={cosmology} onChange={(event) => onCosmology(event.target.checked)} />{' '}
@@ -204,7 +208,8 @@ export function DevDrawer({
               Terrain local : {state.region.width} × {state.region.height}
             </span>
             <span>
-              Repères : {state.region.features.length} · routes : {state.travelRoutes.length}
+              Repères : {state.region.features.length} · {state.pathSource === 'desire' ? 'sentiers' : 'routes'} :{' '}
+              {state.travelRoutes.length}
             </span>
           </section>
           <section>

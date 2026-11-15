@@ -71,11 +71,14 @@ export function createVillagePresentationReader(
   app: FastifyInstance,
   db: Kysely<Database>,
   navigation: TravelNetworkExecutor,
+  config: Pick<AppConfig, 'travelRoutesLegacy'> = {},
 ) {
   return new VillagePresentationReader(db, navigation, {
     store: databaseTravelNetworkStore(db, () =>
       app.log.warn({ code: 'TRAVEL_NETWORK_STORE_FAILED' }, 'Travel network cache unavailable'),
     ),
+    // TRAVEL_ROUTES_LEGACY=0 (slice T3c): the client draws the desire lines. Absent is the default, 1.
+    pathSource: config.travelRoutesLegacy === false ? 'desire' : 'routes',
   });
 }
 
@@ -89,11 +92,11 @@ export interface SyncV2RouteOptions {
 export async function registerSyncV2Routes(
   app: FastifyInstance,
   db: Kysely<Database>,
-  config: Pick<AppConfig, 'cookieName'>,
+  config: Pick<AppConfig, 'cookieName' | 'travelRoutesLegacy'>,
   navigation: TravelNetworkExecutor,
   options: SyncV2RouteOptions = {},
 ) {
-  const presentations = options.presentations ?? createVillagePresentationReader(app, db, navigation);
+  const presentations = options.presentations ?? createVillagePresentationReader(app, db, navigation, config);
   const streams = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const close of streams) close();

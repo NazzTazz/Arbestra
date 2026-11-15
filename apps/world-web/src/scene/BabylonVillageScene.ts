@@ -54,7 +54,7 @@ import {
   type SubPoint,
 } from '@arbestra/contracts';
 import { sciencePreview } from '../api/client';
-import { villageRoadDisplayRoutes, roadEdges, ROAD_HALF_WIDTH } from './road-profile';
+import { villageRoadDisplayRoutes, roadWidths } from './road-profile';
 import { WeatherMap, WeatherMaterial } from './weather-view';
 import { LocalRain } from './weather-rain';
 import { weatherAt } from './weather';
@@ -1518,15 +1518,8 @@ export class BabylonVillageScene {
         },
         width: (point) => {
           if (!this.#state || !this.#space) return 0.8;
-          if (workerWidths?.routes !== this.#state.travelRoutes) {
-            const widths = new Map<string, number>();
-            for (const edge of roadEdges(this.#state.travelRoutes))
-              for (const cell of [edge.from, edge.to]) {
-                const key = cellKey(cell);
-                widths.set(key, Math.max(widths.get(key) ?? 0, edge.kind === 'paved' ? ROAD_HALF_WIDTH * 2 : 0.8));
-              }
-            workerWidths = { routes: this.#state.travelRoutes, widths };
-          }
+          if (workerWidths?.routes !== this.#state.travelRoutes)
+            workerWidths = { routes: this.#state.travelRoutes, widths: roadWidths(this.#state.travelRoutes) };
           const cell = this.#space.inverse(point.x, point.z);
           return (
             workerWidths.widths.get(

@@ -1,7 +1,7 @@
 import './formats.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { BuildingFootprintSchema, VillageStateSchema, type VillageState } from './villages.js';
+import { BuildingFootprintSchema, PathSourceSchema, VillageStateSchema, type VillageState } from './villages.js';
 import { MarketStateSchema } from './market.js';
 import type { SyncV2Change } from './sync-v2.js';
 
@@ -34,6 +34,9 @@ export const VillagePresentationSchema = Type.Object(
       ),
     ),
     travelRoutes: VillageStateSchema.properties.travelRoutes,
+    // Which paths the client draws (slice T3c). Omitted for the historical network, which keeps
+    // the digest of the presentation unchanged; `desire` only when the server asks for it.
+    pathSource: Type.Optional(PathSourceSchema),
     // Terrain window around the footprints, with its features and deposits.
     // Spatial chunk subscriptions are the eventual target for this data. Its
     // own digest lets a client that already holds it receive null instead:

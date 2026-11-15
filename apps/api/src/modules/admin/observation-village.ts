@@ -27,8 +27,9 @@ export interface ObservationSource {
   presentation(accountId: string, worldSlug: string, villageId: string): Promise<ResolvedVillagePresentation>;
 }
 
-// The scopes the player's client reads, so the operator sees the same village.
-const INCLUDE = ['knowledge', 'manifest', 'traffic'] as const;
+// The scopes the player's client reads, so the operator sees the same village. `desire` (slice T3c)
+// is what a village with `pathSource: 'desire'` draws its paths from.
+const INCLUDE = ['knowledge', 'manifest', 'traffic', 'desire'] as const;
 const isSnapshot = (input: unknown) =>
   (syncV2BatchIsValid(input) && input.coverage === 'scope-snapshot') || syncV2SnapshotPageIsValid(input);
 const structural = (batch: SyncV2Batch) =>

@@ -321,7 +321,17 @@ export const VillageAccomplishmentSchema = Type.Object({
 });
 export type VillageAccomplishment = Static<typeof VillageAccomplishmentSchema>;
 
+/** What `travelRoutes` of a state holds (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §17, slice T3c):
+ * `routes` the all-goals network the server computes (the historical, default value), `desire` the
+ * desire lines observed on the ground, as two-cell segments. The server decides (`TRAVEL_ROUTES_LEGACY`);
+ * a client never infers it from the routes it holds. Absent means `routes`. */
+export const PathSourceSchema = Type.Union([Type.Literal('routes'), Type.Literal('desire')]);
+export type PathSource = Static<typeof PathSourceSchema>;
+
 export const VillageStateSchema = Type.Object({
+  /** Absent (the historical states) or `routes`: `travelRoutes` is the server's network. `desire`:
+   * it holds the observed desire lines, `desireRoutes()`. */
+  pathSource: Type.Optional(PathSourceSchema),
   syncRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
   infrastructure: Type.Optional(InfrastructurePlanSchema),
   /** Road cells of the village (V2 stream only; the historical reader omits them). */

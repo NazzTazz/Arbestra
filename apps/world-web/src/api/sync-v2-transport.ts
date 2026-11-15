@@ -347,11 +347,13 @@ export class SyncV2Transport {
     }
   }
   private async listen(): Promise<void> {
-    if (this.closed || !this.session) return;
+    const session = this.session;
+    if (this.closed || !session) return;
     try {
-      await this.session.connect(this.root + '/sync/stream');
+      await session.connect(this.root + '/sync/stream');
     } catch (error) {
-      if (this.closed) return;
+      // A session replaced meanwhile (`resubscribe`) has its own listener.
+      if (this.closed || this.session !== session) return;
       if (error instanceof SyncV2SessionExpired) {
         this.close();
         this.options.expired();
@@ -378,7 +380,21 @@ export class SyncV2Transport {
       if (!this.closed) this.retry = setTimeout(() => void this.listen(), this.retryDelay(failure));
       return;
     }
-    if (!this.closed) this.retry = setTimeout(() => void this.listen(), 2000);
+    if (!this.closed && this.session === session) this.retry = setTimeout(() => void this.listen(), 2000);
+  }
+  private resubscribing: Promise<void> | null = null;
+  /** A new subscription generation on demand: the shared scopes the server resolves at a bootstrap
+   * (the desire chunks of the village's window) follow the village as it is now. One at a time; the
+   * caller decides when the held chunks no longer fit (`desireChunkDrift`) and does not repeat a
+   * request that did not change them. The session is replaced; commands wait for the new one. */
+  resubscribe(): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    // A pending stream retry would listen on the new session as well as its own listener.
+    clearTimeout(this.retry);
+    this.resubscribing ??= this.reopen().finally(() => {
+      this.resubscribing = null;
+    });
+    return this.resubscribing;
   }
   /** New subscription generation from a full bootstrap; its stream starts
    * with it. Retried until it succeeds, the session expires or we close. */

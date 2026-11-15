@@ -96,4 +96,13 @@ describe('administrator and proxy configuration', () => {
     for (const value of ['true', 'yes', '2'])
       expect(() => loadConfig({ ...base, JOURNEY_ENABLED: value })).toThrow(/JOURNEY_ENABLED/);
   });
+
+  it('draws the all-goals network unless TRAVEL_ROUTES_LEGACY=0, and rejects anything but 0 or 1', () => {
+    expect(loadConfig(base).travelRoutesLegacy).toBe(true);
+    expect(loadConfig({ ...base, TRAVEL_ROUTES_LEGACY: '' }).travelRoutesLegacy).toBe(true);
+    expect(loadConfig({ ...base, TRAVEL_ROUTES_LEGACY: '1' }).travelRoutesLegacy).toBe(true);
+    expect(loadConfig({ ...base, TRAVEL_ROUTES_LEGACY: '0' }).travelRoutesLegacy).toBe(false);
+    for (const value of ['true', 'false', 'no', '2', '00', ' 0', 'off'])
+      expect(() => loadConfig({ ...base, TRAVEL_ROUTES_LEGACY: value })).toThrow(/TRAVEL_ROUTES_LEGACY/);
+  });
 });

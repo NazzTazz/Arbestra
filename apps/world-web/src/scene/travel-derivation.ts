@@ -2,7 +2,7 @@ import { jsonDataEqual, type VillageState } from '@arbestra/contracts';
 
 export type TravelDerivationState = Pick<
   VillageState,
-  'world' | 'travelRoutes' | 'infrastructure' | 'cells' | 'region' | 'roadCells'
+  'world' | 'travelRoutes' | 'infrastructure' | 'cells' | 'region' | 'roadCells' | 'pathSource'
 >;
 
 /** Inputs of the scene's travel derivation (accesses, barriers, braziers,
@@ -49,6 +49,8 @@ export class TravelDerivationInputs {
       a.world.id === b.world.id &&
       a.region.originCellX === b.region.originCellX &&
       a.region.originCellY === b.region.originCellY &&
+      // The same routes mean another network when their source differs (desire lines, T3c).
+      a.pathSource === b.pathSource &&
       same(a.travelRoutes, b.travelRoutes) &&
       same(a.infrastructure, b.infrastructure) &&
       // Road cells mask the automatic roads drawn under them.
