@@ -34,6 +34,7 @@ import * as accountLastSeenReleaseMigration from './migrations/081_account_last_
 import * as roadNavigationInvalidationMigration from './migrations/082_road_navigation_invalidation.js';
 import * as scienceTransportMsMigration from './migrations/083_science_transport_ms.js';
 import * as worksiteBudgetWakesMigration from './migrations/084_worksite_budget_wakes.js';
+import * as desireEdgesMigration from './migrations/085_desire_edges.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -176,6 +177,7 @@ const migrationProvider: MigrationProvider = {
       '082_road_navigation_invalidation': roadNavigationInvalidationMigration,
       '083_science_transport_ms': scienceTransportMsMigration,
       '084_worksite_budget_wakes': worksiteBudgetWakesMigration,
+      '085_desire_edges': desireEdgesMigration,
     };
   },
 };

@@ -9,6 +9,7 @@ import {
 import type { Database } from '../../database/schema.js';
 import type { AppConfig } from '../../config.js';
 import { HttpError } from '../../errors.js';
+import { ensureDesirePathsTask } from '../worlds/desire-paths.js';
 import { generatorSettings } from './settings.js';
 import { worldRecipeChecksum } from './recipe-provenance.js';
 import { artifactChecksum, canonicalJSON } from './artifact.js';
@@ -198,6 +199,8 @@ export async function candidateAction(
         .set({ isOpen: true, openedAt: sql`coalesce(opened_at,statement_timestamp())` })
         .where('id', '=', id)
         .execute();
+      // A candidate has no missions to count: its desire lines start at its opening.
+      await ensureDesirePathsTask(tx, id);
     }
   });
 }

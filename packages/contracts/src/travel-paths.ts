@@ -153,6 +153,57 @@ export function coarseTravelPath(
   return cells;
 }
 
+/** An edge of the cell grid between two neighbouring cells, named by its
+ * origin: `direction` 0 joins the cell to its eastern neighbour, 1 to its
+ * southern one. Wrapped on the torus: the edge east of the last column joins
+ * column 0. A desire line (refonte des trajets T3) counts passages per edge. */
+export interface DesireEdge {
+  cellX: number;
+  cellY: number;
+  direction: 0 | 1;
+}
+
+/**
+ * Canonical edges one mission walked, from all its paths (outward legs, tour
+ * stops, return). Each path is rounded to cells and its long cardinal legs are
+ * expanded by `coarseTravelPath` (the rule of the decorative topology, so a
+ * legacy sparse path and an eighth-cell path give the same cells); a step that
+ * is not cardinal (a diagonal jump) is dropped, as `automaticRoadStrokes` and
+ * `automaticBraziers` do; every other step is named by its eastern or southern
+ * edge, origin wrapped. A mission counts once per edge however many paths or
+ * directions cross it: a round trip, or a tour that passes a plot twice, adds
+ * one passage. Sorted by (cellX, cellY, direction), the order of the table's
+ * primary key.
+ */
+export function desireEdges(
+  paths: ReadonlyArray<readonly TravelCell[]>,
+  world: { widthCells: number; heightCells: number },
+): DesireEdge[] {
+  const found = new Map<number, DesireEdge>();
+  for (const path of paths) {
+    const cells = coarseTravelPath(
+      path.filter((p) => Number.isFinite(p.cellX) && Number.isFinite(p.cellY)),
+      world,
+    );
+    for (let i = 1; i < cells.length; i++) {
+      const a = cells[i - 1]!,
+        b = cells[i]!,
+        dx = delta(b.cellX, a.cellX, world.widthCells),
+        dy = delta(b.cellY, a.cellY, world.heightCells);
+      // Not cardinal (a diagonal jump) or not a move: no edge.
+      if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+      const origin = dx > 0 || dy > 0 ? a : b,
+        direction = dx ? 0 : 1;
+      found.set((origin.cellY * world.widthCells + origin.cellX) * 2 + direction, {
+        cellX: origin.cellX,
+        cellY: origin.cellY,
+        direction,
+      });
+    }
+  }
+  return [...found.values()].sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY || a.direction - b.direction);
+}
+
 interface Step {
   cell: TravelCell;
   cost: number;

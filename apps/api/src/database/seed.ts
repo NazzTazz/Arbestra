@@ -8,6 +8,7 @@ import { createDatabase } from './connection.js';
 import { generateWorld } from '../modules/worlds/generation.js';
 import { configureTownHallFactory } from '../modules/villages/service.js';
 import { ensurePopulationEnergyWake, nextPopulationEnergyAt } from '../modules/population/work.js';
+import { ensureDesirePathsTask } from '../modules/worlds/desire-paths.js';
 
 export const DEVELOPMENT_IDS = {
   account: '10000000-0000-4000-8000-000000000001',
@@ -70,6 +71,7 @@ export async function seedDevelopmentData(databaseUrl = loadConfig().databaseUrl
           }),
         )
         .execute();
+      await ensureDesirePathsTask(transaction, DEVELOPMENT_IDS.world);
 
       await transaction
         .insertInto('worldMemberships')

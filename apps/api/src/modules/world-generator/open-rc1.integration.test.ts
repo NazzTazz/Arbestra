@@ -33,6 +33,17 @@ describe('explicit opening of canonical RC1 worlds', () => {
     await db.destroy();
   }, 60000);
 
+  const desireNotifications = async (worldId: string) =>
+    (
+      await db
+        .selectFrom('scheduledTasks')
+        .select('id')
+        .where('worldId', '=', worldId)
+        .where('taskType', '=', 'world.desire-paths')
+        .where('completedAt', 'is', null)
+        .execute()
+    ).length;
+
   it('opens an independent canonical world discoverable by new players and its spawn atlas', async () => {
     const input = identity(),
       result = await openCanonicalRc1World(db, input);
@@ -64,6 +75,11 @@ describe('explicit opening of canonical RC1 worlds', () => {
       artifactChecksum: RC1_CANONICAL_CHECKSUM,
       villages: [],
     });
+    // The desire lines of the opened world start counting (085): its state and one notification.
+    expect(await desireNotifications(result.worldId)).toBe(1);
+    expect(
+      await db.selectFrom('worldDesireState').select('worldId').where('worldId', '=', result.worldId).execute(),
+    ).toHaveLength(1);
     expect(await db.selectFrom('worldChunks').select('chunkX').where('worldId', '=', result.worldId).execute()).toEqual(
       [],
     );
@@ -97,6 +113,7 @@ describe('explicit opening of canonical RC1 worlds', () => {
       .where('worldId', '=', first.worldId)
       .execute();
     expect(await openCanonicalRc1World(db, input)).toEqual({ ...first, created: false });
+    expect(await desireNotifications(first.worldId)).toBe(1);
     expect(await db.selectFrom('villages').select('id').where('worldId', '=', first.worldId).execute()).toEqual([
       village,
     ]);

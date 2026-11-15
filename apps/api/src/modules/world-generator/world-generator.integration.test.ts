@@ -37,6 +37,16 @@ const input = (version: 2 | 3 = 3): GenerateCandidate => ({
   version,
   parameters: { ...DEFAULT_GENERATOR_PARAMETERS, treePercent: 10 },
 });
+const desireNotifications = async (worldId: string) =>
+  (
+    await db
+      .selectFrom('scheduledTasks')
+      .select('id')
+      .where('worldId', '=', worldId)
+      .where('taskType', '=', 'world.desire-paths')
+      .where('completedAt', 'is', null)
+      .execute()
+  ).length;
 async function create(version: 2 | 3 = 3) {
   const command = input(version),
     candidate = await createCandidate(db, config, accountId, command);
@@ -237,9 +247,12 @@ describe('closed world generator', () => {
     await expect(candidateAction(db, candidate.id, 'open', identity)).rejects.toMatchObject({
       code: 'CANDIDATE_NOT_RETAINED',
     });
+    // A closed candidate has nothing to count; the open copy starts its desire lines (085).
+    expect(await desireNotifications(candidate.id)).toBe(0);
     const copy = await copyCandidateForRecipe(db, db, candidate.id, url);
     worlds.push(copy.id);
     expect(copy.checksum).toBe(identity.checksum);
+    expect(await desireNotifications(copy.id)).toBe(1);
     expect(await worldRecipeChecksum(db, copy.id)).toBe(copy.worldRecipeChecksum);
     const stock = await db
       .selectFrom('woodlandDeposits')
@@ -278,6 +291,8 @@ describe('closed world generator', () => {
     await candidateAction(db, candidate.id, 'retain', identity);
     await candidateAction(db, candidate.id, 'open', identity);
     await candidateAction(db, candidate.id, 'open', identity);
+    // Opened (twice): the world's desire lines start counting, once.
+    expect(await desireNotifications(candidate.id)).toBe(1);
     expect(artifactChecksum(await candidateArtifact(db, candidate.id))).toBe(identity.checksum);
     expect((await listCandidates(db)).find((c) => c.id === candidate.id)?.opened).toBe(true);
     await expect(retryCandidate(db, candidate.id)).rejects.toMatchObject({ code: 'CANDIDATE_NOT_FAILED' });

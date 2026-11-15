@@ -6,6 +6,7 @@ import { wakeScience } from '../modules/science/worker.js';
 import { ECONOMY_CATCHUP_TASK, advanceEconomyCatchup } from '../modules/villages/economy-catchup.js';
 import { COMPLETE_PROCESSING_TASK } from '../modules/villages/processing.js';
 import { COMPLETE_MARKET_TASK } from '../modules/villages/market.js';
+import { DESIRE_PATHS_TASK, aggregateDesireEdges } from '../modules/worlds/desire-paths.js';
 import { TRADE_WAKE_TASK } from '../modules/villages/trade-economy.js';
 import {
   COMPLETE_CONSTRUCTION_TASK,
@@ -42,4 +43,5 @@ export const scheduledTaskHandlers: ScheduledTaskHandlers = {
   [COMPLETE_STONE_EXTRACTION_TASK]: completeStoneExtraction,
   [WAKE_EXTRACTION_WORKSITE_TASK]: wakeExtractionWorksite,
   [POPULATION_ENERGY_TASK]: wakePopulationEnergy,
+  [DESIRE_PATHS_TASK]: aggregateDesireEdges,
 };

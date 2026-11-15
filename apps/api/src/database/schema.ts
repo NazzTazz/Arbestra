@@ -913,6 +913,28 @@ export interface Database {
   villageResourceFlows: VillageResourceFlowsTable;
   buildingResourceBuffers: BuildingResourceBuffersTable;
   scheduledTasks: ScheduledTasksTable;
+  /** Passages per cell edge, owned by the ground (085). Direction 0: eastward, 1: southward. */
+  worldDesireEdges: {
+    worldId: string;
+    cellX: number;
+    cellY: number;
+    direction: 0 | 1;
+    passages: number;
+    lastPassageAt: Timestamp;
+  };
+  /** Missions already counted in `worldDesireEdges`, by source (085); pruned beyond the margin. */
+  worldDesireMissions: {
+    worldId: string;
+    source: 'deposit' | 'garden' | 'science';
+    missionId: string;
+    startedAt: Timestamp;
+  };
+  /** Where counting started for a world, and the lower bound of the next window (085). */
+  worldDesireState: {
+    worldId: string;
+    countingFrom: Timestamp;
+    watermark: Timestamp;
+  };
   villageEconomyCatchups: {
     worldId: string;
     villageId: string;

@@ -40,6 +40,10 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
     await db.transaction().execute(async (transaction) => {
       await transaction.deleteFrom('sessions').execute();
       await transaction.deleteFrom('scheduledTasks').execute();
+      // Desire lines (085) belong to the ground, not to a village: a test world starts without any.
+      await transaction.deleteFrom('worldDesireEdges').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('worldDesireMissions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
+      await transaction.deleteFrom('worldDesireState').where('worldId', '=', DEVELOPMENT_IDS.world).execute();
       await transaction.deleteFrom('villageEconomyCatchups').execute();
       // Receipts of the intent workflows reach every snapshot of the village (079).
       await transaction.deleteFrom('harvestSubmissions').where('worldId', '=', DEVELOPMENT_IDS.world).execute();

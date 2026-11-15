@@ -3,6 +3,7 @@ import { RC1_WORLD, type GeneratedLandscape } from '@arbestra/contracts';
 import { sql, type Kysely } from 'kysely';
 import type { Database } from '../../database/schema.js';
 import { RC1_CANONICAL_CHECKSUM } from '../onboarding/spawn-compute-protocol.js';
+import { ensureDesirePathsTask } from '../worlds/desire-paths.js';
 import { artifactChecksum } from './artifact.js';
 
 export interface OpenRc1World {
@@ -71,6 +72,7 @@ export async function openCanonicalRc1World(db: Kysely<Database>, input: OpenRc1
           .set({ isOpen: true, openedAt: sql`coalesce(opened_at, statement_timestamp())` })
           .where('id', '=', existing.id)
           .execute();
+        await ensureDesirePathsTask(tx, existing.id);
       }
       return { worldId: existing.id, slug, name, created: false, checksum: RC1_CANONICAL_CHECKSUM };
     }
@@ -117,6 +119,7 @@ export async function openCanonicalRc1World(db: Kysely<Database>, input: OpenRc1
       })
       .execute();
     await tx.updateTable('worlds').set({ isOpen: true, openedAt: through }).where('id', '=', id).execute();
+    await ensureDesirePathsTask(tx, id);
     return { worldId: id, slug, name, created: true, checksum: RC1_CANONICAL_CHECKSUM };
   });
 }

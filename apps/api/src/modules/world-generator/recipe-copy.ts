@@ -2,6 +2,7 @@ import { worldRecipeChecksum } from './recipe-provenance.js';
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../database/schema.js';
+import { ensureDesirePathsTask } from '../worlds/desire-paths.js';
 import { artifactChecksum, readV2Artifact } from './artifact.js';
 /** Fixture tool only. Both databases must be test targets, never an alpha-world mutation. */
 export async function copyCandidateForRecipe(
@@ -66,6 +67,7 @@ export async function copyCandidateForRecipe(
             isOpen: true,
           })
           .execute();
+        await ensureDesirePathsTask(tx, copyId);
         for (const c of chunks)
           await tx
             .insertInto('worldChunks')
