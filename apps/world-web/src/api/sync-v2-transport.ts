@@ -66,8 +66,10 @@ type Options = {
   request?: typeof fetch;
   storage?: Storage;
   scopes?: SyncV2ReadRequest['scopes'];
-  /** Shared scopes keyed by the server; the private stream is implicit. */
-  include?: readonly ('knowledge' | 'manifest' | 'traffic' | 'offers')[];
+  /** Shared scopes keyed by the server; the private stream is implicit. `desire` stands for the
+   * chunk scopes of the village's window, which the server resolves (the client does not know its
+   * window before the first snapshot). */
+  include?: readonly ('knowledge' | 'manifest' | 'traffic' | 'offers' | 'desire')[];
   /** The private snapshot exceeds the server bound: rereads are spaced and
    * this receives the delay before the next attempt, then null once a read
    * succeeds again. */

@@ -13,8 +13,13 @@ type TimedVillageState = { state: NonNullable<ReturnType<typeof villageStateFrom
 // The whole village is synchronized through V2 (streams + presentation); the
 // shared scopes it reads besides its private stream. `offers` carries no offer,
 // only the revision of the market's offer index: the open market panel rereads
-// its list when that revision moves.
-export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic', 'offers'] as const;
+// its list when that revision moves. `desire` is the desire-path chunks of the
+// village's window (T3b, docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §17): the server
+// resolves them in the same capture, since the window is unknown before it;
+// nothing displays them yet.
+export const SYNC_V2_VILLAGE_INCLUDE = ['knowledge', 'manifest', 'traffic', 'offers', 'desire'] as const;
+// A read that closes at once (the starter kit) has no use for them.
+const SYNC_V2_ONCE_INCLUDE = SYNC_V2_VILLAGE_INCLUDE.filter((kind) => kind !== 'desire');
 
 type Latest = { state: SyncV2State; observedAt: string; batch: SyncV2Batch };
 export interface InitialSyncV2 {
@@ -37,7 +42,7 @@ export function readSyncV2VillageOnce(worldSlug: string): Promise<TimedVillageSt
 async function readSyncV2Village(worldSlug: string, keep: boolean): Promise<TimedVillageState> {
   let latest: Latest | null = null;
   const transport = await SyncV2Transport.bootstrapWorld(worldSlug, {
-    include: SYNC_V2_VILLAGE_INCLUDE,
+    include: keep ? SYNC_V2_VILLAGE_INCLUDE : SYNC_V2_ONCE_INCLUDE,
     listen: keep,
     // Until adoption, keep the newest applied state; nothing is rendered yet.
     publish: (state, observedAt, batch) => {

@@ -247,6 +247,12 @@ export async function resetE2eState(databaseUrl = testDatabaseUrl()): Promise<vo
       await sql`insert into game_sync_streams(world_id,stream_kind,scope_key) values
         (${DEVELOPMENT_IDS.world},'manifest',${DEVELOPMENT_IDS.world}),(${DEVELOPMENT_IDS.world},'offers','all'),
         (${DEVELOPMENT_IDS.world},'traffic',${DEVELOPMENT_IDS.world}) on conflict do nothing`.execute(transaction);
+      // The desire chunks (086) are created with the world, like the traffic stream.
+      await sql`insert into game_sync_streams(world_id,stream_kind,scope_key)
+        select w.id,'desire',x::text||','||y::text from worlds w
+          cross join lateral generate_series(0,(w.width_cells-1)/w.chunk_size) x
+          cross join lateral generate_series(0,(w.height_cells-1)/w.chunk_size) y
+        where w.id=${DEVELOPMENT_IDS.world} order by 3 on conflict do nothing`.execute(transaction);
     });
   } finally {
     await db.destroy();

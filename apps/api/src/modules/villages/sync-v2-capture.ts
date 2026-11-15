@@ -18,8 +18,9 @@ import {
 import { readSpatialChanges, readSpatialScopeSnapshot } from './sync-v2-spatial-readers.js';
 import { readSharedChanges, readSharedScopeSnapshot } from './sync-v2-shared-readers.js';
 import { readTrafficChanges, readTrafficScopeSnapshot } from './sync-v2-traffic-readers.js';
+import { desireScopesOfVillage, readDesireChanges, readDesireScopeSnapshot } from './sync-v2-desire-readers.js';
 
-export type SyncV2SharedInclude = 'knowledge' | 'manifest' | 'traffic' | 'offers';
+export type SyncV2SharedInclude = 'knowledge' | 'manifest' | 'traffic' | 'offers' | 'desire';
 interface CaptureOptions {
   include?: readonly SyncV2SharedInclude[];
   /** The stream only sends deltas: when a snapshot is required it gets a
@@ -125,9 +126,13 @@ export async function captureSyncV2(
         traffic: { kind: 'traffic' as const, key: village.worldId },
         offers: { kind: 'offers' as const, key: 'all' },
       };
+      // The desire chunks of the village's window are resolved here: the client
+      // does not know that window before its first snapshot (sync-v2-desire-readers.ts).
+      const desire = options.include?.includes('desire') ? await desireScopesOfVillage(tx, village) : [];
       for (const scope of [
         { kind: 'village' as const, key: villageId },
-        ...(options.include ?? []).map((kind) => included[kind]),
+        ...(options.include ?? []).flatMap((kind) => (kind === 'desire' ? [] : [included[kind]])),
+        ...desire,
         ...request.scopes,
       ]) {
         if (
@@ -137,7 +142,7 @@ export async function captureSyncV2(
           (scope.kind === 'offers' && scope.key !== 'all')
         )
           throw new HttpError(404, 'SYNC_SCOPE_NOT_FOUND', 'Périmètre introuvable.');
-        if (scope.kind === 'spatial') {
+        if (scope.kind === 'spatial' || scope.kind === 'desire') {
           if (!/^(0|[1-9][0-9]*),(0|[1-9][0-9]*)$/.test(scope.key))
             throw new HttpError(400, 'INVALID_SYNC_SCOPE', 'Chunk invalide.');
           const [x, y] = scope.key.split(',').map(Number) as [number, number];
@@ -211,6 +216,19 @@ export async function captureSyncV2(
           changes = snapshot
             ? await readSpatialScopeSnapshot(tx, spatial)
             : await readSpatialChanges(tx, spatial, stream.references);
+        } else if (stream.scope.kind === 'desire') {
+          const [chunkX, chunkY] = stream.scope.key.split(',').map(Number) as [number, number];
+          const chunk = {
+            worldId: village.worldId,
+            widthCells: village.widthCells,
+            heightCells: village.heightCells,
+            chunkSize: village.chunkSize,
+            chunkX,
+            chunkY,
+          };
+          changes = snapshot
+            ? await readDesireScopeSnapshot(tx, chunk)
+            : await readDesireChanges(tx, chunk, stream.references);
         } else if (stream.scope.kind === 'traffic')
           changes = snapshot
             ? await readTrafficScopeSnapshot(tx, context)

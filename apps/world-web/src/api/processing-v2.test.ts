@@ -9,6 +9,7 @@ import {
   type SyncV2State,
 } from '@arbestra/contracts';
 import {
+  desireOnlyBatch,
   footprintsKnown,
   offerIndexRevision,
   offersOnlyBatch,
@@ -425,4 +426,34 @@ it('recognizes a delta that changes nothing but the offer index, whatever the un
   expect(offersOnlyBatch({ ...offersBatch('delta', '3', '4'), groups: [] })).toBe(false);
   expect(offersOnlyBatch({ ...offersBatch('delta', '3', '4'), coverage: 'scope-snapshot', groups: [] })).toBe(false);
   expect(offersOnlyBatch(offersBatch('scope-snapshot', '0', '4'))).toBe(false);
+});
+
+it('renders nothing for a delta of desire path chunks alone, and renders as usual when anything else moves', () => {
+  const desire = (key: string, upsert: unknown[], remove: string[] = []): SyncV2Batch['groups'][number] => ({
+    stream: { kind: 'desire', key, epoch },
+    fromRevision: '1',
+    toRevision: '2',
+    changes: [{ component: 'desirePaths', upsert, remove } as SyncV2Batch['groups'][number]['changes'][number]],
+  });
+  const cell = { id: '3,5', cellX: 3, cellY: 5, east: true, south: false };
+  const batch = (...groups: SyncV2Batch['groups']): SyncV2Batch => ({
+    ...offersBatch('delta', '3', '4'),
+    groups,
+  });
+  expect(desireOnlyBatch(batch(desire('0,0', [cell])))).toBe(true);
+  expect(desireOnlyBatch(batch(desire('0,0', [cell]), desire('1,0', [], ['40,5'])))).toBe(true);
+  // Unchanged streams listed beside it do not count.
+  expect(
+    desireOnlyBatch(
+      batch(
+        { stream: { kind: 'village', key: villageId, epoch }, fromRevision: '6', toRevision: '6', changes: [] },
+        desire('0,0', [cell]),
+      ),
+    ),
+  ).toBe(true);
+  // The offers moving too, or nothing at all, or a snapshot: not a desire-only batch.
+  expect(desireOnlyBatch(batch(desire('0,0', [cell]), ...offersBatch('delta', '3', '4').groups))).toBe(false);
+  expect(desireOnlyBatch(batch(desire('0,0', [])))).toBe(false);
+  expect(desireOnlyBatch({ ...batch(desire('0,0', [cell])), coverage: 'scope-snapshot' })).toBe(false);
+  expect(offersOnlyBatch(batch(desire('0,0', [cell])))).toBe(false);
 });

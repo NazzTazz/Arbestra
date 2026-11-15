@@ -1,9 +1,12 @@
 import { randomUUID } from '../random-uuid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  desirePathsFromSyncV2,
+  NO_DESIRE_PATHS,
   visibleSyncV2Scope,
   villageStateFromSyncV2,
   VILLAGE_PRESENTATION_COMPONENTS,
+  type DesirePaths,
   type ExpeditionReceipt,
   type HarvestReceipt,
   type HudWorkforceIntent,
@@ -62,12 +65,17 @@ export function offerIndexRevision(state: SyncV2State): string | null {
  * derives nothing from it, so it projects no state and reads no presentation.
  * A stream batch lists every subscribed stream, the unchanged ones with no
  * change: only the streams that changed count. */
-export function offersOnlyBatch(batch: SyncV2Batch): boolean {
+export const offersOnlyBatch = (batch: SyncV2Batch): boolean => changesOnly(batch, 'offers');
+/** The same for the desire path chunks (T3b): nothing shows them yet, so a
+ * delta of theirs alone renders nothing. `desirePaths()` reads the session's
+ * latest state whenever it is asked. */
+export const desireOnlyBatch = (batch: SyncV2Batch): boolean => changesOnly(batch, 'desire');
+function changesOnly(batch: SyncV2Batch, kind: SyncV2Batch['groups'][number]['stream']['kind']): boolean {
   if (batch.coverage === 'scope-snapshot') return false;
   const changed = batch.groups.filter((group) =>
     group.changes.some((change) => change.upsert.length > 0 || change.remove.length > 0),
   );
-  return changed.length > 0 && changed.every((group) => group.stream.kind === 'offers');
+  return changed.length > 0 && changed.every((group) => group.stream.kind === kind);
 }
 /** The previous list when nothing changed, so that a batch which carries no
  * receipt does not render the village again. */
@@ -224,6 +232,9 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
   const placed = useRef<(placement: ConfirmedPlacement) => void>(() => undefined);
   // The workforce HUD's basis after a confirmed gesture, read from the session.
   const hudBasis = useRef<(owner: SyncV2Transport) => HudWorkforceState | null>(() => null);
+  // The desire paths of the subscribed chunks, read from the session on demand: no state and
+  // no render of their own, nothing displays them yet (T3b).
+  const desireOf = useRef<() => DesirePaths>(() => NO_DESIRE_PATHS);
   useEffect(() => {
     const retrying = reconnect.current!;
     if (!enabled || !worldId || !villageId) {
@@ -308,6 +319,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
           : villageStateFromSyncV2(latest.state, presentation, latest.observedAt);
       return village ? hudFromVillage(village) : null;
     };
+    desireOf.current = () =>
+      latest && transport.current === current ? desirePathsFromSyncV2(latest.state) : NO_DESIRE_PATHS;
     // A confirmed placement shows at once; the pending read replaces it.
     placed.current = (placement) => {
       const patched = presentation && presentationWithPlacement(presentation, placement);
@@ -326,8 +339,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
         setOffersRevision(offerIndexRevision(state));
         // An ACK carries its command time, possibly before the last delta.
         latest = { state, observedAt: latest && latest.observedAt > observedAt ? latest.observedAt : observedAt };
-        // No village render for a market change: the panel rereads its own list.
-        if (presentation && offersOnlyBatch(batch)) return;
+        // No village render for a market change (the panel rereads its own list), nor for desire paths.
+        if (presentation && (offersOnlyBatch(batch) || desireOnlyBatch(batch))) return;
         setOrders(processingOrdersV2(state));
         publishReceipts(state);
         const read = presentationReadNeeded(batch, covered);
@@ -535,6 +548,8 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
   }, []);
   /** The player's retry of a start that failed. */
   const retry = useCallback(() => reconnect.current?.now(), []);
+  /** The visible desire paths of the chunks the session subscribes to, as of its latest state. */
+  const desirePaths = useCallback(() => desireOf.current(), []);
   return {
     status,
     villageReady,
@@ -547,6 +562,7 @@ export function useVillageSyncV2({ worldSlug, worldId, villageId, enabled, onSta
     discard,
     refresh,
     retry,
+    desirePaths,
     construct,
     upgrade,
     expand,

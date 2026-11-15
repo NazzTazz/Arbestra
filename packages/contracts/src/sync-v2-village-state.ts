@@ -232,6 +232,33 @@ export function villageStateFromSyncV2(
   };
 }
 
+/** A cell whose east edge (towards cell x + 1) or south edge (towards cell
+ * y + 1) is a visible desire path (slice T3b). */
+export interface DesirePathCell {
+  cellX: number;
+  cellY: number;
+  east: boolean;
+  south: boolean;
+}
+/** Visible desire path cells of every subscribed `desire` chunk, by canonical
+ * cell "x,y". Derived from the applied streams, read-only, empty while none is
+ * subscribed. Nothing consumes it yet: no renderer, brazier or leisure walk
+ * (T3c). Chunk scopes are disjoint, so a cell comes from exactly one. */
+export type DesirePaths = ReadonlyMap<string, DesirePathCell>;
+export const NO_DESIRE_PATHS: DesirePaths = new Map();
+export function desirePathsFromSyncV2(sync: SyncV2State): DesirePaths {
+  const paths = new Map<string, DesirePathCell>();
+  for (const [key, scope] of sync.scopes) {
+    if (!key.startsWith('desire:')) continue;
+    for (const [entity, value] of visibleSyncV2Scope(scope)) {
+      if (!entity.startsWith('desirePaths:')) continue;
+      const cell = value as Entity<'desirePaths'>;
+      paths.set(cell.id, { cellX: cell.cellX, cellY: cell.cellY, east: cell.east, south: cell.south });
+    }
+  }
+  return paths.size ? paths : NO_DESIRE_PATHS;
+}
+
 /** Wire-only fields absent from the historical shapes (entity key, clock). */
 function omit<T extends object, K extends keyof T>(row: T, keys: readonly K[]): Omit<T, K> {
   return Object.fromEntries(

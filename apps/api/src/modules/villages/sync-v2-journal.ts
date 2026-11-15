@@ -7,7 +7,7 @@ export interface SyncCursor {
   revision: string;
 }
 export interface SyncScope {
-  kind: 'village' | 'knowledge' | 'spatial' | 'offers' | 'manifest' | 'traffic';
+  kind: 'village' | 'knowledge' | 'spatial' | 'offers' | 'manifest' | 'traffic' | 'desire';
   key: string;
 }
 export interface SyncDependency extends SyncScope, SyncCursor {

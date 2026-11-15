@@ -23,6 +23,7 @@ import { TerrainEditsResultSchema } from './terrain-edits.js';
 import { RoadAnchorSchema, RoadAnchorsResultSchema } from './road-anchors.js';
 import { StarterInstallationSchema } from './spawn-installation.js';
 import { SYNC_V2_SPATIAL_COMPONENTS, SyncV2SpatialChangeSchema } from './sync-v2-spatial.js';
+import { SYNC_V2_DESIRE_COMPONENTS, SyncV2DesireChangeSchema } from './sync-v2-desire.js';
 import {
   SYNC_V2_KNOWLEDGE_COMPONENTS,
   SYNC_V2_MANIFEST_COMPONENTS,
@@ -181,6 +182,7 @@ export const SyncV2StreamSchema = Type.Object(
       Type.Literal('offers'),
       Type.Literal('manifest'),
       Type.Literal('traffic'),
+      Type.Literal('desire'),
     ]),
     key: Type.String({ minLength: 1, maxLength: 128 }),
     epoch: id,
@@ -190,6 +192,7 @@ export const SyncV2StreamSchema = Type.Object(
 export const SyncV2ChangeSchema = Type.Union([
   ...SyncV2SpatialChangeSchema.anyOf,
   ...SyncV2SharedChangeSchema.anyOf,
+  SyncV2DesireChangeSchema,
   Type.Object(
     {
       component: Type.Literal('processingOrders'),
@@ -658,7 +661,9 @@ const registryOf = (kind: SyncV2Batch['groups'][number]['stream']['kind']): read
             ? SYNC_V2_OFFER_COMPONENTS
             : kind === 'traffic'
               ? SYNC_V2_TRAFFIC_COMPONENTS
-              : [];
+              : kind === 'desire'
+                ? SYNC_V2_DESIRE_COMPONENTS
+                : [];
 
 /** Validate every group before replacing anything. ACKs overlay keys; only a
  * complete delta/snapshot can advance a stream's canonical applied cursor. */

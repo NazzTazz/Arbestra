@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import {
+  desirePathsFromSyncV2,
   SYNC_V2_PRIVATE_COMPONENTS,
   SYNC_V2_KNOWLEDGE_COMPONENTS,
   visibleSyncV2Scope,
@@ -9,6 +10,7 @@ import {
   type SyncV2State,
 } from '@arbestra/contracts';
 import { SyncV2Transport } from './sync-v2-transport';
+import { SYNC_V2_VILLAGE_INCLUDE } from './sync-v2-initial';
 import { offerIndexRevision, offersOnlyBatch } from './processing-v2';
 import { SyncV2SessionExpired } from './sync-v2-session';
 const worldId = '11111111-1111-4111-8111-111111111111',
@@ -310,6 +312,109 @@ it('follows the shared offer index: bootstrap with offers, then a stream delta m
     expect(published[1]).toEqual({ revision: `${epoch}:3`, offersOnly: true });
     // The session took the component as is: no snapshot reread was needed.
     expect(urls.filter((url) => url.endsWith('/sync/read'))).toHaveLength(0);
+  } finally {
+    transport.close();
+  }
+});
+it('subscribes to the desire chunks the server resolves, keeps them on every reconnect and derives their cells', async () => {
+  const cell = (cellX: number, cellY: number, east: boolean, south: boolean) => ({
+    id: `${cellX},${cellY}`,
+    cellX,
+    cellY,
+    east,
+    south,
+  });
+  const desire = (
+    key: string,
+    from: string,
+    to: string,
+    upsert: ReturnType<typeof cell>[],
+    remove: string[] = [],
+  ): SyncV2Batch['groups'][number] => ({
+    stream: { kind: 'desire', key, epoch },
+    fromRevision: from,
+    toRevision: to,
+    changes: [{ component: 'desirePaths', upsert, remove }],
+  });
+  const urls: string[] = [],
+    reconnects: SyncV2ReadRequest[] = [];
+  const request: typeof fetch = async (url, init) => {
+    urls.push(String(url));
+    const generation = Number(new Headers(init?.headers).get('x-arbestra-generation'));
+    if (String(url).endsWith('/sync/stream')) {
+      const body = JSON.parse(String(init?.body)) as SyncV2ReadRequest;
+      reconnects.push(body);
+      // The server's delta: a second edge of a cell of the seam chunk, and a cell that left the other.
+      const delta: SyncV2Batch = {
+        protocol: 2,
+        worldId,
+        villageId,
+        generation: body.generation,
+        observedAt: '2026-11-15T10:00:05Z',
+        coverage: 'delta',
+        groups: [
+          { stream: { kind: 'village', key: villageId, epoch }, fromRevision: '4', toRevision: '4', changes: [] },
+          desire('0,0', '2', '3', [], ['3,5']),
+          desire('63,31', '1', '2', [cell(2047, 1023, true, true), cell(2046, 1023, false, true)]),
+        ],
+      };
+      return new Response(`event: batch\ndata: ${JSON.stringify(delta)}\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }
+    const first = bootstrap(generation);
+    return json({
+      ...first,
+      groups: [
+        ...first.groups,
+        desire('0,0', '0', '2', [cell(3, 5, true, false)]),
+        desire('63,31', '0', '1', [cell(2047, 1023, true, false)]),
+        desire('1,0', '0', '0', []),
+      ],
+    });
+  };
+  const published: SyncV2State[] = [];
+  expect(SYNC_V2_VILLAGE_INCLUDE).toContain('desire');
+  const transport = await SyncV2Transport.bootstrapWorld('aube', {
+    storage: memory(),
+    request,
+    include: SYNC_V2_VILLAGE_INCLUDE,
+    publish: (state) => published.push(state),
+    expired: () => undefined,
+  });
+  try {
+    // One bootstrap carries the village stream, the shared ones and every desire chunk.
+    expect(urls[0]).toMatch(/\/village\/bootstrap\?generation=\d+&include=knowledge,manifest,traffic,offers,desire$/);
+    expect([...published[0]!.scopes.keys()].filter((key) => key.startsWith('desire:')).sort()).toEqual([
+      'desire:0,0',
+      'desire:1,0',
+      'desire:63,31',
+    ]);
+    expect([...desirePathsFromSyncV2(published[0]!)]).toEqual([
+      ['3,5', { cellX: 3, cellY: 5, east: true, south: false }],
+      ['2047,1023', { cellX: 2047, cellY: 1023, east: true, south: false }],
+    ]);
+    // The stream reopens with every scope it holds, desire chunks and their cursors included.
+    await vi.waitFor(() => expect(published).toHaveLength(2));
+    const scopes = reconnects[0]!.scopes.filter((scope) => scope.kind === 'desire');
+    expect(scopes).toEqual(
+      expect.arrayContaining([
+        { kind: 'desire', key: '0,0' },
+        { kind: 'desire', key: '1,0' },
+        { kind: 'desire', key: '63,31' },
+      ]),
+    );
+    expect(reconnects[0]!.cursors.filter((cursor) => cursor.kind === 'desire')).toEqual(
+      expect.arrayContaining([
+        { kind: 'desire', key: '0,0', epoch, revision: '2' },
+        { kind: 'desire', key: '63,31', epoch, revision: '1' },
+      ]),
+    );
+    // And a delta of those chunks is applied to the derived cells.
+    expect([...desirePathsFromSyncV2(published[1]!)]).toEqual([
+      ['2047,1023', { cellX: 2047, cellY: 1023, east: true, south: true }],
+      ['2046,1023', { cellX: 2046, cellY: 1023, east: false, south: true }],
+    ]);
   } finally {
     transport.close();
   }
