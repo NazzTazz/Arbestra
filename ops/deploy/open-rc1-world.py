@@ -45,7 +45,8 @@ def main():
     release = (Path('/srv/arbestra') / environment / 'current').resolve(strict=True)
     if not (release / 'api/dist/open-rc1-world.js').is_file():
         raise RuntimeError('Deploy a release containing the RC1 operator command first')
-    if args.shared_vertices and '--shared-vertices' not in (release / 'api/dist/open-rc1-world.js').read_text():
+    # parseArgs declares the option without its dashes: 'shared-vertices'.
+    if args.shared_vertices and "'shared-vertices'" not in (release / 'api/dist/open-rc1-world.js').read_text():
         raise RuntimeError('This release predates --shared-vertices: deploy a release that contains it first')
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')
     backup = Path('/var/backups/arbestra') / f'{environment}-open-rc1-{slug}-{stamp}.dump'
