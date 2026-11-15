@@ -516,3 +516,18 @@ rc1-dev : 624 arêtes distinctes ; aube : 369. Les +44 de Test commerce viennent
 **Tests** : `desire-start.integration.test.ts` (création, relèvement, arête plus haute intacte, date de dernier passage conservée, publication au seuil, second passage sans écriture ni publication).
 
 **Reste** : preuve sur une copie de l'alpha (copie de base de joueurs : à demander) ; passage `--apply` sur dev pour la mesure navigateur du mode `0`.
+
+### Mesure navigateur de T3c (15 novembre, dev local, Bressuire, rc1-dev)
+
+Campagne DevDrawer (3 chargements puis 60 s de jeu), fenêtre au premier plan, NVIDIA MX230. Aucun chargement n'est à froid côté serveur (présentation déjà en cache).
+
+| | Mode 1 (défaut) | Mode 0 (sentiers, après T3d) |
+|---|---|---|
+| Village prêt (3 chargements) | 17,6 s ; 13,5 s ; 12,5 s | 21,0 s ; 18,9 s ; 16,0 s |
+| 60 s de jeu : images/s | 42,1 | 29,3 |
+| 60 s : images > 100 ms | 0 | 15 |
+| 60 s : villageois p95 / max | 0,1 / 0,4 ms | 4,6 / 22,4 ms |
+
+Contre-mesure immédiate (60 s de jeu chacune, l'une après l'autre) : mode 0 à 29,7 images/s, 18 images > 100 ms, rendu p95 43,8 ms, villageois 4,8 ms ; mode 1 à 44,5 images/s, aucune image > 100 ms, rendu p95 18,5 ms, villageois 0,1 ms. Compteurs : 208 appels de dessin et 394 meshes actifs en mode 0, contre 181 et 367 en mode 1.
+
+**Le mode 0 dépasse les budgets d'AGENTS.md** (images > 100 ms, villageois p95 > 2 ms) : il ne peut pas être activé tant que la cause n'est pas trouvée et corrigée. Le mode 1 (défaut) est conforme. Le dev est remis en mode 1.
