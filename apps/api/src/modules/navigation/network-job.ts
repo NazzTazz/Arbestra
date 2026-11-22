@@ -72,6 +72,7 @@ export function networkState(s: TravelNetworkState): TravelNetworkState {
     })),
     ...(s.infrastructure ? { infrastructure: s.infrastructure } : {}),
     ...(s.roadCells?.length ? { roadCells: s.roadCells } : {}),
+    ...(s.trails?.length ? { trails: s.trails } : {}),
   };
 }
 

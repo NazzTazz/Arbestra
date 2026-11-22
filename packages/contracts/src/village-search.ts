@@ -4,9 +4,11 @@ import { infrastructurePlanSurface, type RoadPixel } from './infrastructure.js';
 import { canWalkSpawnSegment, type SpawnAccessField } from './spawn-access.js';
 import {
   blocksTravelFootprint,
+  DESIRE_TRAIL_COST,
   GARDEN_CROSSING_COST,
   roadLookup,
   segmentCost,
+  trailLookup,
   type TravelCell,
   type TravelGround,
   type TravelNetworkState,
@@ -26,7 +28,9 @@ import {
  * footprints, reservations, deposits, gardens, the destination cell) is a
  * mask applied before the mesh, and road accessories are checked on the few
  * cells that carry one. The cost of a step is its duration (decision 8):
- * segmentCost, times GARDEN_CROSSING_COST on another garden's plot.
+ * segmentCost, times GARDEN_CROSSING_COST on another garden's plot, and
+ * DESIRE_TRAIL_COST along a visible desire path (`state.trails`, the beaten
+ * track of §3.4): travelDuration with the same trails gives the same number.
  */
 
 export type VillageSearchOutcome =
@@ -366,6 +370,20 @@ export function searchVillagePath(
         for (const dy of [-0.25, 0, 0.25]) equipped.add(cellOf(point.x + dx, point.y + dy));
     }
   }
+  // The beaten track: a step along a visible desire path costs DESIRE_TRAIL_COST (§3.4).
+  const trails = trailLookup(state.trails, world),
+    trailCells = new Set<number>();
+  if (trails)
+    for (const e of state.trails!) {
+      const [dx, dy] = [
+        [1, 0],
+        [0, 1],
+        [1, 1],
+        [-1, 1],
+      ][e.direction]!;
+      trailCells.add(index(e.cellX, e.cellY));
+      trailCells.add(index(e.cellX + dx!, e.cellY + dy!));
+    }
   const clearOfEquipment = (p: TravelCell) =>
     !(equipment.get(index(Math.floor(p.cellX), Math.floor(p.cellY))) ?? []).some(
       (e) => Math.abs(delta(e.x, p.cellX, W)) < 0.125 && Math.abs(delta(e.y, p.cellY, H)) < 0.125,
@@ -479,8 +497,8 @@ export function searchVillagePath(
         (roads && (roadCells.has(cellOf(a.cellX, a.cellY)) || roadCells.has(cellOf(b.cellX, b.cellY)))) ||
         (gardenFactor && (foreign.has(cellOf(a.cellX, a.cellY)) || foreign.has(cellOf(b.cellX, b.cellY))));
       total = near
-        ? segmentCost(a, b, world, roads, gardenFactor, total)
-        : segmentCost(a, b, world, undefined, undefined, total);
+        ? segmentCost(a, b, world, roads, gardenFactor, total, trails)
+        : segmentCost(a, b, world, undefined, undefined, total, trails);
     }
     return total;
   };
@@ -600,7 +618,9 @@ export function searchVillagePath(
       const c = cellAt(i),
         k = index(c.cellX, c.cellY);
       mask[i] = passable(c.cellX, c.cellY) ? 1 : 0;
-      floorFactor[i] = (roadCells.has(k) ? 0.7 : 1) * (foreign.has(k) ? GARDEN_CROSSING_COST : 1);
+      floorFactor[i] =
+        (roadCells.has(k) ? 0.7 : trailCells.has(k) ? DESIRE_TRAIL_COST : 1) *
+        (foreign.has(k) ? GARDEN_CROSSING_COST : 1);
     }
     return mask[i] === 1;
   };

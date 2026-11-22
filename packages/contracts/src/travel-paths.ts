@@ -52,6 +52,9 @@ export interface TravelNetworkState extends Omit<BuildingAccessState, 'cells'> {
     }
   >;
   infrastructure?: VillageState['infrastructure'];
+  /** The visible desire edges around the village (the beaten track of the village search,
+   * DESIRE_TRAIL_COST); navigation input only, read by the server, never sent to a client. */
+  trails?: readonly DesireEdge[];
   /** Road cells for the coarse costs of a network without `infrastructure` (no
    * refinement): its witnesses follow roads as the refined searches do. */
   roadCells?: NonNullable<NonNullable<VillageState['infrastructure']>['roadCells']>;
@@ -257,6 +260,59 @@ export function desireEdges(
     }
   }
   return [...found.values()].sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY || a.direction - b.direction);
+}
+
+/**
+ * Cost of a step along a visible desire path, per unit of length: the beaten track
+ * (docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md §3.4, decision of 22 November, to be confirmed at the
+ * owner's review). Missions gather on the paths already worn instead of tracing parallel columns.
+ * Durations follow (decision 8): at most 10 % shorter on the part of a trip that follows a path. A
+ * road pixel keeps its own factor (ROAD_STEP_COST); the two never multiply. 1 turns it off. Between
+ * ROAD_STEP_COST and 1: the lower bounds of the searches (0.7 per unit) stay valid.
+ */
+export const DESIRE_TRAIL_COST: number = 0.9;
+/** Whether the edge between two neighbouring cells (wrapped integer cells, among the eight) is a
+ * visible desire path. */
+export type TrailLookup = (from: TravelCell, to: TravelCell) => boolean;
+/**
+ * The edge between two cells as `world_desire_edges` names it (`desireEdges`): null unless the two
+ * wrapped cells are distinct neighbours among the eight.
+ */
+export function desireEdgeBetween(
+  a: TravelCell,
+  b: TravelCell,
+  world: { widthCells: number; heightCells: number },
+): DesireEdge | null {
+  const ax = wrap(Math.round(a.cellX), world.widthCells),
+    ay = wrap(Math.round(a.cellY), world.heightCells),
+    bx = wrap(Math.round(b.cellX), world.widthCells),
+    by = wrap(Math.round(b.cellY), world.heightCells),
+    dx = delta(bx, ax, world.widthCells),
+    dy = delta(by, ay, world.heightCells);
+  if (Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) return null;
+  if (!dx || !dy) {
+    const east = dx > 0 || dy > 0;
+    return { cellX: east ? ax : bx, cellY: east ? ay : by, direction: dx ? 0 : 1 };
+  }
+  const north = dy > 0;
+  return { cellX: north ? ax : bx, cellY: north ? ay : by, direction: dx === dy ? 2 : 3 };
+}
+/** A lookup of visible desire edges (any iterable of them, read once). Undefined when there is
+ * none or the beaten track is off (DESIRE_TRAIL_COST 1): costs and durations are then those of
+ * the paths alone. */
+export function trailLookup(
+  edges: Iterable<DesireEdge> | undefined,
+  world: { widthCells: number; heightCells: number },
+): TrailLookup | undefined {
+  if (!edges || DESIRE_TRAIL_COST === 1) return undefined;
+  const keys = new Set<number>();
+  for (const e of edges)
+    keys.add((wrap(e.cellY, world.heightCells) * world.widthCells + wrap(e.cellX, world.widthCells)) * 4 + e.direction);
+  if (!keys.size) return undefined;
+  return (from, to) => {
+    const e = desireEdgeBetween(from, to, world);
+    return e !== null && keys.has((e.cellY * world.widthCells + e.cellX) * 4 + e.direction);
+  };
 }
 
 interface Step {
@@ -734,12 +790,17 @@ export function segmentCost(
   factor?: (x: number, y: number) => number,
   /** Running total the sub-steps are added to, in order (a path's duration). */
   total = 0,
+  /** Visible desire paths: a segment from one cell to a neighbour along one costs DESIRE_TRAIL_COST
+   * per unit of length off road pixels. A segment inside one cell (a door connector, a piece of a
+   * local detour) is never on a path. */
+  trails?: TrailLookup,
 ): number {
   const dx = delta(b.cellX, a.cellX, world.widthCells),
     dy = delta(b.cellY, a.cellY, world.heightCells),
     length = dx && dy ? Math.hypot(dx, dy) : Math.abs(dx) + Math.abs(dy);
   if (!length) return total;
-  if (!roads && !factor) return total + length;
+  const trail = trails?.(a, b) ? DESIRE_TRAIL_COST : 1;
+  if (!roads && !factor) return total + length * trail;
   const w = world.widthCells * 16,
     h = world.heightCells * 16,
     n = Math.max(1, Math.ceil(length * 8 - 1e-9)),
@@ -750,7 +811,7 @@ export function segmentCost(
       y = a.cellY + (dy * j) / n;
     cost +=
       step *
-      (roads && roads(wrap(Math.round(x * 16), w), wrap(Math.round(y * 16), h)) ? ROAD_STEP_COST : 1) *
+      (roads && roads(wrap(Math.round(x * 16), w), wrap(Math.round(y * 16), h)) ? ROAD_STEP_COST : trail) *
       (factor ? factor(x, y) : 1);
   }
   return cost;
@@ -767,10 +828,13 @@ export function travelDuration(
   path: readonly TravelCell[],
   world?: { widthCells: number; heightCells: number },
   roads?: RoadLookup,
+  /** The visible desire paths the village search read (the beaten track, DESIRE_TRAIL_COST). */
+  trails?: TrailLookup,
 ): number {
   if (world) {
     let cost = 0;
-    for (let i = 1; i < path.length; i++) cost = segmentCost(path[i - 1]!, path[i]!, world, roads, undefined, cost);
+    for (let i = 1; i < path.length; i++)
+      cost = segmentCost(path[i - 1]!, path[i]!, world, roads, undefined, cost, trails);
     return Math.round(cost * 1000);
   }
   let length = 0;

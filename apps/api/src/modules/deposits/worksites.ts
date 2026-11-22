@@ -628,7 +628,9 @@ export async function admitWorksites(
       // Keep the contract's integer milliseconds throughout admission. A trip
       // through seconds can turn 4052 into 4051.9999999999995 and abort the
       // village transaction when PostgreSQL stores transport_ms as an integer.
-      const transportMs = await pathTravelDuration(tx, { ...village, worldId: economy.worldId }, path);
+      const transportMs = await pathTravelDuration(tx, { ...village, worldId: economy.worldId }, path, {
+        trails: true,
+      });
       next = {
         featureId: target.featureId,
         amount: work.amount,

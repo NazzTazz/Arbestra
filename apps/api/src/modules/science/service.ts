@@ -34,7 +34,7 @@ import {
 import { sciencePath, type ScienceWorld } from './navigation.js';
 import { travelDuration } from '@arbestra/contracts';
 import { refineVillagePath } from '../villages/service.js';
-import { pathRoadLookup } from '../navigation/road-cost.js';
+import { pathRoadLookup, pathTrailLookup } from '../navigation/road-cost.js';
 
 export const SCIENCE_WAKE_TASK = 'science.wake';
 // Short reservations let several centres contribute and staffing changes apply
@@ -869,11 +869,12 @@ export async function scienceCommand(
     if (maximumSteps < 0) throw new HttpError(409, 'SURVEY_BUDGET', 'Le budget doit couvrir le relevé et le retour.');
     // The stop and the duration share the path's cost: roads shorten travel (decision 8).
     const world = { worldId: economy.worldId, widthCells: village.widthCells, heightCells: village.heightCells },
-      roads = await pathRoadLookup(tx, world, [path]);
+      roads = await pathRoadLookup(tx, world, [path]),
+      trails = await pathTrailLookup(tx, world, [path]);
     let stop = 0,
       costMs = 0;
     for (let i = 1; i < path.length; i++) {
-      costMs += travelDuration([path[i - 1]!, path[i]!], world, roads);
+      costMs += travelDuration([path[i - 1]!, path[i]!], world, roads, trails);
       if (costMs > maximumSteps * 1000) break;
       if (Number.isInteger(path[i]!.cellX) && Number.isInteger(path[i]!.cellY)) stop = i;
     }
@@ -881,7 +882,7 @@ export async function scienceCommand(
       throw new HttpError(409, 'SURVEY_BUDGET', 'Le budget doit couvrir le trajet jusqu’au premier lieu et le retour.');
     const outward = path.slice(0, stop + 1),
       target = outward.at(-1)!;
-    const transportMs = travelDuration(outward, world, roads),
+    const transportMs = travelDuration(outward, world, roads, trails),
       durationMs = transportMs * 2 + SURVEY_MS;
     const activityId = await startActivity(tx, economy, accountId, {
       kind: command.action === 'survey' ? 'survey' : 'exploration',

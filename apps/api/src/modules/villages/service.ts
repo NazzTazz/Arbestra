@@ -8,7 +8,7 @@ import { readRc1Ground } from '../worlds/rc1-ground.js';
 import { readRc1Source } from '../worlds/rc1-source.js';
 import { navigationBudgetError, networkJob, networkState, type NetworkJob } from '../navigation/network-job.js';
 import { commandTravelNetwork, commandVillageLegs, transactionRefiner } from '../navigation/transaction-refinement.js';
-import { pathRoadLookup, pathTravelDuration } from '../navigation/road-cost.js';
+import { pathRoadLookup, pathTrailLookup, pathTravelDuration, readVisibleTrails } from '../navigation/road-cost.js';
 import { naturalFeaturesQuery } from '../worlds/natural-features.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -20,6 +20,7 @@ import type {
   VillageState,
   TravelCell,
   TravelNetworkState,
+  DesireEdge,
   InfrastructurePlan,
   StartExtractionWorksiteRequest,
   ChangeExtractionWorksiteRequest,
@@ -660,7 +661,10 @@ export async function villageNavigationContext(
           : null,
     })),
     infrastructure: await readNavigationInfrastructure(tx, village),
-  } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells' | 'infrastructure'>;
+    trails: await readVisibleTrails(tx, village, ground),
+  } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells' | 'infrastructure'> & {
+    trails: DesireEdge[];
+  };
   return { context, rc1: ground.rc1 };
 }
 
@@ -1009,6 +1013,8 @@ export async function readInfrastructureSpatialState(
     }),
     // Roads and accessories as the searches see them (road cells included).
     infrastructure: navigation,
+    // The visible desire paths of the window: the beaten track of the leg searches.
+    trails: await readVisibleTrails(tx, village, ground),
   };
   return { snapshot: context, ground: ground.rc1, occupancies: occupancyRows, plots: projectedPlots };
 }
@@ -2366,7 +2372,7 @@ export async function readVillageDepositDetails(
     village,
     economy,
     featureId,
-    path ? await pathTravelDuration(tx, village, path) : 0,
+    path ? await pathTravelDuration(tx, village, path, { trails: true }) : 0,
     Boolean(path),
   );
 }
@@ -2421,7 +2427,8 @@ async function planExploitationTour(
     await search(gardenTourLegs(reachable, village));
   }
   const paths = [...byLeg.values()].filter((path): path is TravelCell[] => !!path);
-  const roads = await pathRoadLookup(tx, village, [...paths, ...cells.map((cell) => [cell])]);
+  const roads = await pathRoadLookup(tx, village, [...paths, ...cells.map((cell) => [cell])]),
+    trails = await pathTrailLookup(tx, village, paths);
   const plan = reachable.length
     ? planGardenTourByLegs(
         reachable,
@@ -2434,7 +2441,7 @@ async function planExploitationTour(
             out = hall(leg.to);
           return back && out ? [...[...back].reverse(), ...out] : null;
         },
-        (path) => travelDuration(path, village, roads),
+        (path) => travelDuration(path, village, roads, trails),
         village,
       )
     : null;
@@ -2614,7 +2621,7 @@ export async function prepareExploitation(
       if (amount < 1) continue;
       const path = await pathFor(id);
       if (path) {
-        lots[family] = { id, amount, transportMs: await pathTravelDuration(tx, village, path) };
+        lots[family] = { id, amount, transportMs: await pathTravelDuration(tx, village, path, { trails: true }) };
         break;
       }
     }
