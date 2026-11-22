@@ -1,6 +1,6 @@
 import { sql, type Transaction } from 'kysely';
 
-import { desireEdges, type TravelCell } from '@arbestra/contracts';
+import { desireEdges, type DesireEdge, type TravelCell } from '@arbestra/contracts';
 
 import type { Database } from '../../database/schema.js';
 import type { ScheduledTask } from '../../jobs/scheduled-tasks.js';
@@ -280,13 +280,13 @@ export async function aggregateDesirePaths(
     const fresh = new Set(recorded.map((r) => `${r.source}:${r.missionId}`));
     const passages = new Map<
       number,
-      { cellX: number; cellY: number; direction: 0 | 1; passages: number; lastPassageAt: Date }
+      { cellX: number; cellY: number; direction: DesireEdge['direction']; passages: number; lastPassageAt: Date }
     >();
     for (const mission of missions) {
       if (!fresh.has(`${mission.source}:${mission.id}`)) continue;
       counted++;
       for (const edge of desireEdges(mission.paths, world)) {
-        const key = (edge.cellY * world.widthCells + edge.cellX) * 2 + edge.direction,
+        const key = (edge.cellY * world.widthCells + edge.cellX) * 4 + edge.direction,
           known = passages.get(key);
         if (known) {
           known.passages++;

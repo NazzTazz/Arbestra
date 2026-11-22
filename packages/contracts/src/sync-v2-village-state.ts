@@ -239,13 +239,17 @@ export function villageStateFromSyncV2(
   };
 }
 
-/** A cell whose east edge (towards cell x + 1) or south edge (towards cell
- * y + 1) is a visible desire path (slice T3b). */
+/** A cell whose east edge (towards cell x + 1), south edge (towards cell
+ * y + 1) or diagonal edge (south-east, towards x + 1, y + 1; south-west,
+ * towards x - 1, y + 1) is a visible desire path (slices T3b and R2a). A
+ * diagonal flag is present only when true, as on the wire. */
 export interface DesirePathCell {
   cellX: number;
   cellY: number;
   east: boolean;
   south: boolean;
+  southEast?: true;
+  southWest?: true;
 }
 /** Visible desire path cells of every subscribed `desire` chunk, by canonical
  * cell "x,y". Derived from the applied streams, read-only, empty while none is
@@ -280,7 +284,14 @@ function desireMemoOf(sync: SyncV2State): DesireMemo {
     for (const [entity, value] of visibleSyncV2Scope(scope)) {
       if (!entity.startsWith('desirePaths:')) continue;
       const cell = value as Entity<'desirePaths'>;
-      paths.set(cell.id, { cellX: cell.cellX, cellY: cell.cellY, east: cell.east, south: cell.south });
+      paths.set(cell.id, {
+        cellX: cell.cellX,
+        cellY: cell.cellY,
+        east: cell.east,
+        south: cell.south,
+        ...(cell.southEast ? { southEast: true as const } : {}),
+        ...(cell.southWest ? { southWest: true as const } : {}),
+      });
     }
   const memo: DesireMemo = { scopes, paths: paths.size ? paths : NO_DESIRE_PATHS, routes: null };
   desireMemos.delete(id);

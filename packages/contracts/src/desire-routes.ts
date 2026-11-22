@@ -1,26 +1,35 @@
 import type { DesireEdge, TravelCell, TravelRoute } from './travel-paths.js';
 
-/** A cell with one or both of its east / south edges visible as desire paths: the shape of a
- * `desirePaths` entity of the V2 stream (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §17, T3b). */
+/** A cell with at least one of its four edges (east, south, south-east, south-west) visible as a
+ * desire path: the shape of a `desirePaths` entity of the V2 stream
+ * (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §17, T3b; docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md,
+ * R2a). A diagonal flag is present only when true: a cell without a diagonal keeps the shape it
+ * had before them, on the wire and here. */
 export interface DesireCell {
   cellX: number;
   cellY: number;
   east: boolean;
   south: boolean;
+  /** Towards cell (x + 1, y + 1). */
+  southEast?: boolean;
+  /** Towards cell (x - 1, y + 1). */
+  southWest?: boolean;
 }
 
 /** Prefix of the route ids `desireRoutes` makes; no server route carries it. */
 export const DESIRE_ROUTE_PREFIX = 'desire:';
 
-/** The desire cells that carry `edges` (canonical edges, east or south of their origin), in the
- * order of the cells. The inverse of what `desireRoutes` reads. */
+/** The desire cells that carry `edges` (canonical edges, named by their origin), in the order of
+ * the cells. The inverse of what `desireRoutes` reads. */
 export function desireCellsFromEdges(edges: readonly DesireEdge[]): DesireCell[] {
   const cells = new Map<string, DesireCell>();
   for (const edge of edges) {
     const key = `${edge.cellX},${edge.cellY}`,
       cell = cells.get(key) ?? { cellX: edge.cellX, cellY: edge.cellY, east: false, south: false };
     if (edge.direction === 0) cell.east = true;
-    else cell.south = true;
+    else if (edge.direction === 1) cell.south = true;
+    else if (edge.direction === 2) cell.southEast = true;
+    else cell.southWest = true;
     cells.set(key, cell);
   }
   return [...cells.values()].sort((a, b) => a.cellY - b.cellY || a.cellX - b.cellX);
@@ -31,11 +40,16 @@ const wrap = (value: number, size: number) => ((value % size) + size) % size;
 /**
  * The desire paths as the segments every consumer of `VillageState.travelRoutes` reads (display and
  * masking, road edges, brazier and stroke derivation, road-cell links, worker widths, the debug
- * overlay): one two-cell route per visible edge, from its origin to its eastern or southern
- * neighbour, wrapped on the torus. `kind` is `wood`: every desire path is earth and none paves
- * (decision 3, §8; `roadEdges` paves only `building` routes). Each route's destination is its
- * second cell. Deterministic: cells by (cellY, cellX), the east edge before the south one, so equal
- * edges give equal routes, ids included (`desire:x:y:east`).
+ * overlay): one two-cell route per visible edge, from its origin to its eastern, southern,
+ * south-eastern or south-western neighbour, wrapped on the torus. `kind` is `wood`: every desire
+ * path is earth and none paves (decision 3, §8; `roadEdges` paves only `building` routes). Each
+ * route's destination is its second cell. Deterministic: cells by (cellY, cellX), then east, south,
+ * south-east, south-west, so equal edges give equal routes, ids included (`desire:x:y:east`,
+ * `desire:x:y:south-east`).
+ *
+ * A diagonal route is a two-cell segment that is not cardinal. Until diagonals are drawn (slice
+ * R2b), the consumers leave it out: strokes, braziers, road-cell links, leisure walks and the inner
+ * corners of the road profile take cardinal steps only.
  *
  * Brazier ids and positions (`auto:X:Y:sx:sy`) belong to the node cell, not to the route a node
  * was reached by, so they stay the same for the same edges. The stroke ids of a joint
@@ -55,6 +69,8 @@ export function desireRoutes(
     for (const [direction, present, dx, dy] of [
       ['east', cell.east, 1, 0],
       ['south', cell.south, 0, 1],
+      ['south-east', cell.southEast === true, 1, 1],
+      ['south-west', cell.southWest === true, -1, 1],
     ] as const) {
       if (!present) continue;
       const to: TravelCell = {

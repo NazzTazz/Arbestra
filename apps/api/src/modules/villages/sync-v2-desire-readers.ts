@@ -8,7 +8,9 @@ import type { SyncEntityReference } from './sync-v2-readers.js';
 /** Desire lines observed, stream kind `desire` (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md
  * §4.3 and §17, slice T3b). A scope is one canonical chunk of the world; its
  * single component, `desirePaths`, has one entity per cell of the chunk with at
- * least one visible edge: its east and south flags. Visible means
+ * least one visible edge: its east and south flags, and its south-east and
+ * south-west flags written only when true (migration 087, slice R2a; an entity
+ * without a diagonal is the one of T3b, byte for byte). Visible means
  * `passages >= world_desire_visible_passages()` (migration 086, the only place
  * that holds the threshold). Counts and `last_passage_at` are never selected
  * into a payload. The ground owns the data: no village or account filter, only
@@ -40,12 +42,15 @@ function area(context: DesireReadContext) {
     throw Error('Non-canonical desire scope');
   return { minX: chunkX * size, maxX: (chunkX + 1) * size, minY: chunkY * size, maxY: (chunkY + 1) * size };
 }
-const toCell = (row: { cellX: number; cellY: number; east: boolean; south: boolean }): Cell => ({
+type Row = { cellX: number; cellY: number; east: boolean; south: boolean; southEast: boolean; southWest: boolean };
+const toCell = (row: Row): Cell => ({
   id: `${row.cellX},${row.cellY}`,
   cellX: row.cellX,
   cellY: row.cellY,
   east: row.east,
   south: row.south,
+  ...(row.southEast ? { southEast: true as const } : {}),
+  ...(row.southWest ? { southWest: true as const } : {}),
 });
 
 /** Every cell of the chunk with a visible edge. A snapshot carries values,
@@ -55,8 +60,9 @@ export async function readDesireScopeSnapshot(
   context: DesireReadContext,
 ): Promise<SyncV2Change[]> {
   const { minX, maxX, minY, maxY } = area(context);
-  const rows = await sql<{ cellX: number; cellY: number; east: boolean; south: boolean }>`
-    select cell_x,cell_y,bool_or(direction=0) as east,bool_or(direction=1) as south
+  const rows = await sql<Row>`
+    select cell_x,cell_y,bool_or(direction=0) as east,bool_or(direction=1) as south,
+      bool_or(direction=2) as south_east,bool_or(direction=3) as south_west
     from world_desire_edges
     where world_id=${context.worldId} and cell_x>=${minX} and cell_x<${maxX} and cell_y>=${minY} and cell_y<${maxY}
       and passages>=world_desire_visible_passages()
@@ -87,8 +93,9 @@ export async function readDesireChanges(
     return { x, y, key };
   });
   const rows = (
-    await sql<{ cellX: number; cellY: number; east: boolean; south: boolean }>`
-    select e.cell_x,e.cell_y,bool_or(e.direction=0) as east,bool_or(e.direction=1) as south
+    await sql<Row>`
+    select e.cell_x,e.cell_y,bool_or(e.direction=0) as east,bool_or(e.direction=1) as south,
+      bool_or(e.direction=2) as south_east,bool_or(e.direction=3) as south_west
     from world_desire_edges e
     join jsonb_to_recordset(${JSON.stringify(cells.map(({ x, y }) => ({ x, y })))}::jsonb) c(x integer,y integer)
       on e.cell_x=c.x and e.cell_y=c.y

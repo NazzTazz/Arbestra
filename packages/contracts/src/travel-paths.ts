@@ -154,25 +154,72 @@ export function coarseTravelPath(
 }
 
 /** An edge of the cell grid between two neighbouring cells, named by its
- * origin: `direction` 0 joins the cell to its eastern neighbour, 1 to its
- * southern one. Wrapped on the torus: the edge east of the last column joins
- * column 0. A desire line (refonte des trajets T3) counts passages per edge. */
+ * origin: `direction` 0 joins the cell to its eastern neighbour (x + 1, y),
+ * 1 to its southern one (x, y + 1), 2 to its south-eastern one (x + 1, y + 1)
+ * and 3 to its south-western one (x - 1, y + 1). Every undirected edge has a
+ * single name: the origin is the end the edge leaves southward or, for the
+ * east edge, eastward. Wrapped on the torus: the edge east of the last column
+ * joins column 0, the south-west edge of column 0 joins the last column. A
+ * desire line (refonte des trajets T3, 8 directions R2a) counts passages per
+ * edge. */
 export interface DesireEdge {
   cellX: number;
   cellY: number;
-  direction: 0 | 1;
+  direction: 0 | 1 | 2 | 3;
+}
+
+/**
+ * A path without the points of its local detours (docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md
+ * §3.1): between two cell centres (integer points) that are distinct neighbours among the eight,
+ * the points in between are dropped when every one lies inside one of the two closed cells. Such a
+ * detour goes round a trunk or a prop within its step; rounded point by point it could leave the
+ * two cells (a point on the far border of a cell rounds to the next cell, and a diagonal detour
+ * crosses the corner the two cells share), so the step is named by its two centres instead. Any
+ * other point is kept: legacy eighth-cell paths round as before, except a run that stays within
+ * two neighbouring cells between their centres, which is that step.
+ */
+function withoutLocalDetours(
+  path: readonly TravelCell[],
+  world: { widthCells: number; heightCells: number },
+): TravelCell[] {
+  const centre = (p: TravelCell) => Number.isInteger(p.cellX) && Number.isInteger(p.cellY),
+    inside = (p: TravelCell, c: TravelCell) =>
+      Math.abs(delta(p.cellX, c.cellX, world.widthCells)) <= 0.5 &&
+      Math.abs(delta(p.cellY, c.cellY, world.heightCells)) <= 0.5;
+  const kept: TravelCell[] = [];
+  let last: TravelCell | undefined,
+    pending: TravelCell[] = [];
+  for (const p of path) {
+    if (!centre(p)) {
+      pending.push(p);
+      continue;
+    }
+    if (last && pending.length) {
+      const dx = delta(p.cellX, last.cellX, world.widthCells),
+        dy = delta(p.cellY, last.cellY, world.heightCells),
+        from = last;
+      const step = Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && (dx !== 0 || dy !== 0);
+      if (!step || !pending.every((q) => inside(q, from) || inside(q, p))) kept.push(...pending);
+    } else kept.push(...pending);
+    pending = [];
+    kept.push(p);
+    last = p;
+  }
+  kept.push(...pending);
+  return kept;
 }
 
 /**
  * Canonical edges one mission walked, from all its paths (outward legs, tour
- * stops, return). Each path is rounded to cells and its long cardinal legs are
+ * stops, return). Each path loses the points of its local detours
+ * (`withoutLocalDetours`), is rounded to cells and its long cardinal legs are
  * expanded by `coarseTravelPath` (the rule of the decorative topology, so a
- * legacy sparse path and an eighth-cell path give the same cells); a step that
- * is not cardinal (a diagonal jump) is dropped, as `automaticRoadStrokes` and
- * `automaticBraziers` do; every other step is named by its eastern or southern
- * edge, origin wrapped. A mission counts once per edge however many paths or
- * directions cross it: a round trip, or a tour that passes a plot twice, adds
- * one passage. Sorted by (cellX, cellY, direction), the order of the table's
+ * legacy sparse path and an eighth-cell path give the same cells). A cardinal
+ * step is named by its eastern or southern edge, a unit diagonal step by its
+ * south-eastern or south-western edge, origin wrapped; any other jump is
+ * dropped. A mission counts once per edge however many paths or directions
+ * cross it: a round trip, or a tour that passes a plot twice, adds one
+ * passage. Sorted by (cellX, cellY, direction), the order of the table's
  * primary key.
  */
 export function desireEdges(
@@ -182,7 +229,10 @@ export function desireEdges(
   const found = new Map<number, DesireEdge>();
   for (const path of paths) {
     const cells = coarseTravelPath(
-      path.filter((p) => Number.isFinite(p.cellX) && Number.isFinite(p.cellY)),
+      withoutLocalDetours(
+        path.filter((p) => Number.isFinite(p.cellX) && Number.isFinite(p.cellY)),
+        world,
+      ),
       world,
     );
     for (let i = 1; i < cells.length; i++) {
@@ -190,11 +240,16 @@ export function desireEdges(
         b = cells[i]!,
         dx = delta(b.cellX, a.cellX, world.widthCells),
         dy = delta(b.cellY, a.cellY, world.heightCells);
-      // Not cardinal (a diagonal jump) or not a move: no edge.
-      if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
-      const origin = dx > 0 || dy > 0 ? a : b,
+      let origin: TravelCell, direction: DesireEdge['direction'];
+      if (Math.abs(dx) + Math.abs(dy) === 1) {
+        origin = dx > 0 || dy > 0 ? a : b;
         direction = dx ? 0 : 1;
-      found.set((origin.cellY * world.widthCells + origin.cellX) * 2 + direction, {
+      } else if (Math.abs(dx) === 1 && Math.abs(dy) === 1) {
+        // The origin is the northern end; south-east when both axes move the same way.
+        origin = dy > 0 ? a : b;
+        direction = dx === dy ? 2 : 3;
+      } else continue; // Not a move, or a jump longer than one cell.
+      found.set((origin.cellY * world.widthCells + origin.cellX) * 4 + direction, {
         cellX: origin.cellX,
         cellY: origin.cellY,
         direction,

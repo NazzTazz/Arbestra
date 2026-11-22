@@ -328,7 +328,7 @@ it('subscribes to the desire chunks the server resolves, keeps them on every rec
     key: string,
     from: string,
     to: string,
-    upsert: ReturnType<typeof cell>[],
+    upsert: Array<ReturnType<typeof cell> & { southEast?: true; southWest?: true }>,
     remove: string[] = [],
   ): SyncV2Batch['groups'][number] => ({
     stream: { kind: 'desire', key, epoch },
@@ -344,7 +344,7 @@ it('subscribes to the desire chunks the server resolves, keeps them on every rec
     if (String(url).endsWith('/sync/stream')) {
       const body = JSON.parse(String(init?.body)) as SyncV2ReadRequest;
       reconnects.push(body);
-      // The server's delta: a second edge of a cell of the seam chunk, and a cell that left the other.
+      // The server's delta: a second edge of a cell of the seam chunk, a diagonal one (R2a), and a cell that left the other.
       const delta: SyncV2Batch = {
         protocol: 2,
         worldId,
@@ -355,7 +355,10 @@ it('subscribes to the desire chunks the server resolves, keeps them on every rec
         groups: [
           { stream: { kind: 'village', key: villageId, epoch }, fromRevision: '4', toRevision: '4', changes: [] },
           desire('0,0', '2', '3', [], ['3,5']),
-          desire('63,31', '1', '2', [cell(2047, 1023, true, true), cell(2046, 1023, false, true)]),
+          desire('63,31', '1', '2', [
+            cell(2047, 1023, true, true),
+            { ...cell(2046, 1023, false, true), southWest: true },
+          ]),
         ],
       };
       return new Response(`event: batch\ndata: ${JSON.stringify(delta)}\n\n`, {
@@ -413,7 +416,7 @@ it('subscribes to the desire chunks the server resolves, keeps them on every rec
     // And a delta of those chunks is applied to the derived cells.
     expect([...desirePathsFromSyncV2(published[1]!)]).toEqual([
       ['2047,1023', { cellX: 2047, cellY: 1023, east: true, south: true }],
-      ['2046,1023', { cellX: 2046, cellY: 1023, east: false, south: true }],
+      ['2046,1023', { cellX: 2046, cellY: 1023, east: false, south: true, southWest: true }],
     ]);
   } finally {
     transport.close();

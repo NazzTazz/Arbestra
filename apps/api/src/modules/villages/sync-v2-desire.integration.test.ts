@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { sql } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import {
   applySyncV2Batch,
@@ -10,6 +10,7 @@ import {
 } from '@arbestra/contracts';
 import { createDatabase } from '../../database/connection.js';
 import { migrateToLatest } from '../../database/migrate.js';
+import * as desireDiagonalsMigration from '../../database/migrations/087_desire_diagonals.js';
 import { resetE2eState } from '../../database/reset-e2e.js';
 import { DEVELOPMENT_IDS as ids } from '../../database/seed.js';
 import { testDatabaseUrl } from '../../database/test-environment.js';
@@ -55,7 +56,7 @@ afterEach(async () => {
   }
 });
 
-type Edge = { x: number; y: number; direction: 0 | 1 };
+type Edge = { x: number; y: number; direction: 0 | 1 | 2 | 3 };
 /** What the desire task does: add passages to edges, in one statement. */
 async function pass(worldId: string, edges: Edge[], by = 1) {
   await db.transaction().execute(async (tx) => {
@@ -82,6 +83,8 @@ async function pass(worldId: string, edges: Edge[], by = 1) {
 }
 const east = (x: number, y: number): Edge => ({ x, y, direction: 0 });
 const south = (x: number, y: number): Edge => ({ x, y, direction: 1 });
+const southEast = (x: number, y: number): Edge => ({ x, y, direction: 2 });
+const southWest = (x: number, y: number): Edge => ({ x, y, direction: 3 });
 const chunkOf = (x: number, y: number) => `${Math.floor(x / 32)},${Math.floor(y / 32)}`;
 async function counter(worldId: string, key: string) {
   const row = (
@@ -225,6 +228,171 @@ it('publishes an edge inserted at or above the threshold, and an edge that is de
       remove: [],
     },
   ]);
+});
+
+it('publishes a diagonal edge like a cardinal one, as flags present only when true (R2a, migration 087)', async () => {
+  const key = chunkOf(100, 200);
+  for (let i = 1; i < N; i++) await pass(ids.world, [southEast(100, 200), southWest(101, 200)]);
+  const before = await counter(ids.world, key);
+  const first = await capture(request(7, [scope(key)]));
+  expect(desireGroup(first, key).changes).toEqual([{ component: 'desirePaths', upsert: [], remove: [] }]);
+  let state: SyncV2State = (
+    applySyncV2Batch(
+      {
+        worldId: ids.world,
+        villageId: ids.village,
+        generation: 7,
+        scopes: new Map(),
+        subscribedScopes: new Set(first.groups.map((group) => `${group.stream.kind}:${group.stream.key}`)),
+      },
+      first,
+    ) as { state: SyncV2State }
+  ).state;
+  // The N-th passage of both diagonals in one statement: one revision, both origin cells.
+  await pass(ids.world, [southEast(100, 200), southWest(101, 200)]);
+  expect(await revision(ids.world, key)).toBe(BigInt(before.revision) + 1n);
+  expect((await journal(ids.world, key)).at(-1)!.changes).toEqual([
+    { component: 'desirePaths', key: '100,200' },
+    { component: 'desirePaths', key: '101,200' },
+  ]);
+  const crossing = await capture(request(7, [scope(key)], cursorsOf(first)));
+  expect(desireGroup(crossing, key).changes).toEqual([
+    {
+      component: 'desirePaths',
+      upsert: [
+        { id: '100,200', cellX: 100, cellY: 200, east: false, south: false, southEast: true },
+        { id: '101,200', cellX: 101, cellY: 200, east: false, south: false, southWest: true },
+      ],
+      remove: [],
+    },
+  ]);
+  const applied = applySyncV2Batch(state, crossing);
+  expect(applied.kind).toBe('applied');
+  state = (applied as { state: SyncV2State }).state;
+  expect(desirePathsFromSyncV2(state).get('101,200')).toEqual({
+    cellX: 101,
+    cellY: 200,
+    east: false,
+    south: false,
+    southWest: true,
+  });
+  // Every edge of a cell in one entity; a cell without a diagonal carries no diagonal key at all.
+  await pass(ids.world, [east(100, 200), south(100, 200), southWest(100, 200), east(102, 200)], N);
+  const all = await capture(request(7, [scope(key)]));
+  expect(desireGroup(all, key).changes).toEqual([
+    {
+      component: 'desirePaths',
+      upsert: [
+        {
+          id: '100,200',
+          cellX: 100,
+          cellY: 200,
+          east: true,
+          south: true,
+          southEast: true,
+          southWest: true,
+        },
+        { id: '101,200', cellX: 101, cellY: 200, east: false, south: false, southWest: true },
+        { id: '102,200', cellX: 102, cellY: 200, east: true, south: false },
+      ],
+      remove: [],
+    },
+  ]);
+  expect(JSON.stringify(desireGroup(all, key).changes[0]!.upsert[2])).toBe(
+    '{"id":"102,200","cellX":102,"cellY":200,"east":true,"south":false}',
+  );
+  // Deleting a visible diagonal publishes its cell; the cell with nothing left is removed.
+  const base = await capture(request(7, [scope(key)]));
+  await db
+    .deleteFrom('worldDesireEdges')
+    .where('worldId', '=', ids.world)
+    .where('cellX', '=', 101)
+    .where('direction', '=', 3)
+    .execute();
+  const removal = await capture(request(7, [scope(key)], cursorsOf(base)));
+  expect(desireGroup(removal, key).changes).toEqual([{ component: 'desirePaths', upsert: [], remove: ['101,200'] }]);
+  expectNoCounts([first, crossing, all, removal]);
+});
+
+it('keeps a diagonal edge of a seam in the chunk of its origin cell', async () => {
+  // South-west of column 0 joins the last column, south-east of the last cell joins (0, 0): both
+  // belong to their origin, never to the chunk of the cell they reach.
+  await pass(ids.world, [southWest(0, 40), southEast(LAST_X, LAST_Y), southWest(5, LAST_Y)], N);
+  expect(await journal(ids.world, chunkOf(LAST_X, 41))).toEqual([]);
+  expect(await journal(ids.world, '0,0')).toEqual([]);
+  const snapshot = await capture(request(8, [scope(chunkOf(0, 40)), scope(chunkOf(LAST_X, LAST_Y)), scope('0,31')]));
+  expect(desireGroup(snapshot, chunkOf(0, 40)).changes[0]!.upsert).toEqual([
+    { id: '0,40', cellX: 0, cellY: 40, east: false, south: false, southWest: true },
+  ]);
+  expect(desireGroup(snapshot, chunkOf(LAST_X, LAST_Y)).changes[0]!.upsert).toEqual([
+    { id: `${LAST_X},${LAST_Y}`, cellX: LAST_X, cellY: LAST_Y, east: false, south: false, southEast: true },
+  ]);
+  expect(desireGroup(snapshot, '0,31').changes[0]!.upsert).toEqual([
+    { id: `5,${LAST_Y}`, cellX: 5, cellY: LAST_Y, east: false, south: false, southWest: true },
+  ]);
+});
+
+it('allows the four directions only, and 087 down restores the constraint of 085 without the diagonals', async () => {
+  // Out of range: refused by the constraint.
+  await expect(pass(ids.world, [{ x: 7, y: 7, direction: 4 as never }], N)).rejects.toThrow(
+    /world_desire_edges_direction_check/,
+  );
+  await pass(ids.world, [east(7, 7), south(7, 7), southEast(7, 7)], N);
+  await pass(ids.world, [southWest(8, 7)], N - 1);
+  const definition = async (executor: Kysely<unknown>) =>
+    (
+      await sql<{ definition: string }>`select pg_get_constraintdef(oid) as definition from pg_constraint
+        where conrelid='world_desire_edges'::regclass and conname='world_desire_edges_direction_check'`.execute(
+        executor,
+      )
+    ).rows.map((row) => row.definition);
+  const edges = async (executor: Kysely<unknown>) =>
+    (
+      await sql<{
+        x: number;
+        y: number;
+        direction: number;
+        passages: number;
+      }>`select cell_x as x,cell_y as y,direction,passages
+        from world_desire_edges where world_id=${ids.world}::uuid order by 1,2,3`.execute(executor)
+    ).rows;
+  const migrated = await edges(db as unknown as Kysely<unknown>);
+  expect(migrated.map((edge) => edge.direction)).toEqual([0, 1, 2, 3]);
+  class Discard extends Error {}
+  await expect(
+    db.transaction().execute(async (tx) => {
+      const executor = tx as unknown as Kysely<unknown>;
+      // The constraint as 085 created it, inline in a table of the same column.
+      await sql`create temporary table desire_085(direction smallint not null check (direction in (0, 1))) on commit drop`.execute(
+        executor,
+      );
+      const original = (
+        await sql<{ definition: string }>`select pg_get_constraintdef(oid) as definition from pg_constraint
+          where conrelid='desire_085'::regclass and contype='c'`.execute(executor)
+      ).rows.map((row) => row.definition);
+      expect(await definition(executor)).not.toEqual(original);
+      await desireDiagonalsMigration.down(executor);
+      expect(await definition(executor)).toEqual(original);
+      // The cardinal edges stay as they were; the diagonals, visible or not, are gone.
+      expect(await edges(executor)).toEqual(migrated.filter((edge) => edge.direction < 2));
+      await sql`savepoint refused`.execute(executor);
+      await expect(
+        sql`insert into world_desire_edges values(${ids.world}::uuid,9,9,2,1,now())`.execute(executor),
+      ).rejects.toThrow(/world_desire_edges_direction_check/);
+      await sql`rollback to savepoint refused`.execute(executor);
+      // The cell whose visible diagonal went is published at the commit; the hidden one is not.
+      const touched = (
+        await sql<{ key: string }>`select entity_key as key from game_sync_pending
+          where stream_kind='desire' and world_id=${ids.world}::uuid order by 1`.execute(executor)
+      ).rows.map((row) => row.key);
+      expect(touched).toEqual(['7,7']);
+      // And up again: the diagonals are accepted once more.
+      await desireDiagonalsMigration.up(executor);
+      await sql`insert into world_desire_edges values(${ids.world}::uuid,9,9,3,1,now())`.execute(executor);
+      throw new Discard();
+    }),
+  ).rejects.toBeInstanceOf(Discard);
+  expect(await edges(db as unknown as Kysely<unknown>)).toEqual(migrated);
 });
 
 it('touches each chunk of one statement once, in a single commit, and no other', async () => {

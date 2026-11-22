@@ -1,6 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 import {
   automaticBraziers,
+  coarseTravelPath,
   desireCellsFromEdges,
   desireEdges,
   desireRoutes,
@@ -20,12 +21,21 @@ import type { Database } from '../../database/schema.js';
 
 type World = { widthCells: number; heightCells: number };
 
-/** Canonical edges of the routes a village shows (`travelRoutes` of its presentation). */
+/** Canonical edges of the routes a village shows (`travelRoutes` of its presentation): the cells
+ * the decorative topology draws (`coarseTravelPath`), cardinal steps only. A route is drawn from
+ * its cells rounded point by point and never along a diagonal, so neither the local-detour rule
+ * nor the diagonal edges of `desireEdges` (R2a) apply: the start state stays what is displayed,
+ * exactly as before them. */
 export function displayedDesireEdges(routes: readonly TravelRoute[], world: World): DesireEdge[] {
   return desireEdges(
-    routes.map((route) => route.cells),
+    routes.map((route) =>
+      coarseTravelPath(
+        route.cells.filter((p) => Number.isFinite(p.cellX) && Number.isFinite(p.cellY)),
+        world,
+      ),
+    ),
     world,
-  );
+  ).filter((edge) => edge.direction < 2);
 }
 
 const edgeKey = (edge: DesireEdge) => `${edge.cellX}:${edge.cellY}:${edge.direction}`;

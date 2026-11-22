@@ -40,7 +40,7 @@ function fixtureRoutes(): TravelRoute[] {
     route('wood:seam-y', 'wood', [at(63, 28), at(63, 32), at(2, 32)]),
     route('garden:seam-corner', 'garden', [at(30, 62), at(30, 2)]),
     route('wood:fine', 'wood', fine),
-    // A diagonal jump is no edge for either derivation.
+    // A unit diagonal: a desire edge since R2a, drawn by neither derivation.
     route('wood:jump', 'wood', [at(50, 50), at(51, 51), at(51, 55)]),
   ];
 }
@@ -115,6 +115,56 @@ describe('desireRoutes', () => {
     expect(routes.every((r) => r.id.startsWith(DESIRE_ROUTE_PREFIX) && r.cells.length === 2)).toBe(true);
   });
 
+  it('makes a two-cell segment per visible diagonal edge too, after the cardinal ones of its cell, wrapped', () => {
+    const routes = desireRoutes(
+      [
+        { cellX: 63, cellY: 5, east: false, south: false, southEast: true },
+        { cellX: 0, cellY: 5, east: false, south: false, southWest: true },
+        { cellX: 7, cellY: 63, east: false, south: false, southEast: true, southWest: true },
+        { cellX: 3, cellY: 4, east: true, south: true, southEast: true, southWest: true },
+        { cellX: 9, cellY: 9, east: true, south: false, southEast: false },
+      ],
+      world,
+    );
+    expect(routes.map((r) => [r.id, r.cells, r.destination])).toEqual([
+      ['desire:3:4:east', [at(3, 4), at(4, 4)], at(4, 4)],
+      ['desire:3:4:south', [at(3, 4), at(3, 5)], at(3, 5)],
+      ['desire:3:4:south-east', [at(3, 4), at(4, 5)], at(4, 5)],
+      ['desire:3:4:south-west', [at(3, 4), at(2, 5)], at(2, 5)],
+      ['desire:0:5:south-west', [at(0, 5), at(63, 6)], at(63, 6)],
+      ['desire:63:5:south-east', [at(63, 5), at(0, 6)], at(0, 6)],
+      ['desire:9:9:east', [at(9, 9), at(10, 9)], at(10, 9)],
+      ['desire:7:63:south-east', [at(7, 63), at(8, 0)], at(8, 0)],
+      ['desire:7:63:south-west', [at(7, 63), at(6, 0)], at(6, 0)],
+    ]);
+    expect(new Set(routes.map((r) => r.kind))).toEqual(new Set(['wood']));
+    // The edges they are made from, and back.
+    const edges = desireEdges(
+      routes.map((r) => r.cells),
+      world,
+    );
+    expect(edges.filter((e) => e.direction >= 2)).toEqual([
+      { cellX: 0, cellY: 5, direction: 3 },
+      { cellX: 3, cellY: 4, direction: 2 },
+      { cellX: 3, cellY: 4, direction: 3 },
+      { cellX: 7, cellY: 63, direction: 2 },
+      { cellX: 7, cellY: 63, direction: 3 },
+      { cellX: 63, cellY: 5, direction: 2 },
+    ]);
+    expect(desireCellsFromEdges(edges).find((c) => c.cellX === 3 && c.cellY === 4)).toEqual({
+      cellX: 3,
+      cellY: 4,
+      east: true,
+      south: true,
+      southEast: true,
+      southWest: true,
+    });
+    // A cell without a diagonal keeps the shape of T3b.
+    expect(desireCellsFromEdges([{ cellX: 1, cellY: 1, direction: 0 }])).toEqual([
+      { cellX: 1, cellY: 1, east: true, south: false },
+    ]);
+  });
+
   it('does not depend on the order the cells arrive in', () => {
     const cells = desireCellsOf(fixtureRoutes());
     expect(cells.length).toBeGreaterThan(20);
@@ -171,6 +221,57 @@ describe('golden: desire edges draw what the network drew', () => {
     expect(byId(automaticRoadStrokes(desire.travelRoutes, world, allowed).filter((s) => !isJoint(s.id)))).toEqual(
       byId(automaticRoadStrokes(routes, world, allowed).filter((s) => !isJoint(s.id))),
     );
+  });
+});
+
+describe('diagonal desire paths before they are drawn (R2a)', () => {
+  // A diagonal next to every cardinal shape of the fixture: at a corner, along a leg, across both
+  // seams, alone, and into the occupied cells.
+  const cardinal = desireCellsOf(fixtureRoutes()),
+    diagonals = desireCellsFromEdges([
+      { cellX: 10, cellY: 10, direction: 2 },
+      { cellX: 12, cellY: 10, direction: 3 },
+      { cellX: 15, cellY: 12, direction: 2 },
+      { cellX: 63, cellY: 30, direction: 2 },
+      { cellX: 0, cellY: 63, direction: 3 },
+      { cellX: 30, cellY: 63, direction: 2 },
+      { cellX: 44, cellY: 44, direction: 2 },
+      { cellX: 45, cellY: 44, direction: 3 },
+      { cellX: 14, cellY: 14, direction: 2 },
+    ]);
+  const merged = new Map(cardinal.map((c) => [`${c.cellX},${c.cellY}`, { ...c }]));
+  for (const d of diagonals) {
+    const known = merged.get(`${d.cellX},${d.cellY}`);
+    if (known) Object.assign(known, d.southEast ? { southEast: true } : {}, d.southWest ? { southWest: true } : {});
+    else merged.set(`${d.cellX},${d.cellY}`, d);
+  }
+  const plain = fixtureState(desireRoutes(cardinal, world)),
+    withDiagonals = fixtureState(desireRoutes(merged.values(), world)),
+    onlyDiagonals = fixtureState(desireRoutes(diagonals, world));
+
+  it('are routes of the state, and the fixture does carry them', () => {
+    const ids = withDiagonals.travelRoutes.map((r) => r.id);
+    // The nine above, and the unit jump of the fixture (`wood:jump`), now a south-east edge.
+    expect(ids.filter((id) => id.endsWith(':south-east') || id.endsWith(':south-west'))).toHaveLength(10);
+    expect(plain.travelRoutes.map((r) => r.id)).toContain('desire:50:50:south-east');
+    expect(ids.length).toBe(plain.travelRoutes.length + 9);
+  });
+
+  it('light no brazier and move none', () => {
+    expect(automaticBraziers(onlyDiagonals)).toEqual([]);
+    expect(byId(automaticBraziers(withDiagonals))).toEqual(byId(automaticBraziers(plain)));
+  });
+
+  it('draw no stroke, and leave the strokes and the frozen arms of the cardinal paths as they are', () => {
+    expect(automaticRoadStrokes(onlyDiagonals.travelRoutes, world)).toEqual([]);
+    expect(byId(automaticRoadStrokes(withDiagonals.travelRoutes, world))).toEqual(
+      byId(automaticRoadStrokes(plain.travelRoutes, world)),
+    );
+    expect(createInfrastructureEditContext(onlyDiagonals as never).automatic.size).toBe(0);
+    const expected = createInfrastructureEditContext(plain as never).automatic,
+      actual = createInfrastructureEditContext(withDiagonals as never).automatic;
+    expect([...actual.keys()].sort()).toEqual([...expected.keys()].sort());
+    for (const [cell, strokes] of expected) expect(byId(actual.get(cell)!)).toEqual(byId(strokes));
   });
 });
 

@@ -5,15 +5,25 @@ import { Type } from '@sinclair/typebox';
  * slice T3b). The `desire` stream kind is keyed per canonical chunk ("cx,cy",
  * chunk units, like `spatial`) and carries one component. Counts and
  * timestamps of `world_desire_edges` never leave the server (decision 15):
- * a cell appears here only once one of its two edges is visible (the
+ * a cell appears here only once one of its four edges is visible (the
  * threshold lives in the database, `world_desire_visible_passages()`), and it
- * says nothing beyond which of the two edges are. The ground owns the data:
+ * says nothing beyond which of the four edges are. The ground owns the data:
  * every village of the world reads the same cells (decision 4). */
 export const SYNC_V2_DESIRE_COMPONENTS = ['desirePaths'] as const;
 
 const cellKey = Type.String({ pattern: '^[0-9]+,[0-9]+$' });
-/** One cell whose east edge (towards cell x + 1) or south edge (towards cell
- * y + 1) is visible. `id` is the canonical cell, "x,y". */
+/** One cell whose east edge (towards cell x + 1), south edge (towards cell
+ * y + 1), south-east edge (towards x + 1, y + 1) or south-west edge (towards
+ * x - 1, y + 1) is visible. `id` is the canonical cell, "x,y".
+ *
+ * The diagonal flags (slice R2a of docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md)
+ * are optional and the server writes them only when true: a cell without a
+ * visible diagonal is the entity of T3b byte for byte, which a client built
+ * before them still accepts. Only a cell with a diagonal is refused there (a
+ * resynchronization, until the tab reloads); before the 8-direction search
+ * (R1) a diagonal only comes from a legacy path that steps through the corner
+ * two cells share, or a sparse unit jump. A client reads an absent flag as
+ * false. */
 export const SyncV2DesireCellSchema = Type.Object(
   {
     id: cellKey,
@@ -21,6 +31,8 @@ export const SyncV2DesireCellSchema = Type.Object(
     cellY: Type.Integer({ minimum: 0 }),
     east: Type.Boolean(),
     south: Type.Boolean(),
+    southEast: Type.Optional(Type.Literal(true)),
+    southWest: Type.Optional(Type.Literal(true)),
   },
   { additionalProperties: false },
 );

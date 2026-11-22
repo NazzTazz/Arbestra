@@ -36,6 +36,7 @@ import * as scienceTransportMsMigration from './migrations/083_science_transport
 import * as worksiteBudgetWakesMigration from './migrations/084_worksite_budget_wakes.js';
 import * as desireEdgesMigration from './migrations/085_desire_edges.js';
 import * as desireStreamMigration from './migrations/086_desire_stream.js';
+import * as desireDiagonalsMigration from './migrations/087_desire_diagonals.js';
 import * as levelingMigration from './migrations/047_leveling.js';
 import * as populationGrowthMigration from './migrations/043_population_growth.js';
 import * as asyncExpeditionsMigration from './migrations/042_async_expeditions.js';
@@ -180,6 +181,7 @@ const migrationProvider: MigrationProvider = {
       '084_worksite_budget_wakes': worksiteBudgetWakesMigration,
       '085_desire_edges': desireEdgesMigration,
       '086_desire_stream': desireStreamMigration,
+      '087_desire_diagonals': desireDiagonalsMigration,
     };
   },
 };
