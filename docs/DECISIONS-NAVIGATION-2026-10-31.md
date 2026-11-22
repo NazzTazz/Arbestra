@@ -37,3 +37,8 @@ Tranchées par Tristan pour T3 ([plan](SPEC-REFONTE-TRAJETS-2026-11-10.md) §17)
 20. **Exploration** : une exploration compte comme un passage, comme un relevé (marche locale).
 21. **Pas de rattrapage** : les missions antérieures à T3 ne comptent pas ; l'état de départ est l'affichage du jour (décision 9) et le comptage commence à la migration 085.
 22. **Promenades** (mode sentiers) : un habitant se promène vers sa maison dès qu'un sentier ou une case de route rejoint sa case ou une case libre voisine ; une maison qu'aucun sentier ne rejoint n'a pas de promenade.
+
+## Décisions de game design du 22 novembre 2026
+
+23. **Diagonales.** Les trajets à pied vont dans 8 directions. Un pas en diagonale coûte √2 fois un pas droit, en coût comme en durée (la décision 8 est conservée). Remplace le « piéton cardinal » de la décision 11.
+24. **Refonte du cœur de recherche maintenant**, par remplacement, avec une seule recette sur le résultat final. Spec : [trajets à 8 directions](SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md).
