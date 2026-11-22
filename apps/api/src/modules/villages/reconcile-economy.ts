@@ -51,7 +51,9 @@ type DueTransition =
   | { id: string; through: Date; type: 'extraction' }
   | { id: string; through: Date; type: 'science' }
   | { id: string; through: Date; type: 'processing' }
-  | { id: string; through: Date; type: 'market' | 'trade-offer' | 'trade-delivery' };
+  | { id: string; through: Date; type: 'market' }
+  | { id: string; through: Date; type: 'trade-offer' }
+  | { id: string; through: Date; type: 'trade-delivery' };
 
 /** Workshop commands have no route/terrain decision. Discover due economic
  * predecessors under the village lock before deciding whether their shared
