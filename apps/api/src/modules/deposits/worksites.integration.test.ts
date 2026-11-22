@@ -446,10 +446,12 @@ it('excludes a genuinely unreachable initial selection but propagates an interru
 
 it('admits and resumes a worksite with an exact 4052 ms sub-cell journey', async () => {
   await fixture(async (tx, featureId, t) => {
+    // Cardinal segments: since 8-direction travel a segment is timed by its
+    // Euclidean length (decision 23); 0.526 + 3.526 cells still make 4052 ms.
     const route = [
       { cellX: 1024, cellY: 512 },
       { cellX: 1024.526, cellY: 512 },
-      { cellX: 1023, cellY: 514 },
+      { cellX: 1024.526, cellY: 515.526 },
     ];
     expect(travelDuration(route, village)).toBe(4052);
     const economy = { worldId, villageId, through: t };

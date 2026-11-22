@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { Worker } from 'node:worker_threads';
 import {
   buildTravelNetwork,
-  refineTravelRoute,
+  planVillageRoute,
   gardenTourLegKey,
   gardenTourLegs,
   planVillageLeg,
@@ -17,6 +17,11 @@ import { networkState } from './network-job.js';
 import { bindTransactionRefiner, commandTravelNetwork } from './transaction-refinement.js';
 import { createDatabase } from '../../database/connection.js';
 
+/** The mission path the worker returns for a refinement job (R1: the village search). */
+function mission(geometry: TravelNetworkState, route: TravelRoute) {
+  const outcome = planVillageRoute(geometry, route);
+  return outcome.kind === 'found' ? { ...route, version: 2 as const, cells: outcome.path } : null;
+}
 const state: TravelNetworkState = {
   world: { id: 'world', widthCells: 16, heightCells: 16 },
   village: { anchorCellX: 2, anchorCellY: 3, townHallBuildingId: 'hall' },
@@ -219,7 +224,7 @@ it('keeps completed gardens walkable through the worker projection and invalidat
   };
   try {
     const load = async () => ({ state: networkState(geometry), refinement });
-    const expected = refineTravelRoute(geometry, refinement);
+    const expected = mission(geometry, refinement);
     expect(expected).not.toBeNull();
     expect(await compute.refine(load)).toEqual([expected]);
     expect(
@@ -306,7 +311,7 @@ it('refines an individual route in the worker with identical geometry and fresh 
     destination: { cellX: 5, cellY: 3 },
   };
   try {
-    const expected = refineTravelRoute(geometry, refinement, new Set());
+    const expected = mission(geometry, refinement);
     expect(expected?.cells.length).toBeGreaterThan(2);
     expect(expected?.version).toBe(2);
     const first = await compute.refine(async () => ({ state: geometry, refinement }));

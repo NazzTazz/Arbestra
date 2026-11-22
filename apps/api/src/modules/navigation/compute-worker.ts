@@ -12,7 +12,7 @@ import {
   ROAD_STEP_COST,
   spawnDelta,
   buildTravelNetwork,
-  refineTravelRoute,
+  planVillageRoute,
   planVillageLeg,
   gardenTourLegKey,
   type TravelGround,
@@ -277,17 +277,13 @@ parentPort!.on(
           });
           return;
         }
+        // A mission path (refineVillagePath): the village search, one route or none.
         const refinement = job.network.refinement;
-        const route = refinement
-          ? refineTravelRoute(state, refinement, new Set(), undefined, ground, checkpoint, {
-              onLimit: () => {
-                throw Error(NAVIGATION_BUDGET);
-              },
-            })
-          : undefined;
+        const outcome = refinement ? planVillageRoute(state, refinement, ground, { checkpoint }) : undefined;
+        if (outcome?.kind === 'budget') throw Error(NAVIGATION_BUDGET);
         const network = refinement
-          ? route
-            ? [route]
+          ? outcome?.kind === 'found'
+            ? [{ ...refinement, version: 2 as const, cells: outcome.path }]
             : []
           : buildTravelNetwork(state, job.network.woodlandTargets ?? [], ground, checkpoint);
         while (sources.size > 2) sources.delete(sources.keys().next().value!);

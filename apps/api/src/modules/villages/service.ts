@@ -30,7 +30,7 @@ import {
   designatedTrees,
   queueContribution,
   exploitationAdmissionCap,
-  refineTravelRoute,
+  planVillageRoute,
   travelDuration,
 } from '@arbestra/contracts';
 import {
@@ -548,20 +548,21 @@ export async function refineVillagePath(
   const { context, rc1 } = await villageNavigationContext(tx, village, existingGround);
   const executor = transactionRefiner(tx),
     input = { id, kind: 'stone' as const, cells: path, destination: path.at(-1)! };
-  const route = executor
-    ? (
-        await executor.refine(async (known) => ({
-          ...networkJob(networkState(context), rc1 ?? undefined, known),
-          refinement: input,
-        }))
-      )[0]
-    : refineTravelRoute(context, input, new Set(), undefined, rc1?.navigation, undefined, {
-        onLimit: () => {
-          throw navigationBudgetError();
-        },
-      });
-  if (!route) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun accès praticable depuis le village.');
-  return route.cells;
+  let cells: TravelCell[] | undefined;
+  if (executor)
+    cells = (
+      await executor.refine(async (known) => ({
+        ...networkJob(networkState(context), rc1 ?? undefined, known),
+        refinement: input,
+      }))
+    )[0]?.cells;
+  else {
+    const outcome = planVillageRoute(context, input, rc1?.navigation);
+    if (outcome.kind === 'budget') throw navigationBudgetError();
+    if (outcome.kind === 'found') cells = outcome.path;
+  }
+  if (!cells) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun accès praticable depuis le village.');
+  return cells;
 }
 
 /** Geometry of a village mission search: its terrain region, natural features,

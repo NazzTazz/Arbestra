@@ -1,9 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { buildingAccesses } from './building-access.js';
 import { emptyInfrastructure } from './infrastructure.js';
 import { canWalkSpawnSegment } from './spawn-access.js';
 import { pathIntersectsBox } from './path-obstacles.js';
 import { refineTravelRoute, type TravelGround, type TravelNetworkState, type TravelRoute } from './travel-paths.js';
+import { planVillageRoute } from './village-search.js';
+
+/** A mission path (R1: the village search), or null; `budget` throws. */
+function mission(state: TravelNetworkState, route: TravelRoute, ground: TravelGround) {
+  const outcome = planVillageRoute(state, route, ground);
+  if (outcome.kind === 'budget') throw Error('search exhausted');
+  return outcome.kind === 'found' ? { ...route, version: 2 as const, cells: outcome.path } : null;
+}
 
 function fixture(seam = false) {
   const x = (n: number) => (n + (seam ? 210 : 0)) % 256;
@@ -68,12 +76,7 @@ describe('certified coarse guide refinement', () => {
       dry: true,
       blocked: Math.abs(x - 89) < 0.15 && Math.abs(y - 10) < 0.15,
     });
-    const result = refineTravelRoute(state, route, undefined, undefined, ground, undefined, {
-      maxVisited: 2048,
-      onLimit: () => {
-        throw Error('search exhausted');
-      },
-    })!;
+    const result = mission(state, route, ground)!;
     expect(result).not.toBeNull();
     expect(result.cells.at(-1)).toEqual(route.destination);
     for (let i = 1; i < result.cells.length; i++) {
@@ -86,12 +89,7 @@ describe('certified coarse guide refinement', () => {
     'reaches a distant woodland within a bounded search, including the real door (seam %s)',
     (seam) => {
       const { state, ground, route } = fixture(seam);
-      const result = refineTravelRoute(state, route, undefined, undefined, ground, undefined, {
-        maxVisited: 2048,
-        onLimit: () => {
-          throw Error('search exhausted');
-        },
-      });
+      const result = mission(state, route, ground);
       expect(result).not.toBeNull();
       expect(result!.cells[0]).toEqual(buildingAccesses(state, 'hall')[0]!.position);
       expect(result!.cells.at(-1)).toEqual(route.destination);
@@ -152,15 +150,18 @@ describe('certified coarse guide refinement', () => {
       }
     },
   );
-  it('never certifies a fully blocked destination cell or turns a search limit into unreachability', () => {
+  it('never certifies a fully blocked destination cell, and proves it at once', () => {
     const { state, ground, route } = fixture();
     ground.revision = 'blocked-destination';
     ground.sample = (x, y) => ({ elevation: 1, dry: true, blocked: Math.abs(x - 90) < 0.5 && Math.abs(y - 10) < 0.5 });
-    const onLimit = vi.fn();
-    expect(
-      refineTravelRoute(state, route, undefined, undefined, ground, undefined, { maxVisited: 2048, onLimit }),
-    ).toBeNull();
-    expect(onLimit).toHaveBeenCalledOnce();
+    const stats = { visited: 0, certified: 0 };
+    // No point of the cell can be stood on: unreachable before any search.
+    expect(planVillageRoute(state, route, ground, { stats })).toEqual({ kind: 'unreachable' });
+    expect(stats.visited).toBe(0);
+    // A lower node bound ends in budget, never in unreachable.
+    ground.revision = 'free-destination';
+    ground.sample = () => ({ elevation: 1, dry: true, blocked: false });
+    expect(planVillageRoute(state, route, ground, { maxVisited: 8 })).toEqual({ kind: 'budget' });
   });
   // Alpha, 27/10/2026: 10 of 158 groves in range were refused "unreachable"
   // because an RC1 trunk covered or sealed the exact centre point of the cell.
@@ -168,12 +169,7 @@ describe('certified coarse guide refinement', () => {
     const { state, ground, route } = fixture();
     ground.revision = 'trunk-on-centre';
     ground.sample = (x, y) => ({ elevation: 1, dry: true, blocked: Math.abs(x - 90) < 0.2 && Math.abs(y - 10) < 0.2 });
-    const result = refineTravelRoute(state, route, undefined, undefined, ground, undefined, {
-      maxVisited: 2048,
-      onLimit: () => {
-        throw Error('search exhausted');
-      },
-    });
+    const result = mission(state, route, ground);
     expect(result).not.toBeNull();
     const end = result!.cells.at(-1)!;
     expect(end).not.toEqual(route.destination);
@@ -188,25 +184,19 @@ describe('certified coarse guide refinement', () => {
     // A free centre keeps the exact destination point.
     ground.revision = 'free-centre';
     ground.sample = () => ({ elevation: 1, dry: true, blocked: false });
-    expect(refineTravelRoute(state, route, undefined, undefined, ground)!.cells.at(-1)).toEqual(route.destination);
+    expect(mission(state, route, ground)!.cells.at(-1)).toEqual(route.destination);
   });
-  it('does not reuse a certified guide after an obstacle changes, or expose mutable cached cells', () => {
+  it('stops beside an accessory placed on the centre of the destination', () => {
     const { state, ground, route } = fixture();
     state.world.id = 'guide-cache';
     ground.woodedCells = ground.woodedCells!.filter((p) => p.cellX < 100 && p.cellY >= 80 && p.cellY <= 100);
-    const first = refineTravelRoute(state, route, undefined, undefined, ground)!;
-    expect(first).not.toBeNull();
-    const saved = structuredClone(first);
-    first.cells[0]!.cellX = 0;
-    const checkpoint = vi.fn();
-    expect(refineTravelRoute(state, route, undefined, undefined, ground, checkpoint)).toEqual(saved);
-    expect(checkpoint).toHaveBeenCalledTimes(1);
+    const first = mission(state, route, ground)!;
+    expect(first.cells.at(-1)).toEqual(route.destination);
     state.infrastructure!.equipment.push({ id: 'closed-goal', x: 90 * 8, y: 10 * 8, quarterTurns: 0, version: 1 });
     // The centre point is now occupied: the grove cell is still the goal, but
-    // the route is recomputed and stops beside the equipment, not on it.
-    const changed = refineTravelRoute(state, route, undefined, undefined, ground);
+    // the route stops beside the equipment, not on it.
+    const changed = mission(state, route, ground);
     expect(changed).not.toBeNull();
-    expect(changed).not.toEqual(saved);
     expect(changed!.cells.at(-1)).not.toEqual(route.destination);
     expect(Math.abs(changed!.cells.at(-1)!.cellX - 90)).toBeLessThanOrEqual(3 / 8);
     expect(Math.abs(changed!.cells.at(-1)!.cellY - 10)).toBeLessThanOrEqual(3 / 8);

@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { gardenTourLegKey, gardenTourLegs, planGardenTour, planGardenTourByLegs } from './garden-tour.js';
 import { emptyInfrastructure } from './infrastructure.js';
-import {
-  planVillageLeg,
-  refineTravelRoute,
-  travelDuration,
-  villageSearchBound,
-  type TravelNetworkState,
-} from './travel-paths.js';
+import { travelDuration, type TravelNetworkState } from './travel-paths.js';
+import { planVillageLeg, searchVillagePath, villageSearchBound } from './village-search.js';
 import type { TravelCell, TravelRoute } from './travel-paths.js';
 const c = (x: number, y = 0): TravelCell => ({ cellX: x, cellY: y });
 const route = (cells: TravelCell[]): TravelRoute => ({
@@ -207,18 +202,11 @@ describe('explicit search outcomes (refonte des trajets T2b, §4.2)', () => {
     expect(planVillageLeg(state(false), c(9, 8), c(2, 2))?.at(-1)).toEqual(c(2, 2));
   });
   it('ends in budget, never unreachable, when the node bound is reached first', () => {
+    expect(searchVillagePath(state(false), c(2, 2), undefined, { maxVisited: 4 })).toEqual({ kind: 'budget' });
+    // planVillageLeg reports the limit to its caller, never a null leg by itself.
     let limited = false;
-    const route = refineTravelRoute(
-      state(false),
-      { id: 'far', kind: 'garden', destination: c(2, 2), cells: [c(2, 2)] },
-      new Set(),
-      undefined,
-      undefined,
-      undefined,
-      { maxVisited: 4, onLimit: () => (limited = true) },
-    );
-    expect(route).toBeNull();
-    expect(limited).toBe(true);
+    expect(planVillageLeg(state(false), null, c(2, 2), undefined, undefined, () => (limited = true))).not.toBeNull();
+    expect(limited).toBe(false);
   });
 });
 

@@ -6,7 +6,13 @@
  * the end, so the script may target the development database. The connection
  * comes from the API configuration (DATABASE_URL, never printed).
  *
- *   tsx src/bench-village-paths.ts --world rc1-dev --village UUID --cells 259:216,258:220,262:223  *     [--repeat 3] [--restore-trees 11059,2823,...]
+ *   tsx src/bench-village-paths.ts --world rc1-dev --village UUID --cells 259:216,258:220,262:223
+ *     [--repeat 3] [--restore-trees 11059,2823,...] [--lane]
+ *
+ * Each target is searched first on a ground revision never seen (an empty
+ * mesh: cold), then `repeat - 1` times on that same revision (warm). Before
+ * R1 the same script timed the former eighth-cell refinement: its figures are
+ * in docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md §6.
  *
  * `--restore-trees` rebuilds the navigation ground with those trunks standing
  * again (the trees felled since an incident), as the navigation worker builds
@@ -42,55 +48,15 @@ const { values } = parseArgs({
 class Rollback extends Error {}
 const ms = (t: number) => Math.round(t * 10) / 10;
 
-/** The search entry point of the current code: the cell search when it
- * exists, else the fine refinement. Typed loosely so the bench survives R1. */
-type Search = (
+/** The mission search (planVillageRoute), from the town hall doors to a cell. */
+function search(
   state: contracts.TravelNetworkState,
   to: TravelCell,
   ground: TravelGround | undefined,
-  stats: { visited: number },
-) => TravelCell[] | null;
-function searcher(): { name: string; run: Search } {
-  const c = contracts as unknown as Record<string, unknown>;
-  if (typeof c.searchVillagePath === 'function') {
-    const f = c.searchVillagePath as (
-      state: contracts.TravelNetworkState,
-      from: TravelCell | null,
-      to: TravelCell,
-      ground: TravelGround | undefined,
-      options: { stats: { visited: number; certified: number } },
-    ) => { kind: string; path?: TravelCell[] };
-    return {
-      name: 'searchVillagePath (cells, 8 directions)',
-      run: (state, to, ground, stats) => {
-        const s = { visited: 0, certified: 0 };
-        const r = f(state, null, to, ground, { stats: s });
-        stats.visited += s.visited;
-        (stats as { certified?: number }).certified = s.certified;
-        return r.kind === 'found' ? r.path! : null;
-      },
-    };
-  }
-  const refine = c.refineTravelRoute as typeof import('@arbestra/contracts').refineTravelRoute;
-  const bound = c.villageSearchBound as (region: { width: number; height: number }) => number;
-  return {
-    name: 'refineTravelRoute (eighth-cell lattice)',
-    run: (state, to, ground, stats) =>
-      refine(
-        state,
-        { id: 'bench', kind: 'stone', destination: to, cells: [to] },
-        new Set(),
-        undefined,
-        ground,
-        undefined,
-        {
-          // The default bound, given explicitly: it bypasses the route cache
-          // (a warm run measures the search, not a lookup).
-          maxVisited: bound(state.region),
-          stats,
-        },
-      )?.cells ?? null,
-  };
+  stats: contracts.VillageSearchStats,
+): TravelCell[] | null {
+  const outcome = contracts.planVillageRoute(state, { cells: [to], destination: to }, ground, { stats });
+  return outcome.kind === 'found' ? outcome.path : null;
 }
 
 await main(async () => {
@@ -103,8 +69,7 @@ await main(async () => {
   });
   const repeat = Math.max(1, Number(values.repeat));
   const db = createDatabase(loadConfig().databaseUrl);
-  const search = searcher();
-  const report: Record<string, unknown> = { search: search.name, targets: [] };
+  const report: Record<string, unknown> = { search: 'planVillageRoute (cells, 8 directions)', targets: [] };
   try {
     await db
       .transaction()
@@ -165,14 +130,20 @@ await main(async () => {
           for (let i = 0; i < repeat; i++) {
             counted.samples = 0;
             counted.sampleMs = 0;
-            const stats = { visited: 0 } as { visited: number; certified?: number };
+            const stats = { visited: 0, certified: 0 };
+            // Run 0 on a ground revision never seen (an empty mesh: cold), the
+            // others on that same revision (its mesh warm).
+            const revisioned = {
+              ...navigation,
+              revision: `${navigation.revision}:bench:${target.cellX}:${target.cellY}`,
+            };
             const t = performance.now(),
-              path = search.run(context as contracts.TravelNetworkState, target, navigation, stats),
+              path = search(context as contracts.TravelNetworkState, target, revisioned, stats),
               searchMs = performance.now() - t;
             runs.push({
               searchMs: ms(searchMs),
               visited: stats.visited,
-              ...(stats.certified !== undefined ? { certified: stats.certified } : {}),
+              certified: stats.certified,
               samples: counted.samples,
               sampleMs: ms(counted.sampleMs),
               found: !!path,
@@ -192,49 +163,8 @@ await main(async () => {
                 : { found: !!path, durationMs: path ? travelDuration(path, village) : null }),
             };
           }
-          // The full search, as a garden tour leg runs it (no witness
-          // shortcut): from the outside point of the door the path left by.
-          let fine: Record<string, unknown> | undefined;
-          const c = contracts as unknown as Record<string, unknown>;
-          const door = (runs[0] as { found: boolean }).found
-            ? search.run(context as contracts.TravelNetworkState, target, navigation, { visited: 0 })?.[1]
-            : undefined;
-          if (door && typeof c.villageSearchBound === 'function') {
-            for (let i = 0; i < 2; i++) {
-              const stats = { visited: 0 };
-              counted.samples = 0;
-              counted.sampleMs = 0;
-              const t = performance.now(),
-                r = contracts.refineTravelRoute(
-                  context as contracts.TravelNetworkState,
-                  { id: 'bench-fine', kind: 'garden', destination: target, cells: [target] },
-                  new Set(),
-                  undefined,
-                  navigation,
-                  undefined,
-                  {
-                    from: door,
-                    gardens: new Set(),
-                    stats,
-                    maxVisited: (c.villageSearchBound as (r: unknown) => number)(context.region),
-                  },
-                );
-              (fine ??= { runs: [] as unknown[] }).runs = [
-                ...((fine.runs as unknown[]) ?? []),
-                {
-                  ms: ms(performance.now() - t),
-                  visited: stats.visited,
-                  samples: counted.samples,
-                  sampleMs: ms(counted.sampleMs),
-                  found: !!r,
-                  durationMs: r ? travelDuration(r.cells, village) : null,
-                },
-              ];
-            }
-          }
           rows.push({
             target,
-            ...(fine ? { fine } : {}),
             resource: deposit?.resourceCode ?? null,
             ...(deposit ? { featureId: deposit.featureId } : {}),
             runs,

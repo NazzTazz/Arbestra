@@ -664,36 +664,58 @@ export function buildTravelNetwork(
 }
 
 /**
- * Duration of a path, in ms: its cost at one second per cell. With `roads`,
- * every segment is walked in eighth-cell steps and a step costs ROAD_STEP_COST
- * when it arrives on a road pixel: the exact cost the fine search minimises,
- * so roads shorten travel (decision 8). Without, the historical length.
+ * Cost of walking one straight segment, at one unit per cell: its Euclidean
+ * length cut into sub-steps of at most an eighth of a cell, each paying the
+ * factor of the point it arrives at (ROAD_STEP_COST on a road pixel, 1
+ * elsewhere, times `factor` if given). The single rule of travel costs and
+ * durations (decision 8): a cardinal segment is cut exactly as it always was,
+ * a diagonal step of one cell (decision 23) into 12 sub-steps of √2/12.
+ */
+export function segmentCost(
+  a: TravelCell,
+  b: TravelCell,
+  world: { widthCells: number; heightCells: number },
+  roads?: RoadLookup,
+  factor?: (x: number, y: number) => number,
+  /** Running total the sub-steps are added to, in order (a path's duration). */
+  total = 0,
+): number {
+  const dx = delta(b.cellX, a.cellX, world.widthCells),
+    dy = delta(b.cellY, a.cellY, world.heightCells),
+    length = dx && dy ? Math.hypot(dx, dy) : Math.abs(dx) + Math.abs(dy);
+  if (!length) return total;
+  if (!roads && !factor) return total + length;
+  const w = world.widthCells * 16,
+    h = world.heightCells * 16,
+    n = Math.max(1, Math.ceil(length * 8 - 1e-9)),
+    step = length / n;
+  let cost = total;
+  for (let j = 1; j <= n; j++) {
+    const x = a.cellX + (dx * j) / n,
+      y = a.cellY + (dy * j) / n;
+    cost +=
+      step *
+      (roads && roads(wrap(Math.round(x * 16), w), wrap(Math.round(y * 16), h)) ? ROAD_STEP_COST : 1) *
+      (factor ? factor(x, y) : 1);
+  }
+  return cost;
+}
+
+/**
+ * Duration of a path, in ms: its cost at one second per cell, segment by
+ * segment in Euclidean length (8-direction travel, decision 23). With `roads`,
+ * every segment pays its road sub-steps (segmentCost): the exact cost the
+ * village search minimises, so roads shorten travel (decision 8). A cardinal
+ * path keeps its duration to the millisecond.
  */
 export function travelDuration(
   path: readonly TravelCell[],
   world?: { widthCells: number; heightCells: number },
   roads?: RoadLookup,
 ): number {
-  if (world && roads) {
-    const w = world.widthCells * 16,
-      h = world.heightCells * 16;
+  if (world) {
     let cost = 0;
-    for (let i = 1; i < path.length; i++) {
-      const a = path[i - 1]!,
-        b = path[i]!,
-        dx = delta(b.cellX, a.cellX, world.widthCells),
-        dy = delta(b.cellY, a.cellY, world.heightCells),
-        length = Math.abs(dx) + Math.abs(dy);
-      if (!length) continue;
-      const n = Math.max(1, Math.ceil(length * 8 - 1e-9)),
-        step = length / n;
-      for (let j = 1; j <= n; j++)
-        cost +=
-          step *
-          (roads(wrap(Math.round((a.cellX + (dx * j) / n) * 16), w), wrap(Math.round((a.cellY + (dy * j) / n) * 16), h))
-            ? ROAD_STEP_COST
-            : 1);
-    }
+    for (let i = 1; i < path.length; i++) cost = segmentCost(path[i - 1]!, path[i]!, world, roads, undefined, cost);
     return Math.round(cost * 1000);
   }
   let length = 0;
@@ -701,10 +723,13 @@ export function travelDuration(
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]!,
       b = path[i]!;
-    const dx = Math.abs(world ? delta(b.cellX, a.cellX, world.widthCells) : b.cellX - a.cellX),
-      dy = Math.abs(world ? delta(b.cellY, a.cellY, world.heightCells) : b.cellY - a.cellY);
-    // Without world dimensions only, retain the historical seam heuristic.
-    length += world ? dx + dy : (dx > 128 ? (fine ? 0.125 : 1) : dx) + (dy > 128 ? (fine ? 0.125 : 1) : dy);
+    const dx = Math.abs(b.cellX - a.cellX),
+      dy = Math.abs(b.cellY - a.cellY);
+    // Without world dimensions, retain the historical seam heuristic: a jump
+    // of more than 128 cells along an axis is a seam, one step long.
+    const x = dx > 128 ? (fine ? 0.125 : 1) : dx,
+      y = dy > 128 ? (fine ? 0.125 : 1) : dy;
+    length += x && y ? Math.hypot(x, y) : x + y;
   }
   return Math.round(length * 1000);
 }
@@ -762,84 +787,15 @@ function prepareRefinement(
   return { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells, gardens };
 }
 
-// Four geometry contexts, at most 64 routes / 16384 points per context. Keys
-// describe physical inputs, never economic quantities, permissions or time.
-type RefinementCache = {
-  prepared: ReturnType<typeof prepareRefinement>;
-  routes: Map<string, TravelCell[]>;
-  points: number;
-};
-const refinementCaches = new Map<string, RefinementCache>();
-function refinementCache(state: TravelNetworkState, ground?: TravelGround): RefinementCache | undefined {
-  const { world, village, region } = state;
-  const signature = JSON.stringify([
-    world.id,
-    world.widthCells,
-    world.heightCells,
-    village.anchorCellX,
-    village.anchorCellY,
-    village.townHallBuildingId,
-    ground && [ground.revision, ground.width, ground.height, ground.woodedCells],
-    region.originCellX,
-    region.originCellY,
-    region.width,
-    region.height,
-    region.terrainCodes,
-    [...region.features]
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .map((f) => [f.id, f.type, f.cellX, f.cellY, f.deposit?.state, f.deposit?.blocksCell, f.deposit?.cleared]),
-    [...state.cells]
-      .sort((a, b) => a.cellX - b.cellX || a.cellY - b.cellY)
-      .map((c) => [
-        c.cellX,
-        c.cellY,
-        // An unblocked footprint is an active garden plot: with its owner, it
-        // also fixes the garden crossing costs of the prepared context.
-        c.footprint?.buildingId,
-        blocksTravelFootprint(c.footprint),
-        c.building && [
-          c.building.id,
-          c.building.type,
-          c.building.quarterTurns,
-          c.building.accesses,
-          c.building.visualLayout,
-        ],
-      ]),
-    state.infrastructure && [
-      state.infrastructure.roads,
-      state.infrastructure.inheritedRoads,
-      state.infrastructure.inheritedCells,
-      [...state.infrastructure.equipment].sort((a, b) => a.x - b.x || a.y - b.y).map((e) => [e.x, e.y]),
-      state.infrastructure.roadCells,
-    ],
-  ]);
-  if (signature.length > 1048576) return undefined;
-  let entry = refinementCaches.get(signature);
-  if (entry) refinementCaches.delete(signature);
-  else entry = { prepared: prepareRefinement(state, ground), routes: new Map(), points: 0 };
-  // Oversized scenes can still be searched, but must not retain large rasters
-  // in addition to the caller's live scene. The returned context is ephemeral.
-  if (
-    entry.prepared.surface.size > 65536 ||
-    entry.prepared.curbPixels.size > 65536 ||
-    entry.prepared.fineCells.size > 65536 ||
-    entry.prepared.blocked.size > 65536 ||
-    entry.prepared.equipmentBins.size > 65536
-  )
-    return entry;
-  refinementCaches.set(signature, entry);
-  while (refinementCaches.size > 4) refinementCaches.delete(refinementCaches.keys().next().value!);
-  return entry;
-}
-/** Fine lattice nodes of one cell (eighths in x and y). */
-export const SEARCH_NODES_PER_CELL = 64;
-/** Node bound of a mission search inside a region (refonte des trajets §4.2):
- * every node of the domain, never more. A search that empties its queue below
- * this bound proves its goal unreachable; one that reaches it ends in `budget`. */
-export function villageSearchBound(region: { width: number; height: number }): number {
-  return region.width * region.height * SEARCH_NODES_PER_CELL;
-}
+/** Fine lattice nodes of one cell (eighths in x and y): the node bound of a display refinement. */
+const SEARCH_NODES_PER_CELL = 64;
 
+/**
+ * Refinement of one route of the display network (buildTravelNetwork): its
+ * coarse cells, certified at the eighth of a cell, from the town hall doors.
+ * Display only since R1 (missions use planVillageRoute, village-search.ts);
+ * removed with the all-goals network in R3.
+ */
 export function refineTravelRoute(
   state: TravelNetworkState,
   route: TravelRoute,
@@ -849,48 +805,20 @@ export function refineTravelRoute(
   checkpoint?: () => void,
   search?: {
     maxVisited?: number;
-    onLimit?: () => void;
     /** Garden of the true destination when `route` is only its first leg; null: none. */
     garden?: string | null;
-    /** Gardens crossed at no extra cost (a tour leg: its start and end gardens). Overrides `garden`. */
-    gardens?: ReadonlySet<string>;
-    /** Start point instead of the town hall doors (a tour leg between two plots). */
-    from?: TravelCell;
-    /** Nodes visited by the fine searches, added to `visited` (tests, diagnostics). */
-    stats?: { visited: number };
   },
 ): TravelRoute | null {
   checkpoint?.();
   if (!state.infrastructure || !route.cells.length) return route;
   // Explicit search budgets are used by diagnostics and must still be honored.
-  const cache = prepared || search?.maxVisited !== undefined ? undefined : refinementCache(state, ground);
-  const routeKey = cache
-    ? JSON.stringify([
-        route.id,
-        route.kind,
-        route.destination,
-        route.cells,
-        [...guide].sort(),
-        search?.from ?? null,
-        search?.gardens ? [...search.gardens].sort() : null,
-      ])
-    : '';
-  const cached = cache?.routes.get(routeKey);
-  if (cached) {
-    cache!.routes.delete(routeKey);
-    cache!.routes.set(routeKey, cached);
-    return { ...route, version: 2, cells: cached.map((p) => ({ ...p })) };
-  }
   const anchor = state.cells.find(
     (c) => c.cellX === state.village.anchorCellX && c.cellY === state.village.anchorCellY,
   );
   const hallId = state.village.townHallBuildingId ?? anchor?.footprint?.buildingId ?? anchor?.building?.id;
   const hall = state.cells.find((c) => c.building?.id === hallId && c.building?.type === 'town-hall');
   if (!hall?.building) return route;
-  const from = search?.from;
-  const starts: Array<Pick<BuildingAccess, 'position' | 'outside'>> = from
-      ? [{ position: from, outside: from }]
-      : buildingAccesses(state, hall.building.id),
+  const starts: Array<Pick<BuildingAccess, 'position' | 'outside'>> = buildingAccesses(state, hall.building.id),
     ends = route.kind === 'building' ? buildingAccesses(state, route.id) : [];
   const world = state.world,
     w = world.widthCells * 8,
@@ -901,7 +829,7 @@ export function refineTravelRoute(
   const lastLocal = route.cells.findLastIndex(local),
     destination = local(route.destination) ? route.destination : route.cells[lastLocal];
   if (!destination) return route;
-  const context = prepared ?? cache?.prepared ?? prepareRefinement(state, ground);
+  const context = prepared ?? prepareRefinement(state, ground);
   const { surface, curbPixels, roadNodes, walk, blocked, equipmentBins, fineCells, gardens } = context;
   // Without any road pixel, the cost is the length: skip the per-eighth walk.
   const roads = roadNodes.length ? roadLookup(surface) : undefined,
@@ -914,7 +842,7 @@ export function refineTravelRoute(
   // plot costs GARDEN_CROSSING_COST per step (Tristan, 29 October).
   const ownGarden =
     search?.garden !== undefined ? search.garden : (gardenAt(route.destination.cellX, route.destination.cellY) ?? null);
-  const ownGardens: ReadonlySet<string | null> = search?.gardens ?? new Set([ownGarden]);
+  const ownGardens: ReadonlySet<string | null> = new Set([ownGarden]);
   let crossesGardens = false;
   for (const owner of gardens.values())
     if (!ownGardens.has(owner)) {
@@ -1004,8 +932,7 @@ export function refineTravelRoute(
         if ((ox || oy) && enters(p)) cellGoals.push(p);
       }
   let best: TravelCell[] | null = null,
-    bestCost = Infinity,
-    limited = false;
+    bestCost = Infinity;
   // Door connections are part of the physical path too. Do not jump over an
   // obstacle between the threshold and the first fine-grid node.
   const accessClear = (access: (typeof starts)[number], buildingId: string) => {
@@ -1025,21 +952,7 @@ export function refineTravelRoute(
         return false;
     return walk(access.position, access.outside);
   };
-  const result = (cells: TravelCell[] | null): TravelRoute | null => {
-    if (cells && cache && routeKey.length <= 16384 && cells.length <= 16384) {
-      cache.routes.set(
-        routeKey,
-        cells.map((p) => ({ ...p })),
-      );
-      cache.points += cells.length;
-      while (cache.routes.size > 64 || cache.points > 16384) {
-        const oldest = cache.routes.keys().next().value!;
-        cache.points -= cache.routes.get(oldest)!.length;
-        cache.routes.delete(oldest);
-      }
-    }
-    return cells ? { ...route, cells, version: 2 } : null;
-  };
+  const result = (cells: TravelCell[] | null): TravelRoute | null => (cells ? { ...route, cells, version: 2 } : null);
   const segmentClear = (a: TravelCell, b: TravelCell) => {
     checkpoint?.();
     const dx = delta(b.cellX, a.cellX, world.widthCells),
@@ -1087,11 +1000,7 @@ export function refineTravelRoute(
         context,
         ground,
         checkpoint,
-        {
-          maxVisited: Math.min(2048, search?.maxVisited ?? 2048),
-          garden: ownGarden,
-          ...(search?.gardens ? { gardens: search.gardens } : {}),
-        },
+        { maxVisited: Math.min(2048, search?.maxVisited ?? 2048), garden: ownGarden },
       );
       if (connector) {
         const cells = [...connector.cells, ...tail.slice(1)];
@@ -1109,9 +1018,7 @@ export function refineTravelRoute(
   const direct =
     Math.abs(delta(destination.cellX, hall.cellX, world.widthCells)) +
     Math.abs(delta(destination.cellY, hall.cellY, world.heightCells));
-  // The coarse witness starts at the town hall doors: a leg from a plot uses the fine search only.
   if (
-    !from &&
     ground &&
     route.kind !== 'building' &&
     (!cellGoal || cellGoals.length) &&
@@ -1167,13 +1074,11 @@ export function refineTravelRoute(
     );
     if (witness.kind === 'found' && pathCost(witness.path) / 1000 <= direct + 16) return result(witness.path);
   }
-  const bound = search?.maxVisited ?? villageSearchBound(state.region),
+  const bound = search?.maxVisited ?? state.region.width * state.region.height * SEARCH_NODES_PER_CELL,
     exhausted = new Map<string, Set<number>>();
-  let searched = false;
   for (const start of starts)
     for (const end of ends.length ? ends : [null]) {
       if (!accessClear(start, hall.building.id) || (end && !accessClear(end, route.id))) continue;
-      searched = true;
       const from = {
         cellX: wrap(Math.round(start.outside.cellX * 8), w),
         cellY: wrap(Math.round(start.outside.cellY * 8), h),
@@ -1342,10 +1247,8 @@ export function refineTravelRoute(
           });
         }
       }
-      if (search?.stats) search.stats.visited += visited;
       if (!found) {
-        if (pending.length) limited = true;
-        else {
+        if (!pending.length) {
           const component = exhausted.get(goalKey) ?? new Set<number>();
           for (const node of seen.keys()) component.add(node);
           exhausted.set(goalKey, component);
@@ -1364,62 +1267,12 @@ export function refineTravelRoute(
         ...cells,
         ...(end ? [end.position] : []),
         ...(!local(route.destination) ? route.cells.slice(lastLocal + 1) : []),
-      ].filter((p, i, list) => !from || !i || key(p) !== key(list[i - 1]!));
+      ];
       const candidate = pathCost(path);
       if (!best || candidate < bestCost) {
         best = path;
         bestCost = candidate;
       }
     }
-  // Outside the region, an exhausted local search proves nothing about the
-  // target: a bounded search there ends in `budget`, never `unreachable` (§4.2).
-  if (!best && (limited || (searched && !local(route.destination)))) search?.onLimit?.();
   return result(best);
-}
-
-/** Garden (logical building) of an active plot cell, if any. */
-export function villageGardenAt(
-  state: Pick<TravelNetworkState, 'cells' | 'world'>,
-  cell: TravelCell,
-): string | undefined {
-  const x = wrap(Math.floor(cell.cellX + 0.5), state.world.widthCells),
-    y = wrap(Math.floor(cell.cellY + 0.5), state.world.heightCells);
-  const plot = state.cells.find(
-    (c) =>
-      wrap(c.cellX, state.world.widthCells) === x &&
-      wrap(c.cellY, state.world.heightCells) === y &&
-      c.footprint &&
-      !blocksTravelFootprint(c.footprint),
-  );
-  return plot?.footprint?.buildingId;
-}
-
-/** One leg of a mission, searched on its own (refonte des trajets §4.1): from
- * the town hall doors (`from` null) or from a point, to a cell. The gardens of
- * both ends are crossed at no extra cost, every other plot at
- * GARDEN_CROSSING_COST per step; the cost of a road step is ROAD_STEP_COST.
- * Null when the search found no path. */
-export function planVillageLeg(
-  state: TravelNetworkState,
-  from: TravelCell | null,
-  to: TravelCell,
-  ground?: TravelGround,
-  checkpoint?: () => void,
-  onLimit?: () => void,
-): TravelCell[] | null {
-  const gardens = new Set<string>();
-  for (const end of from ? [from, to] : [to]) {
-    const garden = villageGardenAt(state, end);
-    if (garden !== undefined) gardens.add(garden);
-  }
-  const route = refineTravelRoute(
-    state,
-    { id: `leg:${from ? key(from) : 'hall'}:${key(to)}`, kind: 'garden', destination: to, cells: [to] },
-    new Set(),
-    undefined,
-    ground,
-    checkpoint,
-    { gardens, ...(from ? { from } : {}), ...(onLimit ? { onLimit } : {}) },
-  );
-  return route?.version === 2 ? route.cells : null;
 }

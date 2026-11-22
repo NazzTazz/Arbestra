@@ -6,6 +6,7 @@ export * from './release-notes.js';
 export * from './villages.js';
 export * from './village-sync.js';
 export * from './travel-paths.js';
+export * from './village-search.js';
 export * from './garden-tour.js';
 export * from './terrain.js';
 export * from './science.js';
