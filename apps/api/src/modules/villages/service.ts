@@ -545,6 +545,42 @@ export async function refineVillagePath(
   id: string,
   existingGround?: Awaited<ReturnType<typeof readRc1Ground>>,
 ): Promise<TravelCell[]> {
+  const { context, rc1 } = await villageNavigationContext(tx, village, existingGround);
+  const executor = transactionRefiner(tx),
+    input = { id, kind: 'stone' as const, cells: path, destination: path.at(-1)! };
+  const route = executor
+    ? (
+        await executor.refine(async (known) => ({
+          ...networkJob(networkState(context), rc1 ?? undefined, known),
+          refinement: input,
+        }))
+      )[0]
+    : refineTravelRoute(context, input, new Set(), undefined, rc1?.navigation, undefined, {
+        onLimit: () => {
+          throw navigationBudgetError();
+        },
+      });
+  if (!route) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun accès praticable depuis le village.');
+  return route.cells;
+}
+
+/** Geometry of a village mission search: its terrain region, natural features,
+ * every building footprint of the region and the road plan, read in `tx`. */
+export async function villageNavigationContext(
+  tx: Transaction<Database>,
+  village: Pick<
+    OwnedVillage,
+    | 'worldId'
+    | 'villageId'
+    | 'anchorCellX'
+    | 'anchorCellY'
+    | 'widthCells'
+    | 'heightCells'
+    | 'chunkSize'
+    | 'generationVersion'
+  >,
+  existingGround?: Awaited<ReturnType<typeof readRc1Ground>>,
+) {
   const full = village as OwnedVillage,
     ground = await snapshot(tx, full, { ground: existingGround }),
     features = await featuresInSnapshot(tx, full, ground, Boolean(ground.rc1));
@@ -624,23 +660,7 @@ export async function refineVillagePath(
     })),
     infrastructure: await readNavigationInfrastructure(tx, village),
   } as unknown as Pick<VillageState, 'world' | 'village' | 'region' | 'cells' | 'infrastructure'>;
-  const rc1 = ground.rc1;
-  const executor = transactionRefiner(tx),
-    input = { id, kind: 'stone' as const, cells: path, destination: path.at(-1)! };
-  const route = executor
-    ? (
-        await executor.refine(async (known) => ({
-          ...networkJob(networkState(context), rc1 ?? undefined, known),
-          refinement: input,
-        }))
-      )[0]
-    : refineTravelRoute(context, input, new Set(), undefined, rc1?.navigation, undefined, {
-        onLimit: () => {
-          throw navigationBudgetError();
-        },
-      });
-  if (!route) throw new HttpError(409, 'DESTINATION_UNREACHABLE', 'Aucun accès praticable depuis le village.');
-  return route.cells;
+  return { context, rc1: ground.rc1 };
 }
 
 function candidates(footprints: Array<{ cellX: number; cellY: number }>, village: OwnedVillage) {

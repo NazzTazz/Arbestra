@@ -71,9 +71,40 @@ A* sur les cases, 8 voisins, heuristique octile × 0,7.
 - **Invariants conservés** : ordre des verrous, admissions, énergie sur durée figée, `world_id`, coordonnées canoniques, aucune écriture nouvelle dans les transactions de commande.
 - **Suppression** : à la fin de R1, `refineTravelRoute` et ses caches n'ont plus d'appelant de mission ; ce qui ne sert plus qu'au réseau d'affichage est marqué pour R3.
 
-## 6. Inventaire et écarts (à remplir par R1 avant de coder)
+## 6. Inventaire et écarts (R1, 22 novembre, sur `0eb07d3`)
 
-À écrire ici : ce que bloque chaque contexte, les écarts, le choix retenu ; puis le profil des 8,2 s.
+### 6.1 Profil des 8,2 s
+
+Banc : `apps/load-test/src/bench-village-paths.ts`, en lecture seule (transaction `read only` annulée) sur la base de dev, connexion par la configuration de l'API. Cibles réelles du 22 novembre : (259, 216), **(258, 220)** (et non (258, 219) : lu dans `harvest_submissions`) et (262, 223). L'état du sol à 17:00 est reconstitué en remettant debout les 11 troncs abattus depuis (`--restore-trees`).
+
+- **Les 8,2 s ne sont pas la durée de la tâche `deposit.worksite.wake`.** `scheduled_tasks.completed_at` vaut `transaction_timestamp()`, le *début* de la transaction de la tâche : celle-ci a commencé à 17:00:47,261, 8,2 s après son échéance, et ses lots sont partis à 47,291 (borne économique lue après le verrou). La tâche elle-même a duré quelques dizaines de millisecondes. L'attente vient du planificateur : la passe qui traitait la tâche précédente, `harvest.intent` (commencée à 38,943, elle a créé la tâche de réveil), l'a enchaînée en fin de traitement ; les deux autres passes étaient au repos et une nouvelle ronde ne démarre qu'à la fin de toutes les passes (`startScheduledTaskWorker`). Les 8,2 s sont donc, pour l'essentiel, la durée de `harvest.intent` (trois cases en défrichage, trois recherches `stoneTravelPath`).
+- **Les recherches ne l'expliquent pas.** Rejouées, sol reconstitué : trajet complet (`stoneTravelPath`, contexte compris) 82 à 394 ms à froid, 11 à 98 ms ensuite ; recherche seule 24 à 260 ms à froid, 17 à 34 ms à chaud. **Zéro nœud** de recherche fine visité : le témoin `planRoute` répond à chaque fois. La recherche fine complète (celle des jambes de jardin, sans témoin) : 888 à 2 245 nœuds, 105 à 152 ms à froid, 55 à 73 ms à chaud, dont 37 à 76 ms de lectures du sol (17 000 à 30 000 échantillons). Par la voie de calcul du serveur (un worker neuf) : 1,75 s de démarrage, 1,15 s pour le premier trajet (transfert et analyse de la géographie), puis 62 à 124 ms.
+- **Non expliqué** : environ 5 s. Candidats non départagés en lecture seule : redémarrage de l'API de dev (worker froid, ≈ 3 s mesurées ci-dessus), réconciliation économique, attentes de verrous (bornées à 1,5 s par instruction). L'hypothèse du §2 (recherche au huitième de case) n'est **pas confirmée** ; R1 reste justifiée par les décisions 23 et 24, et ses critères de vitesse du §5 se mesurent sur le même banc.
+
+### 6.2 Ce que bloque chaque contexte
+
+| Obstacle | Village (`refineTravelRoute`, `prepareRefinement`, `land`, `walk`) | Monde (`navigation/context.ts`, `compute-worker.ts`) |
+|---|---|---|
+| Domaine | Région du village ; hors région = bloqué | Tore entier |
+| Eau | Code de terrain de la case ≠ 1, et échantillons non secs | Échantillons non secs |
+| Pente, roches, troncs | `canWalkSpawnSegment` sur le sol (pente 0,25, largeur ±1/16) | Idem, même champ RC1 et mêmes troncs |
+| Emprises et réservations | Toute emprise de la région bloque la case (chantier, agrandissement en attente compris) | Toute occupation du monde bloque l'échantillon de sa case |
+| Jardins actifs | Traversables, ×30 hors jardins des extrémités | **Bloquants** (occupation) |
+| Gisements | Affleurement non épuisé, chantier de nivellement : case bloquée ; bois : seulement hors RC1 | Chantier de nivellement bloquant ; affleurement : seules ses roches physiques |
+| Bordures | `infrastructureBlockedPixels` : ensemble **vide** depuis la refonte des trottoirs | Absentes |
+| Accessoires de route | Carré de ±1/8 | Carré de ±1/8 |
+| Exceptions | Case de destination admise (missions de ressource) ; emprise du bâtiment de la porte pour son connecteur | Emprise du bâtiment de l'accès ; cibles occupées des mondes historiques |
+| Coût | Pixel de route 0,7 par huitième ; jardin ×30 | Pixel de route 0,7 par huitième |
+
+Écarts : jardins (traversés contre bloqués), affleurements (case contre roches), domaine (région contre tore). Les bordures ne bloquent plus nulle part. Symétrie du test physique : pour un segment unitaire cardinal, les points échantillonnés à l'aller et au retour sont les mêmes (l'actuel `ChunkNavigationCache` l'exploite déjà) ; un test le vérifie aussi pour les diagonales.
+
+### 6.3 Choix retenus (techniques)
+
+- **Le maillage ne porte que la physique du sol** (eau, pente, roches, troncs), la seule partie commune et lente. Tout ce qui dépend du village ou de la mission (domaine, code de terrain, emprises, réservations, gisements, jardins, case de destination) est un **masque par case** appliqué par la recherche avant de lire le maillage ; les accessoires de route (rares, sur les routes) sont vérifiés à chaque recherche sur les seules cases qui en portent. Ainsi le masque du village garde exactement ses règles d'aujourd'hui, et le contexte mondial garde les siennes : les écarts du §6.2 sont conservés, pas unifiés, faute de décision qui les tranche.
+- **Un seul format** : `ChunkNavigationCache` passe à 4 arêtes non dirigées par case (est, sud-est, sud, sud-ouest ; 2 bits : inconnue, bloquée, droite, coudée). Le commerce l'utilise sur son propre champ, avec la même interface `walk` ; `ROUTE_POLICY_VERSION` passe à `rc1-pedestrian-2`, donc ses maillages persistés de l'ancien format ne sont plus lus (autre espace de noms) et sortent par l'éviction existante. Pas de migration.
+- **Maillage du village en mémoire**, par révision du sol, dans le processus qui calcule (worker ou appel direct) : le persister demanderait une écriture hors des transactions de commande et un rattachement des abattages aux versions de chunks. Non fait en R1 ; « à froid » désigne donc un maillage vide.
+- **Point d'ancrage** : le nœud d'une case est son centre, sauf si un tronc ou une roche le couvre ; il est alors le point libre le plus proche au huitième, dans la case. Sans cela, une case boisée dont le centre est pris deviendrait infranchissable alors que l'ancienne recherche la traversait.
+- **Coût d'un pas = sa durée** (décision 8) : la règle exacte de `travelDuration` (pixel de route par sous-pas d'au plus un huitième, en longueur euclidienne), fois le facteur jardin. Pour des cases de route pleines, c'est la moyenne des facteurs des deux cases du §3.3.
 
 ## 7. Journal des tranches
 
