@@ -58,6 +58,27 @@ describe('leisure walks over desire paths', () => {
     expect(search.truncated).toBe(false);
   });
 
+  it('walks no diagonal desire path before they are drawn (R2a), and walks the cardinal ones the same', () => {
+    const homes = [hall(10, 10), house('a', 14, 10), house('diag', 13, 13), house('seam', 63, 63)];
+    // Diagonals only: from the hall's cell south-east to the home diag, and across the seam.
+    const diagonals: DesireCell[] = [
+      { cellX: 10, cellY: 10, east: false, south: false, southEast: true },
+      { cellX: 11, cellY: 11, east: false, south: false, southEast: true },
+      { cellX: 12, cellY: 12, east: false, south: false, southEast: true },
+      { cellX: 0, cellY: 62, east: false, south: false, southWest: true },
+    ];
+    expect(desireLeisureRoutes(state(homes, diagonals)).routes.size).toBe(0);
+    // Beside the cardinal path to house a, they change nothing.
+    const cardinal = east(10, 10, 4),
+      merged = cardinal.map((c) => (c.cellX === 10 ? { ...c, southEast: true } : c));
+    const plain = desireLeisureRoutes(state(homes, cardinal)),
+      both = desireLeisureRoutes(state(homes, [...merged, ...diagonals.slice(1)]));
+    expect([...both.routes]).toEqual([...plain.routes]);
+    expect(both.visited).toBe(plain.visited);
+    expect(walk(both, 14, 10)).toEqual(['10:10', '11:10', '12:10', '13:10', '14:10']);
+    expect(both.routes.has('13:13')).toBe(false);
+  });
+
   it('follows the road cells of the player as well, and joins them to the hall', () => {
     // A road of cells from the hall's south side to a home, with no desire path at all.
     const search = desireLeisureRoutes(

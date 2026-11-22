@@ -913,12 +913,12 @@ export interface Database {
   villageResourceFlows: VillageResourceFlowsTable;
   buildingResourceBuffers: BuildingResourceBuffersTable;
   scheduledTasks: ScheduledTasksTable;
-  /** Passages per cell edge, owned by the ground (085). Direction 0: eastward, 1: southward. */
+  /** Passages per cell edge, owned by the ground (085). Direction 0: eastward, 1: southward, 2: south-eastward, 3: south-westward (087). */
   worldDesireEdges: {
     worldId: string;
     cellX: number;
     cellY: number;
-    direction: 0 | 1;
+    direction: 0 | 1 | 2 | 3;
     passages: number;
     lastPassageAt: Timestamp;
   };

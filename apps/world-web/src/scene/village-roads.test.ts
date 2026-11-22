@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { TravelRoute } from '@arbestra/contracts';
+import { desireRoutes, type TravelRoute } from '@arbestra/contracts';
 import { roadEdges, VillageRoads } from './village-roads';
 import { automaticRoadStrokes, infrastructureSurface, emptyInfrastructure } from '@arbestra/contracts';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
@@ -151,6 +151,51 @@ it('renders automatic earth paths four subdivisions wide without sidewalks', () 
     expect(JSON.stringify(routes)).toBe(before);
   } finally {
     renderer.dispose();
+    scene.dispose();
+    engine.dispose();
+  }
+});
+
+it('draws nothing for a diagonal desire path before they are drawn (R2a), and the cardinal ones as before', () => {
+  const world = { widthCells: 64, heightCells: 64 },
+    space = () => new WorldSpace(64, 64, { cellX: 10, cellY: 10 });
+  const diagonals = desireRoutes(
+      [
+        { cellX: 10, cellY: 10, east: false, south: false, southEast: true },
+        { cellX: 12, cellY: 10, east: false, south: false, southWest: true },
+        { cellX: 63, cellY: 63, east: false, south: false, southEast: true },
+      ],
+      world,
+    ),
+    cardinal = desireRoutes(
+      [
+        { cellX: 10, cellY: 10, east: true, south: false },
+        { cellX: 11, cellY: 10, east: false, south: true },
+      ],
+      world,
+    );
+  expect(diagonals).toHaveLength(3);
+  const engine = new NullEngine(),
+    scene = new Scene(engine);
+  const vertices = (routes: TravelRoute[], stubs: TravelRoute[] = []) => {
+    const renderer = new VillageRoads(scene);
+    try {
+      renderer.update('earth', routes, space(), () => ({ code: 1, height: 0 }), true, undefined, undefined, stubs);
+      return scene.meshes
+        .filter((m) => m.material?.name === 'infrastructure-earth')
+        .map((m) => [...(m.getVerticesData('position') ?? [])]);
+    } finally {
+      renderer.dispose();
+    }
+  };
+  try {
+    expect(vertices(diagonals)).toEqual([]);
+    const plain = vertices(cardinal);
+    expect(plain.flat().length).toBeGreaterThan(0);
+    expect(vertices([...cardinal, ...diagonals])).toEqual(plain);
+    // A diagonal stub (road-cell links make none) would draw nothing either.
+    expect(vertices(cardinal, [diagonals[0]!])).toEqual(plain);
+  } finally {
     scene.dispose();
     engine.dispose();
   }

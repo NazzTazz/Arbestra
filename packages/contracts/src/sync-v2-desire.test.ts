@@ -78,6 +78,48 @@ it('applies a desire snapshot then a delta, and derives the visible cells of eve
   expect(NO_DESIRE_PATHS.size).toBe(0);
 });
 
+it('carries the diagonal edges of a cell as flags present only when true (R2a)', () => {
+  let state = empty('0,0', '1,0');
+  const snapshot = applySyncV2Batch(
+    state,
+    batch(
+      'scope-snapshot',
+      group('0,0', '0', '4', [
+        paths([
+          { ...cell(3, 5, false, false), southEast: true },
+          { ...cell(4, 5, true, false), southWest: true },
+          // The entity of T3b, without the new flags, is still a cell.
+          cell(5, 5, false, true),
+        ]),
+      ]),
+      group('1,0', '0', '2', [paths([{ ...cell(33, 7, true, true), southEast: true, southWest: true }])]),
+    ),
+  );
+  expect(snapshot.kind).toBe('applied');
+  state = snapshot.state;
+  expect([...desirePathsFromSyncV2(state)]).toEqual([
+    ['3,5', { cellX: 3, cellY: 5, east: false, south: false, southEast: true }],
+    ['4,5', { cellX: 4, cellY: 5, east: true, south: false, southWest: true }],
+    ['5,5', { cellX: 5, cellY: 5, east: false, south: true }],
+    ['33,7', { cellX: 33, cellY: 7, east: true, south: true, southEast: true, southWest: true }],
+  ]);
+  expect('southEast' in desirePathsFromSyncV2(state).get('5,5')!).toBe(false);
+  // A delta that loses the diagonal drops the flag.
+  const delta = applySyncV2Batch(state, batch('delta', group('0,0', '4', '5', [paths([cell(4, 5, true, false)])])));
+  expect(delta.kind).toBe('applied');
+  expect(desirePathsFromSyncV2(delta.state).get('4,5')).toEqual({ cellX: 4, cellY: 5, east: true, south: false });
+  // One representation only: a flag is never false, nor anything but a boolean true.
+  const base = (entity: unknown) => batch('scope-snapshot', group('0,0', '0', '1', [paths([entity])]));
+  const fresh = empty('0,0');
+  for (const entity of [
+    { ...cell(3, 5, true, false), southEast: false },
+    { ...cell(3, 5, true, false), southWest: false },
+    { ...cell(3, 5, true, false), southEast: 1 },
+    { ...cell(3, 5, true, false), northEast: true },
+  ])
+    expect(applySyncV2Batch(fresh, base(entity))).toEqual({ kind: 'resync', state: fresh });
+});
+
 it('rejects a malformed or unknown desire entity as a resync, and never carries a count', () => {
   const state = empty('0,0');
   const valid = cell(3, 5, true, false);

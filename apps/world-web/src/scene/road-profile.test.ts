@@ -10,6 +10,7 @@ import {
 import {
   pavedProfiles,
   roadEdges,
+  roadInnerCorners,
   roadKey,
   roadWidths,
   ROAD_HALF_WIDTH,
@@ -118,6 +119,77 @@ it('draws desire paths in earth only: nothing is paved, every figure walks the e
   expect(pavedProfiles(desire, 16, 16).size).toBe(0);
   expect(roadWidths(desire).size).toBe(7);
   expect([...roadWidths(desire).values()].every((w) => w === 0.8)).toBe(true);
+});
+
+// Diagonal desire paths (R2a) are routes before they are drawn (R2b): nothing paves, cuts a corner or
+// opens an arm for them. Cells (5, 5) to (6, 6) south-east, (8, 5) to (7, 6) south-west, and the seam:
+// (15, 3) south-east to (0, 4), (0, 9) south-west to (15, 10).
+const diagonals = desireRoutes(
+  desireCellsFromEdges([
+    { cellX: 5, cellY: 5, direction: 2 },
+    { cellX: 8, cellY: 5, direction: 3 },
+    { cellX: 15, cellY: 3, direction: 2 },
+    { cellX: 0, cellY: 9, direction: 3 },
+  ]),
+  world,
+);
+
+it('takes no profile, corner or arm from a diagonal desire path, alone or beside cardinal ones', () => {
+  expect(diagonals.map((r) => r.id)).toEqual([
+    'desire:15:3:south-east',
+    'desire:5:5:south-east',
+    'desire:8:5:south-west',
+    'desire:0:9:south-west',
+  ]);
+  expect(diagonals.map((r) => r.kind)).toEqual(['wood', 'wood', 'wood', 'wood']);
+  // Alone: no paving, no inner corner, no brazier corner of the fallback (without a snapshot).
+  expect(pavedProfiles(diagonals, 16, 16).size).toBe(0);
+  expect(roadInnerCorners(diagonals, 16, 16)).toEqual([]);
+  // Beside an L of cardinal paths through (5, 5) and (6, 6): the same as without them.
+  const cardinal = desireOf([
+    {
+      id: 'l',
+      kind: 'wood',
+      destination: { cellX: 6, cellY: 6 },
+      cells: [
+        { cellX: 5, cellY: 5 },
+        { cellX: 6, cellY: 5 },
+        { cellX: 6, cellY: 6 },
+      ],
+    },
+    seamRow('wood'),
+  ]);
+  const both = [...cardinal, ...diagonals];
+  expect(roadInnerCorners(both, 16, 16)).toEqual(roadInnerCorners(cardinal, 16, 16));
+  expect(roadInnerCorners(cardinal, 16, 16)).toHaveLength(1);
+  expect(pavedProfiles(both, 16, 16)).toEqual(pavedProfiles(cardinal, 16, 16));
+  // Under paved routes too, a diagonal adds no arm to the excavation profile.
+  const paved = cardinal.map((r) => ({ ...r, kind: 'building' as const }));
+  expect(pavedProfiles([...paved, ...diagonals], 16, 16)).toEqual(pavedProfiles(paved, 16, 16));
+});
+
+it('keeps a diagonal desire path in the display routes and the widths, and masks it like any route', () => {
+  // The cells a figure walks: the diagonal's two cells take the earth width (R2b draws them).
+  const widths = roadWidths(diagonals);
+  expect([...widths.keys()].sort()).toEqual(['0:4', '0:9', '15:10', '15:3', '5:5', '6:6', '7:6', '8:5']);
+  expect([...widths.values()].every((w) => w === 0.8)).toBe(true);
+  const state = (cells: VillageState['cells']) =>
+    ({ world, infrastructure: emptyInfrastructure(), cells, travelRoutes: diagonals }) as unknown as VillageState;
+  expect(villageRoadDisplayRoutes(state([])).map((r) => r.cells)).toEqual(diagonals.map((r) => r.cells));
+  // A footprint on one end removes the segment, as for a cardinal route.
+  const masked = villageRoadDisplayRoutes(state([{ cellX: 6, cellY: 6, footprint: { buildingId: 'house' } }] as never));
+  expect(masked.map((r) => r.id)).toEqual([
+    'desire:15:3:south-east:display:0',
+    'desire:8:5:south-west:display:0',
+    'desire:0:9:south-west:display:0',
+  ]);
+  // A road cell at one end of a diagonal opens no arm and makes no stub.
+  const linked = roadCellLinks({
+    ...state([]),
+    roadCells: [{ id: '6,6', cellX: 6, cellY: 6, surface: 'rubble', sidewalks: false, gauge: 'chemin', revision: 1 }],
+  } as unknown as VillageState);
+  expect(linked.masks.size).toBe(0);
+  expect(linked.stubs).toEqual([]);
 });
 
 it('masks desire paths under footprints and road cells exactly as it masks the same segments of a network, seam included', () => {

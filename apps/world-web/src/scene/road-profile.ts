@@ -52,9 +52,11 @@ export function roadInnerCorners(routes: readonly TravelRoute[], width: number, 
       [edge.from, edge.to],
       [edge.to, edge.from],
     ] as const) {
-      const node = nodes.get(roadKey(a)) ?? { cell: a, mask: 0 };
       const x = delta(b.cellX, a.cellX, width),
         y = delta(b.cellY, a.cellY, height);
+      // A diagonal (desire path, R2a) is no arm: it would be read as an east or west one.
+      if (x && y) continue;
+      const node = nodes.get(roadKey(a)) ?? { cell: a, mask: 0 };
       node.mask |= x > 0 ? 1 : x < 0 ? 2 : y > 0 ? 4 : 8;
       nodes.set(roadKey(a), node);
     }
@@ -111,6 +113,8 @@ export function pavedProfiles(routes: readonly TravelRoute[], width: number, hei
       if (!result.has(roadKey(a))) continue;
       const x = delta(b.cellX, a.cellX, width),
         y = delta(b.cellY, a.cellY, height);
+      // A diagonal opens no E/W/S/N arm (it would be read as an east or west one).
+      if (x && y) continue;
       const bit = x > 0 ? 1 : x < 0 ? 2 : y > 0 ? 4 : 8;
       result.set(roadKey(a), result.get(roadKey(a))! | bit);
     }

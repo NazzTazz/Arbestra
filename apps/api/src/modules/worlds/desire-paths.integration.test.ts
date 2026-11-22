@@ -283,9 +283,11 @@ async function insertScience(kind: 'survey' | 'exploration' | 'training', path: 
   ).id;
 }
 
-const key = (cellX: number, cellY: number, direction: 0 | 1) => `${cellX}:${cellY}:${direction}`;
+const key = (cellX: number, cellY: number, direction: 0 | 1 | 2 | 3) => `${cellX}:${cellY}:${direction}`;
 const E = (x: number, y: number) => key(x, y, 0);
 const S = (x: number, y: number) => key(x, y, 1);
+const SE = (x: number, y: number) => key(x, y, 2);
+const SW = (x: number, y: number) => key(x, y, 3);
 async function edgeTable(world = worldId) {
   const rows = await db.selectFrom('worldDesireEdges').selectAll().where('worldId', '=', world).execute();
   return new Map(
@@ -376,6 +378,53 @@ it('counts exactly the edges of the persisted missions of every source, one pass
   expect(await runTask()).toMatchObject({ outcome: 'completed' });
   expect(await passagesOf()).toEqual(before);
   expect(await ledger()).toHaveLength(8);
+});
+
+it('counts the diagonal steps of the missions of every source on their own edges (R2a)', async () => {
+  const base = await dbNow(),
+    t = (n: number) => at(base, -60_000 + n * 1000);
+  // A wood lot in eighths of a cell along a diagonal, then the same ground by a sparse path.
+  const wood = await insertDeposit('wood', eighths(cell(4, 20), cell(7, 23)), t(1));
+  await insertDeposit('wood', [cell(4, 20), cell(5, 21), cell(6, 22), cell(7, 23)], t(2));
+  // A tour that goes south-west and comes back the other way: one passage per edge.
+  await insertGarden(t(3), [cell(20, 4), cell(19, 5)], {
+    stops: [
+      [cell(20, 4), cell(19, 5)],
+      [cell(19, 5), cell(18, 6)],
+    ],
+    returnPath: [cell(18, 6), cell(19, 5), cell(20, 4)],
+  });
+  // A survey across both seams of the torus, out and back, and an exploration that goes round a
+  // trunk by the border of its two cells (y = 12.5) on a step east.
+  const seam = [cell(62, 30), cell(63, 31), cell(0, 0), cell(63, 1)];
+  await insertScience('survey', [...seam, ...seam.slice(0, -1).reverse()], t(4));
+  await insertScience(
+    'exploration',
+    [cell(40, 12), cell(40.25, 12.375), cell(40.25, 12.5), cell(40.75, 12.5), cell(41, 12), cell(42, 13)],
+    t(5),
+  );
+
+  expect(await runTask()).toMatchObject({ outcome: 'completed' });
+  expect(await passagesOf()).toEqual(
+    new Map([
+      [SE(4, 20), 2],
+      [SE(5, 21), 2],
+      [SE(6, 22), 2],
+      [SW(20, 4), 1],
+      [SW(19, 5), 1],
+      [SE(62, 30), 1],
+      [SE(63, 31), 1], // the last cell of the world, south-east to (0, 0)
+      [SW(0, 0), 1], // column 0, south-west to the last column
+      [E(40, 12), 1], // the detour is its step: no edge of row 13
+      [SE(41, 12), 1],
+    ]),
+  );
+  expect((await edgeTable()).get(SE(4, 20))!.last.getTime()).toBe(t(2).getTime());
+  expect(await ledger()).toEqual(expect.arrayContaining(['deposit:' + wood]));
+  // A second run adds nothing.
+  const before = await passagesOf();
+  expect(await runTask()).toMatchObject({ outcome: 'completed' });
+  expect(await passagesOf()).toEqual(before);
 });
 
 it('counts the missions of its own world only', async () => {
