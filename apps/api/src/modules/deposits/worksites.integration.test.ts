@@ -16,6 +16,10 @@ import { startVillageWorksite } from '../villages/legacy-commands.fixture.js';
 import { wakeExtractionWorksite } from '../villages/complete-construction.js';
 import { buildApp } from '../../app.js';
 import { HttpError } from '../../errors.js';
+import { takeFixtureZones } from '../worlds/spatial-locks.js';
+
+// This file admits trips directly, in transactions that hold no spatial lock.
+takeFixtureZones();
 
 const url = testDatabaseUrl(),
   db = createDatabase(url);

@@ -19,6 +19,10 @@ import { admitScience, scienceCommand } from '../science/service.js';
 import { reconcileVillageEconomy } from './reconcile-economy.js';
 import { up as migrateHud } from '../../database/migrations/050_hud_workforce.js';
 import { commandHudWorkforce } from './legacy-commands.fixture.js';
+import { takeFixtureZones } from '../worlds/spatial-locks.js';
+
+// This file admits trips directly, in transactions that hold no spatial lock.
+takeFixtureZones();
 
 const url = testDatabaseUrl(),
   target = new URL(url);

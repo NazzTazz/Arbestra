@@ -15,12 +15,12 @@ Chaque refonte a laissé l'ancien système vivant à côté du nouveau. Toute fe
 - **État du village** : le serveur construit toujours l'ancien `VillageState` complet (`state()`, `villages/service.ts:1037-1445`), le client reçoit les flux V2 puis les recombine en `VillageState` (`sync-v2-village-state.ts:26`). Un champ visible se déclare à six endroits tenus ensemble par un test de parité [D].
 - **Trajets** : en mode 0, le serveur calcule encore le réseau « tous buts » (`presentation.ts:232-239`) [V]. Le mode 0 s'ajoute donc au coût qu'il devait supprimer.
 - **Terrain** : deux modèles (`terraces`, `vertices`) et `generationVersion === 3` dans une quarantaine de branches [D].
-- **Restes** : trames V1 gardées pour le seul NOC, `assertSyncV2Available` à chaque commande, nivellement retiré mais présent dans les schémas, code « Until S3 » alors que S3 est livré [D].
+- **Restes** : trames V1 gardées pour le seul NOC, `assertSyncV2Available` à chaque commande [D]. Deux restes annoncés par l'audit délégué se sont révélés vivants à la relecture du 22 novembre : les schémas de nivellement servent à la terraformation, et le code « Until S3 » des braseros d'ancrage évite encore un double feu avec les braseros automatiques.
 
 ### 1.2 Des tests qui valident un autre produit
 
 - Le monde de seed `aube` est en génération 2 et en terrasses ; l'alpha est en RC1 à sommets partagés. La majorité des tests d'intégration couvre la branche que les joueurs n'utilisent pas [D].
-- `spatial-locks.ts:403` : sous `process.env.VITEST`, le code de production prend lui-même les zones manquantes au lieu de refuser [V]. La suite ne peut pas détecter un verrou spatial oublié.
+- `spatial-locks.ts:403` : sous `process.env.VITEST`, quand la transaction ne tient aucun verrou spatial, le code de production prend lui-même les zones manquantes au lieu de refuser [V]. Un chemin qui oublierait tout verrou spatial passerait donc les tests ; un chemin qui en prend une partie reste détecté.
 - `legacy-commands.fixture.ts` (851 lignes, 24 fichiers de test) réimplémente l'orchestration des commandes à côté des routes HTTP réelles [D].
 - Aucun test n'instancie `BabylonVillageScene` [D]. Les 31 specs Playwright ne tournent pas en CI (`.github/workflows/test.yml` ne lance que vitest) [V].
 - Les régressions réelles sont exactement dans ces trous : boucle de redimensionnement, braseros fantômes, hôtel de ville blanc puis noir, nappe régionale corrigée quatre fois [D].
@@ -86,10 +86,13 @@ Principe : aucune nouvelle fonctionnalité tant que les points A et B ne sont pa
 
 ### B. Suppressions sans décision
 
-1. Exception `VITEST` de `spatial-locks.ts` ; les fixtures prennent leurs zones.
-2. `assertSyncV2Available`, restes du nivellement, code « Until S3 ».
-3. NOC sur les lots V2 ; retrait des trames V1.
-4. Réconciliation exhaustive (`switch` avec `never`).
+État au 22 novembre au soir :
+
+1. **Fait** (`2111268`, `2f3557a`) : réconciliation exhaustive ; un type de transition inconnu échoue au lieu de finir en extraction.
+2. **Fait** (mêmes commits) : `assertSyncV2Available` retirée, une requête de moins par commande.
+3. **Fait, réduit** : l'exception `VITEST` de `spatial-locks.ts` n'existe plus. Cinq fichiers de tests qui admettent des trajets sans aucun verrou la demandent explicitement (`takeFixtureZones`) ; les 80 autres passent le contrôle strict de la production. La retirer de ces cinq fichiers demande de réécrire environ 45 transactions de fixtures, dont des tests de concurrence : non fait.
+4. **Écarté** : restes du nivellement et code « Until S3 », vivants à la relecture (§1.1).
+5. **Reporté** : NOC sur les lots V2. Ce n'est pas une suppression mais une réécriture du flux d'observation ; sans elle, retirer les trames V1 enverrait l'état complet du village à chaque changement.
 
 ### C. Filets de sécurité
 

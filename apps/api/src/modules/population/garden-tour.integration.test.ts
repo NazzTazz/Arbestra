@@ -12,6 +12,10 @@ import { startGardenTour } from './garden-tour.js';
 import { completeGardenHarvestAt, startGardenHarvest } from './garden-harvest.js';
 import { harvestGardenSelection, harvestGarden } from '../villages/legacy-commands.fixture.js';
 import { materializeGardenPlot } from '../villages/economy.js';
+import { takeFixtureZones } from '../worlds/spatial-locks.js';
+
+// This file admits trips directly, in transactions that hold no spatial lock.
+takeFixtureZones();
 const url = testDatabaseUrl(),
   db = createDatabase(url),
   worldId = DEVELOPMENT_IDS.world,

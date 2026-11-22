@@ -359,6 +359,17 @@ export const vertexCells = (v: { vertexX: number; vertexY: number }): SpatialCel
   { cellX: v.vertexX, cellY: v.vertexY },
 ];
 
+let fixtureZones = false;
+/**
+ * Test fixtures only. The integration files that call an admission directly,
+ * in a transaction without any spatial lock, opt in at their top: a missing
+ * zone is then taken instead of refused. Every other test file runs the strict
+ * check of production (until 22 November every test did not, under VITEST).
+ */
+export function takeFixtureZones(): void {
+  fixtureZones = true;
+}
+
 /**
  * Checks that this transaction holds the zones of `cells` (± halo): shared or
  * exclusive for a trip it admits, exclusive for a spatial write. A miss means
@@ -398,9 +409,9 @@ export async function assertSpatialCoverage(
   missing = missing.filter((z) => absent.has(zoneKey(worldId, z % columns, Math.floor(z / columns))));
   if (!missing.length) return;
   const message = `${what}: ${missing.length} zone(s) not held ${mode} in world ${worldId}`;
-  // Test fixtures call an admission directly, without beginVillageEconomy, and
-  // hold no spatial lock at all: their zones are taken here. Never outside tests.
-  if (process.env.VITEST && !state?.zones.size && !state?.world) {
+  // Fixtures that opted in (takeFixtureZones) call an admission directly, without
+  // beginVillageEconomy, and hold no spatial lock at all: their zones are taken here.
+  if (fixtureZones && !state?.zones.size && !state?.world) {
     await lockSpatial(tx, grid, mode === 'exclusive' ? { exclusive: missing } : { shared: missing });
     return;
   }

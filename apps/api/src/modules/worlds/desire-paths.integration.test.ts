@@ -23,6 +23,10 @@ import {
   aggregateDesirePaths,
   ensureDesirePathsTask,
 } from './desire-paths.js';
+import { takeFixtureZones } from './spatial-locks.js';
+
+// This file admits trips directly, in transactions that hold no spatial lock.
+takeFixtureZones();
 
 /** Desire lines observed (docs/SPEC-REFONTE-TRAJETS-2026-11-10.md §17, T3a):
  * the world task `world.desire-paths` counts the missions admitted in its world,

@@ -33,6 +33,10 @@ import { hashSessionToken } from '../../security/sessions.js';
 import { readExtractionPools } from './extraction-pools.js';
 import { readSpatialChanges } from '../villages/sync-v2-spatial-readers.js';
 import { readTerrainProjection } from '../worlds/terrain.js';
+import { takeFixtureZones } from '../worlds/spatial-locks.js';
+
+// This file admits trips directly, in transactions that hold no spatial lock.
+takeFixtureZones();
 
 /** The tree as the wood harvest unit (docs/SPEC-BOIS-ARBRE-UNITE.md): 500 per
  * tree, lots of 100 on one tree, felled at its first lot, a stump at its last;
