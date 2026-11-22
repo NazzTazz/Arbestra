@@ -26,6 +26,9 @@ const stopWorker = startScheduledTaskWorker(
   config.scheduledTaskPollIntervalMs,
   () => app.log.error({ code: 'SCHEDULER_FAILED' }, 'Scheduled task worker failed'),
   operations ? observeScheduler(operations) : undefined,
+  // A task slower than 1 s writes one `scheduler.slow-task` line: its phases,
+  // technical identifiers only (modules/operations/scheduler-timing.ts).
+  { onSlowTask: (line) => app.log.info(line, 'Slow scheduled task') },
 );
 
 // The V2 journal keeps 7 days or 10,000 entries per stream (bounded passes).

@@ -309,15 +309,20 @@ export class NavigationCompute implements NavigationExecutor, TravelNetworkExecu
   }
   /** A command already holds SQL locks: never queue it behind a lane whose
    * loader might itself need a database connection. Saturation rolls back and
-   * retries through the caller's existing command/scheduler error handling. */
-  async refine(load: NetworkLoader): Promise<TravelRoute[]> {
+   * retries through the caller's existing command/scheduler error handling.
+   * Timed as one `navigation` call whatever its caller (a caller timing it too
+   * is not counted twice); a lane started here counts as `navigation_queue`. */
+  refine(load: NetworkLoader): Promise<TravelRoute[]> {
+    return devTime('navigation', () => this.refineOnLane(load));
+  }
+  private async refineOnLane(load: NetworkLoader): Promise<TravelRoute[]> {
     this.preemptObservation();
     if (this.closed) throw new HttpError(503, 'NAVIGATION_UNAVAILABLE', 'Calcul des trajets indisponible.');
     const lane = this.waiting.length ? undefined : this.lanes.find((l) => !l.busy && !l.boot);
     if (!lane) throw new HttpError(503, 'NAVIGATION_BUSY', 'Calcul des trajets occupé. Réessayez.');
     lane.busy = true;
     try {
-      await this.ensureWorker(lane);
+      await devTime('navigation_queue', () => this.ensureWorker(lane));
       if (this.closed) throw Error('Navigation fermée');
       const network = await load(lane);
       if (this.closed) throw Error('Navigation fermée');
