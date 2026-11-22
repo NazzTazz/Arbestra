@@ -25,7 +25,8 @@ it.skipIf(process.env.NAVIGATION_BENCHMARK !== '1')(
       'utf8',
     );
     const data = JSON.parse(source) as GeneratedLandscape,
-      checksum = createHash('sha256').update(source).digest('hex');
+      // The mesh format follows the policy version: a cache of another format is rebuilt.
+      checksum = createHash('sha256').update(source).update(ROUTE_POLICY_VERSION).digest('hex');
     const base = createSpawnTerrainField(data),
       terrain = editedRc1Field(data, base, [], []);
     const trunks = woodlandPassage(

@@ -18,19 +18,26 @@ export interface SpawnAccessField {
 
 /** Validate the swept passage, not just the endpoints. The approved RC1 rule
  * is |dz| <= .25 * horizontal length, on each sampled interval. Width 1/8,
- * sampling at most 1/8 along the path. No effect on building terrace admission. */
+ * sampling at most 1/8 along the path. No effect on building terrace admission.
+ * An oblique segment (8-direction travel, decision 23) is swept the same way:
+ * its side lines are offset by ±1/16 along its normal, its intervals are at
+ * most 1/8 of its Euclidean length. A cardinal segment samples exactly the
+ * points it always did. */
 export function canWalkSpawnSegment(field: SpawnAccessField, a: SpawnPoint, b: SpawnPoint): boolean {
   const dx = spawnDelta(b.x, a.x, field.width),
     dy = spawnDelta(b.y, a.y, field.height);
-  if (Math.abs(dx) > 1e-8 && Math.abs(dy) > 1e-8) throw Error('Spawn walk requires a cardinal segment');
-  const length = Math.abs(dx) + Math.abs(dy),
-    count = Math.max(1, Math.ceil(length * 8));
+  const cardinal = Math.abs(dx) <= 1e-8 || Math.abs(dy) <= 1e-8;
+  const length = cardinal ? Math.abs(dx) + Math.abs(dy) : Math.hypot(dx, dy),
+    count = Math.max(1, Math.ceil(length * 8 - (cardinal ? 0 : 1e-9)));
   const horizontal = length / count;
+  // Unit normal of an oblique segment; a cardinal one keeps its axis offsets.
+  const nx = cardinal ? (dy ? 1 : 0) : -dy / length,
+    ny = cardinal ? (dx ? 1 : 0) : dx / length;
   for (const offset of [-SPAWN_PEDESTRIAN_HALF_WIDTH, 0, SPAWN_PEDESTRIAN_HALF_WIDTH]) {
     let previous: SpawnAccessSample | undefined;
     for (let i = 0; i <= count; i++) {
-      const x = a.x + (dx * i) / count + (dy ? offset : 0),
-        y = a.y + (dy * i) / count + (dx ? offset : 0);
+      const x = a.x + (dx * i) / count + nx * offset,
+        y = a.y + (dy * i) / count + ny * offset;
       const sample = field.sample(wrapClimate(x, field.width), wrapClimate(y, field.height));
       if (!sample.dry || sample.blocked || !Number.isFinite(sample.elevation)) return false;
       if (previous && Math.abs(sample.elevation - previous.elevation) > SPAWN_MAX_PEDESTRIAN_SLOPE * horizontal + 1e-6)

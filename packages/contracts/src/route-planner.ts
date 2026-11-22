@@ -4,7 +4,11 @@ import type { TravelCell } from './travel-paths.js';
 import type { ChunkCrossing, HierarchicalRouteStats } from './hierarchical-route.js';
 import type { ChunkNavigationMesh } from './chunk-navigation-mesh.js';
 
-export const ROUTE_POLICY_VERSION = 'rc1-pedestrian-1';
+/** Version of the walking policy and of the chunk mesh format it persists:
+ * `-2`, four undirected edges per cell with straight and bent states
+ * (8-direction travel, R1). Older meshes belong to another namespace: unread,
+ * then evicted by the cache bounds. */
+export const ROUTE_POLICY_VERSION = 'rc1-pedestrian-2';
 export type RouteEndpoint = { kind: 'point'; cellX: number; cellY: number } | { kind: 'access'; accessId: string };
 export interface RouteQuery {
   worldId: string;

@@ -69,7 +69,60 @@ describe('RC1 pedestrian paths, independently from terraforming', () => {
   });
   it('keeps an interrupted search distinct from a completed lattice search', () => {
     expect(buildSpawnAccessNetwork(flat(), [[{ x: 0, y: 0 }]], 40, 1)).toMatchObject({ visited: 1, complete: false });
-    expect(() => canWalkSpawnSegment(flat(), { x: 0, y: 0 }, { x: 1, y: 1 })).toThrow('cardinal');
+  });
+  it('sweeps an oblique segment along its normal, with Euclidean intervals (decision 23)', () => {
+    expect(canWalkSpawnSegment(flat(), { x: 0, y: 0 }, { x: 1, y: 1 })).toBe(true);
+    // A diagonal of one cell rises 0.25 per unit of its own length, not per axis.
+    for (const slope of [0.25, 0.25001]) {
+      const field = {
+        ...flat(),
+        sample: (x: number, y: number) => ({
+          elevation: 1 + (slope * (x + y)) / Math.SQRT2,
+          dry: true,
+          blocked: false,
+        }),
+      };
+      expect(canWalkSpawnSegment(field, { x: 10, y: 10 }, { x: 11, y: 11 })).toBe(slope <= 0.25);
+    }
+    // A thin obstacle on one side line, 1/16 off the diagonal: swept, then missed when farther.
+    const side = (distance: number) => ({
+      ...flat(),
+      sample: (x: number, y: number) => ({
+        elevation: 0.75,
+        dry: true,
+        blocked: Math.abs((x - 10 - (y - 10)) / Math.SQRT2 - distance) < 1e-6,
+      }),
+    });
+    expect(canWalkSpawnSegment(side(1 / 16), { x: 10, y: 10 }, { x: 11, y: 11 })).toBe(false);
+    expect(canWalkSpawnSegment(side(1 / 8), { x: 10, y: 10 }, { x: 11, y: 11 })).toBe(true);
+    // Across both seams of the torus.
+    expect(canWalkSpawnSegment(flat(), { x: 511.5, y: 255.5 }, { x: 0.5, y: 0.5 })).toBe(true);
+  });
+  it('samples the same points in both directions of a unit edge (symmetric test)', () => {
+    const seen = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+      const points = new Set<string>();
+      canWalkSpawnSegment(
+        {
+          ...flat(),
+          sample: (x, y) => {
+            points.add(`${x.toFixed(9)}:${y.toFixed(9)}`);
+            return { elevation: 0.75, dry: true, blocked: false };
+          },
+        },
+        a,
+        b,
+      );
+      return [...points].sort();
+    };
+    for (const [dx, dy] of [
+      [1, 0],
+      [0, 1],
+      [1, 1],
+      [-1, 1],
+    ] as const)
+      expect(seen({ x: 20 + dx, y: 20 + dy }, { x: 20, y: 20 })).toEqual(
+        seen({ x: 20, y: 20 }, { x: 20 + dx, y: 20 + dy }),
+      );
   });
   it('stops on a successful route witness without claiming exhaustive exploration', () => {
     const network = buildSpawnAccessNetwork(flat(), [[{ x: 0, y: 0 }]], 40, 4000, (routes) =>
