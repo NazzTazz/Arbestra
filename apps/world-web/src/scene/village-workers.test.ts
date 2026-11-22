@@ -1212,6 +1212,41 @@ it('makes no leisure walk to a home no path leads to', () => {
     f.dispose();
   }
 });
+it('walks no diagonal desire path before they are drawn (R2a), and the same walks beside them', () => {
+  const run = (state: VillageState) => {
+    const walked: string[][] = [];
+    const f = fixture(() => true, {
+      leisurePath: (_id, p) => (walked.push(cellsOf(p)), p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+      leisureVersion: () => 'ground-1',
+    });
+    try {
+      f.view.sync(state, epoch);
+      for (let t = 0; t < 5_000; t += 33) f.view.animate(epoch + t, true);
+      return walked;
+    } finally {
+      f.dispose();
+    }
+  };
+  // The house at (0, 4) reached only by diagonals: from the hall (0, 0) south-east, then back
+  // south-west; and a diagonal beside the column of the connected village.
+  const zigzag = desireIdleSnapshot(false);
+  zigzag.travelRoutes = desireRoutes(
+    [
+      { cellX: 0, cellY: 0, east: false, south: false, southEast: true },
+      { cellX: 1, cellY: 1, east: false, south: false, southWest: true },
+      { cellX: 0, cellY: 2, east: false, south: false, southEast: true },
+      { cellX: 1, cellY: 3, east: false, south: false, southWest: true },
+    ],
+    zigzag.world,
+  );
+  expect(zigzag.travelRoutes.every((r) => /:south-(east|west)$/.test(r.id))).toBe(true);
+  // Only the hall's own spokes, as with no path at all.
+  expect(run(zigzag)).toEqual(run(desireIdleSnapshot(false)));
+  const connected = desireIdleSnapshot(),
+    beside = { ...connected, travelRoutes: [...connected.travelRoutes, ...zigzag.travelRoutes] };
+  expect(run(beside)).toEqual(run(connected));
+  expect(run(beside)).toContainEqual(['0:0', '0:1', '0:2', '0:3', '0:4']);
+});
 it('searches its desire paths again only when the paths, the road cells or the layout of the buildings change', () => {
   const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {
     void lane;
