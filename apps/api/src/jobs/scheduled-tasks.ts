@@ -218,23 +218,6 @@ function processInTransaction(
   });
 }
 
-export async function drainScheduledTasks(
-  db: Kysely<Database>,
-  handlers: ScheduledTaskHandlers,
-  limit = 50,
-  observer?: Observer,
-): Promise<number> {
-  let processed = 0;
-  while (processed < limit) {
-    const result = await processNextScheduledTask(db, handlers);
-    if (!result) break;
-    // The transaction has committed before its outcome is observed.
-    observe(observer, { kind: 'processed', outcome: result.outcome });
-    processed += 1;
-  }
-  return processed;
-}
-
 /**
  * Runs `passes` independent passes. Each takes its own task (`SKIP LOCKED`)
  * and finalises only that one; two tasks of one village meet on the village
