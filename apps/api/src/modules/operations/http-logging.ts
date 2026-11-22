@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import type { FastifyBaseLogger, FastifyServerOptions } from 'fastify';
 import type { HttpDiagnosticLogState, HttpRequestObservation } from '@arbestra/contracts';
 import type { HttpDiagnosticLogger } from './http-diagnostics.js';
+import { SLOW_TASK_EVENT, projectSlowTask } from './scheduler-timing.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE']);
@@ -158,6 +159,7 @@ function safeResponseLog(value: unknown): { statusCode?: number } {
 function safeLog(value: unknown): Record<string, unknown> {
   const source = object(value);
   if (source.event === 'http.diagnostic') return { event: 'http.diagnostic', ...observation(source.observation) };
+  if (source.event === SLOW_TASK_EVENT) return projectSlowTask(source);
   const event = known(source.event, AUDIT_EVENTS, 'application.log');
   const result: Record<string, unknown> = { event };
   if (source instanceof Error || source.err || source.error) result.code = 'INTERNAL_ERROR';

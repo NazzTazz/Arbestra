@@ -3,6 +3,8 @@ import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type { Database, ScheduledTasksTable } from '../database/schema.js';
 import { isLockTimeout } from '../errors.js';
 import { spatialSavepoint, withSpatialRetry } from '../modules/worlds/spatial-locks.js';
+import { DevTimingTrace, withDevTiming } from '../modules/operations/dev-timing.js';
+import { slowTaskLine, type SlowTaskOutcome, type SlowTaskSink } from '../modules/operations/scheduler-timing.js';
 
 export type ScheduledTask = Selectable<ScheduledTasksTable>;
 export type ScheduledTaskHandler = (transaction: Transaction<Database>, task: ScheduledTask) => Promise<void>;
@@ -47,10 +49,12 @@ export async function processNextScheduledTask(
   db: Kysely<Database>,
   handlers: ScheduledTaskHandlers,
   retryDelayMs = 1_000,
+  onSlowTask?: SlowTaskSink,
 ): Promise<ProcessScheduledTaskResult | null> {
+  if (onSlowTask) return processTimed(db, handlers, retryDelayMs, onSlowTask);
   let taken: string | undefined;
   try {
-    return await processInTransaction(db, handlers, retryDelayMs, (id) => (taken = id));
+    return await processInTransaction(db, handlers, retryDelayMs, (task) => (taken = task.id));
   } catch (error) {
     // A lock wait can also time out at COMMIT: the deferred V2 publication
     // (game_sync_assert_published, 053) updates the stream rows there, after
@@ -59,6 +63,55 @@ export async function processNextScheduledTask(
     if (!taken || !isLockTimeout(error)) throw error;
     await rescheduleBusy(db, taken);
     return { taskId: taken, outcome: 'busy-rescheduled' };
+  }
+}
+
+/** The same, timed with the request diagnostics' phases (dev-timing): a task
+ * slower than SLOW_TASK_THRESHOLD_MS reports one line. Observation only: the
+ * trace never reruns a read (`profiling` off) and nothing is written below
+ * the threshold. */
+async function processTimed(
+  db: Kysely<Database>,
+  handlers: ScheduledTaskHandlers,
+  retryDelayMs: number,
+  onSlowTask: SlowTaskSink,
+): Promise<ProcessScheduledTaskResult | null> {
+  const trace = new DevTimingTrace();
+  trace.profiling = false;
+  const started = trace.now();
+  let taken: ScheduledTask | undefined,
+    takenAt = 0,
+    takenAtMs = 0;
+  const report = (outcome: SlowTaskOutcome) => {
+    const ended = trace.now();
+    trace.closed = true;
+    if (!taken) return;
+    try {
+      const line = slowTaskLine(taken, outcome, trace, { started, taken: takenAt, ended, takenAtMs });
+      if (line) onSlowTask(line);
+    } catch {
+      /* Monitoring must never change task handling. */
+    }
+  };
+  try {
+    const result = await withDevTiming(trace, () =>
+      processInTransaction(db, handlers, retryDelayMs, (task) => {
+        taken = task;
+        takenAt = trace.now();
+        takenAtMs = Date.now();
+      }),
+    );
+    if (result) report(result.outcome);
+    return result;
+  } catch (error) {
+    // As above: a lock wait timed out at COMMIT gives way.
+    if (!taken || !isLockTimeout(error)) {
+      report('failed');
+      throw error;
+    }
+    report('busy-rescheduled');
+    await rescheduleBusy(db, taken.id);
+    return { taskId: taken.id, outcome: 'busy-rescheduled' };
   }
 }
 
@@ -87,7 +140,7 @@ function processInTransaction(
   db: Kysely<Database>,
   handlers: ScheduledTaskHandlers,
   retryDelayMs: number,
-  took: (taskId: string) => void,
+  took: (task: ScheduledTask) => void,
 ): Promise<ProcessScheduledTaskResult | null> {
   return db.transaction().execute(async (transaction) => {
     const task = await transaction
@@ -104,7 +157,7 @@ function processInTransaction(
       .executeTakeFirst();
 
     if (!task) return null;
-    took(task.id);
+    took(task);
     await sql`select set_config('lock_timeout', ${`${TASK_LOCK_TIMEOUT_MS}ms`}, true)`.execute(transaction);
 
     const handler = handlers[task.taskType];
@@ -199,7 +252,7 @@ export function startScheduledTaskWorker(
   pollIntervalMs: number,
   onError: (error: unknown) => void,
   observer?: Observer,
-  { passes = SCHEDULER_PASSES }: { passes?: number } = {},
+  { passes = SCHEDULER_PASSES, onSlowTask }: { passes?: number; onSlowTask?: SlowTaskSink } = {},
 ): () => Promise<void> {
   let stopped = false,
     working = 0;
@@ -223,7 +276,7 @@ export function startScheduledTaskWorker(
       working++;
       try {
         while (!stopped) {
-          const result = await processNextScheduledTask(db, handlers);
+          const result = await processNextScheduledTask(db, handlers, undefined, onSlowTask);
           if (!result) break;
           // The transaction has committed before its outcome is observed.
           observe(observer, { kind: 'processed', outcome: result.outcome });

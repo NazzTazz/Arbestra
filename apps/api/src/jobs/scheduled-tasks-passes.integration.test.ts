@@ -4,6 +4,7 @@ import { sql, type Kysely } from 'kysely';
 import { createDatabase } from '../database/connection.js';
 import { testDatabaseUrl } from '../database/test-environment.js';
 import type { Database } from '../database/schema.js';
+import type { SlowTaskLine } from '../modules/operations/scheduler-timing.js';
 import { startScheduledTaskWorker, type ScheduledWorkerObservation } from './scheduled-tasks.js';
 
 // Independent passes: a pass held by a long task never keeps the others from
@@ -164,4 +165,52 @@ it('stops after the task in progress and starts nothing more', async () => {
     barrier.release();
     await Promise.allSettled([stopping]);
   }
+}, 30_000);
+
+it('writes one phase line for a task slower than 1 s, none for a fast one', async () => {
+  const slow = await add('slow'),
+    fast = await add('fast');
+  const lines: SlowTaskLine[] = [];
+  let completed = 0;
+  const done = gate();
+  const stop = startScheduledTaskWorker(
+    db,
+    {
+      slow: async (tx) => {
+        await sql`select pg_sleep(1.1)`.execute(tx);
+      },
+      fast: async (tx) => {
+        await sql`select 1`.execute(tx);
+      },
+    },
+    POLL_MS,
+    () => undefined,
+    (event) => {
+      if (event.kind === 'processed' && event.outcome === 'completed' && ++completed === 2) done.release();
+    },
+    { passes: 2, onSlowTask: (line) => lines.push(line) },
+  );
+  try {
+    await bounded(done.promise);
+  } finally {
+    await stop();
+  }
+  expect(lines).toHaveLength(1);
+  const [line] = lines;
+  expect(line).toMatchObject({
+    event: 'scheduler.slow-task',
+    taskType: 'slow',
+    taskId: slow.id,
+    worldId: slow.worldId,
+    subjectId: slow.subjectId,
+    outcome: 'completed',
+    attempts: 0,
+  });
+  expect(line!.durationMs).toBeGreaterThan(1_000);
+  expect(line!.sqlMs).toBeGreaterThan(1_000);
+  // Selection, lock delay, savepoints, the handler's statement, finalisation.
+  expect(line!.sqlCalls).toBeGreaterThanOrEqual(5);
+  expect(line!.slowestSql[0]).toMatchObject({ label: 'pg_sleep():select' });
+  expect(line!.lateMs).toBeGreaterThan(0);
+  expect(lines.some((l) => l.taskId === fast.id)).toBe(false);
 }, 30_000);

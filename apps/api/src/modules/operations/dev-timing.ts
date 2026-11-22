@@ -5,7 +5,7 @@ import type { CompiledQuery, DatabaseConnection, Driver } from 'kysely';
 import { DEV_TIMING_HEADER, type DevTimingMetric, type DevTimingPhase } from '@arbestra/contracts';
 
 type Span = { start: number; children: number; childStart: number; childMs: number; ended: boolean };
-type Context = { trace: DevTimingTrace; span: Span };
+type Context = { trace: DevTimingTrace; span: Span; phase?: DevTimingPhase };
 const context = new AsyncLocalStorage<Context>();
 
 export class DevTimingTrace {
@@ -16,6 +16,9 @@ export class DevTimingTrace {
   readonly profile: Array<{ label: string; ms: number }> = [];
   readonly root: Span;
   closed = false;
+  /** Whether `profileParts` reruns its parts: an opted-in HTTP request only.
+   * A trace that only observes (scheduler tasks) never issues extra reads. */
+  profiling = true;
   constructor(readonly now = () => performance.now()) {
     this.root = this.start();
   }
@@ -47,7 +50,9 @@ export class DevTimingTrace {
       .join(', ');
   }
   recordStatement(sql: string, ms: number) {
-    if (this.closed) return;
+    // Labelled only when it enters the three slowest (a traced scheduler task
+    // runs many statements; most never do).
+    if (this.closed || (this.slowest.length >= 3 && ms <= this.slowest[2]!.ms)) return;
     this.slowest.push({ label: statementLabel(sql), ms });
     this.slowest.sort((a, b) => b.ms - a.ms);
     this.slowest.length = Math.min(this.slowest.length, 3);
@@ -69,7 +74,7 @@ export function statementLabel(sql: string): string {
  * request (diagnostics; the parts are rerun read-only in the same transaction). */
 export async function profileParts(parts: ReadonlyArray<readonly [string, () => Promise<unknown>]>): Promise<void> {
   const trace = context.getStore()?.trace;
-  if (!trace || trace.closed) return;
+  if (!trace || trace.closed || !trace.profiling) return;
   for (const [label, run] of parts) {
     const started = performance.now();
     await run();
@@ -83,13 +88,16 @@ export function withDevTiming<T>(trace: DevTimingTrace, run: () => T): T {
 
 function begin(phase: DevTimingPhase) {
   const current = context.getStore();
-  if (!current || current.trace.closed) return;
+  // A phase nested directly in itself (a caller and its callee timing the same
+  // work) is counted once, by the outer span.
+  if (!current || current.trace.closed || current.phase === phase) return;
   const { trace, span: parent } = current,
     span = trace.start();
   if (parent.children++ === 0) parent.childStart = span.start;
   return {
     trace,
     span,
+    phase,
     end: () => {
       trace.finish(phase, span);
       if (--parent.children === 0 && !parent.ended) parent.childMs += Math.max(0, trace.now() - parent.childStart);
