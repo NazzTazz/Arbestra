@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Pool } from 'pg';
-import { sql, Kysely, PostgresDialect, CamelCasePlugin } from 'kysely';
-import type { Database } from '../../database/schema.js';
+import { sql } from 'kysely';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -74,51 +72,6 @@ it('requires protocol negotiation and authentication and rejects unknown request
     ).toBe(400);
   }
 });
-it('fails closed before writer activation, including bootstrap without economic mutation', async () => {
-  // The gate reads the catalog (the runtime role cannot read kysely_migration):
-  // hide the last rollout piece by name for this test only, restored below.
-  // Triggers bind functions by OID, so business writers keep working.
-  const schema = 'sync_gate_' + randomUUID().replaceAll('-', '');
-  await sql`create schema ${sql.id(schema)}`.execute(db);
-  const unready = new Kysely<Database>({
-    dialect: new PostgresDialect({
-      pool: new Pool({ connectionString: url, max: 1, options: `-c search_path=${schema},public` }),
-    }),
-    plugins: [new CamelCasePlugin()],
-  });
-  const unavailable = Fastify();
-  try {
-    await sql`alter function game_sync_collect_traffic() rename to game_sync_collect_traffic_hidden`.execute(db);
-    await unavailable.register(cookie);
-    unavailable.setErrorHandler((error, _request, reply) =>
-      error instanceof HttpError
-        ? reply.status(error.statusCode).send({ code: error.code })
-        : reply.status(500).send({ code: 'UNEXPECTED' }),
-    );
-    await registerSyncV2Routes(unavailable, unready, { cookieName: 'session' }, unusedNavigation);
-    const before = await db.selectFrom('villages').selectAll().where('id', '=', ids.village).executeTakeFirstOrThrow();
-    for (const operation of ['read', 'stream', 'bootstrap']) {
-      const response = await unavailable.inject({
-        method: operation === 'bootstrap' ? 'GET' : 'POST',
-        url: `${prefix}/${operation === 'bootstrap' ? 'bootstrap?generation=0' : `sync/${operation}`}`,
-        headers: { 'x-arbestra-protocol': '2' },
-        cookies: { session: token },
-        ...(operation === 'bootstrap' ? {} : { payload: { protocol: 2, generation: 0, scopes: [], cursors: [] } }),
-      });
-      expect(response.statusCode).toBe(503);
-      expect(response.json()).toEqual({ code: 'SYNC_V2_UNAVAILABLE' });
-    }
-    expect(await db.selectFrom('villages').selectAll().where('id', '=', ids.village).executeTakeFirstOrThrow()).toEqual(
-      before,
-    );
-  } finally {
-    await sql`alter function game_sync_collect_traffic_hidden() rename to game_sync_collect_traffic`.execute(db);
-    await unavailable.close();
-    await unready.destroy();
-    await sql`drop schema ${sql.id(schema)} cascade`.execute(db);
-  }
-});
-
 it('bootstraps and streams as pure reads: a due construction and a due wake wait for the worker', async () => {
   const revision = async () =>
     (

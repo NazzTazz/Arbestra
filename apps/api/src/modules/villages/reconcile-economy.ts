@@ -445,7 +445,7 @@ export async function reconcileVillageEconomy(
           (a, b) =>
             a.through.getTime() - b.through.getTime() || a.id.localeCompare(b.id) || a.type.localeCompare(b.type),
         );
-      } else
+      } else if (transition.type === 'extraction')
         await completeStoneExtractionAt(
           transaction,
           economy.worldId,
@@ -453,6 +453,12 @@ export async function reconcileVillageEconomy(
           transition.id,
           transition.through,
         );
+      else {
+        // A kind added to the SQL of readDueVillageTransitions or to DueTransition
+        // without its branch here: fail instead of completing it as an extraction.
+        const unknown: never = transition;
+        throw Error(`Unknown due transition: ${(unknown as { type: string }).type}`);
+      }
       transitions++;
       through = transition.through;
     }

@@ -58,7 +58,6 @@ import { ProcessingConfirmationV2Schema } from '@arbestra/contracts';
 import { commandProcessingV2 } from './processing-v2.js';
 import { expandGardenV2, placeBuildingV2, upgradeBuildingV2 } from './construction-v2.js';
 import type { BuildingType } from '@arbestra/contracts';
-import { assertSyncV2Available } from './sync-v2-routes.js';
 import { TradeCommandSchema, TradePageSchema, TradePreviewSchema, type TradeCommand } from '@arbestra/contracts';
 import { commandPlayerMarket, browsePlayerMarket, previewPlayerTrade } from './trade-service.js';
 import type { NavigationExecutor } from '../navigation/compute.js';
@@ -131,7 +130,6 @@ export async function registerVillageRoutes(
     run: (afterWrites: AfterConstructionWrites) => Promise<ConstructionCommit>,
     commandId = request.headers['x-arbestra-command'] as string | undefined,
   ) => {
-    await assertSyncV2Available(db);
     const confirmation = await villageCommandV2(
       commandId,
       Number(request.headers['x-arbestra-generation'] ?? '0'),
@@ -144,7 +142,6 @@ export async function registerVillageRoutes(
   const hudGesture = async (request: FastifyRequest, reply: FastifyReply, intent: HudWorkforceIntent) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
     const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-    await assertSyncV2Available(db);
     const confirmation = await commandHudWorkforceV2(
       db,
       account.id,
@@ -305,7 +302,6 @@ export async function registerVillageRoutes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      await assertSyncV2Available(db);
       const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
       if (!Number.isSafeInteger(generation))
         throw new HttpError(400, 'INVALID_SYNC_GENERATION', 'Génération invalide.');
@@ -380,7 +376,6 @@ export async function registerVillageRoutes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      await assertSyncV2Available(db);
       const confirmation = await roadCellsCommandV2(
         db,
         account.id,
@@ -408,7 +403,6 @@ export async function registerVillageRoutes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      await assertSyncV2Available(db);
       const confirmation = await terrainEditsCommandV2(
         db,
         account.id,
@@ -436,7 +430,6 @@ export async function registerVillageRoutes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      await assertSyncV2Available(db);
       const confirmation = await demolitionCommandV2(
         db,
         account.id,
@@ -479,7 +472,6 @@ export async function registerVillageRoutes(
     async (request, reply) => {
       const account = await authenticate(db, request.cookies[config.cookieName]);
       const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
-      await assertSyncV2Available(db);
       const confirmation = await roadAnchorsCommandV2(
         db,
         account.id,
@@ -602,7 +594,6 @@ export async function registerVillageRoutes(
       // Placements always carry their idempotent identity and the spatial form.
       if (!body.commandId || !body.cells || body.anchorCellX === undefined || body.anchorCellY === undefined)
         throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
-      await assertSyncV2Available(db);
       const generation = Number(request.headers['x-arbestra-generation'] ?? '0');
       const confirmation = await placeBuildingV2(
         db,
@@ -651,7 +642,6 @@ export async function registerVillageRoutes(
         expectedCosts?: Array<{ resourceCode: string; amount: number }>;
       };
       if (!commandId) throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
-      await assertSyncV2Available(db);
       const confirmation = await expandGardenV2(
         db,
         account.id,
@@ -692,7 +682,6 @@ export async function registerVillageRoutes(
       };
       if (!upgrade.commandId)
         throw new HttpError(400, 'INVALID_V2_CONSTRUCTION', 'Commande de construction V2 incomplète.');
-      await assertSyncV2Available(db);
       const confirmation = await upgradeBuildingV2(
         db,
         account.id,

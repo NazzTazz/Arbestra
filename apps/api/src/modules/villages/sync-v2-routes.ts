@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { sql, type Kysely } from 'kysely';
+import type { Kysely } from 'kysely';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import {
@@ -33,19 +33,6 @@ const prefix = '/api/worlds/:worldSlug/villages/:villageId';
  * assemble them; the header is ignored by servers without pages. */
 const acceptsPages = (request: FastifyRequest) => request.headers[SYNC_V2_PAGES_HEADER] === '1';
 const readResponse = Type.Union([SyncV2BatchSchema, SyncV2SnapshotPageSchema]);
-
-/** Registration is not activation: until the complete writer/backfill rollout
- * is installed, these endpoints fail closed rather than expose partial streams.
- * Checked in the catalog, readable by the runtime role: deployment revokes
- * every right on kysely_migration from it. The 057 traffic collector is the
- * last piece of that rollout (053–057 are applied in order). */
-export async function assertSyncV2Available(db: Kysely<Database>): Promise<void> {
-  const { ready } = (
-    await sql<{ ready: boolean }>`select to_regclass('game_sync_streams') is not null
-      and to_regprocedure('game_sync_collect_traffic()') is not null as ready`.execute(db)
-  ).rows[0]!;
-  if (!ready) throw new HttpError(503, 'SYNC_V2_UNAVAILABLE', 'Synchronisation V2 indisponible.');
-}
 
 export const SYNC_SCOPE_TOO_LARGE_RETRY_AFTER_SECONDS = 60;
 /** A scope beyond the reader bounds is a typed, explicit refusal rather than
@@ -140,7 +127,6 @@ export async function registerSyncV2Routes(
   });
   const bootstrap = async (request: FastifyRequest, reply: FastifyReply, villageId: string | undefined) => {
     const account = await authenticate(db, request.cookies[config.cookieName]);
-    await assertSyncV2Available(db);
     const { worldSlug } = request.params as { worldSlug: string };
     // A pure read: due transitions, admissions, fatigue, rest and beds advance
     // through their worker notifications (071), so the first capture no longer
@@ -212,7 +198,6 @@ export async function registerSyncV2Routes(
       async (request, reply) => {
         const token = request.cookies[config.cookieName];
         const account = await authenticate(db, token);
-        await assertSyncV2Available(db);
         const { worldSlug, villageId } = request.params as { worldSlug: string; villageId: string };
         const body = request.body as SyncV2ReadRequest;
         reply.header('Cache-Control', 'no-store');
