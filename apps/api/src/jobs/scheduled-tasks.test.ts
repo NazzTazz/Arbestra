@@ -47,9 +47,16 @@ describe('scheduler passes', () => {
     let queued = 5;
     const fake = fakeDb(() => (queued-- > 0 ? 'task' : 'none'));
     const events: ScheduledWorkerObservation[] = [];
-    const stop = startScheduledTaskWorker(fake.db, {}, 60_000, () => undefined, (e) => events.push(e), {
-      passes: 1,
-    });
+    const stop = startScheduledTaskWorker(
+      fake.db,
+      {},
+      60_000,
+      () => undefined,
+      (e) => events.push(e),
+      {
+        passes: 1,
+      },
+    );
     try {
       // Five tasks and the empty look that follows, far within one interval.
       await until(() => fake.calls() === 6, 1_000);
@@ -103,9 +110,16 @@ describe('scheduler passes', () => {
   it('stop wakes sleeping passes at once, then nothing runs', async () => {
     const fake = fakeDb(() => 'none');
     const events: ScheduledWorkerObservation[] = [];
-    const stop = startScheduledTaskWorker(fake.db, {}, 60_000, () => undefined, (e) => events.push(e), {
-      passes: 3,
-    });
+    const stop = startScheduledTaskWorker(
+      fake.db,
+      {},
+      60_000,
+      () => undefined,
+      (e) => events.push(e),
+      {
+        passes: 3,
+      },
+    );
     await until(() => fake.calls() === 3);
     await within(stop(), 500);
     expect(events.at(-1)).toEqual({ kind: 'stopped' });
