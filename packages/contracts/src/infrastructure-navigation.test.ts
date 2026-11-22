@@ -284,7 +284,8 @@ describe('infrastructure spatial guarantees', () => {
         ],
       },
     ];
-    expect(automaticBraziers(s)).toEqual([]);
+    // 12:12 turns towards the house: a bend, no fire (R2b). Only the far end of the path, 11:12, is lit.
+    expect(automaticBraziers(s).map((f) => f.id)).toEqual(['auto:11:12:-1:-1']);
   });
   it('retracts a replaced width without destroying a crossing and removes internal curbs', () => {
     const wide = road(

@@ -28,18 +28,65 @@ export function leisureLayout(state: Pick<VillageState, 'cells'>): string {
   return layout;
 }
 
-const EAST = 1,
-  SOUTH = 2,
-  WEST = 4,
-  NORTH = 8;
-const OPPOSITE: Readonly<Record<number, number>> = { [EAST]: WEST, [SOUTH]: NORTH, [WEST]: EAST, [NORTH]: SOUTH };
-/** E, S, W, N: the order that fixes which of several equal paths is taken. */
-const STEPS: ReadonlyArray<readonly [number, number, number]> = [
-  [1, 0, EAST],
-  [0, 1, SOUTH],
-  [-1, 0, WEST],
-  [0, -1, NORTH],
+/** The eight steps, cardinal first (east, south, west, north), then south-east, south-west,
+ * north-west, north-east: the order that fixes which of several equal paths is taken. Bit `i` of a
+ * cell's links is step `i`; the opposite of step `i` is step `i ^ 2` (cardinal) or `4 + ((i + 2) & 3)`. */
+const STEPS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+  [1, -1],
 ];
+const opposite = (step: number) => (step < 4 ? (step + 2) % 4 : 4 + ((step - 4 + 2) % 4));
+
+/** Binary min-heap of (cost, order, cell); duplicates allowed, stale entries skipped by the reader. */
+class Frontier {
+  readonly #items: Array<[number, number, number]> = [];
+  get size() {
+    return this.#items.length;
+  }
+  #less(i: number, j: number) {
+    const a = this.#items[i]!,
+      b = this.#items[j]!;
+    return a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+  }
+  #swap(i: number, j: number) {
+    const t = this.#items[i]!;
+    this.#items[i] = this.#items[j]!;
+    this.#items[j] = t;
+  }
+  push(item: [number, number, number]) {
+    this.#items.push(item);
+    for (let i = this.#items.length - 1; i > 0; ) {
+      const up = (i - 1) >> 1;
+      if (!this.#less(i, up)) break;
+      this.#swap(i, up);
+      i = up;
+    }
+  }
+  pop(): [number, number, number] {
+    const top = this.#items[0]!,
+      last = this.#items.pop()!;
+    if (this.#items.length) {
+      this.#items[0] = last;
+      for (let i = 0; ; ) {
+        const l = i * 2 + 1,
+          r = l + 1;
+        let m = i;
+        if (l < this.#items.length && this.#less(l, m)) m = l;
+        if (r < this.#items.length && this.#less(r, m)) m = r;
+        if (m === i) break;
+        this.#swap(i, m);
+        i = m;
+      }
+    }
+    return top;
+  }
+}
 
 /**
  * The leisure walks of a village whose paths are desire lines (decision 9, §4.3 and §8 of
@@ -47,13 +94,16 @@ const STEPS: ReadonlyArray<readonly [number, number, number]> = [
  * player's road cells, from the town hall to the homes they lead to, and nowhere else. A building
  * raised after the paths were laid has no walk until a path reaches it.
  *
- * The graph: a desire edge (a two-cell segment of `travelRoutes`) joins its two cells, and two
- * adjacent road cells are joined. The hall's footprint cells are the sources; a cell of the hall
- * touches the path cells that border it, as a door opens on the path in front of it. One breadth-first
- * search from all the sources, at most `maxNodes` cells, fixes a shortest path to every cell
- * reached; a home is reached when its own cell, or one of the four cells around it, is. Neighbours
- * are met east, south, west, north and the sources by cell index, so the same inputs give the same
- * walks. Pure; linear in the cells it visits.
+ * The graph, in eight directions (docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md §3.4): a desire edge
+ * (a two-cell segment of `travelRoutes`, cardinal or diagonal) joins its two cells, and two road
+ * cells side by side are joined; two road cells corner to corner are joined when a third road cell
+ * touches both (the walk cuts the corner of a bend). A diagonal step never passes between two corners
+ * of buildings: both cells beside it must be free, as in the mission search. The hall's footprint
+ * cells are the sources; a cell of the hall touches the path cells that border it, as a door opens on
+ * the path in front of it. One shortest-path search from all the sources (a diagonal step √2), at
+ * most `maxNodes` cells, fixes a path to every cell reached; a home is reached when its own cell, or
+ * one of the four cells around it, is. Steps are met in the order of `STEPS` and the sources by cell
+ * index, so the same inputs give the same walks. Pure; n log n in the cells it reaches.
  */
 export function desireLeisureRoutes(state: LeisureState, maxNodes = LEISURE_MAX_NODES): LeisureSearch {
   const { widthCells: width, heightCells: height } = state.world;
@@ -66,20 +116,21 @@ export function desireLeisureRoutes(state: LeisureState, maxNodes = LEISURE_MAX_
   const homes = state.cells.filter((c) => c.building?.status === 'completed' && c.building.type === 'dwelling');
   if (!homes.length) return none;
 
-  // Desire edges as direction bits per cell, from the two-cell segments.
+  // Desire edges as step bits per cell, from the two-cell segments.
   const links = new Map<number, number>();
-  const link = (a: number, b: number, bit: number, opposite: number) => {
-    links.set(a, (links.get(a) ?? 0) | bit);
-    links.set(b, (links.get(b) ?? 0) | opposite);
-  };
   for (const route of state.travelRoutes)
     for (let i = 1; i < route.cells.length; i++) {
       const a = route.cells[i - 1]!,
         b = route.cells[i]!;
       if (![a.cellX, a.cellY, b.cellX, b.cellY].every(Number.isInteger)) continue;
-      for (const [dx, dy, bit] of STEPS)
-        if (id(a.cellX + dx, a.cellY + dy) === id(b.cellX, b.cellY))
-          link(id(a.cellX, a.cellY), id(b.cellX, b.cellY), bit, OPPOSITE[bit]!);
+      const from = id(a.cellX, a.cellY),
+        to = id(b.cellX, b.cellY);
+      for (const [step, [dx, dy]] of STEPS.entries())
+        if (id(a.cellX + dx, a.cellY + dy) === to) {
+          links.set(from, (links.get(from) ?? 0) | (1 << step));
+          links.set(to, (links.get(to) ?? 0) | (1 << opposite(step)));
+          break;
+        }
     }
   const roads = new Set<number>((state.roadCells ?? []).map((c) => id(c.cellX, c.cellY)));
   // A cell with a path or a road: the cells a door opens on.
@@ -100,38 +151,52 @@ export function desireLeisureRoutes(state: LeisureState, maxNodes = LEISURE_MAX_
       .filter((c) => (c.footprint || c.building) && !sourceSet.has(id(c.cellX, c.cellY)))
       .map((c) => id(c.cellX, c.cellY)),
   );
+  const buildings = new Set(state.cells.filter((c) => c.footprint || c.building).map((c) => id(c.cellX, c.cellY)));
 
-  // Breadth-first from every source at once; the bound counts the cells reached.
+  // Shortest paths from every source at once; the bound counts the cells reached.
   const parent = new Map<number, number>();
   const depth = new Map<number, number>();
-  const queue: number[] = [];
-  let truncated = false;
+  const frontier = new Frontier();
+  let truncated = false,
+    order = 0;
   const reach = (cell: number, from: number, d: number) => {
-    if (parent.has(cell)) return;
-    if (parent.size >= maxNodes) {
+    const known = depth.get(cell);
+    if (known !== undefined && known <= d + 1e-9) return;
+    if (known === undefined && parent.size >= maxNodes) {
       truncated = true;
       return;
     }
     parent.set(cell, from);
     depth.set(cell, d);
-    queue.push(cell);
+    frontier.push([d, order++, cell]);
   };
   for (const source of sources) reach(source, -1, 0);
-  for (let head = 0; head < queue.length; head++) {
-    const cell = queue[head]!;
+  const done = new Set<number>();
+  while (frontier.size) {
+    const [d, , cell] = frontier.pop();
+    if (done.has(cell) || d > depth.get(cell)! + 1e-9) continue;
+    done.add(cell);
     if (solid.has(cell)) continue;
     const here = links.get(cell) ?? 0,
       x = cell % width,
-      y = Math.floor(cell / width),
-      d = depth.get(cell)! + 1;
-    for (const [dx, dy, bit] of STEPS) {
+      y = Math.floor(cell / width);
+    for (const [step, [dx, dy]] of STEPS.entries()) {
       const next = id(x + dx, y + dy);
+      if (step >= 4) {
+        // Never between two corners of buildings.
+        const sideA = id(x + dx, y),
+          sideB = id(x, y + dy);
+        if (buildings.has(sideA) || buildings.has(sideB)) continue;
+        if (here & (1 << step) || (roads.has(cell) && roads.has(next) && (roads.has(sideA) || roads.has(sideB))))
+          reach(next, cell, d + Math.SQRT2);
+        continue;
+      }
       if (
-        here & bit ||
+        here & (1 << step) ||
         (roads.has(cell) && roads.has(next)) ||
         (sourceSet.has(cell) && !sourceSet.has(next) && path(next))
       )
-        reach(next, cell, d);
+        reach(next, cell, d + 1);
     }
   }
 
@@ -142,7 +207,7 @@ export function desireLeisureRoutes(state: LeisureState, maxNodes = LEISURE_MAX_
       cost = Infinity;
     // The home's own cell when a desire edge ends in it, else a free cell around it: the one that
     // makes the walk shortest, the home's own cell first, then east, south, west, north.
-    for (const candidate of [own, ...STEPS.map(([dx, dy]) => id(home.cellX + dx, home.cellY + dy))]) {
+    for (const candidate of [own, ...STEPS.slice(0, 4).map(([dx, dy]) => id(home.cellX + dx, home.cellY + dy))]) {
       if (!depth.has(candidate) || (candidate !== own && solid.has(candidate))) continue;
       const length = depth.get(candidate)! + (candidate === own ? 0 : 1);
       if (length < cost) {

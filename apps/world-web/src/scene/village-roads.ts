@@ -8,6 +8,7 @@ import {
 import type { Scene } from '@babylonjs/core/scene';
 import type { WorldSpace } from './world-space';
 import { InfrastructureRenderer } from './infrastructure-renderer';
+import { roadCellSpurs } from './road-cell-links';
 export { roadEdges } from './road-profile';
 
 /** Automatic decoration shares the manual road masonry and sidewalk renderer. */
@@ -47,20 +48,25 @@ export class VillageRoads {
     this.#stubs = stubs;
     if (routeSignature !== this.#routeSignature) {
       this.#routeSignature = routeSignature;
+      const world = { widthCells: space.width, heightCells: space.height };
       this.#plan = {
         ...emptyInfrastructure(),
-        roads: automaticRoadStrokes(
-          [...routes, ...stubs],
-          { widthCells: space.width, heightCells: space.height },
-          // Le bout masqué d'un tronçon n'a pas de nœud : la case de route dessine le sien.
-          stubs.length
-            ? new Set(
-                [...routes, ...stubs.map((r) => ({ cells: [r.cells[0]!] }))].flatMap((r) =>
-                  r.cells.map((c) => c.cellX + ':' + c.cellY),
-                ),
-              )
-            : undefined,
-        ),
+        roads: [
+          ...automaticRoadStrokes(
+            [...routes, ...stubs],
+            world,
+            // Le bout masqué d'un tronçon n'a pas de nœud : la case de route dessine le sien.
+            stubs.length
+              ? new Set(
+                  [...routes, ...stubs.map((r) => ({ cells: [r.cells[0]!] }))].flatMap((r) =>
+                    r.cells.map((c) => c.cellX + ':' + c.cellY),
+                  ),
+                )
+              : undefined,
+          ),
+          // A diagonal junction also carries the path into the corner of the road cell.
+          ...roadCellSpurs(stubs, world),
+        ],
       };
     }
     this.#renderer.update(

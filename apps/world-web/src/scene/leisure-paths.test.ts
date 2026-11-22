@@ -58,25 +58,74 @@ describe('leisure walks over desire paths', () => {
     expect(search.truncated).toBe(false);
   });
 
-  it('walks no diagonal desire path before they are drawn (R2a), and walks the cardinal ones the same', () => {
-    const homes = [hall(10, 10), house('a', 14, 10), house('diag', 13, 13), house('seam', 63, 63)];
-    // Diagonals only: from the hall's cell south-east to the home diag, and across the seam.
-    const diagonals: DesireCell[] = [
-      { cellX: 10, cellY: 10, east: false, south: false, southEast: true },
-      { cellX: 11, cellY: 11, east: false, south: false, southEast: true },
-      { cellX: 12, cellY: 12, east: false, south: false, southEast: true },
-      { cellX: 0, cellY: 62, east: false, south: false, southWest: true },
-    ];
-    expect(desireLeisureRoutes(state(homes, diagonals)).routes.size).toBe(0);
-    // Beside the cardinal path to house a, they change nothing.
-    const cardinal = east(10, 10, 4),
-      merged = cardinal.map((c) => (c.cellX === 10 ? { ...c, southEast: true } : c));
-    const plain = desireLeisureRoutes(state(homes, cardinal)),
-      both = desireLeisureRoutes(state(homes, [...merged, ...diagonals.slice(1)]));
-    expect([...both.routes]).toEqual([...plain.routes]);
-    expect(both.visited).toBe(plain.visited);
-    expect(walk(both, 14, 10)).toEqual(['10:10', '11:10', '12:10', '13:10', '14:10']);
-    expect(both.routes.has('13:13')).toBe(false);
+  it('walks the diagonal desire paths too, √2 a step, and prefers them to the way round (R2b)', () => {
+    const se = (cellX: number, cellY: number): DesireCell => ({
+      cellX,
+      cellY,
+      east: false,
+      south: false,
+      southEast: true,
+    });
+    const homes = [hall(10, 10), house('diag', 13, 13)];
+    const search = desireLeisureRoutes(state(homes, [se(10, 10), se(11, 11), se(12, 12)]));
+    expect(walk(search, 13, 13)).toEqual(['10:10', '11:11', '12:12', '13:13']);
+    // Beside a cardinal way round (6 steps), the diagonal one (3 √2) is taken.
+    const round = [...east(10, 10, 3), ...south(13, 10, 3)];
+    expect(walk(desireLeisureRoutes(state(homes, [...round, se(10, 10), se(11, 11), se(12, 12)])), 13, 13)).toEqual([
+      '10:10',
+      '11:11',
+      '12:12',
+      '13:13',
+    ]);
+    expect(walk(desireLeisureRoutes(state(homes, round)), 13, 13)).toHaveLength(7);
+    // Across both seams of the torus.
+    const seam = desireLeisureRoutes(
+      state(
+        [hall(0, 0), house('seam', 62, 2)],
+        [
+          { cellX: 0, cellY: 0, east: false, south: false, southWest: true },
+          { cellX: 63, cellY: 1, east: false, south: false, southWest: true },
+        ],
+      ),
+    );
+    expect(walk(seam, 62, 2)).toEqual(['0:0', '63:1', '62:2']);
+  });
+
+  it('never steps diagonally between two corners of buildings', () => {
+    const paths = [...east(10, 10, 1), { cellX: 11, cellY: 10, east: false, south: false, southEast: true }];
+    const free = desireLeisureRoutes(state([hall(10, 10), house('h', 12, 12)], paths));
+    expect(walk(free, 12, 12)).toEqual(['10:10', '11:10', '12:11', '12:12']);
+    // A building on either side of the diagonal: no walk, the path is not a way between them.
+    for (const side of [garden(12, 10), garden(11, 11)])
+      expect(desireLeisureRoutes(state([hall(10, 10), house('h', 12, 12), side], paths)).routes.has('12:12')).toBe(
+        false,
+      );
+  });
+
+  it('cuts the corner of a bend of road cells, and never joins two road cells that only touch by a corner', () => {
+    const bend = desireLeisureRoutes(
+      state(
+        [hall(10, 10), house('r', 12, 12)],
+        [],
+        [
+          [10, 11],
+          [10, 12],
+          [11, 12],
+        ],
+      ),
+    );
+    expect(walk(bend, 12, 12)).toEqual(['10:10', '10:11', '11:12', '12:12']);
+    const corner = desireLeisureRoutes(
+      state(
+        [hall(10, 10), house('r', 12, 12)],
+        [],
+        [
+          [10, 11],
+          [11, 12],
+        ],
+      ),
+    );
+    expect(corner.routes.has('12:12')).toBe(false);
   });
 
   it('follows the road cells of the player as well, and joins them to the hall', () => {

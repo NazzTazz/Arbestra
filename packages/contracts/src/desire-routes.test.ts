@@ -224,7 +224,7 @@ describe('golden: desire edges draw what the network drew', () => {
   });
 });
 
-describe('diagonal desire paths before they are drawn (R2a)', () => {
+describe('diagonal desire paths (R2a, drawn since R2b)', () => {
   // A diagonal next to every cardinal shape of the fixture: at a corner, along a leg, across both
   // seams, alone, and into the occupied cells.
   const cardinal = desireCellsOf(fixtureRoutes()),
@@ -257,15 +257,26 @@ describe('diagonal desire paths before they are drawn (R2a)', () => {
     expect(ids.length).toBe(plain.travelRoutes.length + 9);
   });
 
-  it('light no brazier and move none', () => {
-    expect(automaticBraziers(onlyDiagonals)).toEqual([]);
-    expect(byId(automaticBraziers(withDiagonals))).toEqual(byId(automaticBraziers(plain)));
+  it('light the ends of the diagonals, and leave every fire of a node they do not touch as it was (R2b)', () => {
+    const touched = new Set<string>();
+    for (const d of diagonals) {
+      touched.add(`${d.cellX}:${d.cellY}`);
+      touched.add(`${(d.cellX + (d.southEast ? 1 : -1) + 64) % 64}:${(d.cellY + 1) % 64}`);
+    }
+    const node = (id: string) => id.split(':').slice(1, 3).join(':');
+    expect(automaticBraziers(onlyDiagonals).length).toBeGreaterThan(0);
+    expect(byId(automaticBraziers(withDiagonals).filter((f) => !touched.has(node(f.id))))).toEqual(
+      byId(automaticBraziers(plain).filter((f) => !touched.has(node(f.id)))),
+    );
   });
 
-  it('draw no stroke, and leave the strokes and the frozen arms of the cardinal paths as they are', () => {
-    expect(automaticRoadStrokes(onlyDiagonals.travelRoutes, world)).toEqual([]);
-    expect(byId(automaticRoadStrokes(withDiagonals.travelRoutes, world))).toEqual(
-      byId(automaticRoadStrokes(plain.travelRoutes, world)),
+  it('draw their arms, keep every stroke of the cardinal paths, and never freeze a diagonal (R2b)', () => {
+    const diagonal = (s: RoadStroke) => s.points[0]!.x !== s.points[1]!.x && s.points[0]!.y !== s.points[1]!.y;
+    const only = automaticRoadStrokes(onlyDiagonals.travelRoutes, world);
+    expect(only.length).toBe(2 * diagonals.reduce((n, d) => n + (d.southEast ? 1 : 0) + (d.southWest ? 1 : 0), 0));
+    expect(only.every(diagonal)).toBe(true);
+    expect(byId(automaticRoadStrokes(withDiagonals.travelRoutes, world).filter((s) => !diagonal(s)))).toEqual(
+      byId(automaticRoadStrokes(plain.travelRoutes, world).filter((s) => !diagonal(s))),
     );
     expect(createInfrastructureEditContext(onlyDiagonals as never).automatic.size).toBe(0);
     const expected = createInfrastructureEditContext(plain as never).automatic,

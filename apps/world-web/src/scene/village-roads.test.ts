@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { desireRoutes, type TravelRoute } from '@arbestra/contracts';
 import { roadEdges, VillageRoads } from './village-roads';
+import { roadCellSpurs } from './road-cell-links';
 import { automaticRoadStrokes, infrastructureSurface, emptyInfrastructure } from '@arbestra/contracts';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
@@ -156,7 +157,7 @@ it('renders automatic earth paths four subdivisions wide without sidewalks', () 
   }
 });
 
-it('draws nothing for a diagonal desire path before they are drawn (R2a), and the cardinal ones as before', () => {
+it('draws the diagonal desire paths (R2b), across the seam, and the spur of a diagonal junction with a road cell', () => {
   const world = { widthCells: 64, heightCells: 64 },
     space = () => new WorldSpace(64, 64, { cellX: 10, cellY: 10 });
   const diagonals = desireRoutes(
@@ -183,18 +184,36 @@ it('draws nothing for a diagonal desire path before they are drawn (R2a), and th
       renderer.update('earth', routes, space(), () => ({ code: 1, height: 0 }), true, undefined, undefined, stubs);
       return scene.meshes
         .filter((m) => m.material?.name === 'infrastructure-earth')
-        .map((m) => [...(m.getVerticesData('position') ?? [])]);
+        .flatMap((m) => [...(m.getVerticesData('position') ?? [])]);
     } finally {
       renderer.dispose();
     }
   };
   try {
-    expect(vertices(diagonals)).toEqual([]);
-    const plain = vertices(cardinal);
-    expect(plain.flat().length).toBeGreaterThan(0);
-    expect(vertices([...cardinal, ...diagonals])).toEqual(plain);
-    // A diagonal stub (road-cell links make none) would draw nothing either.
-    expect(vertices(cardinal, [diagonals[0]!])).toEqual(plain);
+    const alone = vertices(diagonals),
+      plain = vertices(cardinal);
+    expect(alone.length).toBeGreaterThan(0);
+    expect(plain.length).toBeGreaterThan(0);
+    expect(vertices([...cardinal, ...diagonals]).length).toBeGreaterThan(plain.length);
+    // A diagonal stub (road cell at 11:11): the arm of 10:10 to the corner, and its spur into the
+    // road cell's corner, nothing more.
+    const stub = { ...diagonals[0]!, id: 'link' };
+    expect(vertices([], [stub]).length).toBeGreaterThan(0);
+    const spur = roadCellSpurs([stub], world);
+    expect(spur.map((s) => s.points)).toEqual([
+      [
+        { x: 87, y: 87 },
+        { x: 84, y: 84 },
+      ],
+    ]);
+    // The spur stays in the corner of the road cell, short of its centre band's corner (±2/8).
+    const surface = infrastructureSurface(spur, world);
+    for (const p of surface.values()) {
+      expect(p.x).toBeGreaterThanOrEqual(168 - 4);
+      expect(p.y).toBeGreaterThanOrEqual(168 - 4);
+      expect(p.x + p.y).toBeLessThan(2 * 176 - 2);
+    }
+    expect(roadCellSpurs(cardinal, world)).toEqual([]);
   } finally {
     scene.dispose();
     engine.dispose();

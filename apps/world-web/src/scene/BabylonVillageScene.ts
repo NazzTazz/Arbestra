@@ -1359,6 +1359,11 @@ export class BabylonVillageScene {
         configurable: true,
         value: (cell: Cell) => this.focusCell(cell),
       });
+      // Captures of a place seen from above (browser checks of roads and paths).
+      Object.defineProperty(canvas, 'arbestraApplyPose', {
+        configurable: true,
+        value: (pose: ObservationPose) => this.applyObservationPose(pose),
+      });
     }
     this.#onFeatureSelected = onFeatureSelected;
     this.#onSiteSelected = onSiteSelected;
@@ -3781,6 +3786,8 @@ export class BabylonVillageScene {
       ? infrastructureBlockedPixels(state.infrastructure, state.world, accesses)
       : new Set();
     const fires = automaticBraziers(state);
+    // Browser checks: how many automatic fires the routes light.
+    if (import.meta.env.DEV) this.#canvas.dataset.automaticBraziers = String(fires.length);
     this.#infrastructureEquipment = [
       ...(state.infrastructure?.equipment ?? []).map((e) => ({ x: e.x, y: e.y })),
       ...fires.map((e) => e.position),

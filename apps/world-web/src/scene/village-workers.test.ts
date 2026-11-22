@@ -1212,23 +1212,18 @@ it('makes no leisure walk to a home no path leads to', () => {
     f.dispose();
   }
 });
-it('walks no diagonal desire path before they are drawn (R2a), and the same walks beside them', () => {
-  const run = (state: VillageState) => {
-    const walked: string[][] = [];
-    const f = fixture(() => true, {
-      leisurePath: (_id, p) => (walked.push(cellsOf(p)), p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
-      leisureVersion: () => 'ground-1',
-    });
-    try {
-      f.view.sync(state, epoch);
-      for (let t = 0; t < 5_000; t += 33) f.view.animate(epoch + t, true);
-      return walked;
-    } finally {
-      f.dispose();
-    }
-  };
+it('walks the diagonal desire paths (R2b), and derives nothing again frame after frame', () => {
+  const calls = { leisure: 0, width: 0, path: 0, localPath: 0, free: 0 };
+  const walked: string[][] = [];
+  const f = fixture(() => (calls.free++, true), {
+    leisurePath: (_id, p) => (calls.leisure++, walked.push(cellsOf(p)), p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+    width: () => (calls.width++, 0.8),
+    path: (p) => (calls.path++, p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+    localPath: (p) => (calls.localPath++, p.map((c) => new Vector3(c.cellX, 0, c.cellY))),
+    leisureVersion: () => 'ground-1',
+  });
   // The house at (0, 4) reached only by diagonals: from the hall (0, 0) south-east, then back
-  // south-west; and a diagonal beside the column of the connected village.
+  // south-west, twice.
   const zigzag = desireIdleSnapshot(false);
   zigzag.travelRoutes = desireRoutes(
     [
@@ -1240,12 +1235,17 @@ it('walks no diagonal desire path before they are drawn (R2a), and the same walk
     zigzag.world,
   );
   expect(zigzag.travelRoutes.every((r) => /:south-(east|west)$/.test(r.id))).toBe(true);
-  // Only the hall's own spokes, as with no path at all.
-  expect(run(zigzag)).toEqual(run(desireIdleSnapshot(false)));
-  const connected = desireIdleSnapshot(),
-    beside = { ...connected, travelRoutes: [...connected.travelRoutes, ...zigzag.travelRoutes] };
-  expect(run(beside)).toEqual(run(connected));
-  expect(run(beside)).toContainEqual(['0:0', '0:1', '0:2', '0:3', '0:4']);
+  try {
+    f.view.sync(zigzag, epoch);
+    f.view.animate(epoch, true);
+    expect(walked).toContainEqual(['0:0', '1:1', '0:2', '1:3', '0:4']);
+    const afterSync = { ...calls };
+    for (let t = 33; t < 60_000; t += 33) f.view.animate(epoch + t, true);
+    // Hot path (AGENTS.md, Performance): no leisure search, path, width or free test per frame.
+    expect(calls).toEqual(afterSync);
+  } finally {
+    f.dispose();
+  }
 });
 it('searches its desire paths again only when the paths, the road cells or the layout of the buildings change', () => {
   const leisurePath = vi.fn((_id: string, p: TravelCell[], lane?: DoorLane) => {

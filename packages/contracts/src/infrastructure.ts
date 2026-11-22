@@ -156,6 +156,8 @@ export function infrastructureSurface(
           b = road.points[i]!,
           horizontal = a.y === b.y,
           axis = horizontal ? 1 : 2;
+        // A diagonal (an automatic path arm, R2b) has no axis-aligned centreline to retract.
+        if (a.x !== b.x && a.y !== b.y) continue;
         for (const oldRoad of [...history, ...roads.slice(0, roadIndex)])
           for (let j = 1; j < oldRoad.points.length; j++) {
             const c = oldRoad.points[j - 1]!,
@@ -189,12 +191,20 @@ export function infrastructureSurface(
           }
       }
     const rects: Array<{ x0: number; y0: number; x1: number; y1: number; axes: number }> = [];
+    const bands: Array<{ x: number; y: number; dx: number; dy: number; cap: boolean }> = [];
     for (let i = 1; i < road.points.length; i++) {
       const a = road.points[i - 1]!,
         b = road.points[i]!,
         dx = wrappedDistance(b.x, a.x, w / 2) * 2,
         dy = wrappedDistance(b.y, a.y, h / 2) * 2;
-      if (dx && dy) throw new Error('Le tracé doit suivre les axes X et Y.');
+      if (dx && dy) {
+        // A 45° segment: the diagonal arm of an automatic path (docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md
+        // §3.4). Any other slope is refused, as before.
+        if (Math.abs(dx) !== Math.abs(dy)) throw new Error('Le tracé doit suivre les axes X et Y.');
+        // Rounded at a cell centre, where it joins the other arms of its node; cut square elsewhere.
+        bands.push({ x: a.x * 2, y: a.y * 2, dx, dy, cap: a.x % 8 === 0 && a.y % 8 === 0 });
+        continue;
+      }
       if (!dx && !dy) continue;
       const x = a.x * 2,
         y = a.y * 2,
@@ -206,6 +216,22 @@ export function infrastructureSurface(
       );
       if (i < road.points.length - 1)
         rects.push({ x0: b.x * 2 - r, x1: b.x * 2 + r, y0: b.y * 2 - r, y1: b.y * 2 + r, axes: 3 });
+    }
+    // A band of half-width `width` along a diagonal: the pixels whose centre lies within it.
+    for (const band of bands) {
+      const r = road.width,
+        length = Math.abs(band.dx) * Math.SQRT2,
+        ux = Math.sign(band.dx) / Math.SQRT2,
+        uy = Math.sign(band.dy) / Math.SQRT2;
+      for (let y = Math.min(band.y, band.y + band.dy) - r; y < Math.max(band.y, band.y + band.dy) + r; y++)
+        for (let x = Math.min(band.x, band.x + band.dx) - r; x < Math.max(band.x, band.x + band.dx) + r; x++) {
+          const px = x + 0.5 - band.x,
+            py = y + 0.5 - band.y,
+            along = px * ux + py * uy,
+            across = Math.abs(px * uy - py * ux);
+          if (along > length || (along < 0 ? !band.cap || px * px + py * py >= r * r : across >= r)) continue;
+          rects.push({ x0: x, x1: x + 1, y0: y, y1: y + 1, axes: 3 });
+        }
     }
     for (const r of rects)
       for (let y = r.y0; y < r.y1; y++)
@@ -301,6 +327,21 @@ export const AUTOMATIC_ROAD_STYLE = Object.freeze({
   border: false,
   operation: 'paint' as const,
 });
+/** Arms of an automatic road node, by index: the four cardinal ones (east, south, west, north) keep
+ * the stroke ids they had before diagonals, then south-east, south-west, north-west, north-east. */
+export const ROAD_ARMS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+  [1, -1],
+];
+/** The strokes of the automatic roads (every desire path in desire mode): from each node cell, one
+ * arm per neighbour it is joined to, among the eight (docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md
+ * §3.4), plus an elbow between two perpendicular cardinal arms. Linear in the route cells. */
 export function automaticRoadStrokes(
   routes: readonly VillageState['travelRoutes'][number][],
   world: { widthCells: number; heightCells: number },
@@ -317,22 +358,26 @@ export function automaticRoadStrokes(
         const cell = a!.cellX + ':' + a!.cellY,
           dx = wrappedDistance(b!.cellX, a!.cellX, world.widthCells),
           dy = wrappedDistance(b!.cellY, a!.cellY, world.heightCells);
-        if ((allowedCells && !allowedCells.has(cell)) || Math.abs(dx) + Math.abs(dy) !== 1) continue;
+        if ((allowedCells && !allowedCells.has(cell)) || Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) continue;
         const node = nodes.get(cell) ?? { x: a!.cellX, y: a!.cellY, arms: new Set<number>() };
-        node.arms.add(dx > 0 ? 0 : dy > 0 ? 1 : dx < 0 ? 2 : 3);
+        node.arms.add(ROAD_ARMS.findIndex(([x, y]) => x === dx && y === dy));
         nodes.set(cell, node);
       }
   }
   const roads: RoadStroke[] = [];
   for (const [cell, node] of nodes) {
+    // A cardinal arm ends in the middle of the cell's side, a diagonal one at its corner, where the
+    // neighbour's arm starts: two cells draw one continuous path.
     const at = (d: number) => ({
-        x: wrapCoordinate(node.x * 8 + [4, 0, -4, 0][d]!, world.widthCells * 8),
-        y: wrapCoordinate(node.y * 8 + [0, 4, 0, -4][d]!, world.heightCells * 8),
+        x: wrapCoordinate(node.x * 8 + ROAD_ARMS[d]![0] * 4, world.widthCells * 8),
+        y: wrapCoordinate(node.y * 8 + ROAD_ARMS[d]![1] * 4, world.heightCells * 8),
       }),
       centre = { x: node.x * 8, y: node.y * 8 };
     for (const arm of node.arms)
       roads.push({ id: 'auto:' + cell + ':' + arm, points: [centre, at(arm)], ...AUTOMATIC_ROAD_STYLE });
-    const arms = [...node.arms];
+    // Two perpendicular cardinal arms are joined by an elbow; a diagonal arm is rounded at the centre
+    // (infrastructureSurface), which joins it to any other arm.
+    const arms = [...node.arms].filter((arm) => arm < 4);
     for (let i = 0; i < arms.length; i++)
       for (let j = i + 1; j < arms.length; j++)
         if ((arms[i]! - arms[j]! + 4) % 2)
@@ -355,6 +400,8 @@ export function createInfrastructureEditContext(state: InfrastructureEditState) 
   const automatic = new Map<string, RoadStroke[]>(),
     automaticOrder = new Map<string, number>();
   for (const road of automaticRoadStrokes(state.travelRoutes, state.world)) {
+    // Frozen geometry stays cardinal: a diagonal arm is never persisted in a plan.
+    if (road.points.some((p, i) => i > 0 && p.x !== road.points[i - 1]!.x && p.y !== road.points[i - 1]!.y)) continue;
     const cell = road.id.split(':').slice(1, 3).join(':'),
       list = automatic.get(cell) ?? [];
     const inherited = { ...road, id: road.id.replace(/^auto:/, 'inherited:') };

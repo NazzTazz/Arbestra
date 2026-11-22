@@ -1,4 +1,10 @@
-import { coarseTravelPath, type TravelRoute, type VillageState } from '@arbestra/contracts';
+import {
+  AUTOMATIC_ROAD_STYLE,
+  coarseTravelPath,
+  type RoadStroke,
+  type TravelRoute,
+  type VillageState,
+} from '@arbestra/contracts';
 import { roadKey } from './road-profile';
 
 /** Neighbour bits: east (+x) 1, south (+y) 2, west 4, north 8. */
@@ -49,8 +55,10 @@ export function roadCellLinks(state: LinkState): RoadCellLinks {
         const dx = delta(from.cellX, to.cellX, state.world.widthCells),
           dy = delta(from.cellY, to.cellY, state.world.heightCells);
         const bit = ROAD_DIRECTIONS.find(([x, y]) => x === dx && y === dy)?.[2];
-        if (!bit) continue;
-        masks.set(road, (masks.get(road) ?? 0) | bit);
+        // A diagonal path reaches the road cell at its corner: the cell keeps its square tile (no
+        // arm), the path's own arm and its spur into the corner (`roadCellSpurs`) close the gap.
+        if (!bit && (Math.abs(dx) !== 1 || Math.abs(dy) !== 1)) continue;
+        if (bit) masks.set(road, (masks.get(road) ?? 0) | bit);
         stubs.set(start + '>' + road, {
           ...route,
           id: `${route.id}:link:${start}>${road}`,
@@ -59,8 +67,37 @@ export function roadCellLinks(state: LinkState): RoadCellLinks {
         });
       }
   }
-  return masks.size ? { masks, stubs: [...stubs.values()] } : NO_ROAD_LINKS;
+  return stubs.size ? { masks, stubs: [...stubs.values()] } : NO_ROAD_LINKS;
 }
+
+/**
+ * The spur of each diagonal junction (`stubs` whose two cells are diagonal neighbours): a short
+ * earth stroke that carries the path from the shared corner into the road cell, as far as its
+ * centre band (a quarter cell from its centre), cut square at both ends so that it covers only the
+ * corner of the road cell, never its other neighbours. Sub-cell points, as `automaticRoadStrokes`.
+ */
+export function roadCellSpurs(
+  stubs: readonly TravelRoute[],
+  world: { widthCells: number; heightCells: number },
+): RoadStroke[] {
+  const spurs: RoadStroke[] = [];
+  for (const stub of stubs) {
+    const [from, to] = stub.cells;
+    if (!from || !to) continue;
+    const dx = delta(to.cellX, from.cellX, world.widthCells),
+      dy = delta(to.cellY, from.cellY, world.heightCells);
+    if (Math.abs(dx) !== 1 || Math.abs(dy) !== 1) continue;
+    const at = (back: number) => ({
+      x: wrap(to.cellX * 8 - dx * back, world.widthCells * 8),
+      y: wrap(to.cellY * 8 - dy * back, world.heightCells * 8),
+    });
+    // From the road side (one eighth short of its centre band's corner) to the corner: a stroke
+    // that does not start at a cell centre has no rounded cap.
+    spurs.push({ id: `${stub.id}:spur`, points: [at(1), at(4)], ...AUTOMATIC_ROAD_STYLE });
+  }
+  return spurs;
+}
+const wrap = (value: number, size: number) => ((value % size) + size) % size;
 const delta = (value: number, origin: number, size: number) => {
   const direct = value - origin;
   return direct > size / 2 ? direct - size : direct < -size / 2 ? direct + size : direct;

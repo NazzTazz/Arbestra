@@ -183,13 +183,22 @@ it('keeps a diagonal desire path in the display routes and the widths, and masks
     'desire:8:5:south-west:display:0',
     'desire:0:9:south-west:display:0',
   ]);
-  // A road cell at one end of a diagonal opens no arm and makes no stub.
+  // A road cell at one end of a diagonal opens no arm of its square tile; the free end gets its
+  // stub (R2b), drawn to the shared corner, and a spur carries it into the road cell's corner.
   const linked = roadCellLinks({
     ...state([]),
     roadCells: [{ id: '6,6', cellX: 6, cellY: 6, surface: 'rubble', sidewalks: false, gauge: 'chemin', revision: 1 }],
   } as unknown as VillageState);
   expect(linked.masks.size).toBe(0);
-  expect(linked.stubs).toEqual([]);
+  expect(linked.stubs.map((s) => [s.id, s.cells])).toEqual([
+    [
+      'desire:5:5:south-east:link:5:5>6:6',
+      [
+        { cellX: 5, cellY: 5 },
+        { cellX: 6, cellY: 6 },
+      ],
+    ],
+  ]);
 });
 
 it('masks desire paths under footprints and road cells exactly as it masks the same segments of a network, seam included', () => {
