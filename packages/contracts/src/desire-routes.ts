@@ -47,9 +47,10 @@ const wrap = (value: number, size: number) => ((value % size) + size) % size;
  * south-east, south-west, so equal edges give equal routes, ids included (`desire:x:y:east`,
  * `desire:x:y:south-east`).
  *
- * A diagonal route is a two-cell segment that is not cardinal. Until diagonals are drawn (slice
- * R2b), the consumers leave it out: strokes, braziers, road-cell links, leisure walks and the inner
- * corners of the road profile take cardinal steps only.
+ * A diagonal route is a two-cell segment that is not cardinal. Since R2b the consumers draw and
+ * walk it: strokes (an arm to the shared corner), braziers, road-cell links (a spur into the corner
+ * of a road cell) and leisure walks; only the inner corners and the paved profiles of the legacy
+ * road profile take cardinal steps.
  *
  * Brazier ids and positions (`auto:X:Y:sx:sy`) belong to the node cell, not to the route a node
  * was reached by, so they stay the same for the same edges. The stroke ids of a joint

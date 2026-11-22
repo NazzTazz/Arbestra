@@ -124,3 +124,4 @@ Banc : `apps/load-test/src/bench-village-paths.ts`, en lecture seule (transactio
 Les mesures et preuves de chaque tranche vont dans son commit ; cette section ne reçoit qu'une ligne de statut par tranche.
 
 - **R1** (22 novembre) : **à valider**. Recherche à la case en 8 directions pour toutes les missions de village, maillage étendu, `travelDuration` euclidienne, recherche fine des missions et `refinementCaches` supprimées ; profil et résultats au §6.
+- **R2b** (22 novembre) : **à valider**. Sentiers diagonaux dessinés (bras jusqu'au coin partagé, éperon dans le coin d'une case de route), braseros automatiques aux carrefours et aux extrémités seulement (règle partagée, mode 1 compris), promenades à 8 directions, sentier battu à 0,9 (`DESIRE_TRAIL_COST`) dans la recherche et les durées des missions de village ; preuves et mesures dans les commits `9adeeb2` et `62d6f3f`.
