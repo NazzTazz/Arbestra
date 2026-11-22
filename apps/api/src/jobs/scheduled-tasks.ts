@@ -183,10 +183,15 @@ export async function drainScheduledTasks(
 }
 
 /**
- * Polls with `passes` concurrent drains. Each takes its own task (`SKIP
- * LOCKED`) and finalises only that one; two tasks of one village meet on the
- * village row as two commands would. A round ends when every pass is idle.
- * `db` should own at least `passes` connections.
+ * Runs `passes` independent passes. Each takes its own task (`SKIP LOCKED`)
+ * and finalises only that one; two tasks of one village meet on the village
+ * row as two commands would. A pass that handled a task looks for the next one
+ * at once; a pass that found nothing (or failed) sleeps `pollIntervalMs`,
+ * whatever the others are doing: a task due while a pass is held by a long
+ * one is taken by a free pass within one interval. Never more than `passes`
+ * scheduler transactions at once; `db` should own at least `passes`
+ * connections. The returned stop wakes sleeping passes, waits for the tasks in
+ * progress and starts nothing more.
  */
 export function startScheduledTaskWorker(
   db: Kysely<Database>,
@@ -196,38 +201,56 @@ export function startScheduledTaskWorker(
   observer?: Observer,
   { passes = SCHEDULER_PASSES }: { passes?: number } = {},
 ): () => Promise<void> {
-  let stopped = false;
-  let currentRun: Promise<void> | null = null;
+  let stopped = false,
+    working = 0;
+  const sleepers = new Set<() => void>();
+  const sleep = () =>
+    new Promise<void>((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        sleepers.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, pollIntervalMs);
+      timer.unref();
+      sleepers.add(wake);
+    });
 
-  const poll = () => {
-    if (stopped || currentRun) return;
-    observe(observer, { kind: 'poll' });
-    // allSettled: a failed pass never ends the round while others still run.
-    currentRun = Promise.allSettled(
-      Array.from({ length: passes }, () => drainScheduledTasks(db, handlers, 50, observer)),
-    )
-      .then((results) => {
-        const failed = results.find((result) => result.status === 'rejected');
-        if (failed) throw failed.reason;
-        observe(observer, { kind: 'idle' });
-      })
-      .catch((error) => {
+  const pass = async () => {
+    while (!stopped) {
+      observe(observer, { kind: 'poll' });
+      let failed = false;
+      working++;
+      try {
+        while (!stopped) {
+          const result = await processNextScheduledTask(db, handlers);
+          if (!result) break;
+          // The transaction has committed before its outcome is observed.
+          observe(observer, { kind: 'processed', outcome: result.outcome });
+        }
+      } catch (error) {
+        // A failed pass sleeps and resumes: it never stops itself or another.
+        failed = true;
         observe(observer, { kind: 'error' });
-        onError(error);
-      })
-      .finally(() => {
-        currentRun = null;
-      });
+        try {
+          onError(error);
+        } catch {
+          /* Reporting must never stop a pass. */
+        }
+      } finally {
+        working--;
+      }
+      if (stopped) break;
+      if (!failed && working === 0) observe(observer, { kind: 'idle' });
+      await sleep();
+    }
   };
-
-  const timer = setInterval(() => void poll(), pollIntervalMs);
-  timer.unref();
-  void poll();
+  const running = Array.from({ length: passes }, pass);
 
   return async () => {
     stopped = true;
-    clearInterval(timer);
-    await currentRun;
+    for (const wake of [...sleepers]) wake();
+    await Promise.allSettled(running);
     observe(observer, { kind: 'stopped' });
   };
 }
