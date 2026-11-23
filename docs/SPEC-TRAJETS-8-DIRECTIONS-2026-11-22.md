@@ -126,3 +126,27 @@ Les mesures et preuves de chaque tranche vont dans son commit ; cette section ne
 - **R1** (22 novembre) : **validée le 23 novembre**. Recherche à la case en 8 directions pour toutes les missions de village, maillage étendu, `travelDuration` euclidienne, recherche fine des missions et `refinementCaches` supprimées ; profil et résultats au §6.
 - **R2b** (22 novembre) : **validée le 23 novembre**. Sentiers diagonaux dessinés (bras jusqu'au coin partagé, éperon dans le coin d'une case de route), braseros automatiques aux carrefours et aux extrémités seulement (règle partagée, mode 1 compris), promenades à 8 directions, sentier battu à 0,9 (`DESIRE_TRAIL_COST`) dans la recherche et les durées des missions de village ; preuves et mesures dans les commits `9adeeb2` et `62d6f3f`.
 - **Recette** (23 novembre, dev, mode 0) : **validée** par Tristan. Sentier battu 0,9, seuil de 3 passages et braseros aux carrefours et aux extrémités acceptés tels que vus. Défaut trouvé et corrigé pendant la recette (`2c4c356`) : le chantier de bois du client ne suivait pas le rebasage de la scène (équipe partie vers un arbre décalé de 32 cases) ; sans lien avec les 8 directions. Journal `scheduler.slow-task` de la recette : 15 fins d'extraction sur 27 au-dessus d'une seconde ; les cas de 6 à 11 s suivent tous un redémarrage de l'API (rechargement de la source RC1 : somme de contrôle, lecture et analyse, 1 à 4 s), les autres font 1,1 à 2,5 s, surtout en SQL (120 à 140 requêtes). **Pas de préchauffage** : en production l'API ne redémarre qu'au déploiement. Aucune mission lancée après le passage à l'API sans surveillance de fichiers : le délai clic-départ à chaud n'a pas de mesure propre.
+
+## 8. R3 : inventaire et ordre (23 novembre, sur `fae9bcc`)
+
+Lecture du code, rien de modifié.
+
+**Ce qui appelle encore l'ancien réseau en production** :
+
+- `presentation.ts` : calcule le réseau « tous buts » (`networkJob`, `village_travel_networks`) à chaque capture, même en mode 0, où le client l'ignore (`sync-v2-village-state.ts` remplace `travelRoutes` par les sentiers). C'est le coût de charge à supprimer.
+- `stoneTravelPath` (`service.ts`) : au-delà de 32 cases de l'hôtel de ville, couloir grossier par `commandTravelNetwork` puis `refineVillagePath` ; au-delà de 128, jambe en L. En deçà, la recherche à la case seule.
+- `desire-start.ts` (script T3d) : lit `presentation.travelRoutes` pour semer les sentiers d'un village à partir du réseau qu'il affiche.
+- Commerce et expéditions : `planRoute` et `planHierarchicalRoute`, hors du réseau « tous buts ».
+
+**Hors production** : `state()` sans report de navigation n'est plus appelé que par `legacy-commands.fixture.ts` ; `buildTravelNetwork` et `refineTravelRoute` gardent une soixantaine d'appels dans les tests de `contracts`.
+
+**Contrainte d'ordre** : le script T3d a besoin de l'ancien réseau. Il doit donc tourner sur l'alpha avant que R3 retire ce réseau, sinon les villages de l'alpha perdent leurs sentiers affichés jusqu'à ce que les villageois les retracent. Deux ordres possibles : (A) déployer l'état validé sur l'alpha en mode 0 avec T3d, puis R3 ; (B) R3 d'abord, en gardant `buildTravelNetwork` pour le seul script jusqu'au passage de l'alpha. **Recommandé : A.** À trancher par Tristan (T3d écrit dans des données de joueurs).
+
+**Tranches** :
+
+| Tranche | Contenu | Dépend de |
+|---|---|---|
+| **R3a** | `stoneTravelPath` sur la recherche unique au-delà de 32 cases ; plus de couloir grossier ni de jambe en L | — |
+| **R3b** | Retrait du drapeau, `pathSource` toujours `desire`, présentation sans réseau ni `village_travel_networks`, `travelRoutes` vide puis retiré du contrat | Alpha semée (ordre A) |
+| **R3c** | Suppression de `buildTravelNetwork`, `refineTravelRoute`, `networkCache`, `passageCaches`, `commandTravelNetwork`, `desire-start.ts` et de leurs tests ; fixture sans réseau | R3a, R3b |
+| **R3d** | Commerce et expéditions sur la recherche unique | À rejuger : leurs durées changent pour les joueurs |
