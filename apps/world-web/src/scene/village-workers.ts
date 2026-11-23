@@ -1434,6 +1434,9 @@ export class VillageWorkers {
         ...(g.mission.leisure?.flatMap((l) => l.path) ?? []),
         ...g.people.flatMap((p) => p.actor.path),
         ...g.layout.stations.flatMap((s) => (s.workAt ? [s.workAt] : [])),
+        // The felled tree is kept in scene coordinates: a layout rebuilt after
+        // the rebase stands around it (recette of 23 November 2026).
+        ...(g.wood?.tree ? [g.wood.tree] : []),
       ]);
       for (const q of points) {
         q.x -= x;
@@ -2239,7 +2242,12 @@ export class VillageWorkers {
     for (const [side, index] of plan.pair0.entries()) {
       const station = g.layout.stations[index]!,
         sign = side === 0 ? 1 : -1,
-        post = { x: centre.x + plan.across.x * 0.49 * sign, z: centre.z + plan.across.z * 0.49 * sign },
+        // The plan is relative to the site root, the stations are scene points:
+        // after a rebase the root carries the origin's move (recette of 23 November 2026).
+        post = {
+          x: centre.x + plan.across.x * 0.49 * sign + g.root.position.x,
+          z: centre.z + plan.across.z * 0.49 * sign + g.root.position.z,
+        },
         previous = station.workAt ?? station;
       if (Math.hypot(post.x - previous.x, post.z - previous.z) < 0.01) continue;
       const person = g.people[index],
@@ -2247,7 +2255,7 @@ export class VillageWorkers {
       station.x = post.x;
       station.z = post.z;
       station.workAt = post;
-      station.facing = Math.atan2(centre.x - post.x, centre.z - post.z);
+      station.facing = Math.atan2(-plan.across.x * sign, -plan.across.z * sign);
       // One step to the next cut, keeping its work.
       if (person && settled) {
         person.actor.position = { ...post };

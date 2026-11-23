@@ -2024,3 +2024,28 @@ it('costs no more per frame with the double door than with the single door it re
     single * 1.5 + 0.2,
   );
 });
+
+it('keeps a wood team at its felled tree when the scene origin moves and the site is laid out again', () => {
+  // Recette of 23 November 2026: after a rebase of one chunk, a rebuilt layout stood around the
+  // tree's former scene position, 32 cells away, and the sawyers walked there, into the lake.
+  let narrowed = false;
+  const grove = groveTree(),
+    f = fixture((p) => !narrowed || Math.hypot(p.x - 0, p.z - 8) > 0.9 || p.z < 8, grove.hooks);
+  try {
+    f.view.sync(woodTeam('rebased-wood', 4), epoch);
+    for (let t = 0; t <= 20_000; t += 33) f.view.animate(epoch + t, true);
+    const tree = () => f.scene.getTransformNodeByName('wood-tree-rebased-wood')!.position;
+    expect(tree().x).toBeCloseTo(0.6, 3);
+    f.rebase(100);
+    narrowed = true;
+    f.view.reproject();
+    for (let t = 20_000; t <= 40_000; t += 33) f.view.animate(epoch + t, true);
+    expect(grove.felled, 'the tree is not felled a second time').toEqual(['rebased-wood']);
+    expect(tree().x).toBeCloseTo(0.6 - 100, 3);
+    expect(tree().z).toBeCloseTo(7.2, 3);
+    for (const p of f.view.figures)
+      expect(Math.hypot(p.root.position.x - (0.6 - 100), p.root.position.z - 7.2)).toBeLessThan(3);
+  } finally {
+    f.dispose();
+  }
+});
