@@ -1,4 +1,11 @@
-import { overlayRoadCells, type RoadCell, type RoadCellSurface, type RoadPixel } from '@arbestra/contracts';
+import {
+  AUTOMATIC_ROAD_STYLE,
+  overlayRoadCells,
+  ROAD_CELL_SURFACES,
+  type RoadCell,
+  type RoadCellSurface,
+  type RoadPixel,
+} from '@arbestra/contracts';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -46,13 +53,27 @@ const COLOURS: Record<Code, string> = {
 };
 const TOP_OFFSET = 0.015,
   DEPTH = 0.025;
+/** The stone pavers' top over the ground (before the clearance) and their thickness: a stone joint matches them. */
+const PAVER_TOP = 0.003,
+  PAVER_THICKNESS = 0.04;
 const wrap = (value: number, size: number) => ((value % size) + size) % size;
 /** Position lue, au 1/8192 de case (0,3 mm) : clé entière (colonne × FINE_ROW + ligne). */
 const FINE = 8192,
   FINE_ROW = 1 << 23;
 
-/** Une case à dessiner plus tard : ses bordures (terre, gravats) ou sa tuile entière (pierre). */
-type Job = { kind: 'curb' | 'stone'; cell: Cell };
+/**
+ * Two road cells that touch only by a corner, drawn as one 45° band between their centres. `x`, `y` is the upper
+ * cell of the pair (the owner of the joint, canonical coordinates); the lower one is a cell down and `sx` across.
+ */
+interface Joint {
+  x: number;
+  y: number;
+  sx: 1 | -1;
+  /** The humbler of the two cells' surfaces (earth < rubble < stone-1 < stone-2). */
+  surface: RoadCellSurface;
+}
+/** Une case à dessiner plus tard : ses bordures (terre, gravats), sa tuile entière (pierre) ou une jonction de pierre. */
+type Job = { kind: 'curb' | 'stone'; cell: Cell } | { kind: 'joint'; joint: Joint };
 interface Sector {
   key: string;
   /** Les cases du secteur, de sa première couronne et leurs jonctions : inchangées, rien n'est refait. */
@@ -88,6 +109,116 @@ interface Baked {
   indices: number[];
 }
 
+type Point = readonly [number, number];
+/** One convex face of a stone joint, lying in a single triangle of the terrain. */
+interface JointPiece {
+  /** Corners in cells from the upper cell's centre, anticlockwise in (x, z): the top face looks up. */
+  polygon: Point[];
+  /** Per edge (corner i to i + 1): a long side of the band, which stands free and gets a skirt. */
+  free: boolean[];
+}
+const EPS = 1e-9;
+const area = (polygon: readonly Point[]) => {
+  let sum = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i]!,
+      b = polygon[(i + 1) % polygon.length]!;
+    sum += a[0] * b[1] - b[0] * a[1];
+  }
+  return sum / 2;
+};
+/** Cuts a convex polygon along the line `f = 0`: the part where `f >= 0` and the part where `f <= 0`. */
+function cutPolygon(polygon: readonly Point[], f: (u: number, v: number) => number): Point[][] {
+  const d = polygon.map(([u, v]) => f(u, v));
+  if (d.every((x) => x >= -EPS) || d.every((x) => x <= EPS)) return [[...polygon]];
+  const above: Point[] = [],
+    below: Point[] = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const j = (i + 1) % polygon.length,
+      a = polygon[i]!,
+      b = polygon[j]!,
+      da = d[i]!,
+      db = d[j]!;
+    if (da >= -EPS) above.push(a);
+    if (da <= EPS) below.push(a);
+    if ((da > EPS && db < -EPS) || (da < -EPS && db > EPS)) {
+      const t = da / (da - db),
+        cut: Point = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      above.push(cut);
+      below.push(cut);
+    }
+  }
+  return [above, below];
+}
+const jointPieceCache = new Map<string, JointPiece[]>();
+/**
+ * The band of a joint between the centres of two cells that touch by a corner (the lower one is a cell down and `sx`
+ * across), half a cell wide like the centre path, cut into faces that each lie in one triangle of the terrain: the cell
+ * edges (x or z at a half-cell) and the diagonal of each cell (x - z a whole number), as the stone tiles are. The two
+ * centre squares are cut out: the tiles pave them. Pure geometry, independent of the ground: cached per direction.
+ */
+function jointPieces(sx: 1 | -1, onTerrain: boolean): JointPiece[] {
+  const key = `${sx}:${onTerrain ? 1 : 0}`,
+    cached = jointPieceCache.get(key);
+  if (cached) return cached;
+  const half = AUTOMATIC_ROAD_STYLE.width / 16,
+    nx = -1 / Math.SQRT2,
+    ny = sx / Math.SQRT2;
+  const band: Point[] = [
+    [-nx * half, -ny * half],
+    [nx * half, ny * half],
+    [sx + nx * half, 1 + ny * half],
+    [sx - nx * half, 1 - ny * half],
+  ];
+  if (area(band) < 0) band.reverse();
+  const lines: Array<(u: number, v: number) => number> = [];
+  for (const c of [0, sx])
+    lines.push(
+      (u) => u - c + half,
+      (u) => u - c - half,
+    );
+  for (const c of [0, 1])
+    lines.push(
+      (_, v) => v - c + half,
+      (_, v) => v - c - half,
+    );
+  if (onTerrain) {
+    const us = band.map((p) => p[0]),
+      vs = band.map((p) => p[1]),
+      ds = band.map((p) => p[1] - p[0]);
+    for (let k = Math.ceil(Math.min(...us) - 0.5); k <= Math.floor(Math.max(...us) - 0.5); k++)
+      lines.push((u) => u - k - 0.5);
+    for (let k = Math.ceil(Math.min(...vs) - 0.5); k <= Math.floor(Math.max(...vs) - 0.5); k++)
+      lines.push((_, v) => v - k - 0.5);
+    for (let k = Math.ceil(Math.min(...ds)); k <= Math.floor(Math.max(...ds)); k++) lines.push((u, v) => v - u - k);
+  }
+  let parts: Point[][] = [band];
+  for (const line of lines) parts = parts.flatMap((part) => cutPolygon(part, line));
+  const pieces: JointPiece[] = [];
+  for (const raw of parts) {
+    const polygon = raw.filter((p, i) => {
+      const next = raw[(i + 1) % raw.length]!;
+      return Math.abs(p[0] - next[0]) > EPS || Math.abs(p[1] - next[1]) > EPS;
+    });
+    if (polygon.length < 3 || Math.abs(area(polygon)) < 1e-7) continue;
+    const cu = polygon.reduce((sum, p) => sum + p[0], 0) / polygon.length,
+      cv = polygon.reduce((sum, p) => sum + p[1], 0) / polygon.length;
+    if ((Math.abs(cu) < half && Math.abs(cv) < half) || (Math.abs(cu - sx) < half && Math.abs(cv - 1) < half)) continue;
+    const side = (p: Point) => p[0] * nx + p[1] * ny;
+    const free = polygon.map((a, i) => {
+      const b = polygon[(i + 1) % polygon.length]!;
+      return (
+        Math.abs(Math.abs(side(a)) - half) < 1e-7 &&
+        Math.abs(Math.abs(side(b)) - half) < 1e-7 &&
+        Math.sign(side(a)) === Math.sign(side(b))
+      );
+    });
+    pieces.push({ polygon, free });
+  }
+  jointPieceCache.set(key, pieces);
+  return pieces;
+}
+
 /**
  * Cases de route dessinées par secteurs de 8 × 8 cases, qui suivent le terrain sommet par sommet comme les routes
  * automatiques, donc se raccordent sans marche à elles et entre elles quelle que soit la pente
@@ -97,6 +228,10 @@ interface Baked {
  * - Pierre (petite pierre, grands pavés) : la tuile de la case, avec son appareillage et ses bordures, est posée sur
  *   le sol : chaque sommet de la tuile plate prend la hauteur du terrain sous lui (`#bakeTile`). Sur sol plat, c'est
  *   la tuile d'avant, 2 cm au-dessus du sol.
+ * - Deux cases qui ne se touchent que par un coin (sans case de route sur les deux cases d'angle) sont jointes par une
+ *   bande à 45° de centre à centre, large d'une demi-case, de la surface la plus humble des deux (terre < gravats <
+ *   petite pierre < grands pavés) : terre et gravats, des pixels ajoutés à la trame du secteur, soudés aux cases ;
+ *   pierre, une face plate posée sur le sol (`#bakeJoint`). Rendu seul : rien n'est stocké.
  * - Les bordures de trottoir de la terre et des gravats sont les bordures de la même tuile, posées de la même façon ;
  *   elles et les tuiles de pierre sont faites case par case (de 0,5 à 10 ms) en
  *   tranches de quelques ms entre deux images ; le secteur précédent reste affiché jusqu'à l'échange.
@@ -282,7 +417,83 @@ export class RoadCellSurfaces {
         if (x >= x0 && x <= x1 && y >= y0 && y <= y1) drawn = true;
         signature += `${x - x0},${y - y0},${cell.surface},${cell.sidewalks ? 1 : 0},${this.#links.get(cx + ':' + cy) ?? 0};`;
       }
-    return drawn ? signature : '';
+    // The joints that touch the sector are a function of the cells of this first ring (their 2 × 2 blocks lie in it),
+    // so the signature already carries them. A sector with no cell of its own can still hold a joint's corner.
+    return drawn || this.#jointsAround(x0, y0, x1, y1).length ? signature : '';
+  }
+  /**
+   * The joints of the 2 × 2 blocks of cells that touch the cells `[x0, x1] × [y0, y1]` (so the sector's whole first
+   * ring). A block has a joint when exactly one of its diagonals is a pair of road cells: neither of the two flanking
+   * cells is a road cell, drawn or automatic (the bend would link the pair already). The surface is the humbler.
+   */
+  #jointsAround(x0: number, y0: number, x1: number, y1: number): Joint[] {
+    const { space } = this.#env!,
+      found = new Map<string, Joint>();
+    const at = (x: number, y: number) => this.#byKey.get(wrap(x, space.width) + ':' + wrap(y, space.height));
+    // An automatic road reaches a drawn cell from a side: that side's cell is a road cell too.
+    const reached = (x: number, y: number, fx: number, fy: number) => {
+      const mask = this.#links.get(wrap(x, space.width) + ':' + wrap(y, space.height)) ?? 0;
+      return ROAD_DIRECTIONS.some(([dx, dy, bit]) => dx === fx - x && dy === fy - y && (mask & bit) !== 0);
+    };
+    const flank = (fx: number, fy: number, px: number, py: number, qx: number, qy: number) =>
+      at(fx, fy) !== undefined || reached(px, py, fx, fy) || reached(qx, qy, fx, fy);
+    for (let by = y0 - 1; by <= y1; by++)
+      for (let bx = x0 - 1; bx <= x1; bx++) {
+        // The upper cell of a pair is its owner: down-right from the top-left cell, down-left from the top-right one.
+        for (const sx of [1, -1] as const) {
+          const px = sx === 1 ? bx : bx + 1,
+            py = by,
+            qx = px + sx,
+            qy = by + 1,
+            upper = at(px, py),
+            lower = at(qx, qy);
+          if (!upper || !lower || flank(qx, py, px, py, qx, qy) || flank(px, qy, px, py, qx, qy)) continue;
+          const rank = Math.min(ROAD_CELL_SURFACES.indexOf(upper.surface), ROAD_CELL_SURFACES.indexOf(lower.surface));
+          const x = wrap(px, space.width),
+            y = wrap(py, space.height);
+          found.set(`${x}:${y}:${sx}`, { x, y, sx, surface: ROAD_CELL_SURFACES[rank]! });
+        }
+      }
+    return [...found.values()];
+  }
+  /**
+   * The pixels of the 45° bands of the earth and rubble joints, centre to centre and half a cell wide as the automatic
+   * paths' diagonal arms (`infrastructureSurface`). Pixels a cell already paints are left alone; where two bands meet,
+   * the humbler surface wins whatever the order, so that every sector reads the same pixel the same way.
+   */
+  #bandPixels(joints: readonly Joint[], taken: ReadonlyMap<string, RoadPixel>): Map<string, RoadPixel> {
+    const { space } = this.#env!,
+      w = space.width * 16,
+      h = space.height * 16,
+      half = AUTOMATIC_ROAD_STYLE.width,
+      length = 16 * Math.SQRT2,
+      bands = new Map<string, RoadPixel>();
+    for (const joint of joints) {
+      if (!isSectorSurface(joint.surface)) continue;
+      const ox = joint.x * 16,
+        oy = joint.y * 16,
+        ux = joint.sx / Math.SQRT2,
+        uy = 1 / Math.SQRT2;
+      for (let y = oy - half; y < oy + 16 + half; y++)
+        for (let x = Math.min(ox, ox + joint.sx * 16) - half; x < Math.max(ox, ox + joint.sx * 16) + half; x++) {
+          const px = x + 0.5 - ox,
+            py = y + 0.5 - oy,
+            along = px * ux + py * uy;
+          if (along < 0 || along > length || Math.abs(px * uy - py * ux) >= half) continue;
+          const xx = wrap(x, w),
+            yy = wrap(y, h),
+            key = xx + ':' + yy,
+            prior = bands.get(key);
+          if (taken.has(key)) continue;
+          if (
+            prior &&
+            ROAD_CELL_SURFACES.indexOf(prior.material as RoadCellSurface) <= ROAD_CELL_SURFACES.indexOf(joint.surface)
+          )
+            continue;
+          bands.set(key, { x: xx, y: yy, material: joint.surface, border: false, manual: true, axes: 3 });
+        }
+    }
+    return bands;
   }
   #cellOf(p: { x: number; y: number }) {
     const { space } = this.#env!;
@@ -360,6 +571,12 @@ export class RoadCellSurfaces {
           if (cell.sidewalks) jobs.push({ kind: 'curb', cell });
         } else jobs.push({ kind: 'stone', cell });
       }
+    // A joint between two stone cells is a stone job of the sector that owns its upper cell; the others are earth or
+    // rubble bands, added to the raster below.
+    const joints = this.#jointsAround(x0, y0, x1, y1);
+    for (const joint of joints)
+      if (!isSectorSurface(joint.surface) && joint.x >= x0 && joint.x <= x1 && joint.y >= y0 && joint.y <= y1)
+        jobs.push({ kind: 'joint', joint });
     const sector: Sector = {
       key,
       signature,
@@ -372,9 +589,18 @@ export class RoadCellSurfaces {
       live: !this.#sectors.has(key),
       block: { x0, y0, x1, y1 },
     };
-    if (own.size) {
+    if (own.size || joints.some((joint) => isSectorSurface(joint.surface))) {
       const read = this.#reader(sector);
       const raster = this.#rasterAround(x0, y0, x1, y1, 2);
+      // The bands join the cells' pixels, welded with them. A band pixel belongs to the sector of the cell it lies in
+      // (a flanking cell has no road, a neighbour sector may hold it): each pixel is drawn once, by one sector.
+      const bands = this.#bandPixels(joints, raster);
+      for (const [point, p] of bands) raster.set(point, p);
+      const inside = (p: RoadPixel) => {
+        const cx = wrap(Math.floor((p.x + 8) / 16), space.width),
+          cy = wrap(Math.floor((p.y + 8) / 16), space.height);
+        return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1;
+      };
       for (const code of ['earth', 'rubble'] as const) {
         // Les pixels d'un revêtement, en entier pour les murets exposés, ceux du secteur pour la surface.
         const all = new Map<string, RoadPixel>(),
@@ -382,7 +608,7 @@ export class RoadCellSurfaces {
         for (const [point, p] of raster) {
           if (p.material !== code) continue;
           all.set(point, p);
-          if (own.has(this.#cellOf(p))) mine.set(point, p);
+          if (own.has(this.#cellOf(p)) || (bands.has(point) && inside(p))) mine.set(point, p);
         }
         if (!mine.size) continue;
         const data = flatRoadGeometry(mine, space, read, followTerrain, TOP_OFFSET, DEPTH, all);
@@ -452,6 +678,59 @@ export class RoadCellSurfaces {
       for (const index of mesh.indices) target.indices.push(index + base);
     }
   }
+  /**
+   * Lays a stone joint on the ground: the faces of `jointPieces`, each vertex at the height of the terrain under it,
+   * at the top of the pavers (so the band meets the tiles without a step), with a skirt down to their foot along the
+   * long sides. A flat top (normal up) like the tiles; no masonry, no curb. Without terrain following, the band slopes
+   * between the two cell heights.
+   */
+  #bakeJoint(sector: Sector, joint: Joint, into: Map<Code, Baked>) {
+    const { space, followTerrain } = this.#env!;
+    const read = this.#reader(sector),
+      upper = read(joint.x, joint.y);
+    if (upper === null) return;
+    const lower = read(wrap(joint.x + joint.sx, space.width), wrap(joint.y + 1, space.height)) ?? upper;
+    const origin = space.project({ cellX: joint.x, cellY: joint.y }),
+      top = PAVER_TOP + STONE_CLEARANCE,
+      foot = top - PAVER_THICKNESS;
+    const ground = (u: number, v: number) =>
+      followTerrain
+        ? (read(wrap(joint.x + u, space.width), wrap(joint.y + v, space.height)) ?? upper)
+        : upper + (lower - upper) * Math.min(1, Math.max(0, (u * joint.sx + v) / 2));
+    const target = into.get(joint.surface) ?? { positions: [], normals: [], uvs: [], indices: [] };
+    into.set(joint.surface, target);
+    for (const { polygon, free } of jointPieces(joint.sx, followTerrain)) {
+      const heights = polygon.map(([u, v]) => ground(u, v)),
+        base = target.positions.length / 3;
+      polygon.forEach(([u, v], i) => {
+        target.positions.push(origin.x + u * CELL_UNITS, heights[i]! + top, origin.z + v * CELL_UNITS);
+        target.normals.push(0, 1, 0);
+        target.uvs.push(0, 0);
+      });
+      for (let k = 1; k + 1 < polygon.length; k++) target.indices.push(base, base + k, base + k + 1);
+      polygon.forEach((a, i) => {
+        const j = (i + 1) % polygon.length,
+          b = polygon[j]!,
+          du = b[0] - a[0],
+          dv = b[1] - a[1],
+          length = Math.hypot(du, dv);
+        if (!free[i] || length < EPS) return;
+        const skirt = target.positions.length / 3;
+        for (const [[u, v], height, y] of [
+          [a, heights[i]!, top],
+          [b, heights[j]!, top],
+          [a, heights[i]!, foot],
+          [b, heights[j]!, foot],
+        ] as const) {
+          target.positions.push(origin.x + u * CELL_UNITS, height + y, origin.z + v * CELL_UNITS);
+          target.normals.push(dv / length, 0, -du / length);
+          target.uvs.push(0, 0);
+        }
+        // Outward, as Babylon winds it: (top a, foot b, top b) and (top a, foot a, foot b).
+        target.indices.push(skirt, skirt + 3, skirt + 1, skirt, skirt + 2, skirt + 3);
+      });
+    }
+  }
   /** Les autres formes du style d'une tuile de pierre sont préparées une par tâche, pour qu'une pose suivante n'en construise aucune. */
   #queuePrewarm(surface: RoadCellSurface, sidewalks: boolean) {
     if (this.#prewarm.some(([, a, b]) => a === surface && b === sidewalks)) return;
@@ -509,7 +788,8 @@ export class RoadCellSurfaces {
       const baked = new Map<Code, Baked>();
       while (sector.jobs.length && performance.now() - started < budget) {
         const job = sector.jobs.shift()!;
-        this.#bakeTile(sector, job.cell, baked, job.kind);
+        if (job.kind === 'joint') this.#bakeJoint(sector, job.joint, baked);
+        else this.#bakeTile(sector, job.cell, baked, job.kind);
         this.stats.jobs++;
       }
       for (const [code, arrays] of baked) {
@@ -531,7 +811,7 @@ export class RoadCellSurfaces {
   get pendingSectors(): number {
     return this.#later.size;
   }
-  /** Nombre de cases (bordures, tuiles de pierre) pas encore dessinées. */
+  /** Nombre de cases (bordures, tuiles de pierre) et de jonctions de pierre pas encore dessinées. */
   get pendingJobs(): number {
     let count = 0;
     for (const sector of this.#building.values()) count += sector.jobs.length;
