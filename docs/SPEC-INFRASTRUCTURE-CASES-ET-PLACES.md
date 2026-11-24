@@ -46,7 +46,7 @@ L'infrastructure est aujourd'hui globalement inutilisable en jeu. La subdivision
 
 ### 4.2 Pose
 
-- Outil Voirie : appui, glissé, relâché. Les cases sous le pointeur sont interpolées sur le tore, en 4-connexité pour éviter les trous en diagonale. Un appui sans glisser pose une case.
+- Outil Voirie : appui, glissé, relâché. Les cases sous le pointeur sont interpolées sur le tore, en 8-connexité (ligne de Bresenham entre deux échantillons du pointeur) : une diagonale pure ne pose que des cases qui se touchent par un coin, sans case de remplissage. Un appui sans glisser pose une case.
 - Le style choisi dans la palette (revêtement, trottoirs) s'applique aux cases posées. Reposer sur une case existante change son style (devis de la différence).
 - « Pas de route » retire des cases, avec le même geste.
 - Une seule commande V2 par geste : liste bornée de cases, devis attendu, `commandId` idempotent, lectures bornées, sans `state()`.
@@ -77,7 +77,7 @@ Serveur et contrats seulement ; aucun client (S2), aucune conversion (S3).
 ### 4.6 Livré en S2b, le client (30 octobre) — à valider
 
 - **Palette** (HUD Infrastructure, famille Voirie ; la famille Trottoirs disparaît, Éclairage est inchangé) : Pas de route, Terre (terre battue ou gravats), Petite Pierre, Grands Pavés, chacun sans ou avec trottoirs, coût par case affiché. Ni largeur ni subdivision à choisir ; l'ancien outil de traits au 1/8 n'est plus proposé (son code serveur reste).
-- **Geste** (`ui/road-cell-gesture.ts`) : appui, glissé, relâché ; les cases sous le pointeur sont interpolées sur le tore en **4-connexité** (`sweptCells4`, deux cases successives partagent un côté), au plus 64 cases par échantillon de pointeur (une passe suivante rattrape), au plus 256 par geste, sans doublon. Un appui sans glisser pose une case. Clic droit ou Échap annule le geste en cours : rien n'est envoyé.
+- **Geste** (`ui/road-cell-gesture.ts`) : appui, glissé, relâché ; les cases sous le pointeur sont interpolées sur le tore en **8-connexité** (`sweptCells8`, `ui/road-cell-line.ts` : ligne de Bresenham entre deux échantillons du pointeur, deux cases successives partagent un côté ou un coin ; un échantillon voisin par un côté ajoute la case seule, comme avant, donc un tracé lent de case en case reste épais), au plus 64 cases par échantillon de pointeur (une passe suivante rattrape), au plus 256 par geste, sans doublon. Un appui sans glisser pose une case. Clic droit ou Échap annule le geste en cours : rien n'est envoyé.
 - **Aperçu** : une instance par case désignée (`scene/road-cell-preview.ts` : bleu pose, orange retrait, rouge refus), ajoutée une fois. Devis `/road-cells/preview` coalescé : 120 ms de calme, une requête à la fois, toujours les dernières cases. Débit en pierres affiché près du pointeur.
 - **Relâché** : une seule commande V2 (`commandId`, `expectedQuote` du devis des cases exactes ; « Pas de route » envoie un retrait sans devis). Les effets V2 de la confirmation mettent à jour la session (`roadCells`) ; aucune relecture `GET /village`. Refus métier : message affiché, rien n'est posé ; issue incertaine (réseau, 5xx) : « Vérifier la même commande » rejoue le même identifiant.
 - **Choix d'UX pris au plus simple** : une case refusée au milieu d'un glissé faisait refuser tout le geste ; **remplacé en S2d** (§4.8) par la décision de Tristan : les cases interdites sont sautées. Pas de surbrillance de la case survolée hors geste.

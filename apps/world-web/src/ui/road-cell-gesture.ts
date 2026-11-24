@@ -10,6 +10,7 @@ import {
   type RoadCellsRequest,
   type RoadCellsResult,
 } from '@arbestra/contracts';
+import { sweptCells8 } from './road-cell-line';
 
 export type Cell = { cellX: number; cellY: number };
 type World = { widthCells: number; heightCells: number };
@@ -27,8 +28,10 @@ const key = (c: Cell) => c.cellX + ':' + c.cellY;
 /**
  * Cells crossed from `from` (excluded) towards `to`, on the torus, in
  * 4-connexity: two consecutive cells always share a side, so a diagonal
- * swipe leaves no hole between road cells. At most `limit` cells; the last
- * one is `to` only when it is reached within the limit.
+ * swipe leaves no hole. Road cells use the 8-connected `sweptCells8` (a
+ * diagonal stays a diagonal); this one still serves the lighting anchors.
+ * At most `limit` cells; the last one is `to` only when it is reached within
+ * the limit.
  */
 export function sweptCells4(from: Cell | null, to: Cell, world: World, limit = MAX_SWEEP_STEP): Cell[] {
   if (!from) return [to];
@@ -183,9 +186,12 @@ export class RoadCellGesture {
     }
     this.#version++;
   }
-  /** Adds the cells crossed towards `cell`; false once `cell` is reached or the gesture is full. */
+  /** Adds the cells crossed towards `cell` (8-connected line: a diagonal move
+   * lays corner-to-corner cells only); false once `cell` is reached or the gesture is full. */
   #extend(cell: Cell): boolean {
-    const swept = sweptCells4(this.#last, cell, this.deps.world),
+    // Most hover frames stay in the same cell: nothing to compute then.
+    if (this.#last && this.#last.cellX === cell.cellX && this.#last.cellY === cell.cellY) return false;
+    const swept = sweptCells8(this.#last, cell, this.deps.world, MAX_SWEEP_STEP),
       fresh: Cell[] = [];
     for (const c of swept) {
       const k = key(c);

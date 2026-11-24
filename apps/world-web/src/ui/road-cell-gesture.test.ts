@@ -4,16 +4,22 @@ import { MAX_SWEEP_STEP, RoadCellGesture, summary, sweptCells4, type Cell } from
 
 const world = { widthCells: 64, heightCells: 32 };
 const c = (cellX: number, cellY: number): Cell => ({ cellX, cellY });
-const fourConnected = (from: Cell, cells: Cell[]) => {
+const torusSteps = (from: Cell, cells: Cell[]) => {
+  const out: Array<[number, number]> = [];
   let prev = from;
   for (const cell of cells) {
-    const dx = Math.min(Math.abs(cell.cellX - prev.cellX), world.widthCells - Math.abs(cell.cellX - prev.cellX)),
-      dy = Math.min(Math.abs(cell.cellY - prev.cellY), world.heightCells - Math.abs(cell.cellY - prev.cellY));
-    if (dx + dy !== 1) return false;
+    out.push([
+      Math.min(Math.abs(cell.cellX - prev.cellX), world.widthCells - Math.abs(cell.cellX - prev.cellX)),
+      Math.min(Math.abs(cell.cellY - prev.cellY), world.heightCells - Math.abs(cell.cellY - prev.cellY)),
+    ]);
     prev = cell;
   }
-  return true;
+  return out;
 };
+const fourConnected = (from: Cell, cells: Cell[]) => torusSteps(from, cells).every(([dx, dy]) => dx + dy === 1);
+/** Consecutive cells share a side or a corner. */
+const eightConnected = (from: Cell, cells: Cell[]) =>
+  torusSteps(from, cells).every(([dx, dy]) => dx <= 1 && dy <= 1 && dx + dy > 0);
 
 describe('sweptCells4', () => {
   it('fills a diagonal with side-sharing cells, without holes', () => {
@@ -123,7 +129,54 @@ describe('RoadCellGesture', () => {
     expect(h.preview).toHaveBeenCalledTimes(2);
     const sent = h.command.mock.calls[0]![0];
     expect(new Set(sent.cells.map((cell) => `${cell.cellX}:${cell.cellY}`)).size).toBe(sent.cells.length);
-    expect(fourConnected(c(0, 0), sent.cells.slice(1))).toBe(true);
+    expect(eightConnected(c(0, 0), sent.cells.slice(1))).toBe(true);
+  });
+  it('designates a diagonal drag as corner-to-corner cells, without cardinal filler, and sends them', async () => {
+    const h = harness();
+    h.gesture.down(c(2, 2));
+    h.gesture.move(c(3, 3));
+    expect([...h.gesture.cells.values()]).toEqual([c(2, 2), c(3, 3)]);
+    h.gesture.move(c(6, 6));
+    expect(h.added.mock.calls.map(([cells]) => cells)).toEqual([[c(2, 2)], [c(3, 3)], [c(4, 4), c(5, 5), c(6, 6)]]);
+    h.gesture.up(c(6, 6));
+    await h.flush();
+    expect(h.command).toHaveBeenCalledTimes(1);
+    expect(h.command.mock.calls[0]![0]).toMatchObject({
+      action: 'place',
+      cells: [c(2, 2), c(3, 3), c(4, 4), c(5, 5), c(6, 6)],
+    });
+  });
+  it('keeps the thick staircase when the pointer goes cell by cell through a side neighbour', () => {
+    const h = harness();
+    h.gesture.down(c(0, 0));
+    for (const cell of [c(1, 0), c(1, 1), c(2, 1), c(2, 2)]) h.gesture.move(cell);
+    expect([...h.gesture.cells.values()]).toEqual([c(0, 0), c(1, 0), c(1, 1), c(2, 1), c(2, 2)]);
+    expect(fourConnected(c(0, 0), [...h.gesture.cells.values()].slice(1))).toBe(true);
+  });
+  it('draws a diagonal across the toric corner and removes along the same line', async () => {
+    const h = harness();
+    h.gesture.down(c(62, 30));
+    h.gesture.move(c(1, 1));
+    expect([...h.gesture.cells.values()]).toEqual([c(62, 30), c(63, 31), c(0, 0), c(1, 1)]);
+    h.gesture.setMode({ action: 'remove' });
+    h.gesture.down(c(5, 5));
+    h.gesture.up(c(8, 2));
+    await h.flush();
+    expect(h.command).toHaveBeenCalledTimes(1);
+    expect(h.command.mock.calls[0]![0]).toMatchObject({
+      action: 'remove',
+      cells: [c(5, 5), c(6, 4), c(7, 3), c(8, 2)],
+    });
+  });
+  it('does nothing while the pointer stays in its cell', () => {
+    const h = harness();
+    h.gesture.down(c(4, 4));
+    const version = h.gesture.version;
+    for (let i = 0; i < 100; i++) h.gesture.move(c(4, 4));
+    expect(h.gesture.version).toBe(version);
+    expect(h.added).toHaveBeenCalledTimes(1);
+    expect(h.timers).toHaveLength(1);
+    expect(h.gesture.cells.size).toBe(1);
   });
   it('stops at the command bound', () => {
     const h = harness();

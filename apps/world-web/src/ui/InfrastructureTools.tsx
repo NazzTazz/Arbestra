@@ -20,6 +20,7 @@ import type { InfrastructureGesture } from '../scene/infrastructure-renderer';
 import { InfrastructureThumbnail } from './InfrastructureThumbnail';
 import { RoadVariantMenu } from './RoadVariantMenu';
 import { subPointCell } from './demolition-selection';
+import { inRoadCellCore } from './road-cell-line';
 import { RoadCellGesture, skippedLabel } from './road-cell-gesture';
 import {
   RoadAnchorGesture,
@@ -222,8 +223,10 @@ export function InfrastructureTools({
       const cell = e.point && subPointCell(e.point, shape);
       if (!cell) return;
       if (e.kind === 'down') road.down(cell);
-      else if (e.kind === 'hover') road.move(cell);
-      else if (e.kind === 'up') road.up(cell);
+      // A drag designates a cell from its core only: at about 45° it lays the diagonal cells alone.
+      else if (e.kind === 'hover') {
+        if (inRoadCellCore(e.point!)) road.move(cell);
+      } else if (e.kind === 'up') road.up(inRoadCellCore(e.point!) ? cell : null);
       return;
     }
     if (!e.point) {
@@ -316,7 +319,7 @@ export function InfrastructureTools({
           : (road.notice ??
             (surface === 'none'
               ? 'Glissez sur les cases à retirer · sans remboursement'
-              : 'Glissez de case en case · clic droit ou Échap : annuler le geste'));
+              : 'Glissez de case en case, droit ou en biais · clic droit ou Échap : annuler le geste'));
   const anchorCount = lighting.vertices.size;
   const lightStatus = lighting.drawing
     ? `${anchorCount} ${anchorCount > 1 ? 'ancrages' : 'ancrage'}${
