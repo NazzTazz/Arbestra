@@ -15,6 +15,8 @@ export function flatRoadGeometry(
   topOffset: number,
   depth = 0,
   neighbours: ReadonlyMap<string, SurfacePixel> = pixels,
+  /** Straight 45° edges (below). Off for the flat editing preview, which shows the exact raster. */
+  straighten = depth > 0,
 ): VertexData {
   const positions: number[] = [],
     indices: number[] = [],
@@ -73,6 +75,35 @@ export function flatRoadGeometry(
       // Babylon uses left-handed winding; these triangles have upward normals.
       indices.push(a, b, c, a, c, d);
     }
+  // A staircase edge is drawn straight: the notch between two pixels that touch by a corner (an
+  // empty pixel with a filled neighbour beside it and another above or below) receives the half
+  // lying on their side. A 45° band, rastered pixel by pixel, thus gets straight edges; a square
+  // inner corner gets a chamfer of one pixel. The pixel beside the notch emits the triangle.
+  if (straighten) {
+    const width = space.width * 16,
+      height = space.height * 16;
+    const filled = (x: number, y: number) => neighbours.has(wrap(x, width) + ':' + wrap(y, height));
+    for (const p of pixels.values())
+      for (const sx of [1, -1]) {
+        const ex = p.x + sx;
+        if (filled(ex, p.y)) continue;
+        for (const sy of [1, -1]) {
+          if (!filled(ex, p.y + sy)) continue;
+          const anchor = { x: ex + 0.5, y: p.y + 0.5 },
+            base = heightAt(anchor.x, anchor.y);
+          if (base === null) continue;
+          // The corner shared with both neighbours, then the far ends of the two sides they hold.
+          const cx = sx > 0 ? ex : ex + 1,
+            cy = sy > 0 ? p.y + 1 : p.y;
+          const corner = vertex(cx, cy, anchor, base),
+            beside = vertex(cx, sy > 0 ? p.y : p.y + 1, anchor, base),
+            along = vertex(sx > 0 ? ex + 1 : ex, cy, anchor, base);
+          // Same winding as the quads above (upward normals).
+          if (sx * sy > 0) indices.push(corner, beside, along);
+          else indices.push(corner, along, beside);
+        }
+      }
+  }
   if (depth > 0) {
     const width = space.width * 16,
       height = space.height * 16;

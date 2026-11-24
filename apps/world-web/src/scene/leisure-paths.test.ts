@@ -102,7 +102,7 @@ describe('leisure walks over desire paths', () => {
       );
   });
 
-  it('cuts the corner of a bend of road cells, and never joins two road cells that only touch by a corner', () => {
+  it('cuts the corner of a bend of road cells, and walks two road cells that only touch by a corner', () => {
     const bend = desireLeisureRoutes(
       state(
         [hall(10, 10), house('r', 12, 12)],
@@ -125,7 +125,19 @@ describe('leisure walks over desire paths', () => {
         ],
       ),
     );
-    expect(corner.routes.has('12:12')).toBe(false);
+    expect(walk(corner, 12, 12)).toEqual(['10:10', '10:11', '11:12', '12:12']);
+    // A building beside the corner: the two cells are no longer joined.
+    const walled = desireLeisureRoutes(
+      state(
+        [hall(10, 10), house('r', 12, 12), garden(11, 11)],
+        [],
+        [
+          [10, 11],
+          [11, 12],
+        ],
+      ),
+    );
+    expect(walled.routes.has('12:12')).toBe(false);
   });
 
   it('follows the road cells of the player as well, and joins them to the hall', () => {

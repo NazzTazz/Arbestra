@@ -96,9 +96,9 @@ class Frontier {
  *
  * The graph, in eight directions (docs/SPEC-TRAJETS-8-DIRECTIONS-2026-11-22.md §3.4): a desire edge
  * (a two-cell segment of `travelRoutes`, cardinal or diagonal) joins its two cells, and two road
- * cells side by side are joined; two road cells corner to corner are joined when a third road cell
- * touches both (the walk cuts the corner of a bend). A diagonal step never passes between two corners
- * of buildings: both cells beside it must be free, as in the mission search. The hall's footprint
+ * cells side by side or corner to corner are joined, as in the mission search (a chain of road cells
+ * laid corner to corner is a diagonal road). A diagonal step never passes between two corners of
+ * buildings: both cells beside it must be free, as in the mission search. The hall's footprint
  * cells are the sources; a cell of the hall touches the path cells that border it, as a door opens on
  * the path in front of it. One shortest-path search from all the sources (a diagonal step √2), at
  * most `maxNodes` cells, fixes a path to every cell reached; a home is reached when its own cell, or
@@ -187,8 +187,7 @@ export function desireLeisureRoutes(state: LeisureState, maxNodes = LEISURE_MAX_
         const sideA = id(x + dx, y),
           sideB = id(x, y + dy);
         if (buildings.has(sideA) || buildings.has(sideB)) continue;
-        if (here & (1 << step) || (roads.has(cell) && roads.has(next) && (roads.has(sideA) || roads.has(sideB))))
-          reach(next, cell, d + Math.SQRT2);
+        if (here & (1 << step) || (roads.has(cell) && roads.has(next))) reach(next, cell, d + Math.SQRT2);
         continue;
       }
       if (
